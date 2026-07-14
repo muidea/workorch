@@ -8,6 +8,7 @@ import (
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func TestDecisionResolutionEventRepositorySendsTypedOwnerCommand(t *testing.T) {
@@ -30,12 +31,13 @@ func TestDecisionResolutionEventRepositorySendsTypedOwnerCommand(t *testing.T) {
 		ID:       "resolution-command-payload",
 		TicketID: "ticket-command-payload",
 		Type:     "provide_missing_info",
-		Payload:  map[string]any{"answer": "ok"},
+		Payload:  workorcheventpayload.New(workorcheventpayload.StringField("answer", "ok")),
 	}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if got.ResolutionID != "resolution-command-payload" || got.TicketID != "ticket-command-payload" || got.Payload.Map()["answer"] != "ok" {
+	answer, _ := workorcheventpayload.New(got.Payload...).String("answer")
+	if got.ResolutionID != "resolution-command-payload" || got.TicketID != "ticket-command-payload" || answer != "ok" {
 		t.Fatalf("command = %+v, want populated resolution command", got)
 	}
 }

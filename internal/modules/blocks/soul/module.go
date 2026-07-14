@@ -129,17 +129,18 @@ func (m *Module) Service() Service {
 }
 
 func (m *Module) handleSoulCommand(ev magicevent.Event, result magicevent.Result) {
-	response, err := m.executeSoulCommand(ev.Context(), ev.ID(), ev.Data())
+	response, err := m.executeSoulCommand(ev)
 	setMagicResult(result, response, err)
 }
 
-func (m *Module) executeSoulCommand(ctx context.Context, topic string, data any) (soulevents.SoulCommandResult, error) {
+func (m *Module) executeSoulCommand(ev magicevent.Event) (soulevents.SoulCommandResult, error) {
 	if m == nil || m.servicePtr == nil {
 		return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
 	}
-	switch topic {
+	ctx := ev.Context()
+	switch ev.ID() {
 	case soulevents.TopicSoulCommandCreate:
-		cmd, ok := data.(soulevents.CreateSoulCommand)
+		cmd, ok := ev.Data().(soulevents.CreateSoulCommand)
 		if !ok {
 			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
 		}
@@ -152,7 +153,7 @@ func (m *Module) executeSoulCommand(ctx context.Context, topic string, data any)
 		}
 		return soulevents.SoulCommandResult{Soul: item}, nil
 	case soulevents.TopicSoulCommandGet:
-		cmd, ok := data.(soulevents.GetSoulCommand)
+		cmd, ok := ev.Data().(soulevents.GetSoulCommand)
 		if !ok {
 			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
 		}
@@ -162,7 +163,7 @@ func (m *Module) executeSoulCommand(ctx context.Context, topic string, data any)
 		}
 		return soulevents.SoulCommandResult{Soul: item}, nil
 	case soulevents.TopicSoulCommandList:
-		if _, ok := data.(soulevents.ListSoulsCommand); !ok {
+		if _, ok := ev.Data().(soulevents.ListSoulsCommand); !ok {
 			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
 		}
 		items, err := m.servicePtr.ListSouls(ctx)
@@ -171,7 +172,7 @@ func (m *Module) executeSoulCommand(ctx context.Context, topic string, data any)
 		}
 		return soulevents.SoulCommandResult{Souls: items}, nil
 	case soulevents.TopicSoulCommandUpdate:
-		cmd, ok := data.(soulevents.UpdateSoulCommand)
+		cmd, ok := ev.Data().(soulevents.UpdateSoulCommand)
 		if !ok {
 			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
 		}
@@ -184,7 +185,7 @@ func (m *Module) executeSoulCommand(ctx context.Context, topic string, data any)
 		}
 		return soulevents.SoulCommandResult{Soul: item}, nil
 	case soulevents.TopicSoulCommandDelete:
-		cmd, ok := data.(soulevents.DeleteSoulCommand)
+		cmd, ok := ev.Data().(soulevents.DeleteSoulCommand)
 		if !ok {
 			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
 		}
@@ -193,7 +194,7 @@ func (m *Module) executeSoulCommand(ctx context.Context, topic string, data any)
 		}
 		return soulevents.SoulCommandResult{}, nil
 	case soulevents.TopicSoulCommandValidateCapability:
-		cmd, ok := data.(soulevents.ValidateCapabilitySelectionCommand)
+		cmd, ok := ev.Data().(soulevents.ValidateCapabilitySelectionCommand)
 		if !ok {
 			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
 		}

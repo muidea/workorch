@@ -255,10 +255,10 @@ func workspaceGovernanceHistory(
 			"decisionKind":      ticket.DecisionKind,
 			"reason":            ticket.Reason,
 			"question":          ticket.Question,
-			"ticketContext":     activationcore.CompactFailureContext(ticket.Context),
+			"ticketContext":     activationcore.CompactFailureContext(ticket.Context.Map()),
 			"resolutionId":      string(resolution.ID),
 			"resolutionType":    resolution.Type,
-			"resolutionPayload": activationcore.CompactDecisionPayload(resolution.Payload),
+			"resolutionPayload": activationcore.CompactDecisionPayload(resolution.Payload.Map()),
 		}))
 		if len(ret) >= limit {
 			break
@@ -1213,13 +1213,13 @@ func TestBuildWorkspaceRuntimeActivationInjectsLatestRejectedResultContinuation(
 			ResidualRisks:    []string{"coverage gap remains"},
 			KnownLimitations: []string{"no raw stream should be copied"},
 			EvidenceRefs:     []string{"run-latest/summary-evidence"},
-			Diagnostics: map[string]any{
+			Diagnostics: mustAppserviceEventPayload(t, map[string]any{
 				"gateFailureReason": "requires concrete neutral evidence",
 				"runtimeDiagnostics": map[string]any{
 					"kind":   "dod_evidence_quality_gap",
 					"reason": "requires evidence aligned with the satisfied claim",
 				},
-			},
+			}),
 		},
 		UpdatedAt: "2026-05-16T00:00:00Z",
 	}); err != nil {
@@ -1304,7 +1304,7 @@ func TestWorkspaceGovernanceHistoryUsesWorkspaceScopedTicketRead(t *testing.T) {
 			ID:       "resolution-governance-scope",
 			TicketID: ticketID,
 			Type:     "provide_missing_info",
-			Payload:  map[string]any{"resumeInstruction": "continue with the generic plan"},
+			Payload:  mustAppserviceGovernancePayload(t, map[string]any{"resumeInstruction": "continue with the generic plan"}),
 		},
 	}
 	runs := staticRunRepository{
@@ -2498,12 +2498,12 @@ func TestActivateWorkspaceExecutionUsesWorkspaceMCPDefaultOverride(t *testing.T)
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
-	workspaceModel.ContextHints = map[string]any{
+	workspaceModel.ContextHints = mustAppserviceEventPayload(t, map[string]any{
 		"semanticCodeNavigation": map[string]any{
 			"defaultMCPServerIds":  []any{"mcp-workspace-override"},
 			"defaultCapabilityIds": []any{"mcp-workspace-override:tool:tool.lookup"},
 		},
-	}
+	})
 	if err := exports.Repositories.Workspaces.Update(ctx, workspaceModel); err != nil {
 		t.Fatalf("update workspace override: %v", err)
 	}

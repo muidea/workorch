@@ -1,11 +1,13 @@
 package governancecore
 
-func ContainsInlineLLMProviderConfig(payload map[string]any) bool {
-	if len(payload) == 0 {
+import "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+
+func ContainsInlineLLMProviderConfig(payload workorcheventpayload.Payload) bool {
+	if len(payload.Fields) == 0 {
 		return false
 	}
 	hits := map[string]bool{}
-	VisitProviderConfigValue(payload, hits)
+	VisitProviderConfigPayload(payload, hits)
 	if hits["apiKey"] || hits["secret"] {
 		return true
 	}
@@ -18,22 +20,22 @@ func ContainsInlineLLMProviderConfig(payload map[string]any) bool {
 	return configHits >= 2
 }
 
-func VisitProviderConfigValue(value any, hits map[string]bool) {
-	switch typed := value.(type) {
-	case map[string]any:
-		for key, nested := range typed {
-			RecordProviderConfigKey(key, hits)
+func VisitProviderConfigPayload(payload workorcheventpayload.Payload, hits map[string]bool) {
+	for _, field := range payload.Fields {
+		RecordProviderConfigKey(field.Name, hits)
+		VisitProviderConfigValue(field.Value, hits)
+	}
+}
+
+func VisitProviderConfigValue(value workorcheventpayload.Value, hits map[string]bool) {
+	switch value.Kind {
+	case workorcheventpayload.ValueObject:
+		VisitProviderConfigPayload(workorcheventpayload.Payload{Fields: value.Object}, hits)
+	case workorcheventpayload.ValueArray:
+		for _, nested := range value.Array {
 			VisitProviderConfigValue(nested, hits)
 		}
-	case []any:
-		for _, nested := range typed {
-			VisitProviderConfigValue(nested, hits)
-		}
-	case []map[string]any:
-		for _, nested := range typed {
-			VisitProviderConfigValue(nested, hits)
-		}
-	case string:
-		RecordProviderConfigText(typed, hits)
+	case workorcheventpayload.ValueString:
+		RecordProviderConfigText(value.String, hits)
 	}
 }

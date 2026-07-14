@@ -17,9 +17,7 @@ func IsWorkorchRuntimeLLMProviderRecoveryTicket(ticket *decisionmodel.Ticket) bo
 	if scope == decisionContextScopeWorkorchRuntime {
 		return IsLLMProviderRecoveryTicket(ticket)
 	}
-	// Older tickets did not carry a scope. Preserve provider recovery protection
-	// for those records while keeping scoped target-workspace tickets separate.
-	return IsLLMProviderRecoveryTicket(ticket)
+	return false
 }
 
 func IsLLMProviderRecoveryTicket(ticket *decisionmodel.Ticket) bool {

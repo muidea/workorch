@@ -1,17 +1,21 @@
 package repository
 
-import "context"
+import (
+	"context"
+
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
 type WorkspaceTemplate struct {
-	ID               string            `json:"id"`
-	Name             string            `json:"name"`
-	Description      string            `json:"description,omitempty"`
-	GoalText         string            `json:"goalText,omitempty"`
-	DoDItems         []string          `json:"doDItems,omitempty"`
-	DefaultSoulID    string            `json:"defaultSoulId,omitempty"`
-	SoulBindings     map[string]string `json:"soulBindings,omitempty"`
-	ContextHints     map[string]any    `json:"contextHints,omitempty"`
-	EvidencePolicies []map[string]any  `json:"evidencePolicies,omitempty"`
+	ID               string                         `json:"id"`
+	Name             string                         `json:"name"`
+	Description      string                         `json:"description,omitempty"`
+	GoalText         string                         `json:"goalText,omitempty"`
+	DoDItems         []string                       `json:"doDItems,omitempty"`
+	DefaultSoulID    string                         `json:"defaultSoulId,omitempty"`
+	SoulBindings     map[string]string              `json:"soulBindings,omitempty"`
+	ContextHints     workorcheventpayload.Payload   `json:"contextHints,omitempty"`
+	EvidencePolicies []workorcheventpayload.Payload `json:"evidencePolicies,omitempty"`
 }
 
 type WorkspaceTemplateRepository interface {

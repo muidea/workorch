@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
-	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestRuntimeAdapterReadStatus(t *testing.T) {
@@ -18,20 +17,20 @@ func TestRuntimeAdapterReadStatus(t *testing.T) {
 	writeFile(t, filepath.Join(repo, "README.md"), "hello\n")
 
 	adapter := NewRuntimeAdapter(false)
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindRead,
 		WorkspaceDeliverableDirectory: repo,
-		Input:                         map[string]any{"operation": gitcommon.OperationStatus},
+		Operation:                     gitcommon.OperationStatus,
 	})
 	if err != nil {
 		t.Fatalf("execute status: %v", err)
 	}
-	if result.Output["status"] != "completed" || result.Output["operation"] != gitcommon.OperationStatus {
-		t.Fatalf("status output = %+v, want completed status", result.Output)
+	if result.Status != "completed" || result.Operation != gitcommon.OperationStatus {
+		t.Fatalf("status output = %+v, want completed status", result)
 	}
-	files, ok := result.Output["changedFiles"].([]map[string]any)
-	if !ok || len(files) != 1 || files[0]["path"] != "README.md" {
-		t.Fatalf("changedFiles = %#v, want README.md", result.Output["changedFiles"])
+	files := result.ChangedFiles
+	if len(files) != 1 || files[0].Path != "README.md" {
+		t.Fatalf("changedFiles = %#v, want README.md", result.ChangedFiles)
 	}
 }
 
@@ -43,22 +42,22 @@ func TestRuntimeAdapterReadStatusInEmptyRepository(t *testing.T) {
 	runGitForTest(t, repo, "init", "-q")
 
 	adapter := NewRuntimeAdapter(false)
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindRead,
 		WorkspaceDeliverableDirectory: repo,
-		Input:                         map[string]any{"operation": gitcommon.OperationStatus},
+		Operation:                     gitcommon.OperationStatus,
 	})
 	if err != nil {
 		t.Fatalf("execute status in empty repo: %v", err)
 	}
-	if result.Output["status"] != "completed" || result.Output["operation"] != gitcommon.OperationStatus {
-		t.Fatalf("status output = %+v, want completed status", result.Output)
+	if result.Status != "completed" || result.Operation != gitcommon.OperationStatus {
+		t.Fatalf("status output = %+v, want completed status", result)
 	}
-	if result.Output["headCommit"] != "" {
-		t.Fatalf("headCommit = %v, want empty value before first commit", result.Output["headCommit"])
+	if result.HeadCommit != "" {
+		t.Fatalf("headCommit = %v, want empty value before first commit", result.HeadCommit)
 	}
-	if result.Output["unbornHead"] != true {
-		t.Fatalf("unbornHead = %v, want true before first commit", result.Output["unbornHead"])
+	if result.UnbornHead != true {
+		t.Fatalf("unbornHead = %v, want true before first commit", result.UnbornHead)
 	}
 }
 
@@ -71,21 +70,21 @@ func TestRuntimeAdapterReadLogAndShowInEmptyRepository(t *testing.T) {
 
 	adapter := NewRuntimeAdapter(false)
 	for _, operation := range []string{gitcommon.OperationLog, gitcommon.OperationShow} {
-		result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 			Kind:                          gitcommon.StepKindRead,
 			WorkspaceDeliverableDirectory: repo,
-			Input:                         map[string]any{"operation": operation},
+			Operation:                     operation,
 		})
 		if err != nil {
-			t.Fatalf("execute %s in empty repo: %v\noutput=%+v", operation, err, result.Output)
+			t.Fatalf("execute %s in empty repo: %v\noutput=%+v", operation, err, result)
 		}
-		if result.Output["status"] != "completed" || result.Output["zeroWork"] != true || result.Output["unbornHead"] != true {
-			t.Fatalf("%s output = %+v, want completed zero-work unborn HEAD baseline", operation, result.Output)
+		if result.Status != "completed" || result.ZeroWork != true || result.UnbornHead != true {
+			t.Fatalf("%s output = %+v, want completed zero-work unborn HEAD baseline", operation, result)
 		}
 		if operation == gitcommon.OperationLog {
-			commits, ok := result.Output["commits"].([]map[string]any)
-			if !ok || len(commits) != 0 {
-				t.Fatalf("commits = %#v, want empty list", result.Output["commits"])
+			commits := result.Commits
+			if len(commits) != 0 {
+				t.Fatalf("commits = %#v, want empty list", result.Commits)
 			}
 		}
 	}
@@ -95,20 +94,21 @@ func TestRuntimeAdapterReadPathspecDotMeansRepositoryRoot(t *testing.T) {
 	repo := newTestRepo(t)
 
 	adapter := NewRuntimeAdapter(false)
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindRead,
 		WorkspaceDeliverableDirectory: repo,
-		Input:                         map[string]any{"operation": gitcommon.OperationStatus, "pathspecs": []any{"."}},
+		Operation:                     gitcommon.OperationStatus,
+		Pathspecs:                     []string{"."},
 	})
 	if err != nil {
-		t.Fatalf("execute status with root pathspec: %v\noutput=%+v", err, result.Output)
+		t.Fatalf("execute status with root pathspec: %v\noutput=%+v", err, result)
 	}
-	if result.Output["status"] != "completed" {
-		t.Fatalf("status output = %+v, want completed", result.Output)
+	if result.Status != "completed" {
+		t.Fatalf("status output = %+v, want completed", result)
 	}
-	pathspecs, ok := result.Output["pathspecs"].([]string)
-	if !ok || len(pathspecs) != 0 {
-		t.Fatalf("pathspecs = %#v, want repository-root pathspec normalized away", result.Output["pathspecs"])
+	pathspecs := result.Pathspecs
+	if len(pathspecs) != 0 {
+		t.Fatalf("pathspecs = %#v, want repository-root pathspec normalized away", result.Pathspecs)
 	}
 }
 
@@ -119,22 +119,22 @@ func TestRuntimeAdapterWriteInitInitializesWorkspaceRepository(t *testing.T) {
 	repo := t.TempDir()
 
 	adapter := NewRuntimeAdapter(true)
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
 		WorkspaceDeliverableDirectory: repo,
-		Input:                         map[string]any{"operation": gitcommon.OperationInit},
+		Operation:                     gitcommon.OperationInit,
 	})
 	if err != nil {
-		t.Fatalf("execute init: %v\noutput=%+v", err, result.Output)
+		t.Fatalf("execute init: %v\noutput=%+v", err, result)
 	}
-	if result.Output["status"] != "completed" || result.Output["operation"] != gitcommon.OperationInit {
-		t.Fatalf("init output = %+v, want completed init", result.Output)
+	if result.Status != "completed" || result.Operation != gitcommon.OperationInit {
+		t.Fatalf("init output = %+v, want completed init", result)
 	}
-	if result.Output["initialized"] != true || result.Output["existingRepository"] != false {
-		t.Fatalf("init flags = %+v, want initialized new repository", result.Output)
+	if result.Initialized != true || result.ExistingRepository != false {
+		t.Fatalf("init flags = %+v, want initialized new repository", result)
 	}
-	if result.Output["unbornHead"] != true || result.Output["headCommit"] != "" {
-		t.Fatalf("head output = %+v, want unborn repository without head commit", result.Output)
+	if result.UnbornHead != true || result.HeadCommit != "" {
+		t.Fatalf("head output = %+v, want unborn repository without head commit", result)
 	}
 	if _, err := os.Stat(filepath.Join(repo, ".git")); err != nil {
 		t.Fatalf(".git stat: %v, want initialized repository", err)
@@ -148,22 +148,22 @@ func TestRuntimeAdapterWriteInitIsIdempotentForExistingRepository(t *testing.T) 
 	repo := newTestRepo(t)
 
 	adapter := NewRuntimeAdapter(true)
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
 		WorkspaceDeliverableDirectory: repo,
-		Input:                         map[string]any{"operation": gitcommon.OperationInit},
+		Operation:                     gitcommon.OperationInit,
 	})
 	if err != nil {
-		t.Fatalf("execute idempotent init: %v\noutput=%+v", err, result.Output)
+		t.Fatalf("execute idempotent init: %v\noutput=%+v", err, result)
 	}
-	if result.Output["status"] != "completed" || result.Output["operation"] != gitcommon.OperationInit {
-		t.Fatalf("init output = %+v, want completed init", result.Output)
+	if result.Status != "completed" || result.Operation != gitcommon.OperationInit {
+		t.Fatalf("init output = %+v, want completed init", result)
 	}
-	if result.Output["zeroWork"] != true || result.Output["existingRepository"] != true || result.Output["initialized"] != false {
-		t.Fatalf("init flags = %+v, want idempotent existing repository", result.Output)
+	if result.ZeroWork != true || result.ExistingRepository != true || result.Initialized != false {
+		t.Fatalf("init flags = %+v, want idempotent existing repository", result)
 	}
-	if result.Output["headCommit"] == "" {
-		t.Fatalf("headCommit empty for existing committed repository: %+v", result.Output)
+	if result.HeadCommit == "" {
+		t.Fatalf("headCommit empty for existing committed repository: %+v", result)
 	}
 }
 
@@ -171,16 +171,16 @@ func TestRuntimeAdapterReadInitRejected(t *testing.T) {
 	dir := t.TempDir()
 	adapter := NewRuntimeAdapter(true)
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindRead,
 		WorkspaceDeliverableDirectory: dir,
-		Input:                         map[string]any{"operation": gitcommon.OperationInit},
+		Operation:                     gitcommon.OperationInit,
 	})
 	if err == nil {
 		t.Fatal("execute init with git/read: expected error")
 	}
-	if result.Output["status"] != "rejected" || result.Output["errorCode"] != gitcommon.ErrorOperationDenied {
-		t.Fatalf("output = %+v, want init rejected for git/read", result.Output)
+	if result.Status != "rejected" || result.ErrorCode != gitcommon.ErrorOperationDenied {
+		t.Fatalf("output = %+v, want init rejected for git/read", result)
 	}
 }
 
@@ -191,16 +191,16 @@ func TestRuntimeAdapterWriteInitIgnoresLegacyDisabledFlag(t *testing.T) {
 	dir := t.TempDir()
 	adapter := NewRuntimeAdapter(false)
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
 		WorkspaceDeliverableDirectory: dir,
-		Input:                         map[string]any{"operation": gitcommon.OperationInit},
+		Operation:                     gitcommon.OperationInit,
 	})
 	if err != nil {
-		t.Fatalf("execute init with legacy disabled flag: %v\noutput=%+v", err, result.Output)
+		t.Fatalf("execute init with legacy disabled flag: %v\noutput=%+v", err, result)
 	}
-	if result.Output["status"] != "completed" || result.Output["operation"] != gitcommon.OperationInit {
-		t.Fatalf("output = %+v, want init completed despite legacy disabled flag", result.Output)
+	if result.Status != "completed" || result.Operation != gitcommon.OperationInit {
+		t.Fatalf("output = %+v, want init completed despite legacy disabled flag", result)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
 		t.Fatalf(".git stat: %v, want repository initialized", err)
@@ -211,16 +211,17 @@ func TestRuntimeAdapterRejectsUnsafePathspec(t *testing.T) {
 	repo := newTestRepo(t)
 	adapter := NewRuntimeAdapter(true)
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
 		WorkspaceDeliverableDirectory: repo,
-		Input:                         map[string]any{"operation": gitcommon.OperationAdd, "pathspecs": []any{"../outside"}},
+		Operation:                     gitcommon.OperationAdd,
+		Pathspecs:                     []string{"../outside"},
 	})
 	if err == nil {
 		t.Fatal("execute add with unsafe pathspec: expected error")
 	}
-	if result.Output["status"] != "rejected" || result.Output["errorCode"] != gitcommon.ErrorPathRejected {
-		t.Fatalf("output = %+v, want rejected path", result.Output)
+	if result.Status != "rejected" || result.ErrorCode != gitcommon.ErrorPathRejected {
+		t.Fatalf("output = %+v, want rejected path", result)
 	}
 }
 
@@ -228,16 +229,17 @@ func TestRuntimeAdapterWritePathspecDotStillRejected(t *testing.T) {
 	repo := newTestRepo(t)
 	adapter := NewRuntimeAdapter(true)
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
 		WorkspaceDeliverableDirectory: repo,
-		Input:                         map[string]any{"operation": gitcommon.OperationAdd, "pathspecs": []any{"."}},
+		Operation:                     gitcommon.OperationAdd,
+		Pathspecs:                     []string{"."},
 	})
 	if err == nil {
 		t.Fatal("execute add with broad root pathspec: expected error")
 	}
-	if result.Output["status"] != "rejected" || result.Output["errorCode"] != gitcommon.ErrorPathRejected {
-		t.Fatalf("output = %+v, want rejected broad root pathspec", result.Output)
+	if result.Status != "rejected" || result.ErrorCode != gitcommon.ErrorPathRejected {
+		t.Fatalf("output = %+v, want rejected broad root pathspec", result)
 	}
 }
 
@@ -246,16 +248,17 @@ func TestRuntimeAdapterAddIgnoresLegacyDisabledFlag(t *testing.T) {
 	writeFile(t, filepath.Join(repo, "README.md"), "hello\n")
 	adapter := NewRuntimeAdapter(false)
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
 		WorkspaceDeliverableDirectory: repo,
-		Input:                         map[string]any{"operation": gitcommon.OperationAdd, "pathspecs": []any{"README.md"}},
+		Operation:                     gitcommon.OperationAdd,
+		Pathspecs:                     []string{"README.md"},
 	})
 	if err != nil {
-		t.Fatalf("execute add with legacy disabled flag: %v\noutput=%+v", err, result.Output)
+		t.Fatalf("execute add with legacy disabled flag: %v\noutput=%+v", err, result)
 	}
-	if result.Output["status"] != "completed" || result.Output["operation"] != gitcommon.OperationAdd {
-		t.Fatalf("output = %+v, want add completed despite legacy disabled flag", result.Output)
+	if result.Status != "completed" || result.Operation != gitcommon.OperationAdd {
+		t.Fatalf("output = %+v, want add completed despite legacy disabled flag", result)
 	}
 }
 
@@ -268,28 +271,31 @@ func TestRuntimeAdapterAddAndCommitDoesNotRunHooks(t *testing.T) {
 	}
 	adapter := NewRuntimeAdapter(true)
 
-	if _, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	if _, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
 		WorkspaceDeliverableDirectory: repo,
-		Input:                         map[string]any{"operation": gitcommon.OperationAdd, "pathspecs": []any{"README.md"}},
+		Operation:                     gitcommon.OperationAdd,
+		Pathspecs:                     []string{"README.md"},
 	}); err != nil {
 		t.Fatalf("execute add: %v", err)
 	}
 	head := gitOutputForTest(t, repo, "rev-parse", "HEAD")
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
 		WorkspaceDeliverableDirectory: repo,
-		Input:                         map[string]any{"operation": gitcommon.OperationCommit, "message": "docs: add readme", "expectedHead": head},
+		Operation:                     gitcommon.OperationCommit,
+		Message:                       "docs: add readme",
+		ExpectedHead:                  head,
 	})
 	if err != nil {
-		t.Fatalf("execute commit: %v\noutput=%+v", err, result.Output)
+		t.Fatalf("execute commit: %v\noutput=%+v", err, result)
 	}
-	if result.Output["status"] != "completed" {
-		t.Fatalf("commit output = %+v, want completed", result.Output)
+	if result.Status != "completed" {
+		t.Fatalf("commit output = %+v, want completed", result)
 	}
-	commit, ok := result.Output["commit"].(map[string]any)
-	if !ok || commit["hash"] == "" {
-		t.Fatalf("commit = %#v, want hash", result.Output["commit"])
+	commit := result
+	if commit.CommitHash == "" {
+		t.Fatalf("commit = %#v, want hash", result)
 	}
 	if _, err := os.Stat(filepath.Join(repo, "hook-ran")); !os.IsNotExist(err) {
 		t.Fatalf("post-commit hook ran or stat failed: %v", err)
@@ -307,37 +313,39 @@ func TestRuntimeAdapterCommitAllowsUnbornBranchInitialCommit(t *testing.T) {
 	writeFile(t, filepath.Join(repo, "README.md"), "hello\n")
 	adapter := NewRuntimeAdapter(true)
 
-	status, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	status, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindRead,
 		WorkspaceDeliverableDirectory: repo,
-		Input:                         map[string]any{"operation": gitcommon.OperationStatus},
+		Operation:                     gitcommon.OperationStatus,
 	})
 	if err != nil {
 		t.Fatalf("execute status: %v", err)
 	}
-	if status.Output["detachedHead"] == true || status.Output["unbornHead"] != true {
-		t.Fatalf("status output = %+v, want unborn branch without detached HEAD", status.Output)
+	if status.DetachedHead == true || status.UnbornHead != true {
+		t.Fatalf("status output = %+v, want unborn branch without detached HEAD", status)
 	}
-	if _, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	if _, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
 		WorkspaceDeliverableDirectory: repo,
-		Input:                         map[string]any{"operation": gitcommon.OperationAdd, "pathspecs": []any{"README.md"}},
+		Operation:                     gitcommon.OperationAdd,
+		Pathspecs:                     []string{"README.md"},
 	}); err != nil {
 		t.Fatalf("execute add: %v", err)
 	}
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
 		WorkspaceDeliverableDirectory: repo,
-		Input:                         map[string]any{"operation": gitcommon.OperationCommit, "message": "docs: initial readme"},
+		Operation:                     gitcommon.OperationCommit,
+		Message:                       "docs: initial readme",
 	})
 	if err != nil {
-		t.Fatalf("execute initial commit: %v\noutput=%+v", err, result.Output)
+		t.Fatalf("execute initial commit: %v\noutput=%+v", err, result)
 	}
-	if result.Output["status"] != "completed" || result.Output["detachedHead"] == true {
-		t.Fatalf("commit output = %+v, want completed non-detached commit", result.Output)
+	if result.Status != "completed" || result.DetachedHead == true {
+		t.Fatalf("commit output = %+v, want completed non-detached commit", result)
 	}
-	if result.Output["headCommitAfter"] == "" {
-		t.Fatalf("commit output = %+v, want headCommitAfter", result.Output)
+	if result.HeadCommitAfter == "" {
+		t.Fatalf("commit output = %+v, want headCommitAfter", result)
 	}
 }
 
@@ -345,16 +353,18 @@ func TestRuntimeAdapterCommitRejectsPathspec(t *testing.T) {
 	repo := newTestRepo(t)
 	adapter := NewRuntimeAdapter(true)
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
 		WorkspaceDeliverableDirectory: repo,
-		Input:                         map[string]any{"operation": gitcommon.OperationCommit, "message": "bad", "pathspecs": []any{"README.md"}},
+		Operation:                     gitcommon.OperationCommit,
+		Message:                       "bad",
+		Pathspecs:                     []string{"README.md"},
 	})
 	if err == nil {
 		t.Fatal("execute commit with pathspecs: expected error")
 	}
-	if result.Output["status"] != "rejected" || result.Output["errorCode"] != gitcommon.ErrorPathRejected {
-		t.Fatalf("output = %+v, want rejected pathspec", result.Output)
+	if result.Status != "rejected" || result.ErrorCode != gitcommon.ErrorPathRejected {
+		t.Fatalf("output = %+v, want rejected pathspec", result)
 	}
 }
 
@@ -362,16 +372,16 @@ func TestRuntimeAdapterFailsOutsideGitRepository(t *testing.T) {
 	dir := t.TempDir()
 	adapter := NewRuntimeAdapter(true)
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindRead,
 		WorkspaceDeliverableDirectory: dir,
-		Input:                         map[string]any{"operation": gitcommon.OperationStatus},
+		Operation:                     gitcommon.OperationStatus,
 	})
 	if err == nil {
 		t.Fatal("execute status outside git repo: expected error")
 	}
-	if result.Output["status"] != "failed" || result.Output["errorCode"] != gitcommon.ErrorNotGitRepository {
-		t.Fatalf("output = %+v, want not_git_repository failure", result.Output)
+	if result.Status != "failed" || result.ErrorCode != gitcommon.ErrorNotGitRepository {
+		t.Fatalf("output = %+v, want not_git_repository failure", result)
 	}
 }
 
@@ -382,16 +392,17 @@ func TestRuntimeAdapterCommitRejectsDetachedHead(t *testing.T) {
 	runGitForTest(t, repo, "add", "README.md")
 	adapter := NewRuntimeAdapter(true)
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
 		WorkspaceDeliverableDirectory: repo,
-		Input:                         map[string]any{"operation": gitcommon.OperationCommit, "message": "docs: add readme"},
+		Operation:                     gitcommon.OperationCommit,
+		Message:                       "docs: add readme",
 	})
 	if err == nil {
 		t.Fatal("execute commit on detached HEAD: expected error")
 	}
-	if result.Output["status"] != "rejected" || result.Output["errorCode"] != gitcommon.ErrorOperationDenied {
-		t.Fatalf("output = %+v, want detached HEAD rejection", result.Output)
+	if result.Status != "rejected" || result.ErrorCode != gitcommon.ErrorOperationDenied {
+		t.Fatalf("output = %+v, want detached HEAD rejection", result)
 	}
 }
 
@@ -401,16 +412,18 @@ func TestRuntimeAdapterCommitFailsOnExpectedHeadMismatch(t *testing.T) {
 	runGitForTest(t, repo, "add", "README.md")
 	adapter := NewRuntimeAdapter(true)
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
 		WorkspaceDeliverableDirectory: repo,
-		Input:                         map[string]any{"operation": gitcommon.OperationCommit, "message": "docs: add readme", "expectedHead": strings.Repeat("0", 40)},
+		Operation:                     gitcommon.OperationCommit,
+		Message:                       "docs: add readme",
+		ExpectedHead:                  strings.Repeat("0", 40),
 	})
 	if err == nil {
 		t.Fatal("execute commit with mismatched expectedHead: expected error")
 	}
-	if result.Output["status"] != "failed" || result.Output["errorCode"] != gitcommon.ErrorHeadMismatch {
-		t.Fatalf("output = %+v, want head mismatch failure", result.Output)
+	if result.Status != "failed" || result.ErrorCode != gitcommon.ErrorHeadMismatch {
+		t.Fatalf("output = %+v, want head mismatch failure", result)
 	}
 }
 
@@ -429,16 +442,17 @@ func TestRuntimeAdapterCommitFailsWhenIdentityMissing(t *testing.T) {
 	runGitForTest(t, repo, "add", "README.md")
 	adapter := NewRuntimeAdapter(true)
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindWrite,
 		WorkspaceDeliverableDirectory: repo,
-		Input:                         map[string]any{"operation": gitcommon.OperationCommit, "message": "docs: add readme"},
+		Operation:                     gitcommon.OperationCommit,
+		Message:                       "docs: add readme",
 	})
 	if err == nil {
 		t.Fatal("execute commit without identity: expected error")
 	}
-	if result.Output["status"] != "failed" || result.Output["errorCode"] != gitcommon.ErrorIdentityMissing {
-		t.Fatalf("output = %+v, want identity_missing failure", result.Output)
+	if result.Status != "failed" || result.ErrorCode != gitcommon.ErrorIdentityMissing {
+		t.Fatalf("output = %+v, want identity_missing failure", result)
 	}
 }
 
@@ -459,16 +473,17 @@ func TestRuntimeAdapterDiffLargeOutputIsTruncated(t *testing.T) {
 	writeFile(t, filepath.Join(repo, "large.txt"), strings.Repeat("changed line\n", 20000))
 	adapter := NewRuntimeAdapter(false)
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:                          gitcommon.StepKindRead,
 		WorkspaceDeliverableDirectory: repo,
-		Input:                         map[string]any{"operation": gitcommon.OperationDiff, "pathspecs": []any{"large.txt"}},
+		Operation:                     gitcommon.OperationDiff,
+		Pathspecs:                     []string{"large.txt"},
 	})
 	if err != nil {
 		t.Fatalf("execute diff: %v", err)
 	}
-	if result.Output["status"] != "completed" || result.Output["truncated"] != true {
-		t.Fatalf("output = %+v, want completed truncated diff", result.Output)
+	if result.Status != "completed" || result.Truncated != true {
+		t.Fatalf("output = %+v, want completed truncated diff", result)
 	}
 }
 

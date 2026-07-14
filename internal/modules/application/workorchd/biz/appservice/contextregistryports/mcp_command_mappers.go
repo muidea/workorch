@@ -7,7 +7,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/eventvalue"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func mcpServerCommandFromView(cmd contextregistrycore.MCPServer) mcpevents.CreateServerCommand {
@@ -30,7 +30,7 @@ func mcpServerCommandFromView(cmd contextregistrycore.MCPServer) mcpevents.Creat
 }
 
 func mcpCapabilityCommandFromView(cmd contextregistrycore.MCPCapability) (mcpevents.CreateCapabilityCommand, error) {
-	schema, err := eventvalue.FromMap(cmd.Schema)
+	schema, err := workorcheventpayload.FromMap(cmd.Schema)
 	if err != nil {
 		return mcpevents.CreateCapabilityCommand{}, fmt.Errorf("invalid mcp capability schema: %w", err)
 	}

@@ -22,8 +22,18 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 	file "github.com/muidea/workorch/internal/pkg/repository/file"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func mustRepositoryPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
+	t.Helper()
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
 
 func TestWorkspaceRepositoryContract_Memory(t *testing.T) {
 	testWorkspaceRepositoryContract(t, func() repository.WorkspaceRepository {
@@ -561,7 +571,7 @@ func testMCPCapabilityRepositoryContract(t *testing.T, factory func() repository
 		OutputSummary:  "返回仓库结构和变更摘要。",
 		StageHints:     []string{"planning"},
 		RiskLevel:      "read_only",
-		Schema:         map[string]any{"type": "object"},
+		Schema:         mustRepositoryPayload(t, map[string]any{"type": "object"}),
 		Enabled:        true,
 		ApprovalPolicy: "operator",
 		Status:         "draft",
@@ -577,12 +587,13 @@ func testMCPCapabilityRepositoryContract(t *testing.T, factory func() repository
 		t.Fatalf("get mcp capability: %v", err)
 	}
 	got.Tags[0] = "mutated"
-	got.Schema["type"] = "mutated"
+	got.Schema = mustRepositoryPayload(t, map[string]any{"type": "mutated"})
 	fresh, err := repo.Get(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("get mcp capability fresh: %v", err)
 	}
-	if fresh.Tags[0] != "repo" || fresh.Schema["type"] != "object" {
+	schemaType, _ := fresh.Schema.String("type")
+	if fresh.Tags[0] != "repo" || schemaType != "object" {
 		t.Fatalf("mcp capability clone isolation failed: %+v", fresh)
 	}
 	fresh.Enabled = false
@@ -743,7 +754,7 @@ func testArtifactRepositoryContract(t *testing.T, factory func() repository.Arti
 		ContentType:        "text/markdown",
 		State:              common.ArtifactStateAvailable,
 		EvidenceRefs:       []string{"tool-contract", "validation-contract"},
-		Metadata:           map[string]any{"kind": "acceptance", "score": float64(1)},
+		Metadata:           mustRepositoryPayload(t, map[string]any{"kind": "acceptance", "score": float64(1)}),
 		CreatedAt:          "2026-04-28T00:00:00Z",
 		UpdatedAt:          "2026-04-28T00:00:00Z",
 	}
@@ -758,12 +769,13 @@ func testArtifactRepositoryContract(t *testing.T, factory func() repository.Arti
 		t.Fatalf("get artifact: %v", err)
 	}
 	got.EvidenceRefs[0] = "mutated"
-	got.Metadata["kind"] = "mutated"
+	got.Metadata = workorcheventpayload.New(workorcheventpayload.StringField("kind", "mutated"))
 	fresh, err := repo.Get(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("get artifact fresh: %v", err)
 	}
-	if fresh.EvidenceRefs[0] != "tool-contract" || fresh.Metadata["kind"] != "acceptance" {
+	kind, _ := fresh.Metadata.String("kind")
+	if fresh.EvidenceRefs[0] != "tool-contract" || kind != "acceptance" {
 		t.Fatalf("artifact clone isolation failed: %+v", fresh)
 	}
 	fresh.Summary = "Updated final report"
@@ -855,8 +867,8 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 		SubjectID:      "run-contract",
 		WorkspaceID:    common.WorkspaceID("ws-contract"),
 		RunID:          common.RunID("run-contract"),
-		Payload:        map[string]any{"state": "running"},
-		PayloadSummary: map[string]any{"fieldCount": 1},
+		Payload:        mustRepositoryPayload(t, map[string]any{"state": "running"}),
+		PayloadSummary: mustRepositoryPayload(t, map[string]any{"fieldCount": 1}),
 		PayloadRef:     "payloads/event-record-1.json",
 	}
 	second := &eventstreammodel.EventRecord{
@@ -870,7 +882,7 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 		WorkspaceID:  common.WorkspaceID("ws-contract"),
 		RunID:        common.RunID("run-contract"),
 		StepID:       common.StepID("step-contract"),
-		Payload:      map[string]any{"state": "completed"},
+		Payload:      mustRepositoryPayload(t, map[string]any{"state": "completed"}),
 	}
 	third := &eventstreammodel.EventRecord{
 		ID:           common.EventRecordID("event-record-3"),
@@ -883,7 +895,7 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 		WorkspaceID:  common.WorkspaceID("ws-contract"),
 		RunID:        common.RunID("run-contract"),
 		StepID:       common.StepID("step-contract-2"),
-		Payload:      map[string]any{"state": "failed"},
+		Payload:      mustRepositoryPayload(t, map[string]any{"state": "failed"}),
 	}
 	if err := repo.Append(ctx, first); err != nil {
 		t.Fatalf("append first event record: %v", err)
@@ -901,15 +913,16 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 	if err != nil {
 		t.Fatalf("get event record: %v", err)
 	}
-	got.Payload["state"] = "mutated"
+	got.Payload.Fields[0].Value.String = "mutated"
 	fresh, err := repo.Get(ctx, first.ID)
 	if err != nil {
 		t.Fatalf("get event record fresh: %v", err)
 	}
-	if fresh.Payload["state"] != "running" {
+	if state, ok := fresh.Payload.String("state"); !ok || state != "running" {
 		t.Fatalf("event record clone isolation failed: %+v", fresh)
 	}
-	if fresh.PayloadSummary["fieldCount"] != 1 && fresh.PayloadSummary["fieldCount"] != float64(1) || fresh.PayloadRef != "payloads/event-record-1.json" {
+	fieldCount, _ := fresh.PayloadSummary.Int64("fieldCount")
+	if fieldCount != 1 || fresh.PayloadRef != "payloads/event-record-1.json" {
 		t.Fatalf("event record summary/ref = %+v/%q, want persisted summary/ref", fresh.PayloadSummary, fresh.PayloadRef)
 	}
 	byRun, err := repo.List(ctx, repository.EventRecordQuery{RunID: first.RunID})
@@ -919,14 +932,18 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 	if len(byRun) != 3 || byRun[0].ID != first.ID || byRun[1].ID != second.ID || byRun[2].ID != third.ID {
 		t.Fatalf("run events = %+v, want ordered first, second, and third", byRun)
 	}
-	if len(byRun[0].Payload) != 0 {
+	if len(byRun[0].Payload.Fields) != 0 {
 		t.Fatalf("run events payload = %+v, want lightweight list result without payload", byRun[0].Payload)
 	}
 	byRunWithPayload, err := repo.List(ctx, repository.EventRecordQuery{RunID: first.RunID, IncludePayload: true})
 	if err != nil {
 		t.Fatalf("list events by run with payload: %v", err)
 	}
-	if len(byRunWithPayload) != 3 || byRunWithPayload[0].Payload["state"] != "running" {
+	if len(byRunWithPayload) != 3 {
+		t.Fatalf("run events with payload = %+v, want three hydrated payloads", byRunWithPayload)
+	}
+	state, _ := byRunWithPayload[0].Payload.String("state")
+	if state != "running" {
 		t.Fatalf("run events with payload = %+v, want hydrated payload", byRunWithPayload)
 	}
 	byTopic, err := repo.List(ctx, repository.EventRecordQuery{Topic: second.Topic})
@@ -1338,12 +1355,10 @@ func testWorkspaceTemplateRepositoryContract(t *testing.T, factory func() reposi
 			"planning":  "soul-contract",
 			"execution": "soul-contract",
 		},
-		EvidencePolicies: []map[string]any{
-			{
-				"id":              "policy-contract",
-				"zeroWorkMarkers": []any{"no work"},
-			},
-		},
+		EvidencePolicies: []workorcheventpayload.Payload{mustRepositoryPayload(t, map[string]any{
+			"id":              "policy-contract",
+			"zeroWorkMarkers": []any{"no work"},
+		})},
 	}
 	if err := repo.Create(ctx, item); err != nil {
 		t.Fatalf("create workspace template: %v", err)
@@ -1359,14 +1374,18 @@ func testWorkspaceTemplateRepositoryContract(t *testing.T, factory func() reposi
 	got.Name = "mutated"
 	got.DoDItems[0] = "mutated"
 	got.SoulBindings["planning"] = "mutated"
-	got.EvidencePolicies[0]["id"] = "mutated"
-	got.EvidencePolicies[0]["zeroWorkMarkers"].([]any)[0] = "mutated"
+	got.EvidencePolicies[0] = mustRepositoryPayload(t, map[string]any{
+		"id":              "mutated",
+		"zeroWorkMarkers": []any{"mutated"},
+	})
 
 	fresh, err := repo.Get(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("get workspace template fresh: %v", err)
 	}
-	if fresh.Name != "contract template" || fresh.DoDItems[0] != "goal is defined" || fresh.SoulBindings["planning"] != "soul-contract" || fresh.EvidencePolicies[0]["id"] != "policy-contract" || fresh.EvidencePolicies[0]["zeroWorkMarkers"].([]any)[0] != "no work" {
+	policyID, _ := fresh.EvidencePolicies[0].String("id")
+	zeroWorkMarkers, _ := fresh.EvidencePolicies[0].StringSlice("zeroWorkMarkers")
+	if fresh.Name != "contract template" || fresh.DoDItems[0] != "goal is defined" || fresh.SoulBindings["planning"] != "soul-contract" || policyID != "policy-contract" || len(zeroWorkMarkers) != 1 || zeroWorkMarkers[0] != "no work" {
 		t.Fatalf("clone isolation failed, workspace template = %+v", fresh)
 	}
 
@@ -1413,11 +1432,11 @@ func testWorkspaceRepositoryContract(t *testing.T, factory func() repository.Wor
 		Description:          "workspace contract description",
 		DeliverableDirectory: "/tmp/workorch/ws-contract",
 		State:                common.WorkspaceStateActive,
-		EvidencePolicies: []map[string]any{
-			{
+		EvidencePolicies: []workorcheventpayload.Payload{
+			mustRepositoryPayload(t, map[string]any{
 				"id":              "workspace-policy-contract",
 				"zeroWorkMarkers": []any{"no work"},
-			},
+			}),
 		},
 	}
 	if err := repo.Create(ctx, item); err != nil {
@@ -1432,8 +1451,7 @@ func testWorkspaceRepositoryContract(t *testing.T, factory func() repository.Wor
 		t.Fatalf("get workspace: %v", err)
 	}
 	got.Title = "mutated"
-	got.EvidencePolicies[0]["id"] = "mutated"
-	got.EvidencePolicies[0]["zeroWorkMarkers"].([]any)[0] = "mutated"
+	got.EvidencePolicies[0] = workorcheventpayload.New(workorcheventpayload.StringField("id", "mutated"))
 
 	fresh, err := repo.Get(ctx, item.ID)
 	if err != nil {
@@ -1448,7 +1466,9 @@ func testWorkspaceRepositoryContract(t *testing.T, factory func() repository.Wor
 	if fresh.DeliverableDirectory != "/tmp/workorch/ws-contract" {
 		t.Fatalf("deliverableDirectory = %q, want /tmp/workorch/ws-contract", fresh.DeliverableDirectory)
 	}
-	if fresh.EvidencePolicies[0]["id"] != "workspace-policy-contract" || fresh.EvidencePolicies[0]["zeroWorkMarkers"].([]any)[0] != "no work" {
+	policyID, _ := fresh.EvidencePolicies[0].String("id")
+	zeroWorkMarkers, _ := fresh.EvidencePolicies[0].StringSlice("zeroWorkMarkers")
+	if policyID != "workspace-policy-contract" || len(zeroWorkMarkers) != 1 || zeroWorkMarkers[0] != "no work" {
 		t.Fatalf("evidencePolicies clone isolation failed: %+v", fresh.EvidencePolicies)
 	}
 
@@ -1739,7 +1759,7 @@ func testStepRepositoryContract(t *testing.T, factory func() repository.StepRepo
 		RunID: common.RunID("run-contract"),
 		Kind:  "llm/workspace_execution",
 		State: common.StepStateExecuting,
-		Input: map[string]any{"workspaceId": "ws-contract"},
+		Input: mustRepositoryPayload(t, map[string]any{"workspaceId": "ws-contract"}),
 	}
 	if err := repo.Create(ctx, item); err != nil {
 		t.Fatalf("create step: %v", err)
@@ -1752,26 +1772,27 @@ func testStepRepositoryContract(t *testing.T, factory func() repository.StepRepo
 	if err != nil {
 		t.Fatalf("get step: %v", err)
 	}
-	got.Input["workspaceId"] = "mutated"
-	got.Output = map[string]any{"result": "done"}
+	got.Input.Fields[0].Value.String = "mutated"
+	got.Output = mustRepositoryPayload(t, map[string]any{"result": "done"})
 
 	fresh, err := repo.Get(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("get fresh step: %v", err)
 	}
-	if fresh.Input["workspaceId"] != "ws-contract" {
-		t.Fatalf("clone isolation failed, workspaceId = %v", fresh.Input["workspaceId"])
+	workspaceID, _ := fresh.Input.String("workspaceId")
+	if workspaceID != "ws-contract" {
+		t.Fatalf("clone isolation failed, workspaceId = %v", workspaceID)
 	}
-	if fresh.Output != nil {
+	if len(fresh.Output.Fields) != 0 {
 		t.Fatalf("fresh output = %#v, want nil", fresh.Output)
 	}
 
 	fresh.State = common.StepStateSucceeded
-	fresh.Output = map[string]any{
+	fresh.Output = mustRepositoryPayload(t, map[string]any{
 		"status":           "completed",
 		"failureSignature": "class=runtime_failed|targetRef=main.go",
 		"result":           "done",
-	}
+	})
 	if err := repo.Update(ctx, fresh); err != nil {
 		t.Fatalf("update step: %v", err)
 	}
@@ -1783,8 +1804,9 @@ func testStepRepositoryContract(t *testing.T, factory func() repository.StepRepo
 	if updated.State != common.StepStateSucceeded {
 		t.Fatalf("step state = %q, want completed", updated.State)
 	}
-	if updated.Output["result"] != "done" {
-		t.Fatalf("output result = %v, want done", updated.Output["result"])
+	result, _ := updated.Output.String("result")
+	if result != "done" {
+		t.Fatalf("output result = %v, want done", result)
 	}
 
 	if err := repo.Create(ctx, &runmodel.Step{
@@ -1792,7 +1814,7 @@ func testStepRepositoryContract(t *testing.T, factory func() repository.StepRepo
 		RunID: common.RunID("run-contract"),
 		Kind:  "llm/workspace_execution",
 		State: common.StepStateSucceeded,
-		Input: map[string]any{"workspaceId": "ws-contract", "previousStepId": "run-contract/step-1"},
+		Input: mustRepositoryPayload(t, map[string]any{"workspaceId": "ws-contract", "previousStepId": "run-contract/step-1"}),
 	}); err != nil {
 		t.Fatalf("create second step: %v", err)
 	}
@@ -1815,13 +1837,19 @@ func testStepRepositoryContract(t *testing.T, factory func() repository.StepRepo
 	if steps[0].ID != common.StepID("run-contract/step-1") || steps[1].ID != common.StepID("run-contract/step-2") {
 		t.Fatalf("listed step ids = [%s %s], want [run-contract/step-1 run-contract/step-2]", steps[0].ID, steps[1].ID)
 	}
-	steps[0].Output["result"] = "mutated"
+	for idx := range steps[0].Output.Fields {
+		if steps[0].Output.Fields[idx].Name == "result" {
+			steps[0].Output.Fields[idx].Value.String = "mutated"
+			break
+		}
+	}
 	refreshed, err := repo.Get(ctx, common.StepID("run-contract/step-1"))
 	if err != nil {
 		t.Fatalf("get refreshed step: %v", err)
 	}
-	if refreshed.Output["result"] != "done" {
-		t.Fatalf("refreshed output result = %v, want done", refreshed.Output["result"])
+	refreshedResult, _ := refreshed.Output.String("result")
+	if refreshedResult != "done" {
+		t.Fatalf("refreshed output result = %v, want done", refreshedResult)
 	}
 
 	summaries, err := repo.ListByRunSummary(ctx, common.RunID("run-contract"))
@@ -1831,16 +1859,19 @@ func testStepRepositoryContract(t *testing.T, factory func() repository.StepRepo
 	if len(summaries) != 2 {
 		t.Fatalf("list step summaries len = %d, want 2", len(summaries))
 	}
-	if summaries[0].Input["workspaceId"] != "ws-contract" {
-		t.Fatalf("summary input workspaceId = %v, want ws-contract", summaries[0].Input["workspaceId"])
+	summaryWorkspaceID, _ := summaries[0].Input.String("workspaceId")
+	if summaryWorkspaceID != "ws-contract" {
+		t.Fatalf("summary input workspaceId = %v, want ws-contract", summaryWorkspaceID)
 	}
-	if summaries[0].Output["status"] != "completed" {
-		t.Fatalf("summary output status = %v, want completed", summaries[0].Output["status"])
+	summaryStatus, _ := summaries[0].Output.String("status")
+	if summaryStatus != "completed" {
+		t.Fatalf("summary output status = %v, want completed", summaryStatus)
 	}
-	if summaries[0].Output["failureSignature"] != "class=runtime_failed|targetRef=main.go" {
-		t.Fatalf("summary output failureSignature = %v, want retained signature", summaries[0].Output["failureSignature"])
+	summaryFailureSignature, _ := summaries[0].Output.String("failureSignature")
+	if summaryFailureSignature != "class=runtime_failed|targetRef=main.go" {
+		t.Fatalf("summary output failureSignature = %v, want retained signature", summaryFailureSignature)
 	}
-	if _, ok := summaries[0].Output["result"]; ok {
+	if _, ok := summaries[0].Output.Field("result"); ok {
 		t.Fatalf("summary retained non-whitelisted output result, want omitted")
 	}
 
@@ -1871,7 +1902,7 @@ func testToolCallRepositoryContract(t *testing.T, factory func() repository.Tool
 		RunID:       common.RunID("run-contract"),
 		StepID:      common.StepID("run-contract/step-1"),
 		ToolName:    "shell",
-		Arguments:   map[string]any{"command": "go test ./..."},
+		Arguments:   mustRepositoryPayload(t, map[string]any{"command": "go test ./..."}),
 		State:       common.ToolCallStateRunning,
 		StartedAt:   "2026-04-25T00:00:00Z",
 	}
@@ -1886,9 +1917,9 @@ func testToolCallRepositoryContract(t *testing.T, factory func() repository.Tool
 	if err != nil {
 		t.Fatalf("get tool call: %v", err)
 	}
-	got.Arguments["command"] = "mutated"
+	got.Arguments = got.Arguments.Merge(workorcheventpayload.New(workorcheventpayload.StringField("command", "mutated")))
 	got.State = common.ToolCallStateCompleted
-	got.Output = map[string]any{"exitCode": 0}
+	got.Output = mustRepositoryPayload(t, map[string]any{"exitCode": 0})
 	if err := repo.Update(ctx, got); err != nil {
 		t.Fatalf("update tool call: %v", err)
 	}
@@ -1897,16 +1928,24 @@ func testToolCallRepositoryContract(t *testing.T, factory func() repository.Tool
 	if err != nil {
 		t.Fatalf("get updated tool call: %v", err)
 	}
-	if updated.Arguments["command"] != "mutated" || updated.Output["exitCode"] != float64(0) && updated.Output["exitCode"] != 0 {
+	updatedCommand, _ := updated.Arguments.String("command")
+	updatedExitCode, _ := updated.Output.Int64("exitCode")
+	if updatedCommand != "mutated" || updatedExitCode != 0 {
 		t.Fatalf("updated tool call = %+v, want updated argument and output", updated)
 	}
-	updated.Output["exitCode"] = 1
+	for idx := range updated.Output.Fields {
+		if updated.Output.Fields[idx].Name == "exitCode" {
+			updated.Output.Fields[idx].Value.Int = 1
+			break
+		}
+	}
 	fresh, err := repo.Get(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("get fresh tool call: %v", err)
 	}
-	if fresh.Output["exitCode"] != float64(0) && fresh.Output["exitCode"] != 0 {
-		t.Fatalf("clone isolation failed, exitCode = %v", fresh.Output["exitCode"])
+	freshExitCode, _ := fresh.Output.Int64("exitCode")
+	if freshExitCode != 0 {
+		t.Fatalf("clone isolation failed, exitCode = %v", freshExitCode)
 	}
 
 	second := &runmodel.ToolCall{
@@ -1969,9 +2008,9 @@ func testPatchRepositoryContract(t *testing.T, factory func() repository.PatchRe
 		TargetRef:   "internal/example.go",
 		Diff:        "--- a/internal/example.go\n+++ b/internal/example.go\n@@ -1 +1 @@\n-before\n+after\n",
 		Summary:     "initial patch",
-		CoverageTargets: []any{map[string]any{
-			"goalRequirementId": "goal-contract",
-			"targetText":        "contract target",
+		CoverageTargets: []runmodel.PatchCoverageTarget{{
+			GoalRequirementID: "goal-contract",
+			TargetText:        "contract target",
 		}},
 		State:     common.PatchStateCreated,
 		CreatedAt: "2026-04-25T00:00:00Z",
@@ -2002,12 +2041,12 @@ func testPatchRepositoryContract(t *testing.T, factory func() repository.PatchRe
 	if updated.Diff != item.Diff {
 		t.Fatalf("patch diff = %q, want persisted diff", updated.Diff)
 	}
-	targets, ok := updated.CoverageTargets.([]any)
-	if !ok || len(targets) != 1 {
+	targets := updated.CoverageTargets
+	if len(targets) != 1 {
 		t.Fatalf("coverage targets = %#v, want persisted target metadata", updated.CoverageTargets)
 	}
-	target, ok := targets[0].(map[string]any)
-	if !ok || target["goalRequirementId"] != "goal-contract" || target["targetText"] != "contract target" {
+	target := targets[0]
+	if target.GoalRequirementID != "goal-contract" || target.TargetText != "contract target" {
 		t.Fatalf("coverage target = %#v, want preserved structured target", updated.CoverageTargets)
 	}
 
@@ -2152,7 +2191,7 @@ func testRuntimeCheckpointRepositoryContract(t *testing.T, factory func() reposi
 		CurrentStepID:    common.StepID("run-contract/step-1"),
 		RunStateSnapshot: common.RunStateActive,
 		OccurredAt:       "2026-04-25T00:00:00Z",
-		Data:             map[string]any{"thread": "main"},
+		Data:             mustRepositoryPayload(t, map[string]any{"thread": "main"}),
 	}
 	if err := repo.Create(ctx, item); err != nil {
 		t.Fatalf("create runtime checkpoint: %v", err)
@@ -2165,7 +2204,7 @@ func testRuntimeCheckpointRepositoryContract(t *testing.T, factory func() reposi
 	if err != nil {
 		t.Fatalf("get runtime checkpoint: %v", err)
 	}
-	got.Data["thread"] = "mutated"
+	got.Data = got.Data.Merge(workorcheventpayload.New(workorcheventpayload.StringField("thread", "mutated")))
 	got.RunStateSnapshot = common.RunStateBlockedOnDecision
 	if err := repo.Update(ctx, got); err != nil {
 		t.Fatalf("update runtime checkpoint: %v", err)
@@ -2174,16 +2213,23 @@ func testRuntimeCheckpointRepositoryContract(t *testing.T, factory func() reposi
 	if err != nil {
 		t.Fatalf("get updated runtime checkpoint: %v", err)
 	}
-	if updated.Data["thread"] != "mutated" || updated.RunStateSnapshot != common.RunStateBlockedOnDecision {
+	updatedThread, _ := updated.Data.String("thread")
+	if updatedThread != "mutated" || updated.RunStateSnapshot != common.RunStateBlockedOnDecision {
 		t.Fatalf("runtime checkpoint = %+v, want updated", updated)
 	}
-	updated.Data["thread"] = "leak"
+	for idx := range updated.Data.Fields {
+		if updated.Data.Fields[idx].Name == "thread" {
+			updated.Data.Fields[idx].Value.String = "leak"
+			break
+		}
+	}
 	fresh, err := repo.Get(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("get fresh runtime checkpoint: %v", err)
 	}
-	if fresh.Data["thread"] != "mutated" {
-		t.Fatalf("clone isolation failed, thread = %v", fresh.Data["thread"])
+	freshThread, _ := fresh.Data.String("thread")
+	if freshThread != "mutated" {
+		t.Fatalf("clone isolation failed, thread = %v", freshThread)
 	}
 
 	second := &runmodel.RuntimeCheckpoint{
@@ -2240,7 +2286,7 @@ func testEvidenceRecordRepositoryContract(t *testing.T, factory func() repositor
 		SubjectID:          "dod:001",
 		CoverageItemRefs:   []string{"cwi-contract-001"},
 		CreatedAt:          "2026-06-23T00:00:00Z",
-		Metadata:           map[string]any{"scope": "contract"},
+		Metadata:           mustRepositoryPayload(t, map[string]any{"scope": "contract"}),
 	}
 	if err := repo.Create(ctx, item); err != nil {
 		t.Fatalf("create evidence record: %v", err)
@@ -2253,13 +2299,14 @@ func testEvidenceRecordRepositoryContract(t *testing.T, factory func() repositor
 	if err != nil {
 		t.Fatalf("get evidence record: %v", err)
 	}
-	got.Metadata["scope"] = "mutated"
+	got.Metadata = workorcheventpayload.New(workorcheventpayload.StringField("scope", "mutated"))
 	got.CoverageItemRefs[0] = "mutated"
 	fresh, err := repo.Get(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("get fresh evidence record: %v", err)
 	}
-	if fresh.Metadata["scope"] != "contract" ||
+	freshScope, _ := fresh.Metadata.String("scope")
+	if freshScope != "contract" ||
 		fresh.CoverageItemRefs[0] != "cwi-contract-001" ||
 		fresh.Kind != orchestratormodel.EvidenceKindStateChange ||
 		fresh.Status != orchestratormodel.EvidenceStatusAccepted ||
@@ -2278,7 +2325,7 @@ func testEvidenceRecordRepositoryContract(t *testing.T, factory func() repositor
 		SourceRef:   "violation:missing-required-output",
 		Supersedes:  []common.EvidenceRecordID{item.ID},
 		CreatedAt:   "2026-06-23T00:00:01Z",
-		Metadata:    map[string]any{"rule": "missing_required_output"},
+		Metadata:    mustRepositoryPayload(t, map[string]any{"rule": "missing_required_output"}),
 	}
 	if err := repo.Create(ctx, rejected); err != nil {
 		t.Fatalf("create rejected evidence record: %v", err)
@@ -2365,7 +2412,7 @@ func testArtifactContinuationRepositoryContract(t *testing.T, factory func() rep
 		ReceivedChunkHashes: map[int]string{1: "hash-001"},
 		RetryCounters:       map[string]int{"hash_mismatch": 1},
 		EvidenceRefs:        []string{"run-contract/step-1"},
-		Metadata:            map[string]any{"scope": "contract"},
+		Metadata:            mustRepositoryPayload(t, map[string]any{"scope": "contract"}),
 	}
 	if err := repo.Create(ctx, item); err != nil {
 		t.Fatalf("create artifact continuation: %v", err)
@@ -2377,28 +2424,16 @@ func testArtifactContinuationRepositoryContract(t *testing.T, factory func() rep
 	if err != nil {
 		t.Fatalf("get artifact continuation: %v", err)
 	}
-	got.Metadata["scope"] = "mutated"
+	got.Metadata = workorcheventpayload.New(workorcheventpayload.StringField("scope", "mutated"))
 	got.CoverageTargets[0] = "mutated"
 	fresh, err := repo.Get(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("get fresh artifact continuation: %v", err)
 	}
-	if fresh.Metadata["scope"] != "contract" || fresh.CoverageTargets[0] != "coverage-001" || fresh.ReceivedChunkHashes[1] != "hash-001" ||
+	freshScope, _ := fresh.Metadata.String("scope")
+	if freshScope != "contract" || fresh.CoverageTargets[0] != "coverage-001" || fresh.ReceivedChunkHashes[1] != "hash-001" ||
 		fresh.CurrentStepID != item.CurrentStepID || fresh.OutputMode != "incrementalArtifact" {
 		t.Fatalf("artifact continuation clone isolation failed: %+v", fresh)
-	}
-
-	plan := map[string]any{"artifacts": []any{map[string]any{"artifactId": "artifact-001"}}}
-	if err := repo.SavePlan(ctx, item.ID, plan); err != nil {
-		t.Fatalf("save plan: %v", err)
-	}
-	plan["mutated"] = true
-	storedPlan, err := repo.GetPlan(ctx, item.ID)
-	if err != nil {
-		t.Fatalf("get plan: %v", err)
-	}
-	if storedPlan["mutated"] != nil {
-		t.Fatalf("stored plan leaked caller mutation: %+v", storedPlan)
 	}
 
 	chunk := &orchestratormodel.ArtifactContinuationChunk{
@@ -2411,18 +2446,19 @@ func testArtifactContinuationRepositoryContract(t *testing.T, factory func() rep
 		CurrentChunkTail: "hello",
 		LLMCallRefs:      []string{"llm-call-001"},
 		StepRefs:         []common.StepID{item.RootStepID},
-		Validation:       map[string]any{"state": "accepted"},
-		Metadata:         map[string]any{"scope": "chunk"},
+		Validation:       mustRepositoryPayload(t, map[string]any{"state": "accepted"}),
+		Metadata:         mustRepositoryPayload(t, map[string]any{"scope": "chunk"}),
 	}
 	if err := repo.SaveChunk(ctx, chunk, "hello"); err != nil {
 		t.Fatalf("save chunk: %v", err)
 	}
-	chunk.Metadata["scope"] = "mutated"
+	chunk.Metadata = workorcheventpayload.New(workorcheventpayload.StringField("scope", "mutated"))
 	storedChunk, content, err := repo.GetChunk(ctx, item.ID, 1)
 	if err != nil {
 		t.Fatalf("get chunk: %v", err)
 	}
-	if content != "hello" || storedChunk.Metadata["scope"] != "chunk" {
+	storedChunkScope, _ := storedChunk.Metadata.String("scope")
+	if content != "hello" || storedChunkScope != "chunk" {
 		t.Fatalf("stored chunk/content = %+v/%q, want isolated chunk content", storedChunk, content)
 	}
 	chunks, err := repo.ListChunks(ctx, item.ID)
@@ -2440,7 +2476,7 @@ func testArtifactContinuationRepositoryContract(t *testing.T, factory func() rep
 		RollingHash:       "rolling-hash",
 		SourceChunkRefs:   []string{"001"},
 		ApplyEvidenceRefs: []string{"apply-step"},
-		Metadata:          map[string]any{"scope": "assembled"},
+		Metadata:          mustRepositoryPayload(t, map[string]any{"scope": "assembled"}),
 	}
 	if err := repo.SaveAssembled(ctx, assembled, "hello"); err != nil {
 		t.Fatalf("save assembled: %v", err)
@@ -2523,7 +2559,7 @@ func testCoverageWorkItemRepositoryContract(t *testing.T, factory func() reposit
 		RejectedEvidenceRefs:  []string{"ev:rejected"},
 		CurrentGap:            "validation missing",
 		UpdatedByStepID:       common.StepID("run-contract/step-1"),
-		Metadata:              map[string]any{"scope": "contract"},
+		Metadata:              mustRepositoryPayload(t, map[string]any{"scope": "contract"}),
 	}
 	if err := repo.Create(ctx, item); err != nil {
 		t.Fatalf("create coverage work item: %v", err)
@@ -2545,14 +2581,15 @@ func testCoverageWorkItemRepositoryContract(t *testing.T, factory func() reposit
 	if err != nil {
 		t.Fatalf("get coverage work item: %v", err)
 	}
-	got.Metadata["scope"] = "mutated"
+	got.Metadata = workorcheventpayload.New(workorcheventpayload.StringField("scope", "mutated"))
 	got.RequiredEvidenceKinds[0] = "mutated"
 	got.AcceptedEvidenceRefs[0] = "mutated"
 	fresh, err := repo.Get(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("get fresh coverage work item: %v", err)
 	}
-	if fresh.Metadata["scope"] != "contract" ||
+	freshScope, _ := fresh.Metadata.String("scope")
+	if freshScope != "contract" ||
 		fresh.RequiredEvidenceKinds[0] != "state_change" ||
 		fresh.AcceptedEvidenceRefs[0] != "ev:accepted" ||
 		fresh.SourceGoalID != common.GoalID("goal-contract") ||
@@ -2720,7 +2757,7 @@ func testDecisionResolutionRepositoryContract(t *testing.T, factory func() repos
 		ID:                 common.ResolutionID("resolution-contract"),
 		TicketID:           common.TicketID("ticket-contract"),
 		Type:               "provide_missing_info",
-		Payload:            map[string]any{"operator": "contract-test"},
+		Payload:            mustRepositoryPayload(t, map[string]any{"operator": "contract-test"}),
 		ContinuationAction: "resume",
 		ResumeRunID:        "run-current",
 		SuccessorRunID:     "run-successor",
@@ -2745,8 +2782,9 @@ func testDecisionResolutionRepositoryContract(t *testing.T, factory func() repos
 	if fresh.Type != "provide_missing_info" {
 		t.Fatalf("clone isolation failed, type = %q", fresh.Type)
 	}
-	if fresh.Payload["operator"] != "contract-test" {
-		t.Fatalf("payload operator = %v, want contract-test", fresh.Payload["operator"])
+	operator, _ := fresh.Payload.String("operator")
+	if operator != "contract-test" {
+		t.Fatalf("payload operator = %v, want contract-test", operator)
 	}
 	if fresh.ContinuationAction != "resume" || fresh.ResumeRunID != "run-current" || fresh.SuccessorRunID != "run-successor" {
 		t.Fatalf("resolution refs = %+v, want persisted recovery refs", fresh)
@@ -2769,7 +2807,7 @@ func testApprovalRepositoryContract(t *testing.T, factory func() repository.Appr
 		StepID:      common.StepID("run-contract/manual-approval"),
 		Reason:      "manual approval",
 		Action:      "apply risky code patch",
-		Context:     map[string]any{"risk": "public_api_change", "files": []any{"api.go"}},
+		Context:     mustRepositoryPayload(t, map[string]any{"risk": "public_api_change", "files": []any{"api.go"}}),
 		State:       common.ApprovalStatePending,
 	}
 	if err := repo.Create(ctx, item); err != nil {
@@ -2783,12 +2821,13 @@ func testApprovalRepositoryContract(t *testing.T, factory func() repository.Appr
 	if err != nil {
 		t.Fatalf("get approval: %v", err)
 	}
-	got.Context["risk"] = "mutated"
+	got.Context = workorcheventpayload.New(workorcheventpayload.StringField("risk", "mutated"))
 	fresh, err := repo.Get(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("get fresh approval: %v", err)
 	}
-	if fresh.Action != "apply risky code patch" || fresh.Context["risk"] != "public_api_change" {
+	risk, _ := fresh.Context.String("risk")
+	if fresh.Action != "apply risky code patch" || risk != "public_api_change" {
 		t.Fatalf("approval action/context = %q/%+v, want original values", fresh.Action, fresh.Context)
 	}
 	got = fresh
@@ -2801,7 +2840,8 @@ func testApprovalRepositoryContract(t *testing.T, factory func() repository.Appr
 	if err != nil {
 		t.Fatalf("get updated approval: %v", err)
 	}
-	if updated.State != common.ApprovalStateApproved || updated.Action != "apply risky code patch" || updated.Context["risk"] != "public_api_change" {
+	updatedRisk, _ := updated.Context.String("risk")
+	if updated.State != common.ApprovalStateApproved || updated.Action != "apply risky code patch" || updatedRisk != "public_api_change" {
 		t.Fatalf("approval state/action/context = %q/%q/%+v, want approved with original action/context", updated.State, updated.Action, updated.Context)
 	}
 
@@ -3070,7 +3110,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		RunID: runID,
 		Kind:  "manual/checkpoint",
 		State: common.StepStateExecuting,
-		Input: map[string]any{"workspaceId": string(workspaceID), "runId": string(runID)},
+		Input: mustRepositoryPayload(t, map[string]any{"workspaceId": string(workspaceID), "runId": string(runID)}),
 	}
 	if err := bundle.steps.Create(ctx, step); err != nil {
 		t.Fatalf("create step: %v", err)
@@ -3079,7 +3119,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		t.Fatalf("duplicate step create err = %v, want conflict", err)
 	}
 	step.State = common.StepStateSucceeded
-	step.Output = map[string]any{"status": "completed", "ticketId": string(ticketID)}
+	step.Output = mustRepositoryPayload(t, map[string]any{"status": "completed", "ticketId": string(ticketID)})
 	if err := bundle.steps.Update(ctx, step); err != nil {
 		t.Fatalf("update step: %v", err)
 	}
@@ -3090,9 +3130,9 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		RunID:       runID,
 		StepID:      stepID,
 		ToolName:    "shell",
-		Arguments:   map[string]any{"command": "go test ./..."},
+		Arguments:   mustRepositoryPayload(t, map[string]any{"command": "go test ./..."}),
 		State:       common.ToolCallStateCompleted,
-		Output:      map[string]any{"exitCode": 0},
+		Output:      mustRepositoryPayload(t, map[string]any{"exitCode": 0}),
 	}
 	if err := bundle.toolCalls.Create(ctx, toolCall); err != nil {
 		t.Fatalf("create tool call: %v", err)
@@ -3141,7 +3181,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		CheckpointType:   common.CheckpointTypeRunState,
 		CurrentStepID:    stepID,
 		RunStateSnapshot: common.RunStateBlockedOnDecision,
-		Data:             map[string]any{"thread": "main"},
+		Data:             mustRepositoryPayload(t, map[string]any{"thread": "main"}),
 	}
 	if err := bundle.runtimeCheckpoints.Create(ctx, checkpoint); err != nil {
 		t.Fatalf("create runtime checkpoint: %v", err)
@@ -3164,7 +3204,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		SubjectID:          string(dodID),
 		CoverageItemRefs:   []string{string(coverageWorkItemID)},
 		CreatedAt:          "2026-05-04T00:00:03Z",
-		Metadata:           map[string]any{"scope": "bundle"},
+		Metadata:           mustRepositoryPayload(t, map[string]any{"scope": "bundle"}),
 	}
 	if err := bundle.evidenceRecords.Create(ctx, evidenceRecord); err != nil {
 		t.Fatalf("create evidence record: %v", err)
@@ -3188,7 +3228,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		Status:                "open",
 		CurrentGap:            "validation missing",
 		UpdatedByStepID:       stepID,
-		Metadata:              map[string]any{"scope": "bundle"},
+		Metadata:              mustRepositoryPayload(t, map[string]any{"scope": "bundle"}),
 	}
 	if err := bundle.coverageWorkItems.Create(ctx, coverageWorkItem); err != nil {
 		t.Fatalf("create coverage work item: %v", err)
@@ -3207,13 +3247,10 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		Operation:       "replace",
 		CoverageTargets: []string{"bundle-coverage"},
 		State:           common.ArtifactContinuationStateChunking,
-		Metadata:        map[string]any{"scope": "bundle"},
+		Metadata:        mustRepositoryPayload(t, map[string]any{"scope": "bundle"}),
 	}
 	if err := bundle.artifactContinuations.Create(ctx, artifactContinuation); err != nil {
 		t.Fatalf("create artifact continuation: %v", err)
-	}
-	if err := bundle.artifactContinuations.SavePlan(ctx, artifactContinuationID, map[string]any{"artifactId": "artifact-001"}); err != nil {
-		t.Fatalf("save artifact continuation plan: %v", err)
 	}
 	if err := bundle.artifactContinuations.SaveChunk(ctx, &orchestratormodel.ArtifactContinuationChunk{
 		ContinuationID: artifactContinuationID,
@@ -3272,7 +3309,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		ContentType:        "text/markdown",
 		State:              common.ArtifactStateAvailable,
 		EvidenceRefs:       []string{string(toolCallID), string(validationResultID)},
-		Metadata:           map[string]any{"scope": "bundle"},
+		Metadata:           mustRepositoryPayload(t, map[string]any{"scope": "bundle"}),
 	}
 	if err := bundle.artifacts.Create(ctx, artifact); err != nil {
 		t.Fatalf("create artifact: %v", err)
@@ -3291,7 +3328,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		SubjectID:    string(runID),
 		WorkspaceID:  workspaceID,
 		RunID:        runID,
-		Payload:      map[string]any{"state": string(common.RunStateBlockedOnDecision)},
+		Payload:      mustRepositoryPayload(t, map[string]any{"state": string(common.RunStateBlockedOnDecision)}),
 	}
 	if err := bundle.eventRecords.Append(ctx, eventRecord); err != nil {
 		t.Fatalf("append event record: %v", err)
@@ -3323,7 +3360,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		ID:       resolutionID,
 		TicketID: ticketID,
 		Type:     "provide_missing_info",
-		Payload:  map[string]any{"operator": "bundle-test"},
+		Payload:  mustRepositoryPayload(t, map[string]any{"operator": "bundle-test"}),
 	}
 	if err := bundle.resolutions.Create(ctx, resolution); err != nil {
 		t.Fatalf("create resolution: %v", err)
@@ -3497,23 +3534,37 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	if err != nil {
 		t.Fatalf("reload steps by run: %v", err)
 	}
-	if len(reloadedSteps) != 1 || reloadedSteps[0].Output["status"] != "completed" {
+	reloadedStepStatus := ""
+	if len(reloadedSteps) == 1 {
+		reloadedStepStatus, _ = reloadedSteps[0].Output.String("status")
+	}
+	if len(reloadedSteps) != 1 || reloadedStepStatus != "completed" {
 		t.Fatalf("reloaded steps = %+v, want completed output", reloadedSteps)
 	}
-	reloadedSteps[0].Output["status"] = "mutated"
+	for idx := range reloadedSteps[0].Output.Fields {
+		if reloadedSteps[0].Output.Fields[idx].Name == "status" {
+			reloadedSteps[0].Output.Fields[idx].Value.String = "mutated"
+			break
+		}
+	}
 	stepFresh, err := reloaded.steps.Get(ctx, stepID)
 	if err != nil {
 		t.Fatalf("reload step fresh: %v", err)
 	}
-	if stepFresh.Output["status"] != "completed" {
-		t.Fatalf("step output status = %v, want completed", stepFresh.Output["status"])
+	stepFreshStatus, _ := stepFresh.Output.String("status")
+	if stepFreshStatus != "completed" {
+		t.Fatalf("step output status = %v, want completed", stepFreshStatus)
 	}
 
 	reloadedToolCalls, err := reloaded.toolCalls.ListByRun(ctx, runID)
 	if err != nil {
 		t.Fatalf("reload tool calls by run: %v", err)
 	}
-	if len(reloadedToolCalls) != 1 || reloadedToolCalls[0].ID != toolCallID || reloadedToolCalls[0].Output["exitCode"] == nil {
+	hasExitCode := false
+	if len(reloadedToolCalls) == 1 {
+		_, hasExitCode = reloadedToolCalls[0].Output.Field("exitCode")
+	}
+	if len(reloadedToolCalls) != 1 || reloadedToolCalls[0].ID != toolCallID || !hasExitCode {
 		t.Fatalf("reloaded tool calls = %+v, want %q with output", reloadedToolCalls, toolCallID)
 	}
 
@@ -3537,7 +3588,11 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	if err != nil {
 		t.Fatalf("reload runtime checkpoints by run: %v", err)
 	}
-	if len(reloadedCheckpoints) != 1 || reloadedCheckpoints[0].ID != checkpointID || reloadedCheckpoints[0].Data["thread"] != "main" {
+	reloadedThread := ""
+	if len(reloadedCheckpoints) == 1 {
+		reloadedThread, _ = reloadedCheckpoints[0].Data.String("thread")
+	}
+	if len(reloadedCheckpoints) != 1 || reloadedCheckpoints[0].ID != checkpointID || reloadedThread != "main" {
 		t.Fatalf("reloaded runtime checkpoints = %+v, want %q", reloadedCheckpoints, checkpointID)
 	}
 
@@ -3545,12 +3600,16 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	if err != nil {
 		t.Fatalf("reload evidence records by run: %v", err)
 	}
+	reloadedEvidenceScope := ""
+	if len(reloadedEvidenceRecords) == 1 {
+		reloadedEvidenceScope, _ = reloadedEvidenceRecords[0].Metadata.String("scope")
+	}
 	if len(reloadedEvidenceRecords) != 1 ||
 		reloadedEvidenceRecords[0].ID != evidenceRecordID ||
 		reloadedEvidenceRecords[0].Kind != orchestratormodel.EvidenceKindValidation ||
 		reloadedEvidenceRecords[0].Status != orchestratormodel.EvidenceStatusAccepted ||
 		reloadedEvidenceRecords[0].SourceRef != string(validationResultID) ||
-		reloadedEvidenceRecords[0].Metadata["scope"] != "bundle" {
+		reloadedEvidenceScope != "bundle" {
 		t.Fatalf("reloaded evidence records = %+v, want %q", reloadedEvidenceRecords, evidenceRecordID)
 	}
 
@@ -3558,12 +3617,16 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	if err != nil {
 		t.Fatalf("reload active coverage work items by run: %v", err)
 	}
+	reloadedCoverageScope := ""
+	if len(reloadedCoverageWorkItems) == 1 {
+		reloadedCoverageScope, _ = reloadedCoverageWorkItems[0].Metadata.String("scope")
+	}
 	if len(reloadedCoverageWorkItems) != 1 ||
 		reloadedCoverageWorkItems[0].ID != coverageWorkItemID ||
 		reloadedCoverageWorkItems[0].SourceGoalID != goalID ||
 		reloadedCoverageWorkItems[0].SourceDoDID != dodID ||
 		reloadedCoverageWorkItems[0].RequiredEvidenceKinds[0] != "validation" ||
-		reloadedCoverageWorkItems[0].Metadata["scope"] != "bundle" {
+		reloadedCoverageScope != "bundle" {
 		t.Fatalf("reloaded coverage work items = %+v, want %q", reloadedCoverageWorkItems, coverageWorkItemID)
 	}
 
@@ -3571,17 +3634,14 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	if err != nil {
 		t.Fatalf("reload artifact continuations by run: %v", err)
 	}
+	reloadedContinuationScope := ""
+	if len(reloadedArtifactContinuations) == 1 {
+		reloadedContinuationScope, _ = reloadedArtifactContinuations[0].Metadata.String("scope")
+	}
 	if len(reloadedArtifactContinuations) != 1 ||
 		reloadedArtifactContinuations[0].ID != artifactContinuationID ||
-		reloadedArtifactContinuations[0].Metadata["scope"] != "bundle" {
+		reloadedContinuationScope != "bundle" {
 		t.Fatalf("reloaded artifact continuations = %+v, want %q", reloadedArtifactContinuations, artifactContinuationID)
-	}
-	reloadedArtifactPlan, err := reloaded.artifactContinuations.GetPlan(ctx, artifactContinuationID)
-	if err != nil {
-		t.Fatalf("reload artifact continuation plan: %v", err)
-	}
-	if reloadedArtifactPlan["artifactId"] != "artifact-001" {
-		t.Fatalf("reloaded artifact continuation plan = %+v, want artifact id", reloadedArtifactPlan)
 	}
 	reloadedArtifactChunk, reloadedArtifactChunkContent, err := reloaded.artifactContinuations.GetChunk(ctx, artifactContinuationID, 1)
 	if err != nil {
@@ -3610,7 +3670,11 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	if err != nil {
 		t.Fatalf("reload artifacts by result: %v", err)
 	}
-	if len(reloadedArtifacts) != 1 || reloadedArtifacts[0].ID != artifactID || reloadedArtifacts[0].Metadata["scope"] != "bundle" {
+	if len(reloadedArtifacts) != 1 {
+		t.Fatalf("reloaded artifacts = %+v, want one artifact", reloadedArtifacts)
+	}
+	scope, _ := reloadedArtifacts[0].Metadata.String("scope")
+	if reloadedArtifacts[0].ID != artifactID || scope != "bundle" {
 		t.Fatalf("reloaded artifacts = %+v, want %q with metadata", reloadedArtifacts, artifactID)
 	}
 
@@ -3618,14 +3682,18 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	if err != nil {
 		t.Fatalf("reload event records by run: %v", err)
 	}
-	if len(reloadedEvents) != 1 || reloadedEvents[0].ID != eventRecordID || len(reloadedEvents[0].Payload) != 0 {
+	if len(reloadedEvents) != 1 || reloadedEvents[0].ID != eventRecordID || len(reloadedEvents[0].Payload.Fields) != 0 {
 		t.Fatalf("reloaded event records = %+v, want %q", reloadedEvents, eventRecordID)
 	}
 	reloadedEventsWithPayload, err := reloaded.eventRecords.List(ctx, repository.EventRecordQuery{RunID: runID, IncludePayload: true})
 	if err != nil {
 		t.Fatalf("reload event records by run with payload: %v", err)
 	}
-	if len(reloadedEventsWithPayload) != 1 || reloadedEventsWithPayload[0].ID != eventRecordID || reloadedEventsWithPayload[0].Payload["state"] != string(common.RunStateBlockedOnDecision) {
+	if len(reloadedEventsWithPayload) != 1 || reloadedEventsWithPayload[0].ID != eventRecordID {
+		t.Fatalf("reloaded event records with payload = %+v, want %q", reloadedEventsWithPayload, eventRecordID)
+	}
+	reloadedState, _ := reloadedEventsWithPayload[0].Payload.String("state")
+	if reloadedState != string(common.RunStateBlockedOnDecision) {
 		t.Fatalf("reloaded event records with payload = %+v, want %q", reloadedEventsWithPayload, eventRecordID)
 	}
 
@@ -3641,7 +3709,8 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	if err != nil {
 		t.Fatalf("reload resolution: %v", err)
 	}
-	if reloadedResolution.ID != resolutionID || reloadedResolution.Payload["operator"] != "bundle-test" {
+	reloadedOperator, _ := reloadedResolution.Payload.String("operator")
+	if reloadedResolution.ID != resolutionID || reloadedOperator != "bundle-test" {
 		t.Fatalf("reloaded resolution = %+v, want %q with payload", reloadedResolution, resolutionID)
 	}
 

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func TestClientRunRequestsUseWorkspaceScopedPaths(t *testing.T) {
@@ -156,9 +158,12 @@ func TestClientGovernanceObjectOperationsRequireWorkspaceScope(t *testing.T) {
 		call func() error
 	}{
 		{name: "get decision", call: func() error { _, err := client.GetDecision(ctx, "", "ticket-1"); return err }},
-		{name: "resolve decision", call: func() error { _, err := client.ResolveDecision(ctx, "", "ticket-1", "accept", nil); return err }},
+		{name: "resolve decision", call: func() error {
+			_, err := client.ResolveDecision(ctx, "", "ticket-1", "accept", workorcheventpayload.Payload{})
+			return err
+		}},
 		{name: "batch resolve decisions", call: func() error {
-			_, err := client.BatchResolveDecisions(ctx, "", []string{"ticket-1"}, "accept", nil)
+			_, err := client.BatchResolveDecisions(ctx, "", []string{"ticket-1"}, "accept", workorcheventpayload.Payload{})
 			return err
 		}},
 		{name: "get approval", call: func() error { _, err := client.GetApproval(ctx, "", "approval-1"); return err }},
@@ -240,7 +245,11 @@ func TestClientListEventsUsesExplicitPayloadQuery(t *testing.T) {
 			if err != nil {
 				t.Fatalf("list events: %v", err)
 			}
-			if len(items) != 1 || items[0].PayloadSummary["state"] != "running" || items[0].PayloadRef != "payloads/event-001.json" {
+			if len(items) != 1 {
+				t.Fatalf("items = %+v, want one event", items)
+			}
+			state, _ := items[0].PayloadSummary.String("state")
+			if state != "running" || items[0].PayloadRef != "payloads/event-001.json" {
 				t.Fatalf("items = %+v, want event summary/ref", items)
 			}
 		})

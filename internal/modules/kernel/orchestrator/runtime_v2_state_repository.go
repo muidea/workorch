@@ -49,16 +49,9 @@ func (r runtimeV2StateRepository) Save(ctx context.Context, aggregate runtimev2.
 	run.RuntimeState = &record
 	command := updateRunCommandFromModel(run)
 	command.ExpectedRuntimeStateRevision = &expectedRevision
-	_, err = sendRunEventCommand(
-		ctx,
-		r.hub,
-		runevents.TopicRunCommandUpdate,
-		"run",
-		string(run.ID),
-		run.WorkspaceID,
-		run.ID,
-		command,
-	)
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandUpdate, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	bindOwnerCommandLane(event, runevents.TopicRunCommandUpdate, "run", string(run.ID), run.WorkspaceID, run.ID)
+	_, err = runCommandResponse(r.hub.Send(event), runevents.TopicRunCommandUpdate)
 	if errors.Is(err, common.ErrConflict) {
 		return common.ErrConflict
 	}

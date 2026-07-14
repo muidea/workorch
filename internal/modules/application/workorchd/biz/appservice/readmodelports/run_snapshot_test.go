@@ -88,7 +88,7 @@ func TestRunObservabilityHydratesLLMUsagePayloads(t *testing.T) {
 		Topic:       "/run/llm_usage/recorded",
 		WorkspaceID: workspace.ID,
 		RunID:       run.ID,
-		Payload: map[string]any{
+		Payload: mustPortEventPayload(t, map[string]any{
 			events.PayloadKeyWorkspaceID:  string(workspace.ID),
 			events.PayloadKeyRunID:        string(run.ID),
 			events.PayloadKeyStepID:       "run-observability-usage/step-usage",
@@ -99,7 +99,7 @@ func TestRunObservabilityHydratesLLMUsagePayloads(t *testing.T) {
 			events.PayloadKeyOutputTokens: 14,
 			events.PayloadKeyTotalTokens:  44,
 			events.PayloadKeyStatus:       "completed",
-		},
+		}),
 	}
 	eventReader := &fakeRunSnapshotEventReader{records: []*eventstreammodel.EventRecord{usage}}
 
@@ -149,11 +149,11 @@ func TestRunSnapshotViewCompactBoundsStepsAndProjectsStepPayloads(t *testing.T) 
 			RunID: run.ID,
 			Kind:  "llm/workspace_execution",
 			State: common.StepStateSucceeded,
-			Input: map[string]any{"large": "input"},
-			Output: map[string]any{
+			Input: mustPortEventPayload(t, map[string]any{"large": "input"}),
+			Output: mustPortEventPayload(t, map[string]any{
 				"stage":     "llm_execution_graph_plan",
 				"rawOutput": "large output",
-			},
+			}),
 		})
 	}
 	currentStepID := steps[1].ID

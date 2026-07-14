@@ -1,6 +1,19 @@
 # WorkOrch Unified Runtime Design Contract
 
-本文定义 WorkOrch 面向长流程任务的唯一核心运行设计合约。目标是解决反复单点修复后仍无法稳定推进的问题，同时明确核心框架必须保持功能中立：runtime 只能治理阶段、约束、证据、结果、上下文和恢复策略，不得内置软件开发、代码 patch、具体技术栈或具体业务领域规则。
+Status: active
+
+Type: core-contract
+
+Last Updated: 2026-07-14
+
+本文定义 WorkOrch 面向长流程任务的唯一核心运行设计合约。目标是解决反复单点修复后仍无法稳定推进的问题，同时明确核心框架必须保持功能中立：runtime 只能治理阶段语义、约束、证据、结果、上下文和恢复策略，不得内置软件开发、代码 patch、具体技术栈或具体业务领域规则。
+
+**生产实现主链是 Runtime V2**（`DriveRuntimeV2` + reducer + sealed dispatch）。本文采用 **双层并存**：
+
+- **层 A（语义 / profile）**：中立 stage 语言，用于 output policy、profile 映射、LLM 意图与 evidence 严格度。
+- **层 B（实现）**：Runtime V2 authority / focus / requiredOutput / candidate / sealed dispatch。
+
+Stage 名称 **不是** Orchestrator 生产状态机状态；生产动作以 V2 `RuntimeDecision.Action` 为准。实现落点以 `internal/modules/kernel/orchestrator/readme.md` 与 `internal/pkg/workorchruntimecontract` 为准。
 
 ## 权威合约声明
 
@@ -12,22 +25,25 @@
 
 - 不得突破本文定义的核心中立原则。
 - 不得在 core runtime 中引入软件开发、代码 patch、测试框架、具体业务领域等特化逻辑。
-- 新增或调整 runtime 流程时，必须能映射到本文定义的中立 stage、artifact、evidence、result、repair、replan 合同。
+- 新增或调整 runtime 流程时，必须能映射到本文定义的中立 stage 语义 **以及** Runtime V2 focus / requiredOutput / evidence / repair 合同。
 - 旧文档、历史计划、局部收口方案不得作为本文之外的并列约束；需要保留的合理内容应先抽象为中立规则并入本文，或作为 profile / capability 文档的非核心实现说明。
 - 后续所有针对 WorkOrch 功能的开发完善，都必须在设计、实现和验证三个环节显式参照本文。
 - Runtime core flow、LLM context integrity、neutral repair grounding、provider retry、readable ID / lineage、Goal / DoD change impact、result evidence strictness、rejected result continuation 等规则均已并入本文。后续不得再新增分散的 runtime 补充合约；如确需新增专题文档，只能作为 profile / capability / implementation note，并且不得改变本文的核心约束。
+- **不得** 以已删除的 V1 合同（StagePacket / NextAction / DispatchNextStep / ExecutionContextPatch / 自动 replan successor 等）作为新实现约束。
 
 ## 背景
 
-近期多个 workspace 的执行核对显示，runtime 已经能够治理 provider retry、runtime repair、result policy、readable ID、state-changing repair 等底层问题，但在软件开发这类长流程任务中仍会出现持续循环：
+历史上多个 workspace 的执行核对显示：仅靠单点 provider retry、局部 repair 或领域硬编码无法稳定推进长流程。核心问题是：
 
-- LLM 在尚未完成上下文理解时被过早要求输出 patch。
-- 只读探索 graph 被统一视为实现阶段违规，导致 repair / replan 反复触发。
-- runtime 对“应该开放判断”与“必须严格收敛”的阶段边界不够清晰。
-- memory / recall / skill / tool / mcp / soul / prompt 已被接入，但缺少按阶段组织的输入合同，无法稳定为 LLM 提供决策所需信息。
-- 修复容易滑向“为软件开发写死特殊逻辑”，破坏 WorkOrch 核心中立性。
+- 语义阶段边界与实现调度混淆，导致“开放判断”与“严格收敛”切换不稳。
+- LLM 输出载荷与 authority 快照不一致，重复失败却无法确定性收敛。
+- memory / skill / tool / mcp / soul 已接入，但缺少与 focus / requiredOutput 绑定的输入合同。
+- 修复容易滑向“为软件开发写死特殊逻辑”，破坏中立性。
 
-因此后续不应继续围绕单个失败点打补丁，而应把 runtime 收口为“中立阶段状态机 + 阶段内 LLM 决策”的模式。
+因此 core 收口为：
+
+1. **中立 stage 语义**（产品 / profile / LLM 意图层）；
+2. **Runtime V2 确定性收敛主链**（生产调度层）：facts → reducer → authority transaction → prerequisite | candidate → sealed dispatch → evidence → terminal。
 
 ## 设计原则
 
@@ -35,12 +51,13 @@
 
 WorkOrch core runtime 只理解以下中立概念：
 
-- workspace、run、step、stage、loop、attempt。
-- Goal、DoD、input、artifact、evidence、result。
-- stage contract、allowed output、forbidden output。
-- state-changing、read-only、assessment-only、approval、decision。
-- provider retry、runtime repair、replan、terminal result。
+- workspace、run、loop、attempt、focus、authority snapshot / transaction。
+- Goal、DoD、input、artifact、evidence、result、assessment。
+- stage **语义** contract、allowed / forbidden output、requiredOutput。
+- state-changing、read-only、assessment-only、approval、decision / governance。
+- provider retry、runtime repair、replan **语义**、terminal result。
 - memory recall / write 的价值等级与引用关系。
+- prerequisite、candidate、sealed dispatch、operation evidence。
 
 WorkOrch core runtime 不得理解以下领域概念：
 
@@ -52,29 +69,120 @@ WorkOrch core runtime 不得理解以下领域概念：
 
 ### 约束分层
 
-WorkOrch 的阶段约束分三层：
-
 | 层 | 职责 | 是否属于 core |
 | --- | --- | --- |
-| Runtime core | 阶段状态机、输出合约、恢复治理、证据/result、ID/lineage、memory 生命周期 | 是 |
-| Capability / profile | 某类任务的 artifact 类型、tool/skill/mcp/soul/prompt 组合、阶段映射 | 否，属于可插拔能力层 |
-| LLM decision | 在当前 stage contract 内选择方案、生成内容、解释缺口 | 否，由 LLM 执行 |
+| Runtime core（V2） | facts / reducer / authority / sealed dispatch / evidence / governance wait / terminal projection | 是 |
+| 语义 stage / output policy | 中立阶段意图、严格度、profile 映射输入 | 是（语义）；不是生产状态名 |
+| Capability / profile | artifact 类型、tool/skill/mcp/soul/prompt 组合、focus 与 stage policy 映射 | 否，可插拔 |
+| LLM decision | 在当前 requiredOutput / stage 语义内生成 candidate | 否，由 LLM 执行 |
 
-软件开发只能作为一个 profile 映射到中立阶段，不能成为 core runtime 的内置逻辑。
+软件开发只能作为一个 profile 映射到中立阶段语义与 typed focus，不能成为 core runtime 的内置逻辑。
 
-## 阶段模型
+## Runtime V2 实现主链
 
-Runtime 统一使用中立阶段，不使用业务阶段名称作为核心状态。
+### 生产入口
 
-| Stage | 目的 | 约束模式 | 允许输出 | 禁止输出 |
+1. Application 构造 typed `RuntimeBootstrap`（Definition + Activation + Focuses + Requirements），经 EventHub 创建 Run。
+2. `StartRunCommand`：`AcceptRunStart`（pending→active）后后台 `DriveRuntimeV2`。
+3. `ResumeRunCommand`：仅 workspace/run scope；允许 active 或已解决 blocker；进入同一 drive。**无** execution-context patch。
+4. 唯一同步推进合同：`DriveRuntimeV2Command/Result`。
+
+### Drive 循环（有界）
+
+```text
+Load Run → InitializeRuntimeV2FromRun（幂等：已有 aggregate 只 load）
+for transition < guard:
+  reducer(RuntimeFacts) → RuntimeDecision + AuthorityTransaction
+  switch Action:
+    acquire_prerequisite → prerequisite acquire + commit + reduce
+    produce_state_change | produce_validation | produce_assessment | request_governance
+        → candidate (attempt 0, 失败可 1，同 transaction + stable prefix)
+        → SealDispatch → ExecuteRuntimeOperation（dependency graph）
+        → evidence commit / assessment commit / governance open
+    complete | fail → terminal projection
+  if governed_wait → 投影 Run blocked + 返回
+  每个非等待非终态 transition 必须递增 StateRevision，否则 fail-fast
+```
+
+### 权威对象
+
+| 对象 | 权威 |
+| --- | --- |
+| `RuntimeBootstrap` / Definition / Activation | 创建时封存；后续不得由调用方临时 map 重建 |
+| `RuntimeFacts` + focus 队列 + evidence ledger | Orchestrator aggregate |
+| `RuntimeDecision` / `AuthoritySnapshot` / `AuthorityTransaction` | reducer 密封 |
+| `RequiredOutputContract` | 当前 focus 与 capability 中立交集 |
+| `SealedDispatch` | 执行前持久化；execution evidence 唯一合法入口 |
+| `RuntimeStateRecord` | Run owner CAS；正式 V2 状态 |
+| Result accepted/rejected | Orchestrator 裁决后写入 Result owner；Result 不裁决 |
+| Run / Workspace terminal / blocker | Orchestrator 窄投影 |
+
+### Candidate / Dispatch 不变量
+
+- 同 authority snapshot：attempt 0 + 最多 1 次 same-contract retry。
+- Accept 时 seal：绑定 transaction + candidate hash。
+- Evidence：snapshot / dispatch / operation 一致；stale → diagnostic lineage；duplicate → 幂等。
+- Focus 的 required evidence（及可选 assessment）满足后原子切换下一 focus，再 reduce。
+- 最后一个 assessment 关闭后写 Result，再投影 terminal。
+
+### Governance
+
+- `request_governance` → 向 Decision 打开确定性 ticket，binding 写入 aggregate → `governed_wait`。
+- 继续：`CommitRuntimeGovernanceTicketResolution` / resolution commit；**application 不得** 因 resolve 再 Resume。
+- governance fail → `governance_rejected` terminal；stale resolution → diagnostic。
+
+### 恢复
+
+- 进程重启只 load 已持久化 aggregate；Initialize 幂等，不因重复 Start/Resume 再 reduce 或加 attempt。
+- 不记录 / 不重放 V1 progress/terminal checkpoint 作为驱动。
+
+实现细节与 EventHub topics：见 `internal/modules/kernel/orchestrator/readme.md` 与 [20-runtime-flow](../20-runtime-flow/overview.md)。
+
+## 阶段模型（语义层）
+
+中立 stage 用于 **语义意图 / profile 映射 / LLM 输出策略**，不使用业务阶段名作为核心状态，也 **不** 作为 Orchestrator 生产状态机枚举。
+
+| Stage（语义） | 目的 | 约束模式 | 允许输出 | 禁止输出 |
 | --- | --- | --- | --- | --- |
-| `exploration` | 收集上下文、识别问题、发现约束 | 开放判断 | read-only graph、tool read、context summary、candidate findings、blocker | 写 result 完成、无依据 state-changing、无限探索 |
-| `planning` | 将 Goal / DoD 拆成可执行单元 | 半开放 | plan、implementation units、acceptance criteria、risk/blocker、stage transition proposal | 直接完成 run、绕过 DoD、空计划 |
-| `execution` | 产生状态变更或明确无法变更 | 严格收敛 | state-changing artifact、tool action、patch-capable output、failed assessment、decision blocker | 只读 graph 循环、下钻 graph、placeholder output |
+| `exploration` | 收集上下文、识别问题、发现约束 | 开放判断 | read-only 探查、tool read、context summary、candidate findings、blocker | 写 result 完成、无依据 state-changing、无限探索 |
+| `planning` | 将 Goal / DoD 拆成可执行单元 | 半开放 | plan、implementation units、acceptance criteria、risk/blocker、transition proposal | 直接完成 run、绕过 DoD、空计划 |
+| `execution` | 产生状态变更或明确无法变更 | 严格收敛 | state-changing artifact、tool action、patch-capable output、failed assessment、decision blocker | 只读空转、placeholder output |
 | `verification` | 用证据验证执行结果 | 严格证据 | verification tool result、evidence refs、failed/skipped/inconclusive assessment | 无证据 accepted、继续实现、弱证据通过 |
 | `acceptance` | 对照 Goal / DoD 判定完成度 | 严格 result | accepted/rejected result、DoD coverage、evidence mapping | 新增实现、模糊完成、缺 result 终态 |
-| `repair` | 针对失败证据做定向修复 | 继承原约束并收紧 | targeted correction、state-changing repair、failed assessment、blocker | 广泛重规划、降级为探索、重复同一失败 |
-| `replan` | 原计划不成立时重新拆解 | 受控开放 | successor run proposal、new units、discard/keep rationale | 在旧失败路径继续循环、丢失 lineage |
+| `repair` | 针对失败证据做定向修复 | 继承原约束并收紧 | targeted correction、state-changing repair、failed assessment、blocker | 广泛重规划、降级为无界探索、重复同一失败 |
+| `replan` | 原计划不成立时重新拆解 | 受控开放 | **新** typed activation / 新 V2 Run 的定义变更意图、discard/keep rationale | 在旧失败路径空转、丢失 lineage、**自动 V1 successor replan** |
+
+### Stage 语义 ↔ Runtime V2 映射
+
+| Stage 语义意图 | V2 focus / requiredOutput / action |
+| --- | --- |
+| exploration / planning 只读上下文 | `acquire_prerequisite`（manifest / target_snapshot / failure_target / validation_scratch / provider_ceiling / capability）+ 非 state-changing 边界 |
+| execution 状态变更 | `produce_state_change` + state_change evidence + sealed operations |
+| verification | `produce_validation` + validation evidence |
+| acceptance | `RequireAssessment` focus → `produce_assessment` → Result accepted/rejected |
+| repair | 同一 focus 上 rejected validation / evidence gap → 再 `produce_state_change` 或 `produce_validation`；attempt / budget 治理 |
+| replan（语义） | **不**自动创建 V1 successor；目标或定义变更 = 新 typed activation / 新 V2 Run |
+| governance | `request_governance` → Decision ticket → resolution commit → 回 reducer |
+
+Template stage policy 若存在，仅作为 typed C2 / activation 输入进入 candidate 上下文，**不是** kernel reducer 状态名。
+
+## V1 废止清单（不得再作为并列约束）
+
+以下合同 / 路径已从生产主链删除或禁止重新引入：
+
+| 废止项 | 说明 |
+| --- | --- |
+| `StagePacket` / `NextAction` / V1 RuntimeStep 通用进度事件 | 不得包装 V2 facts / candidate / evidence |
+| `DispatchNextStep` / `NextActionForRun` / `EnableEventDrivenDispatch` | 无通用 step dispatcher |
+| `StartRun` / `ResumeRun` V1 lifecycle facade / patch resume | 仅 `AcceptRunStart` / `CanResumeRun` + V2 drive |
+| `ExecutionContext` / `executionContextPatch` | 上下文只经 typed bootstrap / activation |
+| 自动 replan successor Run | 改目标 = 新 activation / 新 Run |
+| V1 progress/terminal checkpoint 驱动恢复 | 恢复 = load aggregate |
+| 通用 RuntimeAdapter registry / map bridge 回 EventHub | 仅具体 typed command/result |
+| application Start/Resume continuation queue | Decision resolve 后不得再 Resume 驱动 |
+| 以 `runtimeContractVersion` 路由 V1/V2 | 仅审计字段 |
+
+历史计划中的合理中立规则须先并入本文或 profile 文档，不得直接引用废止合同实现新功能。
 
 ### Acceptance Assessment 归一化
 
@@ -1880,7 +1988,7 @@ Core 只处理中立结构字段（stage/contract/evidence/ref/budget/lineage/ca
   - `../60-verification/service-acceptance.md`
 - roadmap / gap tracking
   - `../70-roadmap/active/overview.md`
-  - `../01-overview/incomplete-and-connection-gap-tracker.md`
+  - `../90-archive/records/incomplete-and-connection-gap-tracker.md`
 - dated closure history
   - `../90-archive/completed/core-runtime-closure-history.md`
 

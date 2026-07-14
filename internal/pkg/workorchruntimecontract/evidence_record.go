@@ -1,6 +1,9 @@
 package workorchruntimecontract
 
-import "github.com/muidea/workorch/internal/pkg/common"
+import (
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
 const EvidenceRecordSchema = "workorch.evidence_record.v1"
 
@@ -23,20 +26,20 @@ const (
 )
 
 type EvidenceRecord struct {
-	ID                 common.EvidenceRecordID   `json:"id"`
-	WorkspaceID        common.WorkspaceID        `json:"workspaceId"`
-	RunID              common.RunID              `json:"runId"`
-	StepID             common.StepID             `json:"stepId,omitempty"`
-	DefinitionRevision string                    `json:"definitionRevision,omitempty"`
-	Kind               string                    `json:"kind"`
-	Status             string                    `json:"status"`
-	SourceType         string                    `json:"sourceType,omitempty"`
-	SourceRef          string                    `json:"sourceRef"`
-	SubjectType        string                    `json:"subjectType,omitempty"`
-	SubjectID          string                    `json:"subjectId,omitempty"`
-	CoverageItemRefs   []string                  `json:"coverageItemRefs,omitempty"`
-	Supersedes         []common.EvidenceRecordID `json:"supersedes,omitempty"`
-	CreatedAt          string                    `json:"createdAt,omitempty"`
-	UpdatedAt          string                    `json:"updatedAt,omitempty"`
-	Metadata           map[string]any            `json:"metadata,omitempty"`
+	ID                 common.EvidenceRecordID      `json:"id"`
+	WorkspaceID        common.WorkspaceID           `json:"workspaceId"`
+	RunID              common.RunID                 `json:"runId"`
+	StepID             common.StepID                `json:"stepId,omitempty"`
+	DefinitionRevision string                       `json:"definitionRevision,omitempty"`
+	Kind               string                       `json:"kind"`
+	Status             string                       `json:"status"`
+	SourceType         string                       `json:"sourceType,omitempty"`
+	SourceRef          string                       `json:"sourceRef"`
+	SubjectType        string                       `json:"subjectType,omitempty"`
+	SubjectID          string                       `json:"subjectId,omitempty"`
+	CoverageItemRefs   []string                     `json:"coverageItemRefs,omitempty"`
+	Supersedes         []common.EvidenceRecordID    `json:"supersedes,omitempty"`
+	CreatedAt          string                       `json:"createdAt,omitempty"`
+	UpdatedAt          string                       `json:"updatedAt,omitempty"`
+	Metadata           workorcheventpayload.Payload `json:"metadata,omitempty"`
 }

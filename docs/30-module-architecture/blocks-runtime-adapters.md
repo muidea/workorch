@@ -1,156 +1,162 @@
-# Blocks Runtime Adapter Architecture
+# Blocks Runtime Adapters Architecture
 
 Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-05-30
+Last Updated: 2026-07-14
 
 ## Purpose
 
-本文件说明 `internal/modules/blocks/*` 的统一职责和边界。
+本文件说明 `internal/modules/blocks/*` 在 Runtime V2 下的统一职责与边界。
 
-## Main Blocks
+**生产主链：** capability blocks **只执行** sealed operation 或 candidate 请求；跨组件交互走 **typed EventHub command/result**。通用 RuntimeAdapter registry / Step kind registration matrix **不再是** 生产调度主链。
 
-- `blocks/llm`
-- `blocks/mcp`
-- `blocks/shell`
-- `blocks/file`
-- `blocks/git`
-- `blocks/web`
-- `blocks/ssh`
+## Block Categories
+
+### Stateful owners
+
+| 模块 | 正式状态 |
+| --- | --- |
+| `blocks/workspace` | Workspace / Goal / DoD / Template |
+| `blocks/result` | Result / Artifact（formal outcome） |
+| `blocks/decision` | DecisionTicket / Resolution |
+| `blocks/approval` | Approval |
+| `blocks/memory` | MemoryItem / RecallTrace |
+| `blocks/soul` | Soul catalog |
+| `blocks/skill` | Skill registry |
+| `blocks/mcpregistry` | MCPServer / MCPCapability |
+
+### Capability execution
+
+| 模块 | 角色 |
+| --- | --- |
+| `blocks/llm` | Runtime V2 candidate 请求（provider call + strict decode） |
+| `blocks/file` | 文件 list/read/write/edit/patch；target snapshot prerequisite |
+| `blocks/git` | git read/write 操作 |
+| `blocks/shell` | 有界本地 command |
+| `blocks/mcp` | MCP tool/resource/prompt 调用 |
+| `blocks/web` | search / fetch |
+| `blocks/ssh` | 受限远端 command |
 
 ## Shared Responsibility
 
-所有 block 的共同职责是：
+所有 block 的共同职责：
 
-- 实现某类 runtime adapter
-- 执行外部 side effect 或 provider interaction
-- 将执行结果标准化为 runtime 可消费输出
+- 订阅本模块或 Orchestrator 定义的 **具体** EventHub command
+- 执行外部 side effect 或 provider interaction（capability）/ 持久化 owner 状态（stateful）
+- 返回 typed result、有界摘要、raw ref、具体 failure
 
-block 不拥有：
+block **不** 拥有：
 
-- Run 生命周期
-- Goal / DoD 正式定义
-- accepted Result 的最终判定
+- Run 生命周期与 Runtime V2 drive
+- Goal / DoD 正式裁决语义（Workspace 只管理定义本体）
+- accepted Result / coverage / next action 判定
+- 自动 retry / replan 策略
 
-## High-Level Step Kind Mapping
+## Runtime V2 Interaction Model
 
-当前稳定映射方向：
+```text
+Orchestrator sealed dispatch / prerequisite / candidate
+  → typed EventHub command（Orchestrator pkg/events 或 block pkg/events）
+  → block 同步执行
+  → typed result / evidence 摘要 / failure
+  → Orchestrator 提交 evidence 并 reducer
+```
 
-- `llm/workspace_execution` -> `blocks/llm`
-- `mcp/tool_call` / `mcp/resource_read` / `mcp/prompt_get` -> `blocks/mcp`
-- `shell/command` -> `blocks/shell`
-- `file/*` -> `blocks/file`
-- `patch/*` -> `blocks/file`
-- `git/*` -> `blocks/git`
-- `web/*` -> `blocks/web`
-- `ssh/command` -> `blocks/ssh`
-- approval 正式状态与治理动作 -> `blocks/approval`
+要点：
 
-## Step Kind Registration Matrix
+- Orchestrator plugin **不** 创建 RuntimeAdapter registry、EventHub runtime adapter 或 Step kind registration matrix
+- V2 operation 按 capability 使用独立的 concrete EventHub command/result 合同投递：`ExecuteFileList/Read/EditOperation`、`ExecutePatchPreview/ApplyOperation`、`ExecuteShellOperation`、`ExecuteGitOperation`、`ExecuteMCPOperation`、`ExecuteSSHOperation`、`ExecuteWebOperation`
+- LLM 通过 `RequestRuntimeCandidateCommand/Result` 返回绑定当前 authority transaction 的 typed candidate
+- File 另承担 `AcquireTargetSnapshot` 等 prerequisite 合同
+- capability block 内部可以为外部 provider 或本地执行器保留局部解析结构；不得把 `map[string]any` 作为跨模块 command/data/result，也不得重新进入 EventHub / RuntimeFacts / candidate / dispatch / evidence
 
-当前稳定 step kind -> block kind 注册矩阵至少应细化为：
+## Capability Operation Mapping
 
-| Step Kind | Runtime Owner | Executor Module | 当前职责 |
-| --- | --- | --- | --- |
-| `llm/workspace_execution` | `blocks/llm` | `blocks/llm` | 主 LLM 决策、follow-up、assessment-only、repair/replan LLM 输出 |
-| `mcp/tool_call` | `blocks/mcp` | `blocks/mcp` | 受治理的 MCP tool 调用 |
-| `mcp/resource_read` | `blocks/mcp` | `blocks/mcp` | MCP resource 只读获取 |
-| `mcp/prompt_get` | `blocks/mcp` | `blocks/mcp` | MCP prompt / template 读取 |
-| `shell/command` | `blocks/shell` | `blocks/shell` | 有界 shell / command 执行 |
-| `file/list` | `blocks/file` | `blocks/file` | 目录扫描与相对路径枚举 |
-| `file/read` | `blocks/file` | `blocks/file` | 文件正文读取与摘要 |
-| `file/edit` | `blocks/file` | `blocks/file` | 小范围编辑请求，转换为 patch intent |
-| `patch/preview` | `kernel/orchestrator` | `blocks/file` | patch 技术预演、风险、审批需求和 patch evidence 输入 |
-| `patch/apply` | `kernel/orchestrator` | `blocks/file` | patch 技术落盘和结构化执行结果 |
-| `patch/revert` | `kernel/orchestrator` | `blocks/file` | patch reverse material 充分时的技术回滚执行 |
-| `git/read` | `blocks/git` | `blocks/git` | repo 状态、diff、log、show、branch 摘要 |
-| `git/write` | `blocks/git` | `blocks/git` | add / commit 等最小写入闭环 |
-| `web/search` | `blocks/web` | `blocks/web` | 候选来源发现 |
-| `web/fetch` | `blocks/web` | `blocks/web` | 来源正文 / 摘要 / metadata 抓取 |
-| `ssh/command` | `blocks/ssh` | `blocks/ssh` | 受限远端命令执行 |
+| Operation 方向 | Executor | 说明 |
+| --- | --- | --- |
+| Runtime V2 candidate | `blocks/llm` | `StateChange` / `Validation` / `Assessment` / `Governance` candidate |
+| file / patch operations | `blocks/file` | 技术执行；approval / evidence quality 仍归 Orchestrator |
+| git operations | `blocks/git` | 有界 repo 读写 |
+| shell command | `blocks/shell` | exitCode + bounded stdout/stderr + evidence policy 质量结论 |
+| mcp tool/resource/prompt | `blocks/mcp` | 查询 mcpregistry 后调用；不注入 registry service |
+| web search/fetch | `blocks/web` | 候选发现与正文抓取 |
+| ssh command | `blocks/ssh` | 受限远端执行 |
+| target snapshot / manifest preflight | `blocks/file` 等 | prerequisite / capability preflight via typed commands |
 
 约束：
 
-- step kind 注册矩阵只表达“谁执行”，不表达“业务上为什么执行”
-- 是否允许某个 step kind 出现在当前 run，继续由 runtime contract、Soul、Skill、policy、approval 共同决定
-- 具体业务解释必须留在 profile / capability / product 层
-- `llm/assessment_only` 不是独立 step kind；它是 `llm/workspace_execution` 的 runtime mode / stage contract。
-- `patch/*` 的技术执行归属 `blocks/file`；`kernel/orchestrator` 仍然是 runtime contract、approval gate、formal Patch evidence、coverage ledger 和 result gate 的正式权威。迁移过程中不能把 block 执行结果提升为并行 Patch 事实源。
+- 映射只表达“谁执行”，不表达“业务上为什么执行”
+- 是否允许某 operation 由 runtime contract、focus requiredOutput、Soul/Skill/policy、approval 共同决定
+- 无独立 `llm/assessment_only` step kind；assessment 是 V2 action / focus 模式
+- patch 技术执行在 file；Patch evidence、coverage、result gate 权威在 Orchestrator
 
 ## LLM Block
 
-LLM block 负责：
+负责：
 
-- provider request assembly
-- provider call
-- schema parsing / repair normalization
-- request audit / context budget related provider-facing output
+- typed `PromptContext` 渲染与 C0–C5 稳定 cache prefix
+- provider ceiling 校验、流式/非流式调用
+- Runtime V2 candidate 严格解码与合同校验
 
-### Output Direction
+输出：
 
-LLM block 输出应保持为：
+- 当前 action 对应的 typed candidate，或 `RuntimeCandidateFailure`
+- **不** 返回 convergence / focus / authority / repair objective
+- **不** 在进程内决定是否重试；attempt 预算由 Orchestrator 管理
 
-- normalized decision object
-- provider-facing context budget / request audit
-- schema / provider failure 分类
+请求不得包含自由 `Input map[string]any`、V1 execution decision 或从历史 map 重建 definition。
 
-## MCP / Shell / File / Git / Web / SSH Blocks
+## Capability Blocks Normalization
 
-这些 block 负责：
-
-- 外部动作执行
-- output normalization
-- 必要的 runtime-safe policy enforcement
-
-它们不负责：
-
-- 自主决定业务完成
-- 绕过 orchestrator 直接改变 Run 终态
-
-### Normalization Direction
-
-这些 block 的输出应尽量统一为：
-
-- structured result metadata
-- bounded previews / summaries
-- refs to large raw payloads
-- deterministic failure classification when possible
-
-## Block-Specific Normalization Differences
-
-虽然统一要求“结构化元数据 + bounded summary + raw ref”，各 block 仍有稳定差异：
-
-| Block | 主要规范化重点 |
+| Block | 规范化重点 |
 | --- | --- |
-| `blocks/llm` | normalized decision object、schema repair、provider failure classification、request audit |
-| `blocks/mcp` | tool/resource/prompt 的结构化返回、server/capability 标识、approval/risk 命中 |
-| `blocks/shell` | command/args/exitCode/stdoutPreview/stderrPreview/truncated |
-| `blocks/file` | targetRef/baseHash/diffHash/conflicts/approvalRequired/affectedFiles |
-| `blocks/git` | operation/branch/headCommit/changedFiles/summary |
-| `blocks/web` | query/finalUrl/provider/resultCount/contentHash/retrievedAt |
-| `blocks/ssh` | target host/session/exitCode/stdoutPreview/stderrPreview |
+| `llm` | candidate / schema repair / provider failure / request audit |
+| `mcp` | tool/resource/prompt 结构化返回、server/capability 标识、risk 命中 |
+| `shell` | command/args/exitCode/bounded preview/duration/error class |
+| `file` | path/ref/hash/conflicts/approvalRequired/affectedFiles/target snapshot |
+| `git` | operation/branch/head/changedFiles/summary |
+| `web` | query/url/provider/resultCount/contentHash |
+| `ssh` | host/session/exitCode/bounded preview |
 
 统一约束：
 
-- 大正文、大 diff、大网页、大 stdout/stderr 默认只保留 bounded preview + raw ref
-- block 不得输出“已 accepted business outcome”这类上层结论
-- 若 block 结果可形成高风险或高价值 evidence，应通过 Step / ToolCall / Patch / ValidationResult / Artifact 进入正式证据链
+- 大正文默认 bounded preview + raw ref
+- 不得输出“已 accepted business outcome”
+- 技术成功 ≠ 业务完成；evidence 进入 Orchestrator ledger 后才参与收敛
+
+## Stateful Owner Boundary
+
+| Owner | 可写 | 不可做 |
+| --- | --- | --- |
+| workspace | definition / revision / template | 启动 Run、判定 Result |
+| result | formal Result/Artifact | acceptance / coverage 裁决 |
+| decision | ticket / resolution | 直接改 Run 收敛状态；`runtime_v2_governance` 不得并行通用 Resume |
+| approval | 授权状态 | 执行原副作用 |
+| memory / soul / skill / mcpregistry | 各自 registry 状态 | 调度 runtime 或写 Run/Result |
+
+Orchestrator 与 application 一律经 EventHub 访问这些 owner。
 
 ## Capability Boundary Summary
 
-各 block 的能力边界当前应稳定理解为：
+- `blocks/llm`：provider-facing request/response only，不执行 workspace side effect
+- capability execution blocks：外部动作 only，不拥有 Run 终态与 accepted closeout
+- decision / approval：治理选择与授权，恢复路径由 Orchestrator contract gate 决定
+- 生产调度权威 = Orchestrator reducer + sealed dispatch，**不是** 通用 adapter 注册表
 
-- `blocks/llm`
-  - 只负责 provider-facing request / response，不直接执行 side effect
-- `blocks/mcp` / `blocks/shell` / `blocks/file` / `blocks/git` / `blocks/web` / `blocks/ssh`
-  - 负责外部动作执行，但不拥有 Run 终态与 accepted closeout 决策
-- approval 不属于 block adapter。Approval 正式状态、resolve 动作和治理关联由 `blocks/approval`
-  承接，并由 orchestrator/governance 选择恢复路径。
+## Explicit Non-Goals（V1）
+
+- 通用 `RuntimeAdapter` 接口作为生产主链
+- Step kind → adapter registry 矩阵驱动 dispatch
+- block 发布 V1 RuntimeStep Accepted/Progress/Completed/Failed 推进状态
+- block 内本地 repair / replan 主链
+- 跨组件 map / JSON / reflect 类型桥
 
 ## Source Documents
 
 - `architecture-overview.md`
-- `../20-runtime-flow/planning-execution-flow.md`
-- `../50-product-interface/service-api.md`
+- `kernel-orchestrator-governance.md`
+- `../00-core/runtime-stage-contract.md`
+- `internal/modules/kernel/orchestrator/readme.md`
+- 各 `internal/modules/blocks/*/readme.md`

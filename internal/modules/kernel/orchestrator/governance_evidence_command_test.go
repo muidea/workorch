@@ -11,6 +11,7 @@ import (
 	decisioncontracts "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -47,13 +48,17 @@ func TestDecisionEvidenceCommandPersistsThroughOrchestratorConsumer(t *testing.T
 		t.Fatalf("create ticket: %v", err)
 	}
 	resolve := decisioncontracts.ResolveTicketCommand{
-		ResolutionID:       "resolution-pairwise-evidence",
-		TicketID:           create.TicketID,
-		WorkspaceID:        create.WorkspaceID,
-		RunID:              create.RunID,
-		StepID:             create.StepID,
-		Type:               decisioncommon.ResolutionTypeProvideMissingInfo,
-		Payload:            map[string]any{"operator": "tester", "retry": true, "targets": []any{"step-a", "step-b"}},
+		ResolutionID: "resolution-pairwise-evidence",
+		TicketID:     create.TicketID,
+		WorkspaceID:  create.WorkspaceID,
+		RunID:        create.RunID,
+		StepID:       create.StepID,
+		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload: workorcheventpayload.New(
+			workorcheventpayload.StringField("operator", "tester"),
+			workorcheventpayload.BoolField("retry", true),
+			workorcheventpayload.StringArrayField("targets", []string{"step-a", "step-b"}),
+		),
 		ContinuationAction: "resume",
 		ResumeRunID:        create.RunID,
 	}
@@ -75,9 +80,11 @@ func TestDecisionEvidenceCommandPersistsThroughOrchestratorConsumer(t *testing.T
 	if record.Kind != runtimemodel.EvidenceKindDecision || record.Status != runtimemodel.EvidenceStatusAccepted || record.SubjectID != string(create.TicketID) {
 		t.Fatalf("decision evidence = %+v, want accepted decision record", record)
 	}
-	payload, ok := record.Metadata["resolutionPayload"].(map[string]any)
-	if !ok || payload["operator"] != "tester" || payload["retry"] != true {
-		t.Fatalf("decision evidence payload = %#v, want concrete fields restored", record.Metadata["resolutionPayload"])
+	payload, ok := record.Metadata.Object("resolutionPayload")
+	operator, _ := payload.String("operator")
+	retry, _ := payload.Bool("retry")
+	if !ok || operator != "tester" || !retry {
+		t.Fatalf("decision evidence payload = %#v, want concrete fields restored", payload)
 	}
 }
 
@@ -107,7 +114,10 @@ func TestApprovalEvidenceCommandPersistsThroughOrchestratorConsumer(t *testing.T
 		StepID:      "step-pairwise-evidence",
 		Reason:      "need authorization",
 		Action:      "continue runtime action",
-		Context:     map[string]any{"scope": "runtime", "risk": 2},
+		Context: workorcheventpayload.New(
+			workorcheventpayload.StringField("scope", "runtime"),
+			workorcheventpayload.IntField("risk", 2),
+		),
 	}
 	if err := service.CreateApproval(ctx, create); err != nil {
 		t.Fatalf("create approval: %v", err)
@@ -116,7 +126,9 @@ func TestApprovalEvidenceCommandPersistsThroughOrchestratorConsumer(t *testing.T
 		ApprovalID:  create.ApprovalID,
 		WorkspaceID: create.WorkspaceID,
 		RunID:       create.RunID,
-		Context:     map[string]any{"resolvedBy": "tester"},
+		Context: workorcheventpayload.New(
+			workorcheventpayload.StringField("resolvedBy", "tester"),
+		),
 	}
 	if _, err := service.EnsureApprovedAndReturn(ctx, resolve); err != nil {
 		t.Fatalf("approve: %v", err)
@@ -136,8 +148,10 @@ func TestApprovalEvidenceCommandPersistsThroughOrchestratorConsumer(t *testing.T
 	if record.Kind != runtimemodel.EvidenceKindApproval || record.Status != runtimemodel.EvidenceStatusAccepted || record.SubjectID != string(create.ApprovalID) {
 		t.Fatalf("approval evidence = %+v, want accepted approval record", record)
 	}
-	metadataContext, ok := record.Metadata["context"].(map[string]any)
-	if !ok || metadataContext["scope"] != "runtime" || metadataContext["resolvedBy"] != "tester" {
-		t.Fatalf("approval evidence context = %#v, want merged concrete context", record.Metadata["context"])
+	metadataContext, ok := record.Metadata.Object("context")
+	scope, _ := metadataContext.String("scope")
+	resolvedBy, _ := metadataContext.String("resolvedBy")
+	if !ok || scope != "runtime" || resolvedBy != "tester" {
+		t.Fatalf("approval evidence context = %#v, want merged concrete context", metadataContext)
 	}
 }

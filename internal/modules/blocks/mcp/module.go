@@ -11,6 +11,7 @@ import (
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const ModuleID = modulecommon.ModuleID
@@ -50,14 +51,14 @@ func (m *Module) Start() error {
 	}
 	m.capabilityObserver = magicevent.NewSimpleObserver(ModuleID, m.eventHub)
 	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
-	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteRuntimeOperation, m.handleRuntimeOperation)
+	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteMCPOperation, m.handleMCPOperation)
 	return nil
 }
 
 func (m *Module) Stop(ctx context.Context) error {
 	_ = ctx
 	if m.capabilityObserver != nil {
-		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteRuntimeOperation)
+		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteMCPOperation)
 		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
 	}
 	m.capabilityObserver = nil
@@ -69,16 +70,42 @@ func (m *Module) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (m *Module) handleRuntimeOperation(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.ExecuteRuntimeOperationCommand)
+func (m *Module) handleMCPOperation(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.ExecuteMCPOperationCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	response, err := orchestratorevents.ExecuteRuntimeOperation(event.Context(), command, m.runtimeAdapter)
-	if err != nil {
+	if err := orchestratorevents.ValidateRuntimeOperationScope(command.WorkspaceID, command.RunID, command.DispatchID, command.Transaction, command.OperationID, command.EvidenceKind, command.WorkspaceDeliverableDirectory); err != nil {
 		setCapabilityError(result, err)
 		return
+	}
+	operationResult, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), mcpbiz.RuntimeOperationRequest{
+		WorkspaceID: command.WorkspaceID, RunID: command.RunID, StepID: common.StepID(command.DispatchID + "/" + command.OperationID),
+		Kind: command.OperationKind, WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
+		WorkspaceInternalDirectory: command.WorkspaceInternalDirectory, TargetRefs: command.TargetRefs,
+		Data: command.Data, EvidencePolicies: command.EvidencePolicies,
+	})
+	response := orchestratorevents.ExecuteMCPOperationResult{
+		EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID,
+		EvidenceKind: command.EvidenceKind, Status: runtimecontract.RuntimeOperationExecutionStatusAccepted,
+		SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: operationResult.Evidence,
+		Data: orchestratorevents.MCPOperationResultData{
+			Status: operationResult.Status, Stage: operationResult.Stage, Operation: operationResult.Operation,
+			ServerID: operationResult.ServerID, Tool: operationResult.Tool, URI: operationResult.URI, Prompt: operationResult.Prompt,
+			Summary: operationResult.Summary, Transport: operationResult.Transport, Endpoint: operationResult.Endpoint,
+			DurationMillis: operationResult.DurationMillis, StatusCode: operationResult.StatusCode, Stderr: operationResult.Stderr,
+			FailureCode: operationResult.FailureCode, FailureMessage: operationResult.FailureMessage, TargetRefs: operationResult.TargetRefs,
+			Diagnostics: orchestratorevents.MCPFailureDiagnosticsData{
+				Operation: operationResult.Diagnostics.Operation, ServerID: operationResult.Diagnostics.ServerID, Tool: operationResult.Diagnostics.Tool,
+				URI: operationResult.Diagnostics.URI, Prompt: operationResult.Diagnostics.Prompt, TargetRef: operationResult.Diagnostics.TargetRef,
+				FailureTargets: append([]string(nil), operationResult.Diagnostics.FailureTargets...),
+			},
+		},
+	}
+	if executeErr != nil {
+		response.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
+		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, command.OperationKind, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
 	}
 	result.Set(response, nil)
 }

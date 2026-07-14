@@ -4,11 +4,13 @@ Status: active
 
 Type: product-interface
 
-Last Updated: 2026-05-30
+Last Updated: 2026-07-14
 
 ## Purpose
 
 本目录用于承接 WorkOrch 的产品接口面，包括部署入口、HTTP API、TUI 和 Web Console。
+
+生产 runtime 主链为 **Runtime V2 only**。产品接口只提交 scoped command 与展示 projection，不复制 V2 reducer / authority，不推断 next action，不通过 `ExecutionContextPatch` 或 V1 graph/next-action 路径推进。
 
 ## Reading Order
 
@@ -32,6 +34,7 @@ Last Updated: 2026-05-30
 - JSON/read-model envelope
 - governance / registry / content open path
 - configuration write contract
+- execution activation / Start / Resume 的 command accepted 语义（进入 V2 drive）
 
 权威文档：
 
@@ -77,16 +80,25 @@ Last Updated: 2026-05-30
 - `web-console/overview.md`
 - `web-console/bundle-ui-optimization-record.md`
 
+## Runtime-Facing Interface Stance
+
+- activation / create run：封存 typed bootstrap 输入，创建 V2 Run。
+- Start：AcceptRunStart 后进入 `DriveRuntimeV2`。
+- Resume：workspace/run scope；允许 active 或已解决 blocker；**无** execution-context patch。
+- Decision / Approval resolve：提交 resolution；**不得**要求 application 再 Resume 才能回到 drive。
+- replan 语义：新 activation / replacement run，不是同 Run 自动 successor。
+- UI 消费 projection；不得本地重建 RuntimeDecision。
+
 ## Cross-Layer Boundary
 
-- core runtime contract 属于 `00-core/`
+- core runtime contract / Runtime V2 属于 `00-core/`
 - domain object 定义属于 `10-domain-model/`
 - runtime flow 属于 `20-runtime-flow/`
 - module architecture 属于 `30-module-architecture/`
 - profile/capability 特化属于 `40-profiles-capabilities/`
 - acceptance / verifier / audit 属于 `60-verification/`
 
-产品接口层不应重新定义 runtime core 规则或业务对象边界。
+产品接口层不应重新定义 runtime core 规则或业务对象边界，也不得把 V1 StagePacket/NextAction/graph dispatch 重新声明为 API 生产语义。
 
 ## Current Status
 

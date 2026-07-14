@@ -6,6 +6,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -14,7 +15,9 @@ func ReadMCPServerByOwnerCommand(ctx context.Context, hub magicevent.Hub, id com
 	if hub == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	result, err := sendMagicCommand[mcpevents.GetServerCommand, mcpevents.MCPCommandResult](ctx, hub, mcpevents.TopicMCPCommandGetServer, mcpevents.CommandDestination, "mcp_server", string(id), mcpevents.GetServerCommand{ServerID: id})
+	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandGetServer, sourceModule, mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.GetServerCommand{ServerID: id})
+	ownerevent.BindLane(event, mcpevents.TopicMCPCommandGetServer, "mcp_server", string(id), "", "", "")
+	result, err := ownerevent.MCP(hub.Send(event), mcpevents.TopicMCPCommandGetServer)
 	if err != nil {
 		return nil, err
 	}
@@ -28,7 +31,9 @@ func ReadMCPCapabilityByOwnerCommand(ctx context.Context, hub magicevent.Hub, id
 	if hub == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	result, err := sendMagicCommand[mcpevents.GetCapabilityCommand, mcpevents.MCPCommandResult](ctx, hub, mcpevents.TopicMCPCommandGetCapability, mcpevents.CommandDestination, "mcp_capability", string(id), mcpevents.GetCapabilityCommand{CapabilityID: id})
+	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandGetCapability, sourceModule, mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.GetCapabilityCommand{CapabilityID: id})
+	ownerevent.BindLane(event, mcpevents.TopicMCPCommandGetCapability, "mcp_capability", string(id), "", "", "")
+	result, err := ownerevent.MCP(hub.Send(event), mcpevents.TopicMCPCommandGetCapability)
 	if err != nil {
 		return nil, err
 	}

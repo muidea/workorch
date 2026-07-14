@@ -3,18 +3,15 @@ package governancecore
 import (
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-func NormalizeDecisionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, payload map[string]any, resolutionType string) (map[string]any, string) {
+func NormalizeDecisionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, payload workorcheventpayload.Payload, resolutionType string) (workorcheventpayload.Payload, string) {
 	payload = NormalizeCandidateSelectionResolutionPayloadForTicket(ticket, payload)
 	if IsWorkorchRuntimeLLMProviderRecoveryTicket(ticket) {
 		action := InferRuntimeRepairRecoveryAction(payload)
 		if action == "retry_same_step" {
-			ret := CloneDecisionPayload(payload)
-			if ret == nil {
-				ret = map[string]any{}
-			}
-			ret["recoveryAction"] = action
+			ret := CloneDecisionPayload(payload).Merge(workorcheventpayload.New(workorcheventpayload.StringField("recoveryAction", action)))
 			return ret, decisioncommon.ResolutionTypeProvideMissingInfo
 		}
 	}
@@ -28,11 +25,7 @@ func NormalizeDecisionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, p
 	if action == "" {
 		return payload, resolutionType
 	}
-	ret := CloneDecisionPayload(payload)
-	if ret == nil {
-		ret = map[string]any{}
-	}
-	ret["recoveryAction"] = action
+	ret := CloneDecisionPayload(payload).Merge(workorcheventpayload.New(workorcheventpayload.StringField("recoveryAction", action)))
 	switch action {
 	case "replan":
 		return ret, decisioncommon.ResolutionTypeReplan

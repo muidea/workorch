@@ -56,14 +56,14 @@ func TestWorkspaceSnapshotMergesRunScopedLLMUsageEvents(t *testing.T) {
 	secondRunID := common.RunID("run-workspace-run-usage-estimated")
 	reader := &workspaceEventReaderByQuery{
 		workspaceRecords: []*eventstreammodel.EventRecord{
-			llmUsageEventRecord("usage-native", workspaceID, firstRunID, "provider-native", "model-native", false),
+			llmUsageEventRecord(t, "usage-native", workspaceID, firstRunID, "provider-native", "model-native", false),
 		},
 		runRecords: map[common.RunID][]*eventstreammodel.EventRecord{
 			firstRunID: {
-				llmUsageEventRecord("usage-native", workspaceID, firstRunID, "provider-native", "model-native", false),
+				llmUsageEventRecord(t, "usage-native", workspaceID, firstRunID, "provider-native", "model-native", false),
 			},
 			secondRunID: {
-				llmUsageEventRecord("usage-estimated", workspaceID, secondRunID, "provider-estimated", "model-estimated", true),
+				llmUsageEventRecord(t, "usage-estimated", workspaceID, secondRunID, "provider-estimated", "model-estimated", true),
 			},
 		},
 	}
@@ -402,7 +402,7 @@ func (r *recordingWorkspaceArtifactContinuationReader) ListByRun(_ context.Conte
 	return nil, nil
 }
 
-func llmUsageEventRecord(id string, workspaceID common.WorkspaceID, runID common.RunID, providerID string, model string, estimated bool) *eventstreammodel.EventRecord {
+func llmUsageEventRecord(t *testing.T, id string, workspaceID common.WorkspaceID, runID common.RunID, providerID string, model string, estimated bool) *eventstreammodel.EventRecord {
 	return &eventstreammodel.EventRecord{
 		ID:          common.EventRecordID(id),
 		Version:     "workorch.event.v1",
@@ -410,7 +410,7 @@ func llmUsageEventRecord(id string, workspaceID common.WorkspaceID, runID common
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 		StepID:      common.StepID(string(runID) + "/step-1"),
-		Payload: map[string]any{
+		Payload: mustPortEventPayload(t, map[string]any{
 			"workspaceId":  string(workspaceID),
 			"runId":        string(runID),
 			"stepId":       string(runID) + "/step-1",
@@ -424,7 +424,7 @@ func llmUsageEventRecord(id string, workspaceID common.WorkspaceID, runID common
 			"estimated":    estimated,
 			"usageSource":  "provider_native",
 			"status":       "completed",
-		},
+		}),
 	}
 }
 

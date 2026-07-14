@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
@@ -606,7 +607,10 @@ func ResolveDecisionWithType(be backend.Backend, workspaceID string, ticketID st
 			WorkspaceID:    wsID,
 			TicketID:       common.TicketID(ticketID),
 			ResolutionType: resolutionType,
-			Payload:        map[string]any{"answer": answer, "operator": "tui"},
+			Payload: workorcheventpayload.New(
+				workorcheventpayload.StringField("answer", answer),
+				workorcheventpayload.StringField("operator", "tui"),
+			),
 		})
 		if err != nil {
 			return DecisionResolvedMsg{WorkspaceID: wsID, Error: err}
@@ -616,14 +620,14 @@ func ResolveDecisionWithType(be backend.Backend, workspaceID string, ticketID st
 }
 
 func inferDecisionResolutionType(answer string) string {
-	semantic := backend.NormalizeDecisionResolution("auto", map[string]any{
-		"answer":   answer,
-		"operator": "tui",
-	})
+	semantic := backend.NormalizeDecisionResolution("auto", workorcheventpayload.New(
+		workorcheventpayload.StringField("answer", answer),
+		workorcheventpayload.StringField("operator", "tui"),
+	))
 	return semantic.ResolutionType
 }
 
-func ResolveApproval(be backend.Backend, workspaceID string, approvalID string, approve bool, payload ...map[string]any) tea.Cmd {
+func ResolveApproval(be backend.Backend, workspaceID string, approvalID string, approve bool, payload ...workorcheventpayload.Payload) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -657,10 +661,13 @@ func ResolveApproval(be backend.Backend, workspaceID string, approvalID string, 
 	}
 }
 
-func approvalResolutionPayload(rawInput string) map[string]any {
+func approvalResolutionPayload(rawInput string) workorcheventpayload.Payload {
 	rawInput = strings.TrimSpace(rawInput)
 	if rawInput == "" {
-		return map[string]any{"source": "tui"}
+		return workorcheventpayload.New(workorcheventpayload.StringField("source", "tui"))
 	}
-	return map[string]any{"rawInput": rawInput, "source": "tui"}
+	return workorcheventpayload.New(
+		workorcheventpayload.StringField("rawInput", rawInput),
+		workorcheventpayload.StringField("source", "tui"),
+	)
 }

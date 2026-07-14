@@ -185,7 +185,14 @@ func TestModuleRejectsInvalidResultCommandWithoutSideEffect(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	_, err := module.executeCommand(ctx, resultevents.TopicResultCommandCreate, resultevents.CreateResultCommand{})
+	_, err := module.executeCommand(magicevent.NewEventWithContext(
+		resultevents.TopicResultCommandCreate,
+		"test",
+		resultevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		resultevents.CreateResultCommand{},
+	))
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("invalid create err = %v, want invalid argument", err)
 	}

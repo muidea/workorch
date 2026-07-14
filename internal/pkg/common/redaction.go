@@ -3,6 +3,8 @@ package common
 import (
 	"regexp"
 	"strings"
+
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 const redactedValue = "[REDACTED]"
@@ -77,6 +79,36 @@ func RedactSensitiveString(value string) string {
 		})
 	}
 	return ret
+}
+
+func RedactSensitivePayload(input workorcheventpayload.Payload) workorcheventpayload.Payload {
+	fields := make([]workorcheventpayload.Field, 0, len(input.Fields))
+	for _, field := range input.Fields {
+		value := field.Value
+		if isSensitiveKey(field.Name) {
+			value = workorcheventpayload.Value{Kind: workorcheventpayload.ValueString, String: redactedValue}
+		} else {
+			value = redactSensitivePayloadValue(value)
+		}
+		fields = append(fields, workorcheventpayload.Field{Name: field.Name, Value: value})
+	}
+	return workorcheventpayload.New(fields...)
+}
+
+func redactSensitivePayloadValue(value workorcheventpayload.Value) workorcheventpayload.Value {
+	switch value.Kind {
+	case workorcheventpayload.ValueString:
+		value.String = RedactSensitiveString(value.String)
+	case workorcheventpayload.ValueObject:
+		value.Object = RedactSensitivePayload(workorcheventpayload.Payload{Fields: value.Object}).Fields
+	case workorcheventpayload.ValueArray:
+		items := make([]workorcheventpayload.Value, 0, len(value.Array))
+		for _, item := range value.Array {
+			items = append(items, redactSensitivePayloadValue(item))
+		}
+		value.Array = items
+	}
+	return value
 }
 
 func isSensitiveKey(key string) bool {

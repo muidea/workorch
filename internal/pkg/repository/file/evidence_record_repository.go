@@ -194,6 +194,6 @@ func cloneEvidenceRecord(item *orchestratormodel.EvidenceRecord) *orchestratormo
 	cloned := *item
 	cloned.CoverageItemRefs = append([]string(nil), item.CoverageItemRefs...)
 	cloned.Supersedes = append([]common.EvidenceRecordID(nil), item.Supersedes...)
-	cloned.Metadata = cloneMap(item.Metadata)
+	cloned.Metadata = item.Metadata.Clone()
 	return &cloned
 }

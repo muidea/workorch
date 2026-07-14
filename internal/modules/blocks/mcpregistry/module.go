@@ -133,17 +133,18 @@ func (m *Module) Service() Service {
 }
 
 func (m *Module) handleMCPCommand(ev magicevent.Event, result magicevent.Result) {
-	response, err := m.executeMCPCommand(ev.Context(), ev.ID(), ev.Data())
+	response, err := m.executeMCPCommand(ev)
 	setMagicResult(result, response, err)
 }
 
-func (m *Module) executeMCPCommand(ctx context.Context, topic string, data any) (mcpevents.MCPCommandResult, error) {
+func (m *Module) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandResult, error) {
 	if m == nil || m.servicePtr == nil {
 		return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 	}
-	switch topic {
+	ctx := ev.Context()
+	switch ev.ID() {
 	case mcpevents.TopicMCPCommandCreateServer:
-		cmd, ok := data.(mcpevents.CreateServerCommand)
+		cmd, ok := ev.Data().(mcpevents.CreateServerCommand)
 		if !ok {
 			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 		}
@@ -156,7 +157,7 @@ func (m *Module) executeMCPCommand(ctx context.Context, topic string, data any) 
 		}
 		return mcpevents.MCPCommandResult{Server: server}, nil
 	case mcpevents.TopicMCPCommandGetServer:
-		cmd, ok := data.(mcpevents.GetServerCommand)
+		cmd, ok := ev.Data().(mcpevents.GetServerCommand)
 		if !ok {
 			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 		}
@@ -166,7 +167,7 @@ func (m *Module) executeMCPCommand(ctx context.Context, topic string, data any) 
 		}
 		return mcpevents.MCPCommandResult{Server: server}, nil
 	case mcpevents.TopicMCPCommandListServers:
-		if _, ok := data.(mcpevents.ListServersCommand); !ok {
+		if _, ok := ev.Data().(mcpevents.ListServersCommand); !ok {
 			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 		}
 		servers, err := m.servicePtr.ListServers(ctx)
@@ -175,7 +176,7 @@ func (m *Module) executeMCPCommand(ctx context.Context, topic string, data any) 
 		}
 		return mcpevents.MCPCommandResult{Servers: servers}, nil
 	case mcpevents.TopicMCPCommandUpdateServer:
-		cmd, ok := data.(mcpevents.UpdateServerCommand)
+		cmd, ok := ev.Data().(mcpevents.UpdateServerCommand)
 		if !ok {
 			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 		}
@@ -188,7 +189,7 @@ func (m *Module) executeMCPCommand(ctx context.Context, topic string, data any) 
 		}
 		return mcpevents.MCPCommandResult{Server: server}, nil
 	case mcpevents.TopicMCPCommandCreateCapability:
-		cmd, ok := data.(mcpevents.CreateCapabilityCommand)
+		cmd, ok := ev.Data().(mcpevents.CreateCapabilityCommand)
 		if !ok {
 			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 		}
@@ -198,7 +199,7 @@ func (m *Module) executeMCPCommand(ctx context.Context, topic string, data any) 
 		}
 		return mcpevents.MCPCommandResult{Capability: item}, nil
 	case mcpevents.TopicMCPCommandGetCapability:
-		cmd, ok := data.(mcpevents.GetCapabilityCommand)
+		cmd, ok := ev.Data().(mcpevents.GetCapabilityCommand)
 		if !ok {
 			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 		}
@@ -208,7 +209,7 @@ func (m *Module) executeMCPCommand(ctx context.Context, topic string, data any) 
 		}
 		return mcpevents.MCPCommandResult{Capability: item}, nil
 	case mcpevents.TopicMCPCommandListCapabilities:
-		cmd, ok := data.(mcpevents.ListCapabilitiesCommand)
+		cmd, ok := ev.Data().(mcpevents.ListCapabilitiesCommand)
 		if !ok {
 			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 		}
@@ -218,7 +219,7 @@ func (m *Module) executeMCPCommand(ctx context.Context, topic string, data any) 
 		}
 		return mcpevents.MCPCommandResult{Capabilities: items}, nil
 	case mcpevents.TopicMCPCommandUpdateCapability:
-		cmd, ok := data.(mcpevents.UpdateCapabilityCommand)
+		cmd, ok := ev.Data().(mcpevents.UpdateCapabilityCommand)
 		if !ok {
 			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 		}
@@ -237,7 +238,7 @@ func mcpCapabilityContractCommand(cmd mcpevents.CreateCapabilityCommand) mcpcont
 		ID: cmd.ID, ServerID: cmd.ServerID, Kind: cmd.Kind, Name: cmd.Name, DisplayName: cmd.DisplayName,
 		Description: cmd.Description, Category: cmd.Category, Tags: append([]string(nil), cmd.Tags...),
 		UsageHint: cmd.UsageHint, InputSummary: cmd.InputSummary, OutputSummary: cmd.OutputSummary,
-		StageHints: append([]string(nil), cmd.StageHints...), RiskLevel: cmd.RiskLevel, Schema: cmd.Schema.Map(),
+		StageHints: append([]string(nil), cmd.StageHints...), RiskLevel: cmd.RiskLevel, Schema: cmd.Schema.Clone(),
 		URI: cmd.URI, Enabled: cmd.Enabled, ApprovalPolicy: cmd.ApprovalPolicy, Status: cmd.Status,
 	}
 }

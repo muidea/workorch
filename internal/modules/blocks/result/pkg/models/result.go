@@ -1,6 +1,9 @@
 package result
 
-import "github.com/muidea/workorch/internal/pkg/common"
+import (
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
 type Result struct {
 	ID            common.ResultID
@@ -34,7 +37,7 @@ type ResultSummary struct {
 	KnownLimitations      []string
 	ResidualRisks         []string
 	NextActions           []string
-	Diagnostics           map[string]any
+	Diagnostics           workorcheventpayload.Payload
 }
 
 type DoDAssessment struct {

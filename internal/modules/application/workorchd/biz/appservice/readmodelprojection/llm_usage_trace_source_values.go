@@ -1,11 +1,14 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/pkg/events"
+import (
+	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
-func llmUsageTraceEstimated(payload map[string]any) bool {
-	return readModelBoolValue(payload[events.PayloadKeyEstimated])
+func llmUsageTraceEstimated(payload workorcheventpayload.Payload) bool {
+	return eventPayloadBool(payload, events.PayloadKeyEstimated)
 }
 
-func llmUsageTraceUsageSource(payload map[string]any, estimated bool) string {
-	return llmUsageTraceSource(readModelStringValue(payload[events.PayloadKeyUsageSource]), estimated)
+func llmUsageTraceUsageSource(payload workorcheventpayload.Payload, estimated bool) string {
+	return llmUsageTraceSource(eventPayloadString(payload, events.PayloadKeyUsageSource), estimated)
 }

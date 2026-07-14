@@ -98,17 +98,18 @@ func (m *Module) Service() Service {
 }
 
 func (m *Module) handleSkillCommand(ev magicevent.Event, result magicevent.Result) {
-	response, err := m.executeSkillCommand(ev.Context(), ev.ID(), ev.Data())
+	response, err := m.executeSkillCommand(ev)
 	setMagicResult(result, response, err)
 }
 
-func (m *Module) executeSkillCommand(ctx context.Context, topic string, data any) (skillevents.SkillCommandResult, error) {
+func (m *Module) executeSkillCommand(ev magicevent.Event) (skillevents.SkillCommandResult, error) {
 	if m == nil || m.servicePtr == nil {
 		return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
 	}
-	switch topic {
+	ctx := ev.Context()
+	switch ev.ID() {
 	case skillevents.TopicSkillCommandCreate:
-		cmd, ok := data.(skillevents.CreateSkillCommand)
+		cmd, ok := ev.Data().(skillevents.CreateSkillCommand)
 		if !ok {
 			return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
 		}
@@ -121,7 +122,7 @@ func (m *Module) executeSkillCommand(ctx context.Context, topic string, data any
 		}
 		return skillevents.SkillCommandResult{Skill: item}, nil
 	case skillevents.TopicSkillCommandGet:
-		cmd, ok := data.(skillevents.GetSkillCommand)
+		cmd, ok := ev.Data().(skillevents.GetSkillCommand)
 		if !ok {
 			return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
 		}
@@ -131,7 +132,7 @@ func (m *Module) executeSkillCommand(ctx context.Context, topic string, data any
 		}
 		return skillevents.SkillCommandResult{Skill: item}, nil
 	case skillevents.TopicSkillCommandList:
-		if _, ok := data.(skillevents.ListSkillsCommand); !ok {
+		if _, ok := ev.Data().(skillevents.ListSkillsCommand); !ok {
 			return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
 		}
 		items, err := m.servicePtr.ListSkills(ctx)
@@ -140,7 +141,7 @@ func (m *Module) executeSkillCommand(ctx context.Context, topic string, data any
 		}
 		return skillevents.SkillCommandResult{Skills: items}, nil
 	case skillevents.TopicSkillCommandUpdate:
-		cmd, ok := data.(skillevents.UpdateSkillCommand)
+		cmd, ok := ev.Data().(skillevents.UpdateSkillCommand)
 		if !ok {
 			return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
 		}

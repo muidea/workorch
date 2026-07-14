@@ -6,8 +6,8 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
-	"github.com/muidea/workorch/internal/pkg/eventvalue"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
@@ -27,8 +27,8 @@ type UpdateWorkspaceCommand struct {
 	ProfileID            string
 	DefaultSoulID        common.SoulID
 	SoulBindings         map[string]common.SoulID
-	ContextHints         eventvalue.Payload
-	EvidencePolicies     []eventvalue.Payload
+	ContextHints         workorcheventpayload.Payload
+	EvidencePolicies     []workorcheventpayload.Payload
 }
 type DeleteWorkspaceCommand = workspacecontracts.DeleteWorkspaceCommand
 type PurgeWorkspaceCommand = workspacecontracts.DeleteWorkspaceCommand
@@ -46,8 +46,8 @@ type CreateWorkspaceTemplateCommand struct {
 	DoDItems         []string
 	DefaultSoulID    string
 	SoulBindings     map[string]string
-	ContextHints     eventvalue.Payload
-	EvidencePolicies []eventvalue.Payload
+	ContextHints     workorcheventpayload.Payload
+	EvidencePolicies []workorcheventpayload.Payload
 }
 
 type UpdateWorkspaceTemplateCommand = CreateWorkspaceTemplateCommand

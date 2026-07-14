@@ -12,7 +12,6 @@ import (
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
-	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestRuntimeAdapterSearchUsesHTTPProvider(t *testing.T) {
@@ -45,22 +44,20 @@ func TestRuntimeAdapterSearchUsesHTTPProvider(t *testing.T) {
 		},
 	}, nil, server.Client())
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		Kind: webcommon.StepKindSearch,
-		Input: map[string]any{
-			"query":      "golang latest",
-			"maxResults": 2,
-		},
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
+		Kind:       webcommon.StepKindSearch,
+		Query:      "golang latest",
+		MaxResults: 2,
 	})
 	if err != nil {
 		t.Fatalf("execute search: %v", err)
 	}
-	if result.Output["status"] != "completed" || result.Output["stage"] != "web_search" || result.Output["resultCount"] != 2 {
-		t.Fatalf("output = %+v, want completed search", result.Output)
+	if result.Status != "completed" || result.Stage != "web_search" || result.ResultCount != 2 {
+		t.Fatalf("output = %+v, want completed search", result)
 	}
-	results, ok := result.Output["results"].([]map[string]any)
-	if !ok || len(results) != 2 || results[0]["url"] != "https://go.dev/dl/" || results[0]["contentHash"] == "" {
-		t.Fatalf("results = %+v, want normalized search results", result.Output["results"])
+	results := result.Results
+	if len(results) != 2 || results[0].URL != "https://go.dev/dl/" || results[0].ContentHash == "" {
+		t.Fatalf("results = %+v, want normalized search results", result.Results)
 	}
 }
 
@@ -93,29 +90,26 @@ func TestRuntimeAdapterSearchLargeResultSetRequiresApproval(t *testing.T) {
 			MaxFetchBytes:  4096,
 		},
 	}, approvals, server.Client())
-	request := runtimemodel.StepExecutionRequest{
+	request := RuntimeOperationRequest{
 		WorkspaceID: common.WorkspaceID("ws-search-approval"),
 		RunID:       common.RunID("run-search-approval"),
 		StepID:      common.StepID("run-search-approval/step-1"),
 		Kind:        webcommon.StepKindSearch,
-		Input: map[string]any{
-			"query":      "wide search",
-			"maxResults": 12,
-		},
+		Query:       "wide search",
+		MaxResults:  12,
 	}
-	blocked, err := adapter.ExecuteRuntimeStep(context.Background(), request)
-	if err != nil {
-		t.Fatalf("blocked search returned err: %v", err)
+	blocked, err := adapter.ExecuteOperation(context.Background(), request)
+	if err == nil {
+		t.Fatal("blocked search err = nil, want approval-required error")
 	}
-	if blocked.Output["status"] != "blocked" ||
-		blocked.Output["errorCode"] != webcommon.ErrorApprovalRequired ||
-		blocked.Output["approvalAction"] != webcommon.StepKindSearch ||
+	if blocked.Status != "blocked" ||
+		blocked.FailureCode != webcommon.ErrorApprovalRequired ||
 		calls != 0 {
-		t.Fatalf("blocked output/calls = %+v/%d, want approval without provider call", blocked.Output, calls)
+		t.Fatalf("blocked output/calls = %+v/%d, want approval without provider call", blocked, calls)
 	}
-	contextMap, ok := blocked.Output["approvalContext"].(map[string]any)
-	if !ok || contextMap["query"] != "wide search" {
-		t.Fatalf("approvalContext = %+v, want query context", blocked.Output["approvalContext"])
+	approvalQuery, _ := blocked.ApprovalContext.String("query")
+	if approvalQuery != "wide search" {
+		t.Fatalf("approvalContext = %+v, want query context", blocked.ApprovalContext)
 	}
 	approvalID := common.ApprovalID("approval-web-search")
 	if err := approvals.Create(context.Background(), &approvalmodel.Approval{
@@ -125,21 +119,21 @@ func TestRuntimeAdapterSearchLargeResultSetRequiresApproval(t *testing.T) {
 		StepID:      request.StepID,
 		Reason:      "approve wide search",
 		Action:      webcommon.StepKindSearch,
-		Context:     contextMap,
+		Context:     blocked.ApprovalContext.Clone(),
 		State:       common.ApprovalStateApproved,
 	}); err != nil {
 		t.Fatalf("create approval: %v", err)
 	}
-	request.Input["approvalId"] = string(approvalID)
-	completed, err := adapter.ExecuteRuntimeStep(context.Background(), request)
+	request.ApprovalID = approvalID
+	completed, err := adapter.ExecuteOperation(context.Background(), request)
 	if err != nil {
 		t.Fatalf("approved search: %v", err)
 	}
-	if completed.Output["status"] != "completed" ||
-		completed.Output["approvalId"] != string(approvalID) ||
-		completed.Output["resultCount"] != 2 ||
+	if completed.Status != "completed" ||
+		completed.ApprovalID != approvalID ||
+		completed.ResultCount != 2 ||
 		calls != 1 {
-		t.Fatalf("completed output/calls = %+v/%d, want approved search", completed.Output, calls)
+		t.Fatalf("completed output/calls = %+v/%d, want approved search", completed, calls)
 	}
 }
 
@@ -160,25 +154,22 @@ func TestRuntimeAdapterFetchBlocksLoopbackUntilApproved(t *testing.T) {
 		},
 	}, approvals, server.Client())
 
-	request := runtimemodel.StepExecutionRequest{
+	request := RuntimeOperationRequest{
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		RunID:       common.RunID("run-1"),
 		StepID:      common.StepID("run-1/step-1"),
 		Kind:        webcommon.StepKindFetch,
-		Input: map[string]any{
-			"url": "http://127.0.0.1/private",
-		},
+		URL:         "http://127.0.0.1/private",
 	}
-	blocked, err := adapter.ExecuteRuntimeStep(context.Background(), request)
-	if err != nil {
-		t.Fatalf("blocked fetch returned err: %v", err)
+	blocked, err := adapter.ExecuteOperation(context.Background(), request)
+	if err == nil {
+		t.Fatal("blocked fetch err = nil, want approval-required error")
 	}
-	if blocked.Output["status"] != "blocked" || blocked.Output["errorCode"] != webcommon.ErrorApprovalRequired || blocked.Output["approvalRequired"] != true {
-		t.Fatalf("blocked output = %+v, want approval required", blocked.Output)
+	if blocked.Status != "blocked" || blocked.FailureCode != webcommon.ErrorApprovalRequired || blocked.ApprovalNeeded != true {
+		t.Fatalf("blocked output = %+v, want approval required", blocked)
 	}
-	contextMap, ok := blocked.Output["approvalContext"].(map[string]any)
-	if !ok {
-		t.Fatalf("approvalContext = %+v, want map", blocked.Output["approvalContext"])
+	if len(blocked.ApprovalContext.Fields) == 0 {
+		t.Fatalf("approvalContext = %+v, want typed payload", blocked.ApprovalContext)
 	}
 	approvalID := common.ApprovalID("approval-web-fetch")
 	if err := approvals.Create(context.Background(), &approvalmodel.Approval{
@@ -188,18 +179,18 @@ func TestRuntimeAdapterFetchBlocksLoopbackUntilApproved(t *testing.T) {
 		StepID:      request.StepID,
 		Reason:      "approve loopback fetch",
 		Action:      webcommon.StepKindFetch,
-		Context:     contextMap,
+		Context:     blocked.ApprovalContext.Clone(),
 		State:       common.ApprovalStateApproved,
 	}); err != nil {
 		t.Fatalf("create approval: %v", err)
 	}
-	request.Input["approvalId"] = string(approvalID)
-	completed, err := adapter.ExecuteRuntimeStep(context.Background(), request)
+	request.ApprovalID = approvalID
+	completed, err := adapter.ExecuteOperation(context.Background(), request)
 	if err != nil {
 		t.Fatalf("approved fetch: %v", err)
 	}
-	if completed.Output["status"] != "completed" || completed.Output["stage"] != "web_fetch" || completed.Output["approvalId"] != string(approvalID) {
-		t.Fatalf("completed output = %+v, want approved fetch", completed.Output)
+	if completed.Status != "completed" || completed.Stage != "web_fetch" || completed.ApprovalID != approvalID {
+		t.Fatalf("completed output = %+v, want approved fetch", completed)
 	}
 }
 
@@ -220,27 +211,25 @@ func TestRuntimeAdapterFetchRechecksFinalURLPolicy(t *testing.T) {
 		},
 	}, approvals, server.Client())
 
-	request := runtimemodel.StepExecutionRequest{
+	request := RuntimeOperationRequest{
 		WorkspaceID: common.WorkspaceID("ws-final-url"),
 		RunID:       common.RunID("run-final-url"),
 		StepID:      common.StepID("run-final-url/step-1"),
 		Kind:        webcommon.StepKindFetch,
-		Input: map[string]any{
-			"url": "https://93.184.216.34/source",
-		},
+		URL:         "https://93.184.216.34/source",
 	}
-	blocked, err := adapter.ExecuteRuntimeStep(context.Background(), request)
-	if err != nil {
-		t.Fatalf("blocked final url fetch returned err: %v", err)
+	blocked, err := adapter.ExecuteOperation(context.Background(), request)
+	if err == nil {
+		t.Fatal("blocked final URL fetch err = nil, want approval-required error")
 	}
-	if blocked.Output["status"] != "blocked" ||
-		blocked.Output["errorCode"] != webcommon.ErrorApprovalRequired ||
-		blocked.Output["finalUrl"] != "http://127.0.0.1/private" {
-		t.Fatalf("blocked output = %+v, want final URL approval requirement", blocked.Output)
+	if blocked.Status != "blocked" ||
+		blocked.FailureCode != webcommon.ErrorApprovalRequired ||
+		blocked.FinalURL != "http://127.0.0.1/private" {
+		t.Fatalf("blocked output = %+v, want final URL approval requirement", blocked)
 	}
-	contextMap, ok := blocked.Output["approvalContext"].(map[string]any)
-	if !ok || contextMap["url"] != "http://127.0.0.1/private" {
-		t.Fatalf("approvalContext = %+v, want final URL context", blocked.Output["approvalContext"])
+	approvalURL, _ := blocked.ApprovalContext.String("url")
+	if approvalURL != "http://127.0.0.1/private" {
+		t.Fatalf("approvalContext = %+v, want final URL context", blocked.ApprovalContext)
 	}
 	approvalID := common.ApprovalID("approval-final-url")
 	if err := approvals.Create(context.Background(), &approvalmodel.Approval{
@@ -250,20 +239,20 @@ func TestRuntimeAdapterFetchRechecksFinalURLPolicy(t *testing.T) {
 		StepID:      request.StepID,
 		Reason:      "approve final URL",
 		Action:      webcommon.StepKindFetch,
-		Context:     contextMap,
+		Context:     blocked.ApprovalContext.Clone(),
 		State:       common.ApprovalStateApproved,
 	}); err != nil {
 		t.Fatalf("create approval: %v", err)
 	}
-	request.Input["approvalId"] = string(approvalID)
-	completed, err := adapter.ExecuteRuntimeStep(context.Background(), request)
+	request.ApprovalID = approvalID
+	completed, err := adapter.ExecuteOperation(context.Background(), request)
 	if err != nil {
 		t.Fatalf("approved final url fetch: %v", err)
 	}
-	if completed.Output["status"] != "completed" ||
-		completed.Output["finalUrl"] != "http://127.0.0.1/private" ||
-		completed.Output["approvalId"] != string(approvalID) {
-		t.Fatalf("completed output = %+v, want approved final URL fetch", completed.Output)
+	if completed.Status != "completed" ||
+		completed.FinalURL != "http://127.0.0.1/private" ||
+		completed.ApprovalID != approvalID {
+		t.Fatalf("completed output = %+v, want approved final URL fetch", completed)
 	}
 }
 
@@ -324,15 +313,15 @@ func TestRuntimeAdapterProviderResponseSizeLimitIsStableError(t *testing.T) {
 		},
 	}, nil, server.Client())
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:  webcommon.StepKindSearch,
-		Input: map[string]any{"query": "too large"},
+		Query: "too large",
 	})
 	if err == nil {
 		t.Fatalf("execute search err = nil, want content too large")
 	}
-	if result.Output["status"] != "failed" || result.Output["errorCode"] != webcommon.ErrorContentTooLarge {
-		t.Fatalf("output = %+v, want content_too_large", result.Output)
+	if result.Status != "failed" || result.FailureCode != webcommon.ErrorContentTooLarge {
+		t.Fatalf("output = %+v, want content_too_large", result)
 	}
 }
 
@@ -353,15 +342,15 @@ func TestRuntimeAdapterProviderTimeoutIsStableError(t *testing.T) {
 		},
 	}, nil, server.Client())
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:  webcommon.StepKindSearch,
-		Input: map[string]any{"query": "timeout"},
+		Query: "timeout",
 	})
 	if err == nil {
 		t.Fatalf("execute search err = nil, want timeout")
 	}
-	if result.Output["status"] != "failed" || result.Output["errorCode"] != webcommon.ErrorTimeout {
-		t.Fatalf("output = %+v, want timeout", result.Output)
+	if result.Status != "failed" || result.FailureCode != webcommon.ErrorTimeout {
+		t.Fatalf("output = %+v, want timeout", result)
 	}
 }
 
@@ -380,15 +369,15 @@ func TestRuntimeAdapterSearchRejectsBadGatewayShape(t *testing.T) {
 		},
 	}, nil, server.Client())
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:  webcommon.StepKindSearch,
-		Input: map[string]any{"query": "bad shape"},
+		Query: "bad shape",
 	})
 	if err == nil {
 		t.Fatalf("execute search err = nil, want bad gateway response")
 	}
-	if result.Output["status"] != "failed" || result.Output["errorCode"] != webcommon.ErrorBadGatewayResponse {
-		t.Fatalf("output = %+v, want bad gateway response", result.Output)
+	if result.Status != "failed" || result.FailureCode != webcommon.ErrorBadGatewayResponse {
+		t.Fatalf("output = %+v, want bad gateway response", result)
 	}
 }
 
@@ -426,15 +415,15 @@ func TestRuntimeAdapterReloadsProviderConfigByRevision(t *testing.T) {
 	adapter.client = first.Client()
 
 	for i := 0; i < 2; i++ {
-		result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 			Kind:  webcommon.StepKindSearch,
-			Input: map[string]any{"query": "reload"},
+			Query: "reload",
 		})
 		if err != nil {
 			t.Fatalf("execute search before reload: %v", err)
 		}
-		results := result.Output["results"].([]map[string]any)
-		if results[0]["title"] != "First" {
+		results := result.Results
+		if results[0].Title != "First" {
 			t.Fatalf("results = %+v, want cached first provider", results)
 		}
 	}
@@ -444,15 +433,15 @@ func TestRuntimeAdapterReloadsProviderConfigByRevision(t *testing.T) {
 
 	revision = 2
 	adapter.client = second.Client()
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 		Kind:  webcommon.StepKindSearch,
-		Input: map[string]any{"query": "reload"},
+		Query: "reload",
 	})
 	if err != nil {
 		t.Fatalf("execute search after reload: %v", err)
 	}
-	results := result.Output["results"].([]map[string]any)
-	if results[0]["title"] != "Second" || loadCount != 2 {
+	results := result.Results
+	if results[0].Title != "Second" || loadCount != 2 {
 		t.Fatalf("results/loadCount = %+v/%d, want reloaded second provider", results, loadCount)
 	}
 }

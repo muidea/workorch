@@ -49,7 +49,7 @@ func mapCoverageWorkItem(item *orchestratormodel.CoverageWorkItem) map[string]an
 	if item == nil || item.ID == "" {
 		return nil
 	}
-	ret := cloneReadModelMap(item.Metadata)
+	ret := cloneReadModelMap(item.Metadata.Map())
 	if ret == nil {
 		ret = map[string]any{}
 	}

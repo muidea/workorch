@@ -1,6 +1,9 @@
 package appmodelcore
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
 type Decision struct {
 	ID                     string                                `json:"id"`
@@ -10,14 +13,14 @@ type Decision struct {
 	Reason                 string                                `json:"reason"`
 	DecisionKind           string                                `json:"decisionKind,omitempty"`
 	Question               string                                `json:"question,omitempty"`
-	Context                map[string]any                        `json:"context,omitempty"`
+	Context                workorcheventpayload.Payload          `json:"context,omitempty"`
 	FailureClass           string                                `json:"failureClass,omitempty"`
 	FailureSignature       string                                `json:"failureSignature,omitempty"`
 	AllowedRecoveryActions []string                              `json:"allowedRecoveryActions,omitempty"`
 	State                  string                                `json:"state"`
 	ResolutionID           string                                `json:"resolutionId,omitempty"`
 	ResolutionType         string                                `json:"resolutionType,omitempty"`
-	ResolutionPayload      map[string]any                        `json:"resolutionPayload,omitempty"`
+	ResolutionPayload      workorcheventpayload.Payload          `json:"resolutionPayload,omitempty"`
 	ContinuationAction     string                                `json:"continuationAction,omitempty"`
 	ResumeRunID            string                                `json:"resumeRunId,omitempty"`
 	SuccessorRunID         string                                `json:"successorRunId,omitempty"`
@@ -46,12 +49,12 @@ type DecisionPage struct {
 }
 
 type ResolveDecisionCommand struct {
-	ResolutionType    string         `json:"resolutionType"`
-	ResolutionPayload map[string]any `json:"resolutionPayload,omitempty"`
+	ResolutionType    string                       `json:"resolutionType"`
+	ResolutionPayload workorcheventpayload.Payload `json:"resolutionPayload,omitempty"`
 }
 
 type BatchResolveDecisionCommand struct {
-	TicketIDs         []string       `json:"ticketIds"`
-	ResolutionType    string         `json:"resolutionType"`
-	ResolutionPayload map[string]any `json:"resolutionPayload,omitempty"`
+	TicketIDs         []string                     `json:"ticketIds"`
+	ResolutionType    string                       `json:"resolutionType"`
+	ResolutionPayload workorcheventpayload.Payload `json:"resolutionPayload,omitempty"`
 }

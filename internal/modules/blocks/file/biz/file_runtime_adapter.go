@@ -5,10 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -28,35 +26,31 @@ func NewRuntimeAdapter() *RuntimeAdapter {
 }
 
 func (a *RuntimeAdapter) AcquireTargetSnapshot(ctx context.Context, workspaceDirectory, targetRef string, maxBytes int) (runtimemodel.TargetSnapshot, error) {
-	result, err := a.read(runtimemodel.StepExecutionRequest{
-		WorkspaceDeliverableDirectory: workspaceDirectory,
-		Kind:                          "file/read",
-		Input: map[string]any{
-			"path":     targetRef,
-			"maxBytes": maxBytes,
-		},
+	result, err := a.ReadFile(ctx, FileReadRequest{
+		WorkspaceDirectory: workspaceDirectory,
+		Path:               targetRef,
+		MaxBytes:           int64(maxBytes),
 	})
 	if err != nil {
 		return runtimemodel.TargetSnapshot{}, err
 	}
-	output := result.Output
 	snapshot := runtimemodel.TargetSnapshot{
-		TargetRef:   strings.TrimSpace(fmt.Sprint(output["targetRef"])),
-		Content:     fmt.Sprint(output["content"]),
-		ContentHash: strings.TrimSpace(fmt.Sprint(output["contentHash"])),
-		Size:        int64Value(output["size"]),
-		LineCount:   intValue(output["lineCount"]),
+		TargetRef:   result.TargetRef,
+		Content:     result.Content,
+		ContentHash: result.ContentHash,
+		Size:        result.Size,
+		LineCount:   int(result.LineCount),
 	}
 	switch {
-	case output["exists"] == false:
+	case !result.Exists:
 		snapshot.ContentState = runtimemodel.SnapshotContentStateMissing
-	case output["isBinary"] == true:
+	case result.Binary:
 		snapshot.ContentState = runtimemodel.SnapshotContentStateBinary
-	case output["redacted"] == true:
+	case result.Redacted:
 		snapshot.ContentState = runtimemodel.SnapshotContentStateRedacted
-	case output["truncated"] == true:
+	case result.Truncated:
 		snapshot.ContentState = runtimemodel.SnapshotContentStateTruncated
-	case output["contentComplete"] == true:
+	case result.ContentComplete:
 		snapshot.ContentState = runtimemodel.SnapshotContentStateComplete
 	}
 	if !snapshot.Complete() {
@@ -66,350 +60,34 @@ func (a *RuntimeAdapter) AcquireTargetSnapshot(ctx context.Context, workspaceDir
 }
 
 func (a *RuntimeAdapter) AcquireWorkspaceManifest(workspaceDirectory string) (runtimemodel.WorkspaceManifest, error) {
-	result, err := a.list(runtimemodel.StepExecutionRequest{
-		WorkspaceDeliverableDirectory: workspaceDirectory,
-		Kind:                          "file/list",
-		Input:                         map[string]any{"path": ".", "recursive": true},
+	result, err := a.ListFiles(FileListRequest{
+		WorkspaceDirectory: workspaceDirectory,
+		Path:               ".",
+		Recursive:          true,
 	})
 	if err != nil {
 		return runtimemodel.WorkspaceManifest{}, err
 	}
-	if result.Output["truncated"] == true {
+	if result.Truncated {
 		return runtimemodel.WorkspaceManifest{}, fmt.Errorf("%w: workspace manifest exceeds bounded file listing", common.ErrInvalidArgument)
 	}
-	entries, ok := result.Output["entries"].([]map[string]any)
-	if !ok && result.Output["entries"] != nil {
-		return runtimemodel.WorkspaceManifest{}, common.ErrInvalidArgument
-	}
-	targetRefs := make([]string, 0, len(entries))
+	targetRefs := make([]string, 0, len(result.Entries))
 	h := sha256.New()
-	for _, entry := range entries {
-		if strings.TrimSpace(fmt.Sprint(entry["kind"])) != "file" {
+	for _, entry := range result.Entries {
+		if entry.Kind != "file" {
 			continue
 		}
-		ref := strings.TrimSpace(fmt.Sprint(entry["path"]))
+		ref := strings.TrimSpace(entry.Path)
 		if ref == "" {
 			continue
 		}
 		targetRefs = append(targetRefs, ref)
-		_, _ = fmt.Fprintf(h, "%d:%s|%s|%v|%v;", len(ref), ref, strings.TrimSpace(fmt.Sprint(entry["contentHash"])), entry["size"], entry["mtime"])
+		_, _ = fmt.Fprintf(h, "%d:%s|%s|%d|%s;", len(ref), ref, entry.ContentHash, entry.Size, entry.ModifiedAt)
 	}
 	return runtimemodel.WorkspaceManifest{
 		Revision:   hex.EncodeToString(h.Sum(nil)),
 		TargetRefs: targetRefs,
 	}, nil
-}
-
-func int64Value(value any) int64 {
-	switch item := value.(type) {
-	case int64:
-		return item
-	case int:
-		return int64(item)
-	case float64:
-		return int64(item)
-	default:
-		return 0
-	}
-}
-
-func intValue(value any) int {
-	switch item := value.(type) {
-	case int:
-		return item
-	case int64:
-		return int(item)
-	case float64:
-		return int(item)
-	default:
-		return 0
-	}
-}
-
-func (a *RuntimeAdapter) ExecuteRuntimeStep(_ context.Context, request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
-	switch strings.TrimSpace(request.Kind) {
-	case "file/list":
-		return a.list(request)
-	case "file/read":
-		return a.read(request)
-	case "file/edit":
-		return a.edit(request)
-	case "patch/preview":
-		return a.patchPreview(request)
-	case "patch/apply":
-		return a.patchApply(request)
-	case "patch/revert":
-		err := fmt.Errorf("%w: patch/revert requires formal reverse material from orchestrator", common.ErrInvalidArgument)
-		return patchErrorResult("patch_revert", "revert", "", "", err, "patch_revert_phase_gated"), err
-	default:
-		return runtimemodel.StepExecutionResult{}, common.ErrInvalidArgument
-	}
-}
-
-func (a *RuntimeAdapter) list(request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
-	relPath := stringInput(request.Input, "path")
-	if relPath == "" {
-		relPath = "."
-	}
-	root, target, rel, err := guardedWorkspacePath(request.WorkspaceDeliverableDirectory, relPath, false)
-	if err != nil {
-		return fileErrorResult("file_list_invalid_path", err), err
-	}
-	info, err := os.Stat(target)
-	if err != nil {
-		return fileErrorResult("file_list_stat_failed", err), err
-	}
-	if !info.IsDir() {
-		return fileErrorResult("file_list_not_directory", common.ErrInvalidArgument), common.ErrInvalidArgument
-	}
-	recursive := boolInput(request.Input, "recursive")
-	maxEntries := intInput(request.Input, "maxEntries", defaultMaxEntries)
-	if maxEntries <= 0 || maxEntries > defaultMaxEntries {
-		maxEntries = defaultMaxEntries
-	}
-	entries := make([]map[string]any, 0)
-	addEntry := func(path string, d fs.DirEntry) error {
-		if len(entries) >= maxEntries {
-			return filepath.SkipAll
-		}
-		if shouldSkipWorkspaceListPath(path) {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		relInput, err := filepath.Rel(root, path)
-		if err != nil {
-			return nil
-		}
-		_, resolved, relEntry, err := guardedWorkspacePath(root, relInput, true)
-		if err != nil {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		info, err := d.Info()
-		if err != nil {
-			return nil
-		}
-		entry := map[string]any{
-			"path":        filepath.ToSlash(relEntry),
-			"kind":        fileKind(info),
-			"size":        info.Size(),
-			"mtime":       info.ModTime().UTC().Format("2006-01-02T15:04:05Z07:00"),
-			"contentHash": "",
-			"isBinary":    false,
-			"isIgnored":   false,
-		}
-		if !info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
-			hash, binary := fileHashAndBinary(resolved, 8192)
-			entry["contentHash"] = hash
-			entry["isBinary"] = binary
-		}
-		entries = append(entries, entry)
-		return nil
-	}
-	if recursive {
-		err = filepath.WalkDir(target, func(path string, d fs.DirEntry, walkErr error) error {
-			if walkErr != nil || path == target {
-				return nil
-			}
-			return addEntry(path, d)
-		})
-	} else {
-		dirEntries, readErr := os.ReadDir(target)
-		if readErr != nil {
-			err = readErr
-		} else {
-			for _, entry := range dirEntries {
-				if addErr := addEntry(filepath.Join(target, entry.Name()), entry); addErr != nil {
-					if addErr == filepath.SkipAll {
-						break
-					}
-					if addErr == filepath.SkipDir {
-						continue
-					}
-					err = addErr
-					break
-				}
-			}
-		}
-	}
-	if err != nil && err != filepath.SkipAll {
-		return fileErrorResult("file_list_failed", err), err
-	}
-	sort.Slice(entries, func(i, j int) bool {
-		return fmt.Sprint(entries[i]["path"]) < fmt.Sprint(entries[j]["path"])
-	})
-	return runtimemodel.StepExecutionResult{Output: map[string]any{
-		"status":     "completed",
-		"stage":      "file_list",
-		"path":       filepath.ToSlash(rel),
-		"entries":    entries,
-		"truncated":  len(entries) >= maxEntries,
-		"maxEntries": maxEntries,
-	}}, nil
-}
-
-func (a *RuntimeAdapter) read(request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
-	relPath := stringInput(request.Input, "path")
-	optional := boolInput(request.Input, "optional")
-	_, target, rel, err := guardedWorkspacePath(request.WorkspaceDeliverableDirectory, relPath, !optional)
-	if err != nil {
-		return fileErrorResult("file_read_invalid_path", err), err
-	}
-	info, err := os.Stat(target)
-	if err != nil {
-		if optional && os.IsNotExist(err) {
-			return runtimemodel.StepExecutionResult{Output: map[string]any{
-				"status": "completed",
-				"stage":  "file_read",
-				"path":   filepath.ToSlash(rel),
-				"exists": false,
-			}}, nil
-		}
-		return fileErrorResult("file_read_stat_failed", err), err
-	}
-	if info.IsDir() {
-		return fileErrorResult("file_read_is_directory", common.ErrInvalidArgument), common.ErrInvalidArgument
-	}
-	data, err := os.ReadFile(target)
-	if err != nil {
-		return fileErrorResult("file_read_failed", err), err
-	}
-	hashBytes := sha256.Sum256(data)
-	isBinary := looksBinary(data)
-	lineCount := strings.Count(string(data), "\n")
-	if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
-		lineCount++
-	}
-	maxBytes := intInput(request.Input, "maxBytes", defaultMaxReadBytes)
-	if maxBytes <= 0 || maxBytes > defaultMaxReadBytes {
-		maxBytes = defaultMaxReadBytes
-	}
-	startLine := intInput(request.Input, "startLine", 0)
-	endLine := intInput(request.Input, "endLine", 0)
-	content := ""
-	truncated := false
-	ranged := startLine > 0 || endLine > 0
-	if !isBinary {
-		content = string(data)
-		if ranged {
-			content = lineRange(content, startLine, endLine)
-		}
-		if len(content) > maxBytes {
-			content = content[:maxBytes]
-			truncated = true
-			for !utf8.ValidString(content) && len(content) > 0 {
-				content = content[:len(content)-1]
-			}
-		}
-	} else {
-		truncated = len(data) > 0
-	}
-	redacted := containsRuntimeRedactionMarker(content)
-	contentComplete := !isBinary && !truncated && !redacted && !ranged
-	safeForPatch := contentComplete && len(data) > 0
-	return runtimemodel.StepExecutionResult{Output: map[string]any{
-		"status":           "completed",
-		"stage":            "file_read",
-		"path":             filepath.ToSlash(rel),
-		"targetRef":        filepath.ToSlash(rel),
-		"exists":           true,
-		"content":          content,
-		"contentHash":      hex.EncodeToString(hashBytes[:]),
-		"size":             info.Size(),
-		"mtime":            info.ModTime().UTC().Format("2006-01-02T15:04:05Z07:00"),
-		"lineCount":        lineCount,
-		"truncated":        truncated,
-		"isBinary":         isBinary,
-		"redacted":         redacted,
-		"contentComplete":  contentComplete,
-		"safeForPatch":     safeForPatch,
-		"safeForFileWrite": safeForPatch,
-	}}, nil
-}
-
-func (a *RuntimeAdapter) edit(request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
-	relPath := stringInput(request.Input, "path")
-	oldText := rawStringInput(request.Input, "oldText")
-	newText := rawStringInput(request.Input, "newText")
-	baseHash := stringInput(request.Input, "baseHash")
-	occurrence := intInput(request.Input, "occurrence", 0)
-	if strings.TrimSpace(relPath) == "" || oldText == "" {
-		return fileErrorResult("file_edit_invalid_input", common.ErrInvalidArgument), common.ErrInvalidArgument
-	}
-	_, target, rel, err := guardedWorkspacePath(request.WorkspaceDeliverableDirectory, relPath, true)
-	if err != nil {
-		return fileErrorResult("file_edit_invalid_path", err), err
-	}
-	info, err := os.Stat(target)
-	if err != nil {
-		return fileErrorResult("file_edit_stat_failed", err), err
-	}
-	if info.IsDir() {
-		return fileErrorResult("file_edit_is_directory", common.ErrInvalidArgument), common.ErrInvalidArgument
-	}
-	data, err := os.ReadFile(target)
-	if err != nil {
-		return fileErrorResult("file_edit_read_failed", err), err
-	}
-	if looksBinary(data) {
-		return fileErrorResult("file_edit_binary_file", common.ErrInvalidArgument), common.ErrInvalidArgument
-	}
-	beforeHash := sha256Hex(data)
-	if baseHash != "" && !strings.EqualFold(beforeHash, baseHash) {
-		err := fmt.Errorf("%w: file/edit baseHash mismatch", common.ErrConflict)
-		return fileErrorResult("file_edit_conflict", err), err
-	}
-	content := string(data)
-	matchCount := strings.Count(content, oldText)
-	if matchCount == 0 {
-		err := fmt.Errorf("%w: file/edit oldText not found", common.ErrConflict)
-		return fileErrorResult("file_edit_conflict", err), err
-	}
-	if occurrence <= 0 && matchCount != 1 {
-		err := fmt.Errorf("%w: file/edit oldText matched %d occurrences", common.ErrConflict, matchCount)
-		return fileErrorResult("file_edit_conflict", err), err
-	}
-	if occurrence > matchCount {
-		err := fmt.Errorf("%w: file/edit occurrence %d exceeds %d matches", common.ErrConflict, occurrence, matchCount)
-		return fileErrorResult("file_edit_conflict", err), err
-	}
-	selectedOccurrence := occurrence
-	if selectedOccurrence <= 0 {
-		selectedOccurrence = 1
-	}
-	nextContent := replaceOccurrence(content, oldText, newText, selectedOccurrence)
-	afterHash := sha256Hex([]byte(nextContent))
-	diff := unifiedDiffForEdit(filepath.ToSlash(rel), content, nextContent)
-	added, deleted := diffLineStats(diff)
-	diffHash := sha256Hex([]byte(diff))
-	preview := map[string]any{
-		"patchType":         "unified_diff",
-		"targetRef":         filepath.ToSlash(rel),
-		"diff":              diff,
-		"summary":           "file/edit preview",
-		"baseHash":          beforeHash,
-		"contentHashBefore": beforeHash,
-		"contentHashAfter":  afterHash,
-		"addedLines":        added,
-		"deletedLines":      deleted,
-		"diffHash":          diffHash,
-		"approvalRequired":  editApprovalRequired(filepath.ToSlash(rel), added+deleted),
-	}
-	return runtimemodel.StepExecutionResult{Output: map[string]any{
-		"status":             "completed",
-		"stage":              "file_edit_preview",
-		"path":               filepath.ToSlash(rel),
-		"baseHash":           beforeHash,
-		"contentHashBefore":  beforeHash,
-		"contentHashAfter":   afterHash,
-		"matchCount":         matchCount,
-		"selectedOccurrence": selectedOccurrence,
-		"patchPreview":       preview,
-	}}, nil
 }
 
 func guardedWorkspacePath(deliverableDirectory string, inputPath string, requireExisting bool) (string, string, string, error) {
@@ -534,47 +212,6 @@ func lineRange(content string, startLine int, endLine int) string {
 		return ""
 	}
 	return strings.Join(lines[startLine-1:endLine], "")
-}
-
-func stringInput(input map[string]any, key string) string {
-	if input == nil {
-		return ""
-	}
-	value, _ := input[key].(string)
-	return strings.TrimSpace(value)
-}
-
-func boolInput(input map[string]any, key string) bool {
-	if input == nil {
-		return false
-	}
-	value, _ := input[key].(bool)
-	return value
-}
-
-func intInput(input map[string]any, key string, fallback int) int {
-	if input == nil || input[key] == nil {
-		return fallback
-	}
-	switch value := input[key].(type) {
-	case int:
-		return value
-	case int64:
-		return int(value)
-	case float64:
-		if value == float64(int(value)) {
-			return int(value)
-		}
-	}
-	return fallback
-}
-
-func rawStringInput(input map[string]any, key string) string {
-	if input == nil {
-		return ""
-	}
-	value, _ := input[key].(string)
-	return value
 }
 
 func replaceOccurrence(content string, oldText string, newText string, occurrence int) string {
@@ -709,15 +346,3 @@ func editApprovalRequired(path string, changedLines int) bool {
 		return false
 	}
 }
-
-func fileErrorResult(stage string, err error) runtimemodel.StepExecutionResult {
-	return runtimemodel.StepExecutionResult{Output: map[string]any{
-		"status": "failed",
-		"stage":  stage,
-		"error":  err.Error(),
-	}}
-}
-
-var _ interface {
-	ExecuteRuntimeStep(context.Context, runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error)
-} = (*RuntimeAdapter)(nil)

@@ -523,13 +523,14 @@ func TestEnsureBuiltinDefaultsUpsertsEmbeddedSoulsAndTemplates(t *testing.T) {
 	if template.DefaultSoulID != "soul-software-dev-execution" {
 		t.Fatalf("software-dev defaultSoulId = %q, want soul-software-dev-execution", template.DefaultSoulID)
 	}
-	if template.ContextHints["stateChangePolicy"] != "must_produce_state_change" {
+	contextHints := template.ContextHints.Map()
+	if contextHints["stateChangePolicy"] != "must_produce_state_change" {
 		t.Fatalf("software-dev contextHints = %+v, want must_produce_state_change", template.ContextHints)
 	}
-	assertSoftwareDevAcceptanceSlicePolicy(t, template.ContextHints)
-	assertSoftwareDevAcceptanceDimensions(t, template.ContextHints)
-	assertSoftwareDevCapabilityUsagePolicies(t, template.ContextHints)
-	assertSoftwareDevValidationPolicies(t, template.ContextHints)
+	assertSoftwareDevAcceptanceSlicePolicy(t, contextHints)
+	assertSoftwareDevAcceptanceDimensions(t, contextHints)
+	assertSoftwareDevCapabilityUsagePolicies(t, contextHints)
+	assertSoftwareDevValidationPolicies(t, contextHints)
 	assertContainsAnyDoDItem(t, template.DoDItems, "evidenceRefs")
 	if len(template.EvidencePolicies) == 0 {
 		t.Fatalf("software-dev evidence policies were not refreshed: %+v", template)
@@ -555,14 +556,18 @@ func TestEnsureBuiltinDefaultsUpsertsEmbeddedSoulsAndTemplates(t *testing.T) {
 	if capability.Category != "code_semantics" || capability.RiskLevel != "read_only" {
 		t.Fatalf("lsp diagnostics capability = %+v, want code semantics read-only", capability)
 	}
-	if len(capability.Schema) == 0 {
+	if len(capability.Schema.Fields) == 0 {
 		t.Fatalf("lsp diagnostics capability schema is empty")
 	}
 	initializeCapability, err := mcpCapabilityRepo.Get(ctx, common.MCPCapabilityID("mcp-lsp-bridge:tool:lsp_initialize"))
 	if err != nil {
 		t.Fatalf("get lsp initialize capability: %v", err)
 	}
-	assertStringListContains(t, initializeCapability.Schema["required"].([]any), "lang_id")
+	required, ok := initializeCapability.Schema.StringSlice("required")
+	if !ok {
+		t.Fatalf("lsp initialize capability required schema = %+v, want string list", initializeCapability.Schema)
+	}
+	assertStringSliceContains(t, required, "lang_id")
 	statusCapability, err := mcpCapabilityRepo.Get(ctx, common.MCPCapabilityID("mcp-lsp-bridge:tool:lsp_status"))
 	if err != nil {
 		t.Fatalf("get lsp status capability: %v", err)

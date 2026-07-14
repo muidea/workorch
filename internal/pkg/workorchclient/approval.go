@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 // ListApprovals returns all approvals, optionally filtered.
@@ -43,7 +45,7 @@ func (c *Client) GetApproval(ctx context.Context, workspaceID string, approvalID
 }
 
 // Approve approves an approval gate.
-func (c *Client) Approve(ctx context.Context, workspaceID string, approvalID string, payload ...map[string]any) (*Approval, error) {
+func (c *Client) Approve(ctx context.Context, workspaceID string, approvalID string, payload ...workorcheventpayload.Payload) (*Approval, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, fmt.Errorf("workspaceId is required")
 	}
@@ -52,7 +54,7 @@ func (c *Client) Approve(ctx context.Context, workspaceID string, approvalID str
 	if workspaceID != "" {
 		values.Set("workspaceId", workspaceID)
 	}
-	resp, err := c.do(ctx, "POST", joinQuery(path, values), approvalResolveRequestPayload(payload...))
+	resp, err := c.do(ctx, "POST", joinQuery(path, values), approvalResolveRequestPayload(firstApprovalPayload(payload)))
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +62,7 @@ func (c *Client) Approve(ctx context.Context, workspaceID string, approvalID str
 }
 
 // Reject rejects an approval gate.
-func (c *Client) Reject(ctx context.Context, workspaceID string, approvalID string, payload ...map[string]any) (*Approval, error) {
+func (c *Client) Reject(ctx context.Context, workspaceID string, approvalID string, payload ...workorcheventpayload.Payload) (*Approval, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, fmt.Errorf("workspaceId is required")
 	}
@@ -69,7 +71,7 @@ func (c *Client) Reject(ctx context.Context, workspaceID string, approvalID stri
 	if workspaceID != "" {
 		values.Set("workspaceId", workspaceID)
 	}
-	resp, err := c.do(ctx, "POST", joinQuery(path, values), approvalResolveRequestPayload(payload...))
+	resp, err := c.do(ctx, "POST", joinQuery(path, values), approvalResolveRequestPayload(firstApprovalPayload(payload)))
 	if err != nil {
 		return nil, err
 	}
@@ -77,15 +79,15 @@ func (c *Client) Reject(ctx context.Context, workspaceID string, approvalID stri
 }
 
 // BatchResolveApprovals resolves multiple approvals at once.
-func (c *Client) BatchResolveApprovals(ctx context.Context, workspaceID string, approvalIDs []string, action string, payload ...map[string]any) ([]Approval, error) {
+func (c *Client) BatchResolveApprovals(ctx context.Context, workspaceID string, approvalIDs []string, action string, payload ...workorcheventpayload.Payload) ([]Approval, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, fmt.Errorf("workspaceId is required")
 	}
 	req := struct {
-		ApprovalIDs []string       `json:"approvalIds"`
-		Action      string         `json:"action"`
-		Payload     map[string]any `json:"payload,omitempty"`
-	}{ApprovalIDs: approvalIDs, Action: action, Payload: firstApprovalPayload(payload...)}
+		ApprovalIDs []string                     `json:"approvalIds"`
+		Action      string                       `json:"action"`
+		Payload     workorcheventpayload.Payload `json:"payload,omitempty"`
+	}{ApprovalIDs: approvalIDs, Action: action, Payload: firstApprovalPayload(payload)}
 	values := url.Values{}
 	if workspaceID != "" {
 		values.Set("workspaceId", workspaceID)
@@ -97,21 +99,20 @@ func (c *Client) BatchResolveApprovals(ctx context.Context, workspaceID string, 
 	return decodeEnvelopeSlice[Approval](resp, "approvals")
 }
 
-func approvalResolveRequestPayload(payload ...map[string]any) any {
-	selected := firstApprovalPayload(payload...)
-	if selected == nil {
+func approvalResolveRequestPayload(payload workorcheventpayload.Payload) any {
+	if len(payload.Fields) == 0 {
 		return nil
 	}
 	return struct {
-		Payload map[string]any `json:"payload,omitempty"`
-	}{Payload: selected}
+		Payload workorcheventpayload.Payload `json:"payload,omitempty"`
+	}{Payload: payload}
 }
 
-func firstApprovalPayload(payload ...map[string]any) map[string]any {
+func firstApprovalPayload(payload []workorcheventpayload.Payload) workorcheventpayload.Payload {
 	for _, candidate := range payload {
-		if len(candidate) > 0 {
-			return candidate
+		if len(candidate.Fields) > 0 {
+			return candidate.Clone()
 		}
 	}
-	return nil
+	return workorcheventpayload.Payload{}
 }

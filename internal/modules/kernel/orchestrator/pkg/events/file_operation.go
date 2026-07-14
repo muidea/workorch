@@ -11,6 +11,54 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func FileListOperationDataFromRuntimeOperation(operation runtimecontract.RuntimeOperation) (FileListOperationData, error) {
+	operation = operation.Normalized()
+	if operation.Kind != runtimecontract.StepKindFileList {
+		return FileListOperationData{}, fmt.Errorf("operation kind %q is not file/list", operation.Kind)
+	}
+	if err := runtimecontract.ValidateRuntimeOperationContract(operation); err != nil {
+		return FileListOperationData{}, err
+	}
+	ret := FileListOperationData{Path: "."}
+	for _, parameter := range operation.Parameters {
+		switch parameter.Name {
+		case "path":
+			ret.Path = *parameter.String
+		case "recursive":
+			ret.Recursive = *parameter.Boolean
+		case "maxEntries":
+			ret.MaxEntries = *parameter.Integer
+		}
+	}
+	return ret, nil
+}
+
+func FileReadOperationDataFromRuntimeOperation(operation runtimecontract.RuntimeOperation) (FileReadOperationData, error) {
+	operation = operation.Normalized()
+	if operation.Kind != runtimecontract.StepKindFileRead {
+		return FileReadOperationData{}, fmt.Errorf("operation kind %q is not file/read", operation.Kind)
+	}
+	if err := runtimecontract.ValidateRuntimeOperationContract(operation); err != nil {
+		return FileReadOperationData{}, err
+	}
+	ret := FileReadOperationData{}
+	for _, parameter := range operation.Parameters {
+		switch parameter.Name {
+		case "path":
+			ret.Path = *parameter.String
+		case "optional":
+			ret.Optional = *parameter.Boolean
+		case "maxBytes":
+			ret.MaxBytes = *parameter.Integer
+		case "startLine":
+			ret.StartLine = *parameter.Integer
+		case "endLine":
+			ret.EndLine = *parameter.Integer
+		}
+	}
+	return ret, nil
+}
+
 func FileEditOperationDataFromRuntimeOperation(operation runtimecontract.RuntimeOperation) (FileEditOperationData, error) {
 	operation = operation.Normalized()
 	if operation.Kind != runtimecontract.StepKindFileEdit {
@@ -79,7 +127,53 @@ func PatchApplyOperationDataFromRuntimeOperation(operation runtimecontract.Runti
 	return ret, nil
 }
 
-func RuntimeFileOperationFailure(transaction runtimecontract.AuthorityTransaction, operationKind string, failureCode string, failureMessage string, targetRefs []string) *runtimecontract.FailureFact {
+func PatchPreviewOperationDataFromRuntimeOperation(operation runtimecontract.RuntimeOperation) (PatchApplyOperationData, error) {
+	operation = operation.Normalized()
+	if operation.Kind != runtimecontract.RuntimeBlockKindPatchPreview {
+		return PatchApplyOperationData{}, fmt.Errorf("operation kind %q is not patch/preview", operation.Kind)
+	}
+	if err := runtimecontract.ValidateRuntimeOperationContract(operation); err != nil {
+		return PatchApplyOperationData{}, err
+	}
+	return patchOperationData(operation), nil
+}
+
+func patchOperationData(operation runtimecontract.RuntimeOperation) PatchApplyOperationData {
+	ret := PatchApplyOperationData{}
+	for _, parameter := range operation.Parameters {
+		switch parameter.Name {
+		case "targetRef":
+			ret.TargetRef = *parameter.String
+		case "path":
+			if ret.TargetRef == "" {
+				ret.TargetRef = *parameter.String
+			}
+		case "patchType":
+			ret.PatchType = *parameter.String
+		case "content":
+			ret.Content = *parameter.String
+			ret.ContentPresent = true
+		case "diff":
+			ret.Diff = *parameter.String
+		case "oldText":
+			ret.OldText = *parameter.String
+		case "newText":
+			ret.NewText = *parameter.String
+			ret.NewTextPresent = true
+		case "baseHash":
+			ret.BaseHash = *parameter.String
+		case "occurrence":
+			ret.Occurrence = *parameter.Integer
+		case "coverageTargets":
+			ret.CoverageTargets = append([]string(nil), parameter.StringList...)
+		case "summary":
+			ret.Summary = *parameter.String
+		}
+	}
+	return ret
+}
+
+func RuntimeOperationFailure(transaction runtimecontract.AuthorityTransaction, operationKind string, failureCode string, failureMessage string, targetRefs []string) *runtimecontract.FailureFact {
 	failureCode = strings.TrimSpace(failureCode)
 	if failureCode == "" {
 		failureCode = "runtime_operation_failed"
@@ -100,18 +194,18 @@ func StableRuntimeOperationFailureSignature(transaction runtimecontract.Authorit
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func RuntimeFileOperationEventID(dispatchID string, operationID string) string {
+func RuntimeOperationEventID(dispatchID string, operationID string) string {
 	return "runtime-operation|" + strings.TrimSpace(dispatchID) + "|" + strings.TrimSpace(operationID)
 }
 
-func RuntimeFileOperationSourceRef(dispatchID string, operationID string) string {
+func RuntimeOperationSourceRef(dispatchID string, operationID string) string {
 	return "workorch://runtime-operations/" + strings.TrimSpace(dispatchID) + "/" + strings.TrimSpace(operationID)
 }
 
-func ValidateFileOperationScope(workspaceID common.WorkspaceID, runID common.RunID, dispatchID string, transaction runtimecontract.AuthorityTransaction, operationID string, evidenceKind string, workspaceDirectory string) error {
+func ValidateRuntimeOperationScope(workspaceID common.WorkspaceID, runID common.RunID, dispatchID string, transaction runtimecontract.AuthorityTransaction, operationID string, evidenceKind string, workspaceDirectory string) error {
 	if workspaceID == "" || runID == "" || strings.TrimSpace(dispatchID) == "" || strings.TrimSpace(transaction.AuthoritySnapshotID) == "" ||
 		strings.TrimSpace(operationID) == "" || strings.TrimSpace(evidenceKind) == "" || strings.TrimSpace(workspaceDirectory) == "" {
-		return fmt.Errorf("invalid runtime file operation command")
+		return fmt.Errorf("invalid runtime operation command")
 	}
 	return nil
 }

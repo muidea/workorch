@@ -1,27 +1,24 @@
 package readmodelprojection
 
-func projectEventPayloadStringListValue(values []string) []string {
-	limit := min(len(values), EventPayloadListLimit)
-	ret := make([]string, 0, limit)
-	for _, item := range values[:limit] {
-		if len(item) > EventPayloadStringLimit {
-			item = item[:EventPayloadStringLimit] + "..."
-		}
-		ret = append(ret, item)
-	}
-	return ret
-}
+import "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 
-func projectEventPayloadAnyListValue(values []any) (any, bool) {
+func projectEventPayloadArray(values []workorcheventpayload.Value) []workorcheventpayload.Value {
 	limit := min(len(values), EventPayloadListLimit)
-	ret := make([]any, 0, limit)
+	ret := make([]workorcheventpayload.Value, 0, limit)
 	for _, item := range values[:limit] {
 		if projected, ok := projectEventPayloadValue(item); ok {
 			ret = append(ret, projected)
 		}
 	}
-	if len(ret) == 0 {
-		return nil, false
+	return ret
+}
+
+func projectEventPayloadObject(fields []workorcheventpayload.Field) []workorcheventpayload.Field {
+	ret := make([]workorcheventpayload.Field, 0, len(fields))
+	for _, field := range fields {
+		if projected, ok := projectEventPayloadValue(field.Value); ok {
+			ret = append(ret, workorcheventpayload.Field{Name: field.Name, Value: projected})
+		}
 	}
-	return ret, true
+	return ret
 }

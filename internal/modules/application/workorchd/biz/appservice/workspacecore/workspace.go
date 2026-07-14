@@ -4,6 +4,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func MapWorkspace(item *workspacemodel.Workspace) appmodelcore.Workspace {
@@ -22,13 +23,21 @@ func MapWorkspace(item *workspacemodel.Workspace) appmodelcore.Workspace {
 		ProfileID:            item.ProfileID,
 		DefaultSoulID:        string(item.DefaultSoulID),
 		SoulBindings:         appmodelcore.MapSoulBindingIDs(item.SoulBindings),
-		ContextHints:         cloneContextMap(item.ContextHints),
-		EvidencePolicies:     cloneContextMapSlice(item.EvidencePolicies),
+		ContextHints:         cloneContextMap(item.ContextHints.Map()),
+		EvidencePolicies:     cloneContextMapSlice(workorcheventpayload.MapSlice(item.EvidencePolicies)),
 	}
 }
 
 func WorkspaceModelFromView(item appmodelcore.Workspace) *workspacemodel.Workspace {
 	if item.ID == "" {
+		return nil
+	}
+	contextHints, err := workorcheventpayload.FromMap(item.ContextHints)
+	if err != nil {
+		return nil
+	}
+	evidencePolicies, err := workorcheventpayload.FromMapSlice(item.EvidencePolicies)
+	if err != nil {
 		return nil
 	}
 	return &workspacemodel.Workspace{
@@ -43,7 +52,7 @@ func WorkspaceModelFromView(item appmodelcore.Workspace) *workspacemodel.Workspa
 		ProfileID:            item.ProfileID,
 		DefaultSoulID:        common.SoulID(item.DefaultSoulID),
 		SoulBindings:         SoulBindingsFromView(item.SoulBindings),
-		ContextHints:         cloneContextMap(item.ContextHints),
-		EvidencePolicies:     cloneContextMapSlice(item.EvidencePolicies),
+		ContextHints:         contextHints,
+		EvidencePolicies:     evidencePolicies,
 	}
 }

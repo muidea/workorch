@@ -20,7 +20,7 @@ type WorkspaceSetupMode = helpers.WorkspaceSetupMode;
 const {
   acceptanceCard,
   boundedParagraph, checkpointTypeLabel, compactJSON, compactTags, contextBundleCard,
-  dodAssessmentItems, errorMessage, eventRecordState, eventRecordSubject, eventRecordSummary,
+  dodAssessmentItems, errorMessage, eventPayloadDisplay, eventRecordState, eventRecordSubject, eventRecordSummary,
   evidenceCount, executionSectionsCard, gapBaselineCard, goalOutcomeState, goalOutcomeSummary,
   hasWorkspaceSetupDraftContent, hasWorkspaceSetupDraftInfoItems, isNotFoundError,
   joinLines, llmContextBudgetCard, llmUsageCard, memoryRecallCard,
@@ -1859,7 +1859,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                             ]}
                             expandable={{
                               expandedRowRender: (item) => (
-                                <pre className="json-panel json-panel-large">{compactJSON(item.payload ?? item.payloadSummary ?? { payloadRef: item.payloadRef })}</pre>
+                                <pre className="json-panel json-panel-large">{compactJSON(eventPayloadDisplay(item.payload ?? item.payloadSummary) ?? { payloadRef: item.payloadRef })}</pre>
                               )
                             }}
                             dataSource={runEventRecords}

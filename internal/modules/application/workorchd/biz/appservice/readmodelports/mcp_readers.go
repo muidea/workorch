@@ -4,6 +4,7 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -17,7 +18,9 @@ func (r MCPCapabilityReader) List(ctx context.Context) ([]*mcpmodel.Capability, 
 	if r.Hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	result, err := sendMagicCommand[mcpevents.ListCapabilitiesCommand, mcpevents.MCPCommandResult](ctx, r.Hub, mcpevents.TopicMCPCommandListCapabilities, mcpevents.CommandDestination, "application/workorchd/readmodel", "mcp_capability", "all", mcpevents.ListCapabilitiesCommand{})
+	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandListCapabilities, "application/workorchd/readmodel", mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.ListCapabilitiesCommand{})
+	ownerevent.BindLane(event, mcpevents.TopicMCPCommandListCapabilities, "mcp_capability", "all", "", "", "")
+	result, err := ownerevent.MCP(r.Hub.Send(event), mcpevents.TopicMCPCommandListCapabilities)
 	if err != nil {
 		return nil, err
 	}

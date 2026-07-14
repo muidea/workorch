@@ -1,21 +1,25 @@
 package readmodelprojection
 
-func projectEventPayloadValue(value any) (any, bool) {
-	switch typed := value.(type) {
-	case nil:
-		return nil, false
-	case string:
-		if len(typed) <= EventPayloadStringLimit {
-			return typed, true
+import "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+
+func projectEventPayloadValue(value workorcheventpayload.Value) (workorcheventpayload.Value, bool) {
+	switch value.Kind {
+	case workorcheventpayload.ValueNull:
+		return workorcheventpayload.Value{}, false
+	case workorcheventpayload.ValueString:
+		if len(value.String) > EventPayloadStringLimit {
+			value.String = value.String[:EventPayloadStringLimit] + "..."
 		}
-		return typed[:EventPayloadStringLimit] + "...", true
-	case bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
-		return typed, true
-	case []string:
-		return projectEventPayloadStringListValue(typed), true
-	case []any:
-		return projectEventPayloadAnyListValue(typed)
+		return value, true
+	case workorcheventpayload.ValueBool, workorcheventpayload.ValueInt, workorcheventpayload.ValueUint, workorcheventpayload.ValueFloat:
+		return value, true
+	case workorcheventpayload.ValueArray:
+		value.Array = projectEventPayloadArray(value.Array)
+		return value, len(value.Array) > 0
+	case workorcheventpayload.ValueObject:
+		value.Object = projectEventPayloadObject(value.Object)
+		return value, len(value.Object) > 0
 	default:
-		return nil, false
+		return workorcheventpayload.Value{}, false
 	}
 }

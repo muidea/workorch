@@ -4,76 +4,86 @@ Status: active
 
 Type: verification
 
-Last Updated: 2026-05-30
+Last Updated: 2026-07-14
 
 ## Purpose
 
-本目录用于集中承接服务验收、core/profile verifier、audit、TUI acceptance 和 loadtest baseline。
+集中承接服务验收、core/profile verifier、TUI acceptance 与 loadtest baseline。  
+历史 alignment checklist / acceptance-record / V1 live 复盘已迁入 `90-archive/records/`，**不再**作为当前实现约束。
 
-## Reading Order
+生产 runtime 主链为 **Runtime V2 only**。验收不得把 `StagePacket` / `NextAction` / graph dispatch / `ExecutionContextPatch` / 自动 replan successor 重新声明为通过标准。
 
-1. [service-acceptance.md](service-acceptance.md)
-2. [core-runtime-verifier.md](core-runtime-verifier.md)
-3. [incremental-artifact-code-review-checklist.md](incremental-artifact-code-review-checklist.md)
-4. [domain-model-code-alignment-checklist.md](domain-model-code-alignment-checklist.md)
-5. [runtime-flow-code-alignment-checklist.md](runtime-flow-code-alignment-checklist.md)
-6. [module-architecture-code-alignment-checklist.md](module-architecture-code-alignment-checklist.md)
-7. [profile-capability-code-alignment-checklist.md](profile-capability-code-alignment-checklist.md)
-8. [product-interface-code-alignment-checklist.md](product-interface-code-alignment-checklist.md)
-9. [verification-layer-code-alignment-checklist.md](verification-layer-code-alignment-checklist.md)
-10. [profile-software-dev-verifier.md](profile-software-dev-verifier.md)
-11. [workorch-runtime-closure-modification-spec.md](workorch-runtime-closure-modification-spec.md)
-12. [convergence-authority-dispatch-live-verification.md](convergence-authority-dispatch-live-verification.md)
-13. [loadtest-baseline.md](loadtest-baseline.md)
-14. [audits/overview.md](audits/overview.md)
-15. `tui/`
-   - [tui-agent-acceptance.md](tui/tui-agent-acceptance.md)
-   - [display-closure-tracking.md](tui/display-closure-tracking.md)
+## Production Acceptance Baseline（Runtime V2）
 
-## Verification Layers
+验收必须以 **Runtime V2 only** 为准：
 
-- Service acceptance
-  - 验证服务可启动、最小业务链可运行、file backend / deployed instance 基线成立
-- Core runtime verifier
-  - 验证中立 contract、context gate、repair/replan/governance 边界、request audit
-- Profile verifier
-  - 验证 software-dev 的 coverage、evidence、entrypoint integrity 和 profile-specific 规则
-- Runtime closure modification spec
-  - 约束线上 workspace / TUI / projection / repair / CPU-IO 问题收口时的修改落点、审核顺序和反打圈检查
-- Convergence authority dispatch live verification
-  - 固化两 workspace convergence authority dispatch 的部署后观测入口、artifact schema、projection/goal convergence/cache/CPU-IO 验收口径
-- Audits
-  - 承接 design-vs-implementation、runtime contract、full-chain、Codex comparison 等核查材料
-- TUI verification
-  - 承接 acceptance、display closure、review absorption
-- Loadtest baseline
-  - 承接并发容量与历史轮次基线
+| 维度 | 必须覆盖 |
+| --- | --- |
+| Activation / Bootstrap | typed `RuntimeBootstrap`（Definition + Activation + Focuses + Requirements）；缺 bootstrap 失败并投影 terminal |
+| Start | AcceptRunStart pending→active 后进入 `DriveRuntimeV2` |
+| Drive | 有界循环；非等待非终态 transition 递增 StateRevision；无进展 / 超 guard fail-fast |
+| Prerequisite | 缺失资源走 `AcquirePrerequisite` + commit + reduce，不伪装 state-change |
+| Candidate | attempt 0/1、same transaction + stable prefix；漂移不 seal；Accept 后 seal |
+| Dispatch / Operation | `SealedDispatch` + typed `ExecuteRuntimeOperation`；operation evidence 与 snapshot/dispatch 一致；dependency graph 仅作 sealed 操作序，非 V1 graph dispatcher |
+| Focus / EvidenceLedger | required evidence（及可选 assessment）满足后切换 focus；stale→diagnostic，duplicate→幂等 |
+| Assessment / Result | Orchestrator 裁决；Result owner 只持久化 outcome；不裁决 |
+| Governance wait | `request_governance` → ticket → blocked 投影；resolution commit 回 reducer；application **不因** resolve 再 Resume |
+| Repair | 同 focus 再收敛；预算耗尽升治理；非自动 replan |
+| Replan semantic | 仅新 activation / 新 V2 Run；无自动 successor lifecycle |
+| Resume / 重启 | 只 load aggregate 幂等再 drive；无 ExecutionContextPatch；不重放 V1 checkpoint 驱动 |
+| Candidate context / cache | `RuntimeCandidateContext` + C0–C5；P0–P4 integrity |
+| 中立性 | core 无 software-dev / profile ID 硬编码；profile 字段仅作 activation / C2 输入 |
 
-## Cross-Layer Boundary
+## Current Entry Documents
 
-- 产品入口与资源清单属于 `50-product-interface/`
-- 运行链路属于 `20-runtime-flow/`
-- profile-specific 规则来源属于 `40-profiles-capabilities/`
-- archive / completed records 属于 `90-archive/`
+| 文档 | 职责 |
+| --- | --- |
+| [service-acceptance.md](service-acceptance.md) | 服务级验收入口与门禁指针 |
+| [core-runtime-verifier.md](core-runtime-verifier.md) | core runtime verifier 说明 |
+| [profile-software-dev-verifier.md](profile-software-dev-verifier.md) | software-dev profile verifier |
+| [authority-live-e2e-closure-verification.md](authority-live-e2e-closure-verification.md) | authority live e2e 记录（与 active design 配套） |
+| [loadtest-baseline.md](loadtest-baseline.md) | 压测 baseline |
+| `tui/` | TUI 验收相关 |
 
-## Current Status
+## Common Commands（make verify-*）
 
-当前本层已经形成稳定入口：
+以仓库根 `Makefile` 为准。Runtime V2 / authority / resume / governance / live gate 相关示例：
 
-- `service-acceptance.md`
-  - 承接服务启动、最小业务链、file backend persistence 与 deployed verification 入口
-- `core-runtime-verifier.md`
-  - 承接 core contract、context gate、repair/replan、request audit 的中立验证
-- `profile-software-dev-verifier.md`
-  - 承接 software-dev profile 的 coverage/evidence/deliverable 闭环验证
-- `workorch-runtime-closure-modification-spec.md`
-  - 承接运行期异常收口、core/template 边界和修改审核规范
-- `convergence-authority-dispatch-live-verification.md`
-  - 承接 convergence authority dispatch closure 的 live verification 命令和 artifact 验收合同
-- `tui/*`
-  - 承接 TUI acceptance、display closure 与 review boundary
-- `loadtest-baseline.md`
-  - 承接当前 active 并发基线、指标口径和 records layering
+```bash
+make test
+make vet
+make verify-boundary-contract
+make verify-ci-mvp-file
+make verify-service
+make verify-llm
+make verify-contract-violation-recovery-e2e
+make verify-service-restart-recoverable-e2e
+make verify-run-resume-gap-confirmation-e2e
+make verify-dual-workspace-resume-replan-e2e   # replan 语义 = 新 activation/run，非自动 successor
+make verify-approval-decision-resolution-e2e  # resolution 后无 application auto-Resume 依赖
+make verify-auto-governance-ticket-approval
+make verify-convergence-authority-dispatch-live
+make verify-authority-live-e2e-closure
+make observe-runtime-closure
+make verify-incremental-artifact-e2e
+make verify-runtime-profile-software-dev
+# 更大套件：verify-e2e-full / verify-deployed-full / verify-managed-full
+# 以及 scripts/ 下 e2e：verify-software-dev-goal-dod-e2e.sh 等
+```
 
-后续若继续补写，主要只应是脚本索引、字段级映射和更多样例补细，
-而不是重新定义 runtime / product / profile 设计边界。
+具体脚本与断言矩阵以 `core-runtime-verifier.md` / `service-acceptance.md` 与 Makefile help 为准。新增验收不得引入 V1 StagePacket/NextAction 通过条件。
+
+## What Was Archived
+
+- `acceptance-record-*`、`*-code-alignment-checklist`、`framework-eventhub-module-boundary-checklist`
+- `convergence-authority-dispatch-live-verification.md`、`workorch-runtime-closure-modification-spec.md`
+
+检索：[../90-archive/records/overview.md](../90-archive/records/overview.md)
+
+## Related
+
+- [../01-overview/current-state.md](../01-overview/current-state.md)
+- [../00-core/runtime-stage-contract.md](../00-core/runtime-stage-contract.md)
+- [../00-core/runtime-request-cache-note.md](../00-core/runtime-request-cache-note.md)
+- [../20-runtime-flow/overview.md](../20-runtime-flow/overview.md)
+- `internal/modules/kernel/orchestrator/readme.md`

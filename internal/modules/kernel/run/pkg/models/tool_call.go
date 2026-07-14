@@ -1,6 +1,7 @@
 package run
 
 import "github.com/muidea/workorch/internal/pkg/common"
+import "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 
 type ToolCall struct {
 	ID          common.ToolCallID
@@ -8,11 +9,11 @@ type ToolCall struct {
 	RunID       common.RunID
 	StepID      common.StepID
 	ToolName    string
-	Arguments   map[string]any
+	Arguments   workorcheventpayload.Payload
 	State       common.ToolCallState
 	StartedAt   string
 	EndedAt     string
 	ExitSummary string
-	Output      map[string]any
+	Output      workorcheventpayload.Payload
 	Error       string
 }

@@ -4,104 +4,155 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-05-30
+Last Updated: 2026-07-14
 
 ## Purpose
 
-本文件说明 orchestrator 和 governance 相关 kernel 模块的代码责任和边界。
+本文件说明 `kernel/orchestrator` 与 `kernel/governance` 在 Runtime V2 下的代码责任与边界。
+
+**Orchestrator = Runtime V2 convergence authority**，不是 V1 Step dispatch 器。生产主链以 `internal/modules/kernel/orchestrator/readme.md` 与 `internal/pkg/workorchruntimecontract` 为权威。
 
 ## Main Modules
 
 ### `kernel/orchestrator`
 
-职责：
+职责（Runtime V2）：
 
-- Run lifecycle coordination
-- Step dispatch
-- graph follow-up / completion follow-up
-- runtime repair / replan dispatch
-- context gate recovery routing
-- evidence mapping
-- completion gate
+- typed facts、authority transaction、prerequisite、candidate、sealed dispatch
+- operation evidence、assessment ledger、governance wait
+- terminal projection（Run / Workspace / Result）
+- `DriveRuntimeV2Command/Result` 唯一同步推进合同
+- Start/Resume EventHub 准入：`AcceptRunStart` / `CanResumeRun` 后进入同一 drive
 
-### `blocks/decision`
+**不是：**
 
-职责：
+- V1 `StartRun` / `DispatchNextStep` / patch resume facade
+- 通用 RuntimeAdapter registry / Step kind registration matrix
+- `NextActionForRun`、自动 replan successor、进程内 policy cache 双权威
+- application continuation queue 的执行者
 
-- Decision Ticket lifecycle
-- Resolution persistence and retrieval
+实现落点：
 
-更细实现边界：
+| 路径 | 内容 |
+| --- | --- |
+| `internal/modules/kernel/orchestrator/biz/runtimev2/` | controller、reducer、prerequisite、dispatch commit、executor、governance |
+| `internal/modules/kernel/orchestrator/pkg/events/` | drive / operation / candidate / governance typed 合同 |
+| `runtime_v2_*.go`（service 层） | drive 入口、state repository、operation executor、result projection |
 
-- 只承接结构化 Decision Ticket 与 Resolution 本体
-- 只负责恢复动作选择结果的持久化与读取
-- 不直接决定 Web/TUI 如何交互展示
+#### Drive 闭环
+
+```text
+Load Run aggregate（CAS via Run owner EventHub）
+InitializeRuntimeV2FromRun（已有 aggregate 只 load，不重复 reduce）
+for transition < guard:
+  reducer(RuntimeFacts) → RuntimeDecision + AuthorityTransaction
+  Action:
+    acquire_prerequisite  → typed prerequisite + commit + reduce
+    produce_state_change | produce_validation | produce_assessment | request_governance
+                          → candidate (attempt 0, 同 transaction 可 1)
+                          → SealDispatch → ExecuteRuntimeOperation
+                          → evidence / assessment / governance open
+    complete | fail       → terminal projection
+  governed_wait → 投影 blocked 并返回
+  非等待非终态 transition 必须递增 StateRevision
+```
+
+#### 跨组件合同
+
+- **读**：EventHub 读取 `blocks/workspace`、`kernel/run` 权威快照；不直接持有其他 owner service/repository
+- **写 Run aggregate**：Run owner update + expected revision CAS
+- **capability 执行**：`ExecuteRuntimeOperationCommand/Result` → File / Git / Shell / MCP / Web / SSH
+- **LLM candidate**：`RequestRuntimeCandidateCommand/Result`；请求携带 typed `RuntimeCandidateContext`，不得从 V1 map 重建
+- **Result / Decision / Approval / Memory**：各 owner 具体 command；Decision/Approval evidence 由各自 `pkg/events` 定义，Orchestrator 幂等写 EvidenceRecord
+- **governance**：`OpenRuntimeGovernanceRequestCommand` 创建 ticket；`CommitRuntimeGovernanceResolutionCommand` / ticket-resolution 提交；同一 resolution ID + authority snapshot 最多消费一次
+- **prerequisite**：target snapshot 等按 requirement owner 调用 EventHub；多 capability 结果合并，不得互相覆盖
+
+#### Start / Resume
+
+| 入口 | 行为 |
+| --- | --- |
+| Start | 原子 pending→active，后台唯一 `DriveRuntimeV2` |
+| Resume | 仅 workspace/run scope；允许 active 或已解决 blocker；进入同一 drive |
+
+约束：
+
+- 无 execution-context patch、无 loaded Run 重放、无 application continuation queue
+- `runtime_v2_governance` resolution committed 后由 Orchestrator 自行投影或 drive continuation；**application resolved watcher 不得再发 Resume**
+- 服务重启只加载 persisted aggregate；重复 Start/Resume 不得重复 reduce 或增加 attempt
 
 ### `kernel/governance`
 
 职责：
 
-- governance-oriented integration logic
-- auto-governance / ticket semantics 的承接点
+- 组合 Decision / Approval / Run / Workspace / Memory / Orchestrator 合同做自动治理评估、自动解决、升级、阻塞
+- 管理 AutoGovernanceTrace（协调过程，不替代正式 owner 状态）
 
-更细实现边界：
+边界：
 
-- duplicate failure / repair exhausted / policy gate 的治理升级判断
-- auto-governance 对结构化恢复动作的自动选择
-- decision / approval / recovery path 的中立协同
+- 生产依赖仅自身 repository + EventHub
+- 不得绕过 Orchestrator 的 evidence / coverage / requiredOutput / runtime contract gate
+- 不替代 `kernel/run` 生命周期、`blocks/result` closeout、产品交互面
 
-它不替代：
+### `blocks/decision` / `blocks/approval`（治理相关 owner）
 
-- `kernel/run` 的生命周期本体
-- `blocks/result` 的 accepted / rejected closeout
-- product 层的 queue / drawer / form 交互
+| 模块 | 职责 | 不负责 |
+| --- | --- | --- |
+| `blocks/decision` | DecisionTicket / Resolution 生命周期；`runtime_v2_governance` 创建后经 typed ticket-resolution 提交 Orchestrator | 不修改 Run/Result 收敛状态；不猜 authority snapshot |
+| `blocks/approval` | pending / approved / rejected 正式状态与 scope 关联 | 不执行副作用；不裁决 accepted business outcome |
 
-### Approval Boundary
+## Authority Objects
 
-approval 的 kernel 责任应保持为：
+| 对象 | 权威 |
+| --- | --- |
+| `RuntimeBootstrap` / Definition / Activation | 创建时封存；后续不得 map 重建 |
+| `RuntimeFacts` + focus queue + evidence ledger | Orchestrator aggregate |
+| `RuntimeDecision` / `AuthorityTransaction` | reducer 密封 |
+| `RequiredOutputContract` | focus 与 capability 中立交集 |
+| `SealedDispatch` | 执行前持久化；execution evidence 唯一合法入口 |
+| `RuntimeStateRecord` | Run owner CAS；正式 V2 状态 |
+| Result accepted/rejected | Orchestrator 裁决后写 Result owner |
+| Run / Workspace terminal / blocker | Orchestrator 窄投影 |
 
-- pending / approved / rejected 的正式状态转换
-- 与 run / step / action 的结构化关联
-- 恢复链中的“允许 / 不允许继续”判断输入
+## Dual-Layer Stage Semantic
 
-approval 不应承担：
+- **层 A（语义）**：中立 stage / output policy / profile 映射 — 用于 LLM 意图与严格度，**不是** Orchestrator 状态机状态
+- **层 B（实现）**：V2 focus / requiredOutput / candidate / sealed dispatch — 生产动作以 `RuntimeDecision.Action` 为准
 
-- Web/TUI 的按钮语义
-- comment / drawer / batch form 的产品交互细节
-- accepted business outcome 的最终裁决
+profile-specific accepted/rejected kinds 只能作为 typed focus requirement 输入；reducer 不识别 profile ID、deliverable ID 或业务术语。
 
 ## Boundary
 
-这些模块负责“如何治理和推进状态”，但不直接负责：
+Orchestrator / Governance 负责如何治理与收敛，不直接负责：
 
-- provider-side request rendering
-- MCP 协议调用
-- shell/file/git/web/ssh 外部动作
+- provider-side request rendering（`blocks/llm`）
+- MCP 协议调用 / shell / file / git / web / ssh 外部动作细节
+- product queue / drawer / form 交互
 
-## Flow Participation
+## Responsibility Split
 
-主要参与：
-
-- planning / execution dispatch
-- governance block / resume
-- repair / replan
-- completion gate / acceptance transition
-
-## Responsibility Split Summary
-
-| 关注点 | 主要 kernel 责任 |
+| 关注点 | 主要责任 |
 | --- | --- |
-| step dispatch / follow-up / completion follow-up | `kernel/orchestrator` |
-| context gate fail-fast / read-required / blocker-required / replan-required routing | `kernel/orchestrator` |
-| decision ticket / resolution object | `blocks/decision` |
-| duplicate failure / repair exhausted / auto-governance 协同 | `kernel/governance` |
-| approval formal state / recovery allow-deny input | governance-aligned kernel responsibility |
+| drive / reducer / sealed dispatch / evidence / terminal | `kernel/orchestrator` |
+| RuntimeStateRecord 持久化 CAS | `kernel/run` |
+| decision ticket / resolution 本体 | `blocks/decision` |
+| approval 正式状态 | `blocks/approval` |
+| auto-governance 协调 / trace | `kernel/governance` |
+| formal Result / Artifact 持久化 | `blocks/result`（不裁决 acceptance） |
+| capability operation 执行 | 各 capability block |
 
-这些责任都服务恢复链，但不能混写成产品交互面。
+## Explicit Non-Goals（已删除 V1）
+
+- `StagePacket`、`NextAction`、RuntimeStep Accepted/Progress/Completed/Failed 通用事件结构
+- `DispatchNextStep`、`EnableEventDrivenDispatch`、通用 runtime executor
+- `ExecutionContextPatch` resume、approval patch resume、decision resume subsystem
+- 自动 replan successor；重定义目标必须新 typed activation/bootstrap
+- ValidateRun/CompleteRun command；completed 只能来自 reducer + typed owner projection
+- RuntimeAdapter registry 作为生产调度主链
 
 ## Source Documents
 
 - `architecture-overview.md`
-- `../20-runtime-flow/repair-replan-flow.md`
-- `../60-verification/audits/full-chain-assessment-closure-plan.md`
-- `../70-roadmap/active/run-closure-quality-improvement-plan.md`
+- `../00-core/runtime-stage-contract.md`
+- `internal/modules/kernel/orchestrator/readme.md`
+- `internal/modules/kernel/run/readme.md`
+- `internal/modules/kernel/governance/readme.md`

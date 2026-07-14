@@ -4,11 +4,19 @@ Status: active
 
 Type: core-note
 
-Last Updated: 2026-06-08
+Last Updated: 2026-07-14
 
 ## Purpose
 
-本文件作为 core 从属 note，定义 provider-neutral 的 request cache-friendly 组织规则。
+本文件作为 core 从属 note，定义 provider-neutral 的 request cache-friendly 组织规则。  
+Runtime V2 生产路径下，candidate 请求上下文来自 typed `RuntimeCandidateContext`（persisted facts + authority transaction），见 [context-assembly-flow.md](../20-runtime-flow/context-assembly-flow.md)。
+
+## Runtime V2 Binding
+
+- Orchestrator 在 candidate request 前计算并持久化 `StablePrefixHash`（与 authority transaction / definition / execution contract 对齐）。
+- attempt 0 与 same-contract attempt 1 **必须**复用同一 stable prefix；transaction 漂移不得 seal。
+- `stablePrefixHash` 意外漂移视为 request rendering bug，不是 provider 偶然行为。
+- LLM block 不得从 V1 map 或临时上下文重建 authority；只消费 typed candidate command。
 
 ## Stable Rules
 
@@ -22,11 +30,11 @@ Last Updated: 2026-06-08
 
 request 应按 cacheability 从高到低组织：
 
-- `C0` stable runtime prefix
-- `C1` semi-stable workspace definition
-- `C2` stable capability contract
-- `C3` current stage bundle
-- `C4` volatile execution tail
+- `C0` stable runtime prefix（中立 runtime 规则 / schema）
+- `C1` semi-stable workspace definition（Goal / DoD）
+- `C2` stable capability / governance / template stage-policy **声明**（语义输入，非 kernel 状态名）
+- `C3` current focus / requiredOutput / decision bundle
+- `C4` volatile execution tail（failure、recent evidence、attempt diagnostics）
 - `C5` large refs / trace
 
 稳定前缀必须保持：
@@ -44,7 +52,7 @@ core 仍只输出 provider-neutral `PromptContext` 与 `ProviderCachePlan`，但
 稳定要求：
 
 - 出站请求第一段必须只包含 `C0` stable runtime prefix、`C1` workspace definition、`C2` capability contract
-- `C3` current stage bundle、`C4` volatile execution tail、`C5` large refs 必须在稳定 prefix 之后
+- `C3` current focus bundle、`C4` volatile execution tail、`C5` large refs 必须在稳定 prefix 之后
 - provider/model/baseURL、stepId 这类动态绑定只能进入动态 tail 或 request audit，不能进入稳定 prefix
 - provider 私有 cache-control、prompt cache key 或等价字段只在 adapter 层设置
 - adapter 应保留 section id heading，使 request-log 能对齐 `ProviderCachePlan.sectionHashes`
@@ -64,11 +72,13 @@ core 仍只输出 provider-neutral `PromptContext` 与 `ProviderCachePlan`，但
 - `stablePrefixHash`
 - `workspaceDefinitionHash`
 - `capabilityContractHash`
-- `stageBundleHash`
+- `stageBundleHash` / focus-bundle hash（对应 C3 current focus / requiredOutput / decision bundle）
 - `volatileTailHash`
 - `definitionRevision`
 - `definitionChangeImpact`
 - included / normalized / compressed / omitted sections
+
+审计字段名可保留历史 `stageBundleHash` 标识，但其语义是 **focus / requiredOutput bundle**，不是 V1 StagePacket / NextAction。
 
 ### Context Priority Tiers
 
@@ -76,7 +86,7 @@ provider-neutral 的请求组织还应遵守稳定上下文优先级：
 
 | 层级 | 当前方向 |
 | --- | --- |
-| `P0 Contract` | runtime contract、schema、workspace/run/stage/step identity、当前 Goal / DoD、当前动作要求 |
+| `P0 Contract` | runtime contract、schema、workspace/run identity、当前 Goal / DoD、当前 requiredOutput / 动作要求 |
 | `P1 Current Failure` | 当前 failure class/signature、repairObjective、requiredOutput、diagnostics |
 | `P2 Coverage Scope` | coverage target、coverage work item summary/current focus、evidence candidates |
 | `P3 Current Evidence` | latest action/validation/artifact evidence 与 progress digest |
@@ -123,7 +133,7 @@ provider-neutral 的请求组织还应遵守稳定上下文优先级：
 - core verifier
   - 检查 stable/volatile 分层、protected fields、request audit completeness
 - context assembly flow
-  - 检查当前 stage bundle、selected context、omitted/compressed 规则是否符合中立合同
+  - 检查 `RuntimeCandidateContext`、C0–C5 / current focus bundle、selected context、omitted/compressed 规则是否符合中立合同；不得从 V1 graph/NextAction map 重建
 - provider assembly / request-log audit
   - 检查 provider-specific cache mapping、request-log ref、raw request rendering 是否符合模块实现约束
 

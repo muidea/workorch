@@ -46,7 +46,7 @@ func WorkspaceExecutionContractHints(ctx context.Context, templates WorkspaceTem
 	if workspace == nil {
 		return nil
 	}
-	workspaceHints := cloneContextMapDeep(workspace.ContextHints)
+	workspaceHints := cloneContextMapDeep(workspace.ContextHints.Map())
 	templateHints := MatchingWorkspaceTemplateContextHints(ctx, templates, workspace)
 	if len(templateHints) == 0 {
 		return workspaceHints

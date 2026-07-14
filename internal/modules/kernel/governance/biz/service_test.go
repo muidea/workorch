@@ -24,8 +24,18 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func mustGovernanceServicePayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
+	t.Helper()
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
 
 func publishGovernanceTestTicketCreated(ctx context.Context, hub magicevent.Hub, ticketID common.TicketID, workspaceID common.WorkspaceID, runID common.RunID) error {
 	event := magicevent.NewEventWithContext(
@@ -208,7 +218,7 @@ func TestServiceUsesBackgroundRoutineForWorkerAndReconciliation(t *testing.T) {
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: memory.NewGoalRepository(), dods: memory.NewDoDRepository()},
 		MemoryItems:          memory.NewMemoryItemRepository(),
 		AutoGovernanceTraces: memory.NewAutoGovernanceTraceRepository(),
-		ResolveDecision:      func(context.Context, common.TicketID, string, map[string]any) error { return nil },
+		ResolveDecision:      func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error { return nil },
 		ResolveApproval:      func(context.Context, common.ApprovalID) error { return nil },
 		ResumeRun:            func(context.Context, common.RunID) error { return nil },
 		LoadConfig:           testGovernanceConfig(true, 0.82, 3),
@@ -261,7 +271,7 @@ func TestProcessPendingTicketUsesWorkspaceScopedRunLookup(t *testing.T) {
 		WorkspaceDefinitions: definitions,
 		MemoryItems:          memory.NewMemoryItemRepository(),
 		AutoGovernanceTraces: memory.NewAutoGovernanceTraceRepository(),
-		ResolveDecision:      func(context.Context, common.TicketID, string, map[string]any) error { return nil },
+		ResolveDecision:      func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error { return nil },
 		ResolveApproval:      func(context.Context, common.ApprovalID) error { return nil },
 		ResumeRun:            func(context.Context, common.RunID) error { return nil },
 		LoadConfig:           testGovernanceConfig(true, 0.82, 3),
@@ -315,7 +325,7 @@ func TestProcessPendingApprovalUsesWorkspaceScopedRunLookup(t *testing.T) {
 		StepID:      common.StepID(string(runID) + "/step-1"),
 		Reason:      "approval required",
 		Action:      "continue requested operation",
-		Context:     map[string]any{"risk": "read_only"},
+		Context:     mustGovernanceServicePayload(t, map[string]any{"risk": "read_only"}),
 		State:       common.ApprovalStatePending,
 	}))
 	svc := NewService(Dependencies{
@@ -325,7 +335,7 @@ func TestProcessPendingApprovalUsesWorkspaceScopedRunLookup(t *testing.T) {
 		WorkspaceDefinitions: definitions,
 		MemoryItems:          memory.NewMemoryItemRepository(),
 		AutoGovernanceTraces: memory.NewAutoGovernanceTraceRepository(),
-		ResolveDecision:      func(context.Context, common.TicketID, string, map[string]any) error { return nil },
+		ResolveDecision:      func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error { return nil },
 		ResolveApproval:      func(context.Context, common.ApprovalID) error { return nil },
 		ResumeRun:            func(context.Context, common.RunID) error { return nil },
 		LoadConfig:           testGovernanceConfig(true, 0.82, 3),
@@ -464,7 +474,7 @@ func TestServiceAutoResolvesTicketFromMemoryStructuredContext(t *testing.T) {
 	})))
 
 	var resolvedTicket common.TicketID
-	var resolvedPayload map[string]any
+	var resolvedPayload workorcheventpayload.Payload
 	var resumedRun common.RunID
 	svc := NewService(Dependencies{
 		Tickets:              ticketRepo,
@@ -474,14 +484,14 @@ func TestServiceAutoResolvesTicketFromMemoryStructuredContext(t *testing.T) {
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		ResolveDecision: func(_ context.Context, id common.TicketID, _ string, payload map[string]any) error {
+		ResolveDecision: func(_ context.Context, id common.TicketID, _ string, payload workorcheventpayload.Payload) error {
 			resolvedTicket = id
-			resolvedPayload = cloneMap(payload)
+			resolvedPayload = payload.Clone()
 			return resolutionRepo.Create(context.Background(), &decisionmodel.Resolution{
 				ID:       common.ResolutionID("resolution-" + string(id) + "-auto-governance"),
 				TicketID: id,
 				Type:     "provide_missing_info",
-				Payload:  cloneMap(payload),
+				Payload:  payload.Clone(),
 			})
 		},
 		ResolveApproval: func(context.Context, common.ApprovalID) error { return nil },
@@ -502,10 +512,10 @@ func TestServiceAutoResolvesTicketFromMemoryStructuredContext(t *testing.T) {
 	if resolvedTicket != ticketID {
 		t.Fatalf("resolved ticket = %s, want %s", resolvedTicket, ticketID)
 	}
-	if answer, _ := resolvedPayload["answer"].(string); answer != "staging" {
+	if answer, _ := resolvedPayload.String("answer"); answer != "staging" {
 		t.Fatalf("resolved answer = %q, want staging", answer)
 	}
-	if source, _ := resolvedPayload["source"].(string); source != "auto_governance" {
+	if source, _ := resolvedPayload.String("source"); source != "auto_governance" {
 		t.Fatalf("resolved source = %q, want auto_governance", source)
 	}
 	if resumedRun != runID {
@@ -567,7 +577,7 @@ func TestServiceEscalatesTicketWhenContextInsufficient(t *testing.T) {
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		ResolveDecision: func(context.Context, common.TicketID, string, map[string]any) error {
+		ResolveDecision: func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error {
 			resolveCount++
 			return nil
 		},
@@ -652,7 +662,7 @@ func TestServiceAutoReplansRuntimeRepairExhaustionTicket(t *testing.T) {
 
 	var resolvedTicket common.TicketID
 	var resolvedResolutionType string
-	var resolvedPayload map[string]any
+	var resolvedPayload workorcheventpayload.Payload
 	var resumedRun common.RunID
 	svc := NewService(Dependencies{
 		Tickets:              ticketRepo,
@@ -662,15 +672,15 @@ func TestServiceAutoReplansRuntimeRepairExhaustionTicket(t *testing.T) {
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		ResolveDecision: func(_ context.Context, id common.TicketID, resolutionType string, payload map[string]any) error {
+		ResolveDecision: func(_ context.Context, id common.TicketID, resolutionType string, payload workorcheventpayload.Payload) error {
 			resolvedTicket = id
 			resolvedResolutionType = resolutionType
-			resolvedPayload = cloneMap(payload)
+			resolvedPayload = payload.Clone()
 			return resolutionRepo.Create(ctx, &decisionmodel.Resolution{
 				ID:       common.ResolutionID("resolution-" + string(id)),
 				TicketID: id,
 				Type:     resolutionType,
-				Payload:  cloneMap(payload),
+				Payload:  payload.Clone(),
 			})
 		},
 		ResolveApproval: func(context.Context, common.ApprovalID) error { return nil },
@@ -694,11 +704,14 @@ func TestServiceAutoReplansRuntimeRepairExhaustionTicket(t *testing.T) {
 	if resolvedResolutionType != "replan" {
 		t.Fatalf("resolved type = %s, want replan", resolvedResolutionType)
 	}
-	if resolvedPayload["answer"] != "replan" || resolvedPayload["recoveryAction"] != "replan" {
+	answer, _ := resolvedPayload.String("answer")
+	recoveryAction, _ := resolvedPayload.String("recoveryAction")
+	if answer != "replan" || recoveryAction != "replan" {
 		t.Fatalf("resolved payload = %+v, want replan recovery action", resolvedPayload)
 	}
-	semantic, _ := resolvedPayload["governanceSemantic"].(map[string]any)
-	if semantic["intent"] != governancecommon.GovernanceIntentRequestReplan {
+	semantic, _ := resolvedPayload.Object("governanceSemantic")
+	intent, _ := semantic.String("intent")
+	if intent != governancecommon.GovernanceIntentRequestReplan {
 		t.Fatalf("semantic = %+v, want request_replan", semantic)
 	}
 	if resumedRun != runID {
@@ -748,7 +761,7 @@ func TestServiceAutoResolvesReplanDecisionTicketWithoutMissingFields(t *testing.
 
 	var resolvedTicket common.TicketID
 	var resolvedResolutionType string
-	var resolvedPayload map[string]any
+	var resolvedPayload workorcheventpayload.Payload
 	var resumedRun common.RunID
 	svc := NewService(Dependencies{
 		Tickets:              ticketRepo,
@@ -758,15 +771,15 @@ func TestServiceAutoResolvesReplanDecisionTicketWithoutMissingFields(t *testing.
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		ResolveDecision: func(_ context.Context, id common.TicketID, resolutionType string, payload map[string]any) error {
+		ResolveDecision: func(_ context.Context, id common.TicketID, resolutionType string, payload workorcheventpayload.Payload) error {
 			resolvedTicket = id
 			resolvedResolutionType = resolutionType
-			resolvedPayload = cloneMap(payload)
+			resolvedPayload = payload.Clone()
 			return resolutionRepo.Create(ctx, &decisionmodel.Resolution{
 				ID:       common.ResolutionID("resolution-" + string(id)),
 				TicketID: id,
 				Type:     resolutionType,
-				Payload:  cloneMap(payload),
+				Payload:  payload.Clone(),
 			})
 		},
 		ResolveApproval: func(context.Context, common.ApprovalID) error { return nil },
@@ -790,7 +803,9 @@ func TestServiceAutoResolvesReplanDecisionTicketWithoutMissingFields(t *testing.
 	if resolvedResolutionType != "replan" {
 		t.Fatalf("resolved type = %s, want replan", resolvedResolutionType)
 	}
-	if resolvedPayload["answer"] != "replan" || resolvedPayload["recoveryAction"] != "replan" {
+	answer, _ := resolvedPayload.String("answer")
+	recoveryAction, _ := resolvedPayload.String("recoveryAction")
+	if answer != "replan" || recoveryAction != "replan" {
 		t.Fatalf("resolved payload = %+v, want replan recovery action", resolvedPayload)
 	}
 	if resumedRun != runID {
@@ -847,7 +862,7 @@ func TestServiceEscalatesReplanDecisionTicketWhenMissingFieldsRemain(t *testing.
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		ResolveDecision: func(context.Context, common.TicketID, string, map[string]any) error {
+		ResolveDecision: func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error {
 			resolveCount++
 			return nil
 		},
@@ -918,7 +933,7 @@ func TestServiceEscalatesRuntimeRepairExhaustionWhenExternalRecoveryRequired(t *
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		ResolveDecision: func(context.Context, common.TicketID, string, map[string]any) error {
+		ResolveDecision: func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error {
 			resolveCount++
 			return nil
 		},
@@ -1068,7 +1083,7 @@ func TestServiceAutoResolvesTicketFromStructuredCandidateContext(t *testing.T) {
 	})))
 
 	var resolvedTicket common.TicketID
-	var resolvedPayload map[string]any
+	var resolvedPayload workorcheventpayload.Payload
 	var resumedRun common.RunID
 	svc := NewService(Dependencies{
 		Tickets:              ticketRepo,
@@ -1078,14 +1093,14 @@ func TestServiceAutoResolvesTicketFromStructuredCandidateContext(t *testing.T) {
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		ResolveDecision: func(_ context.Context, id common.TicketID, _ string, payload map[string]any) error {
+		ResolveDecision: func(_ context.Context, id common.TicketID, _ string, payload workorcheventpayload.Payload) error {
 			resolvedTicket = id
-			resolvedPayload = cloneMap(payload)
+			resolvedPayload = payload.Clone()
 			return resolutionRepo.Create(context.Background(), &decisionmodel.Resolution{
 				ID:       common.ResolutionID("resolution-" + string(id) + "-auto-governance"),
 				TicketID: id,
 				Type:     "provide_missing_info",
-				Payload:  cloneMap(payload),
+				Payload:  payload.Clone(),
 			})
 		},
 		ResolveApproval: func(context.Context, common.ApprovalID) error { return nil },
@@ -1106,7 +1121,7 @@ func TestServiceAutoResolvesTicketFromStructuredCandidateContext(t *testing.T) {
 	if resolvedTicket != ticketID {
 		t.Fatalf("resolved ticket = %s, want %s", resolvedTicket, ticketID)
 	}
-	answer, _ := resolvedPayload["answer"].(string)
+	answer, _ := resolvedPayload.String("answer")
 	if answer != "target=artifact, source=workspace" {
 		t.Fatalf("resolved answer = %q, want structured answer", answer)
 	}
@@ -1124,7 +1139,7 @@ func TestServiceAutoResolvesTicketFromStructuredCandidateContext(t *testing.T) {
 
 func TestInferMissingInfoAnswerSelectsContinuableCandidate(t *testing.T) {
 	answer, confidence, reason, _ := inferMissingInfoAnswer(
-		map[string]any{
+		mustGovernanceServicePayload(t, map[string]any{
 			"candidateValues": map[string]any{
 				"initializationPermission": []any{"允许在空目录从零初始化 Go 网关项目", "不允许初始化，仅等待现有代码同步"},
 				"workspaceSource":          []any{"提供现有项目文件到当前 workspace"},
@@ -1135,7 +1150,7 @@ func TestInferMissingInfoAnswerSelectsContinuableCandidate(t *testing.T) {
 				"initializationPermission": 0.93,
 				"workspaceSource":          0.95,
 			},
-		},
+		}),
 		"请提供下一步工作目标",
 		"当前工作区为空",
 		"",
@@ -1151,13 +1166,13 @@ func TestInferMissingInfoAnswerSelectsContinuableCandidate(t *testing.T) {
 
 func TestInferMissingInfoAnswerDoesNotUseGoalOrDoDTextForCandidateTicket(t *testing.T) {
 	answer, confidence, reason, _ := inferMissingInfoAnswer(
-		map[string]any{
+		mustGovernanceServicePayload(t, map[string]any{
 			"candidateValues": map[string]any{
 				"workspaceSource": []any{"提供现有项目文件到当前 workspace", "提供代码仓库内容/打包文件后再继续"},
 			},
 			"missingFields":       []any{"workspaceSource"},
 			"requiresHumanFields": []any{"workspaceSource"},
-		},
+		}),
 		"请提供 workspaceSource",
 		"当前工作区为空",
 		"workspaceSource: 从目标描述推断",
@@ -1214,7 +1229,7 @@ func TestServiceEscalatesTicketWhenStructuredCandidateRequiresHuman(t *testing.T
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		ResolveDecision: func(context.Context, common.TicketID, string, map[string]any) error {
+		ResolveDecision: func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error {
 			resolveCount++
 			return nil
 		},
@@ -1265,9 +1280,9 @@ func TestServiceAutoApprovesReadOnlyApproval(t *testing.T) {
 		StepID:      common.StepID("run-3/step-1"),
 		Reason:      "需要确认是否执行只读配置查询",
 		Action:      "read configuration and list files",
-		Context: map[string]any{
+		Context: mustGovernanceServicePayload(t, map[string]any{
 			"risk": "read_only",
-		},
+		}),
 		State: common.ApprovalStatePending,
 	}))
 
@@ -1281,7 +1296,7 @@ func TestServiceAutoApprovesReadOnlyApproval(t *testing.T) {
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		ResolveDecision:      func(context.Context, common.TicketID, string, map[string]any) error { return nil },
+		ResolveDecision:      func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error { return nil },
 		ResolveApproval: func(_ context.Context, id common.ApprovalID) error {
 			resolveCount++
 			item, err := approvalRepo.Get(ctx, id)
@@ -1357,10 +1372,10 @@ func TestServiceAutoApprovesWorkspaceWriteOnStartupWhenCreatedEventWasMissed(t *
 		StepID:      common.StepID("run-approval-run-state/step-1"),
 		Reason:      "update local workspace file server.conf with a reversible patch",
 		Action:      "edit server.conf and config.yaml inside the workspace",
-		Context: map[string]any{
+		Context: mustGovernanceServicePayload(t, map[string]any{
 			"impactScope": []any{"server.conf", "config.yaml"},
 			"riskLevel":   "medium",
-		},
+		}),
 		State: common.ApprovalStatePending,
 	}))
 
@@ -1374,7 +1389,7 @@ func TestServiceAutoApprovesWorkspaceWriteOnStartupWhenCreatedEventWasMissed(t *
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		ResolveDecision:      func(context.Context, common.TicketID, string, map[string]any) error { return nil },
+		ResolveDecision:      func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error { return nil },
 		ResolveApproval: func(_ context.Context, id common.ApprovalID) error {
 			resolveCount.Add(1)
 			item, err := approvalRepo.Get(ctx, id)
@@ -1450,10 +1465,10 @@ func TestServiceAutoApprovesLowRiskWorkspaceDependencyMetadataApproval(t *testin
 		StepID:      common.StepID("run-dependency-metadata/repair-1"),
 		Reason:      "workspace build failed because dependency metadata is missing",
 		Action:      "update manifest and checksum files inside the workspace to add the missing dependency metadata, then rerun bounded verification",
-		Context: map[string]any{
+		Context: mustGovernanceServicePayload(t, map[string]any{
 			"affectedFiles": []any{"manifest", "checksum"},
 			"risk":          "low_risk_workspace_dependency_metadata",
-		},
+		}),
 		State: common.ApprovalStatePending,
 	}))
 
@@ -1467,7 +1482,7 @@ func TestServiceAutoApprovesLowRiskWorkspaceDependencyMetadataApproval(t *testin
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		ResolveDecision:      func(context.Context, common.TicketID, string, map[string]any) error { return nil },
+		ResolveDecision:      func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error { return nil },
 		ResolveApproval: func(_ context.Context, id common.ApprovalID) error {
 			resolveCount.Add(1)
 			item, err := approvalRepo.Get(ctx, id)
@@ -1513,10 +1528,10 @@ func TestClassifyApprovalRiskTreatsRuntimeDependencyGovernanceAsL2(t *testing.T)
 	approval := &approvalmodel.Approval{
 		Action: "update workspace dependency metadata and manifest files to satisfy runtime dependency governance before rerunning bounded validation",
 		Reason: "workspace build failed because dependency metadata is missing",
-		Context: map[string]any{
+		Context: mustGovernanceServicePayload(t, map[string]any{
 			"risk": "low_risk_workspace_dependency_metadata",
 			"kind": "patch_approval_required",
-		},
+		}),
 	}
 	riskLevel, signals := classifyApprovalRisk(approval)
 	if riskLevel != "L2" {
@@ -1561,10 +1576,10 @@ func TestServiceStartReturnsWithoutWaitingForBlockedRunResume(t *testing.T) {
 		StepID:      common.StepID("run-start-nonblocking/step-1"),
 		Reason:      "update local workspace file server.conf with a reversible patch",
 		Action:      "edit server.conf and config.yaml inside the workspace",
-		Context: map[string]any{
+		Context: mustGovernanceServicePayload(t, map[string]any{
 			"impactScope": []any{"server.conf", "config.yaml"},
 			"riskLevel":   "medium",
-		},
+		}),
 		State: common.ApprovalStatePending,
 	}))
 
@@ -1578,7 +1593,7 @@ func TestServiceStartReturnsWithoutWaitingForBlockedRunResume(t *testing.T) {
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		ResolveDecision:      func(context.Context, common.TicketID, string, map[string]any) error { return nil },
+		ResolveDecision:      func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error { return nil },
 		ResolveApproval: func(_ context.Context, id common.ApprovalID) error {
 			item, err := approvalRepo.Get(ctx, id)
 			if err != nil {
@@ -1623,7 +1638,7 @@ func TestServiceEscalatesWorkspaceWriteWhenAutoApprovalPolicyDisallowsIt(t *test
 		RunID:       common.RunID("run-policy-disabled"),
 		Reason:      "update local workspace configuration",
 		Action:      "edit config file inside workspace",
-		Context:     map[string]any{"riskLevel": "medium"},
+		Context:     mustGovernanceServicePayload(t, map[string]any{"riskLevel": "medium"}),
 		State:       common.ApprovalStatePending,
 	}
 	enabled := true
@@ -1674,9 +1689,9 @@ func TestServiceEscalatesHighRiskApproval(t *testing.T) {
 		StepID:      common.StepID("run-4/step-1"),
 		Reason:      "需要确认是否执行远程写操作",
 		Action:      "ssh write config to remote server",
-		Context: map[string]any{
+		Context: mustGovernanceServicePayload(t, map[string]any{
 			"risk": "ssh_write",
-		},
+		}),
 		State: common.ApprovalStatePending,
 	}))
 
@@ -1690,7 +1705,7 @@ func TestServiceEscalatesHighRiskApproval(t *testing.T) {
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		ResolveDecision:      func(context.Context, common.TicketID, string, map[string]any) error { return nil },
+		ResolveDecision:      func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error { return nil },
 		ResolveApproval: func(context.Context, common.ApprovalID) error {
 			resolveCount++
 			return nil
@@ -1792,7 +1807,7 @@ func TestServiceEscalatesTicketWhenRepeatedPromptBudgetExhausted(t *testing.T) {
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		ResolveDecision: func(context.Context, common.TicketID, string, map[string]any) error {
+		ResolveDecision: func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error {
 			resolveCount++
 			return nil
 		},
@@ -1857,6 +1872,10 @@ type ticketFixture struct {
 }
 
 func ticket(v *ticketFixture) *decisionmodel.Ticket {
+	contextPayload, err := workorcheventpayload.FromMap(v.context)
+	if err != nil {
+		panic(err)
+	}
 	return &decisionmodel.Ticket{
 		ID:           v.id,
 		WorkspaceID:  v.workspaceID,
@@ -1864,7 +1883,7 @@ func ticket(v *ticketFixture) *decisionmodel.Ticket {
 		Reason:       v.reason,
 		DecisionKind: v.kind,
 		Question:     v.question,
-		Context:      cloneMap(v.context),
+		Context:      contextPayload,
 		State:        v.state,
 	}
 }
@@ -1896,17 +1915,6 @@ func testGovernanceConfig(enabled bool, minConfidence float64, maxPerRun int) fu
 			},
 		}, nil
 	}
-}
-
-func cloneMap(input map[string]any) map[string]any {
-	if input == nil {
-		return nil
-	}
-	ret := make(map[string]any, len(input))
-	for key, value := range input {
-		ret[key] = value
-	}
-	return ret
 }
 
 func waitForGovernanceCondition(t *testing.T, condition func() bool) {

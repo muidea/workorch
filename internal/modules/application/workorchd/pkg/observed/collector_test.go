@@ -13,7 +13,17 @@ import (
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
+
+func mustObservedEventPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
+	t.Helper()
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
 
 type collectorTestHub struct {
 	raw magicevent.Hub
@@ -142,15 +152,13 @@ func TestCollectorPublishedEventRecordsReturnsDeepClonedPayloads(t *testing.T) {
 		SubjectType: "approval",
 		SubjectID:   "approval-1",
 		RunID:       "run-1",
-		Payload: events.ApprovalPayload(
-			"manual approval",
-			"approve",
-			map[string]any{
+		Payload: events.ApprovalPayloadData{
+			Reason: "manual approval", Action: "approve", State: "pending",
+			Context: mustObservedEventPayload(t, map[string]any{
 				"workspaceId": "ws-1",
 				"items":       []any{"first", map[string]any{"nested": "original"}},
-			},
-			"pending",
-		),
+			}),
+		}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish approval event: %v", err)
 	}

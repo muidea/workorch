@@ -161,6 +161,6 @@ func cloneCoverageWorkItem(item *orchestratormodel.CoverageWorkItem) *orchestrat
 	cloned.RequiredEvidenceKinds = append([]string(nil), item.RequiredEvidenceKinds...)
 	cloned.AcceptedEvidenceRefs = append([]string(nil), item.AcceptedEvidenceRefs...)
 	cloned.RejectedEvidenceRefs = append([]string(nil), item.RejectedEvidenceRefs...)
-	cloned.Metadata = cloneMap(item.Metadata)
+	cloned.Metadata = item.Metadata.Clone()
 	return &cloned
 }

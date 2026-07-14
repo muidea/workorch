@@ -14,6 +14,7 @@ import (
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func ResolveDecisionView(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, ticketID common.TicketID, cmd appmodelcore.ResolveDecisionCommand, scope common.WorkspaceID) (readmodelcore.Decision, error) {
@@ -41,7 +42,7 @@ func ResolveDecisionView(ctx context.Context, hub magicevent.Hub, traces governa
 	return readmodelprojection.MapDecision(item, resolution, autoGovernance), nil
 }
 
-func decisionResolutionMissingRequiredInfo(semantic governancecommon.DecisionSemanticNormalization, payload map[string]any) bool {
+func decisionResolutionMissingRequiredInfo(semantic governancecommon.DecisionSemanticNormalization, payload workorcheventpayload.Payload) bool {
 	if strings.TrimSpace(semantic.ResolutionType) != decisioncommon.ResolutionTypeProvideMissingInfo {
 		return false
 	}
@@ -110,9 +111,9 @@ func decisionResolutionSlashCommandOnly(rawInput string) bool {
 	return false
 }
 
-func decisionResolutionPayloadHasExplicitRawInput(payload map[string]any) bool {
+func decisionResolutionPayloadHasExplicitRawInput(payload workorcheventpayload.Payload) bool {
 	for _, key := range []string{"answer", "value", "input", "note", "text", "message"} {
-		if _, ok := payload[key]; ok {
+		if _, ok := payload.Field(key); ok {
 			return true
 		}
 	}
@@ -155,17 +156,17 @@ func ReadDecisionTicketForResolution(ctx context.Context, hub magicevent.Hub, ti
 	}
 }
 
-func resolveDecisionTicket(ctx context.Context, hub magicevent.Hub, ticket *decisionmodel.Ticket, resolutionType string, payload map[string]any, scope common.WorkspaceID) (*decisionmodel.Ticket, *decisionmodel.Resolution, error) {
+func resolveDecisionTicket(ctx context.Context, hub magicevent.Hub, ticket *decisionmodel.Ticket, resolutionType string, payload workorcheventpayload.Payload, scope common.WorkspaceID) (*decisionmodel.Ticket, *decisionmodel.Resolution, error) {
 	normalizedPayload, normalizedType, err := prepareDecisionResolution(ticket, resolutionType, payload, scope)
 	if err != nil {
 		return nil, nil, err
 	}
-	return ResolveDecision(ctx, hub, ticket, normalizedType, common.RedactSensitiveMap(normalizedPayload))
+	return ResolveDecision(ctx, hub, ticket, normalizedType, common.RedactSensitivePayload(normalizedPayload))
 }
 
-func prepareDecisionResolution(ticket *decisionmodel.Ticket, resolutionType string, payload map[string]any, scope common.WorkspaceID) (map[string]any, string, error) {
+func prepareDecisionResolution(ticket *decisionmodel.Ticket, resolutionType string, payload workorcheventpayload.Payload, scope common.WorkspaceID) (workorcheventpayload.Payload, string, error) {
 	if err := governancecore.EnsureDecisionTicketWorkspaceScope(scope, ticket); err != nil {
-		return nil, "", err
+		return workorcheventpayload.Payload{}, "", err
 	}
 	// State-check is delegated to the kernel: kernel.EnsureResolvedTicketAndReturn
 	// performs an orphan-resolution recovery (accepts matching payload on an
@@ -176,7 +177,7 @@ func prepareDecisionResolution(ticket *decisionmodel.Ticket, resolutionType stri
 	// is the single source of truth for conflict detection.
 	normalizedPayload, normalizedType := governancecore.NormalizeDecisionResolutionPayloadForTicket(ticket, payload, resolutionType)
 	if err := governancecore.ValidateDecisionResolutionPayloadForTicket(ticket, normalizedPayload); err != nil {
-		return nil, "", err
+		return workorcheventpayload.Payload{}, "", err
 	}
 	return normalizedPayload, normalizedType, nil
 }

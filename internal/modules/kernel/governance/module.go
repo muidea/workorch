@@ -93,21 +93,21 @@ func (m *Module) Stop(ctx context.Context) error {
 }
 
 func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
-	response, err := m.executeCommand(ev.Context(), ev.ID(), ev.Data())
+	response, err := m.executeCommand(ev)
 	setGovernanceMagicResult(result, response, err)
 }
 
-func (m *Module) executeCommand(ctx context.Context, topic string, data any) (governanceevents.GovernanceCommandResult, error) {
+func (m *Module) executeCommand(ev magicevent.Event) (governanceevents.GovernanceCommandResult, error) {
 	if m == nil || m.traces == nil {
 		return governanceevents.GovernanceCommandResult{}, common.ErrInvalidArgument
 	}
-	switch topic {
+	switch ev.ID() {
 	case governanceevents.TopicGovernanceAutoCommandListTraces:
-		cmd, ok := data.(governanceevents.ListAutoGovernanceTracesCommand)
+		cmd, ok := ev.Data().(governanceevents.ListAutoGovernanceTracesCommand)
 		if !ok {
 			return governanceevents.GovernanceCommandResult{}, common.ErrInvalidArgument
 		}
-		items, err := m.traces.List(ctx, cmd.Query)
+		items, err := m.traces.List(ev.Context(), cmd.Query)
 		if err != nil {
 			return governanceevents.GovernanceCommandResult{}, err
 		}

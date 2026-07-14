@@ -1,6 +1,9 @@
 package workorchport
 
-import "github.com/muidea/workorch/internal/pkg/common"
+import (
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
 type MemoryRecallHitInfo struct {
 	ID              common.MemoryID
@@ -83,8 +86,8 @@ type LLMUsageTraceInfo struct {
 	RequestBytes  int
 	ResponseBytes int
 	Streaming     bool
-	ContextBudget map[string]any
-	CacheUsage    map[string]any
+	ContextBudget workorcheventpayload.Payload
+	CacheUsage    workorcheventpayload.Payload
 	Status        string
 	FailureClass  string
 	OccurredAt    string
@@ -121,8 +124,8 @@ type LLMContextBudgetTraceInfo struct {
 	TracePolicy           string
 	PromptCaptured        bool
 	Estimator             string
-	Profile               map[string]any
-	CachePlan             map[string]any
+	Profile               workorcheventpayload.Payload
+	CachePlan             workorcheventpayload.Payload
 }
 
 type LLMContextBudgetSummaryInfo struct {
@@ -180,19 +183,19 @@ type LLMUsageProviderModelBreakdownInfo struct {
 }
 
 type EventRecordInfo struct {
-	ID             common.EventRecordID
-	Version        string
-	Topic          string
-	OccurredAt     string
-	SourceModule   string
-	SubjectType    string
-	SubjectID      string
-	WorkspaceID    common.WorkspaceID
-	RunID          common.RunID
-	StepID         common.StepID
-	Payload        map[string]any
-	PayloadSummary map[string]any
-	PayloadRef     string
+	ID           common.EventRecordID
+	Version      string
+	Topic        string
+	OccurredAt   string
+	SourceModule string
+	SubjectType  string
+	SubjectID    string
+	WorkspaceID  common.WorkspaceID
+	RunID        common.RunID
+	StepID       common.StepID
+	Payload      EventRecordPayloadInfo
+	Summary      string
+	PayloadRef   string
 }
 
 type RecoveryPlanInfo struct {
@@ -218,8 +221,8 @@ type RepairLoopInfo struct {
 	LastFailureSignature     string
 	LastFailureTargetScope   string
 	LastFailureAt            string
-	StructuredFailureSignals map[string]any
-	RepairInputCompaction    map[string]any
+	StructuredFailureSignals workorcheventpayload.Payload
+	RepairInputCompaction    workorcheventpayload.Payload
 	LastRepairInputBytes     int
 	RepeatedFailureReason    string
 	NextAction               string
@@ -278,7 +281,7 @@ type TaskDecompositionNodeInfo struct {
 	BlockingTicketID common.TicketID
 	EvidenceRefs     []string
 	CoverageTargets  []string
-	Input            map[string]any
+	Input            workorcheventpayload.Payload
 }
 
 type TaskDecompositionInfo struct {

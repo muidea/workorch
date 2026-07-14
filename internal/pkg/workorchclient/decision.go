@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 // ListDecisions returns all decisions, optionally filtered.
@@ -43,13 +45,13 @@ func (c *Client) GetDecision(ctx context.Context, workspaceID string, ticketID s
 }
 
 // ResolveDecision resolves a decision ticket.
-func (c *Client) ResolveDecision(ctx context.Context, workspaceID, ticketID, resolutionType string, payload map[string]any) (*Decision, error) {
+func (c *Client) ResolveDecision(ctx context.Context, workspaceID, ticketID, resolutionType string, payload workorcheventpayload.Payload) (*Decision, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, fmt.Errorf("workspaceId is required")
 	}
 	req := struct {
-		ResolutionType    string         `json:"resolutionType"`
-		ResolutionPayload map[string]any `json:"resolutionPayload,omitempty"`
+		ResolutionType    string                       `json:"resolutionType"`
+		ResolutionPayload workorcheventpayload.Payload `json:"resolutionPayload,omitempty"`
 	}{ResolutionType: resolutionType, ResolutionPayload: payload}
 	path := fmt.Sprintf("/api/v1/workorch/decisions/%s/resolve", escapePath(ticketID))
 	values := url.Values{}
@@ -64,14 +66,14 @@ func (c *Client) ResolveDecision(ctx context.Context, workspaceID, ticketID, res
 }
 
 // BatchResolveDecisions resolves multiple decision tickets with the same type.
-func (c *Client) BatchResolveDecisions(ctx context.Context, workspaceID string, ticketIDs []string, resolutionType string, payload map[string]any) ([]Decision, error) {
+func (c *Client) BatchResolveDecisions(ctx context.Context, workspaceID string, ticketIDs []string, resolutionType string, payload workorcheventpayload.Payload) ([]Decision, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, fmt.Errorf("workspaceId is required")
 	}
 	req := struct {
-		TicketIDs         []string       `json:"ticketIds"`
-		ResolutionType    string         `json:"resolutionType"`
-		ResolutionPayload map[string]any `json:"resolutionPayload,omitempty"`
+		TicketIDs         []string                     `json:"ticketIds"`
+		ResolutionType    string                       `json:"resolutionType"`
+		ResolutionPayload workorcheventpayload.Payload `json:"resolutionPayload,omitempty"`
 	}{TicketIDs: ticketIDs, ResolutionType: resolutionType, ResolutionPayload: payload}
 	values := url.Values{}
 	if workspaceID != "" {

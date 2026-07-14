@@ -2,56 +2,36 @@ package activationports
 
 import (
 	"context"
-	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const activationRunCommandSource = "application/workorchd/workspace-activation"
 
-func sendActivationMagicCommand[Command any, Result any](ctx context.Context, hub magicevent.Hub, topic string, destination string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, command Command) error {
-	if hub == nil || topic == "" || destination == "" {
+func SupersedeRun(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, runID common.RunID) error {
+	if hub == nil {
 		return common.ErrInvalidArgument
 	}
-	ev := magicevent.NewEventWithContext(topic, activationRunCommandSource, destination, magicevent.NewHeader(), ctx, command)
-	ev.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{
-		SubjectType: subjectType,
-		SubjectID:   subjectID,
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-	}))
-	response := hub.Send(ev)
-	if response == nil {
-		return fmt.Errorf("activation run command %s returned no response", topic)
-	}
-	if responseErr := response.Error(); responseErr != nil {
-		return responseErr
-	}
-	data, resultErr := response.Get()
-	if resultErr != nil {
-		return resultErr
-	}
-	if _, ok := data.(Result); !ok {
-		return fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
-	}
-	return nil
-}
-
-func SupersedeRun(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, runID common.RunID) error {
-	return sendActivationMagicCommand[orchestratorevents.SupersedeRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandSupersedeRun, orchestratorevents.CommandDestination, "run", string(runID), workspaceID, runID, orchestratorevents.SupersedeRunCommand{
+	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandSupersedeRun, activationRunCommandSource, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.SupersedeRunCommand{
 		RunID: runID,
 	})
+	ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorCommandSupersedeRun, "run", string(runID), workspaceID, runID, "")
+	_, err := ownerevent.Orchestrator(hub.Send(event), orchestratorevents.TopicOrchestratorCommandSupersedeRun)
+	return err
 }
 
 func CreateWorkspaceExecutionRun(ctx context.Context, hub magicevent.Hub, runID common.RunID, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, definitionRevision string, runtimeBootstrap *runtimecontract.RuntimeBootstrap, priority int) error {
-	return sendActivationMagicCommand[runevents.CreateRunCommand, runevents.RunCommandResult](ctx, hub, runevents.TopicRunCommandCreate, runevents.CommandDestination, "run", string(runID), workspaceID, runID, runevents.CreateRunCommand{
+	if hub == nil {
+		return common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandCreate, activationRunCommandSource, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.CreateRunCommand{
 		RunID:              runID,
 		WorkspaceID:        workspaceID,
 		GoalID:             goalID,
@@ -61,17 +41,32 @@ func CreateWorkspaceExecutionRun(ctx context.Context, hub magicevent.Hub, runID 
 		RuntimeBootstrap:   runtimeBootstrap,
 		Priority:           priority,
 	})
+	ownerevent.BindLane(event, runevents.TopicRunCommandCreate, "run", string(runID), workspaceID, runID, "")
+	_, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandCreate)
+	return err
 }
 
 func StartRun(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, runID common.RunID) error {
-	return sendActivationMagicCommand[orchestratorevents.StartRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandStartRun, orchestratorevents.CommandDestination, "run", string(runID), workspaceID, runID, orchestratorevents.StartRunCommand{
+	if hub == nil {
+		return common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandStartRun, activationRunCommandSource, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.StartRunCommand{
 		RunID: runID,
 	})
+	ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorCommandStartRun, "run", string(runID), workspaceID, runID, "")
+	_, err := ownerevent.Orchestrator(hub.Send(event), orchestratorevents.TopicOrchestratorCommandStartRun)
+	return err
 }
 
 func FailRun(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, runID common.RunID, failureReason string) error {
-	return sendActivationMagicCommand[orchestratorevents.FailRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandFailRun, orchestratorevents.CommandDestination, "run", string(runID), workspaceID, runID, orchestratorevents.FailRunCommand{
+	if hub == nil {
+		return common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandFailRun, activationRunCommandSource, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.FailRunCommand{
 		RunID:  runID,
 		Reason: failureReason,
 	})
+	ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorCommandFailRun, "run", string(runID), workspaceID, runID, "")
+	_, err := ownerevent.Orchestrator(hub.Send(event), orchestratorevents.TopicOrchestratorCommandFailRun)
+	return err
 }

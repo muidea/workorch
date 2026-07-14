@@ -17,17 +17,19 @@ func TestRuntimeCandidateRequiresAcceptedOperationWhenDeclared(t *testing.T) {
 	decision.AuthoritySnapshot.ID = stableAuthoritySnapshotID(decision.AuthoritySnapshot)
 
 	add := "add"
+	pathspecs := []string{"main.go"}
 	candidate := RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{Operation: RuntimeOperation{
-		ID: "git-add", Kind: "git/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Parameters: []OperationParameter{{Name: "operation", String: &add}},
+		ID: "git-add", Kind: "git/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Parameters: []OperationParameter{{Name: "operation", String: &add}, {Name: "pathspecs", StringList: pathspecs}},
 	}}}}}
 	if err := candidate.Validate(decision); err == nil || !strings.Contains(err.Error(), "requires one accepted operation") {
 		t.Fatalf("candidate error = %v, want accepted operation requirement", err)
 	}
 
 	commit := "commit"
+	message := "commit change"
 	candidate.StateChange.Operations = append(candidate.StateChange.Operations, StateChangingOperation{Operation: RuntimeOperation{
 		ID: "git-commit", Kind: "git/write", DependsOn: []string{"git-add"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
-		Parameters: []OperationParameter{{Name: "operation", String: &commit}},
+		Parameters: []OperationParameter{{Name: "operation", String: &commit}, {Name: "message", String: &message}},
 	}})
 	if err := candidate.Validate(decision); err != nil {
 		t.Fatalf("candidate with commit was rejected: %v", err)

@@ -58,11 +58,11 @@ func hasNonSupersededOutcomeRun(runsByID map[string]*readmodelcore.Run) bool {
 }
 
 func outcomeRunEventState(item *readmodelcore.EventRecord) common.RunState {
-	if item == nil || item.Payload == nil {
+	if item == nil {
 		return ""
 	}
 	for _, key := range []string{"state", "State"} {
-		if value, ok := item.Payload[key].(string); ok {
+		if value, ok := item.Payload.String(key); ok {
 			return common.RunState(value)
 		}
 	}

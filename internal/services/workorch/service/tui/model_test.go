@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
@@ -114,10 +115,10 @@ func TestLatestLLMContextBudgetPrefersProjectedBudgetTrace(t *testing.T) {
 	}, []backend.LLMUsageTraceInfo{
 		{
 			ID: "usage-fallback",
-			ContextBudget: map[string]any{
-				"providerId": "provider-usage",
-				"maxTokens":  1024,
-			},
+			ContextBudget: workorcheventpayload.New(
+				workorcheventpayload.StringField("providerId", "provider-usage"),
+				workorcheventpayload.IntField("maxTokens", 1024),
+			),
 		},
 	})
 	if got["providerId"] != "provider-budget" || got["model"] != "model-budget" || got["maxTokens"] != 8192 {
@@ -1682,7 +1683,8 @@ func TestModelDecisionReplanSlashSubcommandUsesExplicitResolutionType(t *testing
 	if req.TicketID != "ticket-1" || req.ResolutionType != backend.DecisionResolutionTypeReplan {
 		t.Fatalf("decision request = %+v, want explicit replan for ticket-1", req)
 	}
-	if req.Payload["answer"] != "重新规划当前路径" {
+	answer, _ := req.Payload.String("answer")
+	if answer != "重新规划当前路径" {
 		t.Fatalf("payload = %+v, want note as answer", req.Payload)
 	}
 	if m.blockingDecision != nil {
@@ -5668,7 +5670,7 @@ func (f *decisionRecordingBackend) Resolve(ctx context.Context, req backend.Reso
 	f.parent.decisions = append(f.parent.decisions, req)
 	return &backend.DecisionInfo{ID: req.TicketID, State: "resolved"}, nil
 }
-func (f *decisionRecordingBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.TicketID, rt string, p map[string]any) ([]backend.DecisionInfo, error) {
+func (f *decisionRecordingBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.TicketID, rt string, p workorcheventpayload.Payload) ([]backend.DecisionInfo, error) {
 	return nil, nil
 }
 func (f *decisionRecordingBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.DecisionInfo, error) {
@@ -5836,13 +5838,13 @@ func (f *conflictWorkspaceBackend) Delete(ctx context.Context, id common.Workspa
 
 type conflictApprovalBackend struct{}
 
-func (f *conflictApprovalBackend) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...map[string]any) (*backend.ApprovalInfo, error) {
+func (f *conflictApprovalBackend) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*backend.ApprovalInfo, error) {
 	return nil, common.ErrConflict
 }
-func (f *conflictApprovalBackend) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...map[string]any) (*backend.ApprovalInfo, error) {
+func (f *conflictApprovalBackend) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*backend.ApprovalInfo, error) {
 	return nil, common.ErrConflict
 }
-func (f *conflictApprovalBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...map[string]any) ([]backend.ApprovalInfo, error) {
+func (f *conflictApprovalBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...workorcheventpayload.Payload) ([]backend.ApprovalInfo, error) {
 	return nil, nil
 }
 func (f *conflictApprovalBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.ApprovalInfo, error) {
@@ -5902,7 +5904,7 @@ func (b *recordingTUIDecisionBackend) Resolve(_ context.Context, req backend.Res
 	b.requests = append(b.requests, req)
 	return &backend.DecisionInfo{ID: req.TicketID, WorkspaceID: req.WorkspaceID, State: "resolved"}, nil
 }
-func (b *recordingTUIDecisionBackend) BatchResolve(context.Context, common.WorkspaceID, []common.TicketID, string, map[string]any) ([]backend.DecisionInfo, error) {
+func (b *recordingTUIDecisionBackend) BatchResolve(context.Context, common.WorkspaceID, []common.TicketID, string, workorcheventpayload.Payload) ([]backend.DecisionInfo, error) {
 	return nil, nil
 }
 func (b *recordingTUIDecisionBackend) List(context.Context, common.WorkspaceID) ([]backend.DecisionInfo, error) {
@@ -5922,15 +5924,15 @@ type recordingTUIApprovalBackend struct {
 	rejections []recordingTUIApprovalCall
 }
 
-func (b *recordingTUIApprovalBackend) Approve(_ context.Context, wsID common.WorkspaceID, id common.ApprovalID, _ ...map[string]any) (*backend.ApprovalInfo, error) {
+func (b *recordingTUIApprovalBackend) Approve(_ context.Context, wsID common.WorkspaceID, id common.ApprovalID, _ ...workorcheventpayload.Payload) (*backend.ApprovalInfo, error) {
 	b.approvals = append(b.approvals, recordingTUIApprovalCall{WorkspaceID: wsID, ApprovalID: id})
 	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: string(common.ApprovalStateApproved)}, nil
 }
-func (b *recordingTUIApprovalBackend) Reject(_ context.Context, wsID common.WorkspaceID, id common.ApprovalID, _ ...map[string]any) (*backend.ApprovalInfo, error) {
+func (b *recordingTUIApprovalBackend) Reject(_ context.Context, wsID common.WorkspaceID, id common.ApprovalID, _ ...workorcheventpayload.Payload) (*backend.ApprovalInfo, error) {
 	b.rejections = append(b.rejections, recordingTUIApprovalCall{WorkspaceID: wsID, ApprovalID: id})
 	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: string(common.ApprovalStateRejected)}, nil
 }
-func (b *recordingTUIApprovalBackend) BatchResolve(context.Context, common.WorkspaceID, []common.ApprovalID, string, ...map[string]any) ([]backend.ApprovalInfo, error) {
+func (b *recordingTUIApprovalBackend) BatchResolve(context.Context, common.WorkspaceID, []common.ApprovalID, string, ...workorcheventpayload.Payload) ([]backend.ApprovalInfo, error) {
 	return nil, nil
 }
 func (b *recordingTUIApprovalBackend) List(context.Context, common.WorkspaceID) ([]backend.ApprovalInfo, error) {
@@ -6055,7 +6057,7 @@ type fakeDC struct{}
 func (f *fakeDC) Resolve(ctx context.Context, req backend.ResolveDecisionRequest) (*backend.DecisionInfo, error) {
 	return &backend.DecisionInfo{ID: req.TicketID, State: "resolved"}, nil
 }
-func (f *fakeDC) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.TicketID, rt string, p map[string]any) ([]backend.DecisionInfo, error) {
+func (f *fakeDC) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.TicketID, rt string, p workorcheventpayload.Payload) ([]backend.DecisionInfo, error) {
 	return nil, nil
 }
 func (f *fakeDC) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.DecisionInfo, error) {
@@ -6069,15 +6071,15 @@ type fakeA struct {
 	lastPayload map[string]any
 }
 
-func (f *fakeA) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...map[string]any) (*backend.ApprovalInfo, error) {
+func (f *fakeA) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*backend.ApprovalInfo, error) {
 	f.lastPayload = firstFakeApprovalPayload(payload...)
 	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: "approved"}, nil
 }
-func (f *fakeA) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...map[string]any) (*backend.ApprovalInfo, error) {
+func (f *fakeA) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*backend.ApprovalInfo, error) {
 	f.lastPayload = firstFakeApprovalPayload(payload...)
 	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: "rejected"}, nil
 }
-func (f *fakeA) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...map[string]any) ([]backend.ApprovalInfo, error) {
+func (f *fakeA) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...workorcheventpayload.Payload) ([]backend.ApprovalInfo, error) {
 	f.lastPayload = firstFakeApprovalPayload(payload...)
 	return nil, nil
 }
@@ -6088,10 +6090,10 @@ func (f *fakeA) Get(ctx context.Context, wsID common.WorkspaceID, id common.Appr
 	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, Reason: "reason", State: "pending"}, nil
 }
 
-func firstFakeApprovalPayload(payload ...map[string]any) map[string]any {
+func firstFakeApprovalPayload(payload ...workorcheventpayload.Payload) map[string]any {
 	for _, candidate := range payload {
-		if len(candidate) > 0 {
-			return candidate
+		if len(candidate.Fields) > 0 {
+			return candidate.Map()
 		}
 	}
 	return nil

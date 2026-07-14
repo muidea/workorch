@@ -4,133 +4,145 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-05-30
+Last Updated: 2026-07-14
 
 ## Purpose
 
-本文件定义从 workspace definition 到 execution activation，再到首个
-`llm/workspace_execution` Step 的形成链路。
+本文件定义从正式 Workspace / Goal / DoD 到 **typed Runtime V2 activation**，再到
+`InitializeRuntimeV2FromRun` 生成 initial facts 的链路。
+
+生产主线不创建 V1 首个 `llm/workspace_execution` Step、不组装 V1 execution-context map，
+也不以 graph dispatch 作为 activation 输出。
 
 ## Flow
 
 ```text
 Workspace / Goal / DoD / Soul / Skill / MCP / Memory selection
--> execution activation request
--> appservice validation
--> Workspace / Goal / DoD / context resolution
--> Run creation
--> activation context assembly
--> first Step input assembly
--> orchestrator dispatches llm/workspace_execution
+  -> application activation (resolve definition + activation context)
+  -> seal RuntimeBootstrap
+       Definition: RuntimeDefinitionContext
+       Activation: RuntimeActivationContext
+       Focuses: CoverageFocus queue
+       Requirements: RuntimeRequirement[]
+  -> Run creation (persist typed bootstrap on Run owner)
+  -> Start: project pending -> active, then DriveRuntimeV2
+  -> InitializeRuntimeV2FromRun
+       load persisted typed bootstrap only
+       InitialFacts (focus[0] + remaining queue)
+       preflight / reducer
+  -> first drive transition (prerequisite or candidate)
 ```
 
 ## Main Stages
 
 ### 1. Definition Resolution
 
-activation 前必须明确：
+activation 前必须明确并可校验：
 
 - 当前 Workspace
-- 当前有效 Goal / DoD
-- 当前 Soul / Skill / MCP / Memory 选择
-- 当前 deliverable / internal directory 边界
+- 当前有效 Goal / DoD 与 `definitionRevision`
+- 当前 Soul / Skill / MCP / Memory 选择（进入 `RuntimeActivationContext`）
+- deliverable / internal directory 边界（供 prerequisite / target snapshot 使用）
 
-如果 Goal / DoD 缺失、无效或不完整，activation 不应进入实际运行。
+Goal / DoD 缺失、无效或不完整时，activation 不得进入 Run 创建。
 
-#### Definition Change Impact
+`RuntimeDefinitionContext` 在 Run owner 中封存；后续 candidate request 与重启恢复
+**只能读取**该持久化定义快照，不能由调用方临时重建。
 
-activation 在读取 Workspace / Goal / DoD 时，至少需要判断：
+definition 漂移（revision、Goal/DoD identity、正文、capability contract 任一变化）
+在后续 commit 时必须返回 conflict。
 
-- 当前 run 是否仍基于最新 `definitionRevision`
-- 旧 revision 的 active coverage / repair scope 是否还能沿用
-- 当前 activation 是否需要重建 baseline、selectedContext 或 successor scope
+### 2. Typed RuntimeBootstrap
 
-稳定方向：
+activation 的正式产物是 **typed `RuntimeBootstrap`**，而不是 V1 execution context map。
 
-- activation 只消费当前 effective definition
-- superseded / historical 的旧 Goal / DoD 只能作为 lineage reference
-- definition change impact 是 activation 前置判断，不应等到 repair / acceptance 阶段才第一次发现
-
-### 2. Execution Activation
-
-activation 的职责是把“正式定义”和“当前上下文选择”变成一个新的 Run。
-
-activation 不应直接承担：
-
-- 最终业务结果判断
-- graph 调度
-- tool 执行
-- patch 应用
-
-#### Activation Vs Workspace Setup
-
-activation 与 workspace setup / draft session 是不同入口：
-
-| 入口 | 当前职责 |
-| --- | --- |
-| workspace setup / draft | 创建前澄清、模板建议、Soul 预选、Goal/DoD 草案 |
-| execution activation | 基于已确认并已落库的正式 Workspace / Goal / DoD / bindings 创建新的 Run |
+```text
+RuntimeBootstrap
+  Definition   RuntimeDefinitionContext
+  Activation   RuntimeActivationContext
+  Focuses      []CoverageFocus          // 至少 1 个；含 coverage work items + evidence/assessment 要求
+  Requirements []RuntimeRequirement     // prerequisite 需求（capability / manifest 等）
+```
 
 约束：
 
-- setup draft 不创建 Run
-- activation 不负责生成创建前草案
-- template / draft / Soul guidance 只能影响 activation 的输入基线，不能替代正式定义
+- bootstrap 必须 `Validate()` 通过后才能落库
+- focus 需要 identity、coverage work item IDs，以及 required evidence kinds 或 `RequireAssessment`
+- `RuntimeActivationContext` 只保存 provider-facing 稳定内容快照（Soul/Skill/MCP/Memory、
+  evidence policies、execution contract、continuation 摘要），不保存 provider/model 动态绑定
+- 不使用 map / JSON bridge 表达组件合同
 
-### 3. Initial Context Materialization
+#### Activation Vs Workspace Setup
 
-Run 创建后，需要把 activation 结果转化为首个 LLM Step 可消费的运行时输入。
+| 入口 | 职责 |
+| --- | --- |
+| workspace setup / draft | 创建前澄清、模板建议、Soul 预选、Goal/DoD 草案；**不创建 Run** |
+| execution activation | 基于已确认并已落库的正式定义，封存 `RuntimeBootstrap` 并创建 V2 Run |
 
-该输入至少应包含：
+template / draft / Soul guidance 只能影响 activation 输入基线，不能替代正式定义。
 
-- 当前 Goal / DoD
-- 当前 stage / requested action
-- 选中的 Skill / Soul / MCP / Memory 上下文
-- 当前 workspace 已知资源摘要
-- 当前 definition revision / lineage
-- 当前 activation 形成的 coverage baseline / 初始 work item scope
+### 3. InitializeRuntimeV2FromRun（幂等）
 
-稳定要求：
+`InitializeRuntimeV2FromRun` 只做：
 
-- activation 必须基于当前 effective definition 形成首轮 coverage baseline
-- 若 definition revision 已变化，旧 revision 的 active coverage/work item 不得直接复用为新 run 的初始 scope
-- 首个 step input 至少应能看到当前 definition 对应的初始收敛面，而不是等到 verification / repair 再补建 coverage ledger
+1. 读取 Run owner 已持久化的 typed bootstrap / aggregate
+2. 若尚无 V2 state：由 bootstrap 生成 `InitialFacts`，执行 preflight 与首轮 reducer
+3. 若已有 aggregate：只加载，**不得**因重复 Start/Resume 再次执行 reducer 或增加 attempt
 
-#### Successor Activation Inheritance
+禁止：
 
-当 activation 来源于 replan successor、governance continuation 或 definition change 后的新 run 时，
-至少应稳定继承：
+- 解析 V1 execution context map 重建定义或 focus
+- 在 Initialize 中直接请求 LLM 或执行 operation
+- 以 `RuntimeBootstrap == nil` 保留兼容路由；缺少 typed bootstrap 必须失败并投影 typed terminal
 
-- predecessor failure context 的必要摘要
-- 当前 effective Goal / DoD definition revision
-- 仍有效的 selected Skill / Soul / MCP / Memory 选择
-- superseded / historical run 只作为 lineage reference，不得直接污染新的 active contract
+### 4. Start / Resume Entry
 
-不应直接继承：
+| 入口 | 行为 |
+| --- | --- |
+| Start | 原子投影 pending Run 为 active，再由 Orchestrator 后台执行唯一 `DriveRuntimeV2` |
+| Resume | 只携带 workspace/run scope；只允许 active 或已解决 blocker 的 Run；进入同一 drive |
 
-- 旧 revision 的 active coverage scope
-- 已被 superseded 的 failure focus
-- 已失效的 target snapshot / rejected output / wrapper failure 壳
+约束：
+
+- application **不再**拥有 Start/Resume continuation queue
+- Orchestrator service **不**暴露 execution-context-patch resume facade、`StartRun`、
+  `DispatchNextStep`、`ResumeRun` 或自动 replan lifecycle
+- `ResumeRunCommand` **不得**重新注入 loaded Run、`ExecutionContextPatch` 或其他 V1 continuation payload
+- 上下文变化只能通过**新的** Runtime V2 activation/bootstrap 表达（新 Run）
+
+### 5. Successor / Continuation Semantics
+
+Runtime V2 **不自动创建** V1 replan successor。
+
+当需要重新定义目标或执行基准时：
+
+- 必须通过新的 typed activation/bootstrap 创建**独立** V2 Run
+- 旧 Run 的 supersede / lineage 只作为历史引用
+- 新 Run **不得**机械复制旧 active focus、stale target snapshot 或已失效 failure surface
+
+若 activation 携带 `RuntimeContinuationContext`，它只表达仍有效的 contract / lineage 摘要，
+不表达 V1 patch resume 或 graph continuation。
 
 ## Key Flow Guarantees
 
-- activation 必须围绕正式 Goal / DoD 定义工作，不能只依赖旧 run 历史
-- activation 生成的是 Run，而不是直接生成最终输出
-- 首个 step 必须是正式的 `llm/workspace_execution`
-- Memory recall / selectedContext 应该在此时留下 activation 侧的过程证据
-- definition change 必须先影响 activation 输入基线，而不是让旧 revision 默认继续执行
-- successor activation 只能继承仍有效的 contract / context / lineage，而不能机械复制旧 run 活跃状态
+- activation 围绕正式 Goal / DoD 与 typed bootstrap 工作
+- activation 生成的是 V2 Run + 封存 definition/activation/focus，而不是最终业务结果
+- Initialize 幂等：重启与重复 Drive 只加载 aggregate
+- definition revision 在 facts、authority transaction、candidate 之间必须一致
+- 生产入口缺少 typed bootstrap 必须失败，禁止 V1 兼容回落
 
 ## Output
 
 activation 的正式输出是：
 
-- 新的 Run
-- 初始 execution context
-- 首个 LLM Step 的 dispatch 前提
+- 新的 V2 Run（含持久化 `RuntimeBootstrap`）
+- 经 Initialize 得到的 initial `RuntimeFacts` / `RuntimeStateRecord`
+- 进入 `DriveRuntimeV2` 的前提（首个 reducer decision）
 
 ## Source Documents
 
-- `planning-execution-flow.md`
+- [overview.md](overview.md)
+- [planning-execution-flow.md](planning-execution-flow.md)
 - `../00-core/runtime-stage-contract.md`
-- `../50-product-interface/service-api.md`
+- `../../internal/modules/kernel/orchestrator/readme.md`
+- `../../internal/pkg/workorchruntimecontract`（`runtime_bootstrap.go`、`runtime_activation.go`、`runtime_definition.go`）

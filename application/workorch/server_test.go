@@ -20,8 +20,18 @@ import (
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 )
+
+func mustWorkorchStepPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
+	t.Helper()
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
 
 type workorchWorkspaceResponse struct {
 	Service   string `json:"service"`
@@ -613,7 +623,7 @@ func seedBlockedApprovalRunForProcess(t *testing.T, dataRoot string, workspaceID
 		RunID:  common.RunID(runID),
 		Kind:   llmcommon.StepKindWorkspaceExecution,
 		State:  common.StepStateSucceeded,
-		Output: map[string]any{"stage": "blocked_on_approval"},
+		Output: mustWorkorchStepPayload(t, map[string]any{"stage": "blocked_on_approval"}),
 	}); err != nil {
 		t.Fatalf("seed approval step: %v", err)
 	}

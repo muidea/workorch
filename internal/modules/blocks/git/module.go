@@ -10,6 +10,7 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const ModuleID = modulecommon.ModuleID
@@ -61,14 +62,14 @@ func (m *Module) Start() error {
 	}
 	m.capabilityObserver = magicevent.NewSimpleObserver(ModuleID, m.eventHub)
 	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
-	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteRuntimeOperation, m.handleRuntimeOperation)
+	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteGitOperation, m.handleGitOperation)
 	return nil
 }
 
 func (m *Module) Stop(ctx context.Context) error {
 	_ = ctx
 	if m.capabilityObserver != nil {
-		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteRuntimeOperation)
+		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteGitOperation)
 		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
 	}
 	m.capabilityObserver = nil
@@ -77,18 +78,77 @@ func (m *Module) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (m *Module) handleRuntimeOperation(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.ExecuteRuntimeOperationCommand)
+func (m *Module) handleGitOperation(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.ExecuteGitOperationCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	response, err := orchestratorevents.ExecuteRuntimeOperation(event.Context(), command, m.runtimeAdapter)
-	if err != nil {
+	if err := orchestratorevents.ValidateRuntimeOperationScope(command.WorkspaceID, command.RunID, command.DispatchID, command.Transaction, command.OperationID, command.EvidenceKind, command.WorkspaceDeliverableDirectory); err != nil {
 		setCapabilityError(result, err)
 		return
 	}
+	operationResult, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), gitbiz.RuntimeOperationRequest{
+		WorkspaceID: command.WorkspaceID, RunID: command.RunID, StepID: common.StepID(command.DispatchID + "/" + command.OperationID),
+		Kind: command.OperationKind, WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
+		WorkspaceInternalDirectory: command.WorkspaceInternalDirectory,
+		Operation:                  command.Data.Operation, TimeoutMillis: command.Data.TimeoutMillis, Pathspecs: command.Data.Pathspecs,
+		Ref: command.Data.Ref, BaseRef: command.Data.BaseRef, Limit: command.Data.Limit,
+		Message: command.Data.Message, ExpectedHead: command.Data.ExpectedHead, EvidencePolicies: command.EvidencePolicies,
+	})
+	response := orchestratorevents.ExecuteGitOperationResult{
+		EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID,
+		EvidenceKind: command.EvidenceKind, Status: runtimecontract.RuntimeOperationExecutionStatusAccepted,
+		SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: operationResult.Evidence,
+		Data: orchestratorevents.GitOperationResultData{
+			Status: operationResult.Status, Stage: operationResult.Stage, Operation: operationResult.Operation,
+			RepoRoot: operationResult.RepoRoot, WorkingDirectory: operationResult.WorkingDirectory, Branch: operationResult.Branch,
+			HeadCommit: operationResult.HeadCommit, HeadCommitBefore: operationResult.HeadCommitBefore, HeadCommitAfter: operationResult.HeadCommitAfter,
+			DetachedHead: operationResult.DetachedHead, UnbornHead: operationResult.UnbornHead,
+			Stdout: operationResult.Stdout, Stderr: operationResult.Stderr, ExitCode: operationResult.ExitCode,
+			DurationMillis: operationResult.DurationMillis, TimeoutMillis: operationResult.TimeoutMillis, Truncated: operationResult.Truncated,
+			ErrorCode: operationResult.ErrorCode, ErrorMessage: operationResult.ErrorMessage, Summary: operationResult.Summary,
+			ZeroWork: operationResult.ZeroWork, Initialized: operationResult.Initialized, ExistingRepository: operationResult.ExistingRepository,
+			Pathspecs: operationResult.Pathspecs, Ref: operationResult.Ref, Limit: operationResult.Limit,
+			LimitClamped: operationResult.LimitClamped, Message: operationResult.Message,
+			CommitHash: operationResult.CommitHash, CommitSubject: operationResult.CommitSubject,
+			ChangedFiles:   gitFileChangesToEventData(operationResult.ChangedFiles),
+			StagedFiles:    gitFileChangesToEventData(operationResult.StagedFiles),
+			CommittedFiles: gitFileChangesToEventData(operationResult.CommittedFiles),
+			Commits:        gitCommitsToEventData(operationResult.Commits),
+			Branches:       gitBranchesToEventData(operationResult.Branches),
+			AheadBehind:    orchestratorevents.GitAheadBehindData{Ahead: operationResult.AheadBehind.Ahead, Behind: operationResult.AheadBehind.Behind},
+		},
+	}
+	if executeErr != nil {
+		response.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
+		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, command.OperationKind, operationResult.ErrorCode, operationResult.ErrorMessage, command.TargetRefs)
+	}
 	result.Set(response, nil)
+}
+
+func gitFileChangesToEventData(values []gitbiz.GitFileChange) []orchestratorevents.GitFileChangeData {
+	ret := make([]orchestratorevents.GitFileChangeData, 0, len(values))
+	for _, value := range values {
+		ret = append(ret, orchestratorevents.GitFileChangeData{Path: value.Path, OldPath: value.OldPath, Status: value.Status, Staged: value.Staged, Unstaged: value.Unstaged, Untracked: value.Untracked})
+	}
+	return ret
+}
+
+func gitCommitsToEventData(values []gitbiz.GitCommit) []orchestratorevents.GitCommitData {
+	ret := make([]orchestratorevents.GitCommitData, 0, len(values))
+	for _, value := range values {
+		ret = append(ret, orchestratorevents.GitCommitData{Hash: value.Hash, ShortHash: value.ShortHash, Author: value.Author, AuthorTime: value.AuthorTime, Subject: value.Subject})
+	}
+	return ret
+}
+
+func gitBranchesToEventData(values []gitbiz.GitBranch) []orchestratorevents.GitBranchData {
+	ret := make([]orchestratorevents.GitBranchData, 0, len(values))
+	for _, value := range values {
+		ret = append(ret, orchestratorevents.GitBranchData{Name: value.Name, Commit: value.Commit, Current: value.Current, Upstream: value.Upstream})
+	}
+	return ret
 }
 
 func (m *Module) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {

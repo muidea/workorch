@@ -119,15 +119,39 @@ func (m *Module) Service() Service {
 }
 
 func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
-	response, err := m.executeCommand(ev.Context(), ev.ID(), ev.Data())
+	response, err := m.executeCommand(ev)
 	setRunMagicResult(result, response, err)
 }
 
-func (m *Module) executeCommand(ctx context.Context, topic string, data any) (runevents.RunCommandResult, error) {
+func (m *Module) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, error) {
+	ctx := ev.Context()
+	topic := ev.ID()
+	data := ev.Data()
 	if m == nil || m.runs == nil || m.servicePtr == nil {
 		return runevents.RunCommandResult{}, common.ErrInvalidArgument
 	}
-	if workspaceID := runCommandWorkspaceID(data); workspaceID != "" {
+	workspaceID := common.WorkspaceID("")
+	switch cmd := data.(type) {
+	case runevents.CreateRunCommand:
+		workspaceID = cmd.WorkspaceID
+	case runevents.GetRunCommand:
+		workspaceID = cmd.WorkspaceID
+	case runevents.ListRunsByWorkspaceCommand:
+		workspaceID = cmd.WorkspaceID
+	case runevents.GetStepCommand:
+		workspaceID = cmd.WorkspaceID
+	case runevents.ListStepsByRunCommand:
+		workspaceID = cmd.WorkspaceID
+	case runevents.GetRuntimeCheckpointCommand:
+		workspaceID = cmd.WorkspaceID
+	case runevents.ListRuntimeCheckpointsByRunCommand:
+		workspaceID = cmd.WorkspaceID
+	case runevents.UpdateRunCommand:
+		workspaceID = cmd.WorkspaceID
+	case runevents.DeleteRunCommand:
+		workspaceID = cmd.WorkspaceID
+	}
+	if workspaceID != "" {
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 	}
 	switch topic {
@@ -310,31 +334,6 @@ func (m *Module) publishRunUpdated(ctx context.Context, item *runmodel.Run) {
 	event := magicevent.NewEventWithContext(runevents.TopicRunStateChanged, modulecommon.ModuleID, runevents.NotificationDestination, magicevent.NewHeader(), ctx, runevents.RunStateChangedDataFromModel(item))
 	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{SubjectType: "run", SubjectID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.ID)}))
 	m.eventHub.Post(event)
-}
-
-func runCommandWorkspaceID(data any) common.WorkspaceID {
-	switch cmd := data.(type) {
-	case runevents.CreateRunCommand:
-		return cmd.WorkspaceID
-	case runevents.GetRunCommand:
-		return cmd.WorkspaceID
-	case runevents.ListRunsByWorkspaceCommand:
-		return cmd.WorkspaceID
-	case runevents.GetStepCommand:
-		return cmd.WorkspaceID
-	case runevents.ListStepsByRunCommand:
-		return cmd.WorkspaceID
-	case runevents.GetRuntimeCheckpointCommand:
-		return cmd.WorkspaceID
-	case runevents.ListRuntimeCheckpointsByRunCommand:
-		return cmd.WorkspaceID
-	case runevents.UpdateRunCommand:
-		return cmd.WorkspaceID
-	case runevents.DeleteRunCommand:
-		return cmd.WorkspaceID
-	default:
-		return ""
-	}
 }
 
 func runStateFilter(states []common.RunState) map[common.RunState]struct{} {

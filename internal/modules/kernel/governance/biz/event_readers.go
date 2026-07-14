@@ -13,6 +13,7 @@ import (
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -24,7 +25,12 @@ type eventTicketReader struct {
 
 func (r eventTicketReader) Get(ctx context.Context, id common.TicketID) (*decisionmodel.Ticket, error) {
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	response, err := sendOwnerMagicCommand[decisionevents.GetTicketCommand, decisionevents.DecisionCommandResult](ctx, r.hub, decisionevents.TopicDecisionCommandGetTicket, decisionevents.CommandDestination, "decision_ticket", string(id), workspaceID, "", "", decisionevents.GetTicketCommand{WorkspaceID: workspaceID, TicketID: id})
+	if r.hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandGetTicket, governancecommon.ModuleID, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.GetTicketCommand{WorkspaceID: workspaceID, TicketID: id})
+	bindOwnerLane(event, decisionevents.TopicDecisionCommandGetTicket, "decision_ticket", string(id), workspaceID, "", "")
+	response, err := decisionResponse(r.hub.Send(event), decisionevents.TopicDecisionCommandGetTicket)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +46,12 @@ type eventResolutionReader struct {
 
 func (r eventResolutionReader) GetByTicketID(ctx context.Context, ticketID common.TicketID) (*decisionmodel.Resolution, error) {
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	response, err := sendOwnerMagicCommand[decisionevents.GetResolutionCommand, decisionevents.DecisionCommandResult](ctx, r.hub, decisionevents.TopicDecisionCommandGetResolution, decisionevents.CommandDestination, "decision_ticket", string(ticketID), workspaceID, "", "", decisionevents.GetResolutionCommand{WorkspaceID: workspaceID, TicketID: ticketID})
+	if r.hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandGetResolution, governancecommon.ModuleID, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.GetResolutionCommand{WorkspaceID: workspaceID, TicketID: ticketID})
+	bindOwnerLane(event, decisionevents.TopicDecisionCommandGetResolution, "decision_ticket", string(ticketID), workspaceID, "", "")
+	response, err := decisionResponse(r.hub.Send(event), decisionevents.TopicDecisionCommandGetResolution)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +67,12 @@ type eventApprovalReader struct {
 
 func (r eventApprovalReader) Get(ctx context.Context, id common.ApprovalID) (*approvalmodel.Approval, error) {
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	response, err := sendOwnerMagicCommand[approvalevents.GetApprovalCommand, approvalevents.ApprovalCommandResult](ctx, r.hub, approvalevents.TopicApprovalCommandGet, approvalevents.CommandDestination, "approval", string(id), workspaceID, "", "", approvalevents.GetApprovalCommand{WorkspaceID: workspaceID, ApprovalID: id})
+	if r.hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandGet, governancecommon.ModuleID, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, approvalevents.GetApprovalCommand{WorkspaceID: workspaceID, ApprovalID: id})
+	bindOwnerLane(event, approvalevents.TopicApprovalCommandGet, "approval", string(id), workspaceID, "", "")
+	response, err := approvalResponse(r.hub.Send(event), approvalevents.TopicApprovalCommandGet)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +88,12 @@ type eventRunReader struct {
 
 func (r eventRunReader) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	response, err := sendOwnerMagicCommand[runevents.GetRunCommand, runevents.RunCommandResult](ctx, r.hub, runevents.TopicRunCommandGet, runevents.CommandDestination, "run", string(id), workspaceID, id, "", runevents.GetRunCommand{WorkspaceID: workspaceID, RunID: id})
+	if r.hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandGet, governancecommon.ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.GetRunCommand{WorkspaceID: workspaceID, RunID: id})
+	bindOwnerLane(event, runevents.TopicRunCommandGet, "run", string(id), workspaceID, id, "")
+	response, err := runResponse(r.hub.Send(event), runevents.TopicRunCommandGet)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +104,12 @@ func (r eventRunReader) Get(ctx context.Context, id common.RunID) (*runmodel.Run
 }
 
 func (r eventRunReader) GetByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
-	response, err := sendOwnerMagicCommand[runevents.GetRunCommand, runevents.RunCommandResult](ctx, r.hub, runevents.TopicRunCommandGet, runevents.CommandDestination, "run", string(id), workspaceID, id, "", runevents.GetRunCommand{WorkspaceID: workspaceID, RunID: id})
+	if r.hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandGet, governancecommon.ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.GetRunCommand{WorkspaceID: workspaceID, RunID: id})
+	bindOwnerLane(event, runevents.TopicRunCommandGet, "run", string(id), workspaceID, id, "")
+	response, err := runResponse(r.hub.Send(event), runevents.TopicRunCommandGet)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +120,13 @@ func (r eventRunReader) GetByWorkspaceID(ctx context.Context, workspaceID common
 }
 
 func (r eventRunReader) List(ctx context.Context) ([]*runmodel.Run, error) {
-	response, err := sendOwnerMagicCommand[runevents.ListRunsCommand, runevents.RunCommandResult](ctx, r.hub, runevents.TopicRunCommandList, runevents.CommandDestination, "run", "all", "", "", "", runevents.ListRunsCommand{})
+	if r.hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandList, governancecommon.ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.ListRunsCommand{})
+	bindOwnerLane(event, runevents.TopicRunCommandList, "run", "all", workspaceID, "", "")
+	response, err := runResponse(r.hub.Send(event), runevents.TopicRunCommandList)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +139,12 @@ type eventWorkspaceReader struct {
 
 func (r eventWorkspaceReader) GetGoal(ctx context.Context, id common.GoalID) (*workspacemodel.Goal, error) {
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	response, err := sendOwnerMagicCommand[workspaceevents.GetGoalCommand, workspaceevents.WorkspaceCommandResult](ctx, r.hub, workspaceevents.TopicWorkspaceCommandGetGoal, workspaceevents.CommandDestination, "goal", string(id), workspaceID, "", "", workspaceevents.GetGoalCommand{WorkspaceID: workspaceID, GoalID: id})
+	if r.hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGetGoal, governancecommon.ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.GetGoalCommand{WorkspaceID: workspaceID, GoalID: id})
+	bindOwnerLane(event, workspaceevents.TopicWorkspaceCommandGetGoal, "goal", string(id), workspaceID, "", "")
+	response, err := workspaceResponse(r.hub.Send(event), workspaceevents.TopicWorkspaceCommandGetGoal)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +156,12 @@ func (r eventWorkspaceReader) GetGoal(ctx context.Context, id common.GoalID) (*w
 
 func (r eventWorkspaceReader) GetDoD(ctx context.Context, id common.DoDID) (*workspacemodel.DoD, error) {
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	response, err := sendOwnerMagicCommand[workspaceevents.GetDoDCommand, workspaceevents.WorkspaceCommandResult](ctx, r.hub, workspaceevents.TopicWorkspaceCommandGetDoD, workspaceevents.CommandDestination, "dod", string(id), workspaceID, "", "", workspaceevents.GetDoDCommand{WorkspaceID: workspaceID, DoDID: id})
+	if r.hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGetDoD, governancecommon.ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.GetDoDCommand{WorkspaceID: workspaceID, DoDID: id})
+	bindOwnerLane(event, workspaceevents.TopicWorkspaceCommandGetDoD, "dod", string(id), workspaceID, "", "")
+	response, err := workspaceResponse(r.hub.Send(event), workspaceevents.TopicWorkspaceCommandGetDoD)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +176,12 @@ type eventMemoryReader struct {
 }
 
 func (r eventMemoryReader) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*memorymodel.MemoryItem, error) {
-	response, err := sendOwnerMagicCommand[memoryevents.ListMemoryByWorkspaceCommand, memoryevents.MemoryCommandResult](ctx, r.hub, memoryevents.TopicMemoryCommandListByWorkspace, memoryevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", "", memoryevents.ListMemoryByWorkspaceCommand{WorkspaceID: workspaceID})
+	if r.hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandListByWorkspace, governancecommon.ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.ListMemoryByWorkspaceCommand{WorkspaceID: workspaceID})
+	bindOwnerLane(event, memoryevents.TopicMemoryCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
+	response, err := memoryResponse(r.hub.Send(event), memoryevents.TopicMemoryCommandListByWorkspace)
 	if err != nil {
 		return nil, err
 	}

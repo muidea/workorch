@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func TestClientDecodesWorkspaceProjectionMetadata(t *testing.T) {
@@ -90,7 +92,7 @@ func TestClientGovernanceRequestsCarryWorkspaceScope(t *testing.T) {
 			bodyKey:   "resolutionType",
 			bodyValue: "accept",
 			call: func(ctx context.Context, client *Client) error {
-				decision, err := client.ResolveDecision(ctx, workspaceID, "ticket-1", "accept", map[string]any{"ok": true})
+				decision, err := client.ResolveDecision(ctx, workspaceID, "ticket-1", "accept", workorcheventpayload.New(workorcheventpayload.BoolField("ok", true)))
 				if err != nil {
 					return err
 				}
@@ -108,7 +110,7 @@ func TestClientGovernanceRequestsCarryWorkspaceScope(t *testing.T) {
 			bodyKey:   "resolutionType",
 			bodyValue: "accept",
 			call: func(ctx context.Context, client *Client) error {
-				decisions, err := client.BatchResolveDecisions(ctx, workspaceID, []string{"ticket-1"}, "accept", nil)
+				decisions, err := client.BatchResolveDecisions(ctx, workspaceID, []string{"ticket-1"}, "accept", workorcheventpayload.Payload{})
 				if err != nil {
 					return err
 				}

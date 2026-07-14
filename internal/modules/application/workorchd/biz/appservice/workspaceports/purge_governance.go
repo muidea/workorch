@@ -8,13 +8,16 @@ import (
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func purgeWorkspaceDecisionTickets(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) error {
-	response, err := sendWorkspaceMagicCommand[decisionevents.ListTicketsByWorkspaceCommand, decisionevents.DecisionCommandResult](ctx, hub, decisionevents.TopicDecisionCommandListTicketsByWS, decisionevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", decisionevents.ListTicketsByWorkspaceCommand{
+	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandListTicketsByWS, sourceModule, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.ListTicketsByWorkspaceCommand{
 		WorkspaceID: workspaceID,
 	})
+	ownerevent.BindLane(event, decisionevents.TopicDecisionCommandListTicketsByWS, "workspace", string(workspaceID), workspaceID, "", "")
+	response, err := ownerevent.Decision(hub.Send(event), decisionevents.TopicDecisionCommandListTicketsByWS)
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
 			return nil
@@ -26,18 +29,22 @@ func purgeWorkspaceDecisionTickets(ctx context.Context, hub magicevent.Hub, work
 		if item == nil || item.WorkspaceID != workspaceID {
 			continue
 		}
-		_, _ = sendWorkspaceMagicCommand[decisionevents.DeleteResolutionCommand, decisionevents.DecisionCommandResult](ctx, hub, decisionevents.TopicDecisionCommandDeleteResolution, decisionevents.CommandDestination, "decision_ticket", string(item.ID), workspaceID, item.RunID, decisionevents.DeleteResolutionCommand{
+		resolutionEvent := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandDeleteResolution, sourceModule, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.DeleteResolutionCommand{
 			TicketID:    item.ID,
 			WorkspaceID: workspaceID,
 			RunID:       item.RunID,
 			StepID:      item.StepID,
 		})
-		_, err := sendWorkspaceMagicCommand[decisionevents.DeleteTicketCommand, decisionevents.DecisionCommandResult](ctx, hub, decisionevents.TopicDecisionCommandDeleteTicket, decisionevents.CommandDestination, "decision_ticket", string(item.ID), workspaceID, item.RunID, decisionevents.DeleteTicketCommand{
+		ownerevent.BindLane(resolutionEvent, decisionevents.TopicDecisionCommandDeleteResolution, "decision_ticket", string(item.ID), workspaceID, item.RunID, item.StepID)
+		_, _ = ownerevent.Decision(hub.Send(resolutionEvent), decisionevents.TopicDecisionCommandDeleteResolution)
+		ticketEvent := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandDeleteTicket, sourceModule, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.DeleteTicketCommand{
 			TicketID:    item.ID,
 			WorkspaceID: workspaceID,
 			RunID:       item.RunID,
 			StepID:      item.StepID,
 		})
+		ownerevent.BindLane(ticketEvent, decisionevents.TopicDecisionCommandDeleteTicket, "decision_ticket", string(item.ID), workspaceID, item.RunID, item.StepID)
+		_, err := ownerevent.Decision(hub.Send(ticketEvent), decisionevents.TopicDecisionCommandDeleteTicket)
 		if err != nil && !errors.Is(err, common.ErrNotFound) {
 			return err
 		}
@@ -46,9 +53,11 @@ func purgeWorkspaceDecisionTickets(ctx context.Context, hub magicevent.Hub, work
 }
 
 func purgeWorkspaceApprovals(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) error {
-	response, err := sendWorkspaceMagicCommand[approvalevents.ListApprovalsByWorkspaceCommand, approvalevents.ApprovalCommandResult](ctx, hub, approvalevents.TopicApprovalCommandListByWorkspace, approvalevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", approvalevents.ListApprovalsByWorkspaceCommand{
+	event := magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandListByWorkspace, sourceModule, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, approvalevents.ListApprovalsByWorkspaceCommand{
 		WorkspaceID: workspaceID,
 	})
+	ownerevent.BindLane(event, approvalevents.TopicApprovalCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
+	response, err := ownerevent.Approval(hub.Send(event), approvalevents.TopicApprovalCommandListByWorkspace)
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
 			return nil
@@ -60,12 +69,14 @@ func purgeWorkspaceApprovals(ctx context.Context, hub magicevent.Hub, workspaceI
 		if item == nil || item.WorkspaceID != workspaceID {
 			continue
 		}
-		_, err := sendWorkspaceMagicCommand[approvalevents.DeleteApprovalCommand, approvalevents.ApprovalCommandResult](ctx, hub, approvalevents.TopicApprovalCommandDelete, approvalevents.CommandDestination, "approval", string(item.ID), workspaceID, item.RunID, approvalevents.DeleteApprovalCommand{
+		event := magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandDelete, sourceModule, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, approvalevents.DeleteApprovalCommand{
 			ApprovalID:  item.ID,
 			WorkspaceID: workspaceID,
 			RunID:       item.RunID,
 			StepID:      item.StepID,
 		})
+		ownerevent.BindLane(event, approvalevents.TopicApprovalCommandDelete, "approval", string(item.ID), workspaceID, item.RunID, item.StepID)
+		_, err := ownerevent.Approval(hub.Send(event), approvalevents.TopicApprovalCommandDelete)
 		if err != nil && !errors.Is(err, common.ErrNotFound) {
 			return err
 		}

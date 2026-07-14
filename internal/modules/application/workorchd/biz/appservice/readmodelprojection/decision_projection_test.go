@@ -5,7 +5,17 @@ import (
 
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
+
+func mustProjectionPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
+	t.Helper()
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
 
 func TestMapDecisionProjectsFailureRecoveryFields(t *testing.T) {
 	item := &decisionmodel.Ticket{
@@ -19,11 +29,11 @@ func TestMapDecisionProjectsFailureRecoveryFields(t *testing.T) {
 		AllowedRecoveryActions: []string{"resume"},
 		ResolvedAt:             "2026-07-06T01:02:03Z",
 		ResolvedBy:             "auto-governance",
-		Context: map[string]any{
+		Context: mustProjectionPayload(t, map[string]any{
 			"failureClass":           "runtime_failed",
 			"failureSignature":       "class=runtime_failed|kind=llm/workspace_execution",
 			"allowedRecoveryActions": []any{"replan", "terminate"},
-		},
+		}),
 	}
 	got := MapDecision(item, nil, nil)
 	if got.FailureClass != "model_runtime_failed" ||
@@ -35,7 +45,7 @@ func TestMapDecisionProjectsFailureRecoveryFields(t *testing.T) {
 		t.Fatalf("projected decision recovery fields = %+v", got)
 	}
 	view := ProjectDecisionView(got)
-	if view.Context == nil ||
+	if len(view.Context.Fields) == 0 ||
 		view.FailureClass != got.FailureClass ||
 		len(view.AllowedRecoveryActions) != 1 ||
 		view.ResolvedAt != got.ResolvedAt ||
@@ -51,11 +61,11 @@ func TestMapDecisionFallsBackToContextRecoveryFields(t *testing.T) {
 		RunID:       "run-runtime-recovery-context",
 		Reason:      "runtime repair exhausted",
 		State:       common.DecisionTicketStateOpen,
-		Context: map[string]any{
+		Context: mustProjectionPayload(t, map[string]any{
 			"failureClass":           "runtime_failed",
 			"failureSignature":       "class=runtime_failed|kind=llm/workspace_execution",
 			"allowedRecoveryActions": []any{"replan", "terminate"},
-		},
+		}),
 	}
 	got := MapDecision(item, nil, nil)
 	if got.FailureClass != "runtime_failed" ||

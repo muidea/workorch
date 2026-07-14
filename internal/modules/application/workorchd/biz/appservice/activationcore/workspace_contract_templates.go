@@ -15,7 +15,7 @@ func MatchingWorkspaceTemplateContextHints(ctx context.Context, templates Worksp
 	if templateID := strings.TrimSpace(workspace.TemplateID); templateID != "" {
 		item, err := templates.Get(ctx, templateID)
 		if err == nil && item != nil {
-			return cloneContextMapDeep(item.ContextHints)
+			return cloneContextMapDeep(item.ContextHints.Map())
 		}
 		return nil
 	}
@@ -25,13 +25,13 @@ func MatchingWorkspaceTemplateContextHints(ctx context.Context, templates Worksp
 	}
 	var selected map[string]any
 	for _, item := range items {
-		if item == nil || len(item.ContextHints) == 0 {
+		if item == nil || len(item.ContextHints.Fields) == 0 {
 			continue
 		}
 		if !WorkspaceMatchesTemplateRouting(workspace, item) {
 			continue
 		}
-		selected = cloneContextMapDeep(item.ContextHints)
+		selected = cloneContextMapDeep(item.ContextHints.Map())
 	}
 	return selected
 }

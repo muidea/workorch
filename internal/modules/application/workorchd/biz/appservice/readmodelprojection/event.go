@@ -14,7 +14,7 @@ func MapEventRecords(items []*eventstreammodel.EventRecord) []readmodelcore.Even
 		if item == nil {
 			continue
 		}
-		projected, ok := mapEventRecordWithPayload(item, canonicalizeEventRecordPayload(item.Topic, item.SubjectType, cloneReadModelMap(item.Payload)))
+		projected, ok := mapEventRecordWithPayload(item, item.Payload)
 		if !ok {
 			continue
 		}

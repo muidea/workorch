@@ -23,6 +23,7 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 type workspaceCommandTestHub struct {
@@ -103,14 +104,18 @@ func TestWorkspaceTemplateRecordsSendOwnerCommands(t *testing.T) {
 		})
 	}
 	template := &repository.WorkspaceTemplate{
-		ID:               "template-command-payload",
-		Name:             "Template Command Payload",
-		GoalText:         "ship",
-		DoDItems:         []string{"done"},
-		DefaultSoulID:    "soul-default",
-		SoulBindings:     map[string]string{"execution": "soul-exec"},
-		ContextHints:     map[string]any{"managedConfig": true},
-		EvidencePolicies: []map[string]any{{"kind": "validation"}},
+		ID:            "template-command-payload",
+		Name:          "Template Command Payload",
+		GoalText:      "ship",
+		DoDItems:      []string{"done"},
+		DefaultSoulID: "soul-default",
+		SoulBindings:  map[string]string{"execution": "soul-exec"},
+		ContextHints: workorcheventpayload.New(
+			workorcheventpayload.BoolField("managedConfig", true),
+		),
+		EvidencePolicies: []workorcheventpayload.Payload{workorcheventpayload.New(
+			workorcheventpayload.StringField("kind", "validation"),
+		)},
 	}
 
 	if err := CreateWorkspaceTemplateRecord(ctx, testHub.raw, template); err != nil {

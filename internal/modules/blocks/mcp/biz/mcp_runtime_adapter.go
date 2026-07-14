@@ -20,9 +20,10 @@ import (
 
 	blockcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagedconfig"
-	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type RuntimeAdapter struct {
@@ -48,30 +49,52 @@ const (
 var longLivedStdioSessionIdleTimeout = 5 * time.Minute
 
 type operationSpec struct {
-	Operation string
-	ServerID  string
-	Tool      string
-	URI       string
-	Prompt    string
-	Input     map[string]any
-	Arguments map[string]any
-	Summary   string
-	Stream    bool
+	Operation  string
+	ServerID   string
+	Tool       string
+	URI        string
+	Prompt     string
+	Input      []orchestratorevents.MCPArgument
+	Arguments  []orchestratorevents.MCPArgument
+	Summary    string
+	Stream     bool
+	TargetRefs []string
 }
 
 type jsonRPCResponse struct {
-	JSONRPC string           `json:"jsonrpc"`
-	ID      json.RawMessage  `json:"id,omitempty"`
-	Result  any              `json:"result,omitempty"`
-	Error   *jsonRPCError    `json:"error,omitempty"`
-	Method  string           `json:"method,omitempty"`
-	Params  *json.RawMessage `json:"params,omitempty"`
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id,omitempty"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	Error   *jsonRPCError   `json:"error,omitempty"`
+	Method  string          `json:"method,omitempty"`
+	Params  json.RawMessage `json:"params,omitempty"`
 }
 
 type jsonRPCError struct {
-	Code    int    `json:"code,omitempty"`
-	Message string `json:"message,omitempty"`
-	Data    any    `json:"data,omitempty"`
+	Code    int             `json:"code,omitempty"`
+	Message string          `json:"message,omitempty"`
+	Data    json.RawMessage `json:"data,omitempty"`
+}
+
+type jsonRPCRequest struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      int             `json:"id,omitempty"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params,omitempty"`
+}
+
+type mcpHTTPPayload struct {
+	WorkspaceID common.WorkspaceID         `json:"workspaceId"`
+	RunID       common.RunID               `json:"runId"`
+	StepID      common.StepID              `json:"stepId"`
+	ServerID    string                     `json:"serverId"`
+	Operation   string                     `json:"operation"`
+	Tool        string                     `json:"tool,omitempty"`
+	URI         string                     `json:"uri,omitempty"`
+	Prompt      string                     `json:"prompt,omitempty"`
+	Input       map[string]json.RawMessage `json:"input,omitempty"`
+	Arguments   map[string]json.RawMessage `json:"arguments,omitempty"`
+	Stream      bool                       `json:"stream,omitempty"`
 }
 
 type stdioSession struct {
@@ -103,8 +126,8 @@ func NewRuntimeAdapterWithHTTPClient(service serverGetter, client *http.Client) 
 	return &RuntimeAdapter{service: service, client: client, sessions: map[string]*stdioSession{}}
 }
 
-func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
-	spec, err := parseOperationSpec(request.Kind, request.Input)
+func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeOperationRequest) (RuntimeOperationResult, error) {
+	spec, err := parseOperationSpec(request)
 	if err != nil {
 		return failedResult(spec, invalidStage(spec), err), err
 	}
@@ -143,7 +166,7 @@ func (a *RuntimeAdapter) Close() {
 	}
 }
 
-func (a *RuntimeAdapter) executeHTTPOperation(ctx context.Context, request runtimemodel.StepExecutionRequest, server *mcpmodel.Server, spec operationSpec) (runtimemodel.StepExecutionResult, error) {
+func (a *RuntimeAdapter) executeHTTPOperation(ctx context.Context, request RuntimeOperationRequest, server *mcpmodel.Server, spec operationSpec) (RuntimeOperationResult, error) {
 	endpoint := strings.TrimSpace(server.Endpoint)
 	if endpoint == "" {
 		err := fmt.Errorf("%w: mcp endpoint is required", common.ErrInvalidArgument)
@@ -153,34 +176,25 @@ func (a *RuntimeAdapter) executeHTTPOperation(ctx context.Context, request runti
 		err = fmt.Errorf("%w: invalid mcp endpoint: %v", common.ErrInvalidArgument, err)
 		return failedResult(spec, invalidEndpointStage(spec), err), err
 	}
-	timeout := timeoutFromServer(server)
-	callCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	payload := map[string]any{
-		"workspaceId": request.WorkspaceID,
-		"runId":       request.RunID,
-		"stepId":      request.StepID,
-		"serverId":    spec.ServerID,
-		"operation":   spec.Operation,
-		"input":       cloneMap(spec.Input),
+	input, err := mcpArgumentsJSON(spec.Input)
+	if err != nil {
+		return failedResult(spec, invalidStage(spec), err), err
 	}
-	switch spec.Operation {
-	case blockcommon.StepKindToolCall:
-		payload["tool"] = spec.Tool
-	case blockcommon.StepKindResourceRead:
-		payload["uri"] = spec.URI
-	case blockcommon.StepKindPromptGet:
-		payload["prompt"] = spec.Prompt
-		payload["arguments"] = cloneMap(spec.Arguments)
+	arguments, err := mcpArgumentsJSON(spec.Arguments)
+	if err != nil {
+		return failedResult(spec, invalidStage(spec), err), err
 	}
-	if spec.Stream {
-		payload["stream"] = true
+	payload := mcpHTTPPayload{
+		WorkspaceID: request.WorkspaceID, RunID: request.RunID, StepID: request.StepID,
+		ServerID: spec.ServerID, Operation: spec.Operation, Tool: spec.Tool, URI: spec.URI,
+		Prompt: spec.Prompt, Input: input, Arguments: arguments, Stream: spec.Stream,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return failedResult(spec, invalidStage(spec), err), err
 	}
+	callCtx, cancel := context.WithTimeout(ctx, timeoutFromServer(server))
+	defer cancel()
 	httpReq, err := http.NewRequestWithContext(callCtx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		err = fmt.Errorf("%w: create mcp request: %v", common.ErrInvalidArgument, err)
@@ -188,7 +202,6 @@ func (a *RuntimeAdapter) executeHTTPOperation(ctx context.Context, request runti
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json, text/event-stream")
-
 	startedAt := time.Now().UTC()
 	resp, err := a.client.Do(httpReq)
 	duration := time.Since(startedAt)
@@ -199,44 +212,40 @@ func (a *RuntimeAdapter) executeHTTPOperation(ctx context.Context, request runti
 			err = context.DeadlineExceeded
 		}
 		output := failureOutput(spec, stage, err)
-		output["durationMillis"] = duration.Milliseconds()
-		return runtimemodel.StepExecutionResult{Output: output}, err
+		output.DurationMillis = duration.Milliseconds()
+		return finalizeMCPResult(output, err)
 	}
 	defer resp.Body.Close()
-
 	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if readErr != nil {
 		output := failureOutput(spec, failedStage(spec), readErr)
-		output["statusCode"] = resp.StatusCode
-		output["durationMillis"] = duration.Milliseconds()
-		return runtimemodel.StepExecutionResult{Output: output}, readErr
+		output.StatusCode = int64(resp.StatusCode)
+		output.DurationMillis = duration.Milliseconds()
+		return finalizeMCPResult(output, readErr)
 	}
 	responsePayload, streamEvents := parseHTTPResponsePayload(raw, resp.Header.Get("Content-Type"), spec.Stream)
 	output := successOutput(spec, server, duration, responsePayload)
-	output["statusCode"] = resp.StatusCode
-	if len(streamEvents) > 0 {
-		output["streamEvents"] = streamEvents
-	}
+	output.StatusCode = int64(resp.StatusCode)
+	output.StreamEvents = append([]MCPStreamEvent(nil), streamEvents...)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		err := fmt.Errorf("mcp endpoint returned status %d", resp.StatusCode)
-		output["status"] = "failed"
-		output["stage"] = failedStage(spec)
-		output["error"] = err.Error()
-		return runtimemodel.StepExecutionResult{Output: output}, err
+		output.Status = "failed"
+		output.Stage = failedStage(spec)
+		output.FailureMessage = err.Error()
+		output.Diagnostics = capabilityFailureDiagnostics(spec)
+		return finalizeMCPResult(output, err)
 	}
 	if err := toolResultError(spec, responsePayload); err != nil {
-		output["status"] = "failed"
-		output["stage"] = failedStage(spec)
-		output["error"] = err.Error()
-		if diagnostics := capabilityFailureDiagnostics(spec); len(diagnostics) > 0 {
-			output["runtimeDiagnostics"] = diagnostics
-		}
-		return runtimemodel.StepExecutionResult{Output: output}, err
+		output.Status = "failed"
+		output.Stage = failedStage(spec)
+		output.FailureMessage = err.Error()
+		output.Diagnostics = capabilityFailureDiagnostics(spec)
+		return finalizeMCPResult(output, err)
 	}
-	return runtimemodel.StepExecutionResult{Output: output}, nil
+	return finalizeMCPResult(output, nil)
 }
 
-func (a *RuntimeAdapter) executeStdioOperation(ctx context.Context, request runtimemodel.StepExecutionRequest, server *mcpmodel.Server, spec operationSpec) (runtimemodel.StepExecutionResult, error) {
+func (a *RuntimeAdapter) executeStdioOperation(ctx context.Context, request RuntimeOperationRequest, server *mcpmodel.Server, spec operationSpec) (RuntimeOperationResult, error) {
 	callCtx, cancel := context.WithTimeout(ctx, timeoutFromServer(server))
 	defer cancel()
 	if strings.EqualFold(strings.TrimSpace(server.SessionPolicy), sessionPolicyLongLived) {
@@ -258,26 +267,24 @@ func (a *RuntimeAdapter) executeStdioOperation(ctx context.Context, request runt
 		}
 		return failedStdioResult(spec, stage, execErr, duration, stderrText)
 	}
-	output := successOutput(spec, server, duration, response.Result)
+	output := successOutput(spec, server, duration, parseResponsePayload(response.Result))
 	if len(streamEvents) > 0 {
-		output["streamEvents"] = streamEvents
+		output.StreamEvents = append([]MCPStreamEvent(nil), streamEvents...)
 	}
 	if stderrText != "" {
-		output["stderr"] = stderrText
+		output.Stderr = stderrText
 	}
-	if err := toolResultError(spec, response.Result); err != nil {
-		output["status"] = "failed"
-		output["stage"] = failedStage(spec)
-		output["error"] = err.Error()
-		if diagnostics := capabilityFailureDiagnostics(spec); len(diagnostics) > 0 {
-			output["runtimeDiagnostics"] = diagnostics
-		}
-		return runtimemodel.StepExecutionResult{Output: output}, err
+	if err := toolResultError(spec, parseResponsePayload(response.Result)); err != nil {
+		output.Status = "failed"
+		output.Stage = failedStage(spec)
+		output.FailureMessage = err.Error()
+		output.Diagnostics = capabilityFailureDiagnostics(spec)
+		return finalizeMCPResult(output, err)
 	}
-	return runtimemodel.StepExecutionResult{Output: output}, nil
+	return finalizeMCPResult(output, nil)
 }
 
-func (a *RuntimeAdapter) executeLongLivedStdioOperation(ctx context.Context, request runtimemodel.StepExecutionRequest, server *mcpmodel.Server, spec operationSpec) (runtimemodel.StepExecutionResult, error) {
+func (a *RuntimeAdapter) executeLongLivedStdioOperation(ctx context.Context, request RuntimeOperationRequest, server *mcpmodel.Server, spec operationSpec) (RuntimeOperationResult, error) {
 	startedAt := time.Now().UTC()
 	sessionKey := stdioSessionKey(request.WorkspaceID, spec.ServerID)
 	session, err := a.getOrCreateStdioSession(ctx, request, server, sessionKey)
@@ -296,26 +303,24 @@ func (a *RuntimeAdapter) executeLongLivedStdioOperation(ctx context.Context, req
 		}
 		return failedStdioResult(spec, stage, execErr, duration, stderrText)
 	}
-	output := successOutput(spec, server, duration, response.Result)
+	output := successOutput(spec, server, duration, parseResponsePayload(response.Result))
 	if len(streamEvents) > 0 {
-		output["streamEvents"] = streamEvents
+		output.StreamEvents = append([]MCPStreamEvent(nil), streamEvents...)
 	}
 	if stderrText := session.Stderr(); stderrText != "" {
-		output["stderr"] = stderrText
+		output.Stderr = stderrText
 	}
-	if err := toolResultError(spec, response.Result); err != nil {
-		output["status"] = "failed"
-		output["stage"] = failedStage(spec)
-		output["error"] = err.Error()
-		if diagnostics := capabilityFailureDiagnostics(spec); len(diagnostics) > 0 {
-			output["runtimeDiagnostics"] = diagnostics
-		}
-		return runtimemodel.StepExecutionResult{Output: output}, err
+	if err := toolResultError(spec, parseResponsePayload(response.Result)); err != nil {
+		output.Status = "failed"
+		output.Stage = failedStage(spec)
+		output.FailureMessage = err.Error()
+		output.Diagnostics = capabilityFailureDiagnostics(spec)
+		return finalizeMCPResult(output, err)
 	}
-	return runtimemodel.StepExecutionResult{Output: output}, nil
+	return finalizeMCPResult(output, nil)
 }
 
-func (a *RuntimeAdapter) getOrCreateStdioSession(ctx context.Context, request runtimemodel.StepExecutionRequest, server *mcpmodel.Server, serverID string) (*stdioSession, error) {
+func (a *RuntimeAdapter) getOrCreateStdioSession(ctx context.Context, request RuntimeOperationRequest, server *mcpmodel.Server, serverID string) (*stdioSession, error) {
 	a.sessionMu.Lock()
 	if session := a.sessions[serverID]; session != nil {
 		a.sessionMu.Unlock()
@@ -383,7 +388,7 @@ func (a *RuntimeAdapter) evictIdleStdioSession(serverID string, session *stdioSe
 	}
 }
 
-func newInitializedStdioSession(ctx context.Context, request runtimemodel.StepExecutionRequest, server *mcpmodel.Server, serverID string) (*stdioSession, error) {
+func newInitializedStdioSession(ctx context.Context, request RuntimeOperationRequest, server *mcpmodel.Server, serverID string) (*stdioSession, error) {
 	command, args, env, err := stdioLaunchConfig(server, request)
 	if err != nil {
 		return nil, err
@@ -433,20 +438,26 @@ func newInitializedStdioSession(ctx context.Context, request runtimemodel.StepEx
 		session.done <- cmd.Wait()
 	}()
 
-	initializeRequest := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      1,
-		"method":  "initialize",
-		"params": map[string]any{
-			"protocolVersion": mcpProtocolVersion,
-			"capabilities":    map[string]any{},
-			"clientInfo": map[string]any{
-				"name":    mcpClientName,
-				"version": mcpClientVersion,
-			},
-		},
+	initializeRaw, err := json.Marshal(struct {
+		ProtocolVersion string   `json:"protocolVersion"`
+		Capabilities    struct{} `json:"capabilities"`
+		ClientInfo      struct {
+			Name    string `json:"name"`
+			Version string `json:"version"`
+		} `json:"clientInfo"`
+	}{
+		ProtocolVersion: mcpProtocolVersion,
+		ClientInfo: struct {
+			Name    string `json:"name"`
+			Version string `json:"version"`
+		}{Name: mcpClientName, Version: mcpClientVersion},
+	})
+	if err != nil {
+		session.Close()
+		return nil, err
 	}
-	if err := writeJSONRPCLine(stdin, initializeRequest); err != nil {
+	initializeParams := json.RawMessage(initializeRaw)
+	if err := writeJSONRPCLine(stdin, jsonRPCRequest{JSONRPC: "2.0", ID: 1, Method: "initialize", Params: initializeParams}); err != nil {
 		session.Close()
 		return nil, err
 	}
@@ -454,47 +465,62 @@ func newInitializedStdioSession(ctx context.Context, request runtimemodel.StepEx
 		session.Close()
 		return nil, err
 	}
-	initializedNotification := map[string]any{
-		"jsonrpc": "2.0",
-		"method":  "notifications/initialized",
-		"params":  map[string]any{},
-	}
-	if err := writeJSONRPCLine(stdin, initializedNotification); err != nil {
+	initializedParams := json.RawMessage("{}")
+	if err := writeJSONRPCLine(stdin, jsonRPCRequest{JSONRPC: "2.0", Method: "notifications/initialized", Params: initializedParams}); err != nil {
 		session.Close()
 		return nil, err
 	}
 	return session, nil
 }
 
-func (s *stdioSession) Execute(ctx context.Context, spec operationSpec, id int) (jsonRPCResponse, []any, error) {
+func (s *stdioSession) Execute(ctx context.Context, spec operationSpec, id int) (jsonRPCResponse, []MCPStreamEvent, error) {
 	if s == nil {
 		return jsonRPCResponse{}, nil, common.ErrInvalidArgument
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	request := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      id,
-	}
+	request := jsonRPCRequest{JSONRPC: "2.0", ID: id}
+	var params json.RawMessage
+	var err error
 	switch spec.Operation {
 	case blockcommon.StepKindToolCall:
-		request["method"] = "tools/call"
-		request["params"] = map[string]any{
-			"name":      spec.Tool,
-			"arguments": cloneMap(spec.Input),
+		arguments, encodeErr := mcpArgumentsJSON(spec.Input)
+		if encodeErr != nil {
+			return jsonRPCResponse{}, nil, encodeErr
 		}
+		request.Method = "tools/call"
+		var raw []byte
+		raw, err = json.Marshal(struct {
+			Name      string                     `json:"name"`
+			Arguments map[string]json.RawMessage `json:"arguments"`
+		}{Name: spec.Tool, Arguments: arguments})
+		params = json.RawMessage(raw)
 	case blockcommon.StepKindResourceRead:
-		request["method"] = "resources/read"
-		request["params"] = map[string]any{"uri": spec.URI}
+		request.Method = "resources/read"
+		var raw []byte
+		raw, err = json.Marshal(struct {
+			URI string `json:"uri"`
+		}{URI: spec.URI})
+		params = json.RawMessage(raw)
 	case blockcommon.StepKindPromptGet:
-		request["method"] = "prompts/get"
-		request["params"] = map[string]any{
-			"name":      spec.Prompt,
-			"arguments": cloneMap(spec.Arguments),
+		arguments, encodeErr := mcpArgumentsJSON(spec.Arguments)
+		if encodeErr != nil {
+			return jsonRPCResponse{}, nil, encodeErr
 		}
+		request.Method = "prompts/get"
+		var raw []byte
+		raw, err = json.Marshal(struct {
+			Name      string                     `json:"name"`
+			Arguments map[string]json.RawMessage `json:"arguments"`
+		}{Name: spec.Prompt, Arguments: arguments})
+		params = json.RawMessage(raw)
 	default:
 		return jsonRPCResponse{}, nil, common.ErrInvalidArgument
 	}
+	if err != nil {
+		return jsonRPCResponse{}, nil, err
+	}
+	request.Params = params
 	if err := writeJSONRPCLine(s.stdin, request); err != nil {
 		return jsonRPCResponse{}, nil, err
 	}
@@ -535,52 +561,24 @@ func (s *stdioSession) Stderr() string {
 	return s.stderr.String()
 }
 
-func parseOperationSpec(kind string, input map[string]any) (operationSpec, error) {
-	spec := operationSpec{Operation: strings.TrimSpace(kind)}
+func parseOperationSpec(request RuntimeOperationRequest) (operationSpec, error) {
+	spec := operationSpec{
+		Operation:  strings.TrimSpace(request.Kind),
+		ServerID:   strings.TrimSpace(request.Data.ServerID),
+		Tool:       strings.TrimSpace(request.Data.Tool),
+		URI:        strings.TrimSpace(request.Data.URI),
+		Prompt:     strings.TrimSpace(request.Data.Prompt),
+		Input:      append([]orchestratorevents.MCPArgument(nil), request.Data.Input...),
+		Arguments:  append([]orchestratorevents.MCPArgument(nil), request.Data.Arguments...),
+		Summary:    strings.TrimSpace(request.Data.Summary),
+		Stream:     request.Data.Stream,
+		TargetRefs: append([]string(nil), request.TargetRefs...),
+	}
 	if spec.Operation == "" {
 		spec.Operation = blockcommon.StepKindToolCall
 	}
-	if input == nil {
-		return spec, common.ErrInvalidArgument
-	}
-	if value, _ := input["serverId"].(string); strings.TrimSpace(value) != "" {
-		spec.ServerID = strings.TrimSpace(value)
-	}
-	if value, _ := input["tool"].(string); strings.TrimSpace(value) != "" {
-		spec.Tool = strings.TrimSpace(value)
-	}
-	if value, _ := input["uri"].(string); strings.TrimSpace(value) != "" {
-		spec.URI = strings.TrimSpace(value)
-	}
-	if value, _ := input["resourceUri"].(string); strings.TrimSpace(value) != "" {
-		spec.URI = strings.TrimSpace(value)
-	}
-	if value, _ := input["prompt"].(string); strings.TrimSpace(value) != "" {
-		spec.Prompt = strings.TrimSpace(value)
-	}
-	if value, _ := input["name"].(string); spec.Prompt == "" && strings.TrimSpace(value) != "" {
-		spec.Prompt = strings.TrimSpace(value)
-	}
-	if value, ok := input["input"].(map[string]any); ok {
-		spec.Input = cloneMap(value)
-	}
-	if value, ok := input["arguments"].(map[string]any); ok {
-		spec.Arguments = cloneMap(value)
-	}
-	if value, _ := input["summary"].(string); strings.TrimSpace(value) != "" {
-		spec.Summary = strings.TrimSpace(value)
-	}
-	if value, ok := input["stream"].(bool); ok {
-		spec.Stream = value
-	}
 	if spec.ServerID == "" {
 		return spec, fmt.Errorf("%w: serverId is required", common.ErrInvalidArgument)
-	}
-	if spec.Input == nil {
-		spec.Input = map[string]any{}
-	}
-	if spec.Arguments == nil {
-		spec.Arguments = map[string]any{}
 	}
 	switch spec.Operation {
 	case blockcommon.StepKindToolCall:
@@ -638,92 +636,71 @@ func containsTrimmed(values []string, target string) bool {
 	return false
 }
 
-func failedResult(spec operationSpec, stage string, err error) runtimemodel.StepExecutionResult {
-	return runtimemodel.StepExecutionResult{Output: failureOutput(spec, stage, err)}
+func failedResult(spec operationSpec, stage string, err error) RuntimeOperationResult {
+	output := failureOutput(spec, stage, err)
+	output, _ = finalizeMCPResult(output, err)
+	return output
 }
 
-func failureOutput(spec operationSpec, stage string, err error) map[string]any {
+func failureOutput(spec operationSpec, stage string, err error) RuntimeOperationResult {
 	output := baseOutput(spec)
-	output["status"] = "failed"
-	output["stage"] = stage
+	output.Status = "failed"
+	output.Stage = stage
 	if err != nil {
-		output["error"] = err.Error()
+		output.FailureMessage = err.Error()
 	}
-	if diagnostics := capabilityFailureDiagnostics(spec); len(diagnostics) > 0 {
-		output["runtimeDiagnostics"] = diagnostics
-	}
+	output.Diagnostics = capabilityFailureDiagnostics(spec)
 	return output
 }
 
-func successOutput(spec operationSpec, server *mcpmodel.Server, duration time.Duration, result any) map[string]any {
+func successOutput(spec operationSpec, server *mcpmodel.Server, duration time.Duration, result MCPResponsePayload) RuntimeOperationResult {
 	output := baseOutput(spec)
-	output["status"] = "completed"
-	output["stage"] = completedStage(spec)
-	output["transport"] = server.Transport
-	output["endpoint"] = server.Endpoint
-	output["durationMillis"] = duration.Milliseconds()
-	output["result"] = result
+	output.Status = "completed"
+	output.Stage = completedStage(spec)
+	output.Transport = server.Transport
+	output.Endpoint = server.Endpoint
+	output.DurationMillis = duration.Milliseconds()
+	output.Response = result
 	return output
 }
 
-func baseOutput(spec operationSpec) map[string]any {
-	output := map[string]any{
-		"operation": spec.Operation,
-		"serverId":  spec.ServerID,
+func baseOutput(spec operationSpec) RuntimeOperationResult {
+	return RuntimeOperationResult{
+		Operation: spec.Operation, ServerID: spec.ServerID, Tool: spec.Tool, URI: spec.URI,
+		Prompt: spec.Prompt, Summary: spec.Summary, TargetRefs: append([]string(nil), spec.TargetRefs...),
 	}
-	switch spec.Operation {
-	case blockcommon.StepKindToolCall:
-		output["tool"] = spec.Tool
-		output["input"] = cloneMap(spec.Input)
-	case blockcommon.StepKindResourceRead:
-		output["uri"] = spec.URI
-	case blockcommon.StepKindPromptGet:
-		output["prompt"] = spec.Prompt
-		output["arguments"] = cloneMap(spec.Arguments)
-	}
-	if spec.Summary != "" {
-		output["summary"] = spec.Summary
-	}
-	return output
 }
 
-func capabilityFailureDiagnostics(spec operationSpec) map[string]any {
-	diagnostics := map[string]any{
-		"operation": spec.Operation,
-		"serverId":  spec.ServerID,
-	}
-	if spec.Tool != "" {
-		diagnostics["tool"] = spec.Tool
+func capabilityFailureDiagnostics(spec operationSpec) MCPCapabilityFailureDiagnostics {
+	diagnostics := MCPCapabilityFailureDiagnostics{
+		Operation: spec.Operation, ServerID: spec.ServerID, Tool: spec.Tool, URI: spec.URI, Prompt: spec.Prompt,
 	}
 	if spec.URI != "" {
-		diagnostics["uri"] = spec.URI
-		diagnostics["targetRef"] = spec.URI
-	}
-	if spec.Prompt != "" {
-		diagnostics["prompt"] = spec.Prompt
+		diagnostics.TargetRef = spec.URI
 	}
 	if target := firstCapabilityInputTarget(spec); target != "" {
-		diagnostics["targetRef"] = target
-		diagnostics["failureTargets"] = []string{target}
+		diagnostics.TargetRef = target
+		diagnostics.FailureTargets = []string{target}
 	}
 	return diagnostics
 }
 
 func firstCapabilityInputTarget(spec operationSpec) string {
-	for _, key := range []string{"targetRef", "path", "file", "uri", "resourceUri"} {
-		if target := normalizedCapabilityInputTarget(spec.Input[key]); target != "" {
-			return target
+	for _, name := range []string{"targetRef", "path", "file", "uri", "resourceUri"} {
+		for _, argument := range spec.Input {
+			if strings.TrimSpace(argument.Name) != name || argument.String == nil {
+				continue
+			}
+			if target := normalizedCapabilityInputTarget(*argument.String); target != "" {
+				return target
+			}
 		}
 	}
 	return ""
 }
 
-func normalizedCapabilityInputTarget(value any) string {
-	text, ok := value.(string)
-	if !ok {
-		return ""
-	}
-	text = strings.TrimSpace(text)
+func normalizedCapabilityInputTarget(value string) string {
+	text := strings.TrimSpace(value)
 	if text == "" || strings.Contains(text, "://") {
 		return text
 	}
@@ -734,7 +711,7 @@ func normalizedCapabilityInputTarget(value any) string {
 	return strings.Trim(text, "/")
 }
 
-func parseHTTPResponsePayload(raw []byte, contentType string, requestedStream bool) (any, []any) {
+func parseHTTPResponsePayload(raw []byte, contentType string, requestedStream bool) (MCPResponsePayload, []MCPStreamEvent) {
 	if !requestedStream && !strings.Contains(strings.ToLower(contentType), "text/event-stream") {
 		return parseResponsePayload(raw), nil
 	}
@@ -742,18 +719,18 @@ func parseHTTPResponsePayload(raw []byte, contentType string, requestedStream bo
 	if len(events) == 0 {
 		return parseResponsePayload(raw), nil
 	}
-	return events[len(events)-1], events
+	return events[len(events)-1].Payload, events
 }
 
-func parseStreamEvents(raw []byte) []any {
+func parseStreamEvents(raw []byte) []MCPStreamEvent {
 	lines := bytes.Split(raw, []byte{'\n'})
-	events := make([]any, 0, len(lines))
+	events := make([]MCPStreamEvent, 0, len(lines))
 	var sseData []string
 	flushSSE := func() {
 		if len(sseData) == 0 {
 			return
 		}
-		events = append(events, parseResponsePayload([]byte(strings.Join(sseData, "\n"))))
+		events = append(events, MCPStreamEvent{Payload: parseResponsePayload([]byte(strings.Join(sseData, "\n")))})
 		sseData = nil
 	}
 	for _, line := range lines {
@@ -770,69 +747,105 @@ func parseStreamEvents(raw []byte) []any {
 			continue
 		}
 		flushSSE()
-		events = append(events, parseResponsePayload([]byte(trimmed)))
+		events = append(events, MCPStreamEvent{Payload: parseResponsePayload([]byte(trimmed))})
 	}
 	flushSSE()
 	return events
 }
 
-func parseResponsePayload(raw []byte) any {
+func parseResponsePayload(raw []byte) MCPResponsePayload {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 {
-		return map[string]any{}
+		return MCPResponsePayload{JSON: json.RawMessage("{}")}
 	}
-	var payload any
-	if err := json.Unmarshal(trimmed, &payload); err == nil {
-		return payload
+	if json.Valid(trimmed) {
+		return MCPResponsePayload{JSON: append(json.RawMessage(nil), trimmed...)}
 	}
-	return string(raw)
+	return MCPResponsePayload{Text: string(raw)}
 }
 
-func toolResultError(spec operationSpec, result any) error {
-	if spec.Operation != blockcommon.StepKindToolCall {
+func toolResultError(spec operationSpec, result MCPResponsePayload) error {
+	if spec.Operation != blockcommon.StepKindToolCall || len(result.JSON) == 0 {
 		return nil
 	}
-	payload, ok := result.(map[string]any)
-	if !ok {
+	var payload struct {
+		IsError bool `json:"isError"`
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(result.JSON, &payload); err != nil || !payload.IsError {
 		return nil
 	}
-	isError, _ := payload["isError"].(bool)
-	if !isError {
-		return nil
+	message := ""
+	for _, item := range payload.Content {
+		if strings.TrimSpace(item.Text) != "" {
+			message = strings.TrimSpace(item.Text)
+			break
+		}
 	}
-	message := strings.TrimSpace(firstToolResultText(payload))
 	if message == "" {
 		message = "mcp tool returned isError=true"
 	}
 	return fmt.Errorf("mcp tool %s failed: %s", spec.Tool, message)
 }
 
-func firstToolResultText(payload map[string]any) string {
-	content, ok := payload["content"].([]any)
-	if !ok {
-		return ""
+func mcpArgumentsJSON(values []orchestratorevents.MCPArgument) (map[string]json.RawMessage, error) {
+	if len(values) == 0 {
+		return nil, nil
 	}
-	for _, item := range content {
-		entry, ok := item.(map[string]any)
-		if !ok {
+	ret := make(map[string]json.RawMessage, len(values))
+	for _, value := range values {
+		name := strings.TrimSpace(value.Name)
+		if name == "" {
 			continue
 		}
-		if text, _ := entry["text"].(string); strings.TrimSpace(text) != "" {
-			return text
+		var raw []byte
+		var err error
+		switch {
+		case value.String != nil:
+			raw, err = json.Marshal(*value.String)
+		case value.Integer != nil:
+			raw, err = json.Marshal(*value.Integer)
+		case value.Boolean != nil:
+			raw, err = json.Marshal(*value.Boolean)
+		case value.StringList != nil:
+			raw, err = json.Marshal(value.StringList)
+		default:
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		ret[name] = raw
+	}
+	return ret, nil
+}
+
+func finalizeMCPResult(output RuntimeOperationResult, executeErr error) (RuntimeOperationResult, error) {
+	if executeErr != nil && strings.TrimSpace(output.FailureMessage) == "" {
+		output.FailureMessage = executeErr.Error()
+	}
+	if executeErr != nil {
+		output.FailureCode = firstMCPNonEmpty(output.Stage, "mcp_operation_failed")
+	}
+	if target := strings.TrimSpace(output.Diagnostics.TargetRef); target != "" {
+		output.TargetRefs = []string{target}
+	}
+	if strings.TrimSpace(output.Summary) == "" {
+		output.Summary = firstMCPNonEmpty(output.Status, fmt.Sprintf("mcp operation %s", output.Operation))
+	}
+	output.Evidence = runtimecontract.RuntimeOperationEvidence{Summary: output.Summary}
+	return output, executeErr
+}
+
+func firstMCPNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
 		}
 	}
 	return ""
-}
-
-func cloneMap(input map[string]any) map[string]any {
-	if input == nil {
-		return nil
-	}
-	ret := make(map[string]any, len(input))
-	for key, value := range input {
-		ret[key] = value
-	}
-	return ret
 }
 
 func parseStdioEndpoint(endpoint string) (string, []string, error) {
@@ -849,7 +862,7 @@ func parseStdioEndpoint(endpoint string) (string, []string, error) {
 	return command, fields[1:], nil
 }
 
-func stdioLaunchConfig(server *mcpmodel.Server, request runtimemodel.StepExecutionRequest) (string, []string, map[string]string, error) {
+func stdioLaunchConfig(server *mcpmodel.Server, request RuntimeOperationRequest) (string, []string, map[string]string, error) {
 	if server == nil {
 		return "", nil, nil, common.ErrInvalidArgument
 	}
@@ -914,7 +927,7 @@ func cloneStringEnv(input map[string]string) map[string]string {
 	return ret
 }
 
-func cloneStringEnvForWorkspace(input map[string]string, request runtimemodel.StepExecutionRequest) map[string]string {
+func cloneStringEnvForWorkspace(input map[string]string, request RuntimeOperationRequest) map[string]string {
 	if input == nil {
 		return nil
 	}
@@ -929,7 +942,7 @@ func cloneStringEnvForWorkspace(input map[string]string, request runtimemodel.St
 	return ret
 }
 
-func expandWorkspaceStringSlice(input []string, request runtimemodel.StepExecutionRequest) []string {
+func expandWorkspaceStringSlice(input []string, request RuntimeOperationRequest) []string {
 	if input == nil {
 		return nil
 	}
@@ -940,7 +953,7 @@ func expandWorkspaceStringSlice(input []string, request runtimemodel.StepExecuti
 	return ret
 }
 
-func expandWorkspaceString(value string, request runtimemodel.StepExecutionRequest) string {
+func expandWorkspaceString(value string, request RuntimeOperationRequest) string {
 	value = workorchmanagedconfig.ExpandPlaceholders(value, request.WorkspaceInternalDirectory)
 	replacements := map[string]string{
 		"{workspaceId}":                   string(request.WorkspaceID),
@@ -955,7 +968,7 @@ func expandWorkspaceString(value string, request runtimemodel.StepExecutionReque
 	return value
 }
 
-func writeJSONRPCLine(w io.Writer, payload any) error {
+func writeJSONRPCLine(w io.Writer, payload jsonRPCRequest) error {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -965,10 +978,10 @@ func writeJSONRPCLine(w io.Writer, payload any) error {
 	return err
 }
 
-func readJSONRPCResponseWithContext(ctx context.Context, reader *bufio.Reader, expectedID int, session *stdioSession) (jsonRPCResponse, []any, error) {
+func readJSONRPCResponseWithContext(ctx context.Context, reader *bufio.Reader, expectedID int, session *stdioSession) (jsonRPCResponse, []MCPStreamEvent, error) {
 	type responseResult struct {
 		response jsonRPCResponse
-		events   []any
+		events   []MCPStreamEvent
 		err      error
 	}
 	done := make(chan responseResult, 1)
@@ -987,8 +1000,8 @@ func readJSONRPCResponseWithContext(ctx context.Context, reader *bufio.Reader, e
 	}
 }
 
-func readJSONRPCResponse(reader *bufio.Reader, expectedID int) (jsonRPCResponse, []any, error) {
-	events := []any{}
+func readJSONRPCResponse(reader *bufio.Reader, expectedID int) (jsonRPCResponse, []MCPStreamEvent, error) {
+	events := []MCPStreamEvent{}
 	for {
 		line, err := reader.ReadBytes('\n')
 		if err != nil {
@@ -1012,20 +1025,9 @@ func readJSONRPCResponse(reader *bufio.Reader, expectedID int) (jsonRPCResponse,
 			return response, events, nil
 		}
 		if response.Method != "" {
-			events = append(events, jsonRPCNotificationEvent(response))
+			events = append(events, MCPStreamEvent{Method: response.Method, Params: append(json.RawMessage(nil), response.Params...)})
 		}
 	}
-}
-
-func jsonRPCNotificationEvent(response jsonRPCResponse) any {
-	event := map[string]any{"method": response.Method}
-	if response.Params != nil && len(*response.Params) > 0 {
-		var params any
-		if err := json.Unmarshal(*response.Params, &params); err == nil {
-			event["params"] = params
-		}
-	}
-	return event
 }
 
 func jsonRPCIDMatches(raw json.RawMessage, expected int) bool {
@@ -1047,13 +1049,11 @@ func jsonRPCIDMatches(raw json.RawMessage, expected int) bool {
 	return false
 }
 
-func failedStdioResult(spec operationSpec, stage string, err error, duration time.Duration, stderrText string) (runtimemodel.StepExecutionResult, error) {
+func failedStdioResult(spec operationSpec, stage string, err error, duration time.Duration, stderrText string) (RuntimeOperationResult, error) {
 	output := failureOutput(spec, stage, err)
-	output["durationMillis"] = duration.Milliseconds()
-	if stderrText != "" {
-		output["stderr"] = stderrText
-	}
-	return runtimemodel.StepExecutionResult{Output: output}, err
+	output.DurationMillis = duration.Milliseconds()
+	output.Stderr = stderrText
+	return finalizeMCPResult(output, err)
 }
 
 func timeoutFromServer(server *mcpmodel.Server) time.Duration {

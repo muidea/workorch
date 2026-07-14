@@ -1,37 +1,27 @@
 package events
 
-import "github.com/muidea/workorch/internal/pkg/common"
+import (
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
 const EvidenceCommandDestination = "kernel/orchestrator"
 
-type ApprovalEvidenceValueKind string
+type ApprovalEvidenceValueKind = workorcheventpayload.ValueKind
 
 const (
-	ApprovalEvidenceValueNull   ApprovalEvidenceValueKind = "null"
-	ApprovalEvidenceValueString ApprovalEvidenceValueKind = "string"
-	ApprovalEvidenceValueBool   ApprovalEvidenceValueKind = "bool"
-	ApprovalEvidenceValueInt    ApprovalEvidenceValueKind = "int"
-	ApprovalEvidenceValueUint   ApprovalEvidenceValueKind = "uint"
-	ApprovalEvidenceValueFloat  ApprovalEvidenceValueKind = "float"
-	ApprovalEvidenceValueObject ApprovalEvidenceValueKind = "object"
-	ApprovalEvidenceValueArray  ApprovalEvidenceValueKind = "array"
+	ApprovalEvidenceValueNull   = workorcheventpayload.ValueNull
+	ApprovalEvidenceValueString = workorcheventpayload.ValueString
+	ApprovalEvidenceValueBool   = workorcheventpayload.ValueBool
+	ApprovalEvidenceValueInt    = workorcheventpayload.ValueInt
+	ApprovalEvidenceValueUint   = workorcheventpayload.ValueUint
+	ApprovalEvidenceValueFloat  = workorcheventpayload.ValueFloat
+	ApprovalEvidenceValueObject = workorcheventpayload.ValueObject
+	ApprovalEvidenceValueArray  = workorcheventpayload.ValueArray
 )
 
-type ApprovalEvidenceField struct {
-	Name  string
-	Value ApprovalEvidenceValue
-}
-
-type ApprovalEvidenceValue struct {
-	Kind   ApprovalEvidenceValueKind
-	String string
-	Bool   bool
-	Int    int64
-	Uint   uint64
-	Float  float64
-	Object []ApprovalEvidenceField
-	Array  []ApprovalEvidenceValue
-}
+type ApprovalEvidenceField = workorcheventpayload.Field
+type ApprovalEvidenceValue = workorcheventpayload.Value
 
 type RecordApprovalEvidenceCommand struct {
 	EvidenceRecordID common.EvidenceRecordID

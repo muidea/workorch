@@ -5,7 +5,17 @@ import (
 
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
+
+func mustRuntimeCoreStepPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
+	t.Helper()
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
 
 func TestTerminalStepModelTreatsGraphRootAsReferenced(t *testing.T) {
 	runID := common.RunID("run-terminal-graph-root")
@@ -18,10 +28,10 @@ func TestTerminalStepModelTreatsGraphRootAsReferenced(t *testing.T) {
 		ID:    common.StepID(runID + "/graph-006/001-fix-main"),
 		RunID: runID,
 		State: common.StepStateSucceeded,
-		Input: map[string]any{
+		Input: mustRuntimeCoreStepPayload(t, map[string]any{
 			"graphRootStepId": string(root.ID),
 			"graphNodeId":     "fix-main",
-		},
+		}),
 	}
 	olderUnorderedRoot := &runmodel.Step{
 		ID:    common.StepID(runID + "/step-1"),
@@ -32,10 +42,10 @@ func TestTerminalStepModelTreatsGraphRootAsReferenced(t *testing.T) {
 		ID:    common.StepID(runID + "/graph-001/001-read"),
 		RunID: runID,
 		State: common.StepStateSucceeded,
-		Input: map[string]any{
+		Input: mustRuntimeCoreStepPayload(t, map[string]any{
 			"graphRootStepId": string(olderUnorderedRoot.ID),
 			"graphNodeId":     "read",
-		},
+		}),
 	}
 
 	got := TerminalStepModel([]*runmodel.Step{root, leaf, olderLeaf, olderUnorderedRoot})

@@ -1,12 +1,9 @@
 package events
 
 import (
-	"time"
-
 	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
-	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
@@ -45,33 +42,6 @@ type WorkspaceRunRequestedResult struct {
 	Accepted bool
 }
 
-type RuntimeV1RetirementCommand struct {
-	DryRun bool
-}
-
-type RuntimeV1RetirementFailure struct {
-	SubjectType string
-	SubjectID   string
-	Reason      string
-}
-
-type RuntimeV1RetirementReport struct {
-	ScannedV1Runs             int
-	SupersededRuns            int
-	ClearedActiveRunIDs       int
-	SupersededTickets         int
-	SupersededApprovals       int
-	ResourceScopesToRelease   int
-	ReleasedResourceScopes    int
-	ProjectionRebuildRevision int64
-	Failures                  []RuntimeV1RetirementFailure
-}
-
-type RuntimeV1RetirementResult struct {
-	DryRun bool
-	Report RuntimeV1RetirementReport
-}
-
 type WorkspaceProjectionChangedData struct {
 	WorkspaceID             common.WorkspaceID
 	RunID                   common.RunID
@@ -88,89 +58,6 @@ type WorkspaceProjectionChangedData struct {
 	Error                   string
 }
 
-type CLICommand struct {
-	CommandID     string
-	CorrelationID string
-	Actor         string
-	IssuedAt      time.Time
-	WorkspaceID   common.WorkspaceID
-	RunID         common.RunID
-	SubjectType   string
-	SubjectID     string
-	Command       string
-
-	CreateWorkspace *workorchport.CreateWorkspaceRequest
-	Purge           bool
-	Text            string
-	Items           []string
-	DecisionIDs     []common.TicketID
-	ResolutionType  string
-	GovernanceData  CLIData
-	ApprovalIDs     []common.ApprovalID
-	ApprovalAction  string
-	Soul            *workorchport.SoulInfo
-	Skill           *workorchport.SkillInfo
-	MCPServer       *workorchport.MCPServerInfo
-	Memory          *workorchport.MemoryItemInfo
-	MemorySearch    *workorchport.MemorySearchRequest
-	Template        *workorchport.TemplateInfo
-}
-
-type CLIData struct {
-	Fields []CLIDataField
-}
-
-type CLIDataField struct {
-	Name  string
-	Value CLIDataValue
-}
-
-type CLIDataValue struct {
-	Kind   string
-	String string
-	Number float64
-	Bool   bool
-	Object CLIData
-	Array  []CLIDataValue
-}
-
-type CLIResult struct {
-	CorrelationID string
-	CommandID     string
-	OK            bool
-	Error         string
-	OccurredAt    time.Time
-	WorkspaceID   common.WorkspaceID
-	RunID         common.RunID
-
-	Workspace         *workorchport.WorkspaceInfo
-	Workspaces        []workorchport.WorkspaceInfo
-	WorkspaceSnapshot *workorchport.WorkspaceSnapshotInfo
-	Goal              *workorchport.GoalInfo
-	Goals             []workorchport.GoalInfo
-	DoD               *workorchport.DoDInfo
-	DoDs              []workorchport.DoDInfo
-	Run               *workorchport.RunInfo
-	Runs              []workorchport.RunInfo
-	RunStatus         *workorchport.RunStatusInfo
-	Decision          *workorchport.DecisionInfo
-	Decisions         []workorchport.DecisionInfo
-	Approval          *workorchport.ApprovalInfo
-	Approvals         []workorchport.ApprovalInfo
-	Soul              *workorchport.SoulInfo
-	Souls             []workorchport.SoulInfo
-	Skill             *workorchport.SkillInfo
-	Skills            []workorchport.SkillInfo
-	MCPServer         *workorchport.MCPServerInfo
-	MCPServers        []workorchport.MCPServerInfo
-	MCPCapabilities   []workorchport.MCPCapabilityInfo
-	Memory            *workorchport.MemoryItemInfo
-	Memories          []workorchport.MemoryItemInfo
-	Template          *workorchport.TemplateInfo
-	Templates         []workorchport.TemplateInfo
-	Configuration     *workorchport.ServiceConfig
-}
-
 type CLIProgress struct {
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
@@ -182,12 +69,11 @@ type CLIProgress struct {
 }
 
 func MessageContracts() []eventcontract.MessageContract {
-	return eventcontract.MessageContracts(
+	ret := eventcontract.MessageContracts(
 		eventcontract.FacadeTopic[DoneCommand, DoneCommandResult]("workorchd", definitionPackage, TopicWorkorchDCommandDone),
 		eventcontract.CommandTopic[WorkspaceRunRequestedCommand, WorkspaceRunRequestedResult]("workorchd.scheduler", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkorchDCommandWorkspaceRunRequested),
-		eventcontract.CommandTopic[RuntimeV1RetirementCommand, RuntimeV1RetirementResult]("workorchd.runtime_v1_retirement", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkorchDCommandRuntimeV1Retirement),
 		eventcontract.DataTopic[WorkspaceProjectionChangedData]("workorchd.workspace_projection", definitionPackage, eventcontract.LanePolicyState, TopicWorkspaceProjectionChanged),
-		eventcontract.FacadeTopic[CLICommand, CLIResult]("cli", definitionPackage, TopicCLICommand),
 		eventcontract.DataTopic[CLIProgress]("cli", definitionPackage, eventcontract.LanePolicyTopic, TopicCLIProgress),
 	)
+	return append(ret, CLIMessageContracts()...)
 }

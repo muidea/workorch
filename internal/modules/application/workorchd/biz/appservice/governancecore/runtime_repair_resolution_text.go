@@ -1,6 +1,10 @@
 package governancecore
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
 func NormalizeRepairResolutionText(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
@@ -17,8 +21,8 @@ func ContainsAnyRepairResolutionCue(value string, cues []string) bool {
 	return false
 }
 
-func SemanticTextForRepairResolution(payload map[string]any) string {
-	semantic := DecisionPayloadMap(payload["governanceSemantic"])
+func SemanticTextForRepairResolution(payload workorcheventpayload.Payload) string {
+	semantic := DecisionPayloadObject(payload, "governanceSemantic")
 	if raw := strings.TrimSpace(StringFromDecisionPayload(semantic, "rawInput")); raw != "" {
 		return strings.ToLower(strings.ReplaceAll(raw, " ", ""))
 	}

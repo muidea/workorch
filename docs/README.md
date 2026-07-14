@@ -1,33 +1,38 @@
 # WorkOrch Documentation Map
 
+Status: active
+
+Last Updated: 2026-07-14
+
 ## Purpose
 
-本文件是当前 `docs/` 的正式阅读导航入口，用于帮助按“核心合约 -> 产品设计 -> 对象 -> 运行链路 -> 模块实现 -> 特化能力 -> 产品接口 -> 验证 -> roadmap/archive”顺序阅读。
+本文件是当前 `docs/` 的正式阅读导航入口，按“核心合约 → 当前事实 → 产品设计 → 对象 → 运行链路 → 模块实现 → 特化能力 → 产品接口 → 验证 → roadmap/archive”顺序阅读。
+
+**实现细节优先以模块 `readme.md` + `internal/pkg/workorchruntimecontract` 为准；中立规则以 `00-core` 为准。**
 
 ## Recommended Reading Order
 
-1. [00-core/runtime-stage-contract.md](00-core/runtime-stage-contract.md)
-2. [01-overview/current-state.md](01-overview/current-state.md)
-3. [05-product/overview.md](05-product/overview.md)
-4. [10-domain-model/overview.md](10-domain-model/overview.md)
-5. [20-runtime-flow/overview.md](20-runtime-flow/overview.md)
-6. [30-module-architecture/overview.md](30-module-architecture/overview.md)
-7. [40-profiles-capabilities/overview.md](40-profiles-capabilities/overview.md)
-8. [50-product-interface/overview.md](50-product-interface/overview.md)
-9. [60-verification/overview.md](60-verification/overview.md)
-10. [70-roadmap/active/overview.md](70-roadmap/active/overview.md)
-11. [90-archive/completed/overview.md](90-archive/completed/overview.md)
+1. [00-core/runtime-stage-contract.md](00-core/runtime-stage-contract.md)（中立 stage 语义 + Runtime V2 映射）
+2. [01-overview/current-state.md](01-overview/current-state.md)（生产主链事实：V2 only）
+3. `internal/modules/kernel/orchestrator/readme.md`（实现 SoT）
+4. [20-runtime-flow/overview.md](20-runtime-flow/overview.md)
+5. [30-module-architecture/overview.md](30-module-architecture/overview.md)
+6. [05-product/overview.md](05-product/overview.md)
+7. [10-domain-model/overview.md](10-domain-model/overview.md)
+8. [40-profiles-capabilities/overview.md](40-profiles-capabilities/overview.md)
+9. [50-product-interface/overview.md](50-product-interface/overview.md)
+10. [60-verification/overview.md](60-verification/overview.md)
+11. [70-roadmap/active/overview.md](70-roadmap/active/overview.md)（仅未关项）
+12. [90-archive/completed/overview.md](90-archive/completed/overview.md)（历史）
 
 ## Read By Task
 
-按常见问题可优先阅读：
-
-- Runtime 核心规则：
+- Runtime 核心规则 / V2 映射：
   [runtime-stage-contract.md](00-core/runtime-stage-contract.md)
-- 产品需求 / 产品架构 / 业务流程合同：
-  [prd.md](05-product/prd.md),
-  [product-architecture.md](05-product/product-architecture.md),
-  [business-model-flow-contracts.md](05-product/business-model-flow-contracts.md)
+- 当前仓库事实 / 未关项：
+  [current-state.md](01-overview/current-state.md),
+  [current-unclosed-matrix.md](01-overview/current-unclosed-matrix.md),
+  [unfinished-todo-index.md](01-overview/unfinished-todo-index.md)
 - 上下文组织 / request cache：
   [runtime-request-cache-note.md](00-core/runtime-request-cache-note.md),
   [context-assembly-flow.md](20-runtime-flow/context-assembly-flow.md),
@@ -41,125 +46,57 @@
   [governance-decision-approval.md](10-domain-model/governance-decision-approval.md)
 - 模块职责与代码落点：
   [architecture-overview.md](30-module-architecture/architecture-overview.md),
+  [kernel-orchestrator-governance.md](30-module-architecture/kernel-orchestrator-governance.md),
   [repository-structure.md](30-module-architecture/repository-structure.md)
 - software-dev / workspace / MCP 特化：
   [40-profiles-capabilities/overview.md](40-profiles-capabilities/overview.md)
 - HTTP / 部署 / TUI：
   [50-product-interface/overview.md](50-product-interface/overview.md),
   [service-api.md](50-product-interface/service-api.md),
-  [50-product-interface/deployment.md](50-product-interface/deployment.md),
-  [50-product-interface/tui/requirements.md](50-product-interface/tui/requirements.md)
-- 验收 / 审计 / 历史记录：
-  [60-verification/overview.md](60-verification/overview.md),
-  [90-archive/records/overview.md](90-archive/records/overview.md)
+  [deployment.md](50-product-interface/deployment.md),
+  [tui/requirements.md](50-product-interface/tui/requirements.md)
+- 验收：
+  [60-verification/overview.md](60-verification/overview.md)
 
 ## Read By Role
 
-按典型使用角色可优先阅读：
-
-- 架构/框架设计
-  - [00-core/runtime-stage-contract.md](00-core/runtime-stage-contract.md)
-  - [05-product/product-architecture.md](05-product/product-architecture.md)
-  - [20-runtime-flow/overview.md](20-runtime-flow/overview.md)
-  - [30-module-architecture/overview.md](30-module-architecture/overview.md)
-- 业务功能/对象建模
-  - [05-product/prd.md](05-product/prd.md)
-  - [05-product/business-model-flow-contracts.md](05-product/business-model-flow-contracts.md)
-  - [10-domain-model/overview.md](10-domain-model/overview.md)
-  - [40-profiles-capabilities/overview.md](40-profiles-capabilities/overview.md)
-- 产品/API/交互设计
-  - [50-product-interface/overview.md](50-product-interface/overview.md)
-  - [50-product-interface/service-api.md](50-product-interface/service-api.md)
-- 验收/验证/运维
-  - [60-verification/overview.md](60-verification/overview.md)
-  - [50-product-interface/deployment.md](50-product-interface/deployment.md)
-- 规划/历史追溯
-  - [70-roadmap/active/overview.md](70-roadmap/active/overview.md)
-  - [90-archive/records/overview.md](90-archive/records/overview.md)
-  - [90-archive/completed/overview.md](90-archive/completed/overview.md)
-
-## Quick Jumps
-
-- 当前事实入口
-  - [01-overview/current-state.md](01-overview/current-state.md)
-- 当前剩余尾项
-  - [01-overview/current-unclosed-matrix.md](01-overview/current-unclosed-matrix.md)
-- 内容不完整 / 衔接缺口
-  - [01-overview/incomplete-and-connection-gap-tracker.md](01-overview/incomplete-and-connection-gap-tracker.md)
-- 信息模型一致性审计
-  - [01-overview/information-model-alignment-audit.md](01-overview/information-model-alignment-audit.md)
-- 当前活跃路线图
-  - [70-roadmap/active/overview.md](70-roadmap/active/overview.md)
-- 历史记录与完成项
-  - [90-archive/records/overview.md](90-archive/records/overview.md)
-  - [90-archive/completed/overview.md](90-archive/completed/overview.md)
+- 架构 / 框架：`00-core`、`current-state`、`20-runtime-flow`、`30-module-architecture`、orchestrator readme
+- 业务建模：`05-product`、`10-domain-model`、`40-profiles-capabilities`
+- 产品 / API：`50-product-interface`
+- 验收 / 运维：`60-verification`、`deployment`
+- 规划 / 历史：`70-roadmap/active`（未关）、`90-archive`（历史）
 
 ## Directory Guide
 
-- `00-core/`
-  - 唯一核心 runtime 合约与其从属 request/cache note
-- `01-overview/`
-  - 当前仓库事实、迁移状态、缺口追踪
-- `05-product/`
-  - 产品 PRD、产品架构、业务模型/流程/交互合同的统一整理层
-- `10-domain-model/`
-  - 业务对象、关系、边界和不变量
-- `20-runtime-flow/`
-  - activation / execution / verification / repair / replan / context assembly 主链
-- `30-module-architecture/`
-  - application / kernel / blocks / storage / provider assembly 的实现边界
-- `40-profiles-capabilities/`
-  - workspace / software-dev / mcp / runtime capability 等特化设计
-- `50-product-interface/`
-  - deployment、service API、TUI、Web Console 产品面
-- `60-verification/`
-  - acceptance、audit、verifier、loadtest
-- `70-roadmap/`
-  - 当前活跃计划与候选项
-- `90-archive/`
-  - completed / superseded / records
+| 目录 | 内容 |
+| --- | --- |
+| `00-core/` | 唯一核心 runtime 合约 + request/cache note |
+| `01-overview/` | 当前事实、未关矩阵、todo 索引 |
+| `05-product/` | PRD、产品架构、业务流程合同 |
+| `10-domain-model/` | 业务对象与不变量 |
+| `20-runtime-flow/` | activation / drive / evidence / repair 主链 |
+| `30-module-architecture/` | application / kernel / blocks / storage 边界 |
+| `40-profiles-capabilities/` | profile / capability 特化 |
+| `50-product-interface/` | API / 部署 / TUI / Web |
+| `60-verification/` | acceptance / audit / verifier |
+| `70-roadmap/active/` | **仅**真实未关计划 |
+| `90-archive/` | completed / superseded / records |
 
 ## Core Entry
 
-WorkOrch runtime 的唯一核心设计合约是：
+- 唯一核心设计合约：[runtime-stage-contract.md](00-core/runtime-stage-contract.md)
+- Request/cache 从属：[runtime-request-cache-note.md](00-core/runtime-request-cache-note.md)
+- 实现 SoT：`internal/modules/kernel/orchestrator/readme.md`
 
-- [runtime-stage-contract.md](00-core/runtime-stage-contract.md)
+若旧文档与核心合约冲突，以 `00-core/runtime-stage-contract.md` 为准。若设计文档与模块 readme/代码冲突，以代码与模块 readme 为准并回写设计文档。
 
-涉及 LLM request 组织、cache-aware rendering、request audit 的从属说明是：
+## Current Documentation Status（2026-07-14）
 
-- [runtime-request-cache-note.md](00-core/runtime-request-cache-note.md)
+- **生产代码路径 = Runtime V2 only**（Start/Resume → `DriveRuntimeV2`）。
+- 权威层已按 V2 刷新：`00-core` 双层映射、`01-overview` 事实入口、`20-runtime-flow` / `30-module-architecture` 主链、active roadmap 瘦身。
+- 约 146 份已完成 / V1-absorbed plan 已迁 `90-archive/completed/`。
+- Active 仅保留运维切换项（deployed-blocker 生产 apply）与真实产品未关项。
+- **已废止作为生产主链叙述**：StagePacket、NextAction、graph dispatch checkpoint、ExecutionContextPatch、自动 replan successor。
+- 根目录正式文档：本文 +（可选）`docs-domain-module-flow-reorganization-plan.md`（历史迁移计划，不再指导 V2 实现）。
 
-若旧文档与核心合约冲突，以 `00-core/runtime-stage-contract.md` 为准。
-
-## Current Documentation Status
-
-当前文档迁移按 [docs-domain-module-flow-reorganization-plan.md](docs-domain-module-flow-reorganization-plan.md) 执行。
-
-当前已完成：
-
-- 固化唯一 core 文档入口
-- 新增产品 PRD、产品架构、业务模型/流程/交互合同统一整理入口
-- 从状态文档中抽出当前事实入口
-- 记录迁移过程中的冲突、不完整项和衔接断点
-- 第一轮目录骨架与主要阅读入口已经建立完成
-- active 设计正文的大部分旧 root 引用已经清理
-
-当前阶段：
-
-- 若关注当前权威设计，优先阅读 `00-core` 到 `60-verification`
-- 若关注历史实现或已完成计划，优先阅读 `90-archive`
-- 若关注仍未完全收口的少量尾项，查看：
-  - [current-unclosed-matrix.md](01-overview/current-unclosed-matrix.md)
-  - [information-model-alignment-audit.md](01-overview/information-model-alignment-audit.md)
-
-当前根目录保留 2 份正式文档：
-
-- 本文档
-- `docs-domain-module-flow-reorganization-plan.md`
-
-当前仍建议结合以下文档使用：
-
-- [incomplete-and-connection-gap-tracker.md](01-overview/incomplete-and-connection-gap-tracker.md)
-- [information-model-alignment-audit.md](01-overview/information-model-alignment-audit.md)
-- [current-unclosed-matrix.md](01-overview/current-unclosed-matrix.md)
-- [docs-domain-module-flow-reorganization-plan.md](docs-domain-module-flow-reorganization-plan.md)
+详见：[01-overview/current-state.md](01-overview/current-state.md)、[70-roadmap/active/overview.md](70-roadmap/active/overview.md)。

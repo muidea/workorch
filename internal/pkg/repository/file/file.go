@@ -27,6 +27,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/runtimepath"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 type WorkspaceRepository struct {
@@ -1193,7 +1194,7 @@ func (r *EventRecordRepository) appendLogLine(root string, item *eventstream.Eve
 func (r *EventRecordRepository) eventRecordLogLine(item *eventstream.EventRecord) (eventRecordLogLine, error) {
 	record := cloneEventRecord(item)
 	line := eventRecordLogLine{Record: *record}
-	if len(record.Payload) == 0 {
+	if len(record.Payload.Fields) == 0 {
 		return line, nil
 	}
 	payload, err := json.Marshal(record.Payload)
@@ -1210,7 +1211,7 @@ func (r *EventRecordRepository) eventRecordLogLine(item *eventstream.EventRecord
 	}
 	line.Record.PayloadSummary = eventPayloadSummary(record.Payload)
 	line.Record.PayloadRef = payloadRef
-	line.Record.Payload = nil
+	line.Record.Payload = workorcheventpayload.Payload{}
 	line.PayloadRef = payloadRef
 	return line, nil
 }
@@ -1309,10 +1310,10 @@ func (r *EventRecordRepository) scanEventRecordSegment(path string, fn func(*eve
 		item := cloneEventRecord(&recordLine.Record)
 		if recordLine.PayloadRef != "" {
 			item.PayloadRef = recordLine.PayloadRef
-			if len(item.PayloadSummary) == 0 {
-				item.PayloadSummary = map[string]any{eventRecordPayloadRefKey: recordLine.PayloadRef}
+			if len(item.PayloadSummary.Fields) == 0 {
+				item.PayloadSummary = eventPayloadRef(recordLine.PayloadRef)
 			}
-			item.Payload = map[string]any{eventRecordPayloadRefKey: recordLine.PayloadRef}
+			item.Payload = eventPayloadRef(recordLine.PayloadRef)
 		}
 		if err := fn(item); err != nil {
 			return err
@@ -1347,10 +1348,10 @@ func (r *EventRecordRepository) scanEventRecordSegmentReverse(path string, fn fu
 		item := cloneEventRecord(&recordLine.Record)
 		if recordLine.PayloadRef != "" {
 			item.PayloadRef = recordLine.PayloadRef
-			if len(item.PayloadSummary) == 0 {
-				item.PayloadSummary = map[string]any{eventRecordPayloadRefKey: recordLine.PayloadRef}
+			if len(item.PayloadSummary.Fields) == 0 {
+				item.PayloadSummary = eventPayloadRef(recordLine.PayloadRef)
 			}
-			item.Payload = map[string]any{eventRecordPayloadRefKey: recordLine.PayloadRef}
+			item.Payload = eventPayloadRef(recordLine.PayloadRef)
 		}
 		stop, err := fn(item)
 		if err != nil {
@@ -1364,10 +1365,10 @@ func (r *EventRecordRepository) scanEventRecordSegmentReverse(path string, fn fu
 }
 
 func (r *EventRecordRepository) hydrateEventRecordPayload(item *eventstream.EventRecord) error {
-	if item == nil || len(item.Payload) == 0 {
+	if item == nil || len(item.Payload.Fields) == 0 {
 		return nil
 	}
-	ref, _ := item.Payload[eventRecordPayloadRefKey].(string)
+	ref, _ := item.Payload.String(eventRecordPayloadRefKey)
 	if strings.TrimSpace(ref) == "" {
 		return nil
 	}
@@ -1380,53 +1381,63 @@ func (r *EventRecordRepository) hydrateEventRecordPayload(item *eventstream.Even
 }
 
 func stripEventRecordPayload(item *eventstream.EventRecord) {
-	if item == nil || len(item.Payload) == 0 {
+	if item == nil || len(item.Payload.Fields) == 0 {
 		return
 	}
-	if len(item.PayloadSummary) == 0 {
+	if len(item.PayloadSummary.Fields) == 0 {
 		item.PayloadSummary = eventPayloadSummary(item.Payload)
 	}
-	item.Payload = nil
+	item.Payload = workorcheventpayload.Payload{}
 }
 
-func eventPayloadSummary(payload map[string]any) map[string]any {
-	if len(payload) == 0 {
-		return nil
+func eventPayloadSummary(payload workorcheventpayload.Payload) workorcheventpayload.Payload {
+	if len(payload.Fields) == 0 {
+		return workorcheventpayload.Payload{}
 	}
-	ret := map[string]any{
-		"fieldCount": len(payload),
-	}
-	keys := make([]string, 0, len(payload))
-	for key := range payload {
-		keys = append(keys, key)
+	keys := make([]string, 0, len(payload.Fields))
+	for _, field := range payload.Fields {
+		if field.Name != "" {
+			keys = append(keys, field.Name)
+		}
 	}
 	sort.Strings(keys)
+	truncated := false
 	if len(keys) > 16 {
 		keys = keys[:16]
-		ret["truncated"] = true
+		truncated = true
 	}
-	ret["fields"] = keys
-	return ret
+	fields := []workorcheventpayload.Field{
+		workorcheventpayload.IntField("fieldCount", int64(len(payload.Fields))),
+		workorcheventpayload.StringArrayField("fields", keys),
+	}
+	if truncated {
+		fields = append(fields, workorcheventpayload.BoolField("truncated", true))
+	}
+	return workorcheventpayload.New(fields...)
 }
 
-func (r *EventRecordRepository) readEventPayload(ref string) (map[string]any, error) {
+func (r *EventRecordRepository) readEventPayload(ref string) (workorcheventpayload.Payload, error) {
 	clean := filepath.Clean(filepath.FromSlash(strings.TrimSpace(ref)))
 	if clean == "." || clean == "" || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || clean == ".." {
-		return nil, common.ErrInvalidArgument
+		return workorcheventpayload.Payload{}, common.ErrInvalidArgument
 	}
 	data, err := os.ReadFile(filepath.Join(r.eventLogRoot(), clean))
 	if err != nil {
-		return nil, err
+		return workorcheventpayload.Payload{}, err
 	}
 	repository.RecordEventRecordPayloadHydrate(len(data))
-	payload := map[string]any{}
+	payload := workorcheventpayload.Payload{}
 	if len(data) == 0 {
 		return payload, nil
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
-		return nil, err
+		return workorcheventpayload.Payload{}, err
 	}
 	return payload, nil
+}
+
+func eventPayloadRef(ref string) workorcheventpayload.Payload {
+	return workorcheventpayload.New(workorcheventpayload.StringField(eventRecordPayloadRefKey, ref))
 }
 
 func safeEventRecordFileName(value string) string {
@@ -2296,15 +2307,15 @@ func (r *StepRepository) saveStep(item *run.Step) error {
 		return err
 	}
 	metadata := *cloneStep(item)
-	metadata.Input = nil
-	metadata.Output = nil
+	metadata.Input = workorcheventpayload.Payload{}
+	metadata.Output = workorcheventpayload.Payload{}
 	if err := writeJSONFileAtomic(filepath.Join(dir, "metadata.json"), metadata); err != nil {
 		return err
 	}
-	if err := writeOptionalMapFile(filepath.Join(dir, "input.json"), item.Input); err != nil {
+	if err := writeOptionalMapFile(filepath.Join(dir, "input.json"), item.Input.Map()); err != nil {
 		return err
 	}
-	if err := writeOptionalMapFile(filepath.Join(dir, "output.json"), item.Output); err != nil {
+	if err := writeOptionalMapFile(filepath.Join(dir, "output.json"), item.Output.Map()); err != nil {
 		return err
 	}
 	return writeJSONFileAtomic(filepath.Join(dir, "summary.json"), compactStepSummary(item))
@@ -2337,8 +2348,14 @@ func (r *StepRepository) loadStepFromDir(dir string) (*run.Step, error) {
 	if err != nil {
 		return nil, err
 	}
-	item.Input = input
-	item.Output = output
+	item.Input, err = workorcheventpayload.FromMap(input)
+	if err != nil {
+		return nil, err
+	}
+	item.Output, err = workorcheventpayload.FromMap(output)
+	if err != nil {
+		return nil, err
+	}
 	return cloneStep(&item), nil
 }
 
@@ -2517,15 +2534,15 @@ func (r *ToolCallRepository) saveToolCall(item *run.ToolCall) error {
 		return err
 	}
 	metadata := *cloneToolCall(item)
-	metadata.Arguments = nil
-	metadata.Output = nil
+	metadata.Arguments = workorcheventpayload.Payload{}
+	metadata.Output = workorcheventpayload.Payload{}
 	if err := writeJSONFileAtomic(filepath.Join(dir, "metadata.json"), metadata); err != nil {
 		return err
 	}
-	if err := writeOptionalMapFile(filepath.Join(dir, "arguments.json"), item.Arguments); err != nil {
+	if err := writeOptionalMapFile(filepath.Join(dir, "arguments.json"), item.Arguments.Map()); err != nil {
 		return err
 	}
-	return writeOptionalMapFile(filepath.Join(dir, "output.json"), item.Output)
+	return writeOptionalMapFile(filepath.Join(dir, "output.json"), item.Output.Map())
 }
 
 func (r *ToolCallRepository) loadToolCall(id common.ToolCallID) (*run.ToolCall, error) {
@@ -2555,8 +2572,14 @@ func (r *ToolCallRepository) loadToolCallFromDir(dir string) (*run.ToolCall, err
 	if err != nil {
 		return nil, err
 	}
-	item.Arguments = arguments
-	item.Output = output
+	item.Arguments, err = workorcheventpayload.FromMap(arguments)
+	if err != nil {
+		return nil, err
+	}
+	item.Output, err = workorcheventpayload.FromMap(output)
+	if err != nil {
+		return nil, err
+	}
 	return cloneToolCall(&item), nil
 }
 
@@ -3421,8 +3444,8 @@ func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 			cloned.SoulBindings[key] = value
 		}
 	}
-	cloned.ContextHints = cloneMap(item.ContextHints)
-	cloned.EvidencePolicies = cloneMapSlice(item.EvidencePolicies)
+	cloned.ContextHints = item.ContextHints.Clone()
+	cloned.EvidencePolicies = workorcheventpayload.CloneSlice(item.EvidencePolicies)
 	return &cloned
 }
 
@@ -3454,12 +3477,8 @@ func cloneRun(item *run.Run) *run.Run {
 
 func cloneStep(item *run.Step) *run.Step {
 	cloned := *item
-	if item.Input != nil {
-		cloned.Input = cloneMap(item.Input)
-	}
-	if item.Output != nil {
-		cloned.Output = cloneMap(item.Output)
-	}
+	cloned.Input = item.Input.Clone()
+	cloned.Output = item.Output.Clone()
 	return &cloned
 }
 
@@ -3483,25 +3502,36 @@ func compactStepSummary(item *run.Step) *run.Step {
 		return nil
 	}
 	cloned := *item
-	cloned.Input = compactStepSummaryInput(item.Input)
-	cloned.Output = compactStepSummaryOutput(item.Output)
+	cloned.Input, _ = workorcheventpayload.FromMap(compactStepSummaryInput(item.Input.Map()))
+	cloned.Output, _ = workorcheventpayload.FromMap(compactStepSummaryOutput(item.Output.Map()))
 	return &cloned
 }
 
 func cloneToolCall(item *run.ToolCall) *run.ToolCall {
 	cloned := *item
-	cloned.Arguments = cloneMap(item.Arguments)
-	cloned.Output = cloneMap(item.Output)
+	cloned.Arguments = item.Arguments.Clone()
+	cloned.Output = item.Output.Clone()
 	return &cloned
 }
 
 func clonePatch(item *run.Patch) *run.Patch {
 	cloned := *item
-	cloned.CoverageTargets = cloneAny(item.CoverageTargets)
+	cloned.CoverageTargets = append([]run.PatchCoverageTarget(nil), item.CoverageTargets...)
 	cloned.AffectedFiles = cloneStringSlice(item.AffectedFiles)
 	cloned.RiskReasons = cloneStringSlice(item.RiskReasons)
-	cloned.Diagnostics = cloneMapSlice(item.Diagnostics)
+	cloned.Diagnostics = cloneEventPayloads(item.Diagnostics)
 	return &cloned
+}
+
+func cloneEventPayloads(input []workorcheventpayload.Payload) []workorcheventpayload.Payload {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make([]workorcheventpayload.Payload, 0, len(input))
+	for _, item := range input {
+		ret = append(ret, item.Clone())
+	}
+	return ret
 }
 
 func cloneValidationResult(item *run.ValidationResult) *run.ValidationResult {
@@ -3512,7 +3542,7 @@ func cloneValidationResult(item *run.ValidationResult) *run.ValidationResult {
 
 func cloneRuntimeCheckpoint(item *run.RuntimeCheckpoint) *run.RuntimeCheckpoint {
 	cloned := *item
-	cloned.Data = cloneMap(item.Data)
+	cloned.Data = item.Data.Clone()
 	return &cloned
 }
 
@@ -3543,7 +3573,7 @@ func cloneResultSummary(item resultmodel.ResultSummary) resultmodel.ResultSummar
 			cloned.DoDItems = append(cloned.DoDItems, dodItem)
 		}
 	}
-	cloned.Diagnostics = cloneMap(item.Diagnostics)
+	cloned.Diagnostics = item.Diagnostics.Clone()
 	return cloned
 }
 
@@ -3583,20 +3613,21 @@ func cloneResultDoDCoverage(item *resultmodel.DoDCoverage) *resultmodel.DoDCover
 func cloneArtifact(item *resultmodel.Artifact) *resultmodel.Artifact {
 	cloned := *item
 	cloned.EvidenceRefs = cloneStringSlice(item.EvidenceRefs)
-	cloned.Metadata = cloneMap(item.Metadata)
+	cloned.Metadata = item.Metadata.Clone()
 	return &cloned
 }
 
 func cloneEventRecord(item *eventstream.EventRecord) *eventstream.EventRecord {
 	cloned := *item
-	cloned.Payload = cloneMap(item.Payload)
-	cloned.PayloadSummary = cloneMap(item.PayloadSummary)
+	cloned.Payload = item.Payload.Clone()
+	cloned.PayloadSummary = item.PayloadSummary.Clone()
 	return &cloned
 }
 
 func cloneDecisionTicket(item *decision.Ticket) *decision.Ticket {
 	cloned := *item
-	cloned.Context = cloneMap(item.Context)
+	cloned.Context = item.Context.Clone()
+	cloned.AutoGovernance = item.AutoGovernance.Clone()
 	return &cloned
 }
 
@@ -3618,15 +3649,14 @@ func applyDecisionTicketFileTimestampFallback(item *decision.Ticket, path string
 
 func cloneDecisionResolution(item *decision.Resolution) *decision.Resolution {
 	cloned := *item
-	if item.Payload != nil {
-		cloned.Payload = cloneMap(item.Payload)
-	}
+	cloned.Payload = item.Payload.Clone()
 	return &cloned
 }
 
 func cloneApproval(item *approval.Approval) *approval.Approval {
 	cloned := *item
-	cloned.Context = cloneMap(item.Context)
+	cloned.Context = item.Context.Clone()
+	cloned.AutoGovernance = item.AutoGovernance.Clone()
 	return &cloned
 }
 
@@ -3674,7 +3704,8 @@ func cloneWorkspaceTemplate(item *repository.WorkspaceTemplate) *repository.Work
 			cloned.SoulBindings[key] = value
 		}
 	}
-	cloned.EvidencePolicies = cloneMapSlice(item.EvidencePolicies)
+	cloned.ContextHints = item.ContextHints.Clone()
+	cloned.EvidencePolicies = workorcheventpayload.CloneSlice(item.EvidencePolicies)
 	return &cloned
 }
 
@@ -3739,7 +3770,7 @@ func cloneMCPCapability(item *mcpmodel.Capability) *mcpmodel.Capability {
 	cloned := *item
 	cloned.Tags = cloneStringSlice(item.Tags)
 	cloned.StageHints = cloneStringSlice(item.StageHints)
-	cloned.Schema = cloneMap(item.Schema)
+	cloned.Schema = item.Schema.Clone()
 	return &cloned
 }
 
@@ -3984,10 +4015,11 @@ func cloneMap(input map[string]any) map[string]any {
 const stepSummarySchemaVersion = "workorch.step_summary.v2"
 
 func stepSummaryCurrent(item *run.Step) bool {
-	if item == nil || item.Input == nil {
+	if item == nil {
 		return false
 	}
-	return stringFromAny(item.Input["_summarySchemaVersion"]) == stepSummarySchemaVersion
+	version, _ := item.Input.String("_summarySchemaVersion")
+	return version == stepSummarySchemaVersion
 }
 
 func compactStepSummaryInput(input map[string]any) map[string]any {

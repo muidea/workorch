@@ -1,6 +1,9 @@
 package decision
 
-import "github.com/muidea/workorch/internal/pkg/common"
+import (
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
 type Ticket struct {
 	ID                     common.TicketID
@@ -10,9 +13,9 @@ type Ticket struct {
 	Reason                 string
 	DecisionKind           string
 	Question               string
-	Context                map[string]any
+	Context                workorcheventpayload.Payload
 	State                  common.DecisionTicketState
-	AutoGovernance         map[string]any
+	AutoGovernance         workorcheventpayload.Payload
 	FailureClass           string
 	FailureSignature       string
 	AllowedRecoveryActions []string

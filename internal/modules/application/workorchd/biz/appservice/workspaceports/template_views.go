@@ -61,7 +61,10 @@ func CreateWorkspaceTemplate(ctx context.Context, hub magicevent.Hub, template w
 	if err != nil {
 		return workspacecore.WorkspaceTemplate{}, err
 	}
-	record := workspacecore.WorkspaceTemplateToRepository(item)
+	record, err := workspacecore.WorkspaceTemplateToRepository(item)
+	if err != nil {
+		return workspacecore.WorkspaceTemplate{}, err
+	}
 	if err := ValidateWorkspaceTemplateSoulRefs(ctx, hub, record); err != nil {
 		return workspacecore.WorkspaceTemplate{}, err
 	}
@@ -77,7 +80,10 @@ func UpdateWorkspaceTemplate(ctx context.Context, hub magicevent.Hub, templateID
 	if err != nil {
 		return workspacecore.WorkspaceTemplate{}, err
 	}
-	record := workspacecore.WorkspaceTemplateToRepository(item)
+	record, err := workspacecore.WorkspaceTemplateToRepository(item)
+	if err != nil {
+		return workspacecore.WorkspaceTemplate{}, err
+	}
 	if err := ValidateWorkspaceTemplateSoulRefs(ctx, hub, record); err != nil {
 		return workspacecore.WorkspaceTemplate{}, err
 	}

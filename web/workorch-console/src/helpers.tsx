@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { App as AntApp, Button, Descriptions, Empty, Form, Input, List, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, ProCard, ProTable } from './components/proCompat';
-import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, ConvergenceStatus, Decision, DoD, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMModelCapabilityConfiguration, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, ConvergenceStatus, Decision, DoD, EventPayload, EventPayloadValue, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMModelCapabilityConfiguration, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import { modelLabels, progressKindLabels, recoveryActionLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels } from './utils/constants';
 import { stateLabel as canonicalStateLabel } from './utils/format';
@@ -1588,8 +1588,8 @@ export function outputText(output: Record<string, unknown> | undefined, key: str
 
 export function eventRecordSummary(item: EventRecord) {
   const payload = item.payload ?? item.payloadSummary;
-  for (const key of ['summary', 'reason', 'error', 'action', 'status', 'state']) {
-    const value = outputText(payload, key);
+  for (const key of ['summary', 'reason', 'failureReason', 'error', 'action', 'status', 'state']) {
+    const value = eventPayloadText(payload, key);
     if (value !== '-') {
       return value;
     }
@@ -1602,12 +1602,45 @@ export function eventRecordSummary(item: EventRecord) {
 
 export function eventRecordState(item: EventRecord) {
   const payload = item.payload ?? item.payloadSummary;
-  const state = outputText(payload, 'state');
+  const state = eventPayloadText(payload, 'state');
   if (state !== '-') {
     return stateLabel(state);
   }
-  const status = outputText(payload, 'status');
+  const status = eventPayloadText(payload, 'status');
   return status !== '-' ? status : '-';
+}
+
+export function eventPayloadDisplay(payload: EventPayload | undefined): Record<string, unknown> | undefined {
+  if (!payload?.fields?.length) {
+    return undefined;
+  }
+  return Object.fromEntries(payload.fields.map((field) => [field.name, eventPayloadValue(field.value)]));
+}
+
+function eventPayloadText(payload: EventPayload | undefined, key: string) {
+  const field = payload?.fields?.find((item) => item.name === key);
+  if (!field) {
+    return '-';
+  }
+  const value = eventPayloadValue(field.value);
+  if (value === undefined || value === null || value === '') {
+    return '-';
+  }
+  return typeof value === 'string' ? value : compactJSON(value);
+}
+
+function eventPayloadValue(value: EventPayloadValue): unknown {
+  switch (value.kind) {
+    case 'null': return null;
+    case 'string': return value.string ?? '';
+    case 'bool': return value.bool ?? false;
+    case 'int': return value.int ?? 0;
+    case 'uint': return value.uint ?? 0;
+    case 'float': return value.float ?? 0;
+    case 'object': return Object.fromEntries((value.object ?? []).map((field) => [field.name, eventPayloadValue(field.value)]));
+    case 'array': return (value.array ?? []).map(eventPayloadValue);
+    default: return undefined;
+  }
 }
 
 export function eventRecordSubject(item: EventRecord) {

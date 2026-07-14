@@ -4,13 +4,14 @@ import (
 	"testing"
 
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func TestNormalizeDecisionResolutionInfersFromText(t *testing.T) {
-	item := NormalizeDecisionResolution("auto", map[string]any{
-		"answer":   "请重新规划执行路径",
-		"operator": "tui",
-	})
+	item := NormalizeDecisionResolution("auto", workorcheventpayload.New(
+		workorcheventpayload.StringField("answer", "请重新规划执行路径"),
+		workorcheventpayload.StringField("operator", "tui"),
+	))
 	if item.ResolutionType != decisioncommon.ResolutionTypeReplan {
 		t.Fatalf("resolutionType = %q, want replan", item.ResolutionType)
 	}
@@ -20,10 +21,10 @@ func TestNormalizeDecisionResolutionInfersFromText(t *testing.T) {
 }
 
 func TestNormalizeDecisionResolutionKeepsExplicitSupportedType(t *testing.T) {
-	item := NormalizeDecisionResolution(decisioncommon.ResolutionTypeRejectCurrentPath, map[string]any{
-		"answer": "继续执行",
-		"source": "console",
-	})
+	item := NormalizeDecisionResolution(decisioncommon.ResolutionTypeRejectCurrentPath, workorcheventpayload.New(
+		workorcheventpayload.StringField("answer", "继续执行"),
+		workorcheventpayload.StringField("source", "console"),
+	))
 	if item.ResolutionType != decisioncommon.ResolutionTypeRejectCurrentPath || item.Inferred {
 		t.Fatalf("normalization = %+v, want explicit resolution type without inference", item)
 	}

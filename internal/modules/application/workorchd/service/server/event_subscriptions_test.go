@@ -16,9 +16,19 @@ import (
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 var serverTestEventSequence atomic.Uint64
+
+func mustServerEventPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
+	t.Helper()
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		t.Fatalf("event payload: %v", err)
+	}
+	return payload
+}
 
 func publishServerTestEventRecord(ctx context.Context, hub magicevent.Hub, envelope streamEvent) error {
 	if envelope.ID == "" {
@@ -42,7 +52,7 @@ func publishServerTestEventRecord(ctx context.Context, hub magicevent.Hub, envel
 		RunID:        common.RunID(envelope.RunID),
 		StepID:       common.StepID(envelope.StepID),
 		Revision:     envelope.Revision,
-		Payload:      envelope.Payload,
+		Payload:      mustServerEventPayloadValue(envelope.Payload),
 	})
 	if err != nil {
 		return err
@@ -59,6 +69,14 @@ func publishServerTestEventRecord(ctx context.Context, hub magicevent.Hub, envel
 		return resultErr
 	}
 	return nil
+}
+
+func mustServerEventPayloadValue(input map[string]any) workorcheventpayload.Payload {
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		panic(err)
+	}
+	return payload
 }
 
 func TestNormalizeEventStreamViewDefaultsToProjection(t *testing.T) {
@@ -120,7 +138,7 @@ func TestSubscribeServerStreamEventsReceivesOwnerEventAcrossHubWrappers(t *testi
 		Version:     events.WorkorchEventVersion,
 		Topic:       workspaceevents.TopicWorkspaceCreated,
 		WorkspaceID: "ws-owner",
-		Payload:     events.WorkspacePayload("owner workspace", "", "/tmp/ws-owner", "", common.WorkspaceStateActive, ""),
+		Payload:     events.WorkspacePayloadData{Title: "owner workspace", DeliverableDirectory: "/tmp/ws-owner", State: common.WorkspaceStateActive}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish owner event: %v", err)
 	}
@@ -155,7 +173,7 @@ func TestSubscribeServerStreamEventsReceivesTicketUpdatedAcrossHubWrappers(t *te
 		StepID:      "step-ticket-updated",
 		SubjectType: "decision_ticket",
 		SubjectID:   "ticket-updated",
-		Payload:     events.DecisionTicketPayload("provider unavailable", common.DecisionTicketStateOpen),
+		Payload:     events.DecisionTicketPayloadData{Reason: "provider unavailable", State: common.DecisionTicketStateOpen}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish ticket updated event: %v", err)
 	}
@@ -186,7 +204,7 @@ func TestSubscribeServerStreamEventsProjectionViewIgnoresOwnerEvents(t *testing.
 		Version:     events.WorkorchEventVersion,
 		Topic:       workspaceevents.TopicWorkspaceCreated,
 		WorkspaceID: "ws-owner",
-		Payload:     events.WorkspacePayload("owner workspace", "", "/tmp/ws-owner", "", common.WorkspaceStateActive, ""),
+		Payload:     events.WorkspacePayloadData{Title: "owner workspace", DeliverableDirectory: "/tmp/ws-owner", State: common.WorkspaceStateActive}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish owner event: %v", err)
 	}

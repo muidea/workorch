@@ -550,7 +550,7 @@ func TestRunSnapshotProjectsRejectedExecutionGraphAsTaskPlan(t *testing.T) {
 			RunID: runID,
 			Kind:  "llm/workspace_execution",
 			State: common.StepStateFailed,
-			Output: map[string]any{
+			Output: mustWorkspaceRunEventPayload(t, map[string]any{
 				"stage":            "candidate_rejected",
 				"failureClass":     "candidate_rejected",
 				"failureSignature": "class=candidate_rejected|reason=validation_evidence_missing",
@@ -564,7 +564,7 @@ func TestRunSnapshotProjectsRejectedExecutionGraphAsTaskPlan(t *testing.T) {
 						},
 					}},
 				},
-			},
+			}),
 		}},
 	})
 
@@ -608,7 +608,7 @@ func TestRunSnapshotProjectsRetryWithoutNewGraphAsPlanRevision(t *testing.T) {
 				RunID: runID,
 				Kind:  "llm/workspace_execution",
 				State: common.StepStateSucceeded,
-				Output: map[string]any{
+				Output: mustWorkspaceRunEventPayload(t, map[string]any{
 					"executionGraph": map[string]any{
 						"nodes": []map[string]any{{
 							"id":   "patch-node",
@@ -618,24 +618,24 @@ func TestRunSnapshotProjectsRetryWithoutNewGraphAsPlanRevision(t *testing.T) {
 							},
 						}},
 					},
-				},
+				}),
 			},
 			{
 				ID:    retryStepID,
 				RunID: runID,
 				Kind:  "llm/workspace_execution",
 				State: common.StepStateFailed,
-				Input: map[string]any{
+				Input: mustWorkspaceRunEventPayload(t, map[string]any{
 					"retryOf":      string(rootStepID),
 					"retryAttempt": float64(2),
-				},
-				Output: map[string]any{
+				}),
+				Output: mustWorkspaceRunEventPayload(t, map[string]any{
 					"stage":            "candidate_rejected",
 					"failureClass":     "candidate_rejected",
 					"failureSignature": "class=candidate_rejected|reason=available_snapshot_ignored",
 					"targetScope":      "targetRef=artifact",
 					"blockingTicketId": string(ticketID),
-				},
+				}),
 			},
 		},
 		Decisions: []readmodelcore.Decision{{

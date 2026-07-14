@@ -6,6 +6,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -14,7 +15,9 @@ func ReadWorkspaceByOwnerCommand(ctx context.Context, hub magicevent.Hub, worksp
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := sendMagicCommand[workspaceevents.GetWorkspaceCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceCommandGet, workspaceevents.CommandDestination, "workspace", string(workspaceID), workspaceevents.GetWorkspaceCommand{WorkspaceID: workspaceID})
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGet, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.GetWorkspaceCommand{WorkspaceID: workspaceID})
+	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandGet, "workspace", string(workspaceID), workspaceID, "", "")
+	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandGet)
 	if err != nil {
 		return nil, err
 	}
@@ -28,7 +31,9 @@ func ListWorkspacesByOwnerCommand(ctx context.Context, hub magicevent.Hub) ([]*w
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := sendMagicCommand[workspaceevents.ListWorkspacesCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceCommandList, workspaceevents.CommandDestination, "workspace", "all", workspaceevents.ListWorkspacesCommand{})
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandList, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.ListWorkspacesCommand{})
+	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandList, "workspace", "all", "", "", "")
+	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandList)
 	if err != nil {
 		return nil, err
 	}

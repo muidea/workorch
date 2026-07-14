@@ -393,7 +393,7 @@ func TestReadRunSnapshotUsesBoundedProjectedEventRecords(t *testing.T) {
 			OccurredAt:  fmt.Sprintf("2026-05-16T%02d:%02d:00Z", 10+i/60, i%60),
 			WorkspaceID: workspaceID,
 			RunID:       runID,
-			Payload:     payload,
+			Payload:     mustAppserviceGovernancePayload(t, payload),
 		}); err != nil {
 			t.Fatalf("append event %d: %v", i, err)
 		}
@@ -410,7 +410,7 @@ func TestReadRunSnapshotUsesBoundedProjectedEventRecords(t *testing.T) {
 		t.Fatalf("bounded event window = first %q last %q, want latest 100 records", snapshot.EventRecords[0].ID, snapshot.EventRecords[len(snapshot.EventRecords)-1].ID)
 	}
 	for _, item := range snapshot.EventRecords {
-		if _, ok := item.Payload[events.PayloadKeyOutput]; ok {
+		if _, ok := item.Payload.Field(events.PayloadKeyOutput); ok {
 			t.Fatalf("snapshot event contains raw output payload: %+v", item.Payload)
 		}
 	}
@@ -421,6 +421,7 @@ func TestReadRunSnapshotUsesBoundedProjectedEventRecords(t *testing.T) {
 
 func TestProjectRunSnapshotDetailBoundsLargeCollectionsAndOmitsRawPayloads(t *testing.T) {
 	rawPayload := map[string]any{"content": strings.Repeat("x", 4096)}
+	governancePayload := mustAppserviceGovernancePayload(t, rawPayload)
 	rawOutput := map[string]any{"rawOutput": strings.Repeat("o", 4096), "summary": "kept"}
 	count := readModelStepPageLimit + 7
 	snapshot := RunSnapshot{
@@ -498,14 +499,14 @@ func TestProjectRunSnapshotDetailBoundsLargeCollectionsAndOmitsRawPayloads(t *te
 			RunID:  "run-large",
 			Reason: "needs input",
 			State:  "resolved",
-			Context: map[string]any{
+			Context: mustAppserviceGovernancePayload(t, map[string]any{
 				"allowedRecoveryActions": []string{"replan", "terminate"},
 				"blockerKind":            "runtime_ineffective_convergence",
 				"failedStepInput":        rawPayload,
-			},
+			}),
 			ResolutionID:      "resolution-" + suffix,
 			ResolutionType:    "resume",
-			ResolutionPayload: rawPayload,
+			ResolutionPayload: governancePayload,
 		})
 		snapshot.Approvals = append(snapshot.Approvals, Approval{
 			ID:      "approval-" + suffix,
@@ -513,7 +514,7 @@ func TestProjectRunSnapshotDetailBoundsLargeCollectionsAndOmitsRawPayloads(t *te
 			Reason:  "needs approval",
 			Action:  "resume",
 			State:   "approved",
-			Context: rawPayload,
+			Context: governancePayload,
 		})
 	}
 
@@ -548,15 +549,16 @@ func TestProjectRunSnapshotDetailBoundsLargeCollectionsAndOmitsRawPayloads(t *te
 	if projected.Artifacts[0].Metadata != nil {
 		t.Fatalf("artifact projection = %+v, want metadata omitted", projected.Artifacts[0])
 	}
-	if projected.Decisions[0].Context["blockerKind"] != "runtime_ineffective_convergence" ||
-		projected.Decisions[0].Context["failedStepInput"] != nil ||
-		projected.Decisions[0].ResolutionPayload["content"] == nil {
+	blockerKind, _ := projected.Decisions[0].Context.String("blockerKind")
+	_, hasFailedStepInput := projected.Decisions[0].Context.Field("failedStepInput")
+	content, hasContent := projected.Decisions[0].ResolutionPayload.String("content")
+	if blockerKind != "runtime_ineffective_convergence" || hasFailedStepInput || !hasContent {
 		t.Fatalf("decision projection = %+v, want bounded context and bounded resolution payload", projected.Decisions[0])
 	}
-	if content, _ := projected.Decisions[0].ResolutionPayload["content"].(string); len(content) > 600 {
+	if len(content) > 600 {
 		t.Fatalf("decision resolution payload content length = %d, want bounded", len(content))
 	}
-	if projected.Approvals[0].Context != nil {
+	if len(projected.Approvals[0].Context.Fields) != 0 {
 		t.Fatalf("approval projection = %+v, want context omitted", projected.Approvals[0])
 	}
 }
@@ -587,13 +589,13 @@ func TestListRunStepsWithSessionPaginatesProjectedSteps(t *testing.T) {
 			RunID: runID,
 			Kind:  "llm/workspace_execution",
 			State: common.StepStateSucceeded,
-			Input: map[string]any{"rawInput": strings.Repeat("i", 1024)},
-			Output: map[string]any{
+			Input: mustAppserviceGovernancePayload(t, map[string]any{"rawInput": strings.Repeat("i", 1024)}),
+			Output: mustAppserviceGovernancePayload(t, map[string]any{
 				"stage":       "stage-" + strconv.Itoa(idx),
 				"summary":     "summary-" + strconv.Itoa(idx),
 				"llmCallRefs": map[string]any{"requestRef": "workorch://request"},
 				"rawOutput":   strings.Repeat("o", 1024),
-			},
+			}),
 		}); err != nil {
 			t.Fatalf("create step %d: %v", idx, err)
 		}
@@ -642,10 +644,10 @@ func TestListRunToolCallsWithSessionPaginatesProjectedToolCalls(t *testing.T) {
 			RunID:       runID,
 			StepID:      common.StepID(fmt.Sprintf("%s/step-%d", runID, idx)),
 			ToolName:    "tool-" + strconv.Itoa(idx),
-			Arguments:   map[string]any{"rawArguments": strings.Repeat("a", 1024)},
+			Arguments:   mustAppserviceGovernancePayload(t, map[string]any{"rawArguments": strings.Repeat("a", 1024)}),
 			State:       common.ToolCallStateCompleted,
 			ExitSummary: "summary-" + strconv.Itoa(idx),
-			Output:      map[string]any{"rawOutput": strings.Repeat("o", 1024)},
+			Output:      mustAppserviceGovernancePayload(t, map[string]any{"rawOutput": strings.Repeat("o", 1024)}),
 		}); err != nil {
 			t.Fatalf("create tool call %d: %v", idx, err)
 		}
@@ -693,7 +695,7 @@ func TestListRunRuntimeCheckpointsWithSessionPaginatesProjectedCheckpoints(t *te
 			CurrentStepID:    common.StepID(fmt.Sprintf("%s/step-%d", runID, idx)),
 			RunStateSnapshot: common.RunStateActive,
 			OccurredAt:       fmt.Sprintf("2026-05-16T10:0%d:00Z", idx),
-			Data:             map[string]any{"rawData": strings.Repeat("d", 1024)},
+			Data:             mustAppserviceGovernancePayload(t, map[string]any{"rawData": strings.Repeat("d", 1024)}),
 		}); err != nil {
 			t.Fatalf("create checkpoint %d: %v", idx, err)
 		}
@@ -903,7 +905,7 @@ func TestListRunArtifactsWithSessionPaginatesProjectedArtifacts(t *testing.T) {
 			ContentType:  "text/plain",
 			State:        common.ArtifactStateAvailable,
 			EvidenceRefs: []string{fmt.Sprintf("evidence-%d", idx)},
-			Metadata:     map[string]any{"raw": strings.Repeat("m", 1024)},
+			Metadata:     mustAppserviceEventPayload(t, map[string]any{"raw": strings.Repeat("m", 1024)}),
 		}); err != nil {
 			t.Fatalf("create artifact %d: %v", idx, err)
 		}
@@ -990,7 +992,7 @@ func TestReadRunSnapshotReadsDecisionResolutionsConcurrently(t *testing.T) {
 			ID:       common.ResolutionID("resolution-concurrent-" + strconv.Itoa(i)),
 			TicketID: ticketID,
 			Type:     "provide_missing_info",
-			Payload:  map[string]any{"answer": "answer " + strconv.Itoa(i)},
+			Payload:  mustAppserviceGovernancePayload(t, map[string]any{"answer": "answer " + strconv.Itoa(i)}),
 		}); err != nil {
 			t.Fatalf("create resolution %d: %v", i, err)
 		}
@@ -1062,7 +1064,7 @@ func TestReadRunSnapshotReadsWorkspaceAndRunScopedEvidenceConcurrently(t *testin
 		RunID:  runID,
 		Kind:   "llm/workspace_execution",
 		State:  common.StepStateSucceeded,
-		Output: map[string]any{"summary": "done"},
+		Output: mustAppserviceGovernancePayload(t, map[string]any{"summary": "done"}),
 	}); err != nil {
 		t.Fatalf("create step: %v", err)
 	}
@@ -1211,7 +1213,7 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 		RunID:  runID,
 		Kind:   "validation",
 		State:  common.StepStateSucceeded,
-		Output: map[string]any{"result": "done"},
+		Output: mustAppserviceGovernancePayload(t, map[string]any{"result": "done"}),
 	}); err != nil {
 		t.Fatalf("create step: %v", err)
 	}
@@ -1221,9 +1223,9 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 		RunID:       runID,
 		StepID:      stepID,
 		ToolName:    "shell",
-		Arguments:   map[string]any{"command": "go test ./..."},
+		Arguments:   mustAppserviceGovernancePayload(t, map[string]any{"command": "go test ./..."}),
 		State:       common.ToolCallStateCompleted,
-		Output:      map[string]any{"exitCode": 0},
+		Output:      mustAppserviceGovernancePayload(t, map[string]any{"exitCode": 0}),
 	}); err != nil {
 		t.Fatalf("create tool call: %v", err)
 	}
@@ -1257,7 +1259,7 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 		CheckpointType:   common.CheckpointTypeRunState,
 		CurrentStepID:    stepID,
 		RunStateSnapshot: common.RunStateCompleted,
-		Data:             map[string]any{"thread": "main"},
+		Data:             mustAppserviceGovernancePayload(t, map[string]any{"thread": "main"}),
 	}); err != nil {
 		t.Fatalf("create runtime checkpoint: %v", err)
 	}
@@ -1292,7 +1294,7 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 			ArtifactRefs:          []common.ArtifactID{"artifact-evidence-snapshot"},
 			ResidualRisks:         []string{"none reported"},
 			NextActions:           []string{"review artifact"},
-			Diagnostics:           map[string]any{"resultScope": "acceptance_slice", "sliceId": "slice-001"},
+			Diagnostics:           mustAppserviceEventPayload(t, map[string]any{"resultScope": "acceptance_slice", "sliceId": "slice-001"}),
 		},
 	}); err != nil {
 		t.Fatalf("create result: %v", err)
@@ -1309,7 +1311,7 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 		Summary:      "formal artifact",
 		State:        common.ArtifactStateAvailable,
 		EvidenceRefs: []string{string(resultID)},
-		Metadata:     map[string]any{"format": "markdown"},
+		Metadata:     mustAppserviceEventPayload(t, map[string]any{"format": "markdown"}),
 	}); err != nil {
 		t.Fatalf("create artifact: %v", err)
 	}
@@ -1433,12 +1435,12 @@ func TestReadRunSnapshotWithBackendReturnsSelectedAndUsedCapabilities(t *testing
 		RunID: runID,
 		Kind:  "mcp/tool_call",
 		State: common.StepStateSucceeded,
-		Output: map[string]any{
+		Output: mustAppserviceGovernancePayload(t, map[string]any{
 			"operation": "mcp/tool_call",
 			"serverId":  "mcp-capability-read-model",
 			"tool":      "repo.summary",
 			"status":    "completed",
-		},
+		}),
 	}); err != nil {
 		t.Fatalf("create step: %v", err)
 	}
@@ -1449,12 +1451,12 @@ func TestReadRunSnapshotWithBackendReturnsSelectedAndUsedCapabilities(t *testing
 		StepID:      stepID,
 		ToolName:    "mcp/tool_call",
 		State:       common.ToolCallStateCompleted,
-		Output: map[string]any{
+		Output: mustAppserviceGovernancePayload(t, map[string]any{
 			"operation": "mcp/tool_call",
 			"serverId":  "mcp-capability-read-model",
 			"tool":      "repo.summary",
 			"status":    "completed",
-		},
+		}),
 	}); err != nil {
 		t.Fatalf("create tool call: %v", err)
 	}
@@ -1628,12 +1630,12 @@ func TestReadRunSnapshotLoadsCapabilityCatalogOnce(t *testing.T) {
 		RunID: runID,
 		Kind:  "mcp/tool_call",
 		State: common.StepStateSucceeded,
-		Output: map[string]any{
+		Output: mustAppserviceGovernancePayload(t, map[string]any{
 			"operation": "mcp/tool_call",
 			"serverId":  "mcp-capability-catalog",
 			"tool":      "repo.summary",
 			"status":    "completed",
-		},
+		}),
 	}); err != nil {
 		t.Fatalf("create step: %v", err)
 	}
@@ -1644,12 +1646,12 @@ func TestReadRunSnapshotLoadsCapabilityCatalogOnce(t *testing.T) {
 		StepID:      stepID,
 		ToolName:    "mcp/tool_call",
 		State:       common.ToolCallStateCompleted,
-		Output: map[string]any{
+		Output: mustAppserviceGovernancePayload(t, map[string]any{
 			"operation": "mcp/tool_call",
 			"serverId":  "mcp-capability-catalog",
 			"tool":      "repo.summary",
 			"status":    "completed",
-		},
+		}),
 	}); err != nil {
 		t.Fatalf("create tool call: %v", err)
 	}
@@ -1750,22 +1752,12 @@ func TestMapRunObservabilityProjectsPatchEventsIntoTimeline(t *testing.T) {
 			RunID:       "run-observability-patch-event",
 			StepID:      "run-observability-patch-event/step-1",
 			OccurredAt:  "2026-04-25T10:00:00Z",
-			Payload: events.PatchPayload(
-				common.PatchID("patch-observability-event"),
-				common.StepID("run-observability-patch-event/step-1"),
-				common.ToolCallID("run-observability-patch-event/step-1/tool-call"),
-				"file_write",
-				"result.txt",
-				"write result",
-				common.PatchStateApplied,
-				1,
-				0,
-				"content-sha",
-				"",
-				"",
-				"",
-				"",
-			),
+			Payload: events.PatchPayloadData{
+				PatchID: "patch-observability-event", StepID: "run-observability-patch-event/step-1",
+				ToolCallID: "run-observability-patch-event/step-1/tool-call", PatchType: "file_write",
+				TargetRef: "result.txt", Summary: "write result", State: common.PatchStateApplied,
+				AddedLines: 1, ContentHash: "content-sha",
+			}.EventPayload(),
 		}},
 	}
 
@@ -1869,7 +1861,7 @@ func TestRuntimeTimelineProjectsPersistedWebStepEvents(t *testing.T) {
 			RunID:       runID,
 			StepID:      stepID,
 			OccurredAt:  "2026-05-05T00:00:02Z",
-			Payload: map[string]any{
+			Payload: mustReadModelEventPayload(t, map[string]any{
 				events.PayloadKeyKind:  webcommon.StepKindSearch,
 				events.PayloadKeyState: string(common.StepStateSucceeded),
 				events.PayloadKeyOutput: map[string]any{
@@ -1878,12 +1870,12 @@ func TestRuntimeTimelineProjectsPersistedWebStepEvents(t *testing.T) {
 					"provider":   "default-http",
 					"query":      "golang latest",
 					"searchedAt": "2026-05-05T00:00:00Z",
-					"results": []map[string]any{{
+					"results": []any{map[string]any{
 						"title": "Go Downloads",
 						"url":   "https://go.dev/dl/",
 					}},
 				},
-			},
+			}),
 		}},
 		WebSources: []WebSourceTrace{{
 			Query:        "golang latest",
@@ -2104,7 +2096,7 @@ func TestReadRunStatusUsesLatestCheckpointStep(t *testing.T) {
 		CurrentStepID:    latestStepID,
 		RunStateSnapshot: common.RunStateActive,
 		OccurredAt:       "2026-05-12T11:20:53Z",
-		Data:             map[string]any{"event": "step_failed"},
+		Data:             mustAppserviceGovernancePayload(t, map[string]any{"event": "step_failed"}),
 	}); err != nil {
 		t.Fatalf("create checkpoint: %v", err)
 	}
@@ -2217,7 +2209,7 @@ func TestRuntimeTimelineUsesStepStateForStreamItemsWhenRunBlockedOnDecision(t *t
 			WorkspaceID: string(workspaceID),
 			RunID:       string(runID),
 			StepID:      stepID,
-			Payload: map[string]any{
+			Payload: mustReadModelEventPayload(t, map[string]any{
 				events.PayloadKeyWorkspaceID:   string(workspaceID),
 				events.PayloadKeyRunID:         string(runID),
 				events.PayloadKeyStepID:        stepID,
@@ -2228,7 +2220,7 @@ func TestRuntimeTimelineUsesStepStateForStreamItemsWhenRunBlockedOnDecision(t *t
 				events.PayloadKeyElapsedMs:     0,
 				events.PayloadKeyStatus:        "completed",
 				events.PayloadKeySummary:       "llm_execution_graph_plan - completed",
-			},
+			}),
 		}},
 	})
 
@@ -2445,7 +2437,7 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 			OccurredAt: "2026-05-07T10:00:00Z",
 			RunID:      "run-1",
 			StepID:     "run-1/step-1",
-			Payload: map[string]any{
+			Payload: mustReadModelEventPayload(t, map[string]any{
 				events.PayloadKeyWorkspaceID:  "ws-1",
 				events.PayloadKeyRunID:        "run-1",
 				events.PayloadKeyStepID:       "run-1/step-1",
@@ -2467,7 +2459,7 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 					"nonCacheableInputTokens": 30,
 				},
 				events.PayloadKeyStatus: "completed",
-			},
+			}),
 		},
 		{
 			ID:         "evt-2",
@@ -2475,7 +2467,7 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 			OccurredAt: "2026-05-07T10:00:01Z",
 			RunID:      "run-1",
 			StepID:     "run-1/step-2",
-			Payload: map[string]any{
+			Payload: mustReadModelEventPayload(t, map[string]any{
 				events.PayloadKeyWorkspaceID:  "ws-1",
 				events.PayloadKeyRunID:        "run-1",
 				events.PayloadKeyStepID:       "run-1/step-2",
@@ -2495,7 +2487,7 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 					"cacheCreationTokens": 8,
 				},
 				events.PayloadKeyStatus: "completed",
-			},
+			}),
 		},
 	}
 
@@ -2560,13 +2552,13 @@ func TestMapProjectedEventRecordsKeepsBoundedMetadataPayload(t *testing.T) {
 		WorkspaceID: common.WorkspaceID("ws-projection"),
 		RunID:       common.RunID("run-projection"),
 		StepID:      common.StepID("run-projection/step-1"),
-		Payload: map[string]any{
+		Payload: mustAppserviceGovernancePayload(t, map[string]any{
 			events.PayloadKeyState:        "running",
 			events.PayloadKeySummary:      strings.Repeat("s", eventPayloadStringLimit+20),
 			events.PayloadKeyEvidenceRefs: []any{"ref-1", "ref-2"},
 			events.PayloadKeyOutput:       map[string]any{"raw": strings.Repeat("x", eventPayloadStringLimit*4)},
 			events.PayloadKeyContext:      map[string]any{"raw": "hidden"},
-		},
+		}),
 	}}
 
 	projected := readmodelprojection.MapProjectedEventRecords(items)
@@ -2574,7 +2566,7 @@ func TestMapProjectedEventRecordsKeepsBoundedMetadataPayload(t *testing.T) {
 	if len(projected) != 1 {
 		t.Fatalf("projected = %+v, want one event", projected)
 	}
-	payload := projected[0].Payload
+	payload := projected[0].Payload.Map()
 	if payload[events.PayloadKeyState] != "running" {
 		t.Fatalf("payload state = %v, want running", payload[events.PayloadKeyState])
 	}
@@ -2594,7 +2586,7 @@ func TestMapProjectedEventRecordsKeepsBoundedMetadataPayload(t *testing.T) {
 	}
 }
 
-func TestMapEventRecordsCanonicalizesWorkspacePlanStepPayload(t *testing.T) {
+func TestMapEventRecordsPreservesWorkspacePlanStepPayload(t *testing.T) {
 	items := []*eventstreammodel.EventRecord{{
 		ID:          common.EventRecordID("event-step-alias"),
 		Topic:       "/step/state/changed",
@@ -2603,18 +2595,18 @@ func TestMapEventRecordsCanonicalizesWorkspacePlanStepPayload(t *testing.T) {
 		RunID:       common.RunID("run-step-alias"),
 		StepID:      common.StepID("run-step-alias/step-1"),
 		SubjectType: "step",
-		Payload: map[string]any{
+		Payload: mustAppserviceGovernancePayload(t, map[string]any{
 			events.PayloadKeyKind:  llmcommon.StepKindWorkspacePlan,
 			events.PayloadKeyState: string(common.StepStateSucceeded),
 			events.PayloadKeyOutput: map[string]any{
 				"executionGraph": map[string]any{
-					"nodes": []map[string]any{{
+					"nodes": []any{map[string]any{
 						"id":   "plan-next",
 						"kind": llmcommon.StepKindWorkspacePlan,
 					}},
 				},
 			},
-		},
+		}),
 	}}
 
 	mapped := readmodelprojection.MapEventRecords(items)
@@ -2622,15 +2614,15 @@ func TestMapEventRecordsCanonicalizesWorkspacePlanStepPayload(t *testing.T) {
 	if len(mapped) != 1 {
 		t.Fatalf("mapped = %+v, want one event", mapped)
 	}
-	payload := mapped[0].Payload
-	if payload[events.PayloadKeyKind] != llmcommon.StepKindWorkspaceExecution {
-		t.Fatalf("payload kind = %v, want %s", payload[events.PayloadKeyKind], llmcommon.StepKindWorkspaceExecution)
+	payload := mapped[0].Payload.Map()
+	if payload[events.PayloadKeyKind] != llmcommon.StepKindWorkspacePlan {
+		t.Fatalf("payload kind = %v, want %s", payload[events.PayloadKeyKind], llmcommon.StepKindWorkspacePlan)
 	}
 	output := readModelMapValue(payload[events.PayloadKeyOutput])
 	graph := readModelMapValue(output["executionGraph"])
 	nodes := readModelMapSliceValue(graph["nodes"])
-	if len(nodes) != 1 || nodes[0]["kind"] != llmcommon.StepKindWorkspaceExecution {
-		t.Fatalf("executionGraph nodes = %+v, want canonical workspace execution kind", nodes)
+	if len(nodes) != 1 || nodes[0]["kind"] != llmcommon.StepKindWorkspacePlan {
+		t.Fatalf("executionGraph nodes = %+v, want original workspace plan kind", nodes)
 	}
 }
 
@@ -3022,11 +3014,11 @@ func TestMapTaskProgressProjectsRepairLoopEscalation(t *testing.T) {
 				RunID:       "run-repair-escalation",
 				Reason:      "runtime repair attempts exhausted after 2 attempts",
 				State:       string(common.DecisionTicketStateOpen),
-				Context: map[string]any{
+				Context: mustAppserviceGovernancePayload(t, map[string]any{
 					"attempts":         2,
 					"failureClass":     "shell_command_failed",
 					"failureSignature": "kind=shell/command",
-				},
+				}),
 			},
 		},
 	}
@@ -3163,7 +3155,7 @@ func TestReadRunContextBundleWithBackendReturnsRecoveryContextAndCompressionCand
 			RunID:  runID,
 			Kind:   "llm/workspace_execution",
 			State:  common.StepStateSucceeded,
-			Output: map[string]any{"stage": "context_bundle_stage"},
+			Output: mustAppserviceGovernancePayload(t, map[string]any{"stage": "context_bundle_stage"}),
 		}); err != nil {
 			t.Fatalf("create step: %v", err)
 		}
@@ -3175,7 +3167,7 @@ func TestReadRunContextBundleWithBackendReturnsRecoveryContextAndCompressionCand
 			CurrentStepID:    stepID,
 			RunStateSnapshot: common.RunStateActive,
 			OccurredAt:       "2026-04-29T10:00:" + twoDigitSecond(idx) + "Z",
-			Data:             map[string]any{"event": "step_completed"},
+			Data:             mustAppserviceGovernancePayload(t, map[string]any{"event": "step_completed"}),
 		}); err != nil {
 			t.Fatalf("create checkpoint: %v", err)
 		}
@@ -3261,7 +3253,7 @@ func TestReadRunTaskDecompositionsWithBackendReturnsExecutionGraphProjection(t *
 		RunID: runID,
 		Kind:  "llm/workspace_execution",
 		State: common.StepStateSucceeded,
-		Output: map[string]any{
+		Output: mustAppserviceGovernancePayload(t, map[string]any{
 			"stage": "llm_execution_graph_plan",
 			"executionGraph": map[string]any{
 				"nodes": []map[string]any{
@@ -3269,7 +3261,7 @@ func TestReadRunTaskDecompositionsWithBackendReturnsExecutionGraphProjection(t *
 					{"id": "verify", "kind": "shell/command", "dependsOn": []string{"inspect"}, "input": map[string]any{"command": "true"}},
 				},
 			},
-		},
+		}),
 	}); err != nil {
 		t.Fatalf("create root step: %v", err)
 	}
@@ -3278,11 +3270,11 @@ func TestReadRunTaskDecompositionsWithBackendReturnsExecutionGraphProjection(t *
 		RunID: runID,
 		Kind:  "shell/command",
 		State: common.StepStateSucceeded,
-		Input: map[string]any{
+		Input: mustAppserviceGovernancePayload(t, map[string]any{
 			"graphNodeId":     "inspect",
 			"graphRootStepId": string(rootStepID),
-		},
-		Output: map[string]any{"exitCode": 0},
+		}),
+		Output: mustAppserviceGovernancePayload(t, map[string]any{"exitCode": 0}),
 	}); err != nil {
 		t.Fatalf("create inspect step: %v", err)
 	}
@@ -3361,10 +3353,10 @@ func TestReadRunTaskDecompositionsWithBackendReturnsExecutionGraphProjection(t *
 		RunID: runID,
 		Kind:  "shell/command",
 		State: common.StepStateExecuting,
-		Input: map[string]any{
+		Input: mustAppserviceGovernancePayload(t, map[string]any{
 			"graphNodeId":     "verify",
 			"graphRootStepId": string(rootStepID),
-		},
+		}),
 	}); err != nil {
 		t.Fatalf("create verify step: %v", err)
 	}
@@ -3674,7 +3666,7 @@ func TestReadWorkspaceSnapshotWithBackendSummarizesRunScopedLLMUsageRecords(t *t
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 		StepID:      "run-scoped-llm-usage/step-1",
-		Payload: map[string]any{
+		Payload: mustAppserviceGovernancePayload(t, map[string]any{
 			events.PayloadKeyWorkspaceID:  string(workspaceID),
 			events.PayloadKeyRunID:        string(runID),
 			events.PayloadKeyStepID:       "run-scoped-llm-usage/step-1",
@@ -3688,7 +3680,7 @@ func TestReadWorkspaceSnapshotWithBackendSummarizesRunScopedLLMUsageRecords(t *t
 			events.PayloadKeyEstimated:    true,
 			events.PayloadKeyUsageSource:  "stream_estimated",
 			events.PayloadKeyStatus:       "completed",
-		},
+		}),
 	}); err != nil {
 		t.Fatalf("append run scoped llm usage event: %v", err)
 	}
@@ -4012,7 +4004,7 @@ func TestReadRunSnapshotIncludesArtifactContinuationMetadata(t *testing.T) {
 		ExpectedSequence:  3,
 		ReceivedSequences: []int{1, 2},
 		BytesWritten:      256,
-		Metadata:          map[string]any{"content": "must not project"},
+		Metadata:          mustAppserviceEventPayload(t, map[string]any{"content": "must not project"}),
 	}); err != nil {
 		t.Fatalf("Create artifact continuation: %v", err)
 	}
@@ -4062,11 +4054,11 @@ func TestReadRunSnapshotReadsCoverageWorkItemsFromOwnerRepository(t *testing.T) 
 		RequiredEvidenceKinds: []string{"validation"},
 		Status:                "open",
 		CurrentGap:            "missing accepted evidence binding for required evidence kind: validation",
-		Metadata: map[string]any{
+		Metadata: mustAppserviceEventPayload(t, map[string]any{
 			"id":                     "cwi-001",
 			"source":                 "goal",
 			"acceptedEvidenceByKind": map[string]any{"validation": []string{"evidence-ref-001"}},
-		},
+		}),
 	}); err != nil {
 		t.Fatalf("Create coverage work item: %v", err)
 	}
@@ -4354,7 +4346,7 @@ func TestReadWorkspaceSnapshotProjectsLatestRunFailureOverHistoricalAcceptedResu
 		SubjectID:   string(completedRunID),
 		WorkspaceID: workspaceID,
 		RunID:       completedRunID,
-		Payload:     map[string]any{events.PayloadKeyState: string(common.RunStateCompleted)},
+		Payload:     mustAppserviceGovernancePayload(t, map[string]any{events.PayloadKeyState: string(common.RunStateCompleted)}),
 	}); err != nil {
 		t.Fatalf("append completed event: %v", err)
 	}
@@ -4367,7 +4359,7 @@ func TestReadWorkspaceSnapshotProjectsLatestRunFailureOverHistoricalAcceptedResu
 		SubjectID:   string(failedRunID),
 		WorkspaceID: workspaceID,
 		RunID:       failedRunID,
-		Payload:     map[string]any{events.PayloadKeyState: string(common.RunStateFailed), events.PayloadKeyFailureReason: "llm provider returned html"},
+		Payload:     mustAppserviceGovernancePayload(t, map[string]any{events.PayloadKeyState: string(common.RunStateFailed), events.PayloadKeyFailureReason: "llm provider returned html"}),
 	}); err != nil {
 		t.Fatalf("append failed event: %v", err)
 	}
@@ -4457,7 +4449,7 @@ func TestReadWorkspaceSnapshotTaskProgressUsesLatestTerminalRejectedResult(t *te
 		SubjectID:   string(oldRunID),
 		WorkspaceID: workspaceID,
 		RunID:       oldRunID,
-		Payload:     map[string]any{events.PayloadKeyState: string(common.RunStateFailed)},
+		Payload:     mustAppserviceGovernancePayload(t, map[string]any{events.PayloadKeyState: string(common.RunStateFailed)}),
 	}); err != nil {
 		t.Fatalf("append stale event: %v", err)
 	}
@@ -4974,7 +4966,7 @@ func TestMapWorkspaceOutcomeIgnoresSupersededEventWhenReplacementRunFailed(t *te
 				OccurredAt:  "2026-06-09T14:50:05Z",
 				WorkspaceID: "ws-replan-failed",
 				RunID:       "run-001-replan-001",
-				Payload:     map[string]any{events.PayloadKeyState: string(common.RunStateFailed)},
+				Payload:     mustReadModelEventPayload(t, map[string]any{events.PayloadKeyState: string(common.RunStateFailed)}),
 			},
 			{
 				ID:          "evt-old-superseded",
@@ -4982,7 +4974,7 @@ func TestMapWorkspaceOutcomeIgnoresSupersededEventWhenReplacementRunFailed(t *te
 				OccurredAt:  "2026-06-09T14:50:06Z",
 				WorkspaceID: "ws-replan-failed",
 				RunID:       "run-001",
-				Payload:     map[string]any{events.PayloadKeyState: string(common.RunStateFailed)},
+				Payload:     mustReadModelEventPayload(t, map[string]any{events.PayloadKeyState: string(common.RunStateFailed)}),
 			},
 		},
 	}
@@ -5019,7 +5011,7 @@ func TestMapWorkspaceOutcomeFallsBackToReplacementRunWhenEventsOnlyContainSupers
 				OccurredAt:  "2026-06-09T14:50:06Z",
 				WorkspaceID: "ws-replan-failed-with-stale-events",
 				RunID:       "run-001",
-				Payload:     map[string]any{events.PayloadKeyState: string(common.RunStateFailed)},
+				Payload:     mustReadModelEventPayload(t, map[string]any{events.PayloadKeyState: string(common.RunStateFailed)}),
 			},
 		},
 	}

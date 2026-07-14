@@ -17,7 +17,7 @@ func MapApproval(item *approvalmodel.Approval, autoGovernance *governancecore.Au
 		StepID:         string(item.StepID),
 		Reason:         item.Reason,
 		Action:         item.Action,
-		Context:        governancecore.CloneApprovalMap(item.Context),
+		Context:        governancecore.CloneApprovalPayload(item.Context),
 		State:          string(item.State),
 		AutoGovernance: autoGovernance,
 		ResolvedAt:     item.ResolvedAt,

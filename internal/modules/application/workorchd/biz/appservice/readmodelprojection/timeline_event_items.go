@@ -6,15 +6,16 @@ import (
 )
 
 func persistedEventTimelineItem(item readmodelcore.EventRecord) readmodelcore.RuntimeTimelineItem {
+	runState, _ := item.Payload.String(events.PayloadKeyState)
 	return readmodelcore.RuntimeTimelineItem{
 		Source:     "persisted_event",
 		Type:       item.SubjectType,
 		ID:         item.ID,
 		Topic:      item.Topic,
-		RunState:   readModelStringValue(item.Payload[events.PayloadKeyState]),
+		RunState:   runState,
 		StepID:     item.StepID,
 		OccurredAt: item.OccurredAt,
-		Data:       cloneReadModelMap(item.Payload),
+		Data:       item.Payload.Map(),
 	}
 }
 

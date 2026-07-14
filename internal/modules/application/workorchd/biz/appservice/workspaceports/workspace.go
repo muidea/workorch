@@ -2,15 +2,15 @@ package workspaceports
 
 import (
 	"context"
-	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/eventvalue"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func ReadWorkspaceRecord(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) (*workspacemodel.Workspace, error) {
@@ -22,29 +22,26 @@ func ListWorkspaceRecords(ctx context.Context, hub magicevent.Hub) ([]*workspace
 }
 
 func CreateWorkspaceRecord(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, title string, description string, deliverableDirectory string, internalDirectory string) error {
-	_, err := sendWorkspaceMagicCommand[workspaceevents.CreateWorkspaceCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceCommandCreate, workspaceevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", workspaceevents.CreateWorkspaceCommand{
+	if hub == nil {
+		return common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandCreate, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.CreateWorkspaceCommand{
 		WorkspaceID:          workspaceID,
 		Title:                title,
 		Description:          description,
 		DeliverableDirectory: deliverableDirectory,
 		InternalDirectory:    internalDirectory,
 	})
+	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandCreate, "workspace", string(workspaceID), workspaceID, "", "")
+	_, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandCreate)
 	return err
 }
 
 func UpdateWorkspaceRecord(ctx context.Context, hub magicevent.Hub, item *workspacemodel.Workspace) error {
-	if item == nil {
+	if hub == nil || item == nil {
 		return common.ErrInvalidArgument
 	}
-	contextHints, err := eventvalue.FromMap(item.ContextHints)
-	if err != nil {
-		return fmt.Errorf("invalid workspace context hints: %w", err)
-	}
-	evidencePolicies, err := eventvalue.FromMapSlice(item.EvidencePolicies)
-	if err != nil {
-		return fmt.Errorf("invalid workspace evidence policies: %w", err)
-	}
-	_, err = sendWorkspaceMagicCommand[workspaceevents.UpdateWorkspaceCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceCommandUpdate, workspaceevents.CommandDestination, "workspace", string(item.ID), item.ID, item.ActiveRunID, workspaceevents.UpdateWorkspaceCommand{
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandUpdate, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.UpdateWorkspaceCommand{
 		WorkspaceID:          item.ID,
 		Title:                item.Title,
 		Description:          item.Description,
@@ -56,13 +53,20 @@ func UpdateWorkspaceRecord(ctx context.Context, hub magicevent.Hub, item *worksp
 		ProfileID:            item.ProfileID,
 		DefaultSoulID:        item.DefaultSoulID,
 		SoulBindings:         cloneSoulBindingMap(item.SoulBindings),
-		ContextHints:         contextHints,
-		EvidencePolicies:     evidencePolicies,
+		ContextHints:         item.ContextHints.Clone(),
+		EvidencePolicies:     workorcheventpayload.CloneSlice(item.EvidencePolicies),
 	})
+	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandUpdate, "workspace", string(item.ID), item.ID, item.ActiveRunID, "")
+	_, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandUpdate)
 	return err
 }
 
 func DeleteWorkspaceRecord(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) error {
-	_, err := sendWorkspaceMagicCommand[workspaceevents.DeleteWorkspaceCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceCommandDelete, workspaceevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", workspaceevents.DeleteWorkspaceCommand{WorkspaceID: workspaceID})
+	if hub == nil {
+		return common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandDelete, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.DeleteWorkspaceCommand{WorkspaceID: workspaceID})
+	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandDelete, "workspace", string(workspaceID), workspaceID, "", "")
+	_, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandDelete)
 	return err
 }

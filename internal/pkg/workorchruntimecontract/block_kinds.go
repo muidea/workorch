@@ -52,7 +52,7 @@ func CanonicalRuntimeBlockKind(kind string) string {
 
 func RuntimeModuleForOperationKind(kind string) string {
 	switch CanonicalRuntimeBlockKind(kind) {
-	case StepKindFileList, StepKindFileRead, StepKindFileEdit, RuntimeBlockKindPatchApply, RuntimeBlockKindPatchPreview, RuntimeBlockKindPatchRevert:
+	case StepKindFileList, StepKindFileRead, StepKindFileEdit, RuntimeBlockKindPatchApply, RuntimeBlockKindPatchPreview:
 		return RuntimeModuleFile
 	case StepKindGitRead, StepKindGitWrite:
 		return RuntimeModuleGit

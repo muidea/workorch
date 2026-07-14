@@ -1,6 +1,9 @@
 package contracts
 
-import "github.com/muidea/workorch/internal/pkg/common"
+import (
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
 type CreateTicketCommand struct {
 	TicketID               common.TicketID
@@ -10,8 +13,8 @@ type CreateTicketCommand struct {
 	Reason                 string
 	DecisionKind           string
 	Question               string
-	Context                map[string]any
-	AutoGovernance         map[string]any
+	Context                workorcheventpayload.Payload
+	AutoGovernance         workorcheventpayload.Payload
 	FailureClass           string
 	FailureSignature       string
 	AllowedRecoveryActions []string
@@ -25,9 +28,9 @@ type UpdateTicketCommand struct {
 	Reason                 string
 	DecisionKind           string
 	Question               string
-	Context                map[string]any
+	Context                workorcheventpayload.Payload
 	State                  common.DecisionTicketState
-	AutoGovernance         map[string]any
+	AutoGovernance         workorcheventpayload.Payload
 	FailureClass           string
 	FailureSignature       string
 	AllowedRecoveryActions []string
@@ -44,7 +47,7 @@ type ResolveTicketCommand struct {
 	RunID              common.RunID
 	StepID             common.StepID
 	Type               string
-	Payload            map[string]any
+	Payload            workorcheventpayload.Payload
 	ContinuationAction string
 	ResumeRunID        common.RunID
 	SuccessorRunID     common.RunID
@@ -57,7 +60,7 @@ type CreateResolutionCommand struct {
 	RunID              common.RunID
 	StepID             common.StepID
 	Type               string
-	Payload            map[string]any
+	Payload            workorcheventpayload.Payload
 	ContinuationAction string
 	ResumeRunID        common.RunID
 	SuccessorRunID     common.RunID

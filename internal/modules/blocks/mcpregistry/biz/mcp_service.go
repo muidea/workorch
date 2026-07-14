@@ -147,7 +147,7 @@ func (s *Service) capabilityFromCommand(ctx context.Context, cmd mcpcontracts.Cr
 		OutputSummary:  strings.TrimSpace(cmd.OutputSummary),
 		StageHints:     compactStrings(cmd.StageHints),
 		RiskLevel:      strings.TrimSpace(cmd.RiskLevel),
-		Schema:         cloneMap(cmd.Schema),
+		Schema:         cmd.Schema.Clone(),
 		URI:            strings.TrimSpace(cmd.URI),
 		Enabled:        cmd.Enabled,
 		ApprovalPolicy: strings.TrimSpace(cmd.ApprovalPolicy),
@@ -373,17 +373,6 @@ func compactStrings(input []string) []string {
 		}
 		seen[value] = struct{}{}
 		ret = append(ret, value)
-	}
-	return ret
-}
-
-func cloneMap(input map[string]any) map[string]any {
-	if input == nil {
-		return nil
-	}
-	ret := make(map[string]any, len(input))
-	for key, value := range input {
-		ret[key] = value
 	}
 	return ret
 }

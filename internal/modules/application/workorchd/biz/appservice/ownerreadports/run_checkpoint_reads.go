@@ -6,6 +6,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -15,10 +16,13 @@ func ReadRuntimeCheckpointByOwnerCommand(ctx context.Context, hub magicevent.Hub
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := sendMagicCommand[runevents.GetRuntimeCheckpointCommand, runevents.RunCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, runevents.TopicRunCommandGetRuntimeCheckpoint, runevents.CommandDestination, "runtime_checkpoint", string(checkpointID), runevents.GetRuntimeCheckpointCommand{
+	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandGetRuntimeCheckpoint, sourceModule, runevents.CommandDestination, magicevent.NewHeader(), commandCtx, runevents.GetRuntimeCheckpointCommand{
 		WorkspaceID:  workspaceID,
 		CheckpointID: checkpointID,
 	})
+	ownerevent.BindLane(event, runevents.TopicRunCommandGetRuntimeCheckpoint, "runtime_checkpoint", string(checkpointID), workspaceID, "", "")
+	response, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandGetRuntimeCheckpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -33,10 +37,13 @@ func ListRuntimeCheckpointsByRunOwnerCommand(ctx context.Context, hub magicevent
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := sendMagicCommand[runevents.ListRuntimeCheckpointsByRunCommand, runevents.RunCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, runevents.TopicRunCommandListCheckpointsByRun, runevents.CommandDestination, "run", string(runID), runevents.ListRuntimeCheckpointsByRunCommand{
+	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandListCheckpointsByRun, sourceModule, runevents.CommandDestination, magicevent.NewHeader(), commandCtx, runevents.ListRuntimeCheckpointsByRunCommand{
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 	})
+	ownerevent.BindLane(event, runevents.TopicRunCommandListCheckpointsByRun, "run", string(runID), workspaceID, runID, "")
+	response, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandListCheckpointsByRun)
 	if err != nil {
 		return nil, err
 	}

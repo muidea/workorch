@@ -14,6 +14,7 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const ModuleID = modulecommon.ModuleID
@@ -49,14 +50,14 @@ func (m *Module) Start() error {
 	}
 	m.capabilityObserver = magicevent.NewSimpleObserver(ModuleID, m.eventHub)
 	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
-	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteRuntimeOperation, m.handleRuntimeOperation)
+	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteWebOperation, m.handleWebOperation)
 	return nil
 }
 
 func (m *Module) Stop(ctx context.Context) error {
 	_ = ctx
 	if m.capabilityObserver != nil {
-		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteRuntimeOperation)
+		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteWebOperation)
 		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
 	}
 	m.capabilityObserver = nil
@@ -65,16 +66,44 @@ func (m *Module) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (m *Module) handleRuntimeOperation(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.ExecuteRuntimeOperationCommand)
+func (m *Module) handleWebOperation(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.ExecuteWebOperationCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	response, err := orchestratorevents.ExecuteRuntimeOperation(event.Context(), command, m.runtimeAdapter)
-	if err != nil {
+	if err := orchestratorevents.ValidateRuntimeOperationScope(command.WorkspaceID, command.RunID, command.DispatchID, command.Transaction, command.OperationID, command.EvidenceKind, command.WorkspaceDeliverableDirectory); err != nil {
 		setCapabilityError(result, err)
 		return
+	}
+	operationResult, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), webbiz.RuntimeOperationRequest{
+		WorkspaceID: command.WorkspaceID, RunID: command.RunID, StepID: common.StepID(command.DispatchID + "/" + command.OperationID),
+		Kind: command.OperationKind, WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
+		WorkspaceInternalDirectory: command.WorkspaceInternalDirectory,
+		ProviderID:                 command.Data.ProviderID, Query: command.Data.Query, Locale: command.Data.Locale, Recency: command.Data.Recency,
+		Domains: command.Data.Domains, ExcludeDomains: command.Data.ExcludeDomains, MaxResults: command.Data.MaxResults,
+		SafeSearch: command.Data.SafeSearch, ApprovalID: command.Data.ApprovalID, URL: command.Data.URL,
+		MaxBytes: command.Data.MaxBytes, ExtractMode: command.Data.ExtractMode, TargetRefs: command.TargetRefs,
+		EvidencePolicies: command.EvidencePolicies,
+	})
+	response := orchestratorevents.ExecuteWebOperationResult{
+		EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID,
+		EvidenceKind: command.EvidenceKind, Status: runtimecontract.RuntimeOperationExecutionStatusAccepted,
+		SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: operationResult.Evidence,
+		Data: orchestratorevents.WebOperationResultData{
+			Status: operationResult.Status, Stage: operationResult.Stage, ProviderID: operationResult.ProviderID,
+			Query: operationResult.Query, URL: operationResult.URL, FinalURL: operationResult.FinalURL,
+			Title: operationResult.Title, Summary: operationResult.Summary, ContentType: operationResult.ContentType,
+			ContentHash: operationResult.ContentHash, RetrievedAt: operationResult.RetrievedAt, PublishedAt: operationResult.PublishedAt,
+			Source: operationResult.Source, Size: operationResult.Size, ResultCount: operationResult.ResultCount,
+			Truncated: operationResult.Truncated, ApprovalID: operationResult.ApprovalID, ApprovalNeeded: operationResult.ApprovalNeeded,
+			DurationMillis: operationResult.DurationMillis, FailureCode: operationResult.FailureCode,
+			FailureMessage: operationResult.FailureMessage, TargetRefs: operationResult.TargetRefs,
+		},
+	}
+	if executeErr != nil {
+		response.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
+		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, command.OperationKind, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
 	}
 	result.Set(response, nil)
 }

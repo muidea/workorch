@@ -6,6 +6,7 @@ import (
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func NormalizeApprovalBatchAction(action string) (string, error) {
@@ -37,15 +38,8 @@ func ValidateApprovalIDs(ids []string) error {
 	return nil
 }
 
-func CloneApprovalMap(input map[string]any) map[string]any {
-	if input == nil {
-		return nil
-	}
-	ret := make(map[string]any, len(input))
-	for key, value := range input {
-		ret[key] = value
-	}
-	return ret
+func CloneApprovalPayload(input workorcheventpayload.Payload) workorcheventpayload.Payload {
+	return input.Clone()
 }
 
 func EnsureApprovalWorkspaceScope(runtimeWorkspaceID common.WorkspaceID, item *approvalmodel.Approval) error {

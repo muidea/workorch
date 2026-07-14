@@ -7,12 +7,15 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func purgeWorkspaceResultsAndArtifacts(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) error {
-	artifactResponse, err := sendWorkspaceMagicCommand[resultevents.ListArtifactsByWorkspaceCommand, resultevents.ResultCommandResult](ctx, hub, resultevents.TopicArtifactCommandListByWorkspace, resultevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", resultevents.ListArtifactsByWorkspaceCommand{WorkspaceID: workspaceID})
+	artifactEvent := magicevent.NewEventWithContext(resultevents.TopicArtifactCommandListByWorkspace, sourceModule, resultevents.CommandDestination, magicevent.NewHeader(), ctx, resultevents.ListArtifactsByWorkspaceCommand{WorkspaceID: workspaceID})
+	ownerevent.BindLane(artifactEvent, resultevents.TopicArtifactCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
+	artifactResponse, err := ownerevent.Result(hub.Send(artifactEvent), resultevents.TopicArtifactCommandListByWorkspace)
 	var artifacts []*resultmodel.Artifact
 	if err != nil {
 		if !errors.Is(err, common.ErrNotFound) {
@@ -25,11 +28,15 @@ func purgeWorkspaceResultsAndArtifacts(ctx context.Context, hub magicevent.Hub, 
 		if item == nil || item.WorkspaceID != workspaceID {
 			continue
 		}
-		if _, err := sendWorkspaceMagicCommand[resultevents.DeleteArtifactCommand, resultevents.ResultCommandResult](ctx, hub, resultevents.TopicArtifactCommandDelete, resultevents.CommandDestination, "artifact", string(item.ID), workspaceID, item.RunID, resultevents.DeleteArtifactCommand{ArtifactID: item.ID}); err != nil && !errors.Is(err, common.ErrNotFound) {
+		event := magicevent.NewEventWithContext(resultevents.TopicArtifactCommandDelete, sourceModule, resultevents.CommandDestination, magicevent.NewHeader(), ctx, resultevents.DeleteArtifactCommand{ArtifactID: item.ID})
+		ownerevent.BindLane(event, resultevents.TopicArtifactCommandDelete, "artifact", string(item.ID), workspaceID, item.RunID, "")
+		if _, err := ownerevent.Result(hub.Send(event), resultevents.TopicArtifactCommandDelete); err != nil && !errors.Is(err, common.ErrNotFound) {
 			return err
 		}
 	}
-	resultResponse, err := sendWorkspaceMagicCommand[resultevents.ListResultsByWorkspaceCommand, resultevents.ResultCommandResult](ctx, hub, resultevents.TopicResultCommandListByWorkspace, resultevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", resultevents.ListResultsByWorkspaceCommand{WorkspaceID: workspaceID})
+	resultEvent := magicevent.NewEventWithContext(resultevents.TopicResultCommandListByWorkspace, sourceModule, resultevents.CommandDestination, magicevent.NewHeader(), ctx, resultevents.ListResultsByWorkspaceCommand{WorkspaceID: workspaceID})
+	ownerevent.BindLane(resultEvent, resultevents.TopicResultCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
+	resultResponse, err := ownerevent.Result(hub.Send(resultEvent), resultevents.TopicResultCommandListByWorkspace)
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
 			return nil
@@ -41,7 +48,9 @@ func purgeWorkspaceResultsAndArtifacts(ctx context.Context, hub magicevent.Hub, 
 		if item == nil || item.WorkspaceID != workspaceID {
 			continue
 		}
-		if _, err := sendWorkspaceMagicCommand[resultevents.DeleteResultCommand, resultevents.ResultCommandResult](ctx, hub, resultevents.TopicResultCommandDelete, resultevents.CommandDestination, "result", string(item.ID), workspaceID, item.RunID, resultevents.DeleteResultCommand{ResultID: item.ID}); err != nil && !errors.Is(err, common.ErrNotFound) {
+		event := magicevent.NewEventWithContext(resultevents.TopicResultCommandDelete, sourceModule, resultevents.CommandDestination, magicevent.NewHeader(), ctx, resultevents.DeleteResultCommand{ResultID: item.ID})
+		ownerevent.BindLane(event, resultevents.TopicResultCommandDelete, "result", string(item.ID), workspaceID, item.RunID, "")
+		if _, err := ownerevent.Result(hub.Send(event), resultevents.TopicResultCommandDelete); err != nil && !errors.Is(err, common.ErrNotFound) {
 			return err
 		}
 	}

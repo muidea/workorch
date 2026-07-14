@@ -1,6 +1,9 @@
 package result
 
-import "github.com/muidea/workorch/internal/pkg/common"
+import (
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
 type Artifact struct {
 	ID                 common.ArtifactID
@@ -19,7 +22,7 @@ type Artifact struct {
 	ContentType        string
 	State              common.ArtifactState
 	EvidenceRefs       []string
-	Metadata           map[string]any
+	Metadata           workorcheventpayload.Payload
 	CreatedAt          string
 	UpdatedAt          string
 }

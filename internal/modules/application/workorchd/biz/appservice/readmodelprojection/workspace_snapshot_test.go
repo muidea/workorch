@@ -9,6 +9,7 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -74,10 +75,10 @@ func TestSelectTerminalResultRunIgnoresAcceptedSlice(t *testing.T) {
 			State:       common.ResultStateAccepted,
 			SourceType:  resultcommon.SourceTypeAcceptanceSlice,
 			SummaryDetail: resultmodel.ResultSummary{
-				Diagnostics: map[string]any{
-					"resultScope":              resultcommon.SourceTypeAcceptanceSlice,
-					"finalCompletionGateState": "not_final_result",
-				},
+				Diagnostics: workorcheventpayload.New(
+					workorcheventpayload.StringField("resultScope", resultcommon.SourceTypeAcceptanceSlice),
+					workorcheventpayload.StringField("finalCompletionGateState", "not_final_result"),
+				),
 			},
 			CreatedAt: "2026-06-28T05:55:05Z",
 			UpdatedAt: "2026-06-28T05:55:05Z",

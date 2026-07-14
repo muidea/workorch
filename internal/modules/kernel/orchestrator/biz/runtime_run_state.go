@@ -46,7 +46,6 @@ func (o *RuntimeOrchestrator) closeLoadedRun(ctx context.Context, run *runModel.
 	if !canCloseRunAsUnsuccessfulTerminal(run.State, state) {
 		return common.ErrConflict
 	}
-	_ = o.finalizeManagedValidationResourcesForRun(ctx, run, "released", "run_terminal")
 	if err := o.dismissOpenDecisionBlocker(ctx, run); err != nil {
 		return err
 	}

@@ -21,6 +21,6 @@ func projectRuntimeCheckpointWithData(item *runmodel.RuntimeCheckpoint) readmode
 		ThreadRef:          item.ThreadRef,
 		OccurredAt:         item.OccurredAt,
 		RestorableUntil:    item.RestorableUntil,
-		Data:               cloneReadModelMap(item.Data),
+		Data:               cloneReadModelMap(item.Data.Map()),
 	}
 }

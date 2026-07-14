@@ -81,7 +81,7 @@ func TestListApprovalPageWithBackendProjectsAuditPayloads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get approval: %v", err)
 	}
-	approval.Context = map[string]any{"large": "approval context"}
+	approval.Context = mustAppserviceGovernancePayload(t, map[string]any{"large": "approval context"})
 	if err := exports.Repositories.Approvals.Update(ctx, approval); err != nil {
 		t.Fatalf("update approval context: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestListApprovalPageWithBackendProjectsAuditPayloads(t *testing.T) {
 	if !page.HasMore || page.NextCursorAfterID != wantCursor {
 		t.Fatalf("page cursor = %+v, want hasMore with second cursor", page)
 	}
-	if page.Approvals[0].Context != nil {
+	if len(page.Approvals[0].Context.Fields) != 0 {
 		t.Fatalf("projected approval carries large context: %+v", page.Approvals[0])
 	}
 
@@ -118,7 +118,7 @@ func TestListApprovalPageWithBackendProjectsAuditPayloads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadApprovalWithBackend: %v", err)
 	}
-	if detail.Context == nil {
+	if len(detail.Context.Fields) == 0 {
 		t.Fatalf("detail approval lost full context: %+v", detail)
 	}
 }
@@ -237,10 +237,10 @@ func TestResolveApprovalWithBackendPersistsGovernanceSemanticPayload(t *testing.
 
 	item, err := ResolveApprovalWithBackend(context.Background(), "file", dataRoot, started.BlockingApprovalID, ResolveApprovalCommand{
 		Action: "approve",
-		Payload: map[string]any{
+		Payload: mustAppserviceGovernancePayload(t, map[string]any{
 			"rawInput": "同意继续",
 			"source":   "tui",
-		},
+		}),
 	})
 	if err != nil {
 		t.Fatalf("ResolveApprovalWithBackend: %v", err)
@@ -248,9 +248,11 @@ func TestResolveApprovalWithBackendPersistsGovernanceSemanticPayload(t *testing.
 	if item.State != "approved" {
 		t.Fatalf("approval = %+v, want approved", item)
 	}
-	semantic, ok := item.Context["governanceSemantic"].(map[string]any)
-	if !ok || semantic["intent"] != "approve_execution" || semantic["source"] != "tui" {
-		t.Fatalf("governanceSemantic = %#v, want approve from tui", item.Context["governanceSemantic"])
+	semantic, ok := item.Context.Object("governanceSemantic")
+	intent, _ := semantic.String("intent")
+	source, _ := semantic.String("source")
+	if !ok || intent != "approve_execution" || source != "tui" {
+		t.Fatalf("governanceSemantic = %#v, want approve from tui", item.Context)
 	}
 }
 

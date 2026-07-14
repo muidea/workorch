@@ -14,7 +14,17 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
+
+func mustMemoryStepPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
+	t.Helper()
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
 
 func TestWorkspaceRepository_CRUDAndCloneIsolation(t *testing.T) {
 	ctx := context.Background()
@@ -111,7 +121,7 @@ func TestStepRepository_CloneIsolation(t *testing.T) {
 		RunID: common.RunID("run-1"),
 		Kind:  "llm/workspace_execution",
 		State: common.StepStateExecuting,
-		Input: map[string]any{"workspaceId": "ws-1"},
+		Input: mustMemoryStepPayload(t, map[string]any{"workspaceId": "ws-1"}),
 	}
 	if err := repo.Create(ctx, step); err != nil {
 		t.Fatalf("create step: %v", err)
@@ -121,22 +131,23 @@ func TestStepRepository_CloneIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get step: %v", err)
 	}
-	got.Input["workspaceId"] = "mutated"
-	got.Output = map[string]any{"result": "done"}
+	got.Input.Fields[0].Value.String = "mutated"
+	got.Output = mustMemoryStepPayload(t, map[string]any{"result": "done"})
 
 	fresh, err := repo.Get(ctx, step.ID)
 	if err != nil {
 		t.Fatalf("get step again: %v", err)
 	}
-	if fresh.Input["workspaceId"] != "ws-1" {
-		t.Fatalf("step input clone isolation failed, workspaceId = %v", fresh.Input["workspaceId"])
+	workspaceID, _ := fresh.Input.String("workspaceId")
+	if workspaceID != "ws-1" {
+		t.Fatalf("step input clone isolation failed, workspaceId = %v", workspaceID)
 	}
-	if fresh.Output != nil {
+	if len(fresh.Output.Fields) != 0 {
 		t.Fatalf("step output should still be nil, got %#v", fresh.Output)
 	}
 
 	fresh.State = common.StepStateSucceeded
-	fresh.Output = map[string]any{"result": "done"}
+	fresh.Output = mustMemoryStepPayload(t, map[string]any{"result": "done"})
 	if err := repo.Update(ctx, fresh); err != nil {
 		t.Fatalf("update step: %v", err)
 	}
@@ -148,8 +159,9 @@ func TestStepRepository_CloneIsolation(t *testing.T) {
 	if updated.State != common.StepStateSucceeded {
 		t.Fatalf("step state = %q, want completed", updated.State)
 	}
-	if updated.Output["result"] != "done" {
-		t.Fatalf("step output result = %v, want done", updated.Output["result"])
+	result, _ := updated.Output.String("result")
+	if result != "done" {
+		t.Fatalf("step output result = %v, want done", result)
 	}
 }
 

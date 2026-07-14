@@ -6,6 +6,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -15,10 +16,12 @@ func ReadDecisionTicketByOwnerCommand(ctx context.Context, hub magicevent.Hub, t
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	response, err := sendMagicCommand[decisionevents.GetTicketCommand, decisionevents.DecisionCommandResult](ctx, hub, decisionevents.TopicDecisionCommandGetTicket, decisionevents.CommandDestination, "decision_ticket", string(ticketID), decisionevents.GetTicketCommand{
+	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandGetTicket, sourceModule, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.GetTicketCommand{
 		WorkspaceID: workspaceID,
 		TicketID:    ticketID,
 	})
+	ownerevent.BindLane(event, decisionevents.TopicDecisionCommandGetTicket, "decision_ticket", string(ticketID), workspaceID, "", "")
+	response, err := ownerevent.Decision(hub.Send(event), decisionevents.TopicDecisionCommandGetTicket)
 	if err != nil {
 		return nil, err
 	}

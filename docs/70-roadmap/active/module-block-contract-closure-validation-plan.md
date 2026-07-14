@@ -12,7 +12,7 @@ Related:
 - `../../05-product/prd.md`
 - `../../05-product/product-architecture.md`
 - `../../05-product/business-model-flow-contracts.md`
-- `../../30-module-architecture/goal-dod-nextaction-delivery-state-machine-design.md`
+- `../../90-archive/superseded/goal-dod-nextaction-delivery-state-machine-design.md`
 - `convergence-authority-simplification-design.md`
 
 ## Purpose
@@ -51,7 +51,7 @@ WorkOrch 的执行链路天然会跨越多个 module/block：workspace、run、o
 后续代码收口遵守以下规则：
 
 - Module first: 每次只固化一个 module/block 的内部合同，或一个 pairwise 交互合同。
-- Fixed contract only: 跨模块只使用 DTO、event、StagePacket、StepExecutionRequest、normalized block result、EvidenceRecord、CoverageWorkItem、Projection DTO 等固定合同。
+- Fixed contract only: 跨模块只使用 owner/capability 定义的 concrete DTO/event、Runtime V2 authority/operation/evidence、EvidenceRecord、CoverageWorkItem、Projection DTO 等固定合同；不得使用已删除的 StagePacket 或 StepExecutionRequest。
 - No private read: consumer 不能读取 provider 的内部状态、旧派生字段、raw payload 或 repository 私有结构来推断业务状态。
 - No duplicated authority: 只有 runtime authority/owner state 能决定业务状态转移；module/block 不能各自推导 run completion 或 next action。
 - Pairwise before e2e: 先通过 provider/consumer 双侧合同测试，再进入最小主链路 e2e。
@@ -80,7 +80,7 @@ WorkOrch 的执行链路天然会跨越多个 module/block：workspace、run、o
 | API/TUI/Web -> appservice | 提交 scoped command 或正式 API payload | 不绕过 API，不携带本地推断状态 |
 | appservice -> owner/EventHub | 校验 scope、幂等键、command type | owner 只接受正式 command，不接受派生状态 patch |
 | owner -> orchestrator | 提供 workspace/run/definition/evidence 权威快照 | orchestrator 不偷读端侧状态或 projection |
-| orchestrator -> block | 输出 StagePacket/StepExecutionRequest/current requiredOutput | block 不判断业务 completion |
+| orchestrator -> block | 输出 capability-specific concrete operation command/data/result 与 current requiredOutput | block 不判断业务 completion |
 | block -> orchestrator | 返回 normalized result/error/raw ref | orchestrator 只消费合同字段，不解析 adapter 私有状态 |
 | orchestrator -> evidence ledger | 写 accepted/rejected evidence with sourceRef/targetRef | ledger 不接受未过合同门禁的 state change |
 | evidence ledger -> coverage ledger | 输出可绑定 evidence refs 与质量字段 | coverage 只根据 accepted evidence 更新 |

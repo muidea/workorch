@@ -1,6 +1,9 @@
 package observed
 
-import "github.com/muidea/workorch/internal/pkg/events"
+import (
+	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
 const SnapshotVersion = "workorch.v1"
 
@@ -44,13 +47,13 @@ type DecisionTicketPayload struct {
 	State             string
 	ResolutionID      string
 	ResolutionType    string
-	ResolutionPayload map[string]any
+	ResolutionPayload workorcheventpayload.Payload
 }
 
 type ApprovalPayload struct {
 	Reason  string
 	Action  string
-	Context map[string]any
+	Context workorcheventpayload.Payload
 	State   string
 }
 
@@ -104,8 +107,8 @@ func (p DecisionTicketPayload) PayloadMap() map[string]any {
 	if p.ResolutionType != "" {
 		payload[events.PayloadKeyType] = p.ResolutionType
 	}
-	if p.ResolutionPayload != nil {
-		payload[events.PayloadKeyPayload] = cloneSnapshotMap(p.ResolutionPayload)
+	if len(p.ResolutionPayload.Fields) > 0 {
+		payload[events.PayloadKeyPayload] = p.ResolutionPayload.Map()
 	}
 	return payload
 }
@@ -118,8 +121,8 @@ func (p ApprovalPayload) PayloadMap() map[string]any {
 	if p.Action != "" {
 		payload["action"] = p.Action
 	}
-	if p.Context != nil {
-		payload["context"] = cloneSnapshotMap(p.Context)
+	if len(p.Context.Fields) > 0 {
+		payload["context"] = p.Context.Map()
 	}
 	return payload
 }

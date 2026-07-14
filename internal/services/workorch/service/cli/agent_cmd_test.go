@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
@@ -155,7 +156,7 @@ type agentCommandDecisionBackend struct{}
 func (agentCommandDecisionBackend) Resolve(context.Context, backend.ResolveDecisionRequest) (*backend.DecisionInfo, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandDecisionBackend) BatchResolve(context.Context, common.WorkspaceID, []common.TicketID, string, map[string]any) ([]backend.DecisionInfo, error) {
+func (agentCommandDecisionBackend) BatchResolve(context.Context, common.WorkspaceID, []common.TicketID, string, workorcheventpayload.Payload) ([]backend.DecisionInfo, error) {
 	return nil, common.ErrInvalidArgument
 }
 func (agentCommandDecisionBackend) List(context.Context, common.WorkspaceID) ([]backend.DecisionInfo, error) {
@@ -167,13 +168,13 @@ func (agentCommandDecisionBackend) Get(context.Context, common.WorkspaceID, comm
 
 type agentCommandApprovalBackend struct{}
 
-func (agentCommandApprovalBackend) Approve(context.Context, common.WorkspaceID, common.ApprovalID, ...map[string]any) (*backend.ApprovalInfo, error) {
+func (agentCommandApprovalBackend) Approve(context.Context, common.WorkspaceID, common.ApprovalID, ...workorcheventpayload.Payload) (*backend.ApprovalInfo, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandApprovalBackend) Reject(context.Context, common.WorkspaceID, common.ApprovalID, ...map[string]any) (*backend.ApprovalInfo, error) {
+func (agentCommandApprovalBackend) Reject(context.Context, common.WorkspaceID, common.ApprovalID, ...workorcheventpayload.Payload) (*backend.ApprovalInfo, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandApprovalBackend) BatchResolve(context.Context, common.WorkspaceID, []common.ApprovalID, string, ...map[string]any) ([]backend.ApprovalInfo, error) {
+func (agentCommandApprovalBackend) BatchResolve(context.Context, common.WorkspaceID, []common.ApprovalID, string, ...workorcheventpayload.Payload) ([]backend.ApprovalInfo, error) {
 	return nil, common.ErrInvalidArgument
 }
 func (agentCommandApprovalBackend) List(context.Context, common.WorkspaceID) ([]backend.ApprovalInfo, error) {

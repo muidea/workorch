@@ -87,7 +87,7 @@ func eventRecordSSEEnvelope(item appservice.EventRecord) streamEvent {
 		RunID:        item.RunID,
 		StepID:       item.StepID,
 		Revision:     item.Revision,
-		Payload:      cloneSSEPayload(item.Payload),
+		Payload:      cloneSSEPayload(item.Payload.Map()),
 	}
 }
 

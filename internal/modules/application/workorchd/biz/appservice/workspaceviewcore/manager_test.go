@@ -19,6 +19,7 @@ import (
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 type managerEventRecordFixture struct {
@@ -58,7 +59,7 @@ func publishManagerEventRecord(ctx context.Context, hub magicevent.Hub, record m
 		RunID:        common.RunID(record.RunID),
 		StepID:       common.StepID(record.StepID),
 		Revision:     record.Revision,
-		Payload:      record.Payload,
+		Payload:      mustManagerEventPayload(record.Payload),
 	})
 	if err != nil {
 		return err
@@ -79,6 +80,14 @@ func publishManagerEventRecord(ctx context.Context, hub magicevent.Hub, record m
 		return resultErr
 	}
 	return nil
+}
+
+func mustManagerEventPayload(input map[string]any) workorcheventpayload.Payload {
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		panic(err)
+	}
+	return payload
 }
 
 func TestStoreReplaceAllListSnapshotAndDelete(t *testing.T) {
@@ -277,7 +286,7 @@ func TestStoreListSnapshotOmitsDetailHeavyPayloads(t *testing.T) {
 			Results:        []readmodelcore.Result{{ID: "result-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", State: "accepted", Summary: strings.Repeat("x", 4096)}},
 			Artifacts:      []readmodelcore.Artifact{{ID: "artifact-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", ArtifactType: "trace", State: "active", Metadata: map[string]any{"payload": strings.Repeat("x", 4096)}}},
 			LLMUsageTraces: []readmodelcore.LLMUsageTrace{{ID: "usage-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", ContextBudget: map[string]any{"payload": strings.Repeat("x", 4096)}}},
-			EventRecords:   []readmodelcore.EventRecord{{ID: "event-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", Payload: map[string]any{"payload": strings.Repeat("x", 4096)}}},
+			EventRecords:   []readmodelcore.EventRecord{{ID: "event-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail"}},
 			Decisions:      []readmodelcore.Decision{{ID: "ticket-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", State: string(common.DecisionTicketStateOpen)}},
 			Approvals:      []readmodelcore.Approval{{ID: "approval-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", State: string(common.ApprovalStatePending)}},
 		},
@@ -885,7 +894,7 @@ func TestManagerPublishesProjectionChangedAndIgnoresOwnEvent(t *testing.T) {
 		RunID:       "run-a",
 		SubjectType: "run",
 		SubjectID:   "run-a",
-		Payload:     events.RunPayload("", "", common.RunStateCompleted, "", "", ""),
+		Payload:     events.RunPayloadData{State: common.RunStateCompleted}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish run state event: %v", err)
 	}

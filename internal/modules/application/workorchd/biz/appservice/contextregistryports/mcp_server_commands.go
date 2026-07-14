@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
@@ -16,7 +17,9 @@ func CreateMCPServer(ctx context.Context, hub magicevent.Hub, cmd contextregistr
 	if hub == nil {
 		return contextregistrycore.MCPServer{}, common.ErrInvalidArgument
 	}
-	result, err := sendMagicCommand[mcpevents.CreateServerCommand, mcpevents.MCPCommandResult](ctx, hub, mcpevents.TopicMCPCommandCreateServer, mcpevents.CommandDestination, "mcp_server", cmd.ID, mcpevents.CreateServerCommand(mcpServerCommandFromView(cmd)))
+	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandCreateServer, sourceModule, mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.CreateServerCommand(mcpServerCommandFromView(cmd)))
+	ownerevent.BindLane(event, mcpevents.TopicMCPCommandCreateServer, "mcp_server", cmd.ID, "", "", "")
+	result, err := ownerevent.MCP(hub.Send(event), mcpevents.TopicMCPCommandCreateServer)
 	if err != nil {
 		return contextregistrycore.MCPServer{}, err
 	}
@@ -34,7 +37,9 @@ func UpdateMCPServer(ctx context.Context, hub magicevent.Hub, cmd contextregistr
 	if hub == nil {
 		return contextregistrycore.MCPServer{}, common.ErrInvalidArgument
 	}
-	result, err := sendMagicCommand[mcpevents.UpdateServerCommand, mcpevents.MCPCommandResult](ctx, hub, mcpevents.TopicMCPCommandUpdateServer, mcpevents.CommandDestination, "mcp_server", cmd.ID, mcpevents.UpdateServerCommand(mcpServerCommandFromView(cmd)))
+	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandUpdateServer, sourceModule, mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.UpdateServerCommand(mcpServerCommandFromView(cmd)))
+	ownerevent.BindLane(event, mcpevents.TopicMCPCommandUpdateServer, "mcp_server", cmd.ID, "", "", "")
+	result, err := ownerevent.MCP(hub.Send(event), mcpevents.TopicMCPCommandUpdateServer)
 	if err != nil {
 		return contextregistrycore.MCPServer{}, err
 	}
@@ -58,7 +63,9 @@ func ListMCPServers(ctx context.Context, hub magicevent.Hub) ([]contextregistryc
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	result, err := sendMagicCommand[mcpevents.ListServersCommand, mcpevents.MCPCommandResult](ctx, hub, mcpevents.TopicMCPCommandListServers, mcpevents.CommandDestination, "mcp_server", "all", mcpevents.ListServersCommand{})
+	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandListServers, sourceModule, mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.ListServersCommand{})
+	ownerevent.BindLane(event, mcpevents.TopicMCPCommandListServers, "mcp_server", "all", "", "", "")
+	result, err := ownerevent.MCP(hub.Send(event), mcpevents.TopicMCPCommandListServers)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +76,9 @@ func ReadMCPServer(ctx context.Context, hub magicevent.Hub, serverID string) (*m
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	result, err := sendMagicCommand[mcpevents.GetServerCommand, mcpevents.MCPCommandResult](ctx, hub, mcpevents.TopicMCPCommandGetServer, mcpevents.CommandDestination, "mcp_server", serverID, mcpevents.GetServerCommand{ServerID: common.MCPServerID(serverID)})
+	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandGetServer, sourceModule, mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.GetServerCommand{ServerID: common.MCPServerID(serverID)})
+	ownerevent.BindLane(event, mcpevents.TopicMCPCommandGetServer, "mcp_server", serverID, "", "", "")
+	result, err := ownerevent.MCP(hub.Send(event), mcpevents.TopicMCPCommandGetServer)
 	if err != nil {
 		return nil, err
 	}

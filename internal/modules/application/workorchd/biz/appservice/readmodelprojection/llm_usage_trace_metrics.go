@@ -1,27 +1,30 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/pkg/events"
+import (
+	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
-func llmUsageTraceInputTokens(payload map[string]any) int {
-	return readModelIntValue(payload[events.PayloadKeyInputTokens])
+func llmUsageTraceInputTokens(payload workorcheventpayload.Payload) int {
+	return eventPayloadInt(payload, events.PayloadKeyInputTokens)
 }
 
-func llmUsageTraceOutputTokens(payload map[string]any) int {
-	return readModelIntValue(payload[events.PayloadKeyOutputTokens])
+func llmUsageTraceOutputTokens(payload workorcheventpayload.Payload) int {
+	return eventPayloadInt(payload, events.PayloadKeyOutputTokens)
 }
 
-func llmUsageTraceTotalTokens(payload map[string]any) int {
-	return readModelIntValue(payload[events.PayloadKeyTotalTokens])
+func llmUsageTraceTotalTokens(payload workorcheventpayload.Payload) int {
+	return eventPayloadInt(payload, events.PayloadKeyTotalTokens)
 }
 
-func llmUsageTraceRequestBytes(payload map[string]any) int {
-	return readModelIntValue(payload[events.PayloadKeyRequestBytes])
+func llmUsageTraceRequestBytes(payload workorcheventpayload.Payload) int {
+	return eventPayloadInt(payload, events.PayloadKeyRequestBytes)
 }
 
-func llmUsageTraceResponseBytes(payload map[string]any) int {
-	return readModelIntValue(payload[events.PayloadKeyResponseBytes])
+func llmUsageTraceResponseBytes(payload workorcheventpayload.Payload) int {
+	return eventPayloadInt(payload, events.PayloadKeyResponseBytes)
 }
 
-func llmUsageTraceDurationMs(payload map[string]any) int {
-	return readModelIntValue(payload[events.PayloadKeyDurationMs])
+func llmUsageTraceDurationMs(payload workorcheventpayload.Payload) int {
+	return eventPayloadInt(payload, events.PayloadKeyDurationMs)
 }

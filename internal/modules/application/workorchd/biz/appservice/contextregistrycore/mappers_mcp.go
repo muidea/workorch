@@ -66,7 +66,7 @@ func MapMCPCapability(item *mcpmodel.Capability) MCPCapability {
 		OutputSummary:  item.OutputSummary,
 		StageHints:     CloneStrings(item.StageHints),
 		RiskLevel:      item.RiskLevel,
-		Schema:         CloneMap(item.Schema),
+		Schema:         item.Schema.Map(),
 		URI:            item.URI,
 		Enabled:        item.Enabled,
 		ApprovalPolicy: item.ApprovalPolicy,

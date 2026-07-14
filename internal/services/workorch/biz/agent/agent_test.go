@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
@@ -15,7 +16,8 @@ func TestAgentChannelLifecycle(t *testing.T) {
 		t.Fatal("expected non-nil events channel")
 	}
 
-	a.Send(Event{Type: EventRunCreated, Payload: RunCreatedInfo{RunID: "test-run", WorkspaceID: "ws-1"}})
+	runCreated := RunCreatedInfo{RunID: "test-run", WorkspaceID: "ws-1"}
+	a.Send(Event{Type: EventRunCreated, RunCreated: &runCreated})
 
 	select {
 	case evt := <-a.Events():
@@ -180,10 +182,11 @@ func TestAgentDecisionAndApprovalResolutionUseScopedCommands(t *testing.T) {
 		t.Fatalf("decision requests = %+v, want one request", decisionBackend.requests)
 	}
 	gotDecision := decisionBackend.requests[0]
+	note, _ := gotDecision.Payload.String("note")
 	if gotDecision.WorkspaceID != "ws-agent" ||
 		gotDecision.TicketID != "ticket-agent" ||
 		gotDecision.ResolutionType != "provide_missing_info" ||
-		gotDecision.Payload["note"] != "answer" {
+		note != "answer" {
 		t.Fatalf("decision request = %+v, want scoped resolution", gotDecision)
 	}
 	if len(approvalBackend.approvals) != 1 ||
@@ -355,7 +358,7 @@ func (b *recordingAgentDecisionBackend) Resolve(_ context.Context, req backend.R
 	b.requests = append(b.requests, req)
 	return &backend.DecisionInfo{ID: req.TicketID, WorkspaceID: req.WorkspaceID, State: "resolved"}, nil
 }
-func (b *recordingAgentDecisionBackend) BatchResolve(context.Context, common.WorkspaceID, []common.TicketID, string, map[string]any) ([]backend.DecisionInfo, error) {
+func (b *recordingAgentDecisionBackend) BatchResolve(context.Context, common.WorkspaceID, []common.TicketID, string, workorcheventpayload.Payload) ([]backend.DecisionInfo, error) {
 	return nil, nil
 }
 func (b *recordingAgentDecisionBackend) List(context.Context, common.WorkspaceID) ([]backend.DecisionInfo, error) {
@@ -375,15 +378,15 @@ type recordingAgentApprovalBackend struct {
 	rejections []recordingAgentApprovalCall
 }
 
-func (b *recordingAgentApprovalBackend) Approve(_ context.Context, wsID common.WorkspaceID, id common.ApprovalID, _ ...map[string]any) (*backend.ApprovalInfo, error) {
+func (b *recordingAgentApprovalBackend) Approve(_ context.Context, wsID common.WorkspaceID, id common.ApprovalID, _ ...workorcheventpayload.Payload) (*backend.ApprovalInfo, error) {
 	b.approvals = append(b.approvals, recordingAgentApprovalCall{WorkspaceID: wsID, ApprovalID: id})
 	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: string(common.ApprovalStateApproved)}, nil
 }
-func (b *recordingAgentApprovalBackend) Reject(_ context.Context, wsID common.WorkspaceID, id common.ApprovalID, _ ...map[string]any) (*backend.ApprovalInfo, error) {
+func (b *recordingAgentApprovalBackend) Reject(_ context.Context, wsID common.WorkspaceID, id common.ApprovalID, _ ...workorcheventpayload.Payload) (*backend.ApprovalInfo, error) {
 	b.rejections = append(b.rejections, recordingAgentApprovalCall{WorkspaceID: wsID, ApprovalID: id})
 	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: string(common.ApprovalStateRejected)}, nil
 }
-func (b *recordingAgentApprovalBackend) BatchResolve(context.Context, common.WorkspaceID, []common.ApprovalID, string, ...map[string]any) ([]backend.ApprovalInfo, error) {
+func (b *recordingAgentApprovalBackend) BatchResolve(context.Context, common.WorkspaceID, []common.ApprovalID, string, ...workorcheventpayload.Payload) ([]backend.ApprovalInfo, error) {
 	return nil, nil
 }
 func (b *recordingAgentApprovalBackend) List(context.Context, common.WorkspaceID) ([]backend.ApprovalInfo, error) {
@@ -398,7 +401,7 @@ type fakeDecision struct{}
 func (fakeDecision) Resolve(context.Context, backend.ResolveDecisionRequest) (*backend.DecisionInfo, error) {
 	return &backend.DecisionInfo{}, nil
 }
-func (fakeDecision) BatchResolve(context.Context, common.WorkspaceID, []common.TicketID, string, map[string]any) ([]backend.DecisionInfo, error) {
+func (fakeDecision) BatchResolve(context.Context, common.WorkspaceID, []common.TicketID, string, workorcheventpayload.Payload) ([]backend.DecisionInfo, error) {
 	return nil, nil
 }
 func (fakeDecision) List(context.Context, common.WorkspaceID) ([]backend.DecisionInfo, error) {
@@ -410,13 +413,13 @@ func (fakeDecision) Get(context.Context, common.WorkspaceID, common.TicketID) (*
 
 type fakeApproval struct{}
 
-func (fakeApproval) Approve(context.Context, common.WorkspaceID, common.ApprovalID, ...map[string]any) (*backend.ApprovalInfo, error) {
+func (fakeApproval) Approve(context.Context, common.WorkspaceID, common.ApprovalID, ...workorcheventpayload.Payload) (*backend.ApprovalInfo, error) {
 	return &backend.ApprovalInfo{}, nil
 }
-func (fakeApproval) Reject(context.Context, common.WorkspaceID, common.ApprovalID, ...map[string]any) (*backend.ApprovalInfo, error) {
+func (fakeApproval) Reject(context.Context, common.WorkspaceID, common.ApprovalID, ...workorcheventpayload.Payload) (*backend.ApprovalInfo, error) {
 	return &backend.ApprovalInfo{}, nil
 }
-func (fakeApproval) BatchResolve(context.Context, common.WorkspaceID, []common.ApprovalID, string, ...map[string]any) ([]backend.ApprovalInfo, error) {
+func (fakeApproval) BatchResolve(context.Context, common.WorkspaceID, []common.ApprovalID, string, ...workorcheventpayload.Payload) ([]backend.ApprovalInfo, error) {
 	return nil, nil
 }
 func (fakeApproval) List(context.Context, common.WorkspaceID) ([]backend.ApprovalInfo, error) {

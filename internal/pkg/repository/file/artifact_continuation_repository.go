@@ -15,7 +15,6 @@ import (
 
 const (
 	artifactContinuationMetadataFile = "metadata.json"
-	artifactContinuationPlanFile     = "plan.json"
 	artifactContinuationChunksDir    = "chunks"
 	artifactContinuationAssembledDir = "assembled"
 	artifactContinuationContentExt   = ".content"
@@ -126,45 +125,6 @@ func (r *ArtifactContinuationRepository) Delete(_ context.Context, id common.Art
 		return err
 	}
 	return os.RemoveAll(dir)
-}
-
-func (r *ArtifactContinuationRepository) SavePlan(_ context.Context, id common.ArtifactContinuationID, plan map[string]any) error {
-	if id == "" {
-		return common.ErrInvalidArgument
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, err := r.metadataPathExisting(id); err != nil {
-		return err
-	}
-	path, err := r.planPath(id)
-	if err != nil {
-		return err
-	}
-	return writeOptionalMapFile(path, plan)
-}
-
-func (r *ArtifactContinuationRepository) GetPlan(_ context.Context, id common.ArtifactContinuationID) (map[string]any, error) {
-	if id == "" {
-		return nil, common.ErrInvalidArgument
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if _, err := r.metadataPathExisting(id); err != nil {
-		return nil, err
-	}
-	path, err := r.planPath(id)
-	if err != nil {
-		return nil, err
-	}
-	plan, err := readOptionalMapFile(path)
-	if err != nil {
-		return nil, err
-	}
-	if plan == nil {
-		return nil, common.ErrNotFound
-	}
-	return cloneMap(plan), nil
 }
 
 func (r *ArtifactContinuationRepository) SaveChunk(_ context.Context, chunk *orchestratormodel.ArtifactContinuationChunk, content string) error {
@@ -324,14 +284,6 @@ func (r *ArtifactContinuationRepository) metadataPathExisting(id common.Artifact
 	return path, nil
 }
 
-func (r *ArtifactContinuationRepository) planPath(id common.ArtifactContinuationID) (string, error) {
-	dir, err := r.continuationDir(id)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, artifactContinuationPlanFile), nil
-}
-
 func (r *ArtifactContinuationRepository) chunksDir(id common.ArtifactContinuationID) (string, error) {
 	dir, err := r.continuationDir(id)
 	if err != nil {
@@ -410,7 +362,7 @@ func cloneArtifactContinuation(item *orchestratormodel.ArtifactContinuation) *or
 	cloned.ReceivedChunkHashes = cloneIntStringMap(item.ReceivedChunkHashes)
 	cloned.RetryCounters = cloneStringIntMap(item.RetryCounters)
 	cloned.EvidenceRefs = cloneStringSlice(item.EvidenceRefs)
-	cloned.Metadata = cloneMap(item.Metadata)
+	cloned.Metadata = item.Metadata.Clone()
 	return &cloned
 }
 
@@ -423,8 +375,8 @@ func cloneArtifactContinuationChunk(item *orchestratormodel.ArtifactContinuation
 	if item.StepRefs != nil {
 		cloned.StepRefs = append([]common.StepID(nil), item.StepRefs...)
 	}
-	cloned.Validation = cloneMap(item.Validation)
-	cloned.Metadata = cloneMap(item.Metadata)
+	cloned.Validation = item.Validation.Clone()
+	cloned.Metadata = item.Metadata.Clone()
 	return &cloned
 }
 
@@ -435,7 +387,7 @@ func cloneArtifactContinuationAssembledMetadata(item *orchestratormodel.Artifact
 	cloned := *item
 	cloned.SourceChunkRefs = cloneStringSlice(item.SourceChunkRefs)
 	cloned.ApplyEvidenceRefs = cloneStringSlice(item.ApplyEvidenceRefs)
-	cloned.Metadata = cloneMap(item.Metadata)
+	cloned.Metadata = item.Metadata.Clone()
 	return &cloned
 }
 

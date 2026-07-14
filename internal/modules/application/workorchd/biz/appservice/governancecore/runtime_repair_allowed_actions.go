@@ -1,36 +1,20 @@
 package governancecore
 
-func RuntimeRepairAllowedRecoveryActions(input map[string]any) []string {
-	if input == nil {
-		return nil
-	}
-	value, ok := input["allowedRecoveryActions"]
+import "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+
+func RuntimeRepairAllowedRecoveryActions(input workorcheventpayload.Payload) []string {
+	values, ok := input.StringSlice("allowedRecoveryActions")
 	if !ok {
 		return nil
 	}
-	switch typed := value.(type) {
-	case []string:
-		ret := make([]string, 0, len(typed))
-		for _, item := range typed {
-			action := NormalizeRuntimeRepairRecoveryAction(item)
-			if action != "" {
-				ret = append(ret, action)
-			}
+	ret := make([]string, 0, len(values))
+	for _, item := range values {
+		action := NormalizeRuntimeRepairRecoveryAction(item)
+		if action != "" {
+			ret = append(ret, action)
 		}
-		return ret
-	case []any:
-		ret := make([]string, 0, len(typed))
-		for _, item := range typed {
-			raw, _ := item.(string)
-			action := NormalizeRuntimeRepairRecoveryAction(raw)
-			if action != "" {
-				ret = append(ret, action)
-			}
-		}
-		return ret
-	default:
-		return nil
 	}
+	return ret
 }
 
 func ContainsRuntimeRepairRecoveryAction(values []string, want string) bool {

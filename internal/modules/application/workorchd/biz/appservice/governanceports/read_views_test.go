@@ -16,6 +16,7 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 type governanceTraceReaderFunc func(context.Context, repository.AutoGovernanceTraceQuery) ([]*governancemodel.AutoGovernanceTrace, error)
@@ -130,7 +131,7 @@ func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 		if cmd.Type != "provide_missing_info" {
 			t.Fatalf("resolution type = %q, want provide_missing_info", cmd.Type)
 		}
-		if cmd.Payload.Map()["answer"] != "resume" {
+		if answer, _ := workorcheventpayload.New(cmd.Payload...).String("answer"); answer != "resume" {
 			t.Fatalf("payload = %#v, want answer resume", cmd.Payload)
 		}
 		return decisionevents.DecisionCommandResult{
@@ -144,7 +145,7 @@ func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 				ID:       "resolution-001",
 				TicketID: "ticket-001",
 				Type:     cmd.Type,
-				Payload:  cmd.Payload.Map(),
+				Payload:  workorcheventpayload.New(cmd.Payload...),
 			},
 		}
 	})
@@ -158,7 +159,7 @@ func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 
 	item, err := ResolveDecisionView(ctx, hub, nil, "ticket-001", appmodelcore.ResolveDecisionCommand{
 		ResolutionType:    "provide_missing_info",
-		ResolutionPayload: map[string]any{"answer": "resume"},
+		ResolutionPayload: mustGovernancePayload(t, map[string]any{"answer": "resume"}),
 	}, workspaceID)
 	if err != nil {
 		t.Fatalf("ResolveDecisionView err = %v", err)
@@ -213,7 +214,7 @@ func TestResolveDecisionViewRejectsNonSemanticMissingInfoPayload(t *testing.T) {
 
 			_, err := ResolveDecisionView(ctx, hub, nil, "ticket-invalid-missing-info", appmodelcore.ResolveDecisionCommand{
 				ResolutionType:    "provide_missing_info",
-				ResolutionPayload: tc.payload,
+				ResolutionPayload: mustGovernancePayload(t, tc.payload),
 			}, workspaceID)
 			if !errors.Is(err, common.ErrInvalidArgument) {
 				t.Fatalf("ResolveDecisionView err = %v, want invalid argument", err)
@@ -291,13 +292,13 @@ func TestResolveDecisionViewWithoutScopePrefersOpenDuplicateTicket(t *testing.T)
 			t.Fatalf("command scope = workspace:%q ticket:%q, want current open ticket", cmd.WorkspaceID, cmd.TicketID)
 		}
 		ticket := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, State: common.DecisionTicketStateResolved}
-		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: cmd.Payload.Map()}
+		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: workorcheventpayload.New(cmd.Payload...)}
 		return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}
 	})
 
 	item, err := ResolveDecisionView(ctx, hub, nil, "ticket-duplicate", appmodelcore.ResolveDecisionCommand{
 		ResolutionType:    "replan",
-		ResolutionPayload: map[string]any{"operator": "test"},
+		ResolutionPayload: mustGovernancePayload(t, map[string]any{"operator": "test"}),
 	}, "")
 	if err != nil {
 		t.Fatalf("ResolveDecisionView err = %v", err)
@@ -342,7 +343,7 @@ func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
 			t.Fatalf("decision command scope = workspace:%q run:%q, want %s/run-001", cmd.WorkspaceID, cmd.RunID, workspaceID)
 		}
 		ticket := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, State: common.DecisionTicketStateResolved}
-		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: cmd.Payload.Map()}
+		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: workorcheventpayload.New(cmd.Payload...)}
 		return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}
 	})
 	resumeObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
@@ -355,7 +356,7 @@ func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
 	items, err := BatchResolveDecisionViews(ctx, hub, nil, appmodelcore.BatchResolveDecisionCommand{
 		TicketIDs:         ticketIDs,
 		ResolutionType:    "provide_missing_info",
-		ResolutionPayload: map[string]any{"answer": "resume"},
+		ResolutionPayload: mustGovernancePayload(t, map[string]any{"answer": "resume"}),
 	}, workspaceID)
 	if err != nil {
 		t.Fatalf("BatchResolveDecisionViews err = %v", err)
@@ -533,12 +534,15 @@ func TestResolveApprovalViewWithCommandPublishesGovernanceSemanticContext(t *tes
 		if !ok {
 			t.Fatalf("command payload type = %T, want EnsureApprovedCommand", data)
 		}
-		contextPayload := cmd.Context.Map()
-		semantic, ok := contextPayload["governanceSemantic"].(map[string]any)
+		contextPayload := workorcheventpayload.New(cmd.Context...)
+		semantic, ok := contextPayload.Object("governanceSemantic")
 		if !ok {
-			t.Fatalf("governanceSemantic = %#v, want map", contextPayload["governanceSemantic"])
+			t.Fatalf("governanceSemantic missing from %#v", contextPayload)
 		}
-		if semantic["intent"] != "approve_execution" || semantic["rawInput"] != "同意继续" || semantic["source"] != "tui" {
+		intent, _ := semantic.String("intent")
+		rawInput, _ := semantic.String("rawInput")
+		source, _ := semantic.String("source")
+		if intent != "approve_execution" || rawInput != "同意继续" || source != "tui" {
 			t.Fatalf("governanceSemantic = %#v, want approve rawInput/source", semantic)
 		}
 		return approvalevents.ApprovalCommandResult{
@@ -554,17 +558,18 @@ func TestResolveApprovalViewWithCommandPublishesGovernanceSemanticContext(t *tes
 
 	item, err := ResolveApprovalViewWithCommand(ctx, hub, nil, "approval-semantic-001", appmodelcore.ResolveApprovalCommand{
 		Action: "approve",
-		Payload: map[string]any{
+		Payload: mustGovernancePayload(t, map[string]any{
 			"rawInput": "同意继续",
 			"source":   "tui",
-		},
+		}),
 	}, workspaceID)
 	if err != nil {
 		t.Fatalf("ResolveApprovalViewWithCommand err = %v", err)
 	}
-	semantic, ok := item.Context["governanceSemantic"].(map[string]any)
-	if !ok || semantic["intent"] != "approve_execution" {
-		t.Fatalf("item semantic = %#v, want approve", item.Context["governanceSemantic"])
+	semantic, ok := item.Context.Object("governanceSemantic")
+	intent, _ := semantic.String("intent")
+	if !ok || intent != "approve_execution" {
+		t.Fatalf("item semantic = %#v, want approve", item.Context)
 	}
 }
 

@@ -5,7 +5,17 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
+
+func mustPortEventPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
+	t.Helper()
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		t.Fatalf("event payload: %v", err)
+	}
+	return payload
+}
 
 func TestPortWorkspaceSnapshotInfoPreservesTypedProjectionFields(t *testing.T) {
 	snapshot := readmodelcore.WorkspaceSnapshot{
@@ -65,12 +75,14 @@ func TestPortWorkspaceSnapshotInfoPreservesTypedProjectionFields(t *testing.T) {
 			State:       "open",
 		}},
 		EventRecords: []readmodelcore.EventRecord{{
-			ID:             "event-map",
-			WorkspaceID:    "ws-map",
-			RunID:          "run-map",
-			Payload:        map[string]any{"raw": "large event payload"},
-			PayloadSummary: map[string]any{"state": "running"},
-			PayloadRef:     "event://payload/event-map",
+			ID:          "event-map",
+			SubjectType: "run",
+			WorkspaceID: "ws-map",
+			RunID:       "run-map",
+			Payload: mustPortEventPayload(t, map[string]any{
+				"state": "active",
+			}),
+			PayloadRef: "event://payload/event-map",
 		}},
 	}
 
@@ -93,10 +105,23 @@ func TestPortWorkspaceSnapshotInfoPreservesTypedProjectionFields(t *testing.T) {
 	if got.GapBaseline == nil || got.GapBaseline.AcceptedEvidenceRefs[0] != "evidence-a" {
 		t.Fatalf("gapBaseline = %+v, want evidence refs", got.GapBaseline)
 	}
-	if got.Decisions[0].ID != "ticket-map" || got.EventRecords[0].PayloadSummary["state"] != "running" {
+	if got.Decisions[0].ID != "ticket-map" || len(got.EventRecords[0].Payload.Fields) != 1 {
 		t.Fatalf("governance/event = %+v/%+v, want mapped values", got.Decisions, got.EventRecords)
 	}
-	if got.EventRecords[0].Payload != nil || got.EventRecords[0].PayloadRef != "event://payload/event-map" {
-		t.Fatalf("event record = %+v, want snapshot projection with payload ref and no raw payload", got.EventRecords[0])
+	if got.EventRecords[0].Summary != "active" || got.EventRecords[0].PayloadRef != "event://payload/event-map" {
+		t.Fatalf("event record = %+v, want typed payload summary and payload ref", got.EventRecords[0])
+	}
+}
+
+func TestPortWorkspaceSnapshotInfoDoesNotFallbackToPayloadSummaryMap(t *testing.T) {
+	got := PortWorkspaceSnapshotInfo(readmodelcore.WorkspaceSnapshot{
+		EventRecords: []readmodelcore.EventRecord{{
+			ID:             "event-summary-only",
+			SubjectType:    "run",
+			PayloadSummary: mustPortEventPayload(t, map[string]any{"state": "active"}),
+		}},
+	})
+	if len(got.EventRecords) != 0 {
+		t.Fatalf("event records = %+v, want summary-only map record rejected", got.EventRecords)
 	}
 }

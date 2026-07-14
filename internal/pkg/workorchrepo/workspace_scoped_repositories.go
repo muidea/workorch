@@ -1951,22 +1951,6 @@ func (r *workspaceScopedArtifactContinuationRepository) Delete(ctx context.Conte
 	return r.repoForRun(current.WorkspaceID, current.RunID).Delete(ctx, id)
 }
 
-func (r *workspaceScopedArtifactContinuationRepository) SavePlan(ctx context.Context, id common.ArtifactContinuationID, plan map[string]any) error {
-	repo, err := r.repoForContinuation(ctx, id)
-	if err != nil {
-		return err
-	}
-	return repo.SavePlan(ctx, id, plan)
-}
-
-func (r *workspaceScopedArtifactContinuationRepository) GetPlan(ctx context.Context, id common.ArtifactContinuationID) (map[string]any, error) {
-	repo, err := r.repoForContinuation(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	return repo.GetPlan(ctx, id)
-}
-
 func (r *workspaceScopedArtifactContinuationRepository) SaveChunk(ctx context.Context, chunk *orchestratormodel.ArtifactContinuationChunk, content string) error {
 	if chunk == nil || chunk.ContinuationID == "" {
 		return common.ErrInvalidArgument

@@ -23,7 +23,7 @@ func artifactFromModel(item *resultmodel.Artifact) readmodelcore.Artifact {
 		ContentType:        item.ContentType,
 		State:              string(item.State),
 		EvidenceRefs:       cloneReadModelStringSlice(item.EvidenceRefs),
-		Metadata:           cloneReadModelMap(item.Metadata),
+		Metadata:           cloneReadModelMap(item.Metadata.Map()),
 		CreatedAt:          item.CreatedAt,
 		UpdatedAt:          item.UpdatedAt,
 	}

@@ -4,7 +4,7 @@ Status: active
 
 Type: profile-capability
 
-Last Updated: 2026-05-30
+Last Updated: 2026-07-14
 
 ## Purpose
 
@@ -15,12 +15,25 @@ Last Updated: 2026-05-30
 - software-dev / workspace / MCP / runtime capability 等特化语义
 - template / Soul / capability allowlist / evidence policy 等 profile 规则
 - 领域术语解释、建议验证方式、典型产物结构、profile-specific coverage matrix
+- **stage policy / focus 映射作为 typed C2 与 activation 输入**，供 candidate 上下文与 requiredOutput 中立交集使用
 
 本层不负责：
 
-- 定义 core runtime contract
+- 定义 core runtime contract 或 Runtime V2 生产状态机
 - 改写 domain model
 - 取代 module architecture
+- 让 kernel 理解 profile ID、模板名或业务领域语义
+
+## Kernel Neutrality
+
+- core / Orchestrator / reducer **不理解 profile IDs**。
+- profile 只能输出结构化字段：stage policy、evidence policy、capability allowlist、focus/coverage 提示、marker 等。
+- 这些字段进入：
+  - typed `RuntimeBootstrap` / Activation
+  - candidate context 的 **C2 stable capability contract** 与相关 section
+  - requiredOutput / evidence gate 的中立约束
+- 中立 stage 语义（exploration / planning / execution / ...）用于 profile 映射与 LLM 输出策略；生产动作仍以 V2 `RuntimeDecision.Action` 为准。
+- 不得把 profile 策略重新包装为 `StagePacket` / graph dispatch / 自动 replan successor。
 
 ## Reading Order
 
@@ -42,10 +55,11 @@ Last Updated: 2026-05-30
 
 ## Cross-Layer Boundary
 
-- core runtime contract 仍以 `00-core/` 为准
+- core runtime contract / Runtime V2 主链仍以 `00-core/` 为准
 - 业务对象定义属于 `10-domain-model/`
 - 运行链路属于 `20-runtime-flow/`
 - 代码实现落点属于 `30-module-architecture/`
+- candidate request 的 C0–C5 分区见 `../00-core/runtime-request-cache-note.md`
 
 ## Current Gaps
 

@@ -123,11 +123,14 @@ func TestModuleStartRunCommandAcceptsStateAndSchedulesBackgroundDispatch(t *test
 		backgroundRoutine: bg,
 	}
 
-	_, err := module.executeMagicCommand(
-		common.ContextWithRuntimeWorkspaceID(common.ContextWithRuntimeLLMProviderID(ctx, "provider-test"), workspaceID),
+	_, err := module.executeMagicCommand(magicevent.NewEventWithContext(
 		orchestratorevents.TopicOrchestratorCommandStartRun,
+		"test",
+		orchestratorevents.CommandDestination,
+		magicevent.NewHeader(),
+		common.ContextWithRuntimeWorkspaceID(common.ContextWithRuntimeLLMProviderID(ctx, "provider-test"), workspaceID),
 		orchestratorevents.StartRunCommand{RunID: runID},
-	)
+	))
 	if err != nil {
 		t.Fatalf("start command err = %v", err)
 	}
@@ -177,14 +180,17 @@ func TestModuleResumeRunCommandSchedulesRuntimeV2Drive(t *testing.T) {
 		backgroundRoutine: bg,
 	}
 
-	_, err := module.executeMagicCommand(
-		common.ContextWithRuntimeLLMProviderID(ctx, "provider-test"),
+	_, err := module.executeMagicCommand(magicevent.NewEventWithContext(
 		orchestratorevents.TopicOrchestratorCommandResumeRun,
+		"test",
+		orchestratorevents.CommandDestination,
+		magicevent.NewHeader(),
+		common.ContextWithRuntimeLLMProviderID(ctx, "provider-test"),
 		orchestratorevents.ResumeRunCommand{
 			WorkspaceID: workspaceID,
 			RunID:       runID,
 		},
-	)
+	))
 	if err != nil {
 		t.Fatalf("resume command err = %v", err)
 	}
@@ -220,7 +226,14 @@ func TestModuleResumeRunCommandRejectsTerminalRunBeforeBackgroundDispatch(t *tes
 		backgroundRoutine: bg,
 	}
 
-	_, err := module.executeMagicCommand(ctx, orchestratorevents.TopicOrchestratorCommandResumeRun, orchestratorevents.ResumeRunCommand{WorkspaceID: workspaceID, RunID: runID})
+	_, err := module.executeMagicCommand(magicevent.NewEventWithContext(
+		orchestratorevents.TopicOrchestratorCommandResumeRun,
+		"test",
+		orchestratorevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		orchestratorevents.ResumeRunCommand{WorkspaceID: workspaceID, RunID: runID},
+	))
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("resume terminal err = %v, want conflict", err)
 	}

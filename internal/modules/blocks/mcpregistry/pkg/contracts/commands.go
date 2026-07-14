@@ -1,6 +1,9 @@
 package contracts
 
-import "github.com/muidea/workorch/internal/pkg/common"
+import (
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
 type CreateServerCommand struct {
 	ServerID              common.MCPServerID
@@ -45,7 +48,7 @@ type CreateCapabilityCommand struct {
 	OutputSummary  string
 	StageHints     []string
 	RiskLevel      string
-	Schema         map[string]any
+	Schema         workorcheventpayload.Payload
 	URI            string
 	Enabled        bool
 	ApprovalPolicy string

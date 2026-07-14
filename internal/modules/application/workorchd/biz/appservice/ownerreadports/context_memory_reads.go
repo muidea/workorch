@@ -6,6 +6,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -16,7 +17,10 @@ func ReadMemoryItemByOwnerCommand(ctx context.Context, hub magicevent.Hub, id co
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := sendMagicCommand[memoryevents.GetMemoryCommand, memoryevents.MemoryCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, memoryevents.TopicMemoryCommandGet, memoryevents.CommandDestination, "memory", string(id), memoryevents.GetMemoryCommand{WorkspaceID: workspaceID, MemoryID: id})
+	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandGet, sourceModule, memoryevents.CommandDestination, magicevent.NewHeader(), commandCtx, memoryevents.GetMemoryCommand{WorkspaceID: workspaceID, MemoryID: id})
+	ownerevent.BindLane(event, memoryevents.TopicMemoryCommandGet, "memory", string(id), workspaceID, "", "")
+	response, err := ownerevent.Memory(hub.Send(event), memoryevents.TopicMemoryCommandGet)
 	if err != nil {
 		return nil, err
 	}
@@ -30,7 +34,9 @@ func ListMemoryItemsByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := sendMagicCommand[memoryevents.ListMemoryByWorkspaceCommand, memoryevents.MemoryCommandResult](ctx, hub, memoryevents.TopicMemoryCommandListByWorkspace, memoryevents.CommandDestination, "workspace", string(workspaceID), memoryevents.ListMemoryByWorkspaceCommand{WorkspaceID: workspaceID})
+	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandListByWorkspace, sourceModule, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.ListMemoryByWorkspaceCommand{WorkspaceID: workspaceID})
+	ownerevent.BindLane(event, memoryevents.TopicMemoryCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
+	response, err := ownerevent.Memory(hub.Send(event), memoryevents.TopicMemoryCommandListByWorkspace)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +47,9 @@ func SearchMemoryByOwnerCommand(ctx context.Context, hub magicevent.Hub, query r
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := sendMagicCommand[memoryevents.SearchMemoryCommand, memoryevents.MemoryCommandResult](ctx, hub, memoryevents.TopicMemoryCommandSearch, memoryevents.CommandDestination, "memory_search", string(query.WorkspaceID), memoryevents.SearchMemoryCommand{Query: query})
+	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandSearch, sourceModule, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.SearchMemoryCommand{Query: query})
+	ownerevent.BindLane(event, memoryevents.TopicMemoryCommandSearch, "memory_search", string(query.WorkspaceID), query.WorkspaceID, "", "")
+	response, err := ownerevent.Memory(hub.Send(event), memoryevents.TopicMemoryCommandSearch)
 	if err != nil {
 		return nil, err
 	}

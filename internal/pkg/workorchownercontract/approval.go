@@ -1,6 +1,9 @@
 package workorchownercontract
 
-import "github.com/muidea/workorch/internal/pkg/common"
+import (
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
 const TopicApprovalCommandGet = "/approval/command/get"
 
@@ -11,9 +14,9 @@ type Approval struct {
 	StepID         common.StepID
 	Reason         string
 	Action         string
-	Context        map[string]any
+	Context        workorcheventpayload.Payload
 	State          common.ApprovalState
-	AutoGovernance map[string]any
+	AutoGovernance workorcheventpayload.Payload
 	ResolvedAt     string
 	ResolvedBy     string
 	CreatedAt      string

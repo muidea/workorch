@@ -1,27 +1,21 @@
 package governancecore
 
-import "strings"
+import (
+	"strings"
 
-func DecisionPayloadMap(value any) map[string]any {
-	typed, _ := value.(map[string]any)
-	return typed
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
+
+func DecisionPayloadObject(payload workorcheventpayload.Payload, key string) workorcheventpayload.Payload {
+	value, _ := payload.Object(key)
+	return value
 }
 
-func StringFromDecisionPayload(payload map[string]any, key string) string {
-	if payload == nil {
-		return ""
-	}
-	value, _ := payload[key].(string)
+func StringFromDecisionPayload(payload workorcheventpayload.Payload, key string) string {
+	value, _ := payload.String(key)
 	return strings.TrimSpace(value)
 }
 
-func CloneDecisionPayload(input map[string]any) map[string]any {
-	if input == nil {
-		return nil
-	}
-	ret := make(map[string]any, len(input))
-	for key, value := range input {
-		ret[key] = value
-	}
-	return ret
+func CloneDecisionPayload(input workorcheventpayload.Payload) workorcheventpayload.Payload {
+	return input.Clone()
 }

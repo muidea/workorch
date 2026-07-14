@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
 
 	workspaceModel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -46,18 +45,15 @@ func (o *RuntimeOrchestrator) BlockOnDecision(ctx context.Context, runID common.
 	if err != nil {
 		return err
 	}
-	return o.blockOnDecisionAtStep(ctx, r, nil, ticketID, "")
+	return o.blockOnDecisionAtStep(ctx, r, nil, ticketID)
 }
 
-func (o *RuntimeOrchestrator) blockOnDecisionAtStep(ctx context.Context, r *runModel.Run, workspace *workspaceModel.Workspace, ticketID common.TicketID, currentStepID common.StepID) error {
+func (o *RuntimeOrchestrator) blockOnDecisionAtStep(ctx context.Context, r *runModel.Run, workspace *workspaceModel.Workspace, ticketID common.TicketID) error {
 	if r == nil || r.ID == "" || ticketID == "" {
 		return common.ErrInvalidArgument
 	}
 	if (r.State != common.RunStatePending && r.State != common.RunStateActive) || !common.RunStateCanTransition(r.State, common.RunStateBlockedOnDecision) {
 		return common.ErrConflict
-	}
-	if err := o.finalizeManagedValidationResourcesForGovernedWait(ctx, r, currentStepID, "released", "run_blocked_on_decision"); err != nil {
-		return err
 	}
 	r.State = common.RunStateBlockedOnDecision
 	r.BlockingTicketID = ticketID
@@ -78,18 +74,15 @@ func (o *RuntimeOrchestrator) BlockOnApproval(ctx context.Context, runID common.
 	if err != nil {
 		return err
 	}
-	return o.blockOnApprovalAtStep(ctx, r, nil, approvalID, "")
+	return o.blockOnApprovalAtStep(ctx, r, nil, approvalID)
 }
 
-func (o *RuntimeOrchestrator) blockOnApprovalAtStep(ctx context.Context, r *runModel.Run, workspace *workspaceModel.Workspace, approvalID common.ApprovalID, currentStepID common.StepID) error {
+func (o *RuntimeOrchestrator) blockOnApprovalAtStep(ctx context.Context, r *runModel.Run, workspace *workspaceModel.Workspace, approvalID common.ApprovalID) error {
 	if r == nil || r.ID == "" || approvalID == "" {
 		return common.ErrInvalidArgument
 	}
 	if (r.State != common.RunStatePending && r.State != common.RunStateActive) || !common.RunStateCanTransition(r.State, common.RunStateBlockedOnApproval) {
 		return common.ErrConflict
-	}
-	if err := o.finalizeManagedValidationResourcesForGovernedWait(ctx, r, currentStepID, "released", "run_blocked_on_approval"); err != nil {
-		return err
 	}
 	r.State = common.RunStateBlockedOnApproval
 	r.BlockingApprovalID = approvalID
@@ -100,29 +93,6 @@ func (o *RuntimeOrchestrator) blockOnApprovalAtStep(ctx context.Context, r *runM
 		return err
 	}
 	return nil
-}
-
-func (o *RuntimeOrchestrator) finalizeManagedValidationResourcesForGovernedWait(ctx context.Context, r *runModel.Run, currentStepID common.StepID, finalStatus string, finalizedBy string) error {
-	if o == nil || r == nil || r.ID == "" || o.steps == nil {
-		return nil
-	}
-	if currentStepID == "" {
-		return o.finalizeManagedValidationResourcesForRun(ctx, r, finalStatus, finalizedBy)
-	}
-	step, err := o.steps.Get(ctx, currentStepID)
-	if err != nil {
-		if errors.Is(err, common.ErrNotFound) {
-			return nil
-		}
-		return err
-	}
-	if step == nil || step.RunID != r.ID {
-		return nil
-	}
-	if !finalizeManagedValidationResourcesForStep(step, finalStatus, finalizedBy) {
-		return nil
-	}
-	return o.steps.Update(ctx, step)
 }
 
 func (o *RuntimeOrchestrator) CanResumeRun(ctx context.Context, runID common.RunID) error {

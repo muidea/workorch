@@ -1,37 +1,27 @@
 package events
 
-import "github.com/muidea/workorch/internal/pkg/common"
+import (
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
 const EvidenceCommandDestination = "kernel/orchestrator"
 
-type DecisionEvidenceValueKind string
+type DecisionEvidenceValueKind = workorcheventpayload.ValueKind
 
 const (
-	DecisionEvidenceValueNull   DecisionEvidenceValueKind = "null"
-	DecisionEvidenceValueString DecisionEvidenceValueKind = "string"
-	DecisionEvidenceValueBool   DecisionEvidenceValueKind = "bool"
-	DecisionEvidenceValueInt    DecisionEvidenceValueKind = "int"
-	DecisionEvidenceValueUint   DecisionEvidenceValueKind = "uint"
-	DecisionEvidenceValueFloat  DecisionEvidenceValueKind = "float"
-	DecisionEvidenceValueObject DecisionEvidenceValueKind = "object"
-	DecisionEvidenceValueArray  DecisionEvidenceValueKind = "array"
+	DecisionEvidenceValueNull   = workorcheventpayload.ValueNull
+	DecisionEvidenceValueString = workorcheventpayload.ValueString
+	DecisionEvidenceValueBool   = workorcheventpayload.ValueBool
+	DecisionEvidenceValueInt    = workorcheventpayload.ValueInt
+	DecisionEvidenceValueUint   = workorcheventpayload.ValueUint
+	DecisionEvidenceValueFloat  = workorcheventpayload.ValueFloat
+	DecisionEvidenceValueObject = workorcheventpayload.ValueObject
+	DecisionEvidenceValueArray  = workorcheventpayload.ValueArray
 )
 
-type DecisionEvidenceField struct {
-	Name  string
-	Value DecisionEvidenceValue
-}
-
-type DecisionEvidenceValue struct {
-	Kind   DecisionEvidenceValueKind
-	String string
-	Bool   bool
-	Int    int64
-	Uint   uint64
-	Float  float64
-	Object []DecisionEvidenceField
-	Array  []DecisionEvidenceValue
-}
+type DecisionEvidenceField = workorcheventpayload.Field
+type DecisionEvidenceValue = workorcheventpayload.Value
 
 type RecordDecisionEvidenceCommand struct {
 	EvidenceRecordID   common.EvidenceRecordID

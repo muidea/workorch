@@ -1,6 +1,9 @@
 package workspace
 
-import "github.com/muidea/workorch/internal/pkg/common"
+import (
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
 type Workspace struct {
 	ID                   common.WorkspaceID
@@ -14,6 +17,6 @@ type Workspace struct {
 	ProfileID            string
 	DefaultSoulID        common.SoulID
 	SoulBindings         map[string]common.SoulID
-	ContextHints         map[string]any
-	EvidencePolicies     []map[string]any
+	ContextHints         workorcheventpayload.Payload
+	EvidencePolicies     []workorcheventpayload.Payload
 }

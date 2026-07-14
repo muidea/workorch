@@ -6,6 +6,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -15,7 +16,10 @@ func ReadResultByOwnerCommand(ctx context.Context, hub magicevent.Hub, resultID 
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := sendMagicCommand[resultevents.GetResultCommand, resultevents.ResultCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, resultevents.TopicResultCommandGet, resultevents.CommandDestination, "result", string(resultID), resultevents.GetResultCommand{ResultID: resultID})
+	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	event := magicevent.NewEventWithContext(resultevents.TopicResultCommandGet, sourceModule, resultevents.CommandDestination, magicevent.NewHeader(), commandCtx, resultevents.GetResultCommand{ResultID: resultID})
+	ownerevent.BindLane(event, resultevents.TopicResultCommandGet, "result", string(resultID), workspaceID, "", "")
+	response, err := ownerevent.Result(hub.Send(event), resultevents.TopicResultCommandGet)
 	if err != nil {
 		return nil, err
 	}

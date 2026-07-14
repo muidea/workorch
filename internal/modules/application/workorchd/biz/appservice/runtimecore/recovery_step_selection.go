@@ -61,11 +61,11 @@ func TerminalStepModel(items []*runmodel.Step) *runmodel.Step {
 }
 
 func PreviousStepModelID(item *runmodel.Step) common.StepID {
-	if item == nil || item.Input == nil {
+	if item == nil {
 		return ""
 	}
 	for _, key := range []string{"previousStepId", "repairOfStepId", "failedStepId"} {
-		value, _ := item.Input[key].(string)
+		value, _ := item.Input.String(key)
 		value = strings.TrimSpace(value)
 		if value != "" && common.StepID(value) != item.ID {
 			return common.StepID(value)
@@ -75,12 +75,12 @@ func PreviousStepModelID(item *runmodel.Step) common.StepID {
 }
 
 func referencedStepModelIDs(item *runmodel.Step) []common.StepID {
-	if item == nil || item.Input == nil {
+	if item == nil {
 		return nil
 	}
 	ret := make([]common.StepID, 0, 2)
 	for _, key := range []string{"previousStepId", "repairOfStepId", "failedStepId", "graphRootStepId"} {
-		value, _ := item.Input[key].(string)
+		value, _ := item.Input.String(key)
 		value = strings.TrimSpace(value)
 		if value == "" || common.StepID(value) == item.ID {
 			continue
@@ -94,11 +94,12 @@ func latestGraphTerminalStep(items []*runmodel.Step) *runmodel.Step {
 	var latest *runmodel.Step
 	var latestGraphSeq, latestNodeSeq int
 	for _, item := range items {
-		if item == nil || item.Input == nil {
+		if item == nil {
 			continue
 		}
-		if strings.TrimSpace(stringValue(item.Input["graphNodeId"])) == "" ||
-			strings.TrimSpace(stringValue(item.Input["graphRootStepId"])) == "" {
+		graphNodeID, _ := item.Input.String("graphNodeId")
+		graphRootStepID, _ := item.Input.String("graphRootStepId")
+		if strings.TrimSpace(graphNodeID) == "" || strings.TrimSpace(graphRootStepID) == "" {
 			continue
 		}
 		graphSeq, nodeSeq := graphStepModelSequence(item)
@@ -118,9 +119,11 @@ func graphStepModelSequence(item *runmodel.Step) (int, int) {
 	if item == nil {
 		return 0, 0
 	}
-	if item.Input != nil {
-		graphSeq := intValue(item.Input["graphSeq"])
-		nodeSeq := intValue(item.Input["graphNodeSeq"])
+	if len(item.Input.Fields) > 0 {
+		graphSeqValue, _ := item.Input.Int64("graphSeq")
+		nodeSeqValue, _ := item.Input.Int64("graphNodeSeq")
+		graphSeq := int(graphSeqValue)
+		nodeSeq := int(nodeSeqValue)
 		if graphSeq > 0 || nodeSeq > 0 {
 			return graphSeq, nodeSeq
 		}

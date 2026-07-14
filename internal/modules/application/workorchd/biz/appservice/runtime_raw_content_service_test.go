@@ -102,7 +102,7 @@ func TestReadRuntimeRawContentWithBackendReturnsVirtualCheckpointAndResultDetail
 		RunID:            runID,
 		CheckpointType:   common.CheckpointTypeRunState,
 		RunStateSnapshot: common.RunStateCompleted,
-		Data:             map[string]any{"failureClass": "none"},
+		Data:             mustAppserviceGovernancePayload(t, map[string]any{"failureClass": "none"}),
 	}); err != nil {
 		t.Fatalf("create checkpoint: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestReadRuntimeRawContentWithBackendScopesVirtualReadsByURIWorkspace(t *tes
 		RunID:            runID,
 		CheckpointType:   common.CheckpointTypeRunState,
 		RunStateSnapshot: common.RunStateCompleted,
-		Data:             map[string]any{"workspace": string(workspaceA)},
+		Data:             mustAppserviceGovernancePayload(t, map[string]any{"workspace": string(workspaceA)}),
 	}); err != nil {
 		t.Fatalf("create checkpoint A: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestReadRuntimeRawContentWithBackendScopesVirtualReadsByURIWorkspace(t *tes
 		RunID:            runID,
 		CheckpointType:   common.CheckpointTypeRunState,
 		RunStateSnapshot: common.RunStateCompleted,
-		Data:             map[string]any{"workspace": string(workspaceB)},
+		Data:             mustAppserviceGovernancePayload(t, map[string]any{"workspace": string(workspaceB)}),
 	}); err != nil {
 		t.Fatalf("create checkpoint B: %v", err)
 	}

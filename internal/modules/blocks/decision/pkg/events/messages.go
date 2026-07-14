@@ -6,7 +6,6 @@ import (
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
-	"github.com/muidea/workorch/internal/pkg/eventvalue"
 )
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
@@ -20,8 +19,8 @@ type CreateTicketCommand struct {
 	Reason                 string
 	DecisionKind           string
 	Question               string
-	Context                eventvalue.Payload
-	AutoGovernance         eventvalue.Payload
+	Context                []DecisionEvidenceField
+	AutoGovernance         []DecisionEvidenceField
 	FailureClass           string
 	FailureSignature       string
 	AllowedRecoveryActions []string
@@ -37,9 +36,9 @@ type UpdateTicketCommand struct {
 	Reason                 string
 	DecisionKind           string
 	Question               string
-	Context                eventvalue.Payload
+	Context                []DecisionEvidenceField
 	State                  common.DecisionTicketState
-	AutoGovernance         eventvalue.Payload
+	AutoGovernance         []DecisionEvidenceField
 	FailureClass           string
 	FailureSignature       string
 	AllowedRecoveryActions []string
@@ -56,7 +55,7 @@ type CreateResolutionCommand struct {
 	RunID              common.RunID
 	StepID             common.StepID
 	Type               string
-	Payload            eventvalue.Payload
+	Payload            []DecisionEvidenceField
 	ContinuationAction string
 	ResumeRunID        common.RunID
 	SuccessorRunID     common.RunID
@@ -69,7 +68,7 @@ type EnsureResolvedCommand struct {
 	RunID              common.RunID
 	StepID             common.StepID
 	Type               string
-	Payload            eventvalue.Payload
+	Payload            []DecisionEvidenceField
 	ContinuationAction string
 	ResumeRunID        common.RunID
 	SuccessorRunID     common.RunID

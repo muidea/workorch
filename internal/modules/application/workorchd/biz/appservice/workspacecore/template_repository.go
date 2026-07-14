@@ -1,8 +1,19 @@
 package workspacecore
 
-import "github.com/muidea/workorch/internal/pkg/repository"
+import (
+	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
-func WorkspaceTemplateToRepository(item WorkspaceTemplate) *repository.WorkspaceTemplate {
+func WorkspaceTemplateToRepository(item WorkspaceTemplate) (*repository.WorkspaceTemplate, error) {
+	contextHints, err := workorcheventpayload.FromMap(item.ContextHints)
+	if err != nil {
+		return nil, err
+	}
+	evidencePolicies, err := workorcheventpayload.FromMapSlice(item.EvidencePolicies)
+	if err != nil {
+		return nil, err
+	}
 	return &repository.WorkspaceTemplate{
 		ID:               item.ID,
 		Name:             item.Name,
@@ -11,9 +22,9 @@ func WorkspaceTemplateToRepository(item WorkspaceTemplate) *repository.Workspace
 		DoDItems:         append([]string(nil), item.DoDItems...),
 		DefaultSoulID:    item.DefaultSoulID,
 		SoulBindings:     cloneStringMap(item.SoulBindings),
-		ContextHints:     cloneContextMap(item.ContextHints),
-		EvidencePolicies: cloneContextMapSlice(item.EvidencePolicies),
-	}
+		ContextHints:     contextHints,
+		EvidencePolicies: evidencePolicies,
+	}, nil
 }
 
 func WorkspaceTemplateFromRepository(item *repository.WorkspaceTemplate) WorkspaceTemplate {
@@ -28,7 +39,7 @@ func WorkspaceTemplateFromRepository(item *repository.WorkspaceTemplate) Workspa
 		DoDItems:         append([]string(nil), item.DoDItems...),
 		DefaultSoulID:    item.DefaultSoulID,
 		SoulBindings:     cloneStringMap(item.SoulBindings),
-		ContextHints:     cloneContextMap(item.ContextHints),
-		EvidencePolicies: cloneContextMapSlice(item.EvidencePolicies),
+		ContextHints:     item.ContextHints.Map(),
+		EvidencePolicies: workorcheventpayload.MapSlice(item.EvidencePolicies),
 	}
 }

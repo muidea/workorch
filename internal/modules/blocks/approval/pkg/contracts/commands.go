@@ -1,6 +1,9 @@
 package contracts
 
-import "github.com/muidea/workorch/internal/pkg/common"
+import (
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
 type CreateApprovalCommand struct {
 	ApprovalID     common.ApprovalID
@@ -9,8 +12,8 @@ type CreateApprovalCommand struct {
 	StepID         common.StepID
 	Reason         string
 	Action         string
-	Context        map[string]any
-	AutoGovernance map[string]any
+	Context        workorcheventpayload.Payload
+	AutoGovernance workorcheventpayload.Payload
 }
 
 type UpdateApprovalCommand struct {
@@ -20,9 +23,9 @@ type UpdateApprovalCommand struct {
 	StepID         common.StepID
 	Reason         string
 	Action         string
-	Context        map[string]any
+	Context        workorcheventpayload.Payload
 	State          common.ApprovalState
-	AutoGovernance map[string]any
+	AutoGovernance workorcheventpayload.Payload
 	ResolvedAt     string
 	ResolvedBy     string
 	CreatedAt      string
@@ -33,7 +36,7 @@ type ResolveApprovalCommand struct {
 	ApprovalID  common.ApprovalID
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
-	Context     map[string]any
+	Context     workorcheventpayload.Payload
 }
 
 type DeleteApprovalCommand struct {

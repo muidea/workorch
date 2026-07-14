@@ -23,7 +23,8 @@ import (
 	webmodels "github.com/muidea/workorch/internal/modules/blocks/web/pkg/models"
 	webproviderconfig "github.com/muidea/workorch/internal/modules/blocks/web/pkg/providerconfig"
 	"github.com/muidea/workorch/internal/pkg/common"
-	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const (
@@ -141,56 +142,57 @@ func LoadProviderConfigs(defaultProviderID string, valuesByID map[string]map[str
 	return webproviderconfig.LoadProviderConfigs(defaultProviderID, valuesByID)
 }
 
-func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
+func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeOperationRequest) (RuntimeOperationResult, error) {
 	if a == nil {
-		return runtimemodel.StepExecutionResult{}, common.ErrInvalidArgument
+		return RuntimeOperationResult{}, common.ErrInvalidArgument
 	}
-	provider, err := a.selectProvider(request)
+	provider, err := a.selectProviderID(request.ProviderID)
 	if err != nil {
-		output := failedOutput(request.Kind, webcommon.ErrorProviderUnavailable, err, map[string]any{
-			"provider": provider.ID,
-		})
-		return runtimemodel.StepExecutionResult{Output: output}, err
+		return failedWebResult(request, provider, webcommon.ErrorProviderUnavailable, err), err
 	}
 	switch strings.TrimSpace(request.Kind) {
 	case webcommon.StepKindSearch:
-		return a.search(ctx, request, provider)
+		result, executeErr := a.search(ctx, request, provider)
+		return requireWebApprovalFailure(result, executeErr)
 	case webcommon.StepKindFetch:
-		return a.fetch(ctx, request, provider)
+		result, executeErr := a.fetch(ctx, request, provider)
+		return requireWebApprovalFailure(result, executeErr)
 	default:
 		err := fmt.Errorf("%w: unsupported web step kind %q", common.ErrInvalidArgument, request.Kind)
-		return runtimemodel.StepExecutionResult{Output: failedOutput(request.Kind, webcommon.ErrorInvalidRequest, err, nil)}, err
+		return failedWebResult(request, provider, webcommon.ErrorInvalidRequest, err), err
 	}
 }
 
-func (a *RuntimeAdapter) search(ctx context.Context, request runtimemodel.StepExecutionRequest, provider ProviderConfig) (runtimemodel.StepExecutionResult, error) {
-	query := stringInput(request.Input, "query")
+func requireWebApprovalFailure(result RuntimeOperationResult, executeErr error) (RuntimeOperationResult, error) {
+	if result.ApprovalNeeded && executeErr == nil {
+		executeErr = fmt.Errorf("web operation requires approval")
+		result.FailureCode = webcommon.ErrorApprovalRequired
+		result.FailureMessage = executeErr.Error()
+	}
+	return result, executeErr
+}
+
+func (a *RuntimeAdapter) search(ctx context.Context, request RuntimeOperationRequest, provider ProviderConfig) (RuntimeOperationResult, error) {
+	query := strings.TrimSpace(request.Query)
 	if query == "" {
 		err := fmt.Errorf("%w: web/search query is required", common.ErrInvalidArgument)
-		return runtimemodel.StepExecutionResult{Output: failedOutput(request.Kind, webcommon.ErrorInvalidRequest, err, map[string]any{
-			"provider": provider.ID,
-		})}, err
+		return failedWebResult(request, provider, webcommon.ErrorInvalidRequest, err), err
 	}
 	policy := policyDecision{Decision: policyAllowed}
-	requestedMaxResults := intInput(request.Input, "maxResults", provider.MaxResults)
+	requestedMaxResults := int(request.MaxResults)
 	if requestedMaxResults <= 0 {
 		requestedMaxResults = provider.MaxResults
 	}
 	providerMaxResults := minPositive(provider.MaxResults, systemMaxResults)
-	approvalID := common.ApprovalID(stringInput(request.Input, "approvalId"))
+	approvalID := request.ApprovalID
 	if requestedMaxResults > providerMaxResults {
 		policy = policyDecision{Decision: policyApproval, Reasons: []string{"large_result_set"}}
 		if approvalID == "" {
-			return runtimemodel.StepExecutionResult{Output: approvalRequiredSearchOutput(request.Kind, provider, query, requestedMaxResults, policy)}, nil
+			return approvalRequiredSearchResult(request, provider, query, requestedMaxResults, policy), nil
 		}
 		if err := a.validateApproval(ctx, approvalID, request.RunID, webcommon.StepKindSearch, provider.ID, approvalContextQuery, query, policy); err != nil {
 			err = fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
-			return runtimemodel.StepExecutionResult{Output: failedOutput(request.Kind, webcommon.ErrorPolicyDenied, err, map[string]any{
-				"provider":   provider.ID,
-				"query":      query,
-				"approvalId": string(approvalID),
-				"policy":     policyOutput(policy),
-			})}, err
+			return failedWebResult(request, provider, webcommon.ErrorPolicyDenied, err), err
 		}
 		providerMaxResults = systemMaxResults
 	}
@@ -200,121 +202,86 @@ func (a *RuntimeAdapter) search(ctx context.Context, request runtimemodel.StepEx
 		"runId":          string(request.RunID),
 		"stepId":         string(request.StepID),
 		"query":          query,
-		"locale":         stringInput(request.Input, "locale"),
-		"recency":        stringInput(request.Input, "recency"),
-		"domains":        stringSliceInput(request.Input, "domains"),
-		"excludeDomains": stringSliceInput(request.Input, "excludeDomains"),
+		"locale":         strings.TrimSpace(request.Locale),
+		"recency":        strings.TrimSpace(request.Recency),
+		"domains":        append([]string(nil), request.Domains...),
+		"excludeDomains": append([]string(nil), request.ExcludeDomains...),
 		"maxResults":     maxResults,
-		"safeSearch":     boolInputWithDefault(request.Input, "safeSearch", true),
+		"safeSearch":     request.SafeSearch,
 	}
 	raw, duration, errCode, err := a.doProviderRequest(ctx, provider, provider.SearchEndpoint, payload, provider.MaxFetchBytes)
 	if err != nil {
-		return runtimemodel.StepExecutionResult{Output: failedOutput(request.Kind, errCode, err, map[string]any{
-			"provider":       provider.ID,
-			"query":          query,
-			"searchedAt":     time.Now().UTC().Format(time.RFC3339),
-			"durationMillis": duration.Milliseconds(),
-			"policy":         policyOutput(policy),
-		})}, err
+		ret := failedWebResult(request, provider, errCode, err)
+		ret.Query, ret.DurationMillis = query, duration.Milliseconds()
+		return ret, err
 	}
 	var response searchGatewayResponse
 	if err := json.Unmarshal(raw, &response); err != nil {
 		err = fmt.Errorf("%w: decode web/search response: %v", common.ErrInvalidArgument, err)
-		return runtimemodel.StepExecutionResult{Output: failedOutput(request.Kind, webcommon.ErrorBadGatewayResponse, err, map[string]any{
-			"provider":       provider.ID,
-			"query":          query,
-			"durationMillis": duration.Milliseconds(),
-			"policy":         policyOutput(policy),
-		})}, err
+		ret := failedWebResult(request, provider, webcommon.ErrorBadGatewayResponse, err)
+		ret.Query, ret.DurationMillis = query, duration.Milliseconds()
+		return ret, err
 	}
-	results := make([]map[string]any, 0, len(response.Results))
+	results := make([]WebSearchResult, 0, len(response.Results))
 	for idx, item := range response.Results {
 		itemURL := strings.TrimSpace(item.URL)
 		if itemURL == "" {
 			err := fmt.Errorf("%w: web/search result url is required", common.ErrInvalidArgument)
-			return runtimemodel.StepExecutionResult{Output: failedOutput(request.Kind, webcommon.ErrorBadGatewayResponse, err, map[string]any{
-				"provider": provider.ID,
-				"query":    query,
-				"policy":   policyOutput(policy),
-			})}, err
+			return failedWebResult(request, provider, webcommon.ErrorBadGatewayResponse, err), err
 		}
 		decision := a.classifyURL(ctx, itemURL, provider, false)
 		if decision.Decision != policyAllowed {
 			err := fmt.Errorf("%w: web/search result url is not allowed: %s", common.ErrInvalidArgument, strings.Join(decision.Reasons, ","))
-			return runtimemodel.StepExecutionResult{Output: failedOutput(request.Kind, webcommon.ErrorBadGatewayResponse, err, map[string]any{
-				"provider": provider.ID,
-				"query":    query,
-				"policy":   policyOutput(decision),
-			})}, err
+			return failedWebResult(request, provider, webcommon.ErrorBadGatewayResponse, err), err
 		}
-		results = append(results, map[string]any{
-			"title":       item.Title,
-			"url":         itemURL,
-			"snippet":     item.Snippet,
-			"source":      sourceForResult(item),
-			"publishedAt": item.PublishedAt,
-			"rank":        idx + 1,
-			"contentHash": stableHash(item.Title, itemURL, item.Snippet, item.Source, item.PublishedAt),
+		results = append(results, WebSearchResult{
+			Title: item.Title, URL: itemURL, Snippet: item.Snippet, Source: sourceForResult(item),
+			PublishedAt: item.PublishedAt, Rank: int64(idx + 1),
+			ContentHash: stableHash(item.Title, itemURL, item.Snippet, item.Source, item.PublishedAt),
 		})
 		if len(results) >= maxResults {
 			break
 		}
 	}
-	return runtimemodel.StepExecutionResult{Output: map[string]any{
-		"status":         "completed",
-		"stage":          "web_search",
-		"provider":       provider.ID,
-		"query":          query,
-		"searchedAt":     time.Now().UTC().Format(time.RFC3339),
-		"results":        results,
-		"resultCount":    len(results),
-		"truncated":      len(response.Results) > len(results),
-		"approvalId":     string(approvalID),
-		"durationMillis": duration.Milliseconds(),
-		"policy":         policyOutput(policy),
-	}}, nil
+	ret := RuntimeOperationResult{
+		Status: "completed", Stage: "web_search", ProviderID: provider.ID, Query: query,
+		Results: results, ResultCount: int64(len(results)), Truncated: len(response.Results) > len(results),
+		ApprovalID: approvalID, DurationMillis: duration.Milliseconds(), TargetRefs: append([]string(nil), request.TargetRefs...),
+	}
+	ret.Summary = "completed web search"
+	ret.Evidence = runtimecontract.RuntimeOperationEvidence{Summary: ret.Summary}
+	return ret, nil
 }
 
-func (a *RuntimeAdapter) fetch(ctx context.Context, request runtimemodel.StepExecutionRequest, provider ProviderConfig) (runtimemodel.StepExecutionResult, error) {
-	rawURL := stringInput(request.Input, "url")
+func (a *RuntimeAdapter) fetch(ctx context.Context, request RuntimeOperationRequest, provider ProviderConfig) (RuntimeOperationResult, error) {
+	rawURL := strings.TrimSpace(request.URL)
 	if rawURL == "" {
 		err := fmt.Errorf("%w: web/fetch url is required", common.ErrInvalidArgument)
-		return runtimemodel.StepExecutionResult{Output: failedOutput(request.Kind, webcommon.ErrorInvalidRequest, err, map[string]any{
-			"provider": provider.ID,
-		})}, err
+		return failedWebResult(request, provider, webcommon.ErrorInvalidRequest, err), err
 	}
 	if provider.FetchEndpoint == "" {
 		err := fmt.Errorf("%w: web search provider fetchEndpoint is not configured", common.ErrInvalidArgument)
-		return runtimemodel.StepExecutionResult{Output: failedOutput(request.Kind, webcommon.ErrorProviderUnavailable, err, map[string]any{
-			"provider": provider.ID,
-			"url":      rawURL,
-		})}, err
+		return failedWebResult(request, provider, webcommon.ErrorProviderUnavailable, err), err
 	}
 	policy := a.classifyURL(ctx, rawURL, provider, true)
-	approvalID := common.ApprovalID(stringInput(request.Input, "approvalId"))
+	approvalID := request.ApprovalID
 	if policy.Decision == policyDenied {
 		err := fmt.Errorf("%w: web/fetch policy denied: %s", common.ErrInvalidArgument, strings.Join(policy.Reasons, ","))
-		return runtimemodel.StepExecutionResult{Output: failedOutput(request.Kind, webcommon.ErrorPolicyDenied, err, map[string]any{
-			"provider": provider.ID,
-			"url":      rawURL,
-			"policy":   policyOutput(policy),
-		})}, err
+		return failedWebResult(request, provider, webcommon.ErrorPolicyDenied, err), err
 	}
 	if policy.Decision == policyApproval {
 		if approvalID == "" {
-			return runtimemodel.StepExecutionResult{Output: approvalRequiredOutput(request.Kind, provider, rawURL, policy, request.Input)}, nil
+			return approvalRequiredFetchResult(request, provider, rawURL, rawURL, policy), nil
 		}
 		if err := a.validateApproval(ctx, approvalID, request.RunID, webcommon.StepKindFetch, provider.ID, approvalContextURL, rawURL, policy); err != nil {
 			err = fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
-			return runtimemodel.StepExecutionResult{Output: failedOutput(request.Kind, webcommon.ErrorPolicyDenied, err, map[string]any{
-				"provider":   provider.ID,
-				"url":        rawURL,
-				"approvalId": string(approvalID),
-				"policy":     policyOutput(policy),
-			})}, err
+			return failedWebResult(request, provider, webcommon.ErrorPolicyDenied, err), err
 		}
 	}
-	maxBytes := int64Input(request.Input, "maxBytes", provider.MaxFetchBytes)
+	maxBytes := request.MaxBytes
+	if maxBytes <= 0 {
+		maxBytes = provider.MaxFetchBytes
+	}
 	maxBytes = boundedInt64(maxBytes, defaultMaxFetchBytes, minPositive64(provider.MaxFetchBytes, systemMaxFetchBytes))
 	payload := map[string]any{
 		"workspaceId": string(request.WorkspaceID),
@@ -322,26 +289,18 @@ func (a *RuntimeAdapter) fetch(ctx context.Context, request runtimemodel.StepExe
 		"stepId":      string(request.StepID),
 		"url":         rawURL,
 		"maxBytes":    maxBytes,
-		"extractMode": stringInput(request.Input, "extractMode"),
+		"extractMode": strings.TrimSpace(request.ExtractMode),
 	}
 	raw, duration, errCode, err := a.doProviderRequest(ctx, provider, provider.FetchEndpoint, payload, maxBytes)
 	if err != nil {
-		return runtimemodel.StepExecutionResult{Output: failedOutput(request.Kind, errCode, err, map[string]any{
-			"provider":       provider.ID,
-			"url":            rawURL,
-			"durationMillis": duration.Milliseconds(),
-			"approvalId":     string(approvalID),
-			"policy":         policyOutput(policy),
-		})}, err
+		ret := failedWebResult(request, provider, errCode, err)
+		ret.URL, ret.DurationMillis = rawURL, duration.Milliseconds()
+		return ret, err
 	}
 	var response fetchGatewayResponse
 	if err := json.Unmarshal(raw, &response); err != nil {
 		err = fmt.Errorf("%w: decode web/fetch response: %v", common.ErrInvalidArgument, err)
-		return runtimemodel.StepExecutionResult{Output: failedOutput(request.Kind, webcommon.ErrorBadGatewayResponse, err, map[string]any{
-			"provider": provider.ID,
-			"url":      rawURL,
-			"policy":   policyOutput(policy),
-		})}, err
+		return failedWebResult(request, provider, webcommon.ErrorBadGatewayResponse, err), err
 	}
 	finalURL := strings.TrimSpace(response.FinalURL)
 	if finalURL == "" {
@@ -353,28 +312,15 @@ func (a *RuntimeAdapter) fetch(ctx context.Context, request runtimemodel.StepExe
 	finalPolicy := a.classifyURL(ctx, finalURL, provider, true)
 	if finalPolicy.Decision == policyDenied {
 		err := fmt.Errorf("%w: web/fetch final url policy denied: %s", common.ErrInvalidArgument, strings.Join(finalPolicy.Reasons, ","))
-		return runtimemodel.StepExecutionResult{Output: failedOutput(request.Kind, webcommon.ErrorPolicyDenied, err, map[string]any{
-			"provider": provider.ID,
-			"url":      rawURL,
-			"finalUrl": finalURL,
-			"policy":   policyOutput(finalPolicy),
-		})}, err
+		return failedWebResult(request, provider, webcommon.ErrorPolicyDenied, err), err
 	}
 	if finalPolicy.Decision == policyApproval {
 		if approvalID == "" {
-			return runtimemodel.StepExecutionResult{Output: approvalRequiredOutputWithContextURL(request.Kind, provider, rawURL, finalURL, finalPolicy, request.Input, map[string]any{
-				"finalUrl": finalURL,
-			})}, nil
+			return approvalRequiredFetchResult(request, provider, rawURL, finalURL, finalPolicy), nil
 		}
 		if err := a.validateApproval(ctx, approvalID, request.RunID, webcommon.StepKindFetch, provider.ID, approvalContextURL, finalURL, finalPolicy); err != nil {
 			err = fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
-			return runtimemodel.StepExecutionResult{Output: failedOutput(request.Kind, webcommon.ErrorPolicyDenied, err, map[string]any{
-				"provider":   provider.ID,
-				"url":        rawURL,
-				"finalUrl":   finalURL,
-				"approvalId": string(approvalID),
-				"policy":     policyOutput(finalPolicy),
-			})}, err
+			return failedWebResult(request, provider, webcommon.ErrorPolicyDenied, err), err
 		}
 	}
 	content := response.Content
@@ -387,27 +333,18 @@ func (a *RuntimeAdapter) fetch(ctx context.Context, request runtimemodel.StepExe
 	if retrievedAt == "" {
 		retrievedAt = time.Now().UTC().Format(time.RFC3339)
 	}
-	return runtimemodel.StepExecutionResult{Output: map[string]any{
-		"status":         "completed",
-		"stage":          "web_fetch",
-		"provider":       provider.ID,
-		"url":            rawURL,
-		"finalUrl":       finalURL,
-		"title":          response.Title,
-		"content":        content,
-		"summary":        response.Summary,
-		"contentType":    response.ContentType,
-		"contentHash":    stableHash(finalURL, response.Title, content, response.Summary, retrievedAt),
-		"retrievedAt":    retrievedAt,
-		"publishedAt":    response.PublishedAt,
-		"source":         response.Source,
-		"size":           len([]byte(content)),
-		"truncated":      truncated,
-		"redirects":      0,
-		"approvalId":     string(approvalID),
-		"durationMillis": duration.Milliseconds(),
-		"policy":         policyOutput(policy),
-	}}, nil
+	ret := RuntimeOperationResult{
+		Status: "completed", Stage: "web_fetch", ProviderID: provider.ID, URL: rawURL, FinalURL: finalURL,
+		Title: response.Title, Content: content, Summary: response.Summary, ContentType: response.ContentType,
+		ContentHash: stableHash(finalURL, response.Title, content, response.Summary, retrievedAt), RetrievedAt: retrievedAt,
+		PublishedAt: response.PublishedAt, Source: response.Source, Size: int64(len([]byte(content))), Truncated: truncated,
+		ApprovalID: approvalID, DurationMillis: duration.Milliseconds(), TargetRefs: []string{finalURL},
+	}
+	if ret.Summary == "" {
+		ret.Summary = firstWebNonEmpty(ret.Title, ret.FinalURL, "completed web fetch")
+	}
+	ret.Evidence = runtimecontract.RuntimeOperationEvidence{Summary: ret.Summary, ContentHash: ret.ContentHash}
+	return ret, nil
 }
 
 func (a *RuntimeAdapter) doProviderRequest(ctx context.Context, provider ProviderConfig, endpoint string, payload map[string]any, maxResponseBytes int64) ([]byte, time.Duration, string, error) {
@@ -461,12 +398,12 @@ func (a *RuntimeAdapter) doProviderRequest(ctx context.Context, provider Provide
 	return raw, duration, "", nil
 }
 
-func (a *RuntimeAdapter) selectProvider(request runtimemodel.StepExecutionRequest) (ProviderConfig, error) {
+func (a *RuntimeAdapter) selectProviderID(requestedID string) (ProviderConfig, error) {
 	defaultID, providers, err := a.providerConfigs()
 	if err != nil {
 		return ProviderConfig{}, err
 	}
-	providerID := stringInput(request.Input, "providerId")
+	providerID := strings.TrimSpace(requestedID)
 	if providerID == "" {
 		providerID = defaultID
 	}
@@ -482,6 +419,57 @@ func (a *RuntimeAdapter) selectProvider(request runtimemodel.StepExecutionReques
 		return provider, fmt.Errorf("%w: %s", common.ErrInvalidArgument, reason)
 	}
 	return provider, nil
+}
+
+func failedWebResult(request RuntimeOperationRequest, provider ProviderConfig, code string, err error) RuntimeOperationResult {
+	stage := "web_failed"
+	if request.Kind == webcommon.StepKindSearch {
+		stage = "web_search"
+	} else if request.Kind == webcommon.StepKindFetch {
+		stage = "web_fetch"
+	}
+	ret := RuntimeOperationResult{
+		Status: "failed", Stage: stage, ProviderID: provider.ID, Query: strings.TrimSpace(request.Query),
+		URL: strings.TrimSpace(request.URL), FailureCode: code, TargetRefs: append([]string(nil), request.TargetRefs...),
+	}
+	if err != nil {
+		ret.FailureMessage = err.Error()
+	}
+	ret.Summary = firstWebNonEmpty(ret.FailureMessage, stage)
+	ret.Evidence = runtimecontract.RuntimeOperationEvidence{Summary: ret.Summary}
+	return ret
+}
+
+func approvalRequiredSearchResult(request RuntimeOperationRequest, provider ProviderConfig, query string, maxResults int, policy policyDecision) RuntimeOperationResult {
+	reason := approvalReasonPrefix + ": " + strings.Join(policy.Reasons, ",")
+	return RuntimeOperationResult{
+		Status: "blocked", Stage: "web_search", ProviderID: provider.ID, Query: query, ResultCount: int64(maxResults),
+		ApprovalNeeded: true, FailureCode: webcommon.ErrorApprovalRequired, FailureMessage: reason,
+		ApprovalContext: workorcheventpayload.New(
+			workorcheventpayload.StringField("providerId", provider.ID), workorcheventpayload.StringField("query", query),
+			workorcheventpayload.IntField("maxResults", int64(maxResults)), workorcheventpayload.StringField("policyDecision", policy.Decision),
+			workorcheventpayload.StringArrayField("policyReasons", policy.Reasons),
+		),
+		TargetRefs: append([]string(nil), request.TargetRefs...),
+	}
+}
+
+func approvalRequiredFetchResult(request RuntimeOperationRequest, provider ProviderConfig, rawURL string, contextURL string, policy policyDecision) RuntimeOperationResult {
+	reason := approvalReasonPrefix + ": " + strings.Join(policy.Reasons, ",")
+	maxBytes := request.MaxBytes
+	if maxBytes <= 0 {
+		maxBytes = provider.MaxFetchBytes
+	}
+	return RuntimeOperationResult{
+		Status: "blocked", Stage: "web_fetch", ProviderID: provider.ID, URL: rawURL, FinalURL: contextURL,
+		ApprovalNeeded: true, FailureCode: webcommon.ErrorApprovalRequired, FailureMessage: reason,
+		ApprovalContext: workorcheventpayload.New(
+			workorcheventpayload.StringField("providerId", provider.ID), workorcheventpayload.StringField("url", contextURL),
+			workorcheventpayload.IntField("maxBytes", maxBytes), workorcheventpayload.StringField("policyDecision", policy.Decision),
+			workorcheventpayload.StringArrayField("policyReasons", policy.Reasons),
+		),
+		TargetRefs: []string{contextURL},
+	}
 }
 
 func (a *RuntimeAdapter) providerConfigs() (string, map[string]ProviderConfig, error) {
@@ -652,111 +640,21 @@ func approvalContextMatches(item *approvalmodel.Approval, providerID string, con
 		return false
 	}
 	ctx := item.Context
-	if strings.TrimSpace(stringFromAny(ctx["providerId"])) != providerID {
+	providerValue, _ := ctx.String("providerId")
+	if strings.TrimSpace(providerValue) != providerID {
 		return false
 	}
-	if strings.TrimSpace(stringFromAny(ctx[contextKey])) != strings.TrimSpace(contextValue) {
+	contextFieldValue, _ := ctx.String(contextKey)
+	if strings.TrimSpace(contextFieldValue) != strings.TrimSpace(contextValue) {
 		return false
 	}
-	gotReasons := stringSliceFromAny(ctx["policyReasons"])
+	gotReasons, _ := ctx.StringSlice("policyReasons")
 	for _, reason := range policy.Reasons {
 		if !containsString(gotReasons, reason) {
 			return false
 		}
 	}
 	return true
-}
-
-func approvalRequiredOutput(kind string, provider ProviderConfig, rawURL string, policy policyDecision, input map[string]any) map[string]any {
-	return approvalRequiredOutputWithContextURL(kind, provider, rawURL, rawURL, policy, input, nil)
-}
-
-func approvalRequiredOutputWithContextURL(kind string, provider ProviderConfig, rawURL string, contextURL string, policy policyDecision, input map[string]any, extra map[string]any) map[string]any {
-	context := map[string]any{
-		"providerId":     provider.ID,
-		"url":            contextURL,
-		"maxBytes":       int64Input(input, "maxBytes", provider.MaxFetchBytes),
-		"policyDecision": policy.Decision,
-		"policyReasons":  append([]string(nil), policy.Reasons...),
-	}
-	reason := approvalReasonPrefix + ": " + strings.Join(policy.Reasons, ",")
-	output := map[string]any{
-		"status":               "blocked",
-		"stage":                "web_fetch",
-		"provider":             provider.ID,
-		"url":                  rawURL,
-		"errorCode":            webcommon.ErrorApprovalRequired,
-		"error":                reason,
-		"approvalRequired":     true,
-		"approvalAction":       webcommon.StepKindFetch,
-		"approvalContext":      cloneMap(context),
-		"blockApprovalReason":  reason,
-		"blockApprovalAction":  webcommon.StepKindFetch,
-		"blockApprovalContext": cloneMap(context),
-		"nextKind":             kind,
-		"policy":               policyOutput(policy),
-	}
-	for key, value := range extra {
-		output[key] = value
-	}
-	return output
-}
-
-func approvalRequiredSearchOutput(kind string, provider ProviderConfig, query string, maxResults int, policy policyDecision) map[string]any {
-	context := map[string]any{
-		"providerId":     provider.ID,
-		"query":          query,
-		"maxResults":     maxResults,
-		"policyDecision": policy.Decision,
-		"policyReasons":  append([]string(nil), policy.Reasons...),
-	}
-	reason := approvalReasonPrefix + ": " + strings.Join(policy.Reasons, ",")
-	return map[string]any{
-		"status":               "blocked",
-		"stage":                "web_search",
-		"provider":             provider.ID,
-		"query":                query,
-		"maxResults":           maxResults,
-		"errorCode":            webcommon.ErrorApprovalRequired,
-		"error":                reason,
-		"approvalRequired":     true,
-		"approvalAction":       webcommon.StepKindSearch,
-		"approvalContext":      cloneMap(context),
-		"blockApprovalReason":  reason,
-		"blockApprovalAction":  webcommon.StepKindSearch,
-		"blockApprovalContext": cloneMap(context),
-		"nextKind":             kind,
-		"policy":               policyOutput(policy),
-	}
-}
-
-func failedOutput(kind string, code string, err error, extra map[string]any) map[string]any {
-	stage := "web_failed"
-	switch kind {
-	case webcommon.StepKindSearch:
-		stage = "web_search"
-	case webcommon.StepKindFetch:
-		stage = "web_fetch"
-	}
-	output := map[string]any{
-		"status":    "failed",
-		"stage":     stage,
-		"errorCode": code,
-	}
-	if err != nil {
-		output["error"] = err.Error()
-	}
-	for key, value := range extra {
-		output[key] = value
-	}
-	return output
-}
-
-func policyOutput(policy policyDecision) map[string]any {
-	return map[string]any{
-		"decision": policy.Decision,
-		"reasons":  append([]string(nil), policy.Reasons...),
-	}
 }
 
 func normalizeProviders(providers map[string]ProviderConfig) map[string]ProviderConfig {
@@ -965,101 +863,6 @@ func boolValue(raw string) bool {
 	return strings.EqualFold(strings.TrimSpace(raw), "true")
 }
 
-func stringInput(input map[string]any, key string) string {
-	if input == nil {
-		return ""
-	}
-	value, _ := input[key].(string)
-	return strings.TrimSpace(value)
-}
-
-func stringFromAny(value any) string {
-	switch typed := value.(type) {
-	case string:
-		return strings.TrimSpace(typed)
-	default:
-		return strings.TrimSpace(fmt.Sprint(value))
-	}
-}
-
-func intInput(input map[string]any, key string, fallback int) int {
-	if input == nil || input[key] == nil {
-		return fallback
-	}
-	switch value := input[key].(type) {
-	case int:
-		return value
-	case int64:
-		return int(value)
-	case float64:
-		if value == float64(int(value)) {
-			return int(value)
-		}
-	case json.Number:
-		if parsed, err := value.Int64(); err == nil {
-			return int(parsed)
-		}
-	}
-	return fallback
-}
-
-func int64Input(input map[string]any, key string, fallback int64) int64 {
-	if input == nil || input[key] == nil {
-		return fallback
-	}
-	switch value := input[key].(type) {
-	case int:
-		return int64(value)
-	case int64:
-		return value
-	case float64:
-		if value == float64(int64(value)) {
-			return int64(value)
-		}
-	case json.Number:
-		if parsed, err := value.Int64(); err == nil {
-			return parsed
-		}
-	}
-	return fallback
-}
-
-func boolInputWithDefault(input map[string]any, key string, fallback bool) bool {
-	if input == nil || input[key] == nil {
-		return fallback
-	}
-	value, ok := input[key].(bool)
-	if !ok {
-		return fallback
-	}
-	return value
-}
-
-func stringSliceInput(input map[string]any, key string) []string {
-	if input == nil {
-		return nil
-	}
-	return stringSliceFromAny(input[key])
-}
-
-func stringSliceFromAny(value any) []string {
-	switch typed := value.(type) {
-	case []string:
-		return append([]string(nil), typed...)
-	case []any:
-		ret := make([]string, 0, len(typed))
-		for _, item := range typed {
-			text := strings.TrimSpace(fmt.Sprint(item))
-			if text != "" {
-				ret = append(ret, text)
-			}
-		}
-		return ret
-	default:
-		return nil
-	}
-}
-
 func stableHash(parts ...string) string {
 	hash := sha256.New()
 	for _, part := range parts {
@@ -1093,14 +896,6 @@ func containsString(items []string, want string) bool {
 		}
 	}
 	return false
-}
-
-func cloneMap(input map[string]any) map[string]any {
-	ret := map[string]any{}
-	for key, value := range input {
-		ret[key] = value
-	}
-	return ret
 }
 
 func cloneStringMap(input map[string]string) map[string]string {

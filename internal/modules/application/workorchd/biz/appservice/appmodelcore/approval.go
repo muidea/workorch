@@ -1,6 +1,9 @@
 package appmodelcore
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
 type Approval struct {
 	ID             string                                `json:"id"`
@@ -9,7 +12,7 @@ type Approval struct {
 	StepID         string                                `json:"stepId,omitempty"`
 	Reason         string                                `json:"reason"`
 	Action         string                                `json:"action,omitempty"`
-	Context        map[string]any                        `json:"context,omitempty"`
+	Context        workorcheventpayload.Payload          `json:"context,omitempty"`
 	State          string                                `json:"state"`
 	AutoGovernance *governancecore.AutoGovernanceSummary `json:"autoGovernance,omitempty"`
 	ResolvedAt     string                                `json:"resolvedAt,omitempty"`
@@ -36,12 +39,12 @@ type ApprovalPage struct {
 }
 
 type ResolveApprovalCommand struct {
-	Action  string         `json:"action"`
-	Payload map[string]any `json:"payload,omitempty"`
+	Action  string                       `json:"action"`
+	Payload workorcheventpayload.Payload `json:"payload,omitempty"`
 }
 
 type BatchResolveApprovalCommand struct {
-	ApprovalIDs []string       `json:"approvalIds"`
-	Action      string         `json:"action"`
-	Payload     map[string]any `json:"payload,omitempty"`
+	ApprovalIDs []string                     `json:"approvalIds"`
+	Action      string                       `json:"action"`
+	Payload     workorcheventpayload.Payload `json:"payload,omitempty"`
 }

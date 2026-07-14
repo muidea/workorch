@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	backend "github.com/muidea/workorch/internal/services/workorch/biz/backends"
 )
 
@@ -210,7 +211,7 @@ func (f *fakeDec) Resolve(ctx context.Context, req backend.ResolveDecisionReques
 	f.b.mu.Unlock()
 	return &backend.DecisionInfo{ID: req.TicketID, State: "resolved"}, nil
 }
-func (f *fakeDec) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ticketIDs []common.TicketID, rt string, p map[string]any) ([]backend.DecisionInfo, error) {
+func (f *fakeDec) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ticketIDs []common.TicketID, rt string, p workorcheventpayload.Payload) ([]backend.DecisionInfo, error) {
 	return nil, nil
 }
 func (f *fakeDec) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.DecisionInfo, error) {
@@ -224,19 +225,19 @@ func (f *fakeDec) Get(ctx context.Context, wsID common.WorkspaceID, id common.Ti
 
 type fakeAppr struct{ b *fakeBackend }
 
-func (f *fakeAppr) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...map[string]any) (*backend.ApprovalInfo, error) {
+func (f *fakeAppr) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*backend.ApprovalInfo, error) {
 	f.b.mu.Lock()
 	f.b.ApproveCalls = append(f.b.ApproveCalls, string(id))
 	f.b.mu.Unlock()
 	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: "approved"}, nil
 }
-func (f *fakeAppr) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...map[string]any) (*backend.ApprovalInfo, error) {
+func (f *fakeAppr) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*backend.ApprovalInfo, error) {
 	f.b.mu.Lock()
 	f.b.RejectCalls = append(f.b.RejectCalls, string(id))
 	f.b.mu.Unlock()
 	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: "rejected"}, nil
 }
-func (f *fakeAppr) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...map[string]any) ([]backend.ApprovalInfo, error) {
+func (f *fakeAppr) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...workorcheventpayload.Payload) ([]backend.ApprovalInfo, error) {
 	return nil, nil
 }
 func (f *fakeAppr) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.ApprovalInfo, error) {

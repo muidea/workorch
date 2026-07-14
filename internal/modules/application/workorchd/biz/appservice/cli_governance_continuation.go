@@ -8,52 +8,51 @@ import (
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/clicore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func (d *CLICommandDispatcher) publishDecisionContinuation(ctx context.Context, cmd clicore.Command, item appmodelcore.Decision) error {
+func (d *CLICommandDispatcher) publishDecisionContinuationForRequest(ctx context.Context, requestID string, item appmodelcore.Decision) error {
 	intent := "resume"
 	reason := "decision_resolved"
 	if strings.TrimSpace(item.ResolutionType) == decisioncommon.ResolutionTypeReplan {
 		intent = "replan"
 		reason = "decision_replan_resolved"
 	}
-	return d.publishGovernanceContinuation(ctx, cmd, governanceContinuationRef{
+	return d.publishGovernanceContinuation(ctx, governanceContinuationRef{
 		WorkspaceID: item.WorkspaceID,
 		RunID:       item.RunID,
 		Intent:      intent,
 		Reason:      reason,
-		RequestID:   cliGovernanceContinuationRequestID(cmd, "decision", item.ID, intent),
+		RequestID:   cliGovernanceContinuationRequestID(requestID, "decision", item.ID, intent),
 		DecisionID:  item.ID,
 	})
 }
 
-func (d *CLICommandDispatcher) publishDecisionContinuations(ctx context.Context, cmd clicore.Command, items []appmodelcore.Decision) error {
+func (d *CLICommandDispatcher) publishDecisionContinuationsForRequest(ctx context.Context, requestID string, items []appmodelcore.Decision) error {
 	for _, item := range items {
-		if err := d.publishDecisionContinuation(ctx, cmd, item); err != nil {
+		if err := d.publishDecisionContinuationForRequest(ctx, requestID, item); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (d *CLICommandDispatcher) publishApprovalContinuation(ctx context.Context, cmd clicore.Command, item appmodelcore.Approval) error {
-	return d.publishGovernanceContinuation(ctx, cmd, governanceContinuationRef{
+func (d *CLICommandDispatcher) publishApprovalContinuationForRequest(ctx context.Context, requestID string, item appmodelcore.Approval) error {
+	return d.publishGovernanceContinuation(ctx, governanceContinuationRef{
 		WorkspaceID: item.WorkspaceID,
 		RunID:       item.RunID,
 		Intent:      "resume",
 		Reason:      "approval_resolved",
-		RequestID:   cliGovernanceContinuationRequestID(cmd, "approval", item.ID, "resume"),
+		RequestID:   cliGovernanceContinuationRequestID(requestID, "approval", item.ID, "resume"),
 	})
 }
 
-func (d *CLICommandDispatcher) publishApprovalContinuations(ctx context.Context, cmd clicore.Command, items []appmodelcore.Approval) error {
+func (d *CLICommandDispatcher) publishApprovalContinuationsForRequest(ctx context.Context, requestID string, items []appmodelcore.Approval) error {
 	for _, item := range items {
-		if err := d.publishApprovalContinuation(ctx, cmd, item); err != nil {
+		if err := d.publishApprovalContinuationForRequest(ctx, requestID, item); err != nil {
 			return err
 		}
 	}
@@ -69,7 +68,7 @@ type governanceContinuationRef struct {
 	DecisionID  string
 }
 
-func (d *CLICommandDispatcher) publishGovernanceContinuation(ctx context.Context, cmd clicore.Command, ref governanceContinuationRef) error {
+func (d *CLICommandDispatcher) publishGovernanceContinuation(ctx context.Context, ref governanceContinuationRef) error {
 	if d == nil || d.session == nil {
 		return common.ErrInvalidArgument
 	}
@@ -78,10 +77,6 @@ func (d *CLICommandDispatcher) publishGovernanceContinuation(ctx context.Context
 	intent := strings.TrimSpace(ref.Intent)
 	if workspaceID == "" || runID == "" || intent == "" {
 		return common.ErrInvalidArgument
-	}
-	priority := 0
-	if parsedPriority, ok := cliPayloadInt(cmd.Payload, events.PayloadKeyPriority); ok {
-		priority = parsedPriority
 	}
 	commandHub, err := d.session.RequiredCommandHub()
 	if err != nil {
@@ -95,7 +90,7 @@ func (d *CLICommandDispatcher) publishGovernanceContinuation(ctx context.Context
 		RequestID:   strings.TrimSpace(ref.RequestID),
 		Source:      "cli",
 		DecisionID:  strings.TrimSpace(ref.DecisionID),
-		Priority:    priority,
+		Priority:    0,
 	}
 	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, "workorchd-cli-dispatcher", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	event.BindLaneKey(events.EventHubLaneKeyFor(event.ID(), events.EventHubLaneScope{SubjectType: "workspace", SubjectID: workspaceID, WorkspaceID: workspaceID, RunID: runID}))
@@ -117,8 +112,8 @@ func (d *CLICommandDispatcher) publishGovernanceContinuation(ctx context.Context
 	return nil
 }
 
-func cliGovernanceContinuationRequestID(cmd clicore.Command, kind string, id string, intent string) string {
-	if value := strings.TrimSpace(cmd.CommandID); value != "" {
+func cliGovernanceContinuationRequestID(requestID string, kind string, id string, intent string) string {
+	if value := strings.TrimSpace(requestID); value != "" {
 		return strings.Join([]string{value, strings.TrimSpace(kind), strings.TrimSpace(id), strings.TrimSpace(intent)}, "-")
 	}
 	parts := []string{"cli-governance", strings.TrimSpace(kind), strings.TrimSpace(id), strings.TrimSpace(intent)}
@@ -128,20 +123,4 @@ func cliGovernanceContinuationRequestID(cmd clicore.Command, kind string, id str
 		}
 	}
 	return strings.Join(parts, "-")
-}
-
-func cliPayloadInt(payload map[string]any, key string) (int, bool) {
-	if payload == nil {
-		return 0, false
-	}
-	switch value := payload[key].(type) {
-	case int:
-		return value, true
-	case int64:
-		return int(value), true
-	case float64:
-		return int(value), true
-	default:
-		return 0, false
-	}
 }

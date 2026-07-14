@@ -14,6 +14,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 type managedRuntimeRecordFixture struct {
@@ -44,7 +45,7 @@ func publishManagedRuntimeRecord(ctx context.Context, hub magicevent.Hub, record
 		RunID:        common.RunID(record.RunID),
 		StepID:       common.StepID(record.StepID),
 		Revision:     record.Revision,
-		Payload:      record.Payload,
+		Payload:      mustManagedRuntimePayload(record.Payload),
 	})
 	if err != nil {
 		return err
@@ -68,6 +69,14 @@ func publishManagedRuntimeRecord(ctx context.Context, hub magicevent.Hub, record
 		return resultErr
 	}
 	return nil
+}
+
+func mustManagedRuntimePayload(input map[string]any) workorcheventpayload.Payload {
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		panic(err)
+	}
+	return payload
 }
 
 func TestManagedRuntimeFromCommandHubBuildsRuntimeWithEventCollector(t *testing.T) {

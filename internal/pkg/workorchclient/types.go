@@ -1,5 +1,7 @@
 package workorchclient
 
+import "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+
 // Workspace resource types (matches workorchd HTTP JSON format with lowercase camelCase tags).
 type Workspace struct {
 	ID                   string             `json:"id"`
@@ -210,36 +212,36 @@ type ValidationResult struct {
 
 // Decision & Approval types.
 type Decision struct {
-	ID                     string                 `json:"id"`
-	WorkspaceID            string                 `json:"workspaceId"`
-	RunID                  string                 `json:"runId"`
-	StepID                 string                 `json:"stepId,omitempty"`
-	Reason                 string                 `json:"reason"`
-	DecisionKind           string                 `json:"decisionKind,omitempty"`
-	Question               string                 `json:"question,omitempty"`
-	Context                map[string]any         `json:"context,omitempty"`
-	FailureClass           string                 `json:"failureClass,omitempty"`
-	FailureSignature       string                 `json:"failureSignature,omitempty"`
-	AllowedRecoveryActions []string               `json:"allowedRecoveryActions,omitempty"`
-	State                  string                 `json:"state"`
-	ResolutionID           string                 `json:"resolutionId,omitempty"`
-	ResolutionType         string                 `json:"resolutionType,omitempty"`
-	ContinuationAction     string                 `json:"continuationAction,omitempty"`
-	ResumeRunID            string                 `json:"resumeRunId,omitempty"`
-	SuccessorRunID         string                 `json:"successorRunId,omitempty"`
-	AutoGovernance         *AutoGovernanceSummary `json:"autoGovernance,omitempty"`
+	ID                     string                       `json:"id"`
+	WorkspaceID            string                       `json:"workspaceId"`
+	RunID                  string                       `json:"runId"`
+	StepID                 string                       `json:"stepId,omitempty"`
+	Reason                 string                       `json:"reason"`
+	DecisionKind           string                       `json:"decisionKind,omitempty"`
+	Question               string                       `json:"question,omitempty"`
+	Context                workorcheventpayload.Payload `json:"context,omitempty"`
+	FailureClass           string                       `json:"failureClass,omitempty"`
+	FailureSignature       string                       `json:"failureSignature,omitempty"`
+	AllowedRecoveryActions []string                     `json:"allowedRecoveryActions,omitempty"`
+	State                  string                       `json:"state"`
+	ResolutionID           string                       `json:"resolutionId,omitempty"`
+	ResolutionType         string                       `json:"resolutionType,omitempty"`
+	ContinuationAction     string                       `json:"continuationAction,omitempty"`
+	ResumeRunID            string                       `json:"resumeRunId,omitempty"`
+	SuccessorRunID         string                       `json:"successorRunId,omitempty"`
+	AutoGovernance         *AutoGovernanceSummary       `json:"autoGovernance,omitempty"`
 }
 
 type Approval struct {
-	ID             string                 `json:"id"`
-	WorkspaceID    string                 `json:"workspaceId"`
-	RunID          string                 `json:"runId"`
-	StepID         string                 `json:"stepId,omitempty"`
-	Reason         string                 `json:"reason"`
-	Action         string                 `json:"action,omitempty"`
-	Context        map[string]any         `json:"context,omitempty"`
-	State          string                 `json:"state"`
-	AutoGovernance *AutoGovernanceSummary `json:"autoGovernance,omitempty"`
+	ID             string                       `json:"id"`
+	WorkspaceID    string                       `json:"workspaceId"`
+	RunID          string                       `json:"runId"`
+	StepID         string                       `json:"stepId,omitempty"`
+	Reason         string                       `json:"reason"`
+	Action         string                       `json:"action,omitempty"`
+	Context        workorcheventpayload.Payload `json:"context,omitempty"`
+	State          string                       `json:"state"`
+	AutoGovernance *AutoGovernanceSummary       `json:"autoGovernance,omitempty"`
 }
 
 type AutoGovernanceSummary struct {
@@ -384,20 +386,20 @@ type WorkspaceTemplate struct {
 
 // Event types.
 type EventRecord struct {
-	ID             string         `json:"id"`
-	Version        string         `json:"version"`
-	Topic          string         `json:"topic"`
-	OccurredAt     string         `json:"occurredAt,omitempty"`
-	SourceModule   string         `json:"sourceModule,omitempty"`
-	SubjectType    string         `json:"subjectType,omitempty"`
-	SubjectID      string         `json:"subjectId,omitempty"`
-	WorkspaceID    string         `json:"workspaceId,omitempty"`
-	RunID          string         `json:"runId,omitempty"`
-	StepID         string         `json:"stepId,omitempty"`
-	Revision       int64          `json:"revision,omitempty"`
-	Payload        map[string]any `json:"payload,omitempty"`
-	PayloadSummary map[string]any `json:"payloadSummary,omitempty"`
-	PayloadRef     string         `json:"payloadRef,omitempty"`
+	ID             string                       `json:"id"`
+	Version        string                       `json:"version"`
+	Topic          string                       `json:"topic"`
+	OccurredAt     string                       `json:"occurredAt,omitempty"`
+	SourceModule   string                       `json:"sourceModule,omitempty"`
+	SubjectType    string                       `json:"subjectType,omitempty"`
+	SubjectID      string                       `json:"subjectId,omitempty"`
+	WorkspaceID    string                       `json:"workspaceId,omitempty"`
+	RunID          string                       `json:"runId,omitempty"`
+	StepID         string                       `json:"stepId,omitempty"`
+	Revision       int64                        `json:"revision,omitempty"`
+	Payload        workorcheventpayload.Payload `json:"payload,omitempty"`
+	PayloadSummary workorcheventpayload.Payload `json:"payloadSummary,omitempty"`
+	PayloadRef     string                       `json:"payloadRef,omitempty"`
 }
 
 type EventRecordQuery struct {

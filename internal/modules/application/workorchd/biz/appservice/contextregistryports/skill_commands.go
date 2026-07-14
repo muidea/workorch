@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	skillevents "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
@@ -15,7 +16,9 @@ func CreateSkill(ctx context.Context, hub magicevent.Hub, cmd contextregistrycor
 	if hub == nil {
 		return contextregistrycore.Skill{}, common.ErrInvalidArgument
 	}
-	result, err := sendMagicCommand[skillevents.CreateSkillCommand, skillevents.SkillCommandResult](ctx, hub, skillevents.TopicSkillCommandCreate, skillevents.CommandDestination, "skill", cmd.ID, skillevents.CreateSkillCommand(skillCommandFromView(cmd)))
+	event := magicevent.NewEventWithContext(skillevents.TopicSkillCommandCreate, sourceModule, skillevents.CommandDestination, magicevent.NewHeader(), ctx, skillevents.CreateSkillCommand(skillCommandFromView(cmd)))
+	ownerevent.BindLane(event, skillevents.TopicSkillCommandCreate, "skill", cmd.ID, "", "", "")
+	result, err := ownerevent.Skill(hub.Send(event), skillevents.TopicSkillCommandCreate)
 	if err != nil {
 		return contextregistrycore.Skill{}, err
 	}
@@ -26,7 +29,9 @@ func ReadSkill(ctx context.Context, hub magicevent.Hub, skillID string) (context
 	if hub == nil {
 		return contextregistrycore.Skill{}, common.ErrInvalidArgument
 	}
-	result, err := sendMagicCommand[skillevents.GetSkillCommand, skillevents.SkillCommandResult](ctx, hub, skillevents.TopicSkillCommandGet, skillevents.CommandDestination, "skill", skillID, skillevents.GetSkillCommand{SkillID: common.SkillID(skillID)})
+	event := magicevent.NewEventWithContext(skillevents.TopicSkillCommandGet, sourceModule, skillevents.CommandDestination, magicevent.NewHeader(), ctx, skillevents.GetSkillCommand{SkillID: common.SkillID(skillID)})
+	ownerevent.BindLane(event, skillevents.TopicSkillCommandGet, "skill", skillID, "", "", "")
+	result, err := ownerevent.Skill(hub.Send(event), skillevents.TopicSkillCommandGet)
 	if err != nil {
 		return contextregistrycore.Skill{}, err
 	}
@@ -48,7 +53,9 @@ func ListSkills(ctx context.Context, hub magicevent.Hub) ([]contextregistrycore.
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	result, err := sendMagicCommand[skillevents.ListSkillsCommand, skillevents.SkillCommandResult](ctx, hub, skillevents.TopicSkillCommandList, skillevents.CommandDestination, "skill", "all", skillevents.ListSkillsCommand{})
+	event := magicevent.NewEventWithContext(skillevents.TopicSkillCommandList, sourceModule, skillevents.CommandDestination, magicevent.NewHeader(), ctx, skillevents.ListSkillsCommand{})
+	ownerevent.BindLane(event, skillevents.TopicSkillCommandList, "skill", "all", "", "", "")
+	result, err := ownerevent.Skill(hub.Send(event), skillevents.TopicSkillCommandList)
 	if err != nil {
 		return nil, err
 	}

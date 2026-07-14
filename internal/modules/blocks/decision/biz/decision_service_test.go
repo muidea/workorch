@@ -16,7 +16,17 @@ import (
 	decisionservice "github.com/muidea/workorch/internal/modules/blocks/decision/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
+
+func mustDecisionPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
+	t.Helper()
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
 
 type recordingDecisionHub struct {
 	magicevent.Hub
@@ -129,7 +139,7 @@ func TestService_CreateTicket_SeedsOpenState(t *testing.T) {
 		RunID:                  common.RunID("run-1"),
 		StepID:                 common.StepID("run-1/step-1"),
 		Reason:                 "need operator decision",
-		AutoGovernance:         map[string]any{"policy": "manual"},
+		AutoGovernance:         mustDecisionPayload(t, map[string]any{"policy": "manual"}),
 		FailureClass:           "runtime_failed",
 		FailureSignature:       "class=runtime_failed",
 		AllowedRecoveryActions: []string{"replan"},
@@ -145,7 +155,8 @@ func TestService_CreateTicket_SeedsOpenState(t *testing.T) {
 	if ticket.State != common.DecisionTicketStateOpen {
 		t.Fatalf("ticket state = %q, want open", ticket.State)
 	}
-	if ticket.AutoGovernance["policy"] != "manual" ||
+	policy, _ := ticket.AutoGovernance.String("policy")
+	if policy != "manual" ||
 		ticket.FailureClass != "runtime_failed" ||
 		ticket.FailureSignature != "class=runtime_failed" ||
 		len(ticket.AllowedRecoveryActions) != 1 ||
@@ -312,7 +323,7 @@ func TestService_ResolveTicket_OpenToResolvedAndPersistsResolution(t *testing.T)
 		ResolutionID: common.ResolutionID("resolution-1"),
 		TicketID:     createCmd.TicketID,
 		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
-		Payload:      map[string]any{"actor": "operator"},
+		Payload:      mustDecisionPayload(t, map[string]any{"actor": "operator"}),
 	}
 	if err := service.ResolveTicket(ctx, resolveCmd); err != nil {
 		t.Fatalf("resolve ticket: %v", err)
@@ -381,7 +392,7 @@ func TestService_ResolveTicket_RecordsDecisionEvidence(t *testing.T) {
 		RunID:              createCmd.RunID,
 		StepID:             createCmd.StepID,
 		Type:               decisioncommon.ResolutionTypeProvideMissingInfo,
-		Payload:            map[string]any{"operatorInput": "continue with current plan"},
+		Payload:            mustDecisionPayload(t, map[string]any{"operatorInput": "continue with current plan"}),
 		ContinuationAction: "resume",
 		ResumeRunID:        createCmd.RunID,
 	}
@@ -481,7 +492,7 @@ func TestService_EnsureResolvedTicket_IsIdempotentAndRejectsResolutionMismatch(t
 		ResolutionID: cmd.ResolutionID,
 		TicketID:     createCmd.TicketID,
 		Type:         cmd.Type,
-		Payload:      map[string]any{},
+		Payload:      workorcheventpayload.Payload{},
 	}); err != nil {
 		t.Fatalf("second ensure resolved ticket: %v", err)
 	}
@@ -503,7 +514,7 @@ func TestService_EnsureResolvedTicket_IsIdempotentAndRejectsResolutionMismatch(t
 		ResolutionID: cmd.ResolutionID,
 		TicketID:     createCmd.TicketID,
 		Type:         cmd.Type,
-		Payload:      map[string]any{"operator": "other"},
+		Payload:      mustDecisionPayload(t, map[string]any{"operator": "other"}),
 	}); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("resolution payload mismatch err = %v, want conflict", err)
 	}
@@ -538,7 +549,7 @@ func TestService_EnsureResolvedTicketReusesLoadedTicket(t *testing.T) {
 		ResolutionID: common.ResolutionID("resolution-ensure-loaded"),
 		TicketID:     createCmd.TicketID,
 		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
-		Payload:      map[string]any{"operator": "workorch"},
+		Payload:      mustDecisionPayload(t, map[string]any{"operator": "workorch"}),
 	}); err != nil {
 		t.Fatalf("ensure resolved ticket: %v", err)
 	}
@@ -568,7 +579,7 @@ func TestService_EnsureResolvedTicketAndReturnReturnsResolvedEntitiesWithoutExtr
 		ResolutionID: common.ResolutionID("resolution-return-loaded"),
 		TicketID:     createCmd.TicketID,
 		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
-		Payload:      map[string]any{"operator": "workorch"},
+		Payload:      mustDecisionPayload(t, map[string]any{"operator": "workorch"}),
 	}
 	ticket, resolution, err := service.EnsureResolvedTicketAndReturn(ctx, cmd)
 	if err != nil {
@@ -580,7 +591,8 @@ func TestService_EnsureResolvedTicketAndReturnReturnsResolvedEntitiesWithoutExtr
 	if ticket.ID != createCmd.TicketID || ticket.State != common.DecisionTicketStateResolved {
 		t.Fatalf("ticket = %+v, want resolved %s", ticket, createCmd.TicketID)
 	}
-	if resolution.ID != cmd.ResolutionID || resolution.Type != cmd.Type || resolution.Payload["operator"] != "workorch" {
+	operator, _ := resolution.Payload.String("operator")
+	if resolution.ID != cmd.ResolutionID || resolution.Type != cmd.Type || operator != "workorch" {
 		t.Fatalf("resolution = %+v, want command payload", resolution)
 	}
 	if got := ticketRepo.getCount.Load(); got != 1 {
@@ -666,7 +678,7 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionSamePayloadIsIdem
 		ID:                 common.ResolutionID("resolution-orphan-recover"),
 		TicketID:           createCmd.TicketID,
 		Type:               decisioncommon.ResolutionTypeProvideMissingInfo,
-		Payload:            map[string]any{"actor": "operator", "intent": "retry_same_step"},
+		Payload:            mustDecisionPayload(t, map[string]any{"actor": "operator", "intent": "retry_same_step"}),
 		ContinuationAction: "resume",
 		ResumeRunID:        "run-1",
 	}
@@ -678,7 +690,7 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionSamePayloadIsIdem
 		ResolutionID: orphan.ID,
 		TicketID:     createCmd.TicketID,
 		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
-		Payload:      map[string]any{"actor": "operator", "intent": "retry_same_step"},
+		Payload:      mustDecisionPayload(t, map[string]any{"actor": "operator", "intent": "retry_same_step"}),
 	}
 	ticket, resolution, err := service.EnsureResolvedTicketAndReturn(ctx, cmd)
 	if err != nil {
@@ -726,7 +738,7 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionPublishesResolved
 		ID:       common.ResolutionID("resolution-orphan-event"),
 		TicketID: createCmd.TicketID,
 		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
-		Payload:  map[string]any{"actor": "operator"},
+		Payload:  mustDecisionPayload(t, map[string]any{"actor": "operator"}),
 	}
 	if err := resolutionRepo.Create(ctx, orphan); err != nil {
 		t.Fatalf("seed orphan resolution: %v", err)
@@ -736,7 +748,7 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionPublishesResolved
 		ResolutionID: orphan.ID,
 		TicketID:     createCmd.TicketID,
 		Type:         orphan.Type,
-		Payload:      map[string]any{"actor": "operator"},
+		Payload:      mustDecisionPayload(t, map[string]any{"actor": "operator"}),
 	}); err != nil {
 		t.Fatalf("orphan recovery: %v", err)
 	}
@@ -786,11 +798,11 @@ func TestService_EnsureResolvedTicketAndReturn_PromotesRecoveryRefsFromPayload(t
 		WorkspaceID:  cmd.WorkspaceID,
 		RunID:        cmd.RunID,
 		Type:         decisioncommon.ResolutionTypeReplan,
-		Payload: map[string]any{
+		Payload: mustDecisionPayload(t, map[string]any{
 			"continuationAction": "replan",
 			"resumeRunId":        "run-source",
 			"successorRunId":     "run-successor",
-		},
+		}),
 	})
 	if err != nil {
 		t.Fatalf("resolve ticket: %v", err)
@@ -830,7 +842,7 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionDifferentPayloadR
 		ID:       common.ResolutionID("resolution-orphan-payload-mismatch"),
 		TicketID: createCmd.TicketID,
 		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
-		Payload:  map[string]any{"actor": "operator", "intent": "retry_same_step"},
+		Payload:  mustDecisionPayload(t, map[string]any{"actor": "operator", "intent": "retry_same_step"}),
 	}
 	if err := resolutionRepo.Create(ctx, orphan); err != nil {
 		t.Fatalf("seed orphan resolution: %v", err)
@@ -840,7 +852,7 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionDifferentPayloadR
 		ResolutionID: orphan.ID,
 		TicketID:     createCmd.TicketID,
 		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
-		Payload:      map[string]any{"actor": "operator", "intent": "terminate"},
+		Payload:      mustDecisionPayload(t, map[string]any{"actor": "operator", "intent": "terminate"}),
 	}
 	if _, _, err := service.EnsureResolvedTicketAndReturn(ctx, cmd); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("orphan + different payload err = %v, want conflict", err)
@@ -882,7 +894,7 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionDifferentIDReturn
 		ID:       common.ResolutionID("resolution-orphan-id-mismatch"),
 		TicketID: createCmd.TicketID,
 		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
-		Payload:  map[string]any{"actor": "operator"},
+		Payload:  mustDecisionPayload(t, map[string]any{"actor": "operator"}),
 	}
 	if err := resolutionRepo.Create(ctx, orphan); err != nil {
 		t.Fatalf("seed orphan resolution: %v", err)
@@ -892,7 +904,7 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionDifferentIDReturn
 		ResolutionID: common.ResolutionID("resolution-different-id"),
 		TicketID:     createCmd.TicketID,
 		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
-		Payload:      map[string]any{"actor": "operator"},
+		Payload:      mustDecisionPayload(t, map[string]any{"actor": "operator"}),
 	}
 	if _, _, err := service.EnsureResolvedTicketAndReturn(ctx, cmd); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("orphan + different resolutionID err = %v, want conflict", err)
@@ -945,7 +957,7 @@ func TestService_CreateAndResolveTicket_PublishesEvents(t *testing.T) {
 		ResolutionID: common.ResolutionID("resolution-event"),
 		TicketID:     createCmd.TicketID,
 		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
-		Payload:      map[string]any{"operator": "workorch"},
+		Payload:      mustDecisionPayload(t, map[string]any{"operator": "workorch"}),
 	}); err != nil {
 		t.Fatalf("resolve ticket: %v", err)
 	}

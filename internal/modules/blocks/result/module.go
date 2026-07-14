@@ -113,17 +113,18 @@ func (m *Module) Service() Service {
 }
 
 func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
-	response, err := m.executeCommand(ev.Context(), ev.ID(), ev.Data())
+	response, err := m.executeCommand(ev)
 	setMagicResult(result, response, err)
 }
 
-func (m *Module) executeCommand(ctx context.Context, topic string, data any) (resultevents.ResultCommandResult, error) {
+func (m *Module) executeCommand(ev magicevent.Event) (resultevents.ResultCommandResult, error) {
 	if m == nil || m.servicePtr == nil {
 		return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 	}
-	switch topic {
+	ctx := ev.Context()
+	switch ev.ID() {
 	case resultevents.TopicResultCommandCreate:
-		cmd, ok := data.(resultevents.CreateResultCommand)
+		cmd, ok := ev.Data().(resultevents.CreateResultCommand)
 		if !ok || cmd.Result == nil {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
@@ -134,7 +135,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (re
 		m.publishResultChanged(ctx, cmd.Result)
 		return resultevents.ResultCommandResult{}, nil
 	case resultevents.TopicResultCommandGet:
-		cmd, ok := data.(resultevents.GetResultCommand)
+		cmd, ok := ev.Data().(resultevents.GetResultCommand)
 		if !ok {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
@@ -144,7 +145,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (re
 		}
 		return resultevents.ResultCommandResult{Result: item}, nil
 	case resultevents.TopicResultCommandListByWorkspace:
-		cmd, ok := data.(resultevents.ListResultsByWorkspaceCommand)
+		cmd, ok := ev.Data().(resultevents.ListResultsByWorkspaceCommand)
 		if !ok {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
@@ -155,7 +156,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (re
 		}
 		return resultevents.ResultCommandResult{Results: items}, nil
 	case resultevents.TopicResultCommandListByRun:
-		cmd, ok := data.(resultevents.ListResultsByRunCommand)
+		cmd, ok := ev.Data().(resultevents.ListResultsByRunCommand)
 		if !ok {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
@@ -165,7 +166,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (re
 		}
 		return resultevents.ResultCommandResult{Results: items}, nil
 	case resultevents.TopicResultCommandUpdate:
-		cmd, ok := data.(resultevents.UpdateResultCommand)
+		cmd, ok := ev.Data().(resultevents.UpdateResultCommand)
 		if !ok || cmd.Result == nil {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
@@ -176,7 +177,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (re
 		m.publishResultChanged(ctx, cmd.Result)
 		return resultevents.ResultCommandResult{}, nil
 	case resultevents.TopicResultCommandDelete:
-		cmd, ok := data.(resultevents.DeleteResultCommand)
+		cmd, ok := ev.Data().(resultevents.DeleteResultCommand)
 		if !ok {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
@@ -185,7 +186,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (re
 		}
 		return resultevents.ResultCommandResult{}, nil
 	case resultevents.TopicArtifactCommandCreate:
-		cmd, ok := data.(resultevents.CreateArtifactCommand)
+		cmd, ok := ev.Data().(resultevents.CreateArtifactCommand)
 		if !ok || cmd.Artifact == nil {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
@@ -196,7 +197,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (re
 		m.publishArtifactCreated(ctx, cmd.Artifact)
 		return resultevents.ResultCommandResult{}, nil
 	case resultevents.TopicArtifactCommandGet:
-		cmd, ok := data.(resultevents.GetArtifactCommand)
+		cmd, ok := ev.Data().(resultevents.GetArtifactCommand)
 		if !ok {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
@@ -206,7 +207,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (re
 		}
 		return resultevents.ResultCommandResult{Artifact: item}, nil
 	case resultevents.TopicArtifactCommandListByWorkspace:
-		cmd, ok := data.(resultevents.ListArtifactsByWorkspaceCommand)
+		cmd, ok := ev.Data().(resultevents.ListArtifactsByWorkspaceCommand)
 		if !ok {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
@@ -217,7 +218,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (re
 		}
 		return resultevents.ResultCommandResult{Artifacts: items}, nil
 	case resultevents.TopicArtifactCommandListByRun:
-		cmd, ok := data.(resultevents.ListArtifactsByRunCommand)
+		cmd, ok := ev.Data().(resultevents.ListArtifactsByRunCommand)
 		if !ok {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
@@ -227,7 +228,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (re
 		}
 		return resultevents.ResultCommandResult{Artifacts: items}, nil
 	case resultevents.TopicArtifactCommandListByResult:
-		cmd, ok := data.(resultevents.ListArtifactsByResultCommand)
+		cmd, ok := ev.Data().(resultevents.ListArtifactsByResultCommand)
 		if !ok {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
@@ -237,7 +238,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (re
 		}
 		return resultevents.ResultCommandResult{Artifacts: items}, nil
 	case resultevents.TopicArtifactCommandUpdate:
-		cmd, ok := data.(resultevents.UpdateArtifactCommand)
+		cmd, ok := ev.Data().(resultevents.UpdateArtifactCommand)
 		if !ok || cmd.Artifact == nil {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
@@ -247,7 +248,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (re
 		}
 		return resultevents.ResultCommandResult{}, nil
 	case resultevents.TopicArtifactCommandDelete:
-		cmd, ok := data.(resultevents.DeleteArtifactCommand)
+		cmd, ok := ev.Data().(resultevents.DeleteArtifactCommand)
 		if !ok {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}

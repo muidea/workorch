@@ -1052,6 +1052,7 @@ func cloneDecisionPtr(input *backend.DecisionInfo) *backend.DecisionInfo {
 		return nil
 	}
 	ret := *input
+	ret.Context = input.Context.Clone()
 	return &ret
 }
 
@@ -1060,7 +1061,7 @@ func cloneApprovalPtr(input *backend.ApprovalInfo) *backend.ApprovalInfo {
 		return nil
 	}
 	ret := *input
-	ret.Context = clonePayloadMap(input.Context)
+	ret.Context = input.Context.Clone()
 	return &ret
 }
 
@@ -1129,10 +1130,10 @@ func latestLLMContextBudget(budgets []backend.LLMContextBudgetTraceInfo, traces 
 	}
 	for idx := len(traces) - 1; idx >= 0; idx-- {
 		budget := traces[idx].ContextBudget
-		if len(budget) == 0 {
+		if len(budget.Fields) == 0 {
 			continue
 		}
-		return clonePayloadMap(budget)
+		return budget.Map()
 	}
 	return nil
 }
@@ -1183,8 +1184,8 @@ func llmContextBudgetTraceMap(item backend.LLMContextBudgetTraceInfo) map[string
 		"tracePolicy":           item.TracePolicy,
 		"promptCaptured":        item.PromptCaptured,
 		"estimator":             item.Estimator,
-		"profile":               clonePayloadMap(item.Profile),
-		"cachePlan":             clonePayloadMap(item.CachePlan),
+		"profile":               item.Profile.Map(),
+		"cachePlan":             item.CachePlan.Map(),
 	}
 	return ret
 }

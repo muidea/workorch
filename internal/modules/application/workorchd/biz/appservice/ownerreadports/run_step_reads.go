@@ -6,6 +6,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -15,10 +16,13 @@ func ReadStepByOwnerCommand(ctx context.Context, hub magicevent.Hub, stepID comm
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := sendMagicCommand[runevents.GetStepCommand, runevents.RunCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, runevents.TopicRunCommandGetStep, runevents.CommandDestination, "step", string(stepID), runevents.GetStepCommand{
+	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandGetStep, sourceModule, runevents.CommandDestination, magicevent.NewHeader(), commandCtx, runevents.GetStepCommand{
 		WorkspaceID: workspaceID,
 		StepID:      stepID,
 	})
+	ownerevent.BindLane(event, runevents.TopicRunCommandGetStep, "step", string(stepID), workspaceID, "", stepID)
+	response, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandGetStep)
 	if err != nil {
 		return nil, err
 	}
@@ -33,10 +37,13 @@ func ListStepsByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, runID c
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := sendMagicCommand[runevents.ListStepsByRunCommand, runevents.RunCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, runevents.TopicRunCommandListStepsByRun, runevents.CommandDestination, "run", string(runID), runevents.ListStepsByRunCommand{
+	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandListStepsByRun, sourceModule, runevents.CommandDestination, magicevent.NewHeader(), commandCtx, runevents.ListStepsByRunCommand{
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 	})
+	ownerevent.BindLane(event, runevents.TopicRunCommandListStepsByRun, "run", string(runID), workspaceID, runID, "")
+	response, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandListStepsByRun)
 	if err != nil {
 		return nil, err
 	}
@@ -48,10 +55,13 @@ func ListStepSummariesByRunOwnerCommand(ctx context.Context, hub magicevent.Hub,
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := sendMagicCommand[runevents.ListStepSummariesByRunCommand, runevents.RunCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, runevents.TopicRunCommandListStepSummariesByRun, runevents.CommandDestination, "run", string(runID), runevents.ListStepSummariesByRunCommand{
+	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandListStepSummariesByRun, sourceModule, runevents.CommandDestination, magicevent.NewHeader(), commandCtx, runevents.ListStepSummariesByRunCommand{
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 	})
+	ownerevent.BindLane(event, runevents.TopicRunCommandListStepSummariesByRun, "run", string(runID), workspaceID, runID, "")
+	response, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandListStepSummariesByRun)
 	if err != nil {
 		return nil, err
 	}

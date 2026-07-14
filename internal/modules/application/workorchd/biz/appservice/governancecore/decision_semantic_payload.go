@@ -1,20 +1,18 @@
 package governancecore
 
-import governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
+import (
+	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
-func WithDecisionSemanticPayload(payload map[string]any, semantic governancecommon.DecisionSemanticNormalization) map[string]any {
-	ret := CloneDecisionPayload(payload)
-	if ret == nil {
-		ret = map[string]any{}
-	}
-	ret["governanceSemantic"] = map[string]any{
-		"resolutionType": semantic.ResolutionType,
-		"intent":         semantic.Intent,
-		"confidence":     semantic.Confidence,
-		"rawInput":       semantic.RawInput,
-		"source":         semantic.Source,
-		"inferred":       semantic.Inferred,
-		"version":        "v1",
-	}
-	return ret
+func WithDecisionSemanticPayload(payload workorcheventpayload.Payload, semantic governancecommon.DecisionSemanticNormalization) workorcheventpayload.Payload {
+	return CloneDecisionPayload(payload).Merge(workorcheventpayload.New(workorcheventpayload.ObjectField("governanceSemantic", workorcheventpayload.New(
+		workorcheventpayload.StringField("resolutionType", semantic.ResolutionType),
+		workorcheventpayload.StringField("intent", semantic.Intent),
+		workorcheventpayload.FloatField("confidence", semantic.Confidence),
+		workorcheventpayload.StringField("rawInput", semantic.RawInput),
+		workorcheventpayload.StringField("source", semantic.Source),
+		workorcheventpayload.BoolField("inferred", semantic.Inferred),
+		workorcheventpayload.StringField("version", "v1"),
+	))))
 }

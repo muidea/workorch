@@ -71,5 +71,5 @@ func (g EventHubGenerator) GenerateWorkspaceSetupDraft(ctx context.Context, requ
 	if !ok || response.Completion == nil {
 		return setupdraftcore.Draft{}, fmt.Errorf("%w: llm completion result type %T", common.ErrInvalidArgument, data)
 	}
-	return setupdraftcore.ParseCompletion(response.Completion.Payload)
+	return setupdraftcore.ParseCompletion([]byte(response.Completion.Content))
 }

@@ -1,0 +1,100 @@
+package workorcheventpayload
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestPayloadJSONBoundaryUsesObjectShape(t *testing.T) {
+	payload := New(
+		StringField("operator", "tester"),
+		BoolField("retry", true),
+		ObjectField("semantic", New(StringField("intent", "approve_execution"))),
+	)
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if string(raw) != `{"operator":"tester","retry":true,"semantic":{"intent":"approve_execution"}}` {
+		t.Fatalf("payload JSON = %s, want object contract", raw)
+	}
+
+	var decoded Payload
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if !decoded.Equal(payload) {
+		t.Fatalf("decoded payload = %+v, want %+v", decoded, payload)
+	}
+}
+
+func TestPayloadJSONBoundaryRejectsNonObject(t *testing.T) {
+	for _, raw := range []string{"null", `[]`, `"text"`} {
+		var payload Payload
+		if err := json.Unmarshal([]byte(raw), &payload); err == nil {
+			t.Fatalf("json.Unmarshal(%s) succeeded, want invalid payload", raw)
+		}
+	}
+}
+
+func TestPayloadRoundTripWithoutSerialization(t *testing.T) {
+	input := map[string]any{
+		"mode":  "resume",
+		"count": 2,
+		"flags": []any{true, "bounded"},
+		"scope": map[string]any{"workspaceId": "ws-1"},
+		"items": []map[string]any{{"id": "item-1"}},
+	}
+	payload, err := FromMap(input)
+	if err != nil {
+		t.Fatalf("FromMap: %v", err)
+	}
+	output := payload.Map()
+	if output["mode"] != "resume" || output["count"] != int64(2) {
+		t.Fatalf("output = %#v", output)
+	}
+	scope, ok := output["scope"].(map[string]any)
+	if !ok || scope["workspaceId"] != "ws-1" {
+		t.Fatalf("scope = %#v", output["scope"])
+	}
+	items, ok := output["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("items = %#v", output["items"])
+	}
+}
+
+func TestCloneSliceKeepsPayloadsIsolated(t *testing.T) {
+	original := []Payload{New(
+		StringField("id", "policy-1"),
+		ObjectField("nested", New(StringField("state", "ready"))),
+	)}
+
+	cloned := CloneSlice(original)
+	cloned[0].Fields[0].Value.String = "mutated"
+	cloned[0].Fields[1].Value.Object[0].Value.String = "changed"
+
+	id, _ := original[0].String("id")
+	nested, _ := original[0].Object("nested")
+	state, _ := nested.String("state")
+	if id != "policy-1" || state != "ready" {
+		t.Fatalf("original payload mutated through clone: id=%q state=%q", id, state)
+	}
+}
+
+func TestPayloadMapSliceBoundaryRoundTrip(t *testing.T) {
+	payloads, err := FromMapSlice([]map[string]any{{"state": "active"}, {"state": "completed"}})
+	if err != nil {
+		t.Fatalf("FromMapSlice: %v", err)
+	}
+	mapped := MapSlice(payloads)
+	if len(mapped) != 2 || mapped[0]["state"] != "active" || mapped[1]["state"] != "completed" {
+		t.Fatalf("mapped = %#v", mapped)
+	}
+}
+
+func TestPayloadRejectsUnsupportedValues(t *testing.T) {
+	if _, err := FromMap(map[string]any{"channel": make(chan struct{})}); err == nil {
+		t.Fatal("expected unsupported value error")
+	}
+}

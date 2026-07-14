@@ -4,11 +4,11 @@ Status: active
 
 Type: archive
 
-Last Updated: 2026-05-30
+Last Updated: 2026-07-14
 
 ## Purpose
 
-本目录承接性能复盘、历史里程碑、交付记录和一次性经验总结。
+本目录承接性能复盘、历史里程碑、交付记录、一次性经验总结，以及 **已退役的文档迁移 audit / tracker**。
 
 它不承接：
 
@@ -16,32 +16,42 @@ Last Updated: 2026-05-30
 - 当前稳定验收门禁
 - 当前稳定 product / runtime 设计定义
 
-## Candidate Inputs
-
-- `single-workspace-performance-optimization-record.md`
-- `delivery-history.md`
-- `workspace-concurrency-loadtest-record.md`
-- `coverage-work-item-closure-history.md`
-- 历史综合状态拆分后形成的稳定事实索引入口
-
 ## Current Records
+
+### 交付与性能
 
 - [delivery-history.md](delivery-history.md)
 - [single-workspace-performance-optimization-record.md](single-workspace-performance-optimization-record.md)
 - [workspace-concurrency-loadtest-record.md](workspace-concurrency-loadtest-record.md)
 - [coverage-work-item-closure-history.md](coverage-work-item-closure-history.md)
 
-## Record Layering
+### 2026-07-14 迁入：文档迁移 / 对齐 audit（历史过程，非当前入口）
 
-| 文档 | 当前职责 | 不负责 |
-| --- | --- | --- |
-| `delivery-history.md` | 已完成交付范围、阶段性完成记录、历史收口说明 | 当前稳定设计/验收定义 |
-| `workspace-concurrency-loadtest-record.md` | 并发压测历史轮次、容量曲线、复盘说明 | 当前稳定 loadtest baseline 门禁 |
-| `single-workspace-performance-optimization-record.md` | 单工作区 latency 优化复盘 | 并发容量基线或当前发布门禁 |
-| `coverage-work-item-closure-history.md` | `coverageWorkItems` 分批实现与回归收口历史 | 当前稳定 coverage ledger / acceptance gate / read-model 契约 |
+- batch-1-migration-audit.md
+- batch-2-domain-migration-audit.md
+- batch-3-flow-migration-audit.md
+- batch-4-module-migration-audit.md
+- 50-product-batch-5-audit.md
+- batch-6-verification-roadmap-archive-audit.md
+- roadmap-archive-migration-audit.md
+- status-reference-cleanup-audit.md
+- workorch-status-split-audit.md
+- information-model-alignment-audit.md
+- incomplete-and-connection-gap-tracker.md
+- architecture-optimization-plan.md
 
-当前若需要查看稳定事实入口，应优先转到：
+### 2026-07-14 迁入：历史验收 checklist / V1 live 复盘
 
-- `../../01-overview/current-state.md`
-- `../../60-verification/loadtest-baseline.md`
-- `../../60-verification/service-acceptance.md`
+- acceptance-record-*.md
+- *-code-alignment-checklist.md / incremental-artifact-code-review-checklist.md
+- framework-eventhub-module-boundary-checklist.md
+- convergence-authority-dispatch-live-verification.md
+- workorch-runtime-closure-modification-spec.md
+
+完整列表以本目录文件名为准。
+
+## Navigation
+
+- 当前事实：[../../01-overview/current-state.md](../../01-overview/current-state.md)
+- 已完成计划：[../completed/overview.md](../completed/overview.md)
+- superseded：[../superseded/overview.md](../superseded/overview.md)

@@ -6,6 +6,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -15,7 +16,9 @@ func ListEventRecordsByOwnerCommand(ctx context.Context, hub magicevent.Hub, que
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := sendMagicCommand[eventstreamevents.ListEventsCommand, eventstreamevents.EventStreamCommandResult](ctx, hub, eventstreamevents.TopicEventStreamCommandList, eventstreamevents.CommandDestination, "event_record", "list", eventstreamevents.ListEventsCommand{Query: query})
+	event := magicevent.NewEventWithContext(eventstreamevents.TopicEventStreamCommandList, sourceModule, eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx, eventstreamevents.ListEventsCommand{Query: query})
+	ownerevent.BindLane(event, eventstreamevents.TopicEventStreamCommandList, "event_record", "list", query.WorkspaceID, query.RunID, "")
+	response, err := ownerevent.EventStream(hub.Send(event), eventstreamevents.TopicEventStreamCommandList)
 	if err != nil {
 		return nil, err
 	}

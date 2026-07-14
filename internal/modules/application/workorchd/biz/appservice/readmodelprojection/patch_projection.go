@@ -3,6 +3,7 @@ package readmodelprojection
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func ProjectPatch(item *runmodel.Patch) readmodelcore.Patch {
@@ -29,7 +30,7 @@ func ProjectPatch(item *runmodel.Patch) readmodelcore.Patch {
 		AffectedFiles:    cloneReadModelStringSlice(item.AffectedFiles),
 		RiskLevel:        item.RiskLevel,
 		RiskReasons:      cloneReadModelStringSlice(item.RiskReasons),
-		Diagnostics:      cloneReadModelMapSlice(item.Diagnostics),
+		Diagnostics:      cloneReadModelMapSlice(workorcheventpayload.MapSlice(item.Diagnostics)),
 		CreatedAt:        item.CreatedAt,
 		AppliedAt:        item.AppliedAt,
 		RevertedAt:       item.RevertedAt,

@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
@@ -91,9 +92,9 @@ var decisionResolveCmd = &cobra.Command{
 		}
 		resType, _ := cmd.Flags().GetString("type")
 		payloadStr, _ := cmd.Flags().GetString("payload")
-		var payload map[string]any
+		payload := workorcheventpayload.Payload{}
 		if payloadStr != "" {
-			payload = map[string]any{"value": payloadStr}
+			payload = workorcheventpayload.New(workorcheventpayload.StringField("value", payloadStr))
 		}
 		d, err := mustBackend().Decision().Resolve(ctx(), backend.ResolveDecisionRequest{
 			WorkspaceID:    common.WorkspaceID(wsID),

@@ -19,7 +19,7 @@ func TestCurrentRunStatusStepTerminalRunPrefersFailedTerminalOverStaleCheckpoint
 			ID:    "run-terminal-selection/002-failed",
 			RunID: run.ID,
 			State: common.StepStateFailed,
-			Input: map[string]any{"previousStepId": "run-terminal-selection/001-completed"},
+			Input: mustWorkspaceRunEventPayload(t, map[string]any{"previousStepId": "run-terminal-selection/001-completed"}),
 		},
 	}
 	checkpoints := []*runmodel.RuntimeCheckpoint{{
@@ -41,7 +41,7 @@ func TestCurrentRunStatusStepTerminalRunUsesCheckpointOrderForLexicallyEarlierFa
 			ID:    "run-terminal-checkpoint-order/follow-up-final",
 			RunID: run.ID,
 			State: common.StepStateFailed,
-			Input: map[string]any{"previousStepId": "run-terminal-checkpoint-order/graph-010"},
+			Input: mustWorkspaceRunEventPayload(t, map[string]any{"previousStepId": "run-terminal-checkpoint-order/graph-010"}),
 		},
 		{
 			ID:    "run-terminal-checkpoint-order/graph-005-old",

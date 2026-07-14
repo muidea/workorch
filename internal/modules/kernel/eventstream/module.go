@@ -94,11 +94,14 @@ func (m *Module) Service() Service {
 }
 
 func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
-	response, err := m.executeCommand(ev.Context(), ev.ID(), ev.Data())
+	response, err := m.executeCommand(ev)
 	setEventStreamMagicResult(result, response, err)
 }
 
-func (m *Module) executeCommand(ctx context.Context, topic string, data any) (eventstreamevents.EventStreamCommandResult, error) {
+func (m *Module) executeCommand(ev magicevent.Event) (eventstreamevents.EventStreamCommandResult, error) {
+	ctx := ev.Context()
+	topic := ev.ID()
+	data := ev.Data()
 	if m == nil || m.servicePtr == nil {
 		return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
 	}

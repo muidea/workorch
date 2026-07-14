@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type RuntimeAdapter struct {
@@ -33,10 +33,10 @@ func NewRuntimeAdapterWithTimeout(timeout time.Duration) *RuntimeAdapter {
 	return adapter
 }
 
-func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
-	spec, err := sshCommandSpecFromInput(request.Input, request.WorkspaceDeliverableDirectory, a.defaultTimeout())
+func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCommandRequest) (RuntimeCommandResult, error) {
+	spec, err := sshCommandSpecFromRequest(request, a.defaultTimeout())
 	if err != nil {
-		return runtimemodel.StepExecutionResult{}, err
+		return RuntimeCommandResult{}, err
 	}
 	runCtx, cancel := context.WithTimeout(ctx, spec.Timeout)
 	defer cancel()
@@ -44,37 +44,48 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	startedAt := time.Now().UTC()
 	result, err := executeSSHCommand(runCtx, spec)
 	duration := time.Since(startedAt)
-	output := map[string]any{
-		"status":         "completed",
-		"host":           spec.Host,
-		"port":           spec.Port,
-		"username":       spec.Username,
-		"command":        spec.Command,
-		"stdout":         result.Stdout,
-		"stderr":         result.Stderr,
-		"exitCode":       result.ExitCode,
-		"durationMillis": duration.Milliseconds(),
-		"timeoutMillis":  spec.Timeout.Milliseconds(),
-		"authMethod":     spec.authMethod(),
-	}
-	if result.StdoutTruncated || result.StderrTruncated {
-		output["outputTruncated"] = true
-		output["stdoutTruncated"] = result.StdoutTruncated
-		output["stderrTruncated"] = result.StderrTruncated
-		output["stdoutBytes"] = result.StdoutBytes
-		output["stderrBytes"] = result.StderrBytes
-		output["maxOutputBytes"] = MaxCommandOutputBytes
+	ret := RuntimeCommandResult{
+		Status:          "completed",
+		Host:            spec.Host,
+		Port:            int64(spec.Port),
+		Username:        spec.Username,
+		Command:         spec.Command,
+		Stdout:          result.Stdout,
+		Stderr:          result.Stderr,
+		ExitCode:        int64(result.ExitCode),
+		DurationMillis:  duration.Milliseconds(),
+		TimeoutMillis:   spec.Timeout.Milliseconds(),
+		AuthMethod:      spec.authMethod(),
+		OutputTruncated: result.StdoutTruncated || result.StderrTruncated,
+		StdoutTruncated: result.StdoutTruncated,
+		StderrTruncated: result.StderrTruncated,
+		StdoutBytes:     int64(result.StdoutBytes),
+		StderrBytes:     int64(result.StderrBytes),
 	}
 	if runCtx.Err() == context.DeadlineExceeded {
-		output["status"] = "timeout"
-		return runtimemodel.StepExecutionResult{Output: output}, context.DeadlineExceeded
+		ret.Status = "timeout"
+		ret.FailureCode = "ssh_command_timeout"
+		ret.FailureMessage = context.DeadlineExceeded.Error()
+		ret.Evidence = sshRuntimeEvidence(ret)
+		return ret, context.DeadlineExceeded
 	}
 	if err != nil {
-		output["status"] = "failed"
-		output["error"] = err.Error()
-		return runtimemodel.StepExecutionResult{Output: output}, err
+		ret.Status = "failed"
+		ret.FailureCode = "ssh_command_failed"
+		ret.FailureMessage = err.Error()
+		ret.Evidence = sshRuntimeEvidence(ret)
+		return ret, err
 	}
-	return runtimemodel.StepExecutionResult{Output: output}, nil
+	ret.Evidence = sshRuntimeEvidence(ret)
+	return ret, nil
+}
+
+func sshRuntimeEvidence(result RuntimeCommandResult) runtimecontract.RuntimeOperationEvidence {
+	exitCode := result.ExitCode
+	return runtimecontract.RuntimeOperationEvidence{
+		Summary:  strings.TrimSpace(result.Status + " ssh command"),
+		ExitCode: &exitCode,
+	}
 }
 
 func (a *RuntimeAdapter) defaultTimeout() time.Duration {
@@ -96,7 +107,7 @@ type sshCommandSpec struct {
 }
 
 func (s sshCommandSpec) authMethod() string {
-	if strings.TrimSpace(s.PrivateKey) != "" {
+	if strings.TrimSpace(s.PrivateKey) != "" || strings.TrimSpace(s.privateKeyPath) != "" {
 		return "private_key"
 	}
 	if strings.TrimSpace(s.Password) != "" {
@@ -105,27 +116,22 @@ func (s sshCommandSpec) authMethod() string {
 	return ""
 }
 
-func sshCommandSpecFromInput(input map[string]any, workspaceDeliverableDirectory string, defaultTimeout time.Duration) (sshCommandSpec, error) {
-	if input == nil {
-		return sshCommandSpec{}, common.ErrInvalidArgument
-	}
+func sshCommandSpecFromRequest(request RuntimeCommandRequest, defaultTimeout time.Duration) (sshCommandSpec, error) {
 	spec := sshCommandSpec{
-		Host:     stringInput(input, "host"),
-		Username: stringInput(input, "username"),
-		Password: stringInput(input, "password"),
-		Command:  stringInput(input, "command"),
+		Host:     strings.TrimSpace(request.Host),
+		Username: strings.TrimSpace(request.Username),
+		Password: strings.TrimSpace(request.Password),
+		Command:  strings.TrimSpace(request.Command),
 		Port:     22,
 		Timeout:  defaultTimeout,
 	}
-	if port, ok, err := numericInput(input["port"]); err != nil {
-		return sshCommandSpec{}, err
-	} else if ok {
-		spec.Port = int(port)
+	if request.Port > 0 {
+		spec.Port = int(request.Port)
 	}
 	if spec.Host == "" || spec.Username == "" || spec.Command == "" || spec.Port <= 0 || spec.Port > 65535 {
 		return sshCommandSpec{}, common.ErrInvalidArgument
 	}
-	privateKey, privateKeyPath, err := sshPrivateKeyInput(input, workspaceDeliverableDirectory)
+	privateKey, privateKeyPath, err := sshPrivateKeyInput(request.PrivateKey, request.PrivateKeyPath, request.WorkspaceDeliverableDirectory)
 	if err != nil {
 		return sshCommandSpec{}, err
 	}
@@ -134,7 +140,7 @@ func sshCommandSpecFromInput(input map[string]any, workspaceDeliverableDirectory
 	if strings.TrimSpace(spec.Password) == "" && strings.TrimSpace(spec.PrivateKey) == "" && strings.TrimSpace(spec.privateKeyPath) == "" {
 		return sshCommandSpec{}, fmt.Errorf("%w: ssh/command requires password or privateKey/privateKeyPath", common.ErrInvalidArgument)
 	}
-	timeout, err := sshCommandTimeout(input, defaultTimeout)
+	timeout, err := sshCommandTimeout(request.TimeoutMillis, defaultTimeout)
 	if err != nil {
 		return sshCommandSpec{}, err
 	}
@@ -142,16 +148,11 @@ func sshCommandSpecFromInput(input map[string]any, workspaceDeliverableDirectory
 	return spec, nil
 }
 
-func stringInput(input map[string]any, key string) string {
-	value, _ := input[key].(string)
-	return strings.TrimSpace(value)
-}
-
-func sshPrivateKeyInput(input map[string]any, workspaceDeliverableDirectory string) (string, string, error) {
-	if value := stringInput(input, "privateKey"); value != "" {
+func sshPrivateKeyInput(privateKey string, privateKeyPath string, workspaceDeliverableDirectory string) (string, string, error) {
+	if value := strings.TrimSpace(privateKey); value != "" {
 		return value, "", nil
 	}
-	path := stringInput(input, "privateKeyPath")
+	path := strings.TrimSpace(privateKeyPath)
 	if path == "" {
 		return "", "", nil
 	}
@@ -165,21 +166,17 @@ func sshPrivateKeyInput(input map[string]any, workspaceDeliverableDirectory stri
 	return "", path, nil
 }
 
-func sshCommandTimeout(input map[string]any, defaultTimeout time.Duration) (time.Duration, error) {
+func sshCommandTimeout(timeoutMillis int64, defaultTimeout time.Duration) (time.Duration, error) {
 	if defaultTimeout <= 0 {
 		defaultTimeout = 30 * time.Second
 	}
-	if input == nil || input["timeoutMillis"] == nil {
+	if timeoutMillis == 0 {
 		return defaultTimeout, nil
 	}
-	value, ok, err := numericInput(input["timeoutMillis"])
-	if err != nil {
-		return 0, err
-	}
-	if !ok || value <= 0 {
+	if timeoutMillis < 0 {
 		return 0, common.ErrInvalidArgument
 	}
-	timeout := time.Duration(value) * time.Millisecond
+	timeout := time.Duration(timeoutMillis) * time.Millisecond
 	if timeout < time.Second {
 		return 0, fmt.Errorf("%w: timeoutMillis must be at least 1000", common.ErrInvalidArgument)
 	}
@@ -187,41 +184,6 @@ func sshCommandTimeout(input map[string]any, defaultTimeout time.Duration) (time
 		return 0, fmt.Errorf("%w: timeoutMillis must not exceed 300000", common.ErrInvalidArgument)
 	}
 	return timeout, nil
-}
-
-func numericInput(input any) (int64, bool, error) {
-	switch typed := input.(type) {
-	case nil:
-		return 0, false, nil
-	case int:
-		return int64(typed), true, nil
-	case int64:
-		return typed, true, nil
-	case int32:
-		return int64(typed), true, nil
-	case float64:
-		if typed != float64(int64(typed)) {
-			return 0, false, common.ErrInvalidArgument
-		}
-		return int64(typed), true, nil
-	case float32:
-		if typed != float32(int64(typed)) {
-			return 0, false, common.ErrInvalidArgument
-		}
-		return int64(typed), true, nil
-	case string:
-		value := strings.TrimSpace(typed)
-		if value == "" {
-			return 0, false, nil
-		}
-		parsed, err := strconv.ParseInt(value, 10, 64)
-		if err != nil {
-			return 0, false, common.ErrInvalidArgument
-		}
-		return parsed, true, nil
-	default:
-		return 0, false, common.ErrInvalidArgument
-	}
 }
 
 type sshCommandResult struct {

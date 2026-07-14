@@ -12,7 +12,6 @@ import (
 type ArtifactContinuationRepository struct {
 	mu               sync.RWMutex
 	items            map[common.ArtifactContinuationID]*orchestratormodel.ArtifactContinuation
-	plans            map[common.ArtifactContinuationID]map[string]any
 	chunks           map[common.ArtifactContinuationID]map[int]*orchestratormodel.ArtifactContinuationChunk
 	chunkContent     map[common.ArtifactContinuationID]map[int]string
 	assembledMeta    map[common.ArtifactContinuationID]*orchestratormodel.ArtifactContinuationAssembledMetadata
@@ -22,7 +21,6 @@ type ArtifactContinuationRepository struct {
 func NewArtifactContinuationRepository() *ArtifactContinuationRepository {
 	return &ArtifactContinuationRepository{
 		items:            map[common.ArtifactContinuationID]*orchestratormodel.ArtifactContinuation{},
-		plans:            map[common.ArtifactContinuationID]map[string]any{},
 		chunks:           map[common.ArtifactContinuationID]map[int]*orchestratormodel.ArtifactContinuationChunk{},
 		chunkContent:     map[common.ArtifactContinuationID]map[int]string{},
 		assembledMeta:    map[common.ArtifactContinuationID]*orchestratormodel.ArtifactContinuationAssembledMetadata{},
@@ -106,41 +104,11 @@ func (r *ArtifactContinuationRepository) Delete(_ context.Context, id common.Art
 		return common.ErrNotFound
 	}
 	delete(r.items, id)
-	delete(r.plans, id)
 	delete(r.chunks, id)
 	delete(r.chunkContent, id)
 	delete(r.assembledMeta, id)
 	delete(r.assembledContent, id)
 	return nil
-}
-
-func (r *ArtifactContinuationRepository) SavePlan(_ context.Context, id common.ArtifactContinuationID, plan map[string]any) error {
-	if id == "" {
-		return common.ErrInvalidArgument
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, ok := r.items[id]; !ok {
-		return common.ErrNotFound
-	}
-	r.plans[id] = cloneMap(plan)
-	return nil
-}
-
-func (r *ArtifactContinuationRepository) GetPlan(_ context.Context, id common.ArtifactContinuationID) (map[string]any, error) {
-	if id == "" {
-		return nil, common.ErrInvalidArgument
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if _, ok := r.items[id]; !ok {
-		return nil, common.ErrNotFound
-	}
-	plan, ok := r.plans[id]
-	if !ok {
-		return nil, common.ErrNotFound
-	}
-	return cloneMap(plan), nil
 }
 
 func (r *ArtifactContinuationRepository) SaveChunk(_ context.Context, chunk *orchestratormodel.ArtifactContinuationChunk, content string) error {
@@ -259,7 +227,7 @@ func cloneArtifactContinuation(item *orchestratormodel.ArtifactContinuation) *or
 	cloned.ReceivedChunkHashes = cloneIntStringMap(item.ReceivedChunkHashes)
 	cloned.RetryCounters = cloneStringIntMap(item.RetryCounters)
 	cloned.EvidenceRefs = cloneStringSlice(item.EvidenceRefs)
-	cloned.Metadata = cloneMap(item.Metadata)
+	cloned.Metadata = item.Metadata.Clone()
 	return &cloned
 }
 
@@ -272,8 +240,8 @@ func cloneArtifactContinuationChunk(item *orchestratormodel.ArtifactContinuation
 	if item.StepRefs != nil {
 		cloned.StepRefs = append([]common.StepID(nil), item.StepRefs...)
 	}
-	cloned.Validation = cloneMap(item.Validation)
-	cloned.Metadata = cloneMap(item.Metadata)
+	cloned.Validation = item.Validation.Clone()
+	cloned.Metadata = item.Metadata.Clone()
 	return &cloned
 }
 
@@ -284,7 +252,7 @@ func cloneArtifactContinuationAssembledMetadata(item *orchestratormodel.Artifact
 	cloned := *item
 	cloned.SourceChunkRefs = cloneStringSlice(item.SourceChunkRefs)
 	cloned.ApplyEvidenceRefs = cloneStringSlice(item.ApplyEvidenceRefs)
-	cloned.Metadata = cloneMap(item.Metadata)
+	cloned.Metadata = item.Metadata.Clone()
 	return &cloned
 }
 

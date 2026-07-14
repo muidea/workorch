@@ -4,62 +4,59 @@ Status: active
 
 Type: roadmap
 
-Last Updated: 2026-05-29
+Last Updated: 2026-07-14
 
 ## Purpose
 
-本目录只保留仍然需要执行的活跃计划。
+仅索引 **当前仍未关闭** 的工作项。已完成 / code-closed / 被 Runtime V2 吸收的 V1 hardening 与 `goal-dod-nextaction-s*` 切片已迁入 [90-archive/completed](../../90-archive/completed/overview.md)，不再在此列出。
 
-它不承接：
+## Runtime Code Status
 
-- 当前已经稳定落入 core / domain / flow / module / product / verification 的正式定义
-- 已完成里程碑的历史实现记录
-- 归档性质的性能复盘或交付总结
+| 主题 | 状态 |
+| --- | --- |
+| Runtime V2 生产主链 | **代码已收口**（Start/Resume → `DriveRuntimeV2` only） |
+| V1 StagePacket / NextAction / graph dispatch 主链 | **已删除** |
+| 设计结论上提 | 见 [00-core/runtime-stage-contract.md](../../00-core/runtime-stage-contract.md)、[current-state.md](../../01-overview/current-state.md) |
 
-## Historical Sources
+## Active Items
 
-- `auto-governance-ticket-approval-plan.md`
-- `software-requirement-development-orchestration-plan.md`
-- `software-dev-dod-repair-closure-plan.md`
-- `unified-tui-console-migration-plan.md`
-- `next-mvp-acceptance.md`
-- `llm-context-budget-todo.md`
-- `run-closure-quality-improvement-plan.md`
+### 运维切换（代码已关，生产 apply 未关）
 
-## Current Active Follow-up Themes
+| 文档 | 说明 |
+| --- | --- |
+| [deployed-workspace-progress-blocker-component-closure-plan.md](deployed-workspace-progress-blocker-component-closure-plan.md) | RV2-01~08 code/live complete；等待 clean build + 生产目录维护窗口正式 apply。稳定结论已上提 core/flow/module，本文件不再充当实现 SoT。 |
 
-- run closure quality improvement
-- software requirement development orchestration
-- software-dev DoD repair closure
-- unified TUI / Console migration
-- auto governance ticket approval
-- next MVP acceptance and context budget follow-up
+### 产品 / 能力
 
-## Active Documents
+| 文档 | 说明 |
+| --- | --- |
+| [auto-governance-ticket-approval-plan.md](auto-governance-ticket-approval-plan.md) | 自动治理与 ticket approval 产品化 |
+| [software-dev-dod-repair-closure-plan.md](software-dev-dod-repair-closure-plan.md) | software-dev profile DoD repair |
+| [software-requirement-development-orchestration-plan.md](software-requirement-development-orchestration-plan.md) | 需求开发编排产品能力 |
+| [unified-tui-console-migration-plan.md](unified-tui-console-migration-plan.md) | TUI / Web console 统一 |
+| [file-patch-side-effect-owner-migration-plan.md](file-patch-side-effect-owner-migration-plan.md) | file-patch 副作用 owner 迁移 |
+| [next-mvp-acceptance.md](next-mvp-acceptance.md) | 下一阶段 MVP 验收 |
+| [run-closure-quality-improvement-plan.md](run-closure-quality-improvement-plan.md) | Run 收口质量 |
+| [llm-context-budget-todo.md](llm-context-budget-todo.md) | LLM context budget 产品/实现跟进 |
+| [authority-live-verification-e2e-closure-design.md](authority-live-verification-e2e-closure-design.md) | authority live e2e 验证设计 |
+| [module-block-contract-closure-validation-plan.md](module-block-contract-closure-validation-plan.md) | module/block 合同校验 |
+| [module-block-initiator-inventory-audit-2026-07-09.md](module-block-initiator-inventory-audit-2026-07-09.md) | initiator 清单审计 |
+| [operation-map-json-contract-audit-2026-07-14.md](operation-map-json-contract-audit-2026-07-14.md) | operation map / JSON 交互合同残留审计与收口 backlog |
 
-- [auto-governance-ticket-approval-plan.md](auto-governance-ticket-approval-plan.md)
-- [software-requirement-development-orchestration-plan.md](software-requirement-development-orchestration-plan.md)
-- [software-dev-dod-repair-closure-plan.md](software-dev-dod-repair-closure-plan.md)
-- [unified-tui-console-migration-plan.md](unified-tui-console-migration-plan.md)
-- [next-mvp-acceptance.md](next-mvp-acceptance.md)
-- [llm-context-budget-todo.md](llm-context-budget-todo.md)
-- [run-closure-quality-improvement-plan.md](run-closure-quality-improvement-plan.md)
-- [workorchd-state-loop-and-projection-closure-plan.md](workorchd-state-loop-and-projection-closure-plan.md)
-- [convergence-authority-dispatch-closure-checklist.md](convergence-authority-dispatch-closure-checklist.md)
-- [product-design-to-runtime-convergence-closure-plan.md](product-design-to-runtime-convergence-closure-plan.md)
-- [module-block-contract-closure-validation-plan.md](module-block-contract-closure-validation-plan.md)
+## Archived From Active (this refresh)
 
-## Layering
+本轮从 `active/` 迁出约 **146** 份文档，包括：
 
-| 文档类型 | 当前职责 | 不负责 |
-| --- | --- | --- |
-| active roadmap plan | 尚未完成的目标、分阶段任务、验收标准、后续待办 | 当前已稳定生效的正式设计定义 |
-| active roadmap todo | 仍待补齐的收尾项、策略补完项、覆盖率提升项 | 历史完成记录 |
+- 全部 `goal-dod-nextaction-s*` 与 iterative delivery plan（completed）
+- V1 contract-retry batch audit / evidence index
+- 已被 Runtime V2 reducer 吸收的 convergence-authority / runtime-*-closure / nextaction hardening 计划
+- `Status: completed|code-closed|closed|implemented` 的其余收口文
 
-当前若需要查看已经稳定的正式定义入口，应优先转到：
+检索入口：[90-archive/completed/overview.md](../../90-archive/completed/overview.md)
 
-- `../../00-core/runtime-stage-contract.md`
-- `../../01-overview/current-state.md`
-- `../../20-runtime-flow/overview.md`
-- `../../30-module-architecture/overview.md`
-- `../../60-verification/overview.md`
+## Rules
+
+1. 新增 active 项必须对应真实未完成工作；不得把已归档 plan 改回 active 充当设计入口。
+2. 实现约束以 `00-core` + 模块 readme + `workorchruntimecontract` 为准。
+3. 某项 code-closed 且无运维/产品尾巴时，应 `git mv` 至 `90-archive/completed/` 并更新本 overview。
+4. 清理失效内容：V1 主链术语、重复 audit、假活跃 Status 不得继续占用 active。

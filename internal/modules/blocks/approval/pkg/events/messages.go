@@ -6,7 +6,6 @@ import (
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
-	"github.com/muidea/workorch/internal/pkg/eventvalue"
 )
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
@@ -19,8 +18,8 @@ type CreateApprovalCommand struct {
 	StepID         common.StepID
 	Reason         string
 	Action         string
-	Context        eventvalue.Payload
-	AutoGovernance eventvalue.Payload
+	Context        []ApprovalEvidenceField
+	AutoGovernance []ApprovalEvidenceField
 }
 
 type EnsureApprovalCommand = CreateApprovalCommand
@@ -32,9 +31,9 @@ type UpdateApprovalCommand struct {
 	StepID         common.StepID
 	Reason         string
 	Action         string
-	Context        eventvalue.Payload
+	Context        []ApprovalEvidenceField
 	State          common.ApprovalState
-	AutoGovernance eventvalue.Payload
+	AutoGovernance []ApprovalEvidenceField
 	ResolvedAt     string
 	ResolvedBy     string
 	CreatedAt      string
@@ -45,7 +44,7 @@ type ResolveApprovalCommand struct {
 	ApprovalID  common.ApprovalID
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
-	Context     eventvalue.Payload
+	Context     []ApprovalEvidenceField
 }
 
 type EnsureApprovedCommand = ResolveApprovalCommand

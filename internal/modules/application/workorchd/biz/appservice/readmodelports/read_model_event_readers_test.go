@@ -56,16 +56,13 @@ func TestOwnerReadersBuildsSnapshotAndStatusReaderBundles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewOwnerReaders: %v", err)
 	}
-	payload, err := eventstreamevents.EventPayloadFromMap(map[string]any{
+	payload := mustPortEventPayload(t, map[string]any{
 		events.PayloadKeyGoalID:             "goal-001",
 		events.PayloadKeyDoDID:              "dod-001",
 		events.PayloadKeyState:              string(common.RunStateActive),
 		events.PayloadKeyBlockingTicketID:   "",
 		events.PayloadKeyBlockingApprovalID: "",
 	})
-	if err != nil {
-		t.Fatalf("EventPayloadFromMap: %v", err)
-	}
 	published := []eventstreamevents.EventRecordData{{
 		Version: events.WorkorchEventVersion,
 		Topic:   runevents.TopicRunCreated,

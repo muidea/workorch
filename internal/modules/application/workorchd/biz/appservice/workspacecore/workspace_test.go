@@ -52,17 +52,19 @@ func TestApplyTemplateToWorkspace(t *testing.T) {
 
 	template.ContextHints["mode"] = "mutated"
 	template.EvidencePolicies[0]["kind"] = "mutated"
-	if got.ContextHints["mode"] != "verify" {
+	mode, _ := got.ContextHints.String("mode")
+	if mode != "verify" {
 		t.Fatalf("context hints were not cloned: %v", got.ContextHints)
 	}
-	if _, ok := got.ContextHints["managedWorkspaceConfigs"]; ok {
+	if _, ok := got.ContextHints.Field("managedWorkspaceConfigs"); ok {
 		t.Fatalf("managedWorkspaceConfigs were copied into workspace context hints: %v", got.ContextHints)
 	}
-	semanticHints, _ := got.ContextHints["semanticCodeNavigation"].(map[string]any)
-	if _, ok := semanticHints["defaultMCPServerIds"]; ok {
+	semanticHints, _ := got.ContextHints.Object("semanticCodeNavigation")
+	if _, ok := semanticHints.Field("defaultMCPServerIds"); ok {
 		t.Fatalf("default MCP server IDs were copied into workspace context hints: %v", got.ContextHints)
 	}
-	if got.EvidencePolicies[0]["kind"] != "validation" {
+	kind, _ := got.EvidencePolicies[0].String("kind")
+	if kind != "validation" {
 		t.Fatalf("evidence policies were not cloned: %v", got.EvidencePolicies)
 	}
 }

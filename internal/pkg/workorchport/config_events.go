@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 type TemplateInfo struct {
@@ -14,7 +15,7 @@ type TemplateInfo struct {
 	DoDItems         []string
 	DefaultSoulID    common.SoulID
 	SoulBindings     map[string]string
-	EvidencePolicies []map[string]any
+	EvidencePolicies []workorcheventpayload.Payload
 }
 
 type TemplateBackend interface {

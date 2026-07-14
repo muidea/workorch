@@ -4,11 +4,13 @@ Status: active
 
 Type: domain-model
 
-Last Updated: 2026-05-30
+Last Updated: 2026-07-14
 
 ## Purpose
 
 本文件定义 WorkOrch 中的治理对象：Decision、Approval、Resolution 及其边界。
+
+**Runtime V2 边界**：`request_governance` 时 Orchestrator 打开 Decision ticket 并将 ticket↔authority snapshot 绑定写入 V2 aggregate，Run 投影为 blocked。继续路径是 Decision → `CommitRuntimeGovernance*Resolution` → Orchestrator 回 reducer；**application 不得**在 resolve 后自动 Resume。Approval 仍服务高风险能力准入；不能绕过 Orchestrator contract gate。
 
 ## Core Entities
 
@@ -115,24 +117,27 @@ Decision / Approval 都是治理对象，不是业务结果对象。
 
 它们的作用是：
 
-- 中断自动执行
-- 记录治理上下文
-- 允许 resume / reject / replan
+- 中断自动执行（Runtime V2：`request_governance` → ticket + blocked 投影）
+- 记录治理上下文与 ticket↔authority snapshot 绑定所需 scope
+- 允许结构化 resolution（resume / reject / replan / terminate 等动作类型）
 
 它们不应承担：
 
 - 代替 Result 表达正式业务完成
 - 代替 Memory 表达长期知识
-- 代替 Run 表达执行生命周期
+- 代替 Run 表达执行生命周期或 V2 aggregate
+- 代替 Orchestrator 消费 resolution 后的 drive / reducer 推进
+- application 在 resolve 后自动 Resume（V2 governance ticket 禁止该路径）
 
 ## Invariants
 
 - 只有真实治理缺口才应产生 Decision / Approval
 - 已存在 concrete target evidence 且可机械推进时，不应滥用 Decision Ticket
-- Resolution / Approval 行为必须可追踪到对应 Run / Step
-- replan 只表达治理结论，不直接等于 successor run 本体
+- Resolution / Approval 行为必须可追踪到对应 Run / Step scope
+- replan 只表达治理结论，不直接等于 successor run 本体；V2 重定义目标 = 新 bootstrap + 新 Run
 - duplicate failure / repair exhausted 只表达治理触发面，不应直接改写 Run 本体状态
 - auto-governance 只能选择恢复动作或治理建议，不能替代正式 Decision / Approval / Resolution 对象
+- `runtime_v2_governance` resolution 必须经 typed `CommitRuntimeGovernance*Resolution` 提交 Orchestrator；同一 resolution ID + authority snapshot 最多消费一次
 
 ## Recovery Trigger Boundary
 
@@ -144,17 +149,20 @@ Decision / Approval 都是治理对象，不是业务结果对象。
 | `repair exhausted` | 表示自动 repair 预算耗尽，需要升级为 decision / approval / replan |
 | `auto-governance` | 表示 policy 已自动选择建议动作，但仍需记录结构化治理摘要 |
 | `successor replan` | 表示治理已选择新 run 路径，旧 run 进入 superseded / historical continuation |
+| `runtime_v2_governance` | Orchestrator 打开的 V2 governed request；ticket 只拥有治理选择状态，authority/dispatch 绑定在 V2 aggregate |
 
 这些对象层语义只表达“为什么进入治理”和“治理选择了哪条恢复路”，
-不直接描述 flow 细节或脚本行为。
+不直接描述 flow 细节或脚本行为，也不推导 `StagePacket` / `NextAction` / `DispatchNextStep`。
 
 ## Projection Boundary
 
 Decision list、Approval list、governance summary、task progress 只是治理对象的投影。
 
-它们不应反向改写 runtime contract 或 Run 本体状态。
+它们不应反向改写 runtime contract、Run 本体状态或 Runtime V2 authority。
 
 ## Source Documents
 
 - `../00-core/runtime-stage-contract.md`
+- `../30-module-architecture/kernel-orchestrator-governance.md`
 - `../50-product-interface/service-api.md`
+- `run-step-result-artifact.md`

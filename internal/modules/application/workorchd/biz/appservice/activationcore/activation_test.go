@@ -10,8 +10,18 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func mustActivationPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
+	t.Helper()
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		t.Fatalf("decode activation payload: %v", err)
+	}
+	return payload
+}
 
 type fakeEventRecordLister struct {
 	items []*eventstreammodel.EventRecord
@@ -217,7 +227,7 @@ func TestWorkspaceExecutionContractIncludesAcceptanceSlicePolicyFromHints(t *tes
 	}
 	reader := fakeWorkspaceTemplateReader{item: &repository.WorkspaceTemplate{
 		ID: "template-policy",
-		ContextHints: map[string]any{
+		ContextHints: mustActivationPayload(t, map[string]any{
 			"acceptanceSlicePolicy": map[string]any{
 				"schemaVersion": "workorch.acceptance_slice_policy.v1",
 				"groups": []any{map[string]any{
@@ -227,7 +237,7 @@ func TestWorkspaceExecutionContractIncludesAcceptanceSlicePolicyFromHints(t *tes
 					},
 				}},
 			},
-		},
+		}),
 	}}
 
 	contract := WorkspaceExecutionContract(context.Background(), reader, workspace)
@@ -253,7 +263,7 @@ func TestWorkspaceExecutionContractIncludesTemplateStagePoliciesFromHints(t *tes
 	}
 	reader := fakeWorkspaceTemplateReader{item: &repository.WorkspaceTemplate{
 		ID: "template-stage-policy",
-		ContextHints: map[string]any{
+		ContextHints: mustActivationPayload(t, map[string]any{
 			"templateStagePolicies": map[string]any{
 				"schemaVersion": "workorch.template_stage_policy.v1",
 				"stages": []any{map[string]any{
@@ -273,7 +283,7 @@ func TestWorkspaceExecutionContractIncludesTemplateStagePoliciesFromHints(t *tes
 					},
 				}},
 			},
-		},
+		}),
 	}}
 
 	contract := WorkspaceExecutionContract(context.Background(), reader, workspace)
@@ -294,7 +304,7 @@ func TestWorkspaceExecutionContractIncludesTemplateStagePoliciesFromHints(t *tes
 		t.Fatalf("template stage = %+v, want neutral execution stage", stage)
 	}
 
-	source := reader.item.ContextHints["templateStagePolicies"].(map[string]any)
+	source := reader.item.ContextHints.Map()["templateStagePolicies"].(map[string]any)
 	source["schemaVersion"] = "mutated"
 	if policy["schemaVersion"] != "workorch.template_stage_policy.v1" {
 		t.Fatalf("templateStagePolicies was not cloned: %+v", policy)

@@ -3,18 +3,19 @@ package readmodelprojection
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-func llmUsageTraceWorkspaceID(item readmodelcore.EventRecord, payload map[string]any) string {
-	return firstNonEmptyTimelineString(item.WorkspaceID, readModelStringValue(payload[events.PayloadKeyWorkspaceID]))
+func llmUsageTraceWorkspaceID(item readmodelcore.EventRecord, payload workorcheventpayload.Payload) string {
+	return firstNonEmptyTimelineString(item.WorkspaceID, eventPayloadString(payload, events.PayloadKeyWorkspaceID))
 }
 
-func llmUsageTraceRunID(item readmodelcore.EventRecord, payload map[string]any) string {
-	return firstNonEmptyTimelineString(item.RunID, readModelStringValue(payload[events.PayloadKeyRunID]))
+func llmUsageTraceRunID(item readmodelcore.EventRecord, payload workorcheventpayload.Payload) string {
+	return firstNonEmptyTimelineString(item.RunID, eventPayloadString(payload, events.PayloadKeyRunID))
 }
 
-func llmUsageTraceStepID(item readmodelcore.EventRecord, payload map[string]any) string {
-	return firstNonEmptyTimelineString(item.StepID, readModelStringValue(payload[events.PayloadKeyStepID]))
+func llmUsageTraceStepID(item readmodelcore.EventRecord, payload workorcheventpayload.Payload) string {
+	return firstNonEmptyTimelineString(item.StepID, eventPayloadString(payload, events.PayloadKeyStepID))
 }
 
 func llmUsageTraceEvidenceRef(item readmodelcore.EventRecord) string {

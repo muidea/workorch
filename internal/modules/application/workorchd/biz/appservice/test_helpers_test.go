@@ -26,16 +26,34 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
-	"github.com/muidea/workorch/internal/pkg/eventvalue"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-func mustAppserviceEventPayload(t *testing.T, input map[string]any) eventvalue.Payload {
+func mustAppserviceEventPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
 	t.Helper()
-	payload, err := eventvalue.FromMap(input)
+	payload, err := workorcheventpayload.FromMap(input)
 	if err != nil {
-		t.Fatalf("eventvalue.FromMap: %v", err)
+		t.Fatalf("workorcheventpayload.FromMap: %v", err)
+	}
+	return payload
+}
+
+func mustReadModelEventPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
+	t.Helper()
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		t.Fatalf("event payload: %v", err)
+	}
+	return payload
+}
+
+func mustAppserviceGovernancePayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
+	t.Helper()
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		t.Fatal(err)
 	}
 	return payload
 }
@@ -410,7 +428,7 @@ func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID
 		RunID:  common.RunID(runID),
 		Kind:   "llm/workspace_execution",
 		State:  common.StepStateSucceeded,
-		Output: map[string]any{"stage": "blocked_on_decision"},
+		Output: mustAppserviceGovernancePayload(t, map[string]any{"stage": "blocked_on_decision"}),
 	}); err != nil {
 		t.Fatalf("Create decision step: %v", err)
 	}
@@ -422,7 +440,13 @@ func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID
 		Reason:       "test decision gate",
 		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
 		Question:     "provide test decision input",
-		Context:      mustAppserviceEventPayload(t, map[string]any{"requiredFields": []any{"input"}}),
+		Context: func() []decisionevents.DecisionEvidenceField {
+			payload, fieldErr := workorcheventpayload.FromMap(map[string]any{"requiredFields": []any{"input"}})
+			if fieldErr != nil {
+				t.Fatalf("DecisionFieldsFromMap: %v", fieldErr)
+			}
+			return payload.Fields
+		}(),
 	}); err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
@@ -456,7 +480,7 @@ func prepareApprovalRun(t *testing.T, dataRoot string, workspaceID string, runID
 		RunID:  common.RunID(runID),
 		Kind:   "llm/workspace_execution",
 		State:  common.StepStateSucceeded,
-		Output: map[string]any{"stage": "blocked_on_approval"},
+		Output: mustAppserviceGovernancePayload(t, map[string]any{"stage": "blocked_on_approval"}),
 	}); err != nil {
 		t.Fatalf("Create approval step: %v", err)
 	}

@@ -45,6 +45,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 	"github.com/muidea/workorch/web/consoleassets"
@@ -52,6 +53,15 @@ import (
 
 func testSessionExports(session *appservice.RuntimeSession) (testkit.Exports, error) {
 	return testkit.SessionExports(session)
+}
+
+func mustServerGovernancePayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
+	t.Helper()
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		t.Fatalf("governance payload: %v", err)
+	}
+	return payload
 }
 
 func TestMain(m *testing.M) {
@@ -1228,14 +1238,14 @@ func TestEventStreamRoutePublishesFilteredHubEvents(t *testing.T) {
 	if err := publishServerTestEventRecord(context.Background(), state.commandHub, streamEvent{
 		Topic:       workspaceevents.TopicWorkspaceCreated,
 		WorkspaceID: "ws-other",
-		Payload:     events.WorkspacePayload("other", "", "/tmp/other", "", common.WorkspaceStateActive, ""),
+		Payload:     events.WorkspacePayloadData{Title: "other", DeliverableDirectory: "/tmp/other", State: common.WorkspaceStateActive}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish nonmatching event: %v", err)
 	}
 	if err := publishServerTestEventRecord(context.Background(), state.commandHub, streamEvent{
 		Topic:       workspaceevents.TopicWorkspaceCreated,
 		WorkspaceID: "ws-stream",
-		Payload:     events.WorkspacePayload("stream workspace", "", "/tmp/stream", "", common.WorkspaceStateActive, ""),
+		Payload:     events.WorkspacePayloadData{Title: "stream workspace", DeliverableDirectory: "/tmp/stream", State: common.WorkspaceStateActive}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish matching event: %v", err)
 	}
@@ -1339,7 +1349,7 @@ func TestEventStreamWritesIDRevisionAndStateSummary(t *testing.T) {
 	if err := publishServerTestEventRecord(context.Background(), state.commandHub, streamEvent{
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-stream-summary",
-		Payload:     events.WorkspacePayload("summary", "", "/tmp/summary", "", common.WorkspaceStateActive, "run-001"),
+		Payload:     events.WorkspacePayloadData{Title: "summary", DeliverableDirectory: "/tmp/summary", State: common.WorkspaceStateActive, ActiveRunID: "run-001"}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish state event: %v", err)
 	}
@@ -1379,7 +1389,7 @@ func TestEventStreamReplaysAfterLastEventID(t *testing.T) {
 	if err := publishServerTestEventRecord(context.Background(), state.commandHub, streamEvent{
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-stream-replay",
-		Payload:     events.WorkspacePayload("first", "", "/tmp/first", "", common.WorkspaceStateActive, ""),
+		Payload:     events.WorkspacePayloadData{Title: "first", DeliverableDirectory: "/tmp/first", State: common.WorkspaceStateActive}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish first event: %v", err)
 	}
@@ -1391,7 +1401,7 @@ func TestEventStreamReplaysAfterLastEventID(t *testing.T) {
 		Topic:       runevents.TopicRunStateChanged,
 		WorkspaceID: "ws-stream-replay",
 		RunID:       "run-replay",
-		Payload:     events.RunPayload("", "", common.RunStateActive, "", "", ""),
+		Payload:     events.RunPayloadData{State: common.RunStateActive}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish replay event: %v", err)
 	}
@@ -1438,7 +1448,7 @@ func TestEventStreamReplaysAfterLastEventIDQueryParam(t *testing.T) {
 	if err := publishServerTestEventRecord(context.Background(), state.commandHub, streamEvent{
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-stream-query-replay",
-		Payload:     events.WorkspacePayload("first", "", "/tmp/first", "", common.WorkspaceStateActive, ""),
+		Payload:     events.WorkspacePayloadData{Title: "first", DeliverableDirectory: "/tmp/first", State: common.WorkspaceStateActive}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish first event: %v", err)
 	}
@@ -1450,7 +1460,7 @@ func TestEventStreamReplaysAfterLastEventIDQueryParam(t *testing.T) {
 		Topic:       runevents.TopicRunStateChanged,
 		WorkspaceID: "ws-stream-query-replay",
 		RunID:       "run-query-replay",
-		Payload:     events.RunPayload("", "", common.RunStateActive, "", "", ""),
+		Payload:     events.RunPayloadData{State: common.RunStateActive}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish replay event: %v", err)
 	}
@@ -1492,9 +1502,9 @@ func TestEventStreamReplaysPersistedRecordsAfterLastEventID(t *testing.T) {
 			RunID:       "run-persist",
 			StepID:      "run-persist/step-1",
 			Revision:    12,
-			Payload: map[string]any{
+			Payload: mustServerEventPayload(t, map[string]any{
 				events.PayloadKeyState: string(common.StepStateSucceeded),
-			},
+			}),
 		}}, nil
 	}
 	server := httptest.NewServer(newMuxWithState(state))
@@ -1543,13 +1553,13 @@ func TestEventStreamProjectionReplayUsesMetadataOnlyRecords(t *testing.T) {
 			Topic:       workorchdevents.TopicWorkspaceProjectionChanged,
 			WorkspaceID: "ws-projection-persist",
 			Revision:    21,
-			Payload: map[string]any{
+			Payload: mustServerEventPayload(t, map[string]any{
 				"payloadRef": "payloads/large-projection.json",
-			},
+			}),
 			PayloadRef: "payloads/large-projection.json",
-			PayloadSummary: map[string]any{
+			PayloadSummary: mustServerEventPayload(t, map[string]any{
 				"fieldCount": 32,
-			},
+			}),
 		}}, nil
 	}
 	server := httptest.NewServer(newMuxWithState(state))
@@ -3442,7 +3452,7 @@ func TestRunSnapshotEndpointReturnsExecutionEvidence(t *testing.T) {
 		StepID:      stepID,
 		ToolName:    "shell",
 		State:       common.ToolCallStateCompleted,
-		Output:      map[string]any{"exitCode": 0},
+		Output:      mustServerGovernancePayload(t, map[string]any{"exitCode": 0}),
 	}); err != nil {
 		t.Fatalf("create tool call: %v", err)
 	}
@@ -3605,7 +3615,7 @@ func TestRunStatusEndpointInvalidatesCachedTerminalSnapshotOnOwnerRunStateEvent(
 		WorkspaceID: "ws-status-owner-event",
 		RunID:       "run-status-owner-event",
 		SubjectID:   "run-status-owner-event",
-		Payload:     events.RunPayload("", "", common.RunStateActive, "", "", ""),
+		Payload:     events.RunPayloadData{State: common.RunStateActive}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish run state changed: %v", err)
 	}
@@ -4041,8 +4051,8 @@ func TestWorkspaceSnapshotEndpointReturnsCompactProjection(t *testing.T) {
 		DeliverableDirectory: "workspaces/compact-projection",
 		State:                common.WorkspaceStateActive,
 		ActiveRunID:          "run-00",
-		ContextHints:         map[string]any{"large": strings.Repeat("x", 128)},
-		EvidencePolicies:     []map[string]any{{"large": strings.Repeat("x", 128)}},
+		ContextHints:         mustServerGovernancePayload(t, map[string]any{"large": strings.Repeat("x", 128)}),
+		EvidencePolicies:     []workorcheventpayload.Payload{mustServerGovernancePayload(t, map[string]any{"large": strings.Repeat("x", 128)})},
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
@@ -4067,7 +4077,7 @@ func TestWorkspaceSnapshotEndpointReturnsCompactProjection(t *testing.T) {
 			WorkspaceID: workspaceID,
 			RunID:       runID,
 			StepID:      common.StepID(fmt.Sprintf("%s/step-%02d", runID, idx)),
-			Payload: map[string]any{
+			Payload: mustServerEventPayload(t, map[string]any{
 				events.PayloadKeyWorkspaceID:  string(workspaceID),
 				events.PayloadKeyRunID:        string(runID),
 				events.PayloadKeyStepID:       fmt.Sprintf("%s/step-%02d", runID, idx),
@@ -4079,7 +4089,7 @@ func TestWorkspaceSnapshotEndpointReturnsCompactProjection(t *testing.T) {
 				events.PayloadKeyOutputTokens: 1,
 				events.PayloadKeyTotalTokens:  11 + idx,
 				events.PayloadKeyStatus:       "completed",
-			},
+			}),
 		}); err != nil {
 			t.Fatalf("append usage event %d: %v", idx, err)
 		}
@@ -4767,7 +4777,8 @@ func TestDecisionResolveEndpointRejectCurrentPathWithoutLegacyRunResume(t *testi
 	if rejected.Decision.State != "resolved" || rejected.Decision.ResolutionType != decisioncommon.ResolutionTypeRejectCurrentPath {
 		t.Fatalf("decision = %+v, want resolved reject_current_path", rejected.Decision)
 	}
-	if rejected.Decision.ResolutionPayload["operator"] != "tester" {
+	operator, _ := rejected.Decision.ResolutionPayload.String("operator")
+	if operator != "tester" {
 		t.Fatalf("resolution payload = %+v, want operator tester", rejected.Decision.ResolutionPayload)
 	}
 
@@ -4820,7 +4831,8 @@ func TestDecisionBatchResolveEndpointResolvesOpenTickets(t *testing.T) {
 		t.Fatalf("resolved decisions = %+v, want request order", resolved.Decisions)
 	}
 	for _, item := range resolved.Decisions {
-		if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeReplan || item.ResolutionPayload["operator"] != "http-batch" {
+		operator, _ := item.ResolutionPayload.String("operator")
+		if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeReplan || operator != "http-batch" {
 			t.Fatalf("decision = %+v, want resolved replan with payload", item)
 		}
 	}
@@ -5322,9 +5334,11 @@ func TestApprovalApproveEndpointApprovesApprovalWithoutLegacyRunResume(t *testin
 	if approved.Approval.State != "approved" {
 		t.Fatalf("approval = %+v, want approved", approved.Approval)
 	}
-	semantic, ok := approved.Approval.Context["governanceSemantic"].(map[string]any)
-	if !ok || semantic["intent"] != "approve_execution" || semantic["source"] != "web" {
-		t.Fatalf("approval governance semantic = %#v, want approve from web", approved.Approval.Context["governanceSemantic"])
+	semantic, ok := approved.Approval.Context.Object("governanceSemantic")
+	intent, _ := semantic.String("intent")
+	source, _ := semantic.String("source")
+	if !ok || intent != "approve_execution" || source != "web" {
+		t.Fatalf("approval governance semantic = %#v, want approve from web", semantic)
 	}
 
 	blocked := waitRunStateForHTTP(t, dataRoot, runID, string(common.RunStateBlockedOnApproval))
@@ -5755,7 +5769,7 @@ func seedBlockedDecisionRunInWorkspaceForHTTP(t *testing.T, dataRoot string, wor
 		RunID:  common.RunID(runID),
 		Kind:   llmcommon.StepKindWorkspaceExecution,
 		State:  common.StepStateSucceeded,
-		Output: map[string]any{"stage": "blocked_on_decision"},
+		Output: mustServerEventPayload(t, map[string]any{"stage": "blocked_on_decision"}),
 	}); err != nil {
 		t.Fatalf("create decision step: %v", err)
 	}
@@ -5767,7 +5781,7 @@ func seedBlockedDecisionRunInWorkspaceForHTTP(t *testing.T, dataRoot string, wor
 		Reason:       "test decision gate",
 		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
 		Question:     "provide test input",
-		Context:      map[string]any{"requiredFields": []any{"input"}},
+		Context:      mustServerGovernancePayload(t, map[string]any{"requiredFields": []any{"input"}}),
 		State:        common.DecisionTicketStateOpen,
 	}); err != nil {
 		t.Fatalf("create decision ticket: %v", err)
@@ -5814,7 +5828,7 @@ func seedBlockedDecisionRunWithTicketInWorkspaceForHTTP(t *testing.T, dataRoot s
 		RunID:  common.RunID(runID),
 		Kind:   llmcommon.StepKindWorkspaceExecution,
 		State:  common.StepStateSucceeded,
-		Output: map[string]any{"stage": "blocked_on_decision"},
+		Output: mustServerEventPayload(t, map[string]any{"stage": "blocked_on_decision"}),
 	}); err != nil {
 		t.Fatalf("create decision step: %v", err)
 	}
@@ -5876,7 +5890,7 @@ func seedBlockedApprovalRunInWorkspaceForHTTP(t *testing.T, dataRoot string, wor
 		RunID:  common.RunID(runID),
 		Kind:   llmcommon.StepKindWorkspaceExecution,
 		State:  common.StepStateSucceeded,
-		Output: map[string]any{"stage": "blocked_on_approval"},
+		Output: mustServerEventPayload(t, map[string]any{"stage": "blocked_on_approval"}),
 	}); err != nil {
 		t.Fatalf("create approval step: %v", err)
 	}
@@ -5932,7 +5946,7 @@ func seedBlockedApprovalRunWithApprovalInWorkspaceForHTTP(t *testing.T, dataRoot
 		RunID:  common.RunID(runID),
 		Kind:   llmcommon.StepKindWorkspaceExecution,
 		State:  common.StepStateSucceeded,
-		Output: map[string]any{"stage": "blocked_on_approval"},
+		Output: mustServerEventPayload(t, map[string]any{"stage": "blocked_on_approval"}),
 	}); err != nil {
 		t.Fatalf("create approval step: %v", err)
 	}

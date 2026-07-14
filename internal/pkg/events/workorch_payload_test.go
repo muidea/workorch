@@ -4,176 +4,141 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-func TestWorkspacePayloadIncludesExpectedFields(t *testing.T) {
-	payload := WorkspacePayload("ws-title", "workspace description", "/tmp/workorch/ws-title", "", common.WorkspaceStateActive, common.RunID("run-1"))
+func TestTypedEventPayloadDecodersRoundTrip(t *testing.T) {
+	workspace := WorkspacePayloadData{
+		Title:                "typed workspace",
+		Description:          "typed description",
+		DeliverableDirectory: "/tmp/typed",
+		InternalDirectory:    "/tmp/typed/.workorch",
+		State:                common.WorkspaceStateActive,
+		ActiveRunID:          "run-typed",
+	}
+	decodedWorkspace, ok := DecodeWorkspaceEventPayload(workspace.EventPayload())
+	if !ok || decodedWorkspace != workspace {
+		t.Fatalf("workspace round trip = %+v/%v, want %+v", decodedWorkspace, ok, workspace)
+	}
 
-	if payload[PayloadKeyTitle] != "ws-title" {
-		t.Fatalf("title = %v, want ws-title", payload[PayloadKeyTitle])
+	run := RunPayloadData{
+		GoalID:                  "goal-typed",
+		DoDID:                   "dod-typed",
+		State:                   common.RunStateBlockedOnDecision,
+		BlockingTicketID:        "ticket-typed",
+		BlockingApprovalID:      "approval-typed",
+		FailureReason:           "waiting",
+		RuntimeStateRevision:    7,
+		RuntimeConvergenceState: "need_governance",
+		RuntimeAction:           "request_governance",
+		RuntimeFocusID:          "focus-typed",
+		AuthoritySnapshotID:     "authority-typed",
 	}
-	if payload[PayloadKeyDescription] != "workspace description" {
-		t.Fatalf("description = %v, want workspace description", payload[PayloadKeyDescription])
+	decodedRun, ok := DecodeRunEventPayload(run.EventPayload())
+	if !ok || decodedRun != run {
+		t.Fatalf("run round trip = %+v/%v, want %+v", decodedRun, ok, run)
 	}
-	if payload[PayloadKeyDeliverableDirectory] != "/tmp/workorch/ws-title" {
-		t.Fatalf("deliverableDirectory = %v, want /tmp/workorch/ws-title", payload[PayloadKeyDeliverableDirectory])
+
+	resolution := DecisionResolutionPayloadData{
+		DecisionTicketPayloadData: DecisionTicketPayloadData{Reason: "choose", State: common.DecisionTicketStateResolved},
+		ResolutionID:              "resolution-typed",
+		Type:                      "resume",
+		Payload:                   workorcheventpayload.New(workorcheventpayload.StringField("actor", "operator")),
+		ContinuationAction:        "resume",
+		ResumeRunID:               "run-typed",
+		SuccessorRunID:            "run-successor",
 	}
-	if payload[PayloadKeyState] != string(common.WorkspaceStateActive) {
-		t.Fatalf("state = %v, want %s", payload[PayloadKeyState], common.WorkspaceStateActive)
+	decodedResolution, ok := DecodeDecisionResolutionEventPayload(resolution.EventPayload())
+	if !ok || decodedResolution.ResolutionID != resolution.ResolutionID || decodedResolution.Type != resolution.Type || !decodedResolution.Payload.Equal(resolution.Payload) {
+		t.Fatalf("resolution round trip = %+v/%v, want %+v", decodedResolution, ok, resolution)
 	}
-	if payload[PayloadKeyActiveRunID] != "run-1" {
-		t.Fatalf("activeRunId = %v, want run-1", payload[PayloadKeyActiveRunID])
+
+	approval := ApprovalPayloadData{
+		Reason:  "approve",
+		Action:  "apply",
+		Context: workorcheventpayload.New(workorcheventpayload.StringField("risk", "medium")),
+		State:   common.ApprovalStateApproved,
+	}
+	decodedApproval, ok := DecodeApprovalEventPayload(approval.EventPayload())
+	if !ok || decodedApproval.Reason != approval.Reason || decodedApproval.Action != approval.Action || decodedApproval.State != approval.State || !decodedApproval.Context.Equal(approval.Context) {
+		t.Fatalf("approval round trip = %+v/%v, want %+v", decodedApproval, ok, approval)
 	}
 }
 
-func TestDecisionResolutionPayloadIncludesResolutionFields(t *testing.T) {
-	payload := DecisionResolutionPayload(
-		"manual gate",
-		common.DecisionTicketStateResolved,
-		common.ResolutionID("resolution-1"),
-		"approve-plan",
-		map[string]any{"operator": "workorch"},
-		DecisionResolutionPayloadData{
-			ContinuationAction: "resume",
-			ResumeRunID:        "run-current",
-			SuccessorRunID:     "run-successor",
-		},
-	)
+func TestTypedPatchAndGovernancePayloadDecodersRoundTrip(t *testing.T) {
+	patch := PatchPayloadData{
+		PatchID:      "patch-1",
+		StepID:       "run-1/step-1",
+		ToolCallID:   "run-1/step-1/tool-call",
+		PatchType:    "unified_diff",
+		TargetRef:    "main.go",
+		State:        common.PatchStateApplied,
+		AddedLines:   2,
+		DeletedLines: 1,
+		DiffHash:     "diff-sha",
+		ApprovalID:   "approval-1",
+		Risk:         "sensitive",
+	}
+	decodedPatch, ok := decodePatchEventPayload(patch.EventPayload())
+	if !ok || decodedPatch != patch {
+		t.Fatalf("patch round trip = %+v/%v, want %+v", decodedPatch, ok, patch)
+	}
 
-	if payload[PayloadKeyReason] != "manual gate" {
-		t.Fatalf("reason = %v, want manual gate", payload[PayloadKeyReason])
+	governance := AutoGovernancePayloadData{
+		TraceID: "gov-trace-1", ItemType: "approval", ItemID: "approval-1", Action: "approve",
+		RiskLevel: "L1", Confidence: 0.91, PolicyMatched: "read_only", BudgetBefore: 2, BudgetAfter: 1,
+		LLMProviderID: "local", LLMModel: "qwen", LLMDecisionPreview: "allow read-only action",
+		PromptFingerprint: "prompt-fingerprint", Status: "resolved", Reason: "policy accepted",
 	}
-	if payload[PayloadKeyState] != string(common.DecisionTicketStateResolved) {
-		t.Fatalf("state = %v, want %s", payload[PayloadKeyState], common.DecisionTicketStateResolved)
-	}
-	if payload[PayloadKeyResolutionID] != "resolution-1" {
-		t.Fatalf("resolutionId = %v, want resolution-1", payload[PayloadKeyResolutionID])
-	}
-	if payload[PayloadKeyType] != "approve-plan" {
-		t.Fatalf("type = %v, want approve-plan", payload[PayloadKeyType])
-	}
-	resolutionPayload, ok := payload[PayloadKeyPayload].(map[string]any)
-	if !ok {
-		t.Fatalf("payload type = %T, want map[string]any", payload[PayloadKeyPayload])
-	}
-	if resolutionPayload["operator"] != "workorch" {
-		t.Fatalf("resolution payload operator = %v, want workorch", resolutionPayload["operator"])
-	}
-	decoded, ok := DecodeDecisionResolutionPayload(payload)
-	if !ok {
-		t.Fatalf("DecodeDecisionResolutionPayload failed")
-	}
-	if decoded.ContinuationAction != "resume" || decoded.ResumeRunID != "run-current" || decoded.SuccessorRunID != "run-successor" {
-		t.Fatalf("decoded refs = %+v, want recovery refs", decoded)
+	decodedGovernance, ok := decodeGovernanceEventPayload(governance.EventPayload())
+	if !ok || decodedGovernance != governance {
+		t.Fatalf("governance round trip = %+v/%v, want %+v", decodedGovernance, ok, governance)
 	}
 }
 
-func TestDecodeDecisionResolutionPayloadRoundTrip(t *testing.T) {
-	payload := DecisionResolutionPayload(
-		"manual gate",
-		common.DecisionTicketStateResolved,
-		common.ResolutionID("resolution-1"),
-		"approve-plan",
-		map[string]any{"operator": "workorch"},
-	)
-
-	decoded, ok := DecodeDecisionResolutionPayload(payload)
+func decodePatchEventPayload(payload workorcheventpayload.Payload) (PatchPayloadData, bool) {
+	state, ok := payload.String(PayloadKeyState)
 	if !ok {
-		t.Fatalf("DecodeDecisionResolutionPayload returned !ok")
+		return PatchPayloadData{}, false
 	}
-	if decoded.Reason != "manual gate" {
-		t.Fatalf("reason = %s, want manual gate", decoded.Reason)
-	}
-	if decoded.State != common.DecisionTicketStateResolved {
-		t.Fatalf("state = %s, want %s", decoded.State, common.DecisionTicketStateResolved)
-	}
-	if decoded.ResolutionID != common.ResolutionID("resolution-1") {
-		t.Fatalf("resolutionId = %s, want resolution-1", decoded.ResolutionID)
-	}
-	if decoded.Type != "approve-plan" {
-		t.Fatalf("type = %s, want approve-plan", decoded.Type)
-	}
-	if decoded.Payload["operator"] != "workorch" {
-		t.Fatalf("payload operator = %v, want workorch", decoded.Payload["operator"])
-	}
+	patchType, _ := payload.String(PayloadKeyPatchType)
+	targetRef, _ := payload.String(PayloadKeyTargetRef)
+	patchID, _ := payload.String(PayloadKeyPatchID)
+	stepID, _ := payload.String(PayloadKeyStepID)
+	toolCallID, _ := payload.String(PayloadKeyToolCallID)
+	diffHash, _ := payload.String(PayloadKeyDiffHash)
+	approvalID, _ := payload.String(PayloadKeyApprovalID)
+	risk, _ := payload.String(PayloadKeyRisk)
+	addedLines, _ := payload.Int64(PayloadKeyAddedLines)
+	deletedLines, _ := payload.Int64(PayloadKeyDeletedLines)
+	return PatchPayloadData{
+		PatchID: common.PatchID(patchID), StepID: common.StepID(stepID), ToolCallID: common.ToolCallID(toolCallID),
+		PatchType: patchType, TargetRef: targetRef, State: common.PatchState(state), AddedLines: int(addedLines),
+		DeletedLines: int(deletedLines), DiffHash: diffHash, ApprovalID: common.ApprovalID(approvalID), Risk: risk,
+	}, true
 }
 
-func TestDecodePatchPayloadRoundTrip(t *testing.T) {
-	payload := PatchPayload(
-		common.PatchID("patch-1"),
-		common.StepID("run-1/step-1"),
-		common.ToolCallID("run-1/step-1/tool-call"),
-		"unified_diff",
-		"main.go",
-		"update main",
-		common.PatchStateApplied,
-		2,
-		1,
-		"",
-		"diff-sha",
-		common.ApprovalID("approval-1"),
-		"sensitive",
-		"",
-	)
-
-	decoded, ok := DecodePatchPayload(payload)
-	if !ok {
-		t.Fatalf("DecodePatchPayload returned !ok")
-	}
-	if decoded.PatchID != "patch-1" ||
-		decoded.StepID != "run-1/step-1" ||
-		decoded.ToolCallID != "run-1/step-1/tool-call" ||
-		decoded.PatchType != "unified_diff" ||
-		decoded.TargetRef != "main.go" ||
-		decoded.State != common.PatchStateApplied ||
-		decoded.AddedLines != 2 ||
-		decoded.DeletedLines != 1 ||
-		decoded.DiffHash != "diff-sha" ||
-		decoded.ApprovalID != "approval-1" ||
-		decoded.Risk != "sensitive" {
-		t.Fatalf("decoded patch payload = %+v", decoded)
-	}
-}
-
-func TestDecodeAutoGovernancePayloadRoundTrip(t *testing.T) {
-	payload := AutoGovernancePayload(
-		common.AutoGovernanceTraceID("gov-trace-1"),
-		"approval",
-		"approval-1",
-		"approve",
-		"L1",
-		0.91,
-		"read_only",
-		"",
-		2,
-		1,
-		"local",
-		"qwen",
-		"allow read-only action",
-		"prompt-fingerprint",
-		"resolved",
-		"policy accepted",
-		"",
-	)
-
-	decoded, ok := DecodeAutoGovernancePayload(payload)
-	if !ok {
-		t.Fatalf("DecodeAutoGovernancePayload returned !ok")
-	}
-	if decoded.TraceID != "gov-trace-1" ||
-		decoded.ItemType != "approval" ||
-		decoded.ItemID != "approval-1" ||
-		decoded.Action != "approve" ||
-		decoded.RiskLevel != "L1" ||
-		decoded.Confidence != 0.91 ||
-		decoded.PolicyMatched != "read_only" ||
-		decoded.BudgetBefore != 2 ||
-		decoded.BudgetAfter != 1 ||
-		decoded.PromptFingerprint != "prompt-fingerprint" ||
-		decoded.LLMProviderID != "local" ||
-		decoded.LLMModel != "qwen" ||
-		decoded.Status != "resolved" ||
-		decoded.Reason != "policy accepted" {
-		t.Fatalf("decoded auto governance payload = %+v", decoded)
-	}
+func decodeGovernanceEventPayload(payload workorcheventpayload.Payload) (AutoGovernancePayloadData, bool) {
+	traceID, _ := payload.String(PayloadKeyTraceID)
+	itemType, _ := payload.String(PayloadKeyItemType)
+	itemID, _ := payload.String(PayloadKeyItemID)
+	action, _ := payload.String(PayloadKeyAction)
+	riskLevel, _ := payload.String(PayloadKeyRisk)
+	confidence, _ := payload.Float64(PayloadKeyConfidenceScore)
+	policyMatched, _ := payload.String(PayloadKeyPolicyMatched)
+	policyBlocked, _ := payload.String(PayloadKeyPolicyBlocked)
+	budgetBefore, _ := payload.Int64(PayloadKeyBudgetBefore)
+	budgetAfter, _ := payload.Int64(PayloadKeyBudgetAfter)
+	providerID, _ := payload.String(PayloadKeyLLMProviderID)
+	model, _ := payload.String(PayloadKeyLLMModel)
+	preview, _ := payload.String(PayloadKeyLLMDecisionPreview)
+	fingerprint, _ := payload.String(PayloadKeyPromptFingerprint)
+	status, _ := payload.String(PayloadKeyStatus)
+	reason, _ := payload.String(PayloadKeyReason)
+	return AutoGovernancePayloadData{
+		TraceID: common.AutoGovernanceTraceID(traceID), ItemType: itemType, ItemID: itemID, Action: action,
+		RiskLevel: riskLevel, Confidence: confidence, PolicyMatched: policyMatched, PolicyBlocked: policyBlocked,
+		BudgetBefore: int(budgetBefore), BudgetAfter: int(budgetAfter), LLMProviderID: providerID, LLMModel: model,
+		LLMDecisionPreview: preview, PromptFingerprint: fingerprint, Status: status, Reason: reason,
+	}, true
 }

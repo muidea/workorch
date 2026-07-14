@@ -110,17 +110,18 @@ func (m *Module) Service() Service {
 }
 
 func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
-	response, err := m.executeCommand(ev.Context(), ev.ID(), ev.Data())
+	response, err := m.executeCommand(ev)
 	setMemoryMagicResult(result, response, err)
 }
 
-func (m *Module) executeCommand(ctx context.Context, topic string, data any) (memoryevents.MemoryCommandResult, error) {
+func (m *Module) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommandResult, error) {
 	if m == nil || m.servicePtr == nil {
 		return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 	}
-	switch topic {
+	ctx := ev.Context()
+	switch ev.ID() {
 	case memoryevents.TopicMemoryCommandCreate:
-		cmd, ok := data.(memoryevents.CreateMemoryCommand)
+		cmd, ok := ev.Data().(memoryevents.CreateMemoryCommand)
 		if !ok {
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
@@ -135,7 +136,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (me
 		m.publishMemoryChanged(ctx, memoryevents.TopicMemoryCreated, item)
 		return memoryevents.MemoryCommandResult{}, nil
 	case memoryevents.TopicMemoryCommandGet:
-		cmd, ok := data.(memoryevents.GetMemoryCommand)
+		cmd, ok := ev.Data().(memoryevents.GetMemoryCommand)
 		if !ok || cmd.MemoryID == "" {
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
@@ -146,7 +147,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (me
 		}
 		return memoryevents.MemoryCommandResult{Item: item}, nil
 	case memoryevents.TopicMemoryCommandListByWorkspace:
-		cmd, ok := data.(memoryevents.ListMemoryByWorkspaceCommand)
+		cmd, ok := ev.Data().(memoryevents.ListMemoryByWorkspaceCommand)
 		if !ok || cmd.WorkspaceID == "" {
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
@@ -157,7 +158,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (me
 		}
 		return memoryevents.MemoryCommandResult{Items: items}, nil
 	case memoryevents.TopicMemoryCommandSearch:
-		cmd, ok := data.(memoryevents.SearchMemoryCommand)
+		cmd, ok := ev.Data().(memoryevents.SearchMemoryCommand)
 		if !ok {
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
@@ -168,7 +169,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (me
 		}
 		return memoryevents.MemoryCommandResult{Items: items}, nil
 	case memoryevents.TopicMemoryCommandUpdate:
-		cmd, ok := data.(memoryevents.UpdateMemoryCommand)
+		cmd, ok := ev.Data().(memoryevents.UpdateMemoryCommand)
 		if !ok {
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
@@ -183,7 +184,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (me
 		m.publishMemoryChanged(ctx, memoryevents.TopicMemoryUpdated, item)
 		return memoryevents.MemoryCommandResult{}, nil
 	case memoryevents.TopicMemoryCommandDelete:
-		cmd, ok := data.(memoryevents.DeleteMemoryCommand)
+		cmd, ok := ev.Data().(memoryevents.DeleteMemoryCommand)
 		if !ok || cmd.WorkspaceID == "" || cmd.MemoryID == "" {
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
@@ -201,7 +202,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (me
 		m.publishMemoryChanged(ctx, memoryevents.TopicMemoryDeleted, item)
 		return memoryevents.MemoryCommandResult{}, nil
 	case memoryevents.TopicMemoryRecallTraceCommandUpsert:
-		cmd, ok := data.(memoryevents.UpsertMemoryRecallTraceCommand)
+		cmd, ok := ev.Data().(memoryevents.UpsertMemoryRecallTraceCommand)
 		if !ok {
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
@@ -245,7 +246,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (me
 		m.eventHub.Post(event)
 		return memoryevents.MemoryCommandResult{}, nil
 	case memoryevents.TopicMemoryRecallTraceCommandGet:
-		cmd, ok := data.(memoryevents.GetMemoryRecallTraceCommand)
+		cmd, ok := ev.Data().(memoryevents.GetMemoryRecallTraceCommand)
 		if !ok || cmd.TraceID == "" {
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
@@ -256,7 +257,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (me
 		}
 		return memoryevents.MemoryCommandResult{RecallTrace: item}, nil
 	case memoryevents.TopicMemoryRecallTraceCommandList:
-		cmd, ok := data.(memoryevents.ListMemoryRecallTracesCommand)
+		cmd, ok := ev.Data().(memoryevents.ListMemoryRecallTracesCommand)
 		if !ok {
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
@@ -267,7 +268,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (me
 		}
 		return memoryevents.MemoryCommandResult{RecallTraces: items}, nil
 	case memoryevents.TopicMemoryRecallTraceCommandDelete:
-		cmd, ok := data.(memoryevents.DeleteMemoryRecallTraceCommand)
+		cmd, ok := ev.Data().(memoryevents.DeleteMemoryRecallTraceCommand)
 		if !ok || cmd.TraceID == "" {
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}

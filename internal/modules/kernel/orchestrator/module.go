@@ -130,14 +130,12 @@ func (m *Module) Start() error {
 			m.rawObserver.Subscribe(topic, m.handleMagicCommand)
 		}
 		m.rawTopics = append(m.rawTopics,
-			orchestratorevents.TopicOrchestratorCommandReleaseRuntimeV1Resources,
 			orchestratorevents.TopicOrchestratorDriveRuntimeV2,
 			orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution,
 			orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
 			decisionevents.TopicDecisionCommandRecordEvidence,
 			approvalevents.TopicApprovalCommandRecordEvidence,
 		)
-		m.rawObserver.Subscribe(orchestratorevents.TopicOrchestratorCommandReleaseRuntimeV1Resources, m.handleReleaseRuntimeV1Resources)
 		m.rawObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, m.handleRuntimeV2Drive)
 		m.rawObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution, m.handleRuntimeV2GovernanceResolution)
 		m.rawObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, m.handleRuntimeV2GovernanceTicketResolution)
@@ -145,31 +143,6 @@ func (m *Module) Start() error {
 		m.rawObserver.Subscribe(approvalevents.TopicApprovalCommandRecordEvidence, m.handleApprovalEvidenceCommand)
 	}
 	return nil
-}
-
-func (m *Module) handleReleaseRuntimeV1Resources(ev magicevent.Event, result magicevent.Result) {
-	cmd, ok := ev.Data().(orchestratorevents.ReleaseRuntimeV1ResourcesCommand)
-	if !ok || m == nil || m.bizPtr == nil || cmd.WorkspaceID == "" || cmd.RunID == "" {
-		setRuntimeV1ResourceReleaseResult(result, orchestratorevents.ReleaseRuntimeV1ResourcesResult{}, common.ErrInvalidArgument)
-		return
-	}
-	released, err := m.bizPtr.ReleaseRuntimeV1Resources(ev.Context(), cmd.WorkspaceID, cmd.RunID)
-	setRuntimeV1ResourceReleaseResult(result, orchestratorevents.ReleaseRuntimeV1ResourcesResult{
-		ReleasedValidationResources: released.ReleasedValidationResources,
-		ClosedSteps:                 released.ClosedSteps, ClosedToolCalls: released.ClosedToolCalls,
-		ClosedArtifactContinuations: released.ClosedArtifactContinuations, ReleasedTotal: released.Total(),
-	}, err)
-}
-
-func setRuntimeV1ResourceReleaseResult(result magicevent.Result, response orchestratorevents.ReleaseRuntimeV1ResourcesResult, err error) {
-	if result == nil {
-		return
-	}
-	if err != nil {
-		result.Set(nil, cd.NewError(cd.Unexpected, err.Error()))
-		return
-	}
-	result.Set(response, nil)
 }
 
 func (m *Module) Stop(ctx context.Context) error {
@@ -195,59 +168,60 @@ func (m *Module) Service() Service {
 }
 
 func (m *Module) handleMagicCommand(ev magicevent.Event, result magicevent.Result) {
-	response, err := m.executeMagicCommand(ev.Context(), ev.ID(), ev.Data())
+	response, err := m.executeMagicCommand(ev)
 	setOrchestratorCommandResult(result, response, err)
 }
 
-func (m *Module) executeMagicCommand(ctx context.Context, topic string, data any) (orchestratorevents.OrchestratorCommandResult, error) {
+func (m *Module) executeMagicCommand(ev magicevent.Event) (orchestratorevents.OrchestratorCommandResult, error) {
 	if m == nil || m.servicePtr == nil {
 		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 	}
-	switch topic {
+	ctx := ev.Context()
+	switch ev.ID() {
 	case orchestratorevents.TopicOrchestratorCommandStartRun:
-		cmd, ok := data.(orchestratorevents.StartRunCommand)
+		cmd, ok := ev.Data().(orchestratorevents.StartRunCommand)
 		if !ok || cmd.RunID == "" {
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
 		return orchestratorevents.OrchestratorCommandResult{}, m.handleStartRunCommand(ctx, common.RuntimeWorkspaceIDFromContext(ctx), cmd.RunID)
 	case orchestratorevents.TopicOrchestratorCommandBlockDecision:
-		cmd, ok := data.(orchestratorevents.BlockDecisionCommand)
+		cmd, ok := ev.Data().(orchestratorevents.BlockDecisionCommand)
 		if !ok || cmd.RunID == "" {
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
 		return orchestratorevents.OrchestratorCommandResult{}, m.servicePtr.BlockOnDecision(ctx, cmd.RunID, cmd.TicketID)
 	case orchestratorevents.TopicOrchestratorCommandBlockApproval:
-		cmd, ok := data.(orchestratorevents.BlockApprovalCommand)
+		cmd, ok := ev.Data().(orchestratorevents.BlockApprovalCommand)
 		if !ok || cmd.RunID == "" {
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
 		return orchestratorevents.OrchestratorCommandResult{}, m.servicePtr.BlockOnApproval(ctx, cmd.RunID, cmd.ApprovalID)
 	case orchestratorevents.TopicOrchestratorCommandResumeRun:
-		cmd, ok := data.(orchestratorevents.ResumeRunCommand)
+		cmd, ok := ev.Data().(orchestratorevents.ResumeRunCommand)
 		if !ok || cmd.RunID == "" {
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
 		return orchestratorevents.OrchestratorCommandResult{}, m.resumeRunMagicCommand(ctx, cmd)
 	case orchestratorevents.TopicOrchestratorCommandCancelRun:
-		cmd, ok := data.(orchestratorevents.CancelRunCommand)
+		cmd, ok := ev.Data().(orchestratorevents.CancelRunCommand)
 		if !ok || cmd.RunID == "" {
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
 		return orchestratorevents.OrchestratorCommandResult{}, m.servicePtr.CancelRun(ctx, cmd.RunID)
 	case orchestratorevents.TopicOrchestratorCommandSupersedeRun:
-		cmd, ok := data.(orchestratorevents.SupersedeRunCommand)
+		cmd, ok := ev.Data().(orchestratorevents.SupersedeRunCommand)
 		if !ok || cmd.RunID == "" {
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
 		return orchestratorevents.OrchestratorCommandResult{}, m.servicePtr.SupersedeRun(ctx, cmd.RunID)
 	case orchestratorevents.TopicOrchestratorCommandFailRun:
-		cmd, ok := data.(orchestratorevents.FailRunCommand)
+		cmd, ok := ev.Data().(orchestratorevents.FailRunCommand)
 		if !ok || cmd.RunID == "" {
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
 		return orchestratorevents.OrchestratorCommandResult{}, m.servicePtr.FailRun(ctx, cmd.RunID, cmd.Reason)
 	case orchestratorevents.TopicOrchestratorCommandPurgeRun:
-		cmd, ok := data.(orchestratorevents.PurgeRunCommand)
+		cmd, ok := ev.Data().(orchestratorevents.PurgeRunCommand)
 		if !ok || cmd.RunID == "" {
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
@@ -258,7 +232,7 @@ func (m *Module) executeMagicCommand(ctx context.Context, topic string, data any
 		orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun,
 		orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun,
 		orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun:
-		return m.readEvidenceMagicCommand(ctx, topic, data)
+		return m.readEvidenceMagicCommand(ev)
 	default:
 		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 	}
@@ -343,19 +317,20 @@ func orchestratorBackgroundContext(ctx context.Context, workspaceID common.Works
 	return bgCtx
 }
 
-func (m *Module) readEvidenceMagicCommand(ctx context.Context, topic string, data any) (orchestratorevents.OrchestratorCommandResult, error) {
+func (m *Module) readEvidenceMagicCommand(ev magicevent.Event) (orchestratorevents.OrchestratorCommandResult, error) {
 	if m == nil || m.bizPtr == nil {
 		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 	}
-	cmd, ok := data.(orchestratorevents.ListRunEvidenceCommand)
+	cmd, ok := ev.Data().(orchestratorevents.ListRunEvidenceCommand)
 	if !ok || cmd.RunID == "" {
 		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 	}
+	ctx := ev.Context()
 	if cmd.WorkspaceID != "" {
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
 	}
 	evidence := m.bizPtr.EvidenceRepositories()
-	switch topic {
+	switch ev.ID() {
 	case orchestratorevents.TopicOrchestratorCommandListToolCallsByRun:
 		if evidence.ToolCalls == nil {
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument

@@ -3,6 +3,7 @@ package readmodelprojection
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func mapProjectedEventRecord(item *eventstreammodel.EventRecord) (readmodelcore.EventRecord, bool) {
@@ -12,7 +13,7 @@ func mapProjectedEventRecord(item *eventstreammodel.EventRecord) (readmodelcore.
 	return mapEventRecordWithPayload(item, projectEventPayload(item.Payload))
 }
 
-func mapEventRecordWithPayload(item *eventstreammodel.EventRecord, payload map[string]any) (readmodelcore.EventRecord, bool) {
+func mapEventRecordWithPayload(item *eventstreammodel.EventRecord, payload workorcheventpayload.Payload) (readmodelcore.EventRecord, bool) {
 	if item == nil {
 		return readmodelcore.EventRecord{}, false
 	}
@@ -28,8 +29,8 @@ func mapEventRecordWithPayload(item *eventstreammodel.EventRecord, payload map[s
 		RunID:          string(item.RunID),
 		StepID:         string(item.StepID),
 		Revision:       item.Revision,
-		Payload:        payload,
-		PayloadSummary: cloneReadModelMap(item.PayloadSummary),
+		Payload:        payload.Clone(),
+		PayloadSummary: item.PayloadSummary.Clone(),
 		PayloadRef:     item.PayloadRef,
 	}, true
 }

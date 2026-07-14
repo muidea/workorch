@@ -14,8 +14,6 @@ type ArtifactContinuationRepository interface {
 	ListOpenByRun(context.Context, common.RunID) ([]*orchestratormodel.ArtifactContinuation, error)
 	Update(context.Context, *orchestratormodel.ArtifactContinuation) error
 	Delete(context.Context, common.ArtifactContinuationID) error
-	SavePlan(context.Context, common.ArtifactContinuationID, map[string]any) error
-	GetPlan(context.Context, common.ArtifactContinuationID) (map[string]any, error)
 	SaveChunk(context.Context, *orchestratormodel.ArtifactContinuationChunk, string) error
 	GetChunk(context.Context, common.ArtifactContinuationID, int) (*orchestratormodel.ArtifactContinuationChunk, string, error)
 	ListChunks(context.Context, common.ArtifactContinuationID) ([]*orchestratormodel.ArtifactContinuationChunk, error)

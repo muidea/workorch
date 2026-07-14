@@ -10,6 +10,7 @@ import (
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -22,7 +23,7 @@ func RuntimeV2ActivationContext(
 	mcpServerIDs []string,
 	capabilities []*mcpmodel.Capability,
 	memories []*memorymodel.MemoryItem,
-	evidencePolicies []map[string]any,
+	evidencePolicies []workorcheventpayload.Payload,
 	executionContract map[string]any,
 	continuation runtimecontract.RuntimeContinuationContext,
 ) runtimecontract.RuntimeActivationContext {
@@ -167,23 +168,61 @@ func runtimeV2ExecutionContract(input map[string]any) runtimecontract.RuntimeExe
 	return ret.Normalized()
 }
 
-func runtimeV2EvidencePolicies(items []map[string]any) []runtimecontract.RuntimeEvidencePolicy {
+func runtimeV2EvidencePolicies(items []workorcheventpayload.Payload) []runtimecontract.RuntimeEvidencePolicy {
 	ret := make([]runtimecontract.RuntimeEvidencePolicy, 0, len(items))
 	for _, item := range items {
-		if len(item) == 0 {
+		if len(item.Fields) == 0 {
 			continue
 		}
 		ret = append(ret, runtimecontract.RuntimeEvidencePolicy{
-			ID: runtimeV2String(item["id"]), Profile: runtimeV2String(item["profile"]), Rule: runtimeV2String(item["rule"]),
-			AppliesTo: runtimeV2String(item["appliesTo"]), CommandName: runtimeV2String(item["commandName"]),
-			ArgsContain: runtimeV2Strings(item["argsContain"]), ZeroWorkMarkers: runtimeV2Strings(item["zeroWorkMarkers"]),
-			WorkEvidenceMarkers: runtimeV2Strings(item["workEvidenceMarkers"]), QualityOnZeroWork: runtimeV2String(item["qualityOnZeroWork"]),
-			MarksZeroWork: runtimeV2Bool(item["zeroWork"]), EvidenceTags: runtimeV2Strings(item["evidenceTags"]),
-			EvidenceReason: runtimeV2String(item["evidenceReason"]), CoverageRequirements: runtimeV2CoverageEvidenceRequirements(item["coverageRequirements"]),
-			Description: runtimeV2String(item["description"]),
+			ID: payloadString(item, "id"), Profile: payloadString(item, "profile"), Rule: payloadString(item, "rule"),
+			AppliesTo: payloadString(item, "appliesTo"), CommandName: payloadString(item, "commandName"),
+			ArgsContain: payloadStrings(item, "argsContain"), ZeroWorkMarkers: payloadStrings(item, "zeroWorkMarkers"),
+			WorkEvidenceMarkers: payloadStrings(item, "workEvidenceMarkers"), QualityOnZeroWork: payloadString(item, "qualityOnZeroWork"),
+			MarksZeroWork: payloadBool(item, "zeroWork"), EvidenceTags: payloadStrings(item, "evidenceTags"),
+			EvidenceReason: payloadString(item, "evidenceReason"), CoverageRequirements: payloadCoverageEvidenceRequirements(item, "coverageRequirements"),
+			Description: payloadString(item, "description"),
 		})
 	}
 	return runtimecontract.NormalizeRuntimeEvidencePolicies(ret)
+}
+
+func payloadString(input workorcheventpayload.Payload, key string) string {
+	value, _ := input.String(key)
+	return value
+}
+
+func payloadBool(input workorcheventpayload.Payload, key string) bool {
+	value, _ := input.Bool(key)
+	return value
+}
+
+func payloadStrings(input workorcheventpayload.Payload, key string) []string {
+	value, _ := input.StringSlice(key)
+	return value
+}
+
+func payloadCoverageEvidenceRequirements(input workorcheventpayload.Payload, key string) []runtimecontract.RuntimeCoverageEvidenceRequirement {
+	value, ok := input.Field(key)
+	if !ok || value.Kind != workorcheventpayload.ValueArray {
+		return nil
+	}
+	ret := make([]runtimecontract.RuntimeCoverageEvidenceRequirement, 0, len(value.Array))
+	for _, item := range value.Array {
+		if item.Kind != workorcheventpayload.ValueObject {
+			continue
+		}
+		payload := workorcheventpayload.Payload{Fields: item.Object}
+		ret = append(ret, runtimecontract.RuntimeCoverageEvidenceRequirement{
+			ID: payloadString(payload, "id"), Scope: payloadString(payload, "scope"),
+			RequiredEvidenceKinds: payloadStrings(payload, "requiredEvidenceKinds"),
+			RequireDirectEvidence: payloadBool(payload, "requireDirectEvidence"), RequireClaimEvidence: payloadBool(payload, "requireClaimEvidence"),
+			RequireExecutableBehaviorEvidence: payloadBool(payload, "requireExecutableBehaviorEvidence"),
+			AcceptedStepKinds:                 payloadStrings(payload, "acceptedStepKinds"), RejectedStepKinds: payloadStrings(payload, "rejectedStepKinds"),
+			Description: payloadString(payload, "description"),
+		})
+	}
+	return ret
 }
 
 func runtimeV2CoverageEvidenceRequirements(value any) []runtimecontract.RuntimeCoverageEvidenceRequirement {

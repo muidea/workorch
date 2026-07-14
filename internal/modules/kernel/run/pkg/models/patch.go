@@ -1,6 +1,14 @@
 package run
 
-import "github.com/muidea/workorch/internal/pkg/common"
+import (
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
+
+type PatchCoverageTarget struct {
+	GoalRequirementID string `json:"goalRequirementId,omitempty"`
+	TargetText        string `json:"targetText,omitempty"`
+}
 
 type Patch struct {
 	ID               common.PatchID
@@ -14,7 +22,7 @@ type Patch struct {
 	Content          string
 	Diff             string
 	Summary          string
-	CoverageTargets  any
+	CoverageTargets  []PatchCoverageTarget
 	State            common.PatchState
 	BeforeHash       string
 	AfterHash        string
@@ -23,7 +31,7 @@ type Patch struct {
 	DeletedLines     int
 	RiskLevel        string
 	RiskReasons      []string
-	Diagnostics      []map[string]any
+	Diagnostics      []workorcheventpayload.Payload
 	OriginalContent  string
 	OriginalExists   bool
 	ReverseDiff      string

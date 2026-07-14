@@ -8,11 +8,11 @@ import (
 )
 
 func PreviousStepID(step *runmodel.Step) common.StepID {
-	if step == nil || step.Input == nil {
+	if step == nil {
 		return ""
 	}
 	for _, key := range []string{"previousStepId", "repairOfStepId", "failedStepId"} {
-		value, _ := step.Input[key].(string)
+		value, _ := step.Input.String(key)
 		value = strings.TrimSpace(value)
 		if value != "" && common.StepID(value) != step.ID {
 			return common.StepID(value)

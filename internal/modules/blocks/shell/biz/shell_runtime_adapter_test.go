@@ -15,24 +15,21 @@ import (
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestRuntimeAdapter_ExecuteRuntimeStepRunsCommandInWorkspaceDirectory(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationRunsCommandInWorkspaceDirectory(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command": "pwd",
-		},
+		Command:                       "pwd",
 	})
 	if err != nil {
-		t.Fatalf("ExecuteRuntimeStep: %v", err)
+		t.Fatalf("ExecuteOperation: %v", err)
 	}
-	if result.Output["exitCode"] != 0 {
-		t.Fatalf("exitCode = %v, want 0", result.Output["exitCode"])
+	if result.ExitCode != 0 {
+		t.Fatalf("exitCode = %v, want 0", result.ExitCode)
 	}
-	stdout, _ := result.Output["stdout"].(string)
+	stdout := result.Stdout
 	if strings.TrimSpace(stdout) != deliverableDirectory {
 		t.Fatalf("stdout = %q, want deliverable directory %q", stdout, deliverableDirectory)
 	}
@@ -46,23 +43,20 @@ func TestRuntimeAdapterRejectsStateChangingShellWithoutWorkspaceDelta(t *testing
 	deliverableDirectory := t.TempDir()
 	initShellTestGitRepo(t, deliverableDirectory)
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command":       "sh",
-			"args":          []any{"-c", "printf checked"},
-			"stateChanging": true,
-			"targetRef":     ".",
-		},
+		Command:                       "sh",
+		Args:                          []string{"-c", "printf checked"},
+		StateChanging:                 true,
+		TargetRef:                     ".",
 	})
 	if err == nil || !strings.Contains(err.Error(), "no observable workspace delta") {
-		t.Fatalf("ExecuteRuntimeStep err = %v, want no-progress rejection", err)
+		t.Fatalf("ExecuteOperation err = %v, want no-progress rejection", err)
 	}
-	if result.Output["failureReason"] != "state_changing_no_workspace_delta" ||
-		result.Output["zeroWork"] != true ||
-		result.Output["evidenceQuality"] != string(common.EvidenceQualityInconclusive) {
-		t.Fatalf("output = %+v, want state-changing no-progress diagnostic", result.Output)
+	if result.FailureReason != "state_changing_no_workspace_delta" ||
+		result.ZeroWork != true ||
+		result.EvidenceQuality != string(common.EvidenceQualityInconclusive) {
+		t.Fatalf("output = %+v, want state-changing no-progress diagnostic", result)
 	}
 }
 
@@ -74,21 +68,18 @@ func TestRuntimeAdapterAllowsStateChangingShellWithWorkspaceDelta(t *testing.T) 
 	deliverableDirectory := t.TempDir()
 	initShellTestGitRepo(t, deliverableDirectory)
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command":       "sh",
-			"args":          []any{"-c", "printf changed > generated.txt"},
-			"stateChanging": true,
-			"targetRef":     "generated.txt",
-		},
+		Command:                       "sh",
+		Args:                          []string{"-c", "printf changed > generated.txt"},
+		StateChanging:                 true,
+		TargetRef:                     "generated.txt",
 	})
 	if err != nil {
-		t.Fatalf("ExecuteRuntimeStep: %v output=%+v", err, result.Output)
+		t.Fatalf("ExecuteOperation: %v output=%+v", err, result)
 	}
-	if result.Output["failureReason"] == "state_changing_no_workspace_delta" {
-		t.Fatalf("output = %+v, want accepted workspace delta", result.Output)
+	if result.FailureReason == "state_changing_no_workspace_delta" {
+		t.Fatalf("output = %+v, want accepted workspace delta", result)
 	}
 }
 
@@ -118,22 +109,19 @@ func initShellTestGitRepo(t *testing.T, dir string) {
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepUsesDefaultCommandTimeout(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationUsesDefaultCommandTimeout(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command": "pwd",
-		},
+		Command:                       "pwd",
 	})
 	if err != nil {
-		t.Fatalf("ExecuteRuntimeStep: %v", err)
+		t.Fatalf("ExecuteOperation: %v", err)
 	}
-	if result.Output["timeoutMillis"] != int64(DefaultCommandTimeout/time.Millisecond) {
-		t.Fatalf("timeoutMillis = %v, want %d", result.Output["timeoutMillis"], DefaultCommandTimeout/time.Millisecond)
+	if result.TimeoutMillis != int64(DefaultCommandTimeout/time.Millisecond) {
+		t.Fatalf("timeoutMillis = %v, want %d", result.TimeoutMillis, DefaultCommandTimeout/time.Millisecond)
 	}
 }
 
@@ -142,18 +130,15 @@ func TestNewRuntimeAdapterFromTimeoutString(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRuntimeAdapterFromTimeoutString: %v", err)
 	}
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: t.TempDir(),
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command": "pwd",
-		},
+		Command:                       "pwd",
 	})
 	if err != nil {
-		t.Fatalf("ExecuteRuntimeStep: %v", err)
+		t.Fatalf("ExecuteOperation: %v", err)
 	}
-	if result.Output["timeoutMillis"] != int64(90000) {
-		t.Fatalf("timeoutMillis = %v, want 90000", result.Output["timeoutMillis"])
+	if result.TimeoutMillis != int64(90000) {
+		t.Fatalf("timeoutMillis = %v, want 90000", result.TimeoutMillis)
 	}
 }
 
@@ -171,7 +156,7 @@ func TestNewRuntimeAdapterFromTimeoutStringAllowsTenMinutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRuntimeAdapterFromTimeoutString: %v", err)
 	}
-	timeout, err := shellCommandTimeout(nil, adapter.timeout)
+	timeout, err := shellCommandTimeout(0, adapter.timeout)
 	if err != nil {
 		t.Fatalf("shellCommandTimeout: %v", err)
 	}
@@ -180,22 +165,19 @@ func TestNewRuntimeAdapterFromTimeoutStringAllowsTenMinutes(t *testing.T) {
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepCreatesMissingWorkspaceDirectory(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationCreatesMissingWorkspaceDirectory(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := filepath.Join(t.TempDir(), "missing", "workspace")
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command": "pwd",
-		},
+		Command:                       "pwd",
 	})
 	if err != nil {
-		t.Fatalf("ExecuteRuntimeStep: %v", err)
+		t.Fatalf("ExecuteOperation: %v", err)
 	}
-	if result.Output["exitCode"] != 0 {
-		t.Fatalf("exitCode = %v, want 0", result.Output["exitCode"])
+	if result.ExitCode != 0 {
+		t.Fatalf("exitCode = %v, want 0", result.ExitCode)
 	}
 	info, err := os.Stat(deliverableDirectory)
 	if err != nil {
@@ -206,143 +188,115 @@ func TestRuntimeAdapter_ExecuteRuntimeStepCreatesMissingWorkspaceDirectory(t *te
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepReturnsOutputForNonZeroExit(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationReturnsOutputForNonZeroExit(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command": "sh",
-			"args":    []any{"-c", "echo shell-out; echo shell-err >&2; exit 7"},
-		},
+		Command:                       "sh",
+		Args:                          []string{"-c", "echo shell-out; echo shell-err >&2; exit 7"},
 	})
 	if err == nil {
-		t.Fatal("ExecuteRuntimeStep err = nil, want non-zero exit error")
+		t.Fatal("ExecuteOperation err = nil, want non-zero exit error")
 	}
-	if result.Output["status"] != "failed" {
-		t.Fatalf("status = %v, want failed", result.Output["status"])
+	if result.Status != "failed" {
+		t.Fatalf("status = %v, want failed", result.Status)
 	}
-	if result.Output["exitCode"] != 7 {
-		t.Fatalf("exitCode = %v, want 7", result.Output["exitCode"])
+	if result.ExitCode != 7 {
+		t.Fatalf("exitCode = %v, want 7", result.ExitCode)
 	}
-	stdout, _ := result.Output["stdout"].(string)
-	stderr, _ := result.Output["stderr"].(string)
+	stdout := result.Stdout
+	stderr := result.Stderr
 	if !strings.Contains(stdout, "shell-out") || !strings.Contains(stderr, "shell-err") {
 		t.Fatalf("stdout/stderr = %q/%q, want captured command output", stdout, stderr)
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepAddsValidationFailureDiagnostic(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationAddsValidationFailureDiagnostic(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command": "sh",
-			"args":    []any{"-c", "echo assertion failed >&2; exit 3"},
-			"validationEvidence": map[string]any{
-				"mode":            "runtime_behavior",
-				"observationType": "test_result",
-				"targetRefs":      []any{"feature-contract"},
-			},
-		},
+		Command:                       "sh",
+		Args:                          []string{"-c", "echo assertion failed >&2; exit 3"},
+		ValidationEvidence:            runtimemodel.RuntimeValidationEvidence{Mode: "runtime_behavior", ObservationType: "test_result", TargetRefs: []string{"feature-contract"}},
 	})
 	if err == nil {
-		t.Fatal("ExecuteRuntimeStep err = nil, want non-zero exit error")
+		t.Fatal("ExecuteOperation err = nil, want non-zero exit error")
 	}
-	diagnostic, ok := result.Output["validationFailureDiagnostic"].(map[string]any)
-	if !ok {
-		t.Fatalf("validationFailureDiagnostic = %T, want map", result.Output["validationFailureDiagnostic"])
+	diagnostic := result.ValidationFailureDiagnostic
+	if diagnostic == nil {
+		t.Fatal("validationFailureDiagnostic = nil, want test failure diagnostic")
 	}
-	if diagnostic["class"] != runtimemodel.ValidationDiagnosticTestFailed ||
-		diagnostic["recommendedEvidenceTargetType"] != runtimemodel.ValidationEvidenceTargetBehaviorEvidence {
+	if diagnostic.Class != runtimemodel.ValidationDiagnosticTestFailed ||
+		diagnostic.RecommendedEvidenceTargetType != runtimemodel.ValidationEvidenceTargetBehaviorEvidence {
 		t.Fatalf("validationFailureDiagnostic = %+v, want test failure behavior diagnostic", diagnostic)
 	}
-	refs, _ := diagnostic["targetRefs"].([]string)
-	if len(refs) != 1 || refs[0] != "feature-contract" {
-		t.Fatalf("targetRefs = %#v, want feature-contract", diagnostic["targetRefs"])
+	if len(diagnostic.TargetRefs) != 1 || diagnostic.TargetRefs[0] != "feature-contract" {
+		t.Fatalf("targetRefs = %#v, want feature-contract", diagnostic.TargetRefs)
 	}
-	runtimeDiagnostics, _ := result.Output["runtimeDiagnostics"].(map[string]any)
-	if _, ok := runtimeDiagnostics["validationFailureDiagnostic"].(map[string]any); !ok {
-		t.Fatalf("runtimeDiagnostics = %+v, want nested validation diagnostic", runtimeDiagnostics)
+	if result.RuntimeDiagnostics.ValidationFailureDiagnostic == nil {
+		t.Fatalf("runtimeDiagnostics = %+v, want nested validation diagnostic", result.RuntimeDiagnostics)
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepRejectsValidationShellMaskedExitStatus(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationRejectsValidationShellMaskedExitStatus(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command": "sh",
-			"args":    []any{"-c", "false; echo EXIT_CODE=$?"},
-			"validationEvidence": map[string]any{
-				"mode":            "runtime_behavior",
-				"observationType": "runtime_observation",
-				"targetRefs":      []any{"feature-contract"},
-				"observedClaims":  []any{"feature contract was validated"},
-			},
-		},
+		Command:                       "sh",
+		Args:                          []string{"-c", "false; echo EXIT_CODE=$?"},
+		ValidationEvidence:            runtimemodel.RuntimeValidationEvidence{Mode: "runtime_behavior", ObservationType: "runtime_observation", TargetRefs: []string{"feature-contract"}, ObservedClaims: []string{"feature contract was validated"}},
 	})
 	if err == nil {
-		t.Fatal("ExecuteRuntimeStep err = nil, want masked validation exit status rejection")
+		t.Fatal("ExecuteOperation err = nil, want masked validation exit status rejection")
 	}
-	if result.Output["status"] != "failed" ||
-		result.Output["stage"] != "shell_validation_contract_rejected" ||
-		result.Output["failureReason"] != "validation_shell_masks_failure" {
-		t.Fatalf("output = %+v, want validation shell contract rejection", result.Output)
+	if result.Status != "failed" ||
+		result.Stage != "shell_validation_contract_rejected" ||
+		result.FailureReason != "validation_shell_masks_failure" {
+		t.Fatalf("output = %+v, want validation shell contract rejection", result)
 	}
-	diagnostic, ok := result.Output["validationFailureDiagnostic"].(map[string]any)
-	if !ok {
-		t.Fatalf("validationFailureDiagnostic = %T, want map", result.Output["validationFailureDiagnostic"])
+	diagnostic := result.ValidationFailureDiagnostic
+	if diagnostic == nil {
+		t.Fatal("validationFailureDiagnostic = nil, want command invalid diagnostic")
 	}
-	if diagnostic["class"] != runtimemodel.ValidationDiagnosticCommandInvalid {
+	if diagnostic.Class != runtimemodel.ValidationDiagnosticCommandInvalid {
 		t.Fatalf("validationFailureDiagnostic = %+v, want command invalid", diagnostic)
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepRejectsValidationShellFallbackMaskedFailure(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationRejectsValidationShellFallbackMaskedFailure(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command": "sh",
-			"args":    []any{"-c", "command -v tool && false 2>&1 || echo 'failed'"},
-			"validationEvidence": map[string]any{
-				"mode":            "runtime_behavior",
-				"observationType": "runtime_observation",
-				"targetRefs":      []any{"feature-contract"},
-				"observedClaims":  []any{"feature contract was validated"},
-			},
-		},
+		Command:                       "sh",
+		Args:                          []string{"-c", "command -v tool && false 2>&1 || echo 'failed'"},
+		ValidationEvidence:            runtimemodel.RuntimeValidationEvidence{Mode: "runtime_behavior", ObservationType: "runtime_observation", TargetRefs: []string{"feature-contract"}, ObservedClaims: []string{"feature contract was validated"}},
 	})
 	if err == nil {
-		t.Fatal("ExecuteRuntimeStep err = nil, want fallback-masked validation failure rejection")
+		t.Fatal("ExecuteOperation err = nil, want fallback-masked validation failure rejection")
 	}
-	if result.Output["status"] != "failed" ||
-		result.Output["stage"] != "shell_validation_contract_rejected" ||
-		result.Output["failureReason"] != "validation_shell_masks_failure" {
-		t.Fatalf("output = %+v, want validation shell contract rejection", result.Output)
+	if result.Status != "failed" ||
+		result.Stage != "shell_validation_contract_rejected" ||
+		result.FailureReason != "validation_shell_masks_failure" {
+		t.Fatalf("output = %+v, want validation shell contract rejection", result)
 	}
-	diagnostic, ok := result.Output["validationFailureDiagnostic"].(map[string]any)
-	if !ok {
-		t.Fatalf("validationFailureDiagnostic = %T, want map", result.Output["validationFailureDiagnostic"])
+	diagnostic := result.ValidationFailureDiagnostic
+	if diagnostic == nil {
+		t.Fatal("validationFailureDiagnostic = nil, want command invalid diagnostic")
 	}
-	if diagnostic["class"] != runtimemodel.ValidationDiagnosticCommandInvalid {
+	if diagnostic.Class != runtimemodel.ValidationDiagnosticCommandInvalid {
 		t.Fatalf("validationFailureDiagnostic = %+v, want command invalid", diagnostic)
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepCarriesManagedValidationMetadata(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationCarriesManagedValidationMetadata(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()
 	scratchDirectory := filepath.Join(os.TempDir(), "workorch-shell-managed-validation-test", strings.NewReplacer("/", "_", " ", "_").Replace(t.Name()))
@@ -350,53 +304,42 @@ func TestRuntimeAdapter_ExecuteRuntimeStepCarriesManagedValidationMetadata(t *te
 		_ = os.RemoveAll(scratchDirectory)
 	})
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceID:                   "ws-managed-validation",
 		RunID:                         "run-managed-validation",
 		StepID:                        "run-managed-validation/verify",
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command":              "sh",
-			"args":                 []any{"-c", "mkdir -p \"$1\"; printf managed-ok > \"$1/out.txt\"; printf managed-ok", "sh", scratchDirectory},
-			"validationScratchDir": scratchDirectory,
-			"validationEvidence": map[string]any{
-				"mode":            "runtime_behavior",
-				"observationType": "runtime_observation",
-			},
-			"managedValidation": map[string]any{
-				"runtimeManaged": true,
-				"autoCleanup":    true,
-				"cleanupPolicy":  "process_group_on_timeout_or_completion",
-			},
-		},
+		Command:                       "sh",
+		Args:                          []string{"-c", "mkdir -p \"$1\"; printf managed-ok > \"$1/out.txt\"; printf managed-ok", "sh", scratchDirectory},
+		ValidationScratchDirectory:    scratchDirectory,
+		ValidationEvidence:            runtimemodel.RuntimeValidationEvidence{Mode: "runtime_behavior", ObservationType: "runtime_observation"},
+		ManagedValidation:             runtimemodel.RuntimeManagedValidation{RuntimeManaged: true, AutoCleanup: true, CleanupPolicy: "process_group_on_timeout_or_completion", AutoCleanupSet: true},
 	})
 	if err != nil {
-		t.Fatalf("ExecuteRuntimeStep: %v", err)
+		t.Fatalf("ExecuteOperation: %v", err)
 	}
-	managed, _ := result.Output["managedValidation"].(map[string]any)
-	if managed["runtimeManaged"] != true ||
-		managed["autoCleanup"] != true ||
-		managed["cleanupPolicy"] != "process_group_on_timeout_or_completion" {
+	managed := result.ManagedValidation
+	if !managed.RuntimeManaged || !managed.AutoCleanup ||
+		managed.CleanupPolicy != "process_group_on_timeout_or_completion" {
 		t.Fatalf("managedValidation = %+v, want carried runtime-managed metadata", managed)
 	}
-	evidence, _ := result.Output["validationEvidence"].(map[string]any)
-	if evidence["mode"] != "runtime_behavior" || evidence["observationType"] != "runtime_observation" {
+	evidence := result.ValidationEvidence
+	if evidence.Mode != "runtime_behavior" || evidence.ObservationType != "runtime_observation" {
 		t.Fatalf("validationEvidence = %+v, want carried validation evidence", evidence)
 	}
-	if managed["resourceCount"] != 2 || managed["resourcesReleased"] != true {
+	if managed.ResourceCount != 2 || !managed.ResourcesReleased {
 		t.Fatalf("managedValidation = %+v, want released process and scratch resources", managed)
 	}
-	resources, ok := result.Output["validationResources"].([]map[string]any)
-	if !ok || len(resources) != 2 {
-		t.Fatalf("validationResources = %#v, want two resource records", result.Output["validationResources"])
+	resources := result.ValidationResources
+	if len(resources) != 2 {
+		t.Fatalf("validationResources = %#v, want two resource records", result.ValidationResources)
 	}
 	kinds := map[string]string{}
 	for _, resource := range resources {
-		kinds[stringFromShellValue(resource["kind"])] = stringFromShellValue(resource["status"])
-		if resource["workspaceId"] != "ws-managed-validation" ||
-			resource["runId"] != "run-managed-validation" ||
-			resource["stepId"] != "run-managed-validation/verify" {
+		kinds[resource.Kind] = resource.Status
+		if resource.WorkspaceID != "ws-managed-validation" ||
+			resource.RunID != "run-managed-validation" ||
+			resource.StepID != "run-managed-validation/verify" {
 			t.Fatalf("resource = %+v, want scoped workspace/run/step ids", resource)
 		}
 	}
@@ -408,7 +351,7 @@ func TestRuntimeAdapter_ExecuteRuntimeStepCarriesManagedValidationMetadata(t *te
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepReleasesOrdinaryValidationScratch(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationReleasesOrdinaryValidationScratch(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()
 	scratchDirectory := filepath.Join(os.TempDir(), "workorch-shell-validation-scratch-test", strings.NewReplacer("/", "_", " ", "_").Replace(t.Name()))
@@ -416,55 +359,47 @@ func TestRuntimeAdapter_ExecuteRuntimeStepReleasesOrdinaryValidationScratch(t *t
 		_ = os.RemoveAll(scratchDirectory)
 	})
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceID:                   "ws-validation-scratch",
 		RunID:                         "run-validation-scratch",
 		StepID:                        "run-validation-scratch/verify",
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command":              "sh",
-			"args":                 []any{"-c", "mkdir -p \"$1\"; printf ordinary-ok > \"$1/out.txt\"; printf ordinary-ok", "sh", scratchDirectory},
-			"validationScratchDir": scratchDirectory,
-			"validationEvidence": map[string]any{
-				"mode":            "runtime_behavior",
-				"observationType": "runtime_observation",
-			},
-		},
+		Command:                       "sh",
+		Args:                          []string{"-c", "mkdir -p \"$1\"; printf ordinary-ok > \"$1/out.txt\"; printf ordinary-ok", "sh", scratchDirectory},
+		ValidationScratchDirectory:    scratchDirectory,
+		ValidationEvidence:            runtimemodel.RuntimeValidationEvidence{Mode: "runtime_behavior", ObservationType: "runtime_observation"},
 	})
 	if err != nil {
-		t.Fatalf("ExecuteRuntimeStep: %v", err)
+		t.Fatalf("ExecuteOperation: %v", err)
 	}
-	if _, ok := result.Output["managedValidation"].(map[string]any); ok {
-		t.Fatalf("managedValidation = %+v, want ordinary validation lifecycle without managed metadata", result.Output["managedValidation"])
+	if result.ManagedValidation.RuntimeManaged || result.ManagedValidation.Kind != "" {
+		t.Fatalf("managedValidation = %+v, want ordinary validation lifecycle without managed metadata", result.ManagedValidation)
 	}
-	resources, ok := result.Output["validationResources"].([]map[string]any)
-	if !ok || len(resources) != 2 {
-		t.Fatalf("validationResources = %#v, want process and scratch resource records", result.Output["validationResources"])
+	resources := result.ValidationResources
+	if len(resources) != 2 {
+		t.Fatalf("validationResources = %#v, want process and scratch resource records", result.ValidationResources)
 	}
 	statuses := map[string]string{}
 	for _, resource := range resources {
-		statuses[stringFromShellValue(resource["kind"])] = stringFromShellValue(resource["status"])
-		if resource["workspaceId"] != "ws-validation-scratch" ||
-			resource["runId"] != "run-validation-scratch" ||
-			resource["stepId"] != "run-validation-scratch/verify" {
+		statuses[resource.Kind] = resource.Status
+		if resource.WorkspaceID != "ws-validation-scratch" ||
+			resource.RunID != "run-validation-scratch" ||
+			resource.StepID != "run-validation-scratch/verify" {
 			t.Fatalf("resource = %+v, want scoped workspace/run/step ids", resource)
 		}
 	}
 	if statuses["process"] != "released" || statuses["scratch_dir"] != "released" {
 		t.Fatalf("resource statuses = %+v, want released process and scratch_dir", statuses)
 	}
-	runtimeDiagnostics, _ := result.Output["runtimeDiagnostics"].(map[string]any)
-	lifecycle, _ := runtimeDiagnostics["validationResourceLifecycle"].(map[string]any)
-	if lifecycle["released"] != true {
-		t.Fatalf("runtimeDiagnostics = %+v, want released ordinary validation lifecycle", runtimeDiagnostics)
+	if !result.RuntimeDiagnostics.ValidationResourceLifecycle.Released {
+		t.Fatalf("runtimeDiagnostics = %+v, want released ordinary validation lifecycle", result.RuntimeDiagnostics)
 	}
 	if _, statErr := os.Stat(scratchDirectory); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("scratchDirectory stat = %v, want removed by ordinary validation scratch cleanup", statErr)
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepRetainsValidationScratchWhenAutoCleanupDisabled(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationRetainsValidationScratchWhenAutoCleanupDisabled(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()
 	scratchDirectory := filepath.Join(os.TempDir(), "workorch-shell-validation-scratch-test", strings.NewReplacer("/", "_", " ", "_").Replace(t.Name()))
@@ -472,33 +407,28 @@ func TestRuntimeAdapter_ExecuteRuntimeStepRetainsValidationScratchWhenAutoCleanu
 		_ = os.RemoveAll(scratchDirectory)
 	})
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceID:                   "ws-validation-scratch-retain",
-		RunID:                         "run-validation-scratch-retain",
-		StepID:                        "run-validation-scratch-retain/verify",
-		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command":                      "sh",
-			"args":                         []any{"-c", "mkdir -p \"$1\"; printf retained-ok > \"$1/out.txt\"; printf retained-ok", "sh", scratchDirectory},
-			"validationScratchDir":         scratchDirectory,
-			"validationScratchAutoCleanup": false,
-			"validationEvidence": map[string]any{
-				"mode":            "runtime_behavior",
-				"observationType": "runtime_observation",
-			},
-		},
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
+		WorkspaceID:                     "ws-validation-scratch-retain",
+		RunID:                           "run-validation-scratch-retain",
+		StepID:                          "run-validation-scratch-retain/verify",
+		WorkspaceDeliverableDirectory:   deliverableDirectory,
+		Command:                         "sh",
+		Args:                            []string{"-c", "mkdir -p \"$1\"; printf retained-ok > \"$1/out.txt\"; printf retained-ok", "sh", scratchDirectory},
+		ValidationScratchDirectory:      scratchDirectory,
+		ValidationScratchAutoCleanup:    false,
+		ValidationEvidence:              runtimemodel.RuntimeValidationEvidence{Mode: "runtime_behavior", ObservationType: "runtime_observation"},
+		ValidationScratchAutoCleanupSet: true,
 	})
 	if err != nil {
-		t.Fatalf("ExecuteRuntimeStep: %v", err)
+		t.Fatalf("ExecuteOperation: %v", err)
 	}
-	resources, ok := result.Output["validationResources"].([]map[string]any)
-	if !ok || len(resources) != 2 {
-		t.Fatalf("validationResources = %#v, want process and scratch resource records", result.Output["validationResources"])
+	resources := result.ValidationResources
+	if len(resources) != 2 {
+		t.Fatalf("validationResources = %#v, want process and scratch resource records", result.ValidationResources)
 	}
 	statuses := map[string]string{}
 	for _, resource := range resources {
-		statuses[stringFromShellValue(resource["kind"])] = stringFromShellValue(resource["status"])
+		statuses[resource.Kind] = resource.Status
 	}
 	if statuses["scratch_dir"] != "retained" {
 		t.Fatalf("resource statuses = %+v, want retained scratch_dir", statuses)
@@ -508,72 +438,63 @@ func TestRuntimeAdapter_ExecuteRuntimeStepRetainsValidationScratchWhenAutoCleanu
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepClassifiesUnavailableCommand(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationClassifiesUnavailableCommand(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()
 	command := "workorch-command-that-should-not-exist"
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command": command,
-		},
+		Command:                       command,
 	})
 	if err == nil {
-		t.Fatal("ExecuteRuntimeStep err = nil, want command lookup failure")
+		t.Fatal("ExecuteOperation err = nil, want command lookup failure")
 	}
-	if result.Output["status"] != "failed" {
-		t.Fatalf("status = %v, want failed", result.Output["status"])
+	if result.Status != "failed" {
+		t.Fatalf("status = %v, want failed", result.Status)
 	}
-	if result.Output["failureReason"] != "command_not_found" || result.Output["unavailableCommand"] != command || result.Output["capabilityUnavailable"] != true {
-		t.Fatalf("output = %+v, want command-not-found metadata", result.Output)
+	if result.FailureReason != "command_not_found" || result.UnavailableCommand != command || result.CapabilityMissing != true {
+		t.Fatalf("output = %+v, want command-not-found metadata", result)
 	}
-	diagnostics, ok := result.Output["runtimeDiagnostics"].(map[string]any)
-	if !ok {
-		t.Fatalf("runtimeDiagnostics = %T, want map", result.Output["runtimeDiagnostics"])
-	}
-	if diagnostics["kind"] != "runtime_capability_unavailable" || diagnostics["unavailableCommand"] != command {
+	diagnostics := result.RuntimeDiagnostics
+	if diagnostics.Kind != "runtime_capability_unavailable" || diagnostics.UnavailableCommand != command {
 		t.Fatalf("runtimeDiagnostics = %+v, want runtime capability unavailable", diagnostics)
 	}
-	validationDiagnostic, ok := result.Output["validationFailureDiagnostic"].(map[string]any)
-	if !ok {
-		t.Fatalf("validationFailureDiagnostic = %T, want map", result.Output["validationFailureDiagnostic"])
+	validationDiagnostic := result.ValidationFailureDiagnostic
+	if validationDiagnostic == nil {
+		t.Fatal("validationFailureDiagnostic = nil, want environment missing diagnostic")
 	}
-	if validationDiagnostic["class"] != runtimemodel.ValidationDiagnosticEnvironmentMissing {
+	if validationDiagnostic.Class != runtimemodel.ValidationDiagnosticEnvironmentMissing {
 		t.Fatalf("validationFailureDiagnostic = %+v, want environment missing", validationDiagnostic)
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepReturnsPolicyDiagnostic(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationReturnsPolicyDiagnostic(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: t.TempDir(),
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command": "kill",
-			"args":    []any{"123"},
-		},
+		Command:                       "kill",
+		Args:                          []string{"123"},
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("ExecuteRuntimeStep err = %v, want invalid argument", err)
+		t.Fatalf("ExecuteOperation err = %v, want invalid argument", err)
 	}
-	if result.Output["stage"] != "shell_command_policy_rejected" {
-		t.Fatalf("stage = %v, want shell_command_policy_rejected", result.Output["stage"])
+	if result.Stage != "shell_command_policy_rejected" {
+		t.Fatalf("stage = %v, want shell_command_policy_rejected", result.Stage)
 	}
-	diagnostic, ok := result.Output["validationFailureDiagnostic"].(map[string]any)
-	if !ok {
-		t.Fatalf("validationFailureDiagnostic = %T, want map", result.Output["validationFailureDiagnostic"])
+	diagnostic := result.ValidationFailureDiagnostic
+	if diagnostic == nil {
+		t.Fatal("validationFailureDiagnostic = nil, want command invalid policy diagnostic")
 	}
-	if diagnostic["class"] != runtimemodel.ValidationDiagnosticCommandInvalid ||
-		diagnostic["commandPolicyViolation"] != true ||
-		diagnostic["recommendedEvidenceTargetType"] != runtimemodel.ValidationEvidenceTargetCommandContract {
+	if diagnostic.Class != runtimemodel.ValidationDiagnosticCommandInvalid ||
+		!diagnostic.CommandPolicyViolation ||
+		diagnostic.RecommendedEvidenceTargetType != runtimemodel.ValidationEvidenceTargetCommandContract {
 		t.Fatalf("validationFailureDiagnostic = %+v, want command invalid policy diagnostic", diagnostic)
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepReleasesManagedValidationScratchOnPolicyReject(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationReleasesManagedValidationScratchOnPolicyReject(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()
 	scratchDirectory := filepath.Join(os.TempDir(), "workorch-shell-managed-validation-test", strings.NewReplacer("/", "_", " ", "_").Replace(t.Name()))
@@ -584,37 +505,31 @@ func TestRuntimeAdapter_ExecuteRuntimeStepReleasesManagedValidationScratchOnPoli
 		_ = os.RemoveAll(scratchDirectory)
 	})
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceID:                   "ws-managed-validation-policy-reject",
 		RunID:                         "run-managed-validation-policy-reject",
 		StepID:                        "run-managed-validation-policy-reject/verify",
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command":              "kill",
-			"args":                 []any{"123"},
-			"validationScratchDir": scratchDirectory,
-			"managedValidation": map[string]any{
-				"runtimeManaged": true,
-				"autoCleanup":    true,
-			},
-		},
+		Command:                       "kill",
+		Args:                          []string{"123"},
+		ValidationScratchDirectory:    scratchDirectory,
+		ManagedValidation:             runtimemodel.RuntimeManagedValidation{RuntimeManaged: true, AutoCleanup: true, AutoCleanupSet: true},
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("ExecuteRuntimeStep err = %v, want invalid argument", err)
+		t.Fatalf("ExecuteOperation err = %v, want invalid argument", err)
 	}
-	if result.Output["stage"] != "shell_command_policy_rejected" {
-		t.Fatalf("stage = %v, want shell_command_policy_rejected", result.Output["stage"])
+	if result.Stage != "shell_command_policy_rejected" {
+		t.Fatalf("stage = %v, want shell_command_policy_rejected", result.Stage)
 	}
-	resources, ok := result.Output["validationResources"].([]map[string]any)
-	if !ok || len(resources) != 1 {
-		t.Fatalf("validationResources = %#v, want released scratch resource", result.Output["validationResources"])
+	resources := result.ValidationResources
+	if len(resources) != 1 {
+		t.Fatalf("validationResources = %#v, want released scratch resource", result.ValidationResources)
 	}
-	if resources[0]["kind"] != "scratch_dir" || resources[0]["status"] != "released" {
+	if resources[0].Kind != "scratch_dir" || resources[0].Status != "released" {
 		t.Fatalf("resource = %+v, want released scratch_dir", resources[0])
 	}
-	managed, _ := result.Output["managedValidation"].(map[string]any)
-	if managed["resourcesReleased"] != true {
+	managed := result.ManagedValidation
+	if !managed.ResourcesReleased {
 		t.Fatalf("managedValidation = %+v, want resources released", managed)
 	}
 	if _, statErr := os.Stat(scratchDirectory); !errors.Is(statErr, os.ErrNotExist) {
@@ -622,7 +537,7 @@ func TestRuntimeAdapter_ExecuteRuntimeStepReleasesManagedValidationScratchOnPoli
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepAllowsManagedValidationProcessLifecycle(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationAllowsManagedValidationProcessLifecycle(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()
 	scratchDirectory := filepath.Join(os.TempDir(), "workorch-shell-managed-validation-test", strings.NewReplacer("/", "_", " ", "_").Replace(t.Name()))
@@ -633,107 +548,85 @@ func TestRuntimeAdapter_ExecuteRuntimeStepAllowsManagedValidationProcessLifecycl
 		_ = os.RemoveAll(scratchDirectory)
 	})
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceID:                   "ws-managed-validation-process",
 		RunID:                         "run-managed-validation-process",
 		StepID:                        "run-managed-validation-process/verify",
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command":              "sh",
-			"args":                 []any{"-c", "sleep 10 & pid=$!; sleep 0.1; kill $pid; wait $pid 2>/dev/null || true; printf managed-ok"},
-			"validationScratchDir": scratchDirectory,
-			"managedValidation": map[string]any{
-				"runtimeManaged": true,
-				"autoCleanup":    true,
-			},
-		},
+		Command:                       "sh",
+		Args:                          []string{"-c", "sleep 10 & pid=$!; sleep 0.1; kill $pid; wait $pid 2>/dev/null || true; printf managed-ok"},
+		ValidationScratchDirectory:    scratchDirectory,
+		ManagedValidation:             runtimemodel.RuntimeManagedValidation{RuntimeManaged: true, AutoCleanup: true, AutoCleanupSet: true},
 	})
 	if err != nil {
-		t.Fatalf("ExecuteRuntimeStep err = %v, want managed validation process lifecycle allowed", err)
+		t.Fatalf("ExecuteOperation err = %v, want managed validation process lifecycle allowed", err)
 	}
-	if result.Output["status"] != "completed" || !strings.Contains(fmt.Sprint(result.Output["stdout"]), "managed-ok") {
-		t.Fatalf("output = %+v, want completed managed validation shell", result.Output)
+	if result.Status != "completed" || !strings.Contains(fmt.Sprint(result.Stdout), "managed-ok") {
+		t.Fatalf("output = %+v, want completed managed validation shell", result)
 	}
-	managed, _ := result.Output["managedValidation"].(map[string]any)
-	if managed["resourcesReleased"] != true {
+	managed := result.ManagedValidation
+	if !managed.ResourcesReleased {
 		t.Fatalf("managedValidation = %+v, want resources released", managed)
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepRejectsManagedValidationGlobalProcessTermination(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationRejectsManagedValidationGlobalProcessTermination(t *testing.T) {
 	adapter := NewRuntimeAdapter()
-	_, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	_, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: t.TempDir(),
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command": "sh",
-			"args":    []any{"-c", "pkill -f workorch || true"},
-			"managedValidation": map[string]any{
-				"runtimeManaged": true,
-			},
-		},
+		Command:                       "sh",
+		Args:                          []string{"-c", "pkill -f workorch || true"},
+		ManagedValidation:             runtimemodel.RuntimeManagedValidation{RuntimeManaged: true},
 	})
 	if err == nil {
-		t.Fatal("ExecuteRuntimeStep err = nil, want managed validation to reject global process termination")
+		t.Fatal("ExecuteOperation err = nil, want managed validation to reject global process termination")
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepRejectsManagedValidationBackgroundWithoutWait(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationRejectsManagedValidationBackgroundWithoutWait(t *testing.T) {
 	adapter := NewRuntimeAdapter()
-	_, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	_, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: t.TempDir(),
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command": "sh",
-			"args":    []any{"-c", "sleep 10 & printf started"},
-			"managedValidation": map[string]any{
-				"runtimeManaged": true,
-			},
-		},
+		Command:                       "sh",
+		Args:                          []string{"-c", "sleep 10 & printf started"},
+		ManagedValidation:             runtimemodel.RuntimeManagedValidation{RuntimeManaged: true},
 	})
 	if err == nil {
-		t.Fatal("ExecuteRuntimeStep err = nil, want managed validation to reject background process without wait")
+		t.Fatal("ExecuteOperation err = nil, want managed validation to reject background process without wait")
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepBoundsCommandOutput(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationBoundsCommandOutput(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command": "sh",
-			"args":    []any{"-c", "yes x | head -c 70000"},
-		},
+		Command:                       "sh",
+		Args:                          []string{"-c", "yes x | head -c 70000"},
 	})
 	if err != nil {
-		t.Fatalf("ExecuteRuntimeStep: %v", err)
+		t.Fatalf("ExecuteOperation: %v", err)
 	}
-	stdout, _ := result.Output["stdout"].(string)
+	stdout := result.Stdout
 	if len([]byte(stdout)) != MaxCommandOutputBytes {
 		t.Fatalf("stdout bytes = %d, want %d", len([]byte(stdout)), MaxCommandOutputBytes)
 	}
-	if result.Output["outputTruncated"] != true || result.Output["stdoutTruncated"] != true {
-		t.Fatalf("output = %+v, want stdout truncation metadata", result.Output)
+	if !result.OutputTruncated || !result.StdoutTruncated {
+		t.Fatalf("output = %+v, want stdout truncation metadata", result)
 	}
-	if result.Output["stdoutBytes"] != 70000 {
-		t.Fatalf("stdoutBytes = %v, want 70000", result.Output["stdoutBytes"])
+	if result.StdoutBytes != 70000 {
+		t.Fatalf("stdoutBytes = %v, want 70000", result.StdoutBytes)
 	}
 }
 
 func TestRuntimeAdapterAppliesConfiguredZeroWorkEvidencePolicy(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command": "sh",
-			"args":    []any{"-c", "printf 'testing: warning: no tests to run\\nPASS\\n'"},
-		},
+		Command:                       "sh",
+		Args:                          []string{"-c", "printf 'testing: warning: no tests to run\\nPASS\\n'"},
 		EvidencePolicies: []runtimemodel.RuntimeEvidencePolicy{{
 			ID: "test-zero-work", AppliesTo: "shell/command", CommandName: "sh", ArgsContain: []string{"-c"},
 			ZeroWorkMarkers: []string{"no tests to run"}, QualityOnZeroWork: string(common.EvidenceQualityInconclusive),
@@ -741,25 +634,22 @@ func TestRuntimeAdapterAppliesConfiguredZeroWorkEvidencePolicy(t *testing.T) {
 		}},
 	})
 	if err != nil {
-		t.Fatalf("ExecuteRuntimeStep: %v", err)
+		t.Fatalf("ExecuteOperation: %v", err)
 	}
-	if result.Output["evidenceQuality"] != string(common.EvidenceQualityInconclusive) ||
-		result.Output["zeroWork"] != true ||
-		result.Output["evidenceReason"] != "configured zero-work marker matched" {
-		t.Fatalf("output = %+v, want configured inconclusive zero-work evidence", result.Output)
+	if result.EvidenceQuality != string(common.EvidenceQualityInconclusive) ||
+		result.ZeroWork != true ||
+		result.EvidenceReason != "configured zero-work marker matched" {
+		t.Fatalf("output = %+v, want configured inconclusive zero-work evidence", result)
 	}
 }
 
 func TestRuntimeAdapterPrefersWorkEvidenceMarkersOverZeroWorkMarkers(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command": "sh",
-			"args":    []any{"-c", "printf '? pkg [no test files]\\n=== RUN   TestExample\\n--- PASS: TestExample (0.00s)\\nok  pkg 0.001s\\n'"},
-		},
+		Command:                       "sh",
+		Args:                          []string{"-c", "printf '? pkg [no test files]\\n=== RUN   TestExample\\n--- PASS: TestExample (0.00s)\\nok  pkg 0.001s\\n'"},
 		EvidencePolicies: []runtimemodel.RuntimeEvidencePolicy{{
 			ID: "test-work-wins", AppliesTo: "shell/command", CommandName: "sh", ArgsContain: []string{"-c"},
 			ZeroWorkMarkers: []string{"[no test files]"}, WorkEvidenceMarkers: []string{"=== RUN", "--- PASS:", "ok  "},
@@ -768,13 +658,13 @@ func TestRuntimeAdapterPrefersWorkEvidenceMarkersOverZeroWorkMarkers(t *testing.
 		}},
 	})
 	if err != nil {
-		t.Fatalf("ExecuteRuntimeStep: %v", err)
+		t.Fatalf("ExecuteOperation: %v", err)
 	}
-	if result.Output["zeroWork"] == true {
-		t.Fatalf("output = %+v, want work evidence to override zero-work marker", result.Output)
+	if result.ZeroWork == true {
+		t.Fatalf("output = %+v, want work evidence to override zero-work marker", result)
 	}
-	if result.Output["evidenceQuality"] == string(common.EvidenceQualityInconclusive) {
-		t.Fatalf("output = %+v, want evidence quality not inconclusive", result.Output)
+	if result.EvidenceQuality == string(common.EvidenceQualityInconclusive) {
+		t.Fatalf("output = %+v, want evidence quality not inconclusive", result)
 	}
 }
 
@@ -806,61 +696,55 @@ func TestSanitizeSuccessfulCommandStderrPreservesFailedCommandStderr(t *testing.
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepReturnsTimeoutOutput(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationReturnsTimeoutOutput(t *testing.T) {
 	adapter := NewRuntimeAdapterWithTimeout(10 * time.Millisecond)
 	deliverableDirectory := t.TempDir()
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command": "sh",
-			"args":    []any{"-c", "sleep 1"},
-		},
+		Command:                       "sh",
+		Args:                          []string{"-c", "sleep 1"},
 	})
 	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("ExecuteRuntimeStep err = %v, want deadline exceeded", err)
+		t.Fatalf("ExecuteOperation err = %v, want deadline exceeded", err)
 	}
-	if result.Output["status"] != "timeout" {
-		t.Fatalf("status = %v, want timeout", result.Output["status"])
+	if result.Status != "timeout" {
+		t.Fatalf("status = %v, want timeout", result.Status)
 	}
-	if result.Output["workingDir"] != deliverableDirectory {
-		t.Fatalf("workingDir = %v, want %s", result.Output["workingDir"], deliverableDirectory)
+	if result.WorkingDirectory != deliverableDirectory {
+		t.Fatalf("workingDir = %v, want %s", result.WorkingDirectory, deliverableDirectory)
 	}
-	diagnostic, ok := result.Output["validationFailureDiagnostic"].(map[string]any)
-	if !ok {
-		t.Fatalf("validationFailureDiagnostic = %T, want map", result.Output["validationFailureDiagnostic"])
+	diagnostic := result.ValidationFailureDiagnostic
+	if diagnostic == nil {
+		t.Fatal("validationFailureDiagnostic = nil, want timeout diagnostic")
 	}
-	if diagnostic["class"] != runtimemodel.ValidationDiagnosticTimeout || diagnostic["timedOut"] != true {
+	if diagnostic.Class != runtimemodel.ValidationDiagnosticTimeout || !diagnostic.TimedOut {
 		t.Fatalf("validationFailureDiagnostic = %+v, want timeout diagnostic", diagnostic)
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepTimeoutKillsProcessGroup(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationTimeoutKillsProcessGroup(t *testing.T) {
 	adapter := NewRuntimeAdapterWithTimeout(50 * time.Millisecond)
 	deliverableDirectory := t.TempDir()
 
 	startedAt := time.Now()
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command": "sh",
-			"args":    []any{"-c", "sleep 5 & wait"},
-		},
+		Command:                       "sh",
+		Args:                          []string{"-c", "sleep 5 & wait"},
 	})
 	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("ExecuteRuntimeStep err = %v, want deadline exceeded", err)
+		t.Fatalf("ExecuteOperation err = %v, want deadline exceeded", err)
 	}
 	if elapsed := time.Since(startedAt); elapsed > time.Second {
-		t.Fatalf("ExecuteRuntimeStep elapsed = %s, want process group timeout without waiting for background child", elapsed)
+		t.Fatalf("ExecuteOperation elapsed = %s, want process group timeout without waiting for background child", elapsed)
 	}
-	if result.Output["status"] != "timeout" {
-		t.Fatalf("status = %v, want timeout", result.Output["status"])
+	if result.Status != "timeout" {
+		t.Fatalf("status = %v, want timeout", result.Status)
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepReleasesManagedValidationResourcesOnTimeout(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationReleasesManagedValidationResourcesOnTimeout(t *testing.T) {
 	adapter := NewRuntimeAdapterWithTimeout(50 * time.Millisecond)
 	deliverableDirectory := t.TempDir()
 	scratchDirectory := filepath.Join(os.TempDir(), "workorch-shell-managed-validation-test", strings.NewReplacer("/", "_", " ", "_").Replace(t.Name()))
@@ -868,236 +752,207 @@ func TestRuntimeAdapter_ExecuteRuntimeStepReleasesManagedValidationResourcesOnTi
 		_ = os.RemoveAll(scratchDirectory)
 	})
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceID:                   "ws-managed-validation-timeout",
 		RunID:                         "run-managed-validation-timeout",
 		StepID:                        "run-managed-validation-timeout/verify",
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command":              "sh",
-			"args":                 []any{"-c", "mkdir -p \"$1\"; printf pending > \"$1/out.txt\"; sleep 5", "sh", scratchDirectory},
-			"validationScratchDir": scratchDirectory,
-			"managedValidation": map[string]any{
-				"runtimeManaged": true,
-				"autoCleanup":    true,
-			},
-		},
+		Command:                       "sh",
+		Args:                          []string{"-c", "mkdir -p \"$1\"; printf pending > \"$1/out.txt\"; sleep 5", "sh", scratchDirectory},
+		ValidationScratchDirectory:    scratchDirectory,
+		ManagedValidation:             runtimemodel.RuntimeManagedValidation{RuntimeManaged: true, AutoCleanup: true, AutoCleanupSet: true},
 	})
 	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("ExecuteRuntimeStep err = %v, want deadline exceeded", err)
+		t.Fatalf("ExecuteOperation err = %v, want deadline exceeded", err)
 	}
-	if result.Output["status"] != "timeout" {
-		t.Fatalf("status = %v, want timeout", result.Output["status"])
+	if result.Status != "timeout" {
+		t.Fatalf("status = %v, want timeout", result.Status)
 	}
-	resources, ok := result.Output["validationResources"].([]map[string]any)
-	if !ok || len(resources) != 2 {
-		t.Fatalf("validationResources = %#v, want process and scratch records", result.Output["validationResources"])
+	resources := result.ValidationResources
+	if len(resources) != 2 {
+		t.Fatalf("validationResources = %#v, want process and scratch records", result.ValidationResources)
 	}
 	statuses := map[string]string{}
 	for _, resource := range resources {
-		statuses[stringFromShellValue(resource["kind"])] = stringFromShellValue(resource["status"])
-		if resource["workspaceId"] != "ws-managed-validation-timeout" ||
-			resource["runId"] != "run-managed-validation-timeout" ||
-			resource["stepId"] != "run-managed-validation-timeout/verify" {
+		statuses[resource.Kind] = resource.Status
+		if resource.WorkspaceID != "ws-managed-validation-timeout" ||
+			resource.RunID != "run-managed-validation-timeout" ||
+			resource.StepID != "run-managed-validation-timeout/verify" {
 			t.Fatalf("resource = %+v, want scoped workspace/run/step ids", resource)
 		}
-		if strings.TrimSpace(stringFromShellValue(resource["releasedAt"])) == "" {
+		if strings.TrimSpace(resource.ReleasedAt) == "" {
 			t.Fatalf("resource = %+v, want releasedAt diagnostic", resource)
 		}
 	}
 	if statuses["process"] != "timeout" || statuses["scratch_dir"] != "released" {
 		t.Fatalf("resource statuses = %+v, want timeout process and released scratch", statuses)
 	}
-	managed, _ := result.Output["managedValidation"].(map[string]any)
-	if managed["resourceCount"] != 2 || managed["resourcesReleased"] != true {
+	managed := result.ManagedValidation
+	if managed.ResourceCount != 2 || !managed.ResourcesReleased {
 		t.Fatalf("managedValidation = %+v, want resources released after timeout cleanup", managed)
 	}
-	runtimeDiagnostics, _ := result.Output["runtimeDiagnostics"].(map[string]any)
-	lifecycle, _ := runtimeDiagnostics["validationResourceLifecycle"].(map[string]any)
-	if lifecycle["released"] != true {
-		t.Fatalf("runtimeDiagnostics = %+v, want released lifecycle diagnostic", runtimeDiagnostics)
+	if !result.RuntimeDiagnostics.ValidationResourceLifecycle.Released {
+		t.Fatalf("runtimeDiagnostics = %+v, want released lifecycle diagnostic", result.RuntimeDiagnostics)
 	}
 	if _, statErr := os.Stat(scratchDirectory); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("scratchDirectory stat = %v, want removed after timeout cleanup", statErr)
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepUsesInputTimeoutMillis(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationUsesInputTimeoutMillis(t *testing.T) {
 	adapter := NewRuntimeAdapterWithTimeout(time.Second)
 	deliverableDirectory := t.TempDir()
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command":       "sh",
-			"args":          []any{"-c", "sleep 0.2; echo done"},
-			"timeoutMillis": 2000,
-		},
+		Command:                       "sh",
+		Args:                          []string{"-c", "sleep 0.2; echo done"},
+		TimeoutMillis:                 2000,
 	})
 	if err != nil {
-		t.Fatalf("ExecuteRuntimeStep: %v", err)
+		t.Fatalf("ExecuteOperation: %v", err)
 	}
-	if result.Output["status"] != "completed" {
-		t.Fatalf("status = %v, want completed", result.Output["status"])
+	if result.Status != "completed" {
+		t.Fatalf("status = %v, want completed", result.Status)
 	}
-	if result.Output["timeoutMillis"] != int64(2000) {
-		t.Fatalf("timeoutMillis = %v, want 2000", result.Output["timeoutMillis"])
+	if result.TimeoutMillis != int64(2000) {
+		t.Fatalf("timeoutMillis = %v, want 2000", result.TimeoutMillis)
 	}
-	stdout, _ := result.Output["stdout"].(string)
+	stdout := result.Stdout
 	if strings.TrimSpace(stdout) != "done" {
 		t.Fatalf("stdout = %q, want done", stdout)
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepNormalizesShPipefailScriptToBash(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationNormalizesShPipefailScriptToBash(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command": "sh",
-			"args":    []any{"-c", "set -euo pipefail\nprintf ok"},
-		},
+		Command:                       "sh",
+		Args:                          []string{"-c", "set -euo pipefail\nprintf ok"},
 	})
 	if err != nil {
-		t.Fatalf("ExecuteRuntimeStep: %v", err)
+		t.Fatalf("ExecuteOperation: %v", err)
 	}
-	if result.Output["status"] != "completed" {
-		t.Fatalf("status = %v, want completed", result.Output["status"])
+	if result.Status != "completed" {
+		t.Fatalf("status = %v, want completed", result.Status)
 	}
-	if result.Output["command"] != "sh" || result.Output["actualCommand"] != "bash" {
-		t.Fatalf("command fields = %+v, want requested sh executed by bash", result.Output)
+	if result.Command != "sh" || result.ActualCommand != "bash" {
+		t.Fatalf("command fields = %+v, want requested sh executed by bash", result)
 	}
-	if result.Output["commandNormalization"] != "sh_script_requires_bash_pipefail" {
-		t.Fatalf("commandNormalization = %v, want pipefail normalization", result.Output["commandNormalization"])
+	if result.CommandNormalization != "sh_script_requires_bash_pipefail" {
+		t.Fatalf("commandNormalization = %v, want pipefail normalization", result.CommandNormalization)
 	}
-	stdout, _ := result.Output["stdout"].(string)
+	stdout := result.Stdout
 	if strings.TrimSpace(stdout) != "ok" {
 		t.Fatalf("stdout = %q, want ok", stdout)
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepNormalizesShPipeStatusScriptToBash(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationNormalizesShPipeStatusScriptToBash(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command": "sh",
-			"args":    []any{"-c", `false | true; printf 'first_status=%s\n' "${PIPESTATUS[0]}"`},
-		},
+		Command:                       "sh",
+		Args:                          []string{"-c", `false | true; printf 'first_status=%s\n' "${PIPESTATUS[0]}"`},
 	})
 	if err != nil {
-		t.Fatalf("ExecuteRuntimeStep: %v output=%+v", err, result.Output)
+		t.Fatalf("ExecuteOperation: %v output=%+v", err, result)
 	}
-	if result.Output["status"] != "completed" {
-		t.Fatalf("status = %v, want completed", result.Output["status"])
+	if result.Status != "completed" {
+		t.Fatalf("status = %v, want completed", result.Status)
 	}
-	if result.Output["command"] != "sh" || result.Output["actualCommand"] != "bash" {
-		t.Fatalf("command fields = %+v, want requested sh executed by bash", result.Output)
+	if result.Command != "sh" || result.ActualCommand != "bash" {
+		t.Fatalf("command fields = %+v, want requested sh executed by bash", result)
 	}
-	if result.Output["commandNormalization"] != "sh_script_requires_bash_pipestatus" {
-		t.Fatalf("commandNormalization = %v, want pipestatus normalization", result.Output["commandNormalization"])
+	if result.CommandNormalization != "sh_script_requires_bash_pipestatus" {
+		t.Fatalf("commandNormalization = %v, want pipestatus normalization", result.CommandNormalization)
 	}
-	stdout, _ := result.Output["stdout"].(string)
+	stdout := result.Stdout
 	if strings.TrimSpace(stdout) != "first_status=1" {
 		t.Fatalf("stdout = %q, want first_status=1", stdout)
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepWrapsCompoundCommandWithShell(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationWrapsCompoundCommandWithShell(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: deliverableDirectory,
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command": "cd",
-			"args":    []any{".", "&&", "pwd"},
-		},
+		Command:                       "cd",
+		Args:                          []string{".", "&&", "pwd"},
 	})
 	if err != nil {
-		t.Fatalf("ExecuteRuntimeStep: %v", err)
+		t.Fatalf("ExecuteOperation: %v", err)
 	}
-	if result.Output["commandNormalization"] != "compound_command_wrapped_with_sh_c" {
-		t.Fatalf("commandNormalization = %v, want compound command normalization", result.Output["commandNormalization"])
+	if result.CommandNormalization != "compound_command_wrapped_with_sh_c" {
+		t.Fatalf("commandNormalization = %v, want compound command normalization", result.CommandNormalization)
 	}
-	stdout, _ := result.Output["stdout"].(string)
+	stdout := result.Stdout
 	if strings.TrimSpace(stdout) != deliverableDirectory {
 		t.Fatalf("stdout = %q, want deliverable directory %q", stdout, deliverableDirectory)
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepRejectsDangerousCompoundCommandAfterWrapping(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationRejectsDangerousCompoundCommandAfterWrapping(t *testing.T) {
 	adapter := NewRuntimeAdapter()
-	_, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	_, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: t.TempDir(),
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command": "echo",
-			"args":    []any{"ok", "&&", "sudo", "true"},
-		},
+		Command:                       "echo",
+		Args:                          []string{"ok", "&&", "sudo", "true"},
 	})
 	if err == nil {
-		t.Fatal("ExecuteRuntimeStep err = nil, want invalid argument")
+		t.Fatal("ExecuteOperation err = nil, want invalid argument")
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepRejectsInvalidInputTimeoutMillis(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationRejectsInvalidInputTimeoutMillis(t *testing.T) {
 	adapter := NewRuntimeAdapter()
-	_, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	_, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: t.TempDir(),
-		Kind:                          "shell/command",
-		Input: map[string]any{
-			"command":       "pwd",
-			"timeoutMillis": 500,
-		},
+		Command:                       "pwd",
+		TimeoutMillis:                 500,
 	})
 	if err == nil {
-		t.Fatal("ExecuteRuntimeStep err = nil, want invalid argument")
+		t.Fatal("ExecuteOperation err = nil, want invalid argument")
 	}
 }
 
-func TestRuntimeAdapter_ExecuteRuntimeStepRejectsDangerousCommands(t *testing.T) {
+func TestRuntimeAdapter_ExecuteOperationRejectsDangerousCommands(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	cases := []struct {
 		name    string
 		command string
-		args    []any
+		args    []string
 	}{
-		{name: "sudo", command: "sudo", args: []any{"true"}},
-		{name: "rm root", command: "rm", args: []any{"-rf", "/"}},
-		{name: "rm git", command: "rm", args: []any{"-rf", ".git"}},
-		{name: "chmod 777", command: "chmod", args: []any{"777", "file.txt"}},
-		{name: "git force push", command: "git", args: []any{"push", "--force"}},
-		{name: "shell script", command: "sh", args: []any{"-c", "rm -rf /tmp/project/.git"}},
-		{name: "direct kill", command: "kill", args: []any{"1234"}},
-		{name: "direct pkill", command: "pkill", args: []any{"workorch"}},
-		{name: "direct killall", command: "killall", args: []any{"workorch"}},
-		{name: "fuser kill port", command: "fuser", args: []any{"-k", "8080/tcp"}},
-		{name: "shell fuser kill port", command: "sh", args: []any{"-c", "fuser -k 8080/tcp 2>/dev/null || true"}},
-		{name: "shell lsof xargs kill", command: "sh", args: []any{"-c", "lsof -ti :8080 | xargs kill -9"}},
-		{name: "shell detached background", command: "sh", args: []any{"-c", "./service >/tmp/service.log 2>&1 & echo $!"}},
+		{name: "sudo", command: "sudo", args: []string{"true"}},
+		{name: "rm root", command: "rm", args: []string{"-rf", "/"}},
+		{name: "rm git", command: "rm", args: []string{"-rf", ".git"}},
+		{name: "chmod 777", command: "chmod", args: []string{"777", "file.txt"}},
+		{name: "git force push", command: "git", args: []string{"push", "--force"}},
+		{name: "shell script", command: "sh", args: []string{"-c", "rm -rf /tmp/project/.git"}},
+		{name: "direct kill", command: "kill", args: []string{"1234"}},
+		{name: "direct pkill", command: "pkill", args: []string{"workorch"}},
+		{name: "direct killall", command: "killall", args: []string{"workorch"}},
+		{name: "fuser kill port", command: "fuser", args: []string{"-k", "8080/tcp"}},
+		{name: "shell fuser kill port", command: "sh", args: []string{"-c", "fuser -k 8080/tcp 2>/dev/null || true"}},
+		{name: "shell lsof xargs kill", command: "sh", args: []string{"-c", "lsof -ti :8080 | xargs kill -9"}},
+		{name: "shell detached background", command: "sh", args: []string{"-c", "./service >/tmp/service.log 2>&1 & echo $!"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+			_, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 				WorkspaceDeliverableDirectory: t.TempDir(),
-				Kind:                          "shell/command",
-				Input: map[string]any{
-					"command": tc.command,
-					"args":    tc.args,
-				},
+				Command:                       tc.command,
+				Args:                          tc.args,
 			})
 			if err == nil {
-				t.Fatal("ExecuteRuntimeStep err = nil, want invalid argument")
+				t.Fatal("ExecuteOperation err = nil, want invalid argument")
 			}
 		})
 	}

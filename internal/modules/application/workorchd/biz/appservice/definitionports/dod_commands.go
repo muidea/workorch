@@ -4,6 +4,7 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
@@ -20,11 +21,16 @@ func ListDoDsByWorkspace(ctx context.Context, hub magicevent.Hub, workspaceID co
 }
 
 func DefineDoD(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, dodID common.DoDID, items []string) (*workspacemodel.DoD, error) {
-	response, err := sendDefinitionMagicCommand[workspaceevents.DefineDoDCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceCommandDefineDoD, workspaceevents.CommandDestination, "dod", string(dodID), workspaceID, workspaceevents.DefineDoDCommand{
+	if hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandDefineDoD, "application/workorchd/appservice", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.DefineDoDCommand{
 		DoDID:       dodID,
 		WorkspaceID: workspaceID,
 		Items:       append([]string(nil), items...),
 	})
+	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandDefineDoD, "dod", string(dodID), workspaceID, "", "")
+	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandDefineDoD)
 	if err != nil {
 		return nil, err
 	}
@@ -38,11 +44,16 @@ func UpdateDoD(ctx context.Context, hub magicevent.Hub, workspaceID common.Works
 	if workspaceID == "" {
 		workspaceID = common.RuntimeWorkspaceIDFromContext(ctx)
 	}
-	response, err := sendDefinitionMagicCommand[workspaceevents.UpdateDoDCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceCommandUpdateDoD, workspaceevents.CommandDestination, "dod", string(dodID), workspaceID, workspaceevents.UpdateDoDCommand{
+	if hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandUpdateDoD, "application/workorchd/appservice", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.UpdateDoDCommand{
 		WorkspaceID: workspaceID,
 		DoDID:       dodID,
 		Items:       append([]string(nil), items...),
 	})
+	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandUpdateDoD, "dod", string(dodID), workspaceID, "", "")
+	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandUpdateDoD)
 	if err != nil {
 		return nil, err
 	}
@@ -56,6 +67,11 @@ func DeleteDoD(ctx context.Context, hub magicevent.Hub, workspaceID common.Works
 	if workspaceID == "" {
 		workspaceID = common.RuntimeWorkspaceIDFromContext(ctx)
 	}
-	_, err := sendDefinitionMagicCommand[workspaceevents.DeleteDoDCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceCommandDeleteDoD, workspaceevents.CommandDestination, "dod", string(dodID), workspaceID, workspaceevents.DeleteDoDCommand{WorkspaceID: workspaceID, DoDID: dodID})
+	if hub == nil {
+		return common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandDeleteDoD, "application/workorchd/appservice", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.DeleteDoDCommand{WorkspaceID: workspaceID, DoDID: dodID})
+	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandDeleteDoD, "dod", string(dodID), workspaceID, "", "")
+	_, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandDeleteDoD)
 	return err
 }

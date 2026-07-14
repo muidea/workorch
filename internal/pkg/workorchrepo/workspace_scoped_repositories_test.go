@@ -15,7 +15,17 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
+
+func mustWorkspaceScopedPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
+	t.Helper()
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
 
 func TestWorkspaceScopedGovernanceGetRequiresUniqueUnscopedID(t *testing.T) {
 	ctx := context.Background()
@@ -195,7 +205,7 @@ func TestWorkspaceScopedEventRecordListHonorsRunScopeCursorAndLimit(t *testing.T
 			OccurredAt:  "2026-06-16T00:01:00Z",
 			WorkspaceID: workspaceID,
 			RunID:       "run-a",
-			Payload:     map[string]any{"state": "running"},
+			Payload:     mustWorkspaceScopedPayload(t, map[string]any{"state": "running"}),
 		},
 		{
 			ID:          "evt-run-a-002",
@@ -203,7 +213,7 @@ func TestWorkspaceScopedEventRecordListHonorsRunScopeCursorAndLimit(t *testing.T
 			OccurredAt:  "2026-06-16T00:02:00Z",
 			WorkspaceID: workspaceID,
 			RunID:       "run-a",
-			Payload:     map[string]any{"state": "completed"},
+			Payload:     mustWorkspaceScopedPayload(t, map[string]any{"state": "completed"}),
 		},
 		{
 			ID:          "evt-run-b-001",
@@ -211,7 +221,7 @@ func TestWorkspaceScopedEventRecordListHonorsRunScopeCursorAndLimit(t *testing.T
 			OccurredAt:  "2026-06-16T00:03:00Z",
 			WorkspaceID: workspaceID,
 			RunID:       "run-b",
-			Payload:     map[string]any{"state": "running"},
+			Payload:     mustWorkspaceScopedPayload(t, map[string]any{"state": "running"}),
 		},
 	}
 	for _, record := range records {
@@ -277,7 +287,7 @@ func TestWorkspaceScopedEventRecordWorkspaceLatestUsesBoundedPerRunLists(t *test
 			OccurredAt:  "2026-06-16T00:01:00Z",
 			WorkspaceID: workspaceID,
 			RunID:       "run-a",
-			Payload:     map[string]any{"state": "old"},
+			Payload:     mustWorkspaceScopedPayload(t, map[string]any{"state": "old"}),
 		},
 		{
 			ID:          "evt-run-a-002",
@@ -285,7 +295,7 @@ func TestWorkspaceScopedEventRecordWorkspaceLatestUsesBoundedPerRunLists(t *test
 			OccurredAt:  "2026-06-16T00:02:00Z",
 			WorkspaceID: workspaceID,
 			RunID:       "run-a",
-			Payload:     map[string]any{"state": "latest-a"},
+			Payload:     mustWorkspaceScopedPayload(t, map[string]any{"state": "latest-a"}),
 		},
 		{
 			ID:          "evt-run-b-001",
@@ -293,7 +303,7 @@ func TestWorkspaceScopedEventRecordWorkspaceLatestUsesBoundedPerRunLists(t *test
 			OccurredAt:  "2026-06-16T00:03:00Z",
 			WorkspaceID: workspaceID,
 			RunID:       "run-b",
-			Payload:     map[string]any{"state": "latest-b"},
+			Payload:     mustWorkspaceScopedPayload(t, map[string]any{"state": "latest-b"}),
 		},
 	} {
 		if err := repos.EventRecords.Append(scoped, record); err != nil {

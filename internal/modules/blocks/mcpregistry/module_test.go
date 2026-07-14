@@ -8,8 +8,8 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/eventvalue"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
@@ -178,12 +178,13 @@ func TestModuleMCPCapabilityCommandsUseStructuredRegistryContract(t *testing.T) 
 	if capability == nil || capability.ID != "mcp-server-contract:tool:repo.summary" {
 		t.Fatalf("capability = %+v, want created capability", capability)
 	}
+	schemaType, _ := capability.Schema.String("type")
 	if capability.Kind != "tool" ||
 		capability.Category != "repository" ||
 		capability.RiskLevel != "read_only" ||
 		capability.ApprovalPolicy != "read_only" ||
 		len(capability.StageHints) != 2 ||
-		capability.Schema["type"] != "object" {
+		schemaType != "object" {
 		t.Fatalf("capability = %+v, want structured policy/capability fields preserved", capability)
 	}
 
@@ -202,11 +203,11 @@ func TestModuleMCPCapabilityCommandsUseStructuredRegistryContract(t *testing.T) 
 	}
 }
 
-func mustMCPPayload(t *testing.T, input map[string]any) eventvalue.Payload {
+func mustMCPPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
 	t.Helper()
-	payload, err := eventvalue.FromMap(input)
+	payload, err := workorcheventpayload.FromMap(input)
 	if err != nil {
-		t.Fatalf("eventvalue.FromMap: %v", err)
+		t.Fatalf("workorcheventpayload.FromMap: %v", err)
 	}
 	return payload
 }

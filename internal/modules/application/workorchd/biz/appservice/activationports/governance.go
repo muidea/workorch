@@ -10,6 +10,7 @@ import (
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -68,18 +69,18 @@ func RejectedResultContinuation(ctx context.Context, hub magicevent.Hub, workspa
 func runtimeV2GovernanceHistoryEntry(ticket *decisionmodel.Ticket, resolution *decisionmodel.Resolution) runtimecontract.RuntimeGovernanceHistoryEntry {
 	recoveryAction := firstRuntimeV2ContinuationString(
 		resolution.ContinuationAction,
-		continuationMapString(resolution.Payload, "recoveryAction"),
+		continuationPayloadString(resolution.Payload, "recoveryAction"),
 	)
 	return runtimecontract.RuntimeGovernanceHistoryEntry{
 		TicketID: ticket.ID, RunID: ticket.RunID, StepID: ticket.StepID,
 		DecisionKind: ticket.DecisionKind, Reason: ticket.Reason, Question: ticket.Question,
 		ResolutionID: resolution.ID, ResolutionType: resolution.Type, RecoveryAction: recoveryAction,
 		ResolutionSummary: firstRuntimeV2ContinuationString(
-			continuationMapString(resolution.Payload, "summary"),
-			continuationMapString(resolution.Payload, "answer"),
-			continuationMapString(resolution.Payload, "note"),
-			continuationMapString(resolution.Payload, "resumeInstruction"),
-			continuationMapString(resolution.Payload, "reason"),
+			continuationPayloadString(resolution.Payload, "summary"),
+			continuationPayloadString(resolution.Payload, "answer"),
+			continuationPayloadString(resolution.Payload, "note"),
+			continuationPayloadString(resolution.Payload, "resumeInstruction"),
+			continuationPayloadString(resolution.Payload, "reason"),
 		),
 		Failure: runtimeV2ContinuationFailure(ticket),
 	}.Normalized()
@@ -91,19 +92,19 @@ func runtimeV2ContinuationFailure(ticket *decisionmodel.Ticket) *runtimecontract
 	}
 	contextData := ticket.Context
 	value := runtimecontract.RuntimeContinuationFailure{
-		Class:      firstRuntimeV2ContinuationString(ticket.FailureClass, continuationMapString(contextData, "failureClass")),
-		Signature:  firstRuntimeV2ContinuationString(ticket.FailureSignature, continuationMapString(contextData, "failureSignature")),
+		Class:      firstRuntimeV2ContinuationString(ticket.FailureClass, continuationPayloadString(contextData, "failureClass")),
+		Signature:  firstRuntimeV2ContinuationString(ticket.FailureSignature, continuationPayloadString(contextData, "failureSignature")),
 		TargetRefs: runtimeV2ContinuationTargetRefs(contextData),
 		FailedStepID: common.StepID(firstRuntimeV2ContinuationString(
-			continuationMapString(contextData, "failedStepId"), string(ticket.StepID),
+			continuationPayloadString(contextData, "failedStepId"), string(ticket.StepID),
 		)),
-		FailedStepKind: continuationMapString(contextData, "failedStepKind"),
+		FailedStepKind: continuationPayloadString(contextData, "failedStepKind"),
 		Summary: firstRuntimeV2ContinuationString(
-			continuationMapString(contextData, "failureReason"),
-			continuationMapString(contextData, "repairObjective"),
+			continuationPayloadString(contextData, "failureReason"),
+			continuationPayloadString(contextData, "repairObjective"),
 			ticket.Reason,
 		),
-		RecoveryPolicy: continuationMapString(contextData, "recoveryPolicy"),
+		RecoveryPolicy: continuationPayloadString(contextData, "recoveryPolicy"),
 	}.Normalized()
 	if value.Class == "" && value.Signature == "" && len(value.TargetRefs) == 0 && value.FailedStepID == "" && value.FailedStepKind == "" && value.Summary == "" && value.RecoveryPolicy == "" {
 		return nil
@@ -118,9 +119,9 @@ func runtimeV2RejectedResultContinuation(item *resultmodel.Result) runtimecontra
 		RequiredEvidence:  append(append(append([]string(nil), item.SummaryDetail.NextActions...), item.SummaryDetail.ResidualRisks...), item.SummaryDetail.KnownLimitations...),
 		EvidenceRefs:      append(append([]string(nil), item.EvidenceRefs...), item.SummaryDetail.EvidenceRefs...),
 		ArtifactRefs:      append(append([]common.ArtifactID(nil), item.ArtifactRefs...), item.SummaryDetail.ArtifactRefs...),
-		GateFailureReason: continuationMapString(item.SummaryDetail.Diagnostics, "gateFailureReason"),
-		RejectionReason:   continuationMapString(item.SummaryDetail.Diagnostics, "rejectionReason"),
-		SourceSummary:     continuationMapString(item.SummaryDetail.Diagnostics, "sourceSummary"),
+		GateFailureReason: continuationPayloadString(item.SummaryDetail.Diagnostics, "gateFailureReason"),
+		RejectionReason:   continuationPayloadString(item.SummaryDetail.Diagnostics, "rejectionReason"),
+		SourceSummary:     continuationPayloadString(item.SummaryDetail.Diagnostics, "sourceSummary"),
 	}
 	for _, value := range item.DoDAssessment.Items {
 		continuationItem := runtimecontract.RuntimeContinuationItem{
@@ -157,10 +158,33 @@ func runtimeV2RejectedCoverageGaps(coverage *resultmodel.DoDCoverage, scope stri
 	return ret
 }
 
-func runtimeV2ContinuationTargetRefs(input map[string]any) []string {
+func runtimeV2ContinuationTargetRefs(input workorcheventpayload.Payload) []string {
 	refs := make([]string, 0)
 	for _, key := range []string{"failureTargetScope", "targetRef", "targetRefs", "repairTargetSet"} {
-		refs = appendRuntimeV2ContinuationRefs(refs, input[key])
+		if value, ok := input.Field(key); ok {
+			refs = appendRuntimeV2ContinuationPayloadRefs(refs, value)
+		}
+	}
+	return refs
+}
+
+func appendRuntimeV2ContinuationPayloadRefs(refs []string, value workorcheventpayload.Value) []string {
+	switch value.Kind {
+	case workorcheventpayload.ValueString:
+		if text := strings.TrimSpace(value.String); text != "" {
+			refs = append(refs, text)
+		}
+	case workorcheventpayload.ValueArray:
+		for _, item := range value.Array {
+			refs = appendRuntimeV2ContinuationPayloadRefs(refs, item)
+		}
+	case workorcheventpayload.ValueObject:
+		object := workorcheventpayload.Payload{Fields: value.Object}
+		for _, key := range []string{"targetRef", "targetRefs", "path", "uri", "resourceRef", "subjectRef", "workspaceRelativePath"} {
+			if nested, ok := object.Field(key); ok {
+				refs = appendRuntimeV2ContinuationPayloadRefs(refs, nested)
+			}
+		}
 	}
 	return refs
 }
@@ -187,11 +211,8 @@ func appendRuntimeV2ContinuationRefs(refs []string, value any) []string {
 	return refs
 }
 
-func continuationMapString(input map[string]any, key string) string {
-	if len(input) == 0 {
-		return ""
-	}
-	value, _ := input[key].(string)
+func continuationPayloadString(input workorcheventpayload.Payload, key string) string {
+	value, _ := input.String(key)
 	return compactRuntimeV2ContinuationText(value)
 }
 

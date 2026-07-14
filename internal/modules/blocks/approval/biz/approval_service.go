@@ -3,7 +3,6 @@ package approval
 import (
 	"context"
 	"errors"
-	"reflect"
 	"strings"
 	"time"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 type Service struct {
@@ -140,7 +140,7 @@ func (s *Service) EnsureRejectedAndReturn(ctx context.Context, cmd approvalcontr
 	return item, nil
 }
 
-func (s *Service) resolve(ctx context.Context, approvalID common.ApprovalID, target common.ApprovalState, context map[string]any) error {
+func (s *Service) resolve(ctx context.Context, approvalID common.ApprovalID, target common.ApprovalState, context workorcheventpayload.Payload) error {
 	if approvalID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -156,7 +156,7 @@ func (s *Service) resolve(ctx context.Context, approvalID common.ApprovalID, tar
 	return s.resolveItem(ctx, item, target, context)
 }
 
-func (s *Service) resolveItem(ctx context.Context, item *approvalModel.Approval, target common.ApprovalState, resolutionContext map[string]any) error {
+func (s *Service) resolveItem(ctx context.Context, item *approvalModel.Approval, target common.ApprovalState, resolutionContext workorcheventpayload.Payload) error {
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -182,10 +182,6 @@ func (s *Service) publishApprovalChanged(ctx context.Context, topic string, item
 	if s == nil || s.commandHub == nil || item == nil {
 		return nil
 	}
-	contextFields, err := approvalEvidenceFields(item.Context)
-	if err != nil {
-		return err
-	}
 	event := magicevent.NewEventWithContext(
 		topic,
 		modulecommon.ModuleID,
@@ -199,7 +195,7 @@ func (s *Service) publishApprovalChanged(ctx context.Context, topic string, item
 			StepID:      item.StepID,
 			Reason:      item.Reason,
 			Action:      item.Action,
-			Context:     contextFields,
+			Context:     item.Context.Clone().Fields,
 			State:       item.State,
 		},
 	)
@@ -214,15 +210,8 @@ func (s *Service) publishApprovalChanged(ctx context.Context, topic string, item
 	return nil
 }
 
-func cloneApprovalContext(input map[string]any) map[string]any {
-	if input == nil {
-		return nil
-	}
-	ret := make(map[string]any, len(input))
-	for key, value := range input {
-		ret[key] = value
-	}
-	return ret
+func cloneApprovalContext(input workorcheventpayload.Payload) workorcheventpayload.Payload {
+	return input.Clone()
 }
 
 func firstNonEmptyApprovalString(values ...string) string {
@@ -234,25 +223,15 @@ func firstNonEmptyApprovalString(values ...string) string {
 	return ""
 }
 
-func approvalStringValue(input map[string]any, key string) string {
-	value, _ := input[key].(string)
+func approvalStringValue(input workorcheventpayload.Payload, key string) string {
+	value, _ := input.String(key)
 	return value
 }
 
-func mergeApprovalContext(existing map[string]any, overlay map[string]any) map[string]any {
-	ret := cloneApprovalContext(existing)
-	if len(overlay) == 0 {
-		return ret
-	}
-	if ret == nil {
-		ret = map[string]any{}
-	}
-	for key, value := range overlay {
-		ret[key] = value
-	}
-	return ret
+func mergeApprovalContext(existing workorcheventpayload.Payload, overlay workorcheventpayload.Payload) workorcheventpayload.Payload {
+	return existing.Merge(overlay)
 }
 
-func approvalContextEqual(left map[string]any, right map[string]any) bool {
-	return reflect.DeepEqual(left, right)
+func approvalContextEqual(left workorcheventpayload.Payload, right workorcheventpayload.Payload) bool {
+	return left.Equal(right)
 }

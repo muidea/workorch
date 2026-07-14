@@ -6,6 +6,7 @@ import (
 	"unicode"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 const (
@@ -48,7 +49,7 @@ type DecisionInfo struct {
 	RunID              common.RunID
 	Reason             string
 	Question           string
-	Context            map[string]any
+	Context            workorcheventpayload.Payload
 	State              string
 	ResolutionType     string
 	ContinuationAction string
@@ -61,12 +62,12 @@ type ResolveDecisionRequest struct {
 	WorkspaceID    common.WorkspaceID
 	TicketID       common.TicketID
 	ResolutionType string
-	Payload        map[string]any
+	Payload        workorcheventpayload.Payload
 }
 
 type DecisionBackend interface {
 	Resolve(ctx context.Context, req ResolveDecisionRequest) (*DecisionInfo, error)
-	BatchResolve(ctx context.Context, wsID common.WorkspaceID, ticketIDs []common.TicketID, resolutionType string, payload map[string]any) ([]DecisionInfo, error)
+	BatchResolve(ctx context.Context, wsID common.WorkspaceID, ticketIDs []common.TicketID, resolutionType string, payload workorcheventpayload.Payload) ([]DecisionInfo, error)
 	List(ctx context.Context, wsID common.WorkspaceID) ([]DecisionInfo, error)
 	Get(ctx context.Context, wsID common.WorkspaceID, id common.TicketID) (*DecisionInfo, error)
 }
@@ -77,7 +78,7 @@ type ApprovalInfo struct {
 	RunID          common.RunID
 	Reason         string
 	Action         string
-	Context        map[string]any
+	Context        workorcheventpayload.Payload
 	State          string
 	AutoGovernance *AutoGovernanceSummaryInfo
 }
@@ -97,9 +98,9 @@ type AutoGovernanceSummaryInfo struct {
 }
 
 type ApprovalBackend interface {
-	Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...map[string]any) (*ApprovalInfo, error)
-	Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...map[string]any) (*ApprovalInfo, error)
-	BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...map[string]any) ([]ApprovalInfo, error)
+	Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*ApprovalInfo, error)
+	Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*ApprovalInfo, error)
+	BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...workorcheventpayload.Payload) ([]ApprovalInfo, error)
 	List(ctx context.Context, wsID common.WorkspaceID) ([]ApprovalInfo, error)
 	Get(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*ApprovalInfo, error)
 }
@@ -115,7 +116,7 @@ func IsSupportedDecisionResolutionType(value string) bool {
 	}
 }
 
-func NormalizeDecisionResolution(resolutionType string, payload map[string]any) DecisionSemanticNormalization {
+func NormalizeDecisionResolution(resolutionType string, payload workorcheventpayload.Payload) DecisionSemanticNormalization {
 	rawInput := firstNonEmptyPayloadString(payload, "answer", "value", "input", "note", "text", "message")
 	source := firstNonEmptyPayloadString(payload, "source", "operator", "entry", "client", "channel")
 	if strings.TrimSpace(source) == "" {
@@ -317,16 +318,9 @@ func hasLettersOrDigits(value string) bool {
 	return false
 }
 
-func firstNonEmptyPayloadString(payload map[string]any, keys ...string) string {
-	if payload == nil {
-		return ""
-	}
+func firstNonEmptyPayloadString(payload workorcheventpayload.Payload, keys ...string) string {
 	for _, key := range keys {
-		raw, ok := payload[key]
-		if !ok {
-			continue
-		}
-		if value, ok := raw.(string); ok {
+		if value, ok := payload.String(key); ok {
 			value = strings.TrimSpace(value)
 			if value != "" {
 				return value

@@ -20,6 +20,7 @@ import (
 	run "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 type WorkspaceRepository struct {
@@ -980,8 +981,8 @@ func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 			cloned.SoulBindings[key] = value
 		}
 	}
-	cloned.ContextHints = cloneMap(item.ContextHints)
-	cloned.EvidencePolicies = cloneMapSlice(item.EvidencePolicies)
+	cloned.ContextHints = item.ContextHints.Clone()
+	cloned.EvidencePolicies = workorcheventpayload.CloneSlice(item.EvidencePolicies)
 	return &cloned
 }
 
@@ -2078,6 +2079,7 @@ func (r *DecisionResolutionRepository) Create(ctx context.Context, item *decisio
 		return common.ErrConflict
 	}
 	cloned := *item
+	cloned.Payload = item.Payload.Clone()
 	r.byTicket[key] = &cloned
 	return nil
 }
@@ -2092,6 +2094,7 @@ func (r *DecisionResolutionRepository) GetByTicketID(ctx context.Context, ticket
 		return nil, err
 	}
 	cloned := *r.byTicket[key]
+	cloned.Payload = cloned.Payload.Clone()
 	return &cloned, nil
 }
 
@@ -2297,12 +2300,8 @@ func (r *ApprovalRepository) Delete(ctx context.Context, id common.ApprovalID) e
 
 func cloneStep(item *run.Step) *run.Step {
 	cloned := *item
-	if item.Input != nil {
-		cloned.Input = cloneMap(item.Input)
-	}
-	if item.Output != nil {
-		cloned.Output = cloneMap(item.Output)
-	}
+	cloned.Input = item.Input.Clone()
+	cloned.Output = item.Output.Clone()
 	return &cloned
 }
 
@@ -2311,8 +2310,8 @@ func compactStepSummary(item *run.Step) *run.Step {
 		return nil
 	}
 	cloned := *item
-	cloned.Input = compactStepSummaryInput(item.Input)
-	cloned.Output = compactStepSummaryOutput(item.Output)
+	cloned.Input, _ = workorcheventpayload.FromMap(compactStepSummaryInput(item.Input.Map()))
+	cloned.Output, _ = workorcheventpayload.FromMap(compactStepSummaryOutput(item.Output.Map()))
 	return &cloned
 }
 
@@ -2331,8 +2330,8 @@ func cloneRun(item *run.Run) *run.Run {
 
 func cloneToolCall(item *run.ToolCall) *run.ToolCall {
 	cloned := *item
-	cloned.Arguments = cloneMap(item.Arguments)
-	cloned.Output = cloneMap(item.Output)
+	cloned.Arguments = item.Arguments.Clone()
+	cloned.Output = item.Output.Clone()
 	return &cloned
 }
 
@@ -2344,7 +2343,7 @@ func cloneValidationResult(item *run.ValidationResult) *run.ValidationResult {
 
 func cloneRuntimeCheckpoint(item *run.RuntimeCheckpoint) *run.RuntimeCheckpoint {
 	cloned := *item
-	cloned.Data = cloneMap(item.Data)
+	cloned.Data = item.Data.Clone()
 	return &cloned
 }
 
@@ -2375,7 +2374,7 @@ func cloneResultSummary(item resultmodel.ResultSummary) resultmodel.ResultSummar
 			cloned.DoDItems = append(cloned.DoDItems, dodItem)
 		}
 	}
-	cloned.Diagnostics = cloneMap(item.Diagnostics)
+	cloned.Diagnostics = item.Diagnostics.Clone()
 	return cloned
 }
 
@@ -2415,20 +2414,21 @@ func cloneResultDoDCoverage(item *resultmodel.DoDCoverage) *resultmodel.DoDCover
 func cloneArtifact(item *resultmodel.Artifact) *resultmodel.Artifact {
 	cloned := *item
 	cloned.EvidenceRefs = cloneStringSlice(item.EvidenceRefs)
-	cloned.Metadata = cloneMap(item.Metadata)
+	cloned.Metadata = item.Metadata.Clone()
 	return &cloned
 }
 
 func cloneEventRecord(item *eventstream.EventRecord) *eventstream.EventRecord {
 	cloned := *item
-	cloned.Payload = cloneMap(item.Payload)
-	cloned.PayloadSummary = cloneMap(item.PayloadSummary)
+	cloned.Payload = item.Payload.Clone()
+	cloned.PayloadSummary = item.PayloadSummary.Clone()
 	return &cloned
 }
 
 func cloneDecisionTicket(item *decision.Ticket) *decision.Ticket {
 	cloned := *item
-	cloned.Context = cloneMap(item.Context)
+	cloned.Context = item.Context.Clone()
+	cloned.AutoGovernance = item.AutoGovernance.Clone()
 	return &cloned
 }
 
@@ -2465,7 +2465,8 @@ func cloneWorkspaceTemplate(item *repository.WorkspaceTemplate) *repository.Work
 			cloned.SoulBindings[key] = value
 		}
 	}
-	cloned.EvidencePolicies = cloneMapSlice(item.EvidencePolicies)
+	cloned.ContextHints = item.ContextHints.Clone()
+	cloned.EvidencePolicies = workorcheventpayload.CloneSlice(item.EvidencePolicies)
 	return &cloned
 }
 
@@ -2530,19 +2531,8 @@ func cloneMCPCapability(item *mcpmodel.Capability) *mcpmodel.Capability {
 	cloned := *item
 	cloned.Tags = cloneStringSlice(item.Tags)
 	cloned.StageHints = cloneStringSlice(item.StageHints)
-	cloned.Schema = cloneAnyMap(item.Schema)
+	cloned.Schema = item.Schema.Clone()
 	return &cloned
-}
-
-func cloneAnyMap(input map[string]any) map[string]any {
-	if input == nil {
-		return nil
-	}
-	ret := make(map[string]any, len(input))
-	for key, value := range input {
-		ret[key] = value
-	}
-	return ret
 }
 
 func listArtifacts(items map[string]*resultmodel.Artifact, matches func(*resultmodel.Artifact) bool) []*resultmodel.Artifact {
@@ -2616,13 +2606,13 @@ func listEventRecords(items map[string]*eventstream.EventRecord, query repositor
 }
 
 func stripEventRecordPayload(item *eventstream.EventRecord) {
-	if item == nil || len(item.Payload) == 0 {
+	if item == nil || len(item.Payload.Fields) == 0 {
 		return
 	}
-	if len(item.PayloadSummary) == 0 {
-		item.PayloadSummary = map[string]any{"fieldCount": len(item.Payload)}
+	if len(item.PayloadSummary.Fields) == 0 {
+		item.PayloadSummary = workorcheventpayload.New(workorcheventpayload.IntField("fieldCount", int64(len(item.Payload.Fields))))
 	}
-	item.Payload = nil
+	item.Payload = workorcheventpayload.Payload{}
 }
 
 func eventRecordMatches(item *eventstream.EventRecord, query repository.EventRecordQuery) bool {
@@ -2783,16 +2773,28 @@ func cloneStringMap(input map[string]string) map[string]string {
 
 func clonePatch(item *run.Patch) run.Patch {
 	cloned := *item
-	cloned.CoverageTargets = cloneAny(item.CoverageTargets)
+	cloned.CoverageTargets = append([]run.PatchCoverageTarget(nil), item.CoverageTargets...)
 	cloned.AffectedFiles = cloneStringSlice(item.AffectedFiles)
 	cloned.RiskReasons = cloneStringSlice(item.RiskReasons)
-	cloned.Diagnostics = cloneMapSlice(item.Diagnostics)
+	cloned.Diagnostics = cloneEventPayloads(item.Diagnostics)
 	return cloned
+}
+
+func cloneEventPayloads(input []workorcheventpayload.Payload) []workorcheventpayload.Payload {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make([]workorcheventpayload.Payload, 0, len(input))
+	for _, item := range input {
+		ret = append(ret, item.Clone())
+	}
+	return ret
 }
 
 func cloneApproval(item *approval.Approval) approval.Approval {
 	cloned := *item
-	cloned.Context = cloneMap(item.Context)
+	cloned.Context = item.Context.Clone()
+	cloned.AutoGovernance = item.AutoGovernance.Clone()
 	return cloned
 }
 

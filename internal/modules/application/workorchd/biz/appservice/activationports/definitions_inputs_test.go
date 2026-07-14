@@ -8,6 +8,7 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func TestReadWorkspaceRuntimeActivationInputsReadsDefinitionsWithExplicitScope(t *testing.T) {
@@ -72,7 +73,7 @@ func TestWorkspaceGovernanceHistoryReadsRunAndResolutionWithWorkspaceScope(t *te
 		ID:       common.ResolutionID("resolution-1"),
 		TicketID: ticketID,
 		Type:     "selected",
-		Payload:  map[string]any{"choice": "ok"},
+		Payload:  workorcheventpayload.New(workorcheventpayload.StringField("choice", "ok")),
 	}); err != nil {
 		t.Fatal(err)
 	}

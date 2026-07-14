@@ -8,7 +8,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func applyShellEvidencePolicies(policies []runtimecontract.RuntimeEvidencePolicy, command string, args []string, output map[string]any) {
+func applyShellEvidencePolicies(policies []runtimecontract.RuntimeEvidencePolicy, command string, args []string, output *RuntimeCommandResult) {
 	if output == nil {
 		return
 	}
@@ -17,11 +17,11 @@ func applyShellEvidencePolicies(policies []runtimecontract.RuntimeEvidencePolicy
 			continue
 		}
 		if shellEvidencePolicyZeroWork(policy, output) {
-			output["evidenceQuality"] = firstNonEmptyEvidencePolicyValue(policy.QualityOnZeroWork, string(common.EvidenceQualityInconclusive))
-			output["evidenceReason"] = firstNonEmptyEvidencePolicyValue(policy.EvidenceReason, "command completed without producing required evidence")
-			output["zeroWork"] = true
+			output.EvidenceQuality = firstNonEmptyEvidencePolicyValue(policy.QualityOnZeroWork, string(common.EvidenceQualityInconclusive))
+			output.EvidenceReason = firstNonEmptyEvidencePolicyValue(policy.EvidenceReason, "command completed without producing required evidence")
+			output.ZeroWork = true
 			if tags := policy.EvidenceTags; len(tags) > 0 {
-				output["evidenceTags"] = tags
+				output.EvidenceTags = append([]string(nil), tags...)
 			}
 			return
 		}
@@ -54,10 +54,10 @@ func shellEvidencePolicyApplies(policy runtimecontract.RuntimeEvidencePolicy, co
 	return true
 }
 
-func shellEvidencePolicyZeroWork(policy runtimecontract.RuntimeEvidencePolicy, output map[string]any) bool {
+func shellEvidencePolicyZeroWork(policy runtimecontract.RuntimeEvidencePolicy, output *RuntimeCommandResult) bool {
 	text := strings.ToLower(strings.Join([]string{
-		stringFromEvidencePolicy(output["stdout"]),
-		stringFromEvidencePolicy(output["stderr"]),
+		strings.TrimSpace(output.Stdout),
+		strings.TrimSpace(output.Stderr),
 	}, "\n"))
 	if strings.TrimSpace(text) == "" {
 		return false
@@ -80,9 +80,4 @@ func firstNonEmptyEvidencePolicyValue(value string, fallback string) string {
 		return value
 	}
 	return fallback
-}
-
-func stringFromEvidencePolicy(value any) string {
-	text, _ := value.(string)
-	return strings.TrimSpace(text)
 }

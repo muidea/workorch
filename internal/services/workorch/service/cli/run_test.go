@@ -46,11 +46,14 @@ func TestEventRecordsForRunFiltersWorkspaceSnapshotEvents(t *testing.T) {
 
 func TestEventRecordCompactSummaryPrefersPayloadDetail(t *testing.T) {
 	got := eventRecordCompactSummary(backend.EventRecordInfo{
-		Payload:        map[string]any{"state": "running"},
-		PayloadSummary: map[string]any{"fieldCount": 1},
+		Payload: backend.EventRecordPayloadInfo{
+			Kind: backend.EventRecordPayloadRun,
+			Run:  &backend.RunEventPayloadInfo{State: common.RunStateActive},
+		},
+		Summary: "stored summary",
 	})
-	if got != "running" {
-		t.Fatalf("summary = %q, want payload state", got)
+	if got != "active" {
+		t.Fatalf("summary = %q, want concrete payload state", got)
 	}
 }
 

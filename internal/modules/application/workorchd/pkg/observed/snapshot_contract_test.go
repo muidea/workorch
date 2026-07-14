@@ -4,17 +4,27 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
+
+func mustObservedPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
+	t.Helper()
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
 
 func TestSnapshotItemPayloadMapDeepClonesNestedPayloads(t *testing.T) {
 	item := SnapshotItem{
 		Topic: topicDecisionTicketSnapshot,
 		Payload: DecisionTicketPayload{
 			State: "resolved",
-			ResolutionPayload: map[string]any{
+			ResolutionPayload: mustObservedPayload(t, map[string]any{
 				"workspaceId": "ws-1",
 				"items":       []any{"first", map[string]any{"nested": "original"}},
-			},
+			}),
 		},
 	}
 

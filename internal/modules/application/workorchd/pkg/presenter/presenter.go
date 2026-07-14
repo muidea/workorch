@@ -18,8 +18,8 @@ func MapStep(item *runmodel.Step) *StepView {
 		ID:     string(item.ID),
 		Kind:   llmcommon.CanonicalRuntimeBlockKind(item.Kind),
 		State:  string(item.State),
-		Input:  clonePresenterMap(item.Input),
-		Output: clonePresenterMap(item.Output),
+		Input:  clonePresenterMap(item.Input.Map()),
+		Output: clonePresenterMap(item.Output.Map()),
 	}
 }
 

@@ -4,133 +4,139 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-05-29
+Last Updated: 2026-07-14
 
 ## Purpose
 
-本文件提供 WorkOrch 当前稳定的模块架构总览，不再承担完整 runtime contract、
-全量 API 清单或历史实现记录。
+本文件提供 WorkOrch 当前稳定的模块架构总览。生产实现主链是 **Runtime V2 only**；本文件不承担完整 runtime contract、全量 API 清单或 V1 迁移记录。
 
 ## Stable Layers
 
-WorkOrch 当前可按稳定责任划分为：
+WorkOrch 按稳定责任划分为：
 
 - application layer
 - kernel layer
-- block/runtime adapter layer
+- block layer（stateful owner + capability execution）
 - shared internal package layer
 - web console layer
 
 ### Layer Roles
 
-- application layer：进程入口、bootstrap、HTTP/TUI surface、appservice 级 use-case 组合
-- kernel layer：Workspace / Goal / DoD / Run / Step / Decision / Approval / Result / Artifact / EventStream / Orchestrator 等正式业务状态与编排
-- block/runtime adapter layer：LLM、MCP、shell、file、git、web、ssh、approval 等外部动作与 provider 调用
-- shared internal package layer：common types、event helpers、repository interfaces/implementations、config 等共享基础设施
-- web console layer：基于 read model 的产品展示与操作入口
+- **application layer**：进程入口、bootstrap、HTTP/CLI/TUI surface、appservice use-case 组合、workspace projection；不拥有正式业务状态
+- **kernel layer**：Run / Runtime V2 aggregate、Orchestrator 收敛权威、Governance 协调、Eventstream 审计
+- **block layer**：
+  - stateful owner：Workspace / Result / Decision / Approval / Memory / Soul / Skill / MCP Registry
+  - capability execution：LLM / File / Git / Shell / MCP / Web / SSH（只执行，不裁决）
+- **shared internal package layer**：`workorchruntimecontract`、repository、config、EventHub helpers 等
+- **web console layer**：基于 read model / projection 的产品展示与操作入口
 
 ## Top-Level Structure
 
 核心代码落点：
 
-- `application/workorch`
-- `internal/initiators/workorchruntime`
-- `internal/modules/application`
-- `internal/modules/kernel`
-- `internal/modules/blocks`
-- `internal/pkg`
-- `web/workorch-console`
+- `application/workorch` — thin main
+- `internal/initiators/workorchruntime` — repository provider 装配
+- `internal/modules/application/workorchd` — appservice / server / bootstrap / projection
+- `internal/modules/kernel` — orchestrator / run / governance / eventstream / system
+- `internal/modules/blocks` — workspace、result、decision、approval、memory、soul、skill、mcpregistry 与能力 block
+- `internal/pkg` — runtime contract、repo、config、ports
+- `internal/services/workorch` — CLI / TUI
+- `web/workorch-console` — Web Console
+
+## Runtime V2 Mainline
+
+```text
+Application: RuntimeBootstrap → Run create
+Start / Resume (Orchestrator EventHub handlers)
+  → DriveRuntimeV2（唯一同步推进）
+    → InitializeRuntimeV2FromRun（幂等 load/init）
+    → reducer(RuntimeFacts) → RuntimeDecision + AuthorityTransaction
+    → prerequisite | candidate → SealedDispatch
+    → ExecuteRuntimeOperation（typed EventHub → capability blocks）
+    → evidence / assessment / governance commit
+    → governed_wait | typed terminal projection
+```
+
+双层语义：
+
+- **层 A**：中立 stage / profile / output policy（意图与严格度，非生产状态名）
+- **层 B**：V2 focus / requiredOutput / candidate / sealed dispatch（实现状态机）
+
+已删除、不得作为生产主链：
+
+- `StagePacket` / `NextAction` / `DispatchNextStep`
+- `ExecutionContextPatch` 与 application continuation queue
+- 自动 replan successor Run
+- 通用 RuntimeAdapter registry / Step kind registration matrix 作为生产调度
 
 ## Key Modules
 
 ### Application
 
-- `application/workorch`: 主可执行入口，负责本地 TUI 和 `--server` 模式启动
-- `internal/initiators/workorchruntime`: 提供 repository、event hub、runtime policy 和 cross-module wiring
-- `internal/modules/application/workorchd`: 应用层插件模块，承接 appservice、server、observed/presenter
+| 模块 | 职责 |
+| --- | --- |
+| `application/workorch` | 主可执行入口（TUI / `--server`） |
+| `internal/initiators/workorchruntime` | owner repository provider |
+| `internal/modules/application/workorchd` | bootstrap、appservice、HTTP、projection、scheduler Start/Resume 转发 |
 
 ### Kernel
 
-当前稳定 kernel 关注点包括：
-
-- workspace / goal / dod
-- run / step / tool call / patch / validation / checkpoint
-- soul / skill / mcp / memory
-- decision / approval / result / artifact
-- eventstream
-- orchestrator
+| 模块 | 职责 |
+| --- | --- |
+| `kernel/orchestrator` | Runtime V2 convergence authority：drive、reducer、sealed dispatch、evidence、governance wait、terminal projection |
+| `kernel/run` | Run / Step / Checkpoint / `RuntimeStateRecord` 持久化与 CAS |
+| `kernel/governance` | 自动治理评估 / 升级 / AutoGovernanceTrace 协调（不替代 Orchestrator contract gate） |
+| `kernel/eventstream` | 审计事件持久化 |
+| `kernel/system` | 默认 Soul / Template / MCP 等 ensure |
 
 ### Blocks
 
-当前稳定 block 集合包括：
+**Stateful owners**
 
-- `blocks/llm`
-- `blocks/mcp`
-- `blocks/shell`
-- `blocks/file`
-- `blocks/git`
-- `blocks/web`
-- `blocks/ssh`
+- `blocks/workspace` — Workspace / Goal / DoD / Template
+- `blocks/result` — Result / Artifact（formal outcome；不裁决 acceptance）
+- `blocks/decision` / `blocks/approval` — 治理 ticket / 授权
+- `blocks/memory` / `blocks/soul` / `blocks/skill` / `blocks/mcpregistry` — 记忆与能力注册
+
+**Capability execution（typed EventHub operation only）**
+
+- `blocks/llm` — Runtime V2 candidate 请求
+- `blocks/file` / `git` / `shell` / `mcp` / `web` / `ssh` — sealed operation 执行
 
 ## Architecture Boundary
 
-### Application
+| 层 | 负责 | 不负责 |
+| --- | --- | --- |
+| Application | 入口、用例组合、projection、Start/Resume 转发 | owner 状态机、drive loop、Decision resolve 后 Resume |
+| Orchestrator | 收敛权威、evidence quality、coverage、Result 裁决、Run/Workspace 窄投影 | provider 调用细节、领域 profile 硬编码 |
+| Run owner | 持久化与 CAS、状态准入核对 | 编排、coverage 裁决 |
+| Capability blocks | 同步执行并返回 typed result/evidence 摘要 | Run 终态、accepted Result、自动 retry 策略 |
+| Shared packages | 中立 contract 与基础设施 | 业务状态机 |
 
-应用层负责：
+## Key Rules
 
-- 进程入口
-- 运行时装配
-- HTTP/TUI 对外面向
-- appservice use-case 组合
-
-### Kernel
-
-kernel 负责：
-
-- 正式领域对象
-- Run/Step/Decision/Approval/Result 等业务状态
-- orchestrator 编排
-- eventstream 持久化事件
-
-### Blocks
-
-blocks 负责：
-
-- 外部动作执行
-- provider 调用
-- shell / MCP / file / git / web / ssh 等 runtime adapter 行为
-
-### Shared Internal Packages
-
-`internal/pkg` 负责：
-
-- common types
-- shared event helpers
-- repository interfaces/implementations
-
-## Key Rule
-
-稳定规则是：
-
-- business state transitions 留在 kernel / orchestrator
-- side effects 留在 blocks
-- request/service composition 留在 application layer
-- shared primitives 留在 `internal/pkg`
-
-补充：
-
-- product/UI 层不得绕过 read model 直接定义业务状态
-- template / Soul / capability 特化不得下沉到 kernel 基础 contract
-- runtime adapter 不负责 accepted Result 或最终 DoD 裁决
+1. **business state transitions** 留在 kernel / Orchestrator；**side effects** 留在 capability blocks。
+2. 跨组件交互只走 **EventHub + 具体 command/data/result**；禁止跨 owner service/repository、Envelope、通用 map payload。
+3. product/UI 不得绕过 read model 直接定义业务状态。
+4. template / Soul / profile 特化不得下沉到 kernel reducer。
+5. block 输出只是 candidate 或 operation evidence；evidence quality、next action、accepted Result 只能由 Orchestrator 判定。
+6. Start/Resume 生产入口只进入 Runtime V2；缺少 typed bootstrap 必须失败。
 
 ## Current Stable Decisions
 
-- 仓库保持单 `go.mod` 形态，不拆成多个 Go modules
-- `application/workorch` 保持 thin main，显式选择加载 initiators / modules
-- 大型 runtime 文件按责任拆分，但仍保持同一应用/模块边界
-- shared event helpers、repository 和 config 统一沉到 `internal/pkg`
+- 仓库保持单 `go.mod`
+- `application/workorch` 保持 thin main
+- Runtime V2 aggregate 经 Run owner EventHub CAS 持久化，不编码为 `map[string]any`
+- Orchestrator plugin 不创建 RuntimeAdapter registry；operation 只走各组件 typed EventHub 合同
+- Decision `runtime_v2_governance` resolve 由 Decision owner 直接提交 Orchestrator resolution；application **不** 再发 Resume
 
 ## Source Documents
 
 - `repository-structure.md`
+- `kernel-orchestrator-governance.md`
+- `application-workorchd.md`
+- `blocks-runtime-adapters.md`
 - `../00-core/runtime-stage-contract.md`
+- `internal/modules/kernel/orchestrator/readme.md`
+- `internal/modules/kernel/run/readme.md`
+- `internal/modules/application/workorchd/readme.md`

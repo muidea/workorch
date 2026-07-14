@@ -44,7 +44,7 @@ var (
 			return item.WorkspaceID == ref.workspaceID
 		},
 		normalize: func(item eventstreamevents.EventRecordData, ref workorchSnapshotRef) (SnapshotItem, bool) {
-			data, ok := events.DecodeWorkspacePayload(item.Payload.Map())
+			data, ok := events.DecodeWorkspaceEventPayload(item.Payload)
 			if !ok {
 				return SnapshotItem{}, false
 			}
@@ -80,7 +80,7 @@ var (
 			return item.RunID == ref.runID
 		},
 		normalize: func(item eventstreamevents.EventRecordData, _ workorchSnapshotRef) (SnapshotItem, bool) {
-			data, ok := events.DecodeRunPayload(item.Payload.Map())
+			data, ok := events.DecodeRunEventPayload(item.Payload)
 			if !ok {
 				return SnapshotItem{}, false
 			}
@@ -109,13 +109,15 @@ var (
 			return item.SubjectID == ref.subjectID
 		},
 		normalize: func(item eventstreamevents.EventRecordData, _ workorchSnapshotRef) (SnapshotItem, bool) {
-			data, ok := events.DecodeApprovalPayload(item.Payload.Map())
+			data, ok := events.DecodeApprovalEventPayload(item.Payload)
 			if !ok {
 				return SnapshotItem{}, false
 			}
 			return normalizePublishedSnapshot(item, topicApprovalSnapshot, "approval", ApprovalPayload{
-				Reason: data.Reason,
-				State:  string(data.State),
+				Reason:  data.Reason,
+				Action:  data.Action,
+				Context: data.Context.Clone(),
+				State:   string(data.State),
 			}), true
 		},
 	}
@@ -154,9 +156,8 @@ func (c workorchSnapshotContract) acceptsTopic(topic string) bool {
 }
 
 func normalizeDecisionTicketSnapshot(item eventstreamevents.EventRecordData, _ workorchSnapshotRef) (SnapshotItem, bool) {
-	payload := item.Payload.Map()
 	if item.Topic == decisionevents.TopicTicketResolved {
-		data, ok := events.DecodeDecisionResolutionPayload(payload)
+		data, ok := events.DecodeDecisionResolutionEventPayload(item.Payload)
 		if !ok {
 			return SnapshotItem{}, false
 		}
@@ -165,10 +166,10 @@ func normalizeDecisionTicketSnapshot(item eventstreamevents.EventRecordData, _ w
 			State:             string(data.State),
 			ResolutionID:      string(data.ResolutionID),
 			ResolutionType:    data.Type,
-			ResolutionPayload: cloneMap(data.Payload),
+			ResolutionPayload: data.Payload.Clone(),
 		}), true
 	}
-	data, ok := events.DecodeDecisionTicketPayload(payload)
+	data, ok := events.DecodeDecisionTicketEventPayload(item.Payload)
 	if !ok {
 		return SnapshotItem{}, false
 	}

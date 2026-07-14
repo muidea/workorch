@@ -1,30 +1,36 @@
 package governancecore
 
-import "strings"
+import (
+	"strings"
 
-func PreferredContinuationCandidate(value any) string {
-	switch typed := value.(type) {
-	case []string:
-		for _, item := range typed {
-			if IsContinuationCandidate(item) {
-				return strings.TrimSpace(item)
-			}
-		}
-	case []any:
-		for _, item := range typed {
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
+
+func PreferredContinuationCandidate(value workorcheventpayload.Value) string {
+	switch value.Kind {
+	case workorcheventpayload.ValueArray:
+		for _, item := range value.Array {
 			if candidate := PreferredContinuationCandidate(item); candidate != "" {
 				return candidate
 			}
 		}
-	case map[string]any:
+	case workorcheventpayload.ValueObject:
+		object := workorcheventpayload.Payload{Fields: value.Object}
 		for _, key := range []string{"value", "id", "mode", "target", "name"} {
-			if candidate := PreferredContinuationCandidate(typed[key]); candidate != "" {
+			if nested, ok := object.Field(key); ok {
+				if candidate := PreferredContinuationCandidate(nested); candidate != "" {
+					return candidate
+				}
+			}
+		}
+		for _, field := range value.Object {
+			if candidate := PreferredContinuationCandidate(field.Value); candidate != "" {
 				return candidate
 			}
 		}
-	case string:
-		if IsContinuationCandidate(typed) {
-			return strings.TrimSpace(typed)
+	case workorcheventpayload.ValueString:
+		if IsContinuationCandidate(value.String) {
+			return strings.TrimSpace(value.String)
 		}
 	}
 	return ""

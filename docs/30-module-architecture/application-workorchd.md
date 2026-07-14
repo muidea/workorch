@@ -4,214 +4,148 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-06-12
+Last Updated: 2026-07-14
 
 ## Purpose
 
-本文件说明 `application/workorch` 和 `internal/modules/application/workorchd`
-相关的应用层架构职责。
+本文件说明 `application/workorch` 与 `internal/modules/application/workorchd` 的应用层职责。
+
+生产主链为 **Runtime V2 only**：application 负责入口、用例组合、typed bootstrap 构造与 Start/Resume **转发**；不拥有 drive loop、continuation queue，也不在 Decision resolve 后 Resume。
+
+权威说明：`internal/modules/application/workorchd/readme.md`。
 
 ## Main Responsibilities
 
 应用层负责：
 
-- 进程入口与 lifecycle 触发
-- runtime bootstrap 组装
+- 进程入口与 lifecycle
+- runtime bootstrap 组装（application-owned infrastructure only）
 - request-scoped runtime session
-- HTTP service 暴露
-- appservice 级 use-case 组合
-- workspace ViewModel projection 的服务端管理和输出适配
+- HTTP / CLI / SSE surface
+- appservice use-case 组合
+- 构造 typed `RuntimeBootstrap` 并经 EventHub 创建 Run
+- 将 Start / Resume scheduler command 转发为 Orchestrator typed owner command
+- workspace ViewModel projection 管理与输出适配
 
 应用层不负责：
 
-- 拥有 workspace/run/decision/approval/result 等正式业务状态
-- 绕过 owner module 直接执行状态机转换
-- 让 Web/TUI 在端侧重建 workspace 状态投影
-
-workspace ViewModel 的完整设计以
-`mvvp-workspace-viewmodel-architecture.md` 为准。长期运行下的 projection-first
-读路径、EventRecord payload、file backend IO 和 CPU/IO 收口设计以
-`projection-first-readmodel-io-closure-design.md` 为准。
+- 拥有 Workspace / Run / Result / Decision / Approval / Memory / MCP / Skill / Soul 正式状态
+- 执行 Runtime V2 drive / reducer / sealed dispatch
+- 维护 run pending/started continuation queue 或 governance recovery scheduler
+- Decision / Approval resolve 后发布 Resume
+- V1 inactive-running recovery、stale-Step watchdog、orphan Step / runtime-gap 恢复 API
+- `executionContextPatch` 作为 activation、恢复或跨组件 payload
 
 ## Main Components
 
 ### `application/workorch`
 
-职责：
-
-- 作为主可执行入口
-- 选择加载 initiator、kernel、blocks 模块
-- 启动 TUI 或 `--server` 服务模式
+- 主可执行入口
+- 显式加载 initiator、kernel、blocks
+- 启动 TUI 或 `--server`
 
 ### `internal/initiators/workorchruntime`
 
-职责：
-
-- 以 `workorch/repositories` ID 提供单一 repository provider
-- 只作为 kernel owner module 的 repository 装配依赖源
-
-application EventHub 直接来自 magicCommon framework application runtime；runtime policy
-由无状态配置能力读取，不再通过 initiator 聚合导出。
+- 以 repository provider 形式为 kernel owner 装配依赖
+- 不聚合导出 runtime policy 双权威；EventHub 来自 framework application runtime
 
 ### `internal/modules/application/workorchd/biz/bootstrap`
 
-职责：
-
-- 组装 grouped exports
-- 构造应用层 Runtime shell
-- 管理 request-scoped runtime module lifecycle
-
-生产 bootstrap exports 只允许暴露 application-owned infrastructure：
-
-- projection `EventHub`
-- framework `CommandHub`
-- `BackgroundRoutine`
-- 配置加载函数
-
-Workspace、Run、Result、Decision、Approval、Memory 等 owner repositories 不属于
-application runtime exports。集成测试需要的 file/memory repository builder、owner
-module fixture 与 repository 直写能力统一放在 `biz/testkit`，不得进入生产
-bootstrap/session 类型。
+- 组装 application-owned infrastructure：projection EventHub、framework CommandHub、BackgroundRoutine、配置加载
+- **不** 暴露 owner repository 到生产 bootstrap/session
+- repository builder / owner fixture / 直写仅允许 `biz/testkit`
 
 ### `internal/modules/application/workorchd/biz/appservice`
 
-职责：
-
-- execution activation
-- workspace/run/decision/approval use-case
-- read-model assembly
-- runtime adapter/use-case composition
-
-更细边界：
-
-- activation / recovery / governance / read-model 等 use-case 组合应留在 appservice
-- appservice 优先通过 module service 或 grouped runtime face 访问下层能力
-- read-model DTO 与 read-model construction 逻辑应分离
-- workspace overview/detail ViewModel core、projection store、baseline loader
-  应落在 appservice focused package，而不是 HTTP server package
+- workspace activation / restart 用例
+- run-scoped Start / Resume 转发
+- decision / approval HTTP resolve（只提交 owner command + 刷新投影）
+- read-model / ViewModel 装配
+- Runtime V1 retirement planner / migration command（迁移面，非生产执行主链）
 
 ### `internal/modules/application/workorchd/service/server`
 
-职责：
+- route registration、HTTP handler、SSE
+- 请求解析 → 调用 appservice → 输出 response
+- 不持有 projection core，不直接访问 owner repository/service
 
-- route registration
-- HTTP handler surface
-- request validation / response output
+## Runtime V2 Activation
 
-server 层不应复制业务逻辑；其职责应止于：
+1. workspace activation 使用 cumulative effective Goal/DoD 与 profile capability policy 构造 typed `RuntimeBootstrap`（Definition + Activation + ordered focus queue + prerequisite requirements）。
+2. bootstrap 随 Run create command 交给 Run owner 持久化；definition / activation 快照在初始化前不可变。
+3. activation 将 DoD item 标记为需要 typed assessment，并按 profile contract 追加稳定 focus；primary state-change 优先于 supplemental evidence。
+4. RuntimeBootstrap 直接保存 dialog language、Soul 内容快照、Skill 指令、MCP 选择、Memory、evidence policy，以及 state-change / capability-usage / profile acceptance / template stage policy 等 execution contract。
+5. Start：Orchestrator `AcceptRunStart` 后后台唯一 drive；Resume：仅 workspace/run scope，进入同一 drive。
 
-- 请求解析与参数校验
-- 调用 appservice
-- 输出 HTTP response / SSE
+application **不** 维护 background queue；workspace activation/restart 同步执行用例，通过 Workspace / Run / Orchestrator typed EventHub command 完成。
 
-server 层可以接线 projection manager lifecycle，但不拥有 projection core：
+## Start / Resume Boundary
 
-- 不在 handler 内逐 workspace 做 heavy snapshot/result/evidence 聚合
-- 不直接访问 kernel owner repository/service
-- 不把 projection store、baseline rebuild、field mapping 长期放在 server 包内
-- 只把 projection store 的只读结果映射为 REST/SSE response
-
-## Lifecycle Upgrade Note
-
-当前 WorkOrch 已迁移到 magicCommon 的 context-first lifecycle：
-
-- `Startup(ctx, ...)`
-- `Run(ctx)`
-- `Shutdown(ctx)`
-- `Setup/Run/Teardown(ctx)`
-
-该迁移属于应用层/框架接线问题，不属于 runtime core contract。
-
-## Request-Scoped Runtime Session
-
-应用层需要为 HTTP / backend / local TUI 等入口提供 request-scoped runtime session：
-
-- session 只负责本次请求的 runtime access 与 teardown
-- session 不能演化为新的业务状态拥有者
-- request cancel / context cancel 应能安全传递到 appservice 与下游 runtime use-case
-
-稳定方向：
-
-- HTTP 请求进入后，应在 request scope 内绑定 runtime access、EventHub 与 application-owned infrastructure
-- session 结束时只做资源释放，不做业务状态裁决
-- session 既不替代 workspace/run state，也不替代 repository 持久化 contract
-
-### Startup Recovery Boundary
-
-workorchd 启动恢复属于应用层 use-case 组合，职责是把 repository 中无法由内存 executor
-继续推进的状态重新交回 kernel runtime contract：
-
-- `active + terminal executing step` 表示上次进程已派发但未形成 output；启动恢复应调用 run service resume，让 orchestrator 重新派发该 step。
-- `active` 且没有 blocker、没有 continuation checkpoint、也没有可恢复 terminal executing/failed step 时，才能标记为 stuck failure。
-- 应用层只能识别这些通用状态形态，不得根据 workspace template、具体文件、测试框架或业务目标做分支。
-- 恢复后状态仍由 kernel run/orchestrator 决定，appservice 只返回恢复结果投影。
-
-Run watchdog / continuation recovery 是该边界的运行期扩展：workorchd 可以通过 framework `BackgroundRoutine`
-注册启动恢复任务和周期 timer，扫描 stale executing/dispatched-event、resolved governance blocker、replan continuation
-等通用运行时形态，但不得直接改写正式状态机。详细触发时机、影响范围和后续特性跟踪见
-`../70-roadmap/active/workorchd-state-loop-and-projection-closure-plan.md#p24-run-watchdog--continuation-recovery`。
-
-典型入口包括：
-
-- HTTP read/write handler
-- deployed verification / server-side request path
-- local TUI / backend bridge 在应用层复用的 request scope
-
-## Read Model Boundary
-
-应用层读模型职责应继续分离为：
-
-- observed: 事件/状态到 snapshot 的语义投影
-- presenter: 输出渲染/包装
-- appservice: 聚合读取入口与 DTO 装配
-
-### Observed / Presenter / Read-Model Split
-
-三层当前至少应保持：
-
-| 层 | 当前职责 |
+| 入口 | application 行为 |
 | --- | --- |
-| observed | 从 repositories / eventstream / runtime state 提取语义投影输入 |
-| presenter | 把 observed 结果包装成 API / Web / Console / TUI 需要的输出形态 |
-| appservice | 组织 read query、调用 observed / presenter、输出 DTO |
+| Start scheduler command | 直接发送 Orchestrator typed Start command |
+| Resume scheduler command | 直接发送 Orchestrator typed Resume（仅 scope） |
+| Decision / Approval HTTP resolve | 只提交对应 owner command 并刷新投影 |
+| `runtime_v2_governance` ticket resolve | Decision owner 直接提交 Orchestrator resolution；**不** 由 application 发 Resume |
 
 约束：
 
-- observed 不直接做 HTTP 级响应包装
-- presenter 不重新执行业务查询或状态裁决
-- appservice 不应把领域查询、投影语义、HTTP 输出全部混在一个函数里
+- 请求只有在 typed owner command 成功接收后才返回 accepted
+- 无 execution pending/started map、无 owner readback retry、无 scheduler recovery map
+- 重启后 Runtime V2 推进只能重新发送 Orchestrator drive，并从 Run owner aggregate 幂等恢复
 
-### Read-Model Assembly Focus
+## Lifecycle
 
-应用层当前主要装配以下 read-model：
+magicCommon context-first lifecycle：
 
-- workspace snapshot / detail
-- run snapshot / status / observability
-- decisions / approvals page
-- taskProgress / contextBundle / taskDecompositions / memoryRecallTraces
-- artifact content / runtime payload / event list 的读打开入口
+- `Startup(ctx, ...)` / `Run(ctx)` / `Shutdown(ctx)`
+- `Setup` / `Run` / `Teardown(ctx)`
 
-这些装配都应：
+服务启动只启动 workspace projection 与 HTTP 生命周期；**不** 运行 V1 inactive-running recovery，**不** 注册 stale-Step watchdog（watchdog interval audit = `0`）。
 
-- 优先复用 module/service/repository query face
-- 与 `service-api.md` 的 response family 保持一致
-- 与 `service-acceptance.md` 的 direct verification 证据保持一致
+## Request-Scoped Runtime Session
 
-### Workspace ViewModel Boundary
+- session 只持有应用基础设施与唯一 EventHub
+- `ManagedRuntime` 仅订阅 Eventstream typed record 做进程内观测；不提供 owner action / snapshot facade / 跨 owner service adapter
+- session 结束只做资源释放，不做业务状态裁决
 
-workspace list/detail 面向 Web/TUI 时应优先读取 workorchd 启动后维护的
-ViewModel projection：
+## Read Model Boundary
 
-- overview list: `GET /api/v1/workorch/workspaces`
-- detail projection: `GET /api/v1/workorch/workspaces/:workspaceId/snapshot`
-- refresh signal: `GET /api/v1/workorch/events`
+| 层 | 职责 |
+| --- | --- |
+| observed | 从 Eventstream / owner 快照提取语义投影输入 |
+| presenter | 包装为 API / Web / Console / TUI 输出 |
+| appservice | 组织 read query、装配 DTO |
 
-旧的 request-time snapshot 聚合只能作为 projection baseline/rebuild 的内部实现
-细节，不再作为 Web/TUI 的主刷新路径。
+约束：
+
+- projection 只读与投影，不修复 owner 状态、不重建业务状态机
+- workspace list/detail 优先读启动后维护的 ViewModel projection
+- 旧 request-time snapshot 聚合仅作 baseline/rebuild 内部细节
+
+详见 `mvvp-workspace-viewmodel-architecture.md`、`projection-first-readmodel-io-closure-design.md`。
+
+## Retirement / Migration（非生产主链）
+
+- Runtime V1 retirement planner 经 typed EventHub list 识别 V1 对象；排除带 V2 bootstrap/state 的 Run
+- dry-run 只预览；`--apply` 仅 file repository，先备份再 apply
+- apply 前逐 Run 调用 Orchestrator typed resource release；失败则停止 owner apply 与 projection rebuild
+- 正式 apply 完成后 projection full rebuild
+
+## Explicit Non-Goals
+
+- `executionContextPatch` / `Run.ExecutionContext` / resume patch API
+- application 订阅 Decision/Approval resolved 以恢复 Run
+- `scheduleWatchdog`、stale dispatched recovery、stuck Run recovery helper
+- Runtime V1 repair/output policy 缓存于 bootstrap/session
+- orphan Step / runtime-gap 恢复 API
 
 ## Source Documents
 
-- `repository-structure.md`
+- `architecture-overview.md`
+- `kernel-orchestrator-governance.md`
 - `mvvp-workspace-viewmodel-architecture.md`
 - `projection-first-readmodel-io-closure-design.md`
+- `internal/modules/application/workorchd/readme.md`
+- `../00-core/runtime-stage-contract.md`
 - `../50-product-interface/service-api.md`

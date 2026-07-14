@@ -5,6 +5,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -53,5 +54,9 @@ func RecordActivationMemoryRecallTrace(ctx context.Context, commandHub magiceven
 	if trace == nil {
 		return nil
 	}
-	return sendActivationMagicCommand[memoryevents.UpsertMemoryRecallTraceCommand, memoryevents.MemoryCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, trace.WorkspaceID), commandHub, memoryevents.TopicMemoryRecallTraceCommandUpsert, memoryevents.CommandDestination, "memory_recall", string(trace.ID), trace.WorkspaceID, trace.RunID, memoryevents.UpsertMemoryRecallTraceCommandFromModel(trace))
+	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, trace.WorkspaceID)
+	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryRecallTraceCommandUpsert, activationRunCommandSource, memoryevents.CommandDestination, magicevent.NewHeader(), commandCtx, memoryevents.UpsertMemoryRecallTraceCommandFromModel(trace))
+	ownerevent.BindLane(event, memoryevents.TopicMemoryRecallTraceCommandUpsert, "memory_recall", string(trace.ID), trace.WorkspaceID, trace.RunID, "")
+	_, err := ownerevent.Memory(commandHub.Send(event), memoryevents.TopicMemoryRecallTraceCommandUpsert)
+	return err
 }

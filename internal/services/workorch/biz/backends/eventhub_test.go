@@ -18,6 +18,7 @@ import (
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 
 	appservice "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/testkit"
@@ -47,8 +48,8 @@ func TestEventHubBackendRoutesWorkspaceCreateThroughCLICommand(t *testing.T) {
 	}
 	var sawCommand bool
 	for _, event := range recordedHub.Sent() {
-		command, ok := event.Data().(workorchdevents.CLICommand)
-		if ok && command.Command == workorchdevents.CommandWorkspaceCreate && command.CreateWorkspace != nil {
+		command, ok := event.Data().(workorchdevents.CLIWorkspaceCreateCommand)
+		if ok && command.Request.Title == "eventhub workspace" {
 			sawCommand = true
 		}
 	}
@@ -135,7 +136,7 @@ func TestEventHubEventsBackendReceivesTypedEventStreamRecord(t *testing.T) {
 		SubjectType: "workspace",
 		SubjectID:   "ws-eventstream",
 		Revision:    1,
-		Payload:     map[string]any{"title": "typed event stream"},
+		Payload:     workorcheventpayload.New(workorcheventpayload.StringField("title", "typed event stream")),
 	})
 	if err != nil {
 		t.Fatalf("build event record data: %v", err)
@@ -163,17 +164,13 @@ func TestEventHubEventsBackendReceivesTypedEventStreamRecord(t *testing.T) {
 	}
 }
 
-func TestDecodeResultResourceUsesTypedPayloadBeforeJSONFallback(t *testing.T) {
+func TestCLIWorkspaceSnapshotResultCarriesTypedSnapshot(t *testing.T) {
 	want := WorkspaceSnapshotInfo{
 		Workspace: WorkspaceInfo{ID: "ws-typed", State: common.WorkspaceStateActive},
 	}
-	got, err := decodeResultResource[WorkspaceSnapshotInfo](workorchdevents.CLIResult{
-		WorkspaceSnapshot: &want,
-	}, nil)
-	if err != nil {
-		t.Fatalf("decode typed resource: %v", err)
-	}
-	if got == nil || got.Workspace.ID != "ws-typed" {
+	result := workorchdevents.CLIWorkspaceSnapshotResult{Snapshot: want}
+	got := result.Snapshot
+	if got.Workspace.ID != "ws-typed" {
 		t.Fatalf("typed resource = %+v, want workspace ws-typed", got)
 	}
 }
@@ -308,8 +305,7 @@ func TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand(t *testing.T) {
 		t.Fatal("command hub does not expose sent events")
 	}
 	for _, event := range recordedHub.Sent() {
-		command, ok := event.Data().(workorchdevents.CLICommand)
-		if ok && command.Command == workorchdevents.CommandWorkspaceSnapshot {
+		if _, ok := event.Data().(workorchdevents.CLIWorkspaceSnapshotCommand); ok {
 			return
 		}
 	}
@@ -382,7 +378,7 @@ func TestEventHubGovernanceObjectCommandsRequireWorkspaceScopeBeforePublish(t *t
 		{
 			name: "batch resolve decisions",
 			call: func(be Backend) error {
-				_, err := be.Decision().BatchResolve(ctx, "", []common.TicketID{"ticket-eventhub"}, "accept", nil)
+				_, err := be.Decision().BatchResolve(ctx, "", []common.TicketID{"ticket-eventhub"}, "accept", workorcheventpayload.Payload{})
 				return err
 			},
 		},
@@ -449,9 +445,9 @@ func TestEventHubWorkspaceObjectCommandsCarryWorkspaceScope(t *testing.T) {
 		t.Fatalf("delete workspace: %v", err)
 	}
 
-	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.CommandWorkspaceGet, ws.ID, string(ws.ID))
-	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.CommandWorkspaceSnapshot, ws.ID, string(ws.ID))
-	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.CommandWorkspaceDelete, ws.ID, string(ws.ID))
+	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIWorkspaceGet, ws.ID, string(ws.ID))
+	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIWorkspaceSnapshot, ws.ID, string(ws.ID))
+	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIWorkspaceDelete, ws.ID, string(ws.ID))
 }
 
 func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
@@ -472,7 +468,7 @@ func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
 		Topic:       workspaceevents.TopicGoalDefined,
 		SubjectID:   "goal-1",
 		WorkspaceID: "ws-1",
-		Payload:     events.GoalPayload("updated goal", "", "", "", ""),
+		Payload:     events.GoalPayloadData{Text: "updated goal"}.EventPayload().Map(),
 	})
 	if goalEvent.Type != EventGoalDefined || goalEvent.WorkspaceID != "ws-1" || goalEvent.Payload["goalId"] != "goal-1" {
 		t.Fatalf("goal event = %+v, want converted goal definition event", goalEvent)
@@ -481,7 +477,7 @@ func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
 		Topic:       workspaceevents.TopicDoDDefined,
 		SubjectID:   "dod-1",
 		WorkspaceID: "ws-1",
-		Payload:     events.DoDPayload([]string{"tests pass"}, common.DoDStateReady, "", "", "", ""),
+		Payload:     events.DoDPayloadData{Items: []string{"tests pass"}, State: common.DoDStateReady}.EventPayload().Map(),
 	})
 	if dodEvent.Type != EventDoDDefined || dodEvent.WorkspaceID != "ws-1" || dodEvent.Payload["doDId"] != "dod-1" {
 		t.Fatalf("dod event = %+v, want converted dod definition event", dodEvent)
@@ -574,10 +570,10 @@ func TestEventHubGoalAndDoDGetUpdateCommandsCarryWorkspaceScope(t *testing.T) {
 		t.Fatalf("update dod: %v", err)
 	}
 
-	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.CommandGoalGet, ws.ID, string(goal.ID))
-	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.CommandGoalUpdate, ws.ID, string(goal.ID))
-	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.CommandDoDGet, ws.ID, string(dod.ID))
-	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.CommandDoDUpdate, ws.ID, string(dod.ID))
+	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIGoalGet, ws.ID, string(goal.ID))
+	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIGoalUpdate, ws.ID, string(goal.ID))
+	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIDoDGet, ws.ID, string(dod.ID))
+	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIDoDUpdate, ws.ID, string(dod.ID))
 }
 
 func TestEventHubRunReadCommandsCarryWorkspaceScope(t *testing.T) {
@@ -599,9 +595,9 @@ func TestEventHubRunReadCommandsCarryWorkspaceScope(t *testing.T) {
 		t.Fatalf("run status: %v", err)
 	}
 
-	assertCLICommandWorkspaceScope(t, recordedHub, workorchdevents.CommandRunGet, "ws-run-read-scope", "run-read-scope")
-	assertCLICommandWorkspaceScope(t, recordedHub, workorchdevents.CommandRunList, "ws-run-read-scope", "")
-	assertCLICommandWorkspaceScope(t, recordedHub, workorchdevents.CommandRunStatus, "ws-run-read-scope", "run-read-scope")
+	assertCLICommandWorkspaceScope(t, recordedHub, workorchdevents.TopicCLIRunGet, "ws-run-read-scope", "run-read-scope")
+	assertCLICommandWorkspaceScope(t, recordedHub, workorchdevents.TopicCLIRunList, "ws-run-read-scope", "")
+	assertCLICommandWorkspaceScope(t, recordedHub, workorchdevents.TopicCLIRunStatus, "ws-run-read-scope", "run-read-scope")
 }
 
 func TestEventHubBackendWorkspaceListUsesProjectionViewReader(t *testing.T) {
@@ -773,53 +769,73 @@ func subscribeWorkspaceRunResult(t *testing.T, hub magicevent.Hub, response any)
 func subscribeRunReadCLIResponses(t *testing.T, hub magicevent.Hub, workspaceID common.WorkspaceID, runID common.RunID) func() {
 	t.Helper()
 	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, hub)
-	observer.Subscribe(workorchdevents.TopicCLICommand, func(event magicevent.Event, response magicevent.Result) {
-		cmd, ok := event.Data().(workorchdevents.CLICommand)
-		if !ok {
-			t.Fatalf("decode CLI command failed: %T", event.Data())
+	observer.Subscribe(workorchdevents.TopicCLIRunGet, func(event magicevent.Event, response magicevent.Result) {
+		if _, ok := event.Data().(workorchdevents.CLIRunGetCommand); !ok {
+			t.Fatalf("run get command = %T", event.Data())
 		}
-		result := workorchdevents.CLIResult{
-			CorrelationID: cmd.CorrelationID,
-			CommandID:     cmd.CommandID,
-			OK:            true,
-			WorkspaceID:   cmd.WorkspaceID,
-			RunID:         cmd.RunID,
-			OccurredAt:    time.Now().UTC(),
-		}
-		run := RunInfo{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
-		switch cmd.Command {
-		case workorchdevents.CommandRunGet:
-			result.Run = &run
-		case workorchdevents.CommandRunList:
-			result.Runs = []RunInfo{run}
-		case workorchdevents.CommandRunStatus:
-			status := RunStatusInfo{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
-			result.RunStatus = &status
-		default:
-			return
-		}
-		response.Set(result, nil)
+		response.Set(workorchdevents.CLIRunGetResult{Run: RunInfo{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}}, nil)
 	})
-	return func() { observer.Unsubscribe(workorchdevents.TopicCLICommand) }
+	observer.Subscribe(workorchdevents.TopicCLIRunList, func(event magicevent.Event, response magicevent.Result) {
+		if _, ok := event.Data().(workorchdevents.CLIRunListCommand); !ok {
+			t.Fatalf("run list command = %T", event.Data())
+		}
+		response.Set(workorchdevents.CLIRunListResult{Runs: []RunInfo{{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}}}, nil)
+	})
+	observer.Subscribe(workorchdevents.TopicCLIRunStatus, func(event magicevent.Event, response magicevent.Result) {
+		if _, ok := event.Data().(workorchdevents.CLIRunStatusCommand); !ok {
+			t.Fatalf("run status command = %T", event.Data())
+		}
+		response.Set(workorchdevents.CLIRunStatusResult{Status: RunStatusInfo{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}}, nil)
+	})
+	return func() {
+		observer.Unsubscribe(workorchdevents.TopicCLIRunGet)
+		observer.Unsubscribe(workorchdevents.TopicCLIRunList)
+		observer.Unsubscribe(workorchdevents.TopicCLIRunStatus)
+	}
 }
 
-func assertCLICommandWorkspaceScope(t *testing.T, hub magicevent.Hub, command string, workspaceID common.WorkspaceID, subjectID string) {
+func assertCLICommandWorkspaceScope(t *testing.T, hub magicevent.Hub, topic string, workspaceID common.WorkspaceID, subjectID string) {
 	t.Helper()
 	recordedHub, ok := hub.(*recordingEventHub)
 	if !ok {
 		t.Fatal("command hub does not expose sent events")
 	}
 	for _, event := range recordedHub.Sent() {
-		cmd, ok := event.Data().(workorchdevents.CLICommand)
-		if !ok || cmd.Command != command || cmd.SubjectID != subjectID {
+		if event.ID() != topic {
 			continue
 		}
-		if cmd.WorkspaceID != workspaceID {
-			t.Fatalf("%s command workspace scope=%q, want %q", command, cmd.WorkspaceID, workspaceID)
+		var actualWorkspace common.WorkspaceID
+		var actualSubject string
+		switch command := event.Data().(type) {
+		case workorchdevents.CLIWorkspaceGetCommand:
+			actualWorkspace, actualSubject = command.WorkspaceID, string(command.WorkspaceID)
+		case workorchdevents.CLIWorkspaceSnapshotCommand:
+			actualWorkspace, actualSubject = command.WorkspaceID, string(command.WorkspaceID)
+		case workorchdevents.CLIWorkspaceDeleteCommand:
+			actualWorkspace, actualSubject = command.WorkspaceID, string(command.WorkspaceID)
+		case workorchdevents.CLIGoalGetCommand:
+			actualWorkspace, actualSubject = command.WorkspaceID, string(command.GoalID)
+		case workorchdevents.CLIGoalUpdateCommand:
+			actualWorkspace, actualSubject = command.WorkspaceID, string(command.GoalID)
+		case workorchdevents.CLIDoDGetCommand:
+			actualWorkspace, actualSubject = command.WorkspaceID, string(command.DoDID)
+		case workorchdevents.CLIDoDUpdateCommand:
+			actualWorkspace, actualSubject = command.WorkspaceID, string(command.DoDID)
+		case workorchdevents.CLIRunGetCommand:
+			actualWorkspace, actualSubject = command.WorkspaceID, string(command.RunID)
+		case workorchdevents.CLIRunListCommand:
+			actualWorkspace = command.WorkspaceID
+		case workorchdevents.CLIRunStatusCommand:
+			actualWorkspace, actualSubject = command.WorkspaceID, string(command.RunID)
+		default:
+			t.Fatalf("topic %s command = %T", topic, event.Data())
+		}
+		if actualWorkspace != workspaceID || actualSubject != subjectID {
+			t.Fatalf("%s command scope=%q subject=%q, want %q/%q", topic, actualWorkspace, actualSubject, workspaceID, subjectID)
 		}
 		return
 	}
-	t.Fatalf("published CLI command %s subject=%s not found", command, subjectID)
+	t.Fatalf("published CLI command %s subject=%s not found", topic, subjectID)
 }
 
 type recordingEventHub struct {
@@ -871,7 +887,7 @@ func TestConvertBackendEventAddsBlockingSubjectIDs(t *testing.T) {
 	created := convertBackendEvent(backendEventData{
 		Topic:       workspaceevents.TopicWorkspaceCreated,
 		WorkspaceID: "ws-created",
-		Payload:     events.WorkspacePayload("created", "", "/tmp/created", "", "active", ""),
+		Payload:     events.WorkspacePayloadData{Title: "created", DeliverableDirectory: "/tmp/created", State: "active"}.EventPayload().Map(),
 	})
 	if created.Type != EventWorkspaceCreated || created.WorkspaceID != "ws-created" {
 		t.Fatalf("created event = %+v, want workspace created", created)
@@ -880,7 +896,7 @@ func TestConvertBackendEventAddsBlockingSubjectIDs(t *testing.T) {
 	deleted := convertBackendEvent(backendEventData{
 		Topic:       workspaceevents.TopicWorkspaceDeleted,
 		WorkspaceID: "ws-deleted",
-		Payload:     events.WorkspacePayload("deleted", "", "/tmp/deleted", "", "active", ""),
+		Payload:     events.WorkspacePayloadData{Title: "deleted", DeliverableDirectory: "/tmp/deleted", State: "active"}.EventPayload().Map(),
 	})
 	if deleted.Type != EventWorkspaceDeleted || deleted.WorkspaceID != "ws-deleted" {
 		t.Fatalf("deleted event = %+v, want workspace deleted", deleted)
@@ -891,7 +907,7 @@ func TestConvertBackendEventAddsBlockingSubjectIDs(t *testing.T) {
 		SubjectID:   "ticket-1",
 		WorkspaceID: "ws-1",
 		RunID:       "run-1",
-		Payload:     events.DecisionTicketPayload("missing operator input", "open"),
+		Payload:     events.DecisionTicketPayloadData{Reason: "missing operator input", State: "open"}.EventPayload().Map(),
 	})
 	if decision.Type != EventDecisionCreated || decision.Payload["ticketId"] != "ticket-1" {
 		t.Fatalf("decision event = %+v, want ticketId from subject", decision)
@@ -902,7 +918,10 @@ func TestConvertBackendEventAddsBlockingSubjectIDs(t *testing.T) {
 		SubjectID:   "approval-1",
 		WorkspaceID: "ws-1",
 		RunID:       "run-1",
-		Payload:     events.ApprovalPayload("approve shell", "run command", map[string]any{"risk": "shell"}, "pending"),
+		Payload: events.ApprovalPayloadData{
+			Reason: "approve shell", Action: "run command", State: "pending",
+			Context: workorcheventpayload.New(workorcheventpayload.StringField("risk", "shell")),
+		}.EventPayload().Map(),
 	})
 	if approval.Type != EventApprovalCreated || approval.Payload["approvalId"] != "approval-1" {
 		t.Fatalf("approval event = %+v, want approvalId from subject", approval)

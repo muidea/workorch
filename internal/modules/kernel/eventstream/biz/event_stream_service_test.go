@@ -140,8 +140,10 @@ func TestServicePersistsTypedDecisionNotifications(t *testing.T) {
 	if records[1].Topic != decisionevents.TopicTicketResolved || records[1].Revision != 2 {
 		t.Fatalf("resolved record = %+v, want revision 2", records[1])
 	}
-	resolutionPayload, _ := records[1].Payload[events.PayloadKeyPayload].(map[string]any)
-	if records[1].Payload[events.PayloadKeyType] != decisioncommon.ResolutionTypeReplan || resolutionPayload["actor"] != "operator" {
+	resolutionPayload, _ := records[1].Payload.Object(events.PayloadKeyPayload)
+	resolutionActor, _ := resolutionPayload.String("actor")
+	resolutionType, _ := records[1].Payload.String(events.PayloadKeyType)
+	if resolutionType != string(decisioncommon.ResolutionTypeReplan) || resolutionActor != "operator" {
 		t.Fatalf("resolved payload = %+v, want typed resolution payload", records[1].Payload)
 	}
 }
@@ -192,8 +194,10 @@ func TestServicePersistsTypedApprovalNotifications(t *testing.T) {
 	if records[0].Revision != 1 || records[1].Revision != 2 {
 		t.Fatalf("approval revisions = %d/%d, want 1/2", records[0].Revision, records[1].Revision)
 	}
-	contextPayload, _ := records[1].Payload[events.PayloadKeyContext].(map[string]any)
-	if records[1].Payload[events.PayloadKeyState] != string(common.ApprovalStateApproved) || contextPayload["risk"] != "medium" {
+	contextPayload, _ := records[1].Payload.Object(events.PayloadKeyContext)
+	risk, _ := contextPayload.String("risk")
+	state, _ := records[1].Payload.String(events.PayloadKeyState)
+	if state != string(common.ApprovalStateApproved) || risk != "medium" {
 		t.Fatalf("resolved approval payload = %+v", records[1].Payload)
 	}
 }
@@ -236,7 +240,9 @@ func TestServicePersistsTypedGovernanceNotification(t *testing.T) {
 	if len(records) != 1 || records[0].Topic != governanceevents.TopicGovernanceAutoEscalated || records[0].Revision != 1 {
 		t.Fatalf("records = %+v, want governance escalated revision 1", records)
 	}
-	if records[0].Payload[events.PayloadKeyTraceID] != string(data.Trace.ID) || records[0].Payload[events.PayloadKeyEscalationReason] != data.EscalationReason {
+	traceID, _ := records[0].Payload.String(events.PayloadKeyTraceID)
+	escalationReason, _ := records[0].Payload.String(events.PayloadKeyEscalationReason)
+	if traceID != string(data.Trace.ID) || escalationReason != data.EscalationReason {
 		t.Fatalf("governance payload = %+v", records[0].Payload)
 	}
 }
@@ -276,14 +282,21 @@ func TestServicePersistsTypedRunStateNotifications(t *testing.T) {
 	if len(records) != 1 || records[0].Topic != runevents.TopicRunStateChanged || records[0].SourceModule != "kernel/orchestrator" || records[0].Revision != 1 {
 		t.Fatalf("records = %+v, want typed run state revision 1", records)
 	}
-	if records[0].Payload[events.PayloadKeyState] != string(data.State) || records[0].Payload[events.PayloadKeyBlockingTicketID] != string(data.BlockingTicketID) {
+	state, _ := records[0].Payload.String(events.PayloadKeyState)
+	blockingTicketID, _ := records[0].Payload.String(events.PayloadKeyBlockingTicketID)
+	if state != string(data.State) || blockingTicketID != string(data.BlockingTicketID) {
 		t.Fatalf("run payload = %+v", records[0].Payload)
 	}
-	if records[0].Payload[events.PayloadKeyRuntimeStateRevision] != int(data.RuntimeStateRevision) ||
-		records[0].Payload[events.PayloadKeyRuntimeState] != string(data.RuntimeConvergenceState) ||
-		records[0].Payload[events.PayloadKeyRuntimeAction] != string(data.RuntimeAction) ||
-		records[0].Payload[events.PayloadKeyRuntimeFocusID] != data.RuntimeFocusID ||
-		records[0].Payload[events.PayloadKeyAuthoritySnapshotID] != data.AuthoritySnapshotID {
+	runtimeStateRevision, _ := records[0].Payload.Int64(events.PayloadKeyRuntimeStateRevision)
+	runtimeState, _ := records[0].Payload.String(events.PayloadKeyRuntimeState)
+	runtimeAction, _ := records[0].Payload.String(events.PayloadKeyRuntimeAction)
+	runtimeFocusID, _ := records[0].Payload.String(events.PayloadKeyRuntimeFocusID)
+	authoritySnapshotID, _ := records[0].Payload.String(events.PayloadKeyAuthoritySnapshotID)
+	if uint64(runtimeStateRevision) != data.RuntimeStateRevision ||
+		runtimeState != string(data.RuntimeConvergenceState) ||
+		runtimeAction != string(data.RuntimeAction) ||
+		runtimeFocusID != data.RuntimeFocusID ||
+		authoritySnapshotID != data.AuthoritySnapshotID {
 		t.Fatalf("run runtime payload = %+v", records[0].Payload)
 	}
 }
@@ -326,10 +339,12 @@ func TestServicePersistsTypedWorkspaceNotifications(t *testing.T) {
 	if len(records) != 3 {
 		t.Fatalf("records = %+v, want workspace/goal/dod", records)
 	}
-	if records[0].Topic != workspaceevents.TopicWorkspaceCreated || records[0].Payload[events.PayloadKeyTitle] != "typed workspace" {
+	workspaceTitle, _ := records[0].Payload.String(events.PayloadKeyTitle)
+	if records[0].Topic != workspaceevents.TopicWorkspaceCreated || workspaceTitle != "typed workspace" {
 		t.Fatalf("workspace record = %+v", records[0])
 	}
-	if records[1].Topic != workspaceevents.TopicGoalDefined || records[1].Payload[events.PayloadKeyText] != "typed goal" {
+	goalText, _ := records[1].Payload.String(events.PayloadKeyText)
+	if records[1].Topic != workspaceevents.TopicGoalDefined || goalText != "typed goal" {
 		t.Fatalf("goal record = %+v", records[1])
 	}
 	if records[2].Topic != workspaceevents.TopicDoDDefined {
@@ -374,10 +389,12 @@ func TestServicePersistsTypedResultNotifications(t *testing.T) {
 	if len(records) != 2 {
 		t.Fatalf("records = %+v, want result and artifact", records)
 	}
-	if records[0].Topic != resultevents.TopicResultAccepted || records[0].Payload[events.PayloadKeyTitle] != "typed result" {
+	resultTitle, _ := records[0].Payload.String(events.PayloadKeyTitle)
+	if records[0].Topic != resultevents.TopicResultAccepted || resultTitle != "typed result" {
 		t.Fatalf("result record = %+v", records[0])
 	}
-	if records[1].Topic != resultevents.TopicArtifactCreated || records[1].Payload[events.PayloadKeyName] != "result.md" {
+	artifactName, _ := records[1].Payload.String(events.PayloadKeyName)
+	if records[1].Topic != resultevents.TopicArtifactCreated || artifactName != "result.md" {
 		t.Fatalf("artifact record = %+v", records[1])
 	}
 }
@@ -426,7 +443,11 @@ func TestServicePersistsTypedMemoryNotifications(t *testing.T) {
 			recallRecord = record
 		}
 	}
-	if memoryRecord == nil || memoryRecord.Payload[events.PayloadKeySummary] != "typed memory" {
+	if memoryRecord == nil {
+		t.Fatalf("memory records = %+v", records)
+	}
+	memorySummary, _ := memoryRecord.Payload.String(events.PayloadKeySummary)
+	if memorySummary != "typed memory" {
 		t.Fatalf("memory records = %+v", records)
 	}
 	if recallRecord == nil || recallRecord.StepID != "step-001" {
@@ -468,7 +489,9 @@ func TestServicePersistsTypedOrchestratorDetailNotifications(t *testing.T) {
 	if len(records) != 2 || records[0].Topic != orchestratorevents.TopicPatchApplied || records[1].Topic != orchestratorevents.TopicArtifactContinuationAssembled {
 		t.Fatalf("records = %+v", records)
 	}
-	if records[0].Payload[events.PayloadKeyTargetRef] != "result.txt" || records[1].Payload["bytesWritten"] != int64(42) {
+	targetRef, _ := records[0].Payload.String(events.PayloadKeyTargetRef)
+	bytesWritten, _ := records[1].Payload.Int64("bytesWritten")
+	if targetRef != "result.txt" || bytesWritten != 42 {
 		t.Fatalf("detail payloads = %+v / %+v", records[0].Payload, records[1].Payload)
 	}
 }
@@ -521,7 +544,11 @@ func TestServicePersistsPatchEventsFromHub(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list event records: %v", err)
 	}
-	if len(records) != 1 || records[0].Topic != orchestratorevents.TopicPatchApplied || records[0].Payload[events.PayloadKeyTargetRef] != "result.txt" {
+	if len(records) != 1 {
+		t.Fatalf("records = %+v, want one persisted patch event", records)
+	}
+	targetRef, _ := records[0].Payload.String(events.PayloadKeyTargetRef)
+	if records[0].Topic != orchestratorevents.TopicPatchApplied || targetRef != "result.txt" {
 		t.Fatalf("records = %+v, want persisted patch event", records)
 	}
 }

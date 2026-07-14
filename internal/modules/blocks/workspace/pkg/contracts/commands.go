@@ -18,39 +18,9 @@ type EnsureWorkspaceCommand struct {
 	InternalDirectory    string
 }
 
-type UpdateWorkspaceCommand struct {
-	WorkspaceID          common.WorkspaceID
-	Title                string
-	Description          string
-	DeliverableDirectory string
-	InternalDirectory    string
-	State                common.WorkspaceState
-	ActiveRunID          common.RunID
-	TemplateID           string
-	ProfileID            string
-	DefaultSoulID        common.SoulID
-	SoulBindings         map[string]common.SoulID
-	ContextHints         map[string]any
-	EvidencePolicies     []map[string]any
-}
-
 type DeleteWorkspaceCommand struct {
 	WorkspaceID common.WorkspaceID
 }
-
-type CreateWorkspaceTemplateCommand struct {
-	TemplateID       string
-	Name             string
-	Description      string
-	GoalText         string
-	DoDItems         []string
-	DefaultSoulID    string
-	SoulBindings     map[string]string
-	ContextHints     map[string]any
-	EvidencePolicies []map[string]any
-}
-
-type UpdateWorkspaceTemplateCommand = CreateWorkspaceTemplateCommand
 
 type DeleteWorkspaceTemplateCommand struct {
 	TemplateID string

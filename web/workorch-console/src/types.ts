@@ -1443,11 +1443,33 @@ export type EventRecord = {
   workspaceId?: string;
   runId?: string;
   stepId?: string;
-  payload?: Record<string, unknown>;
-  payloadSummary?: Record<string, unknown>;
+  payload?: EventPayload;
+  payloadSummary?: EventPayload;
   payloadRef?: string;
   revision?: number;
   stateSummary?: WorkorchEventStateSummary;
+};
+
+export type EventPayloadValueKind = 'null' | 'string' | 'bool' | 'int' | 'uint' | 'float' | 'object' | 'array';
+
+export type EventPayloadField = {
+  name: string;
+  value: EventPayloadValue;
+};
+
+export type EventPayloadValue = {
+  kind: EventPayloadValueKind;
+  string?: string;
+  bool?: boolean;
+  int?: number;
+  uint?: number;
+  float?: number;
+  object?: EventPayloadField[];
+  array?: EventPayloadValue[];
+};
+
+export type EventPayload = {
+  fields?: EventPayloadField[];
 };
 
 export type WorkorchEventStateSummary = {

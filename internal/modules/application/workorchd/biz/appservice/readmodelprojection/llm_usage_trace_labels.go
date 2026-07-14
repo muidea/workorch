@@ -1,23 +1,26 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/pkg/events"
+import (
+	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
-func llmUsageTraceProviderID(payload map[string]any) string {
-	return readModelStringValue(payload[events.PayloadKeyProviderID])
+func llmUsageTraceProviderID(payload workorcheventpayload.Payload) string {
+	return eventPayloadString(payload, events.PayloadKeyProviderID)
 }
 
-func llmUsageTraceProvider(payload map[string]any) string {
-	return readModelStringValue(payload[events.PayloadKeyProvider])
+func llmUsageTraceProvider(payload workorcheventpayload.Payload) string {
+	return eventPayloadString(payload, events.PayloadKeyProvider)
 }
 
-func llmUsageTraceAPISurface(payload map[string]any) string {
-	return readModelStringValue(payload[events.PayloadKeyAPISurface])
+func llmUsageTraceAPISurface(payload workorcheventpayload.Payload) string {
+	return eventPayloadString(payload, events.PayloadKeyAPISurface)
 }
 
-func llmUsageTraceModel(payload map[string]any) string {
-	return readModelStringValue(payload[events.PayloadKeyModel])
+func llmUsageTraceModel(payload workorcheventpayload.Payload) string {
+	return eventPayloadString(payload, events.PayloadKeyModel)
 }
 
-func llmUsageTraceOperation(payload map[string]any) string {
-	return readModelStringValue(payload[events.PayloadKeyOperation])
+func llmUsageTraceOperation(payload workorcheventpayload.Payload) string {
+	return eventPayloadString(payload, events.PayloadKeyOperation)
 }

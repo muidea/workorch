@@ -1,6 +1,9 @@
 package workorchruntimecontract
 
-import "github.com/muidea/workorch/internal/pkg/common"
+import (
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
 type ArtifactContinuation struct {
 	ID                  common.ArtifactContinuationID    `json:"id"`
@@ -26,7 +29,7 @@ type ArtifactContinuation struct {
 	EvidenceRefs        []string                         `json:"evidenceRefs,omitempty"`
 	CreatedAt           string                           `json:"createdAt,omitempty"`
 	UpdatedAt           string                           `json:"updatedAt,omitempty"`
-	Metadata            map[string]any                   `json:"metadata,omitempty"`
+	Metadata            workorcheventpayload.Payload     `json:"metadata,omitempty"`
 }
 
 type ArtifactContinuationChunk struct {
@@ -40,9 +43,9 @@ type ArtifactContinuationChunk struct {
 	CurrentChunkTail  string                        `json:"currentChunkTail,omitempty"`
 	LLMCallRefs       []string                      `json:"llmCallRefs,omitempty"`
 	StepRefs          []common.StepID               `json:"stepRefs,omitempty"`
-	Validation        map[string]any                `json:"validation,omitempty"`
+	Validation        workorcheventpayload.Payload  `json:"validation,omitempty"`
 	CreatedAt         string                        `json:"createdAt,omitempty"`
-	Metadata          map[string]any                `json:"metadata,omitempty"`
+	Metadata          workorcheventpayload.Payload  `json:"metadata,omitempty"`
 }
 
 type ArtifactContinuationAssembledMetadata struct {
@@ -53,5 +56,5 @@ type ArtifactContinuationAssembledMetadata struct {
 	SourceChunkRefs   []string                      `json:"sourceChunkRefs,omitempty"`
 	ApplyEvidenceRefs []string                      `json:"applyEvidenceRefs,omitempty"`
 	CreatedAt         string                        `json:"createdAt,omitempty"`
-	Metadata          map[string]any                `json:"metadata,omitempty"`
+	Metadata          workorcheventpayload.Payload  `json:"metadata,omitempty"`
 }

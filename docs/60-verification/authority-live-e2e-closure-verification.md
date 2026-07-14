@@ -8,7 +8,7 @@ Last Updated: 2026-06-27
 
 Related:
 
-- `../30-module-architecture/goal-dod-nextaction-delivery-state-machine-design.md`
+- `../90-archive/superseded/goal-dod-nextaction-delivery-state-machine-design.md`
 - `../70-roadmap/active/convergence-authority-simplification-design.md`
 - `../70-roadmap/active/authority-live-verification-e2e-closure-design.md`
 - `convergence-authority-dispatch-live-verification.md`

@@ -1,12 +1,16 @@
 package workorchport
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
 func TestNormalizeDecisionResolutionInfersReplan(t *testing.T) {
-	got := NormalizeDecisionResolution("auto", map[string]any{
-		"answer":   "请重新规划执行路径",
-		"operator": "tui",
-	})
+	got := NormalizeDecisionResolution("auto", workorcheventpayload.New(
+		workorcheventpayload.StringField("answer", "请重新规划执行路径"),
+		workorcheventpayload.StringField("operator", "tui"),
+	))
 	if got.ResolutionType != DecisionResolutionTypeReplan ||
 		got.Intent != GovernanceIntentRequestReplan ||
 		got.Source != "tui" ||
@@ -16,9 +20,7 @@ func TestNormalizeDecisionResolutionInfersReplan(t *testing.T) {
 }
 
 func TestNormalizeDecisionResolutionKeepsExplicitSupportedType(t *testing.T) {
-	got := NormalizeDecisionResolution(DecisionResolutionTypeRejectCurrentPath, map[string]any{
-		"answer": "继续执行",
-	})
+	got := NormalizeDecisionResolution(DecisionResolutionTypeRejectCurrentPath, workorcheventpayload.New(workorcheventpayload.StringField("answer", "继续执行")))
 	if got.ResolutionType != DecisionResolutionTypeRejectCurrentPath || got.Inferred {
 		t.Fatalf("normalization = %+v, want explicit reject_current_path", got)
 	}

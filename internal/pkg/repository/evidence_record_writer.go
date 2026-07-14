@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -30,17 +31,14 @@ func CreateOrUpdateEvidenceRecord(ctx context.Context, repo EvidenceRecordReposi
 }
 
 func preserveEvidenceRecordMetadataValue(record *orchestratormodel.EvidenceRecord, existing *orchestratormodel.EvidenceRecord, key string) {
-	if record == nil || existing == nil || key == "" || len(existing.Metadata) == 0 {
+	if record == nil || existing == nil || key == "" || len(existing.Metadata.Fields) == 0 {
 		return
 	}
-	value, ok := existing.Metadata[key]
+	value, ok := existing.Metadata.Field(key)
 	if !ok {
 		return
 	}
-	if record.Metadata == nil {
-		record.Metadata = map[string]any{}
-	}
-	record.Metadata[key] = value
+	record.Metadata = record.Metadata.Merge(workorcheventpayload.New(workorcheventpayload.Field{Name: key, Value: value}))
 }
 
 func firstNonEmptyEvidenceRecordString(values ...string) string {

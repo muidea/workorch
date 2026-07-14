@@ -19,8 +19,18 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func mustFileRepositoryPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
+	t.Helper()
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
 
 func TestWorkspaceRepositoryGetReturnsErrorWhenPersistedJSONCorrupt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workspace.json")
@@ -108,7 +118,7 @@ func TestEventRecordRepositoryAppendsJSONLSegmentsWithoutMapRewrite(t *testing.T
 		OccurredAt:  "2026-05-16T00:00:00Z",
 		WorkspaceID: common.WorkspaceID("ws-jsonl"),
 		RunID:       common.RunID("run-jsonl"),
-		Payload:     map[string]any{"large": payload},
+		Payload:     mustFileRepositoryPayload(t, map[string]any{"large": payload}),
 	}); err != nil {
 		t.Fatalf("append event: %v", err)
 	}
@@ -126,10 +136,10 @@ func TestEventRecordRepositoryAppendsJSONLSegmentsWithoutMapRewrite(t *testing.T
 	if err != nil {
 		t.Fatalf("list events: %v", err)
 	}
-	if len(items) != 1 || len(items[0].Payload) != 0 {
+	if len(items) != 1 || len(items[0].Payload.Fields) != 0 {
 		t.Fatalf("events = %+v, want lightweight event without payload", items)
 	}
-	if items[0].PayloadRef == "" || len(items[0].PayloadSummary) == 0 {
+	if items[0].PayloadRef == "" || len(items[0].PayloadSummary.Fields) == 0 {
 		t.Fatalf("event payload projection = ref:%q summary:%+v, want ref and summary", items[0].PayloadRef, items[0].PayloadSummary)
 	}
 	afterDefaultList := repository.EventRecordIOMetricsSnapshot()
@@ -145,7 +155,11 @@ func TestEventRecordRepositoryAppendsJSONLSegmentsWithoutMapRewrite(t *testing.T
 	if err != nil {
 		t.Fatalf("list events with payload: %v", err)
 	}
-	if len(withPayload) != 1 || withPayload[0].Payload["large"] != payload {
+	if len(withPayload) != 1 {
+		t.Fatalf("events = %+v, want one rehydrated payload", withPayload)
+	}
+	large, ok := withPayload[0].Payload.String("large")
+	if !ok || large != payload {
 		t.Fatalf("events = %+v, want rehydrated large payload", withPayload)
 	}
 	afterPayloadList := repository.EventRecordIOMetricsSnapshot()
@@ -235,8 +249,8 @@ func TestStepRepositoryStoresItemsWithoutMapRewrite(t *testing.T) {
 		RunID:  common.RunID("run-item"),
 		Kind:   "llm",
 		State:  common.StepStateSucceeded,
-		Input:  map[string]any{"prompt": "hello"},
-		Output: map[string]any{"answer": "world"},
+		Input:  mustFileRepositoryPayload(t, map[string]any{"prompt": "hello"}),
+		Output: mustFileRepositoryPayload(t, map[string]any{"answer": "world"}),
 	}); err != nil {
 		t.Fatalf("create step: %v", err)
 	}
@@ -253,7 +267,9 @@ func TestStepRepositoryStoresItemsWithoutMapRewrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get step: %v", err)
 	}
-	if item.Input["prompt"] != "hello" || item.Output["answer"] != "world" {
+	prompt, _ := item.Input.String("prompt")
+	answer, _ := item.Output.String("answer")
+	if prompt != "hello" || answer != "world" {
 		t.Fatalf("step payload = %+v/%+v, want split input/output", item.Input, item.Output)
 	}
 }
@@ -268,28 +284,28 @@ func TestStepRepositoryListByRunUsesSequenceScope(t *testing.T) {
 			RunID: "run-a",
 			Kind:  "shell",
 			State: common.StepStateSucceeded,
-			Input: map[string]any{
+			Input: mustFileRepositoryPayload(t, map[string]any{
 				"workspaceId":         "ws-a",
 				"largeRuntimePayload": strings.Repeat("x", 8192),
-			},
-			Output: map[string]any{
+			}),
+			Output: mustFileRepositoryPayload(t, map[string]any{
 				"status": "completed",
 				"value":  "a1",
-			},
+			}),
 		},
 		{
 			ID:     "run-a/step-2",
 			RunID:  "run-a",
 			Kind:   "shell",
 			State:  common.StepStateSucceeded,
-			Output: map[string]any{"value": "a2"},
+			Output: mustFileRepositoryPayload(t, map[string]any{"value": "a2"}),
 		},
 		{
 			ID:     "run-b/step-1",
 			RunID:  "run-b",
 			Kind:   "shell",
 			State:  common.StepStateSucceeded,
-			Output: map[string]any{"value": "b1"},
+			Output: mustFileRepositoryPayload(t, map[string]any{"value": "b1"}),
 		},
 	} {
 		if err := repo.Create(ctx, item); err != nil {
@@ -317,16 +333,18 @@ func TestStepRepositoryListByRunUsesSequenceScope(t *testing.T) {
 	if len(summaries) != 2 || summaries[0].ID != "run-a/step-1" || summaries[1].ID != "run-a/step-2" {
 		t.Fatalf("run-a step summaries = %+v, want only run-a steps in order", summaries)
 	}
-	if summaries[0].Input["workspaceId"] != "ws-a" {
-		t.Fatalf("summary input workspaceId = %v, want ws-a", summaries[0].Input["workspaceId"])
+	workspaceID, _ := summaries[0].Input.String("workspaceId")
+	if workspaceID != "ws-a" {
+		t.Fatalf("summary input workspaceId = %v, want ws-a", workspaceID)
 	}
-	if _, ok := summaries[0].Input["largeRuntimePayload"]; ok {
+	if _, ok := summaries[0].Input.Field("largeRuntimePayload"); ok {
 		t.Fatalf("summary retained largeRuntimePayload, want omitted")
 	}
-	if summaries[0].Output["status"] != "completed" {
-		t.Fatalf("summary output status = %v, want completed", summaries[0].Output["status"])
+	status, _ := summaries[0].Output.String("status")
+	if status != "completed" {
+		t.Fatalf("summary output status = %v, want completed", status)
 	}
-	if _, ok := summaries[0].Output["value"]; ok {
+	if _, ok := summaries[0].Output.Field("value"); ok {
 		t.Fatalf("summary retained non-whitelisted output value, want omitted")
 	}
 }
@@ -376,8 +394,8 @@ func TestStepRepositoryListByRunCacheReturnsClonesAndInvalidatesOnUpdate(t *test
 		RunID:  "run-cache",
 		Kind:   "llm/workspace_execution",
 		State:  common.StepStateExecuting,
-		Input:  map[string]any{"workspaceId": "ws-cache"},
-		Output: map[string]any{"status": "running"},
+		Input:  mustFileRepositoryPayload(t, map[string]any{"workspaceId": "ws-cache"}),
+		Output: mustFileRepositoryPayload(t, map[string]any{"status": "running"}),
 	}
 	if err := repo.Create(ctx, step); err != nil {
 		t.Fatalf("create step: %v", err)
@@ -386,16 +404,17 @@ func TestStepRepositoryListByRunCacheReturnsClonesAndInvalidatesOnUpdate(t *test
 	if err != nil {
 		t.Fatalf("list steps: %v", err)
 	}
-	items[0].Output["status"] = "mutated-by-caller"
+	items[0].Output.Fields[0].Value.String = "mutated-by-caller"
 	cached, err := repo.ListByRun(ctx, step.RunID)
 	if err != nil {
 		t.Fatalf("list cached steps: %v", err)
 	}
-	if cached[0].Output["status"] != "running" {
+	cachedStatus, _ := cached[0].Output.String("status")
+	if cachedStatus != "running" {
 		t.Fatalf("cached step output = %v, want clone isolated from caller mutation", cached[0].Output)
 	}
 	step.State = common.StepStateSucceeded
-	step.Output = map[string]any{"status": "completed"}
+	step.Output = mustFileRepositoryPayload(t, map[string]any{"status": "completed"})
 	if err := repo.Update(ctx, step); err != nil {
 		t.Fatalf("update step: %v", err)
 	}
@@ -403,7 +422,8 @@ func TestStepRepositoryListByRunCacheReturnsClonesAndInvalidatesOnUpdate(t *test
 	if err != nil {
 		t.Fatalf("list updated steps: %v", err)
 	}
-	if updated[0].State != common.StepStateSucceeded || updated[0].Output["status"] != "completed" {
+	updatedStatus, _ := updated[0].Output.String("status")
+	if updated[0].State != common.StepStateSucceeded || updatedStatus != "completed" {
 		t.Fatalf("updated step = state %s output %+v, want completed from invalidated cache", updated[0].State, updated[0].Output)
 	}
 }
@@ -418,16 +438,16 @@ func TestStepRepositoryListByRunSummaryRebuildsLegacySummary(t *testing.T) {
 		RunID: "run-legacy",
 		Kind:  "llm/workspace_execution",
 		State: common.StepStateSucceeded,
-		Input: map[string]any{
+		Input: mustFileRepositoryPayload(t, map[string]any{
 			"workspaceId":           "ws-legacy",
 			"runtimeRepairFollowUp": true,
 			"largeRuntimePayload":   strings.Repeat("x", 8192),
-		},
-		Output: map[string]any{
+		}),
+		Output: mustFileRepositoryPayload(t, map[string]any{
 			"status":           "completed",
 			"failureSignature": "class=runtime_failed|targetRef=main.go",
 			"rawResponse":      strings.Repeat("y", 8192),
-		},
+		}),
 	}
 	if err := repo.Create(ctx, item); err != nil {
 		t.Fatalf("create step: %v", err)
@@ -453,19 +473,23 @@ func TestStepRepositoryListByRunSummaryRebuildsLegacySummary(t *testing.T) {
 	if len(summaries) != 1 {
 		t.Fatalf("summary count = %d, want 1", len(summaries))
 	}
-	if summaries[0].Input["_summarySchemaVersion"] != stepSummarySchemaVersion {
-		t.Fatalf("summary schema = %v, want %s", summaries[0].Input["_summarySchemaVersion"], stepSummarySchemaVersion)
+	summaryVersion, _ := summaries[0].Input.String("_summarySchemaVersion")
+	if summaryVersion != stepSummarySchemaVersion {
+		t.Fatalf("summary schema = %v, want %s", summaryVersion, stepSummarySchemaVersion)
 	}
-	if summaries[0].Input["workspaceId"] != "ws-legacy" || summaries[0].Input["runtimeRepairFollowUp"] != true {
+	summaryWorkspaceID, _ := summaries[0].Input.String("workspaceId")
+	repairFollowUp, _ := summaries[0].Input.Bool("runtimeRepairFollowUp")
+	if summaryWorkspaceID != "ws-legacy" || !repairFollowUp {
 		t.Fatalf("summary retained input = %+v, want workspace and repair flags", summaries[0].Input)
 	}
-	if _, ok := summaries[0].Input["largeRuntimePayload"]; ok {
+	if _, ok := summaries[0].Input.Field("largeRuntimePayload"); ok {
 		t.Fatalf("summary retained largeRuntimePayload, want omitted")
 	}
-	if summaries[0].Output["failureSignature"] != "class=runtime_failed|targetRef=main.go" {
-		t.Fatalf("summary failureSignature = %v, want retained", summaries[0].Output["failureSignature"])
+	failureSignature, _ := summaries[0].Output.String("failureSignature")
+	if failureSignature != "class=runtime_failed|targetRef=main.go" {
+		t.Fatalf("summary failureSignature = %v, want retained", failureSignature)
 	}
-	if _, ok := summaries[0].Output["rawResponse"]; ok {
+	if _, ok := summaries[0].Output.Field("rawResponse"); ok {
 		t.Fatalf("summary retained rawResponse, want omitted")
 	}
 
@@ -477,13 +501,14 @@ func TestStepRepositoryListByRunSummaryRebuildsLegacySummary(t *testing.T) {
 	if err := json.Unmarshal(rewrittenData, &rewritten); err != nil {
 		t.Fatalf("unmarshal rewritten summary: %v", err)
 	}
-	if rewritten.Input["_summarySchemaVersion"] != stepSummarySchemaVersion {
-		t.Fatalf("rewritten summary schema = %v, want %s", rewritten.Input["_summarySchemaVersion"], stepSummarySchemaVersion)
+	rewrittenVersion, _ := rewritten.Input.String("_summarySchemaVersion")
+	if rewrittenVersion != stepSummarySchemaVersion {
+		t.Fatalf("rewritten summary schema = %v, want %s", rewrittenVersion, stepSummarySchemaVersion)
 	}
-	if _, ok := rewritten.Input["largeRuntimePayload"]; ok {
+	if _, ok := rewritten.Input.Field("largeRuntimePayload"); ok {
 		t.Fatalf("rewritten summary retained largeRuntimePayload, want omitted")
 	}
-	if _, ok := rewritten.Output["rawResponse"]; ok {
+	if _, ok := rewritten.Output.Field("rawResponse"); ok {
 		t.Fatalf("rewritten summary retained rawResponse, want omitted")
 	}
 }
@@ -500,8 +525,8 @@ func TestToolCallRepositoryStoresItemsWithoutMapRewrite(t *testing.T) {
 		StepID:    common.StepID("run-item/step-1"),
 		ToolName:  "shell",
 		State:     common.ToolCallStateCompleted,
-		Arguments: map[string]any{"command": "true"},
-		Output:    map[string]any{"exitCode": float64(0)},
+		Arguments: mustFileRepositoryPayload(t, map[string]any{"command": "true"}),
+		Output:    mustFileRepositoryPayload(t, map[string]any{"exitCode": float64(0)}),
 	}); err != nil {
 		t.Fatalf("create tool call: %v", err)
 	}
@@ -518,7 +543,9 @@ func TestToolCallRepositoryStoresItemsWithoutMapRewrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tool calls by step: %v", err)
 	}
-	if len(items) != 1 || items[0].Arguments["command"] != "true" || items[0].Output["exitCode"] != float64(0) {
+	command, _ := items[0].Arguments.String("command")
+	exitCode, _ := items[0].Output.Int64("exitCode")
+	if len(items) != 1 || command != "true" || exitCode != 0 {
 		t.Fatalf("tool calls = %+v, want rehydrated arguments/output", items)
 	}
 }
@@ -547,7 +574,7 @@ func TestRuntimeEvidenceRepositoriesUseRunScopedSequencePathsAndReuseExistingPat
 		t.Fatalf("get step by logical id: %v", err)
 	}
 	step.State = common.StepStateSucceeded
-	step.Output = map[string]any{"status": "done"}
+	step.Output = mustFileRepositoryPayload(t, map[string]any{"status": "done"})
 	if err := stepRepo.Update(ctx, step); err != nil {
 		t.Fatalf("update step: %v", err)
 	}
@@ -630,7 +657,7 @@ func TestRunEvidenceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
 		ID:             checkpointID,
 		RunID:          runID,
 		CheckpointType: common.CheckpointTypeRunState,
-		Data:           map[string]any{"state": "running"},
+		Data:           mustFileRepositoryPayload(t, map[string]any{"state": "running"}),
 	}); err != nil {
 		t.Fatalf("create runtime checkpoint: %v", err)
 	}
@@ -640,7 +667,8 @@ func TestRunEvidenceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get runtime checkpoint: %v", err)
 	}
-	if checkpoint.Data["state"] != "running" {
+	state, _ := checkpoint.Data.String("state")
+	if state != "running" {
 		t.Fatalf("checkpoint data = %+v, want rehydrated data", checkpoint.Data)
 	}
 
@@ -668,7 +696,7 @@ func TestRunEvidenceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
 		ResultID:     resultID,
 		ArtifactType: "text",
 		State:        common.ArtifactStateAvailable,
-		Metadata:     map[string]any{"bytes": float64(12)},
+		Metadata:     mustFileRepositoryPayload(t, map[string]any{"bytes": float64(12)}),
 	}); err != nil {
 		t.Fatalf("create artifact: %v", err)
 	}
@@ -678,12 +706,16 @@ func TestRunEvidenceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list artifacts by result: %v", err)
 	}
-	if len(artifacts) != 1 || artifacts[0].Metadata["bytes"] != float64(12) {
+	if len(artifacts) != 1 {
+		t.Fatalf("artifacts = %+v, want one rehydrated artifact", artifacts)
+	}
+	bytes, _ := artifacts[0].Metadata.Float64("bytes")
+	if bytes != float64(12) {
 		t.Fatalf("artifacts = %+v, want rehydrated metadata", artifacts)
 	}
 }
 
-func TestGovernanceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
+func TestGovernanceRepositoriesStoreTypedPayloads(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 
@@ -695,7 +727,7 @@ func TestGovernanceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
 		WorkspaceID: common.WorkspaceID("ws-governance"),
 		RunID:       common.RunID("run-governance"),
 		Reason:      "need human decision",
-		Context:     map[string]any{"field": "value"},
+		Context:     mustFileRepositoryPayload(t, map[string]any{"field": "value"}),
 		State:       common.DecisionTicketStateOpen,
 	}); err != nil {
 		t.Fatalf("create ticket: %v", err)
@@ -706,7 +738,8 @@ func TestGovernanceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tickets by run: %v", err)
 	}
-	if len(tickets) != 1 || tickets[0].Context["field"] != "value" {
+	field, _ := tickets[0].Context.String("field")
+	if len(tickets) != 1 || field != "value" {
 		t.Fatalf("tickets = %+v, want rehydrated context", tickets)
 	}
 
@@ -717,7 +750,7 @@ func TestGovernanceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
 		ID:       resolutionID,
 		TicketID: ticketID,
 		Type:     "provide_missing_info",
-		Payload:  map[string]any{"answer": "ok"},
+		Payload:  mustFileRepositoryPayload(t, map[string]any{"answer": "ok"}),
 	}); err != nil {
 		t.Fatalf("create resolution: %v", err)
 	}
@@ -727,7 +760,8 @@ func TestGovernanceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get resolution by ticket: %v", err)
 	}
-	if resolution.Payload["answer"] != "ok" {
+	answer, _ := resolution.Payload.String("answer")
+	if answer != "ok" {
 		t.Fatalf("resolution payload = %+v, want rehydrated payload", resolution.Payload)
 	}
 
@@ -739,7 +773,7 @@ func TestGovernanceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
 		WorkspaceID: common.WorkspaceID("ws-governance"),
 		RunID:       common.RunID("run-governance"),
 		Reason:      "need approval",
-		Context:     map[string]any{"risk": "high"},
+		Context:     mustFileRepositoryPayload(t, map[string]any{"risk": "high"}),
 		State:       common.ApprovalStatePending,
 	}); err != nil {
 		t.Fatalf("create approval: %v", err)
@@ -750,7 +784,8 @@ func TestGovernanceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list approvals by workspace: %v", err)
 	}
-	if len(approvals) != 1 || approvals[0].Context["risk"] != "high" {
+	risk, _ := approvals[0].Context.String("risk")
+	if len(approvals) != 1 || risk != "high" {
 		t.Fatalf("approvals = %+v, want rehydrated context", approvals)
 	}
 }
@@ -780,7 +815,7 @@ func TestDecisionResolutionRepositoryStoresLongReadableIDsWithSafeFileName(t *te
 		ID:       resolutionID,
 		TicketID: ticketID,
 		Type:     "provide_missing_info",
-		Payload:  map[string]any{"answer": "continue"},
+		Payload:  mustFileRepositoryPayload(t, map[string]any{"answer": "continue"}),
 	}); err != nil {
 		t.Fatalf("create long resolution: %v", err)
 	}
@@ -788,7 +823,8 @@ func TestDecisionResolutionRepositoryStoresLongReadableIDsWithSafeFileName(t *te
 	if err != nil {
 		t.Fatalf("get long resolution by ticket: %v", err)
 	}
-	if resolution.ID != resolutionID || resolution.Payload["answer"] != "continue" {
+	longAnswer, _ := resolution.Payload.String("answer")
+	if resolution.ID != resolutionID || longAnswer != "continue" {
 		t.Fatalf("resolution = %+v, want stored long ID and payload", resolution)
 	}
 
@@ -820,8 +856,8 @@ func TestStepRepositoryStoresLongReadableIDsWithBoundedSequenceDirectories(t *te
 		RunID:  runID,
 		Kind:   "llm/workspace_execution",
 		State:  common.StepStateSucceeded,
-		Input:  map[string]any{"input": "ok"},
-		Output: map[string]any{"output": "ok"},
+		Input:  mustFileRepositoryPayload(t, map[string]any{"input": "ok"}),
+		Output: mustFileRepositoryPayload(t, map[string]any{"output": "ok"}),
 	}); err != nil {
 		t.Fatalf("create long step: %v", err)
 	}
@@ -829,7 +865,8 @@ func TestStepRepositoryStoresLongReadableIDsWithBoundedSequenceDirectories(t *te
 	if err != nil {
 		t.Fatalf("get long step: %v", err)
 	}
-	if got.ID != stepID || got.RunID != runID || got.Output["output"] != "ok" {
+	output, _ := got.Output.String("output")
+	if got.ID != stepID || got.RunID != runID || output != "ok" {
 		t.Fatalf("step = %+v, want long id round trip with payload", got)
 	}
 	listed, err := repo.ListByRun(ctx, runID)

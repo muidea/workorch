@@ -9,6 +9,7 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -25,7 +26,9 @@ func PurgeWorkspaceRecords(ctx context.Context, hub magicevent.Hub, workspaceID 
 		}
 	}
 	for _, runID := range runIDs {
-		if _, err := sendWorkspaceMagicCommand[orchestratorevents.PurgeRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandPurgeRun, orchestratorevents.CommandDestination, "run", string(runID), workspaceID, runID, orchestratorevents.PurgeRunCommand{RunID: runID}); err != nil && !errors.Is(err, common.ErrNotFound) {
+		event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandPurgeRun, sourceModule, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.PurgeRunCommand{RunID: runID})
+		ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorCommandPurgeRun, "run", string(runID), workspaceID, runID, "")
+		if _, err := ownerevent.Orchestrator(hub.Send(event), orchestratorevents.TopicOrchestratorCommandPurgeRun); err != nil && !errors.Is(err, common.ErrNotFound) {
 			return err
 		}
 	}
@@ -42,10 +45,12 @@ func PurgeWorkspaceRecords(ctx context.Context, hub magicevent.Hub, workspaceID 
 		return err
 	}
 	for _, runID := range runIDs {
-		if _, err := sendWorkspaceMagicCommand[runevents.DeleteRunCommand, runevents.RunCommandResult](ctx, hub, runevents.TopicRunCommandDelete, runevents.CommandDestination, "run", string(runID), workspaceID, runID, runevents.DeleteRunCommand{
+		event := magicevent.NewEventWithContext(runevents.TopicRunCommandDelete, sourceModule, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.DeleteRunCommand{
 			WorkspaceID: workspaceID,
 			RunID:       runID,
-		}); err != nil && !errors.Is(err, common.ErrNotFound) {
+		})
+		ownerevent.BindLane(event, runevents.TopicRunCommandDelete, "run", string(runID), workspaceID, runID, "")
+		if _, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandDelete); err != nil && !errors.Is(err, common.ErrNotFound) {
 			return err
 		}
 	}
@@ -53,7 +58,12 @@ func PurgeWorkspaceRecords(ctx context.Context, hub magicevent.Hub, workspaceID 
 }
 
 func WorkspaceRunIDs(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) ([]common.RunID, error) {
-	response, err := sendWorkspaceMagicCommand[runevents.ListRunsByWorkspaceCommand, runevents.RunCommandResult](ctx, hub, runevents.TopicRunCommandListByWorkspace, runevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", runevents.ListRunsByWorkspaceCommand{WorkspaceID: workspaceID})
+	if hub == nil || workspaceID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandListByWorkspace, sourceModule, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.ListRunsByWorkspaceCommand{WorkspaceID: workspaceID})
+	ownerevent.BindLane(event, runevents.TopicRunCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
+	response, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandListByWorkspace)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +78,12 @@ func WorkspaceRunIDs(ctx context.Context, hub magicevent.Hub, workspaceID common
 }
 
 func PurgeWorkspaceEventStream(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) error {
-	_, err := sendWorkspaceMagicCommand[eventstreamevents.PurgeWorkspaceCommand, eventstreamevents.EventStreamCommandResult](ctx, hub, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, eventstreamevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", eventstreamevents.PurgeWorkspaceCommand{WorkspaceID: workspaceID})
+	if hub == nil || workspaceID == "" {
+		return common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(eventstreamevents.TopicEventStreamCommandPurgeWorkspace, sourceModule, eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx, eventstreamevents.PurgeWorkspaceCommand{WorkspaceID: workspaceID})
+	ownerevent.BindLane(event, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
+	_, err := ownerevent.EventStream(hub.Send(event), eventstreamevents.TopicEventStreamCommandPurgeWorkspace)
 	if errors.Is(err, common.ErrNotFound) || errors.Is(err, common.ErrConflict) {
 		return nil
 	}

@@ -4,18 +4,15 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/clicore"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-// CLICommandDispatcher owns the typed /cli/command contract for workorchd.
-// The CLI/TUI backend sends the owner-defined command through magicCommon EventHub;
-// owner state is read or changed here.
+// CLICommandDispatcher owns the operation-specific CLI EventHub contracts.
 type CLICommandDispatcher struct {
 	session    *RuntimeSession
 	commandHub magicevent.Hub
 	viewReader WorkspaceViewReader
-	core       *clicore.Dispatcher
+	typed      magicevent.SimpleObserver
 }
 
 type WorkspaceViewReader interface {
@@ -24,62 +21,21 @@ type WorkspaceViewReader interface {
 }
 
 func NewCLICommandDispatcher(session *RuntimeSession, commandHub magicevent.Hub, viewReader WorkspaceViewReader) *CLICommandDispatcher {
-	ret := &CLICommandDispatcher{session: session, commandHub: commandHub, viewReader: viewReader}
-	ret.core = clicore.NewDispatcher(commandHub, func(ctx context.Context, cmd clicore.Command) (map[string]any, []map[string]any, error) {
-		return ret.handleCommand(ContextWithCommandHub(ctx, commandHub), cmd)
-	})
-	return ret
+	return &CLICommandDispatcher{session: session, commandHub: commandHub, viewReader: viewReader}
 }
 
 func (d *CLICommandDispatcher) Run() error {
-	if d == nil || d.session == nil || d.core == nil {
+	if d == nil || d.session == nil {
 		return common.ErrInvalidArgument
 	}
-	return d.core.Run()
+	return d.runTypedCLI()
 }
 
 func (d *CLICommandDispatcher) Close() {
 	if d == nil {
 		return
 	}
-	d.core.Close()
-}
-
-func (d *CLICommandDispatcher) handleCommand(ctx context.Context, cmd clicore.Command) (map[string]any, []map[string]any, error) {
-	if cmd.WorkspaceID != "" {
-		ctx = common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
-	}
-	switch cmd.Command {
-	case clicore.CommandWorkspaceCreate, clicore.CommandWorkspaceGet, clicore.CommandWorkspaceList,
-		clicore.CommandWorkspaceSnapshot, clicore.CommandWorkspaceDelete:
-		return d.handleWorkspaceCommand(ctx, cmd)
-	case clicore.CommandGoalDefine, clicore.CommandGoalList, clicore.CommandGoalGet, clicore.CommandGoalUpdate,
-		clicore.CommandDoDDefine, clicore.CommandDoDList, clicore.CommandDoDGet, clicore.CommandDoDUpdate:
-		return d.handleDefinitionCommand(ctx, cmd)
-	case clicore.CommandRunActivate, clicore.CommandRunResume, clicore.CommandRunGet, clicore.CommandRunList,
-		clicore.CommandRunStatus:
-		return d.handleRunCommand(ctx, cmd)
-	case clicore.CommandDecisionResolve, clicore.CommandDecisionList, clicore.CommandDecisionGet, clicore.CommandDecisionBatch,
-		clicore.CommandApprovalApprove, clicore.CommandApprovalReject, clicore.CommandApprovalList, clicore.CommandApprovalGet,
-		clicore.CommandApprovalBatch:
-		return d.handleGovernanceCommand(ctx, cmd)
-	case clicore.CommandSoulCreate, clicore.CommandSoulGet, clicore.CommandSoulList, clicore.CommandSoulUpdate,
-		clicore.CommandSoulDelete, clicore.CommandSkillCreate, clicore.CommandSkillGet, clicore.CommandSkillList,
-		clicore.CommandMCPServerCreate, clicore.CommandMCPServerGet, clicore.CommandMCPServerList,
-		clicore.CommandMCPServerUpdate, clicore.CommandMCPCapabilityList:
-		return d.handleContextRegistryCommand(ctx, cmd)
-	case clicore.CommandMemoryCreate, clicore.CommandMemoryGet, clicore.CommandMemoryUpdate, clicore.CommandMemoryDelete,
-		clicore.CommandMemoryList, clicore.CommandMemorySearch:
-		return d.handleMemoryCommand(ctx, cmd)
-	case clicore.CommandTemplateCreate, clicore.CommandTemplateGet, clicore.CommandTemplateList,
-		clicore.CommandTemplateUpdate, clicore.CommandTemplateDelete:
-		return d.handleTemplateCommand(ctx, cmd)
-	case clicore.CommandConfigurationGet:
-		item, err := ReadServiceConfiguration()
-		return clicore.ServiceConfigResourceMap(item), nil, err
-	default:
-		return unsupportedCLICommand(cmd)
-	}
+	d.closeTypedCLI()
 }
 
 func (d *CLICommandDispatcher) borrow() *RuntimeSession {

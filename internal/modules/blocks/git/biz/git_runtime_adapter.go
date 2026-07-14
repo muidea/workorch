@@ -14,7 +14,7 @@ import (
 
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
-	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const (
@@ -88,12 +88,12 @@ func NewRuntimeAdapterFromTimeoutString(writeEnabled bool, timeoutValue string) 
 	return adapter, nil
 }
 
-func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
-	operation := strings.ToLower(strings.TrimSpace(stringFromMap(request.Input, "operation")))
+func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeOperationRequest) (RuntimeOperationResult, error) {
+	operation := strings.ToLower(strings.TrimSpace(request.Operation))
 	if operation == "" {
 		return a.rejectedResult(request, operation, gitcommon.ErrorInvalidRequest, common.ErrInvalidArgument)
 	}
-	timeout, err := gitCommandTimeout(request.Input, a.timeout)
+	timeout, err := gitCommandTimeout(request.TimeoutMillis, a.timeout)
 	if err != nil {
 		return a.rejectedResult(request, operation, gitcommon.ErrorInvalidRequest, err)
 	}
@@ -117,7 +117,7 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	}
 }
 
-func (a *RuntimeAdapter) executeRead(ctx context.Context, request runtimemodel.StepExecutionRequest, repo repoContext, operation string, timeout time.Duration) (runtimemodel.StepExecutionResult, error) {
+func (a *RuntimeAdapter) executeRead(ctx context.Context, request RuntimeOperationRequest, repo repoContext, operation string, timeout time.Duration) (RuntimeOperationResult, error) {
 	switch operation {
 	case gitcommon.OperationStatus:
 		return a.executeStatus(ctx, request, repo, timeout)
@@ -135,7 +135,7 @@ func (a *RuntimeAdapter) executeRead(ctx context.Context, request runtimemodel.S
 	}
 }
 
-func (a *RuntimeAdapter) executeWrite(ctx context.Context, request runtimemodel.StepExecutionRequest, repo repoContext, operation string, timeout time.Duration) (runtimemodel.StepExecutionResult, error) {
+func (a *RuntimeAdapter) executeWrite(ctx context.Context, request RuntimeOperationRequest, repo repoContext, operation string, timeout time.Duration) (RuntimeOperationResult, error) {
 	switch operation {
 	case gitcommon.OperationInit:
 		return a.executeInit(ctx, request, timeout)
@@ -149,7 +149,7 @@ func (a *RuntimeAdapter) executeWrite(ctx context.Context, request runtimemodel.
 	}
 }
 
-func (a *RuntimeAdapter) executeInit(ctx context.Context, request runtimemodel.StepExecutionRequest, timeout time.Duration) (runtimemodel.StepExecutionResult, error) {
+func (a *RuntimeAdapter) executeInit(ctx context.Context, request RuntimeOperationRequest, timeout time.Duration) (RuntimeOperationResult, error) {
 	deliverable, err := filepath.Abs(strings.TrimSpace(request.WorkspaceDeliverableDirectory))
 	if err != nil || deliverable == "" {
 		return a.rejectedResult(request, gitcommon.OperationInit, gitcommon.ErrorInvalidRequest, common.ErrInvalidArgument)
@@ -166,14 +166,14 @@ func (a *RuntimeAdapter) executeInit(ctx context.Context, request runtimemodel.S
 		return a.failedResult(request, gitcommon.OperationInit, gitcommon.ErrorNotGitRepository, existingErr)
 	} else if ok {
 		output := a.baseOutput(request, repo, gitcommon.OperationInit, gitCommandResult{}, "completed")
-		output["zeroWork"] = true
-		output["initialized"] = false
-		output["existingRepository"] = true
+		output.ZeroWork = true
+		output.Initialized = false
+		output.ExistingRepository = true
 		if repo.HeadCommit == "" {
-			output["unbornHead"] = true
+			output.UnbornHead = true
 		}
-		output["summary"] = "git init skipped because workspace repository already exists"
-		return runtimemodel.StepExecutionResult{Output: output}, nil
+		output.Summary = "git init skipped because workspace repository already exists"
+		return finalizeGitResult(output, nil)
 	}
 	cmd, err := a.runGit(ctx, deliverable, timeout, maxOutputBytes, "init", "-q")
 	if err != nil {
@@ -193,15 +193,15 @@ func (a *RuntimeAdapter) executeInit(ctx context.Context, request runtimemodel.S
 		return a.failedResult(request, gitcommon.OperationInit, gitcommon.ErrorNotGitRepository, err)
 	}
 	output := a.baseOutput(request, repo, gitcommon.OperationInit, cmd, "completed")
-	output["initialized"] = true
-	output["existingRepository"] = false
-	output["unbornHead"] = true
-	output["summary"] = "git init completed"
-	return runtimemodel.StepExecutionResult{Output: output}, nil
+	output.Initialized = true
+	output.ExistingRepository = false
+	output.UnbornHead = true
+	output.Summary = "git init completed"
+	return finalizeGitResult(output, nil)
 }
 
-func (a *RuntimeAdapter) executeStatus(ctx context.Context, request runtimemodel.StepExecutionRequest, repo repoContext, timeout time.Duration) (runtimemodel.StepExecutionResult, error) {
-	pathspecs, err := optionalPathspecs(request.Input)
+func (a *RuntimeAdapter) executeStatus(ctx context.Context, request RuntimeOperationRequest, repo repoContext, timeout time.Duration) (RuntimeOperationResult, error) {
+	pathspecs, err := optionalPathspecs(request.Pathspecs)
 	if err != nil {
 		return a.rejectedResultWithRepo(request, gitcommon.OperationStatus, repo, gitcommon.ErrorPathRejected, err)
 	}
@@ -212,34 +212,34 @@ func (a *RuntimeAdapter) executeStatus(ctx context.Context, request runtimemodel
 	}
 	files, aheadBehind, branch, head := parsePorcelainStatus(cmd.Stdout)
 	output := a.baseOutput(request, repo, gitcommon.OperationStatus, cmd, "completed")
-	output["pathspecs"] = pathspecs
-	output["changedFiles"] = limitChangedFiles(files)
-	output["aheadBehind"] = aheadBehind
+	output.Pathspecs = pathspecs
+	output.ChangedFiles = limitChangedFiles(files)
+	output.AheadBehind = aheadBehind
 	if branch != "" {
-		output["branch"] = branch
+		output.Branch = branch
 	}
 	if head == "(initial)" {
-		output["unbornHead"] = true
+		output.UnbornHead = true
 	} else if head != "" {
-		output["headCommit"] = head
+		output.HeadCommit = head
 	}
-	output["summary"] = fmt.Sprintf("git status completed with %d changed file(s)", len(files))
-	return runtimemodel.StepExecutionResult{Output: output}, nil
+	output.Summary = fmt.Sprintf("git status completed with %d changed file(s)", len(files))
+	return finalizeGitResult(output, nil)
 }
 
-func (a *RuntimeAdapter) executeDiff(ctx context.Context, request runtimemodel.StepExecutionRequest, repo repoContext, timeout time.Duration) (runtimemodel.StepExecutionResult, error) {
-	pathspecs, err := optionalPathspecs(request.Input)
+func (a *RuntimeAdapter) executeDiff(ctx context.Context, request RuntimeOperationRequest, repo repoContext, timeout time.Duration) (RuntimeOperationResult, error) {
+	pathspecs, err := optionalPathspecs(request.Pathspecs)
 	if err != nil {
 		return a.rejectedResultWithRepo(request, gitcommon.OperationDiff, repo, gitcommon.ErrorPathRejected, err)
 	}
 	args := []string{"diff"}
-	if ref := strings.TrimSpace(stringFromMap(request.Input, "ref")); ref != "" {
-		if base := strings.TrimSpace(stringFromMap(request.Input, "baseRef")); base != "" {
+	if ref := strings.TrimSpace(request.Ref); ref != "" {
+		if base := strings.TrimSpace(request.BaseRef); base != "" {
 			args = append(args, base+".."+ref)
 		} else {
 			args = append(args, ref)
 		}
-	} else if base := strings.TrimSpace(stringFromMap(request.Input, "baseRef")); base != "" {
+	} else if base := strings.TrimSpace(request.BaseRef); base != "" {
 		args = append(args, base)
 	}
 	args = append(args, pathspecArgs(pathspecs)...)
@@ -249,31 +249,31 @@ func (a *RuntimeAdapter) executeDiff(ctx context.Context, request runtimemodel.S
 	}
 	statusFiles, _ := a.diffChangedFiles(ctx, repo.RepoRoot, timeout, pathspecs)
 	output := a.baseOutput(request, repo, gitcommon.OperationDiff, cmd, "completed")
-	output["pathspecs"] = pathspecs
-	output["changedFiles"] = limitChangedFiles(statusFiles)
-	output["summary"] = fmt.Sprintf("git diff completed with %d changed file(s)", len(statusFiles))
-	return runtimemodel.StepExecutionResult{Output: output}, nil
+	output.Pathspecs = pathspecs
+	output.ChangedFiles = limitChangedFiles(statusFiles)
+	output.Summary = fmt.Sprintf("git diff completed with %d changed file(s)", len(statusFiles))
+	return finalizeGitResult(output, nil)
 }
 
-func (a *RuntimeAdapter) executeLog(ctx context.Context, request runtimemodel.StepExecutionRequest, repo repoContext, timeout time.Duration) (runtimemodel.StepExecutionResult, error) {
-	pathspecs, err := optionalPathspecs(request.Input)
+func (a *RuntimeAdapter) executeLog(ctx context.Context, request RuntimeOperationRequest, repo repoContext, timeout time.Duration) (RuntimeOperationResult, error) {
+	pathspecs, err := optionalPathspecs(request.Pathspecs)
 	if err != nil {
 		return a.rejectedResultWithRepo(request, gitcommon.OperationLog, repo, gitcommon.ErrorPathRejected, err)
 	}
-	limit, clamped := logLimit(request.Input)
-	ref := strings.TrimSpace(stringFromMap(request.Input, "ref"))
+	limit, clamped := logLimit(request.Limit)
+	ref := strings.TrimSpace(request.Ref)
 	if ref == "" {
 		ref = "HEAD"
 	}
 	if repo.UnbornHead && ref == "HEAD" {
 		output := a.baseOutput(request, repo, gitcommon.OperationLog, gitCommandResult{}, "completed")
-		output["pathspecs"] = pathspecs
-		output["commits"] = []map[string]any{}
-		output["limit"] = limit
-		output["limitClamped"] = clamped
-		output["zeroWork"] = true
-		output["summary"] = "git log completed with no commits because repository HEAD is unborn"
-		return runtimemodel.StepExecutionResult{Output: output}, nil
+		output.Pathspecs = pathspecs
+		output.Commits = []GitCommit{}
+		output.Limit = int64(limit)
+		output.LimitClamped = clamped
+		output.ZeroWork = true
+		output.Summary = "git log completed with no commits because repository HEAD is unborn"
+		return finalizeGitResult(output, nil)
 	}
 	format := "%H%x1f%h%x1f%an <%ae>%x1f%aI%x1f%s"
 	args := []string{"log", "--format=" + format, "-n", strconv.Itoa(limit), ref}
@@ -284,33 +284,33 @@ func (a *RuntimeAdapter) executeLog(ctx context.Context, request runtimemodel.St
 	}
 	commits := parseLogCommits(cmd.Stdout)
 	output := a.baseOutput(request, repo, gitcommon.OperationLog, cmd, "completed")
-	output["pathspecs"] = pathspecs
-	output["commits"] = commits
-	output["limit"] = limit
-	output["limitClamped"] = clamped
-	output["summary"] = fmt.Sprintf("git log completed with %d commit(s)", len(commits))
+	output.Pathspecs = pathspecs
+	output.Commits = commits
+	output.Limit = int64(limit)
+	output.LimitClamped = clamped
+	output.Summary = fmt.Sprintf("git log completed with %d commit(s)", len(commits))
 	if clamped {
-		output["summary"] = output["summary"].(string) + "; limit clamped to maximum"
+		output.Summary = output.Summary + "; limit clamped to maximum"
 	}
-	return runtimemodel.StepExecutionResult{Output: output}, nil
+	return finalizeGitResult(output, nil)
 }
 
-func (a *RuntimeAdapter) executeShow(ctx context.Context, request runtimemodel.StepExecutionRequest, repo repoContext, timeout time.Duration) (runtimemodel.StepExecutionResult, error) {
-	pathspecs, err := optionalPathspecs(request.Input)
+func (a *RuntimeAdapter) executeShow(ctx context.Context, request RuntimeOperationRequest, repo repoContext, timeout time.Duration) (RuntimeOperationResult, error) {
+	pathspecs, err := optionalPathspecs(request.Pathspecs)
 	if err != nil {
 		return a.rejectedResultWithRepo(request, gitcommon.OperationShow, repo, gitcommon.ErrorPathRejected, err)
 	}
-	ref := strings.TrimSpace(stringFromMap(request.Input, "ref"))
+	ref := strings.TrimSpace(request.Ref)
 	if ref == "" {
 		ref = "HEAD"
 	}
 	if repo.UnbornHead && ref == "HEAD" {
 		output := a.baseOutput(request, repo, gitcommon.OperationShow, gitCommandResult{}, "completed")
-		output["pathspecs"] = pathspecs
-		output["ref"] = ref
-		output["zeroWork"] = true
-		output["summary"] = "git show completed with no commit because repository HEAD is unborn"
-		return runtimemodel.StepExecutionResult{Output: output}, nil
+		output.Pathspecs = pathspecs
+		output.Ref = ref
+		output.ZeroWork = true
+		output.Summary = "git show completed with no commit because repository HEAD is unborn"
+		return finalizeGitResult(output, nil)
 	}
 	args := []string{"show", "--stat", "--summary", "--format=%H%x1f%h%x1f%an <%ae>%x1f%aI%x1f%s", ref}
 	args = append(args, pathspecArgs(pathspecs)...)
@@ -319,26 +319,26 @@ func (a *RuntimeAdapter) executeShow(ctx context.Context, request runtimemodel.S
 		return a.commandFailureResult(request, repo, gitcommon.OperationShow, cmd, classifyGitError(cmd, err), err)
 	}
 	output := a.baseOutput(request, repo, gitcommon.OperationShow, cmd, "completed")
-	output["pathspecs"] = pathspecs
-	output["ref"] = ref
-	output["summary"] = "git show completed"
-	return runtimemodel.StepExecutionResult{Output: output}, nil
+	output.Pathspecs = pathspecs
+	output.Ref = ref
+	output.Summary = "git show completed"
+	return finalizeGitResult(output, nil)
 }
 
-func (a *RuntimeAdapter) executeBranch(ctx context.Context, request runtimemodel.StepExecutionRequest, repo repoContext, timeout time.Duration) (runtimemodel.StepExecutionResult, error) {
+func (a *RuntimeAdapter) executeBranch(ctx context.Context, request RuntimeOperationRequest, repo repoContext, timeout time.Duration) (RuntimeOperationResult, error) {
 	cmd, err := a.runGit(ctx, repo.RepoRoot, timeout, maxOutputBytes, "branch", "--format=%(refname:short)%09%(objectname)%09%(HEAD)%09%(upstream:short)")
 	if err != nil {
 		return a.commandFailureResult(request, repo, gitcommon.OperationBranch, cmd, classifyGitError(cmd, err), err)
 	}
 	output := a.baseOutput(request, repo, gitcommon.OperationBranch, cmd, "completed")
-	output["branches"] = parseBranches(cmd.Stdout)
-	output["detachedHead"] = repo.DetachedHead
-	output["summary"] = "git branch completed"
-	return runtimemodel.StepExecutionResult{Output: output}, nil
+	output.Branches = parseBranches(cmd.Stdout)
+	output.DetachedHead = repo.DetachedHead
+	output.Summary = "git branch completed"
+	return finalizeGitResult(output, nil)
 }
 
-func (a *RuntimeAdapter) executeAdd(ctx context.Context, request runtimemodel.StepExecutionRequest, repo repoContext, timeout time.Duration) (runtimemodel.StepExecutionResult, error) {
-	pathspecs, err := requiredPathspecs(request.Input)
+func (a *RuntimeAdapter) executeAdd(ctx context.Context, request RuntimeOperationRequest, repo repoContext, timeout time.Duration) (RuntimeOperationResult, error) {
+	pathspecs, err := requiredPathspecs(request.Pathspecs)
 	if err != nil {
 		return a.rejectedResultWithRepo(request, gitcommon.OperationAdd, repo, gitcommon.ErrorPathRejected, err)
 	}
@@ -349,18 +349,18 @@ func (a *RuntimeAdapter) executeAdd(ctx context.Context, request runtimemodel.St
 	}
 	staged, _ := a.stagedFiles(ctx, repo.RepoRoot, timeout)
 	output := a.baseOutput(request, repo, gitcommon.OperationAdd, cmd, "completed")
-	output["pathspecs"] = pathspecs
-	output["stagedFiles"] = staged
-	output["changedFiles"] = staged
+	output.Pathspecs = pathspecs
+	output.StagedFiles = staged
+	output.ChangedFiles = staged
 	if len(staged) == 0 {
-		output["zeroWork"] = true
+		output.ZeroWork = true
 	}
-	output["summary"] = fmt.Sprintf("git add completed with %d staged file(s)", len(staged))
-	return runtimemodel.StepExecutionResult{Output: output}, nil
+	output.Summary = fmt.Sprintf("git add completed with %d staged file(s)", len(staged))
+	return finalizeGitResult(output, nil)
 }
 
-func (a *RuntimeAdapter) executeCommit(ctx context.Context, request runtimemodel.StepExecutionRequest, repo repoContext, timeout time.Duration) (runtimemodel.StepExecutionResult, error) {
-	if _, ok := request.Input["pathspecs"]; ok {
+func (a *RuntimeAdapter) executeCommit(ctx context.Context, request RuntimeOperationRequest, repo repoContext, timeout time.Duration) (RuntimeOperationResult, error) {
+	if len(request.Pathspecs) > 0 {
 		err := fmt.Errorf("%w: git commit does not accept pathspecs; stage files with git add first", common.ErrInvalidArgument)
 		return a.rejectedResultWithRepo(request, gitcommon.OperationCommit, repo, gitcommon.ErrorPathRejected, err)
 	}
@@ -368,12 +368,12 @@ func (a *RuntimeAdapter) executeCommit(ctx context.Context, request runtimemodel
 		err := fmt.Errorf("%w: git commit is rejected on detached HEAD", common.ErrInvalidArgument)
 		return a.rejectedResultWithRepo(request, gitcommon.OperationCommit, repo, gitcommon.ErrorOperationDenied, err)
 	}
-	message := strings.TrimSpace(stringFromMap(request.Input, "message"))
+	message := strings.TrimSpace(request.Message)
 	if message == "" {
 		err := fmt.Errorf("%w: git commit message is required", common.ErrInvalidArgument)
 		return a.rejectedResultWithRepo(request, gitcommon.OperationCommit, repo, gitcommon.ErrorInvalidRequest, err)
 	}
-	expectedHead := strings.TrimSpace(stringFromMap(request.Input, "expectedHead"))
+	expectedHead := strings.TrimSpace(request.ExpectedHead)
 	if expectedHead != "" && repo.HeadCommit != "" && expectedHead != repo.HeadCommit {
 		err := fmt.Errorf("%w: git HEAD mismatch", common.ErrInvalidArgument)
 		return a.failedResultWithRepo(request, gitcommon.OperationCommit, repo, gitcommon.ErrorHeadMismatch, err)
@@ -384,11 +384,11 @@ func (a *RuntimeAdapter) executeCommit(ctx context.Context, request runtimemodel
 	}
 	if len(staged) == 0 {
 		output := a.baseOutput(request, repo, gitcommon.OperationCommit, gitCommandResult{}, "completed")
-		output["zeroWork"] = true
-		output["errorCode"] = gitcommon.ErrorNoStagedChanges
-		output["stagedFiles"] = []map[string]any{}
-		output["summary"] = "git commit completed with no staged changes"
-		return runtimemodel.StepExecutionResult{Output: output}, nil
+		output.ZeroWork = true
+		output.ErrorCode = gitcommon.ErrorNoStagedChanges
+		output.StagedFiles = []GitFileChange{}
+		output.Summary = "git commit completed with no staged changes"
+		return finalizeGitResult(output, nil)
 	}
 	cmd, err := a.runGit(ctx, repo.RepoRoot, timeout, maxOutputBytes, "-c", "core.hooksPath=/dev/null", "commit", "--no-verify", "-m", message)
 	if err != nil {
@@ -396,21 +396,19 @@ func (a *RuntimeAdapter) executeCommit(ctx context.Context, request runtimemodel
 	}
 	nextHead, _ := a.gitOutput(ctx, repo.RepoRoot, timeout, "rev-parse", "HEAD")
 	output := a.baseOutput(request, repo, gitcommon.OperationCommit, cmd, "completed")
-	output["headCommitBefore"] = repo.HeadCommit
-	output["headCommitAfter"] = strings.TrimSpace(nextHead)
-	output["message"] = message
-	output["stagedFiles"] = staged
-	output["committedFiles"] = staged
-	output["changedFiles"] = staged
-	output["commit"] = map[string]any{
-		"hash":    strings.TrimSpace(nextHead),
-		"subject": firstLine(message),
-	}
-	output["summary"] = "git commit completed"
-	return runtimemodel.StepExecutionResult{Output: output}, nil
+	output.HeadCommitBefore = repo.HeadCommit
+	output.HeadCommitAfter = strings.TrimSpace(nextHead)
+	output.Message = message
+	output.StagedFiles = staged
+	output.CommittedFiles = staged
+	output.ChangedFiles = staged
+	output.CommitHash = strings.TrimSpace(nextHead)
+	output.CommitSubject = firstLine(message)
+	output.Summary = "git commit completed"
+	return finalizeGitResult(output, nil)
 }
 
-func (a *RuntimeAdapter) resolveRepo(ctx context.Context, request runtimemodel.StepExecutionRequest, timeout time.Duration) (repoContext, error) {
+func (a *RuntimeAdapter) resolveRepo(ctx context.Context, request RuntimeOperationRequest, timeout time.Duration) (repoContext, error) {
 	deliverable, err := filepath.Abs(strings.TrimSpace(request.WorkspaceDeliverableDirectory))
 	if err != nil || deliverable == "" {
 		return repoContext{}, common.ErrInvalidArgument
@@ -459,7 +457,7 @@ func (a *RuntimeAdapter) resolveRepo(ctx context.Context, request runtimemodel.S
 	}, nil
 }
 
-func (a *RuntimeAdapter) existingRepoContext(ctx context.Context, request runtimemodel.StepExecutionRequest, deliverable string, timeout time.Duration) (repoContext, bool, error) {
+func (a *RuntimeAdapter) existingRepoContext(ctx context.Context, request RuntimeOperationRequest, deliverable string, timeout time.Duration) (repoContext, bool, error) {
 	if _, err := os.Stat(filepath.Join(deliverable, ".git")); err != nil {
 		if os.IsNotExist(err) {
 			return repoContext{}, false, nil
@@ -534,7 +532,7 @@ func (a *RuntimeAdapter) filteredEnv() []string {
 	return out
 }
 
-func (a *RuntimeAdapter) stagedFiles(ctx context.Context, repoRoot string, timeout time.Duration) ([]map[string]any, error) {
+func (a *RuntimeAdapter) stagedFiles(ctx context.Context, repoRoot string, timeout time.Duration) ([]GitFileChange, error) {
 	cmd, err := a.runGit(ctx, repoRoot, timeout, maxOutputBytes, "diff", "--cached", "--name-status")
 	if err != nil {
 		return nil, err
@@ -542,7 +540,7 @@ func (a *RuntimeAdapter) stagedFiles(ctx context.Context, repoRoot string, timeo
 	return parseNameStatus(cmd.Stdout, true), nil
 }
 
-func (a *RuntimeAdapter) diffChangedFiles(ctx context.Context, repoRoot string, timeout time.Duration, pathspecs []string) ([]map[string]any, error) {
+func (a *RuntimeAdapter) diffChangedFiles(ctx context.Context, repoRoot string, timeout time.Duration, pathspecs []string) ([]GitFileChange, error) {
 	args := append([]string{"diff", "--name-status"}, pathspecArgs(pathspecs)...)
 	cmd, err := a.runGit(ctx, repoRoot, timeout, maxOutputBytes, args...)
 	if err != nil {
@@ -560,64 +558,83 @@ func (a *RuntimeAdapter) diffChangedFiles(ctx context.Context, repoRoot string, 
 	return parseNameStatus(cmd.Stdout, true), nil
 }
 
-func (a *RuntimeAdapter) baseOutput(_ runtimemodel.StepExecutionRequest, repo repoContext, operation string, cmd gitCommandResult, status string) map[string]any {
-	output := map[string]any{
-		"status":         status,
-		"operation":      operation,
-		"stage":          stageForOperation(operation),
-		"repoRoot":       repo.RepoRoot,
-		"workingDir":     repo.RepoRoot,
-		"branch":         repo.Branch,
-		"headCommit":     repo.HeadCommit,
-		"detachedHead":   repo.DetachedHead,
-		"stdout":         cmd.Stdout,
-		"stderr":         cmd.Stderr,
-		"exitCode":       cmd.ExitCode,
-		"durationMillis": cmd.DurationMillis,
-		"timeoutMillis":  a.timeout.Milliseconds(),
-		"truncated":      cmd.Truncated,
+func (a *RuntimeAdapter) baseOutput(request RuntimeOperationRequest, repo repoContext, operation string, cmd gitCommandResult, status string) RuntimeOperationResult {
+	timeoutMillis := request.TimeoutMillis
+	if timeoutMillis <= 0 {
+		timeoutMillis = a.timeout.Milliseconds()
 	}
-	if repo.UnbornHead {
-		output["unbornHead"] = true
+	return RuntimeOperationResult{
+		Status:           status,
+		Operation:        operation,
+		Stage:            stageForOperation(operation),
+		RepoRoot:         repo.RepoRoot,
+		WorkingDirectory: repo.RepoRoot,
+		Branch:           repo.Branch,
+		HeadCommit:       repo.HeadCommit,
+		DetachedHead:     repo.DetachedHead,
+		UnbornHead:       repo.UnbornHead,
+		Stdout:           cmd.Stdout,
+		Stderr:           cmd.Stderr,
+		ExitCode:         int64(cmd.ExitCode),
+		DurationMillis:   cmd.DurationMillis,
+		TimeoutMillis:    timeoutMillis,
+		Truncated:        cmd.Truncated,
 	}
-	return output
 }
 
-func (a *RuntimeAdapter) rejectedResult(request runtimemodel.StepExecutionRequest, operation string, code string, err error) (runtimemodel.StepExecutionResult, error) {
+func (a *RuntimeAdapter) rejectedResult(request RuntimeOperationRequest, operation string, code string, err error) (RuntimeOperationResult, error) {
 	return a.rejectedResultWithRepo(request, operation, repoContext{}, code, err)
 }
 
-func (a *RuntimeAdapter) rejectedResultWithRepo(request runtimemodel.StepExecutionRequest, operation string, repo repoContext, code string, err error) (runtimemodel.StepExecutionResult, error) {
+func (a *RuntimeAdapter) rejectedResultWithRepo(request RuntimeOperationRequest, operation string, repo repoContext, code string, err error) (RuntimeOperationResult, error) {
 	output := a.baseOutput(request, repo, operation, gitCommandResult{}, "rejected")
-	output["errorCode"] = code
-	output["error"] = err.Error()
-	output["summary"] = "git operation rejected"
-	return runtimemodel.StepExecutionResult{Output: output}, err
+	output.ErrorCode = code
+	output.ErrorMessage = err.Error()
+	output.Summary = "git operation rejected"
+	return finalizeGitResult(output, err)
 }
 
-func (a *RuntimeAdapter) failedResult(request runtimemodel.StepExecutionRequest, operation string, code string, err error) (runtimemodel.StepExecutionResult, error) {
+func (a *RuntimeAdapter) failedResult(request RuntimeOperationRequest, operation string, code string, err error) (RuntimeOperationResult, error) {
 	return a.failedResultWithRepo(request, operation, repoContext{}, code, err)
 }
 
-func (a *RuntimeAdapter) failedResultWithRepo(request runtimemodel.StepExecutionRequest, operation string, repo repoContext, code string, err error) (runtimemodel.StepExecutionResult, error) {
+func (a *RuntimeAdapter) failedResultWithRepo(request RuntimeOperationRequest, operation string, repo repoContext, code string, err error) (RuntimeOperationResult, error) {
 	output := a.baseOutput(request, repo, operation, gitCommandResult{}, "failed")
-	output["errorCode"] = code
-	output["error"] = err.Error()
-	output["summary"] = "git operation failed"
-	return runtimemodel.StepExecutionResult{Output: output}, err
+	output.ErrorCode = code
+	output.ErrorMessage = err.Error()
+	output.Summary = "git operation failed"
+	return finalizeGitResult(output, err)
 }
 
-func (a *RuntimeAdapter) commandFailureResult(request runtimemodel.StepExecutionRequest, repo repoContext, operation string, cmd gitCommandResult, code string, err error) (runtimemodel.StepExecutionResult, error) {
+func (a *RuntimeAdapter) commandFailureResult(request RuntimeOperationRequest, repo repoContext, operation string, cmd gitCommandResult, code string, err error) (RuntimeOperationResult, error) {
 	status := "failed"
 	if errors.Is(err, context.DeadlineExceeded) {
 		status = "timeout"
 		code = gitcommon.ErrorTimeout
 	}
 	output := a.baseOutput(request, repo, operation, cmd, status)
-	output["errorCode"] = code
-	output["error"] = err.Error()
-	output["summary"] = "git command failed"
-	return runtimemodel.StepExecutionResult{Output: output}, err
+	output.ErrorCode = code
+	output.ErrorMessage = err.Error()
+	output.Summary = "git command failed"
+	return finalizeGitResult(output, err)
+}
+
+func finalizeGitResult(output RuntimeOperationResult, executeErr error) (RuntimeOperationResult, error) {
+	if executeErr != nil && strings.TrimSpace(output.ErrorMessage) == "" {
+		output.ErrorMessage = executeErr.Error()
+	}
+	if executeErr != nil && strings.TrimSpace(output.ErrorCode) == "" {
+		output.ErrorCode = "git_operation_failed"
+	}
+	if strings.TrimSpace(output.Summary) == "" {
+		output.Summary = strings.TrimSpace(output.Status)
+		if output.Summary == "" {
+			output.Summary = fmt.Sprintf("git %s", output.Operation)
+		}
+	}
+	exitCode := output.ExitCode
+	output.Evidence = runtimecontract.RuntimeOperationEvidence{Summary: output.Summary, ExitCode: &exitCode}
+	return output, executeErr
 }
 
 func stageForOperation(operation string) string {
@@ -629,94 +646,43 @@ func stageForOperation(operation string) string {
 	}
 }
 
-func gitCommandTimeout(input map[string]any, defaultTimeout time.Duration) (time.Duration, error) {
+func gitCommandTimeout(timeoutMillis int64, defaultTimeout time.Duration) (time.Duration, error) {
 	if defaultTimeout <= 0 {
 		defaultTimeout = DefaultCommandTimeout
 	}
-	if input == nil || input["timeoutMillis"] == nil {
+	if timeoutMillis == 0 {
 		return defaultTimeout, nil
 	}
-	value, ok := numericMillis(input["timeoutMillis"])
-	if !ok || value <= 0 {
-		return 0, common.ErrInvalidArgument
-	}
-	timeout := time.Duration(value) * time.Millisecond
-	if timeout < time.Second {
+	if timeoutMillis < 1000 {
 		return 0, fmt.Errorf("%w: timeoutMillis must be at least 1000", common.ErrInvalidArgument)
 	}
-	if timeout > MaxCommandTimeout {
+	if timeoutMillis > int64(MaxCommandTimeout/time.Millisecond) {
 		return 0, fmt.Errorf("%w: timeoutMillis must not exceed %d", common.ErrInvalidArgument, MaxCommandTimeout/time.Millisecond)
 	}
-	return timeout, nil
+	return time.Duration(timeoutMillis) * time.Millisecond, nil
 }
 
-func numericMillis(input any) (int64, bool) {
-	switch typed := input.(type) {
-	case int:
-		return int64(typed), true
-	case int64:
-		return typed, true
-	case int32:
-		return int64(typed), true
-	case float64:
-		if typed != float64(int64(typed)) {
-			return 0, false
-		}
-		return int64(typed), true
-	case float32:
-		if typed != float32(int64(typed)) {
-			return 0, false
-		}
-		return int64(typed), true
-	default:
-		return 0, false
-	}
+func optionalPathspecs(input []string) ([]string, error) {
+	return parsePathspecs(input, false, true)
 }
 
-func optionalPathspecs(input map[string]any) ([]string, error) {
-	if input == nil || input["pathspecs"] == nil {
-		return nil, nil
-	}
-	return parsePathspecs(input["pathspecs"], false, true)
+func requiredPathspecs(input []string) ([]string, error) {
+	return parsePathspecs(input, true, false)
 }
 
-func requiredPathspecs(input map[string]any) ([]string, error) {
-	if input == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	return parsePathspecs(input["pathspecs"], true, false)
-}
-
-func parsePathspecs(input any, required bool, allowRepositoryRoot bool) ([]string, error) {
-	var raw []string
-	switch typed := input.(type) {
-	case nil:
-	case []string:
-		raw = append(raw, typed...)
-	case []any:
-		for _, item := range typed {
-			value, ok := item.(string)
-			if !ok {
-				return nil, common.ErrInvalidArgument
-			}
-			raw = append(raw, value)
-		}
-	default:
-		return nil, common.ErrInvalidArgument
-	}
-	if required && len(raw) == 0 {
+func parsePathspecs(input []string, required bool, allowRepositoryRoot bool) ([]string, error) {
+	if required && len(input) == 0 {
 		return nil, fmt.Errorf("%w: pathspecs are required", common.ErrInvalidArgument)
 	}
-	ret := make([]string, 0, len(raw))
-	for _, item := range raw {
+	ret := make([]string, 0, len(input))
+	for _, item := range input {
 		pathspec, err := normalizePathspec(item, allowRepositoryRoot)
 		if err != nil {
 			return nil, err
 		}
-		if pathspec == "" {
-			continue
+		if pathspec != "" {
+			ret = append(ret, pathspec)
 		}
-		ret = append(ret, pathspec)
 	}
 	return ret, nil
 }
@@ -759,9 +725,9 @@ func pathspecArgs(pathspecs []string) []string {
 	return ret
 }
 
-func parsePorcelainStatus(stdout string) ([]map[string]any, map[string]any, string, string) {
-	var files []map[string]any
-	aheadBehind := map[string]any{}
+func parsePorcelainStatus(stdout string) ([]GitFileChange, GitAheadBehind, string, string) {
+	var files []GitFileChange
+	aheadBehind := GitAheadBehind{}
 	branch := ""
 	head := ""
 	for _, line := range strings.Split(stdout, "\n") {
@@ -780,14 +746,14 @@ func parsePorcelainStatus(stdout string) ([]map[string]any, map[string]any, stri
 		if strings.HasPrefix(line, "# branch.ab ") {
 			fields := strings.Fields(strings.TrimPrefix(line, "# branch.ab "))
 			if len(fields) >= 2 {
-				aheadBehind["ahead"] = trimSignedInt(fields[0])
-				aheadBehind["behind"] = trimSignedInt(fields[1])
+				aheadBehind.Ahead = int64(trimSignedInt(fields[0]))
+				aheadBehind.Behind = int64(trimSignedInt(fields[1]))
 			}
 			continue
 		}
 		if strings.HasPrefix(line, "? ") {
 			path := strings.TrimSpace(strings.TrimPrefix(line, "? "))
-			files = append(files, map[string]any{"path": path, "status": "untracked", "untracked": true})
+			files = append(files, GitFileChange{Path: path, Status: "untracked", Untracked: true})
 			continue
 		}
 		if strings.HasPrefix(line, "1 ") {
@@ -797,20 +763,15 @@ func parsePorcelainStatus(stdout string) ([]map[string]any, map[string]any, stri
 			}
 			xy := fields[1]
 			path := strings.Join(fields[8:], " ")
-			files = append(files, map[string]any{
-				"path":     path,
-				"status":   statusFromXY(xy),
-				"staged":   len(xy) > 0 && xy[0] != '.',
-				"unstaged": len(xy) > 1 && xy[1] != '.',
-			})
+			files = append(files, GitFileChange{Path: path, Status: statusFromXY(xy), Staged: len(xy) > 0 && xy[0] != '.', Unstaged: len(xy) > 1 && xy[1] != '.'})
 			continue
 		}
 	}
 	return files, aheadBehind, branch, head
 }
 
-func parseNameStatus(stdout string, staged bool) []map[string]any {
-	var files []map[string]any
+func parseNameStatus(stdout string, staged bool) []GitFileChange {
+	var files []GitFileChange
 	for _, line := range strings.Split(stdout, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -822,17 +783,17 @@ func parseNameStatus(stdout string, staged bool) []map[string]any {
 		}
 		status := statusFromCode(fields[0])
 		path := fields[len(fields)-1]
-		item := map[string]any{"path": path, "status": status, "staged": staged}
+		item := GitFileChange{Path: path, Status: status, Staged: staged}
 		if strings.HasPrefix(fields[0], "R") && len(fields) >= 3 {
-			item["oldPath"] = fields[1]
+			item.OldPath = fields[1]
 		}
 		files = append(files, item)
 	}
 	return files
 }
 
-func parseLogCommits(stdout string) []map[string]any {
-	var commits []map[string]any
+func parseLogCommits(stdout string) []GitCommit {
+	var commits []GitCommit
 	for _, line := range strings.Split(stdout, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -842,19 +803,13 @@ func parseLogCommits(stdout string) []map[string]any {
 		if len(fields) != 5 {
 			continue
 		}
-		commits = append(commits, map[string]any{
-			"hash":       fields[0],
-			"shortHash":  fields[1],
-			"author":     fields[2],
-			"authorTime": fields[3],
-			"subject":    fields[4],
-		})
+		commits = append(commits, GitCommit{Hash: fields[0], ShortHash: fields[1], Author: fields[2], AuthorTime: fields[3], Subject: fields[4]})
 	}
 	return commits
 }
 
-func parseBranches(stdout string) []map[string]any {
-	var branches []map[string]any
+func parseBranches(stdout string) []GitBranch {
+	var branches []GitBranch
 	for _, line := range strings.Split(stdout, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -864,31 +819,23 @@ func parseBranches(stdout string) []map[string]any {
 		if len(fields) < 3 {
 			continue
 		}
-		item := map[string]any{
-			"name":    fields[0],
-			"commit":  fields[1],
-			"current": fields[2] == "*",
-		}
+		item := GitBranch{Name: fields[0], Commit: fields[1], Current: fields[2] == "*"}
 		if len(fields) > 3 && fields[3] != "" {
-			item["upstream"] = fields[3]
+			item.Upstream = fields[3]
 		}
 		branches = append(branches, item)
 	}
 	return branches
 }
 
-func logLimit(input map[string]any) (int, bool) {
-	if input == nil || input["limit"] == nil {
+func logLimit(limit int64) (int, bool) {
+	if limit <= 0 {
 		return defaultLogLimit, false
 	}
-	value, ok := numericMillis(input["limit"])
-	if !ok || value <= 0 {
-		return defaultLogLimit, false
-	}
-	if value > maxLogLimit {
+	if limit > maxLogLimit {
 		return maxLogLimit, true
 	}
-	return int(value), false
+	return int(limit), false
 }
 
 func statusFromXY(xy string) string {
@@ -961,19 +908,11 @@ func truncateString(value string, limit int64) (string, bool) {
 	return value[:n] + "\n[truncated]", true
 }
 
-func limitChangedFiles(files []map[string]any) []map[string]any {
+func limitChangedFiles(files []GitFileChange) []GitFileChange {
 	if len(files) <= maxChangedFiles {
 		return files
 	}
 	return files[:maxChangedFiles]
-}
-
-func stringFromMap(input map[string]any, key string) string {
-	if input == nil {
-		return ""
-	}
-	value, _ := input[key].(string)
-	return strings.TrimSpace(value)
 }
 
 func trimSignedInt(value string) int {

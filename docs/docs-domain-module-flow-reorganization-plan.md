@@ -1,10 +1,15 @@
 # WorkOrch 文档按领域模型 / 功能模块 / 数据处理流重组收口计划
 
-Status: active
+Status: completed
 
 Type: plan
 
-Last Updated: 2026-05-29
+Last Updated: 2026-07-14
+
+> **历史计划**：目录骨架重组已完成。当前事实与 Runtime V2 对齐以  
+> [01-overview/current-state.md](01-overview/current-state.md)、  
+> [00-core/runtime-stage-contract.md](00-core/runtime-stage-contract.md)、  
+> [README.md](README.md) 为准。本文不再指导新实现。
 
 ## 1. 目标
 

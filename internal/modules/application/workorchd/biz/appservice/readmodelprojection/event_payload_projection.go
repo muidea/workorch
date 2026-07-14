@@ -1,25 +1,24 @@
 package readmodelprojection
 
+import "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+
 const (
 	EventPayloadStringLimit = 512
 	EventPayloadListLimit   = 16
 )
 
-func projectEventPayload(payload map[string]any) map[string]any {
-	if len(payload) == 0 {
-		return nil
+func projectEventPayload(payload workorcheventpayload.Payload) workorcheventpayload.Payload {
+	if len(payload.Fields) == 0 {
+		return workorcheventpayload.Payload{}
 	}
-	ret := map[string]any{}
-	for key, value := range payload {
-		if !isEventPayloadAllowedKey(key) {
+	fields := make([]workorcheventpayload.Field, 0, len(payload.Fields))
+	for _, field := range payload.Fields {
+		if !isEventPayloadAllowedKey(field.Name) {
 			continue
 		}
-		if projected, ok := projectEventPayloadValue(value); ok {
-			ret[key] = projected
+		if projected, ok := projectEventPayloadValue(field.Value); ok {
+			fields = append(fields, workorcheventpayload.Field{Name: field.Name, Value: projected})
 		}
 	}
-	if len(ret) == 0 {
-		return nil
-	}
-	return ret
+	return workorcheventpayload.New(fields...)
 }

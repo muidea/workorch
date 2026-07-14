@@ -5,9 +5,10 @@ import (
 
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-func ValidateDecisionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, payload map[string]any) error {
+func ValidateDecisionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, payload workorcheventpayload.Payload) error {
 	if ticket == nil {
 		return nil
 	}

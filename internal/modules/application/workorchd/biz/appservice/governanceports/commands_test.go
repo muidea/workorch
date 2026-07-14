@@ -11,7 +11,17 @@ import (
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
+
+func mustGovernancePayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
+	t.Helper()
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
 
 func TestApprovalsForQueryFiltersOwnerCommandResults(t *testing.T) {
 	testHub := newGovernanceMagicTestHub(t)
@@ -139,11 +149,11 @@ func TestResolveDecisionPublishesContractCommand(t *testing.T) {
 		if cmd.ResolutionID != "resolution-ws-contract-ticket-contract-provide_missing_info" {
 			t.Fatalf("resolutionID = %q, want workspace-scoped id", cmd.ResolutionID)
 		}
-		if cmd.Payload.Map()["answer"] != "42" {
+		if answer, _ := workorcheventpayload.New(cmd.Payload...).String("answer"); answer != "42" {
 			t.Fatalf("command payload = %#v", cmd.Payload)
 		}
 		ticket := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, State: common.DecisionTicketStateResolved}
-		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: cmd.Payload.Map()}
+		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: workorcheventpayload.New(cmd.Payload...)}
 		return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}
 	})
 
@@ -152,7 +162,7 @@ func TestResolveDecisionPublishesContractCommand(t *testing.T) {
 		WorkspaceID: "ws-contract",
 		RunID:       "run-contract",
 		StepID:      "step-contract",
-	}, "provide_missing_info", map[string]any{"answer": "42"})
+	}, "provide_missing_info", mustGovernancePayload(t, map[string]any{"answer": "42"}))
 	if err != nil {
 		t.Fatalf("ResolveDecision: %v", err)
 	}
@@ -173,7 +183,7 @@ func TestResolveDecisionScopesResolutionIDByWorkspace(t *testing.T) {
 		}
 		resolutionIDs = append(resolutionIDs, cmd.ResolutionID)
 		ticket := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, State: common.DecisionTicketStateResolved}
-		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: cmd.Payload.Map()}
+		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: workorcheventpayload.New(cmd.Payload...)}
 		return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}
 	})
 
@@ -183,7 +193,7 @@ func TestResolveDecisionScopesResolutionIDByWorkspace(t *testing.T) {
 			WorkspaceID: workspaceID,
 			RunID:       "run-same",
 			StepID:      "run-same/decision",
-		}, "replan", map[string]any{"operator": "scope-test"})
+		}, "replan", mustGovernancePayload(t, map[string]any{"operator": "scope-test"}))
 		if err != nil {
 			t.Fatalf("ResolveDecision(%s): %v", workspaceID, err)
 		}

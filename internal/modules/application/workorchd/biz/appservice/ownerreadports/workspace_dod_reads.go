@@ -6,6 +6,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -15,10 +16,13 @@ func ReadDoDByOwnerCommand(ctx context.Context, hub magicevent.Hub, dodID common
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := sendMagicCommand[workspaceevents.GetDoDCommand, workspaceevents.WorkspaceCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, workspaceevents.TopicWorkspaceCommandGetDoD, workspaceevents.CommandDestination, "dod", string(dodID), workspaceevents.GetDoDCommand{
+	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGetDoD, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), commandCtx, workspaceevents.GetDoDCommand{
 		WorkspaceID: workspaceID,
 		DoDID:       dodID,
 	})
+	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandGetDoD, "dod", string(dodID), workspaceID, "", "")
+	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandGetDoD)
 	if err != nil {
 		return nil, err
 	}
@@ -32,7 +36,10 @@ func ListDoDsByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.Hub, wo
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := sendMagicCommand[workspaceevents.ListDoDsByWorkspaceCommand, workspaceevents.WorkspaceCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, workspaceevents.TopicWorkspaceCommandListDoDsByWS, workspaceevents.CommandDestination, "workspace", string(workspaceID), workspaceevents.ListDoDsByWorkspaceCommand{WorkspaceID: workspaceID})
+	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandListDoDsByWS, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), commandCtx, workspaceevents.ListDoDsByWorkspaceCommand{WorkspaceID: workspaceID})
+	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandListDoDsByWS, "workspace", string(workspaceID), workspaceID, "", "")
+	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandListDoDsByWS)
 	if err != nil {
 		return nil, err
 	}

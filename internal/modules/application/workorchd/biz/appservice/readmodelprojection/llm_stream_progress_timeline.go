@@ -2,14 +2,44 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func streamProgressTimelineItemFromPersistedEvent(item readmodelcore.EventRecord, runState string) (readmodelcore.RuntimeTimelineItem, bool) {
 	if item.Topic != "/run/llm_stream/progress" {
 		return readmodelcore.RuntimeTimelineItem{}, false
 	}
-	payload := cloneReadModelMap(item.Payload)
-	return streamProgressTimelineItemFromPayload(item.ID, item.Topic, item.OccurredAt, item.StepID, payload, runState), true
+	projectedStepID, _ := item.Payload.String(events.PayloadKeyStepID)
+	projectedStepID = firstNonEmptyTimelineString(item.StepID, projectedStepID)
+	itemType, _ := item.Payload.String(events.PayloadKeyStatus)
+	itemType = firstNonEmptyTimelineString(itemType, "progress")
+	summary, _ := item.Payload.String(events.PayloadKeySummary)
+	if summary == "" {
+		summary = streamProgressSummaryFromEventPayload(item.Payload)
+	}
+	displayState, _ := item.Payload.String(events.PayloadKeyStatus)
+	displayState = firstNonEmptyTimelineString(displayState, runState)
+	switch displayState {
+	case "completed":
+		displayState = string(common.StepStateSucceeded)
+	case "dispatched":
+		displayState = string(common.StepStateExecuting)
+	default:
+		displayState = string(common.CanonicalStepState(common.StepState(displayState)))
+	}
+	return readmodelcore.RuntimeTimelineItem{
+		Source:     "llm_stream_progress_event",
+		Type:       itemType,
+		ID:         firstNonEmptyTimelineString(item.ID, projectedStepID+"/llm-stream-progress"),
+		Topic:      item.Topic,
+		RunState:   displayState,
+		StepID:     projectedStepID,
+		StepState:  itemType,
+		Summary:    summary,
+		OccurredAt: item.OccurredAt,
+		Data:       item.Payload.Map(),
+	}, true
 }
 
 func streamProgressTimelineItemFromObserved(item ObservedView, runState string) (readmodelcore.RuntimeTimelineItem, bool) {

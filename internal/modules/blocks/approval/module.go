@@ -14,6 +14,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 const ModuleID = modulecommon.ModuleID
@@ -111,15 +112,35 @@ func (m *Module) Service() Service {
 }
 
 func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
-	response, err := m.executeCommand(ev.Context(), ev.ID(), ev.Data())
+	response, err := m.executeCommand(ev)
 	setApprovalMagicResult(result, response, err)
 }
 
-func (m *Module) executeCommand(ctx context.Context, topic string, data any) (approvalevents.ApprovalCommandResult, error) {
+func (m *Module) executeCommand(ev magicevent.Event) (approvalevents.ApprovalCommandResult, error) {
+	ctx := ev.Context()
+	topic := ev.ID()
+	data := ev.Data()
 	if m == nil || m.approvals == nil || m.servicePtr == nil {
 		return approvalevents.ApprovalCommandResult{}, common.ErrInvalidArgument
 	}
-	if workspaceID := approvalCommandWorkspaceID(data); workspaceID != "" {
+	workspaceID := common.WorkspaceID("")
+	switch cmd := data.(type) {
+	case approvalevents.CreateApprovalCommand:
+		workspaceID = cmd.WorkspaceID
+	case approvalevents.UpdateApprovalCommand:
+		workspaceID = cmd.WorkspaceID
+	case approvalevents.DeleteApprovalCommand:
+		workspaceID = cmd.WorkspaceID
+	case approvalevents.EnsureApprovedCommand:
+		workspaceID = cmd.WorkspaceID
+	case approvalevents.GetApprovalCommand:
+		workspaceID = cmd.WorkspaceID
+	case approvalevents.ListApprovalsByRunCommand:
+		workspaceID = cmd.WorkspaceID
+	case approvalevents.ListApprovalsByWorkspaceCommand:
+		workspaceID = cmd.WorkspaceID
+	}
+	if workspaceID != "" {
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 	}
 	switch topic {
@@ -286,27 +307,6 @@ func (s approvalCommandScope) hasScope() bool {
 	return s.WorkspaceID != "" || s.RunID != "" || s.StepID != ""
 }
 
-func approvalCommandWorkspaceID(data any) common.WorkspaceID {
-	switch cmd := data.(type) {
-	case approvalevents.CreateApprovalCommand:
-		return cmd.WorkspaceID
-	case approvalevents.UpdateApprovalCommand:
-		return cmd.WorkspaceID
-	case approvalevents.DeleteApprovalCommand:
-		return cmd.WorkspaceID
-	case approvalevents.EnsureApprovedCommand:
-		return cmd.WorkspaceID
-	case approvalevents.GetApprovalCommand:
-		return cmd.WorkspaceID
-	case approvalevents.ListApprovalsByRunCommand:
-		return cmd.WorkspaceID
-	case approvalevents.ListApprovalsByWorkspaceCommand:
-		return cmd.WorkspaceID
-	default:
-		return ""
-	}
-}
-
 func approvalMatchesCommandScope(item *approvalmodel.Approval, scope approvalCommandScope) bool {
 	if item == nil {
 		return false
@@ -344,8 +344,8 @@ func createApprovalContract(cmd approvalevents.CreateApprovalCommand) approvalco
 		StepID:         cmd.StepID,
 		Reason:         cmd.Reason,
 		Action:         cmd.Action,
-		Context:        cmd.Context.Map(),
-		AutoGovernance: cmd.AutoGovernance.Map(),
+		Context:        workorcheventpayload.New(cmd.Context...),
+		AutoGovernance: workorcheventpayload.New(cmd.AutoGovernance...),
 	}
 }
 
@@ -354,7 +354,7 @@ func resolveApprovalContract(cmd approvalevents.ResolveApprovalCommand) approval
 		ApprovalID:  cmd.ApprovalID,
 		WorkspaceID: cmd.WorkspaceID,
 		RunID:       cmd.RunID,
-		Context:     cmd.Context.Map(),
+		Context:     workorcheventpayload.New(cmd.Context...),
 	}
 }
 
@@ -366,9 +366,9 @@ func approvalFromUpdateCommand(cmd approvalevents.UpdateApprovalCommand) *approv
 		StepID:         cmd.StepID,
 		Reason:         cmd.Reason,
 		Action:         cmd.Action,
-		Context:        cmd.Context.Map(),
+		Context:        workorcheventpayload.New(cmd.Context...),
 		State:          cmd.State,
-		AutoGovernance: cmd.AutoGovernance.Map(),
+		AutoGovernance: workorcheventpayload.New(cmd.AutoGovernance...),
 		ResolvedAt:     cmd.ResolvedAt,
 		ResolvedBy:     cmd.ResolvedBy,
 		CreatedAt:      cmd.CreatedAt,
@@ -431,12 +431,4 @@ func (m *Module) resolveUniqueApprovalForUnscopedCommand(ctx context.Context, ap
 	default:
 		return nil, common.ErrNotFound
 	}
-}
-
-func cloneMap(value map[string]any) map[string]any {
-	ret := make(map[string]any, len(value))
-	for key, item := range value {
-		ret[key] = item
-	}
-	return ret
 }

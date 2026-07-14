@@ -13,13 +13,15 @@ func MapStep(item *runmodel.Step) *StepView {
 	if item == nil {
 		return nil
 	}
+	input := item.Input.Map()
+	output := item.Output.Map()
 	return &StepView{
 		ID:            string(item.ID),
 		Kind:          llmcommon.CanonicalRuntimeBlockKind(item.Kind),
 		State:         string(common.CanonicalStepState(item.State)),
-		Input:         cloneStepViewMap(item.Input),
-		Output:        cloneStepViewMap(item.Output),
-		ContractAudit: cloneStepViewMap(projectStepContractAudit(item.Input, item.Output)),
+		Input:         cloneStepViewMap(input),
+		Output:        cloneStepViewMap(output),
+		ContractAudit: cloneStepViewMap(projectStepContractAudit(input, output)),
 	}
 }
 

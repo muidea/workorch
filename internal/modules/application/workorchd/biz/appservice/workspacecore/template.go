@@ -7,6 +7,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitioncore"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 type WorkspaceTemplate struct {
@@ -56,8 +57,16 @@ func ApplyTemplateToWorkspace(item *workspacemodel.Workspace, template Workspace
 	item.TemplateID = templateID
 	item.ProfileID = templateID
 	item.SoulBindings = bindings
-	item.ContextHints = cloneContextMapWithoutCommonToolDefaults(template.ContextHints)
-	item.EvidencePolicies = cloneContextMapSlice(template.EvidencePolicies)
+	contextHints, err := workorcheventpayload.FromMap(cloneContextMapWithoutCommonToolDefaults(template.ContextHints))
+	if err != nil {
+		return nil, err
+	}
+	evidencePolicies, err := workorcheventpayload.FromMapSlice(template.EvidencePolicies)
+	if err != nil {
+		return nil, err
+	}
+	item.ContextHints = contextHints
+	item.EvidencePolicies = evidencePolicies
 	return item, nil
 }
 

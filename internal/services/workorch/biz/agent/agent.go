@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
@@ -22,9 +23,12 @@ type Agent struct {
 }
 
 type Event struct {
-	Type    EventType
-	Payload any
-	Error   error
+	Type         EventType
+	RunCreated   *RunCreatedInfo
+	Decision     *DecisionInfo
+	Approval     *ApprovalInfo
+	RunCompleted *RunCompletedInfo
+	Error        error
 }
 
 type EventType string
@@ -51,7 +55,7 @@ type ApprovalInfo struct {
 	ApprovalID  string
 	Reason      string
 	Action      string
-	Context     map[string]any
+	Context     workorcheventpayload.Payload
 	WorkspaceID string
 	RunID       string
 }
@@ -153,7 +157,8 @@ func (a *Agent) RunWithBackend(ctx context.Context, workspaceID string, goalText
 	runIDMu.Lock()
 	runID = run.ID
 	runIDMu.Unlock()
-	a.Send(Event{Type: EventRunCreated, Payload: RunCreatedInfo{RunID: string(run.ID), WorkspaceID: workspaceID}})
+	runCreated := RunCreatedInfo{RunID: string(run.ID), WorkspaceID: workspaceID}
+	a.Send(Event{Type: EventRunCreated, RunCreated: &runCreated})
 
 	select {
 	case <-ctx.Done():
@@ -178,13 +183,14 @@ func (a *Agent) handleBackendEvent(ctx context.Context, evt backend.Event, runDo
 		}
 		a.notifiedDecision = ticketID
 		a.mu.Unlock()
-		a.Send(Event{Type: EventDecision, Payload: DecisionInfo{
+		info := DecisionInfo{
 			TicketID:    ticketID,
 			Question:    firstString(evt.Payload, "question", "Question"),
 			Reason:      firstString(evt.Payload, "reason", "Reason", backend.PayloadKeyReason),
 			WorkspaceID: string(evt.WorkspaceID),
 			RunID:       string(evt.RunID),
-		}})
+		}
+		a.Send(Event{Type: EventDecision, Decision: &info})
 	case backend.EventApprovalCreated:
 		approvalID := firstString(evt.Payload, "approvalId", "ID", "id", backend.PayloadKeyBlockingApprovalID)
 		if approvalID == "" {
@@ -197,14 +203,16 @@ func (a *Agent) handleBackendEvent(ctx context.Context, evt backend.Event, runDo
 		}
 		a.notifiedApproval = approvalID
 		a.mu.Unlock()
-		a.Send(Event{Type: EventApproval, Payload: ApprovalInfo{
+		contextPayload, _ := workorcheventpayload.FromMap(mapFromPayload(evt.Payload, "context", "Context", backend.PayloadKeyContext))
+		info := ApprovalInfo{
 			ApprovalID:  approvalID,
 			Reason:      firstString(evt.Payload, "reason", "Reason", backend.PayloadKeyReason),
 			Action:      firstString(evt.Payload, "action", "Action", backend.PayloadKeyAction),
-			Context:     mapFromPayload(evt.Payload, "context", "Context", backend.PayloadKeyContext),
+			Context:     contextPayload,
 			WorkspaceID: string(evt.WorkspaceID),
 			RunID:       string(evt.RunID),
-		}})
+		}
+		a.Send(Event{Type: EventApproval, Approval: &info})
 	case backend.EventResultAccepted:
 		a.mu.Lock()
 		a.lastResult = RunCompletedInfo{
@@ -218,7 +226,7 @@ func (a *Agent) handleBackendEvent(ctx context.Context, evt backend.Event, runDo
 		switch common.RunState(state) {
 		case common.RunStateCompleted:
 			info := a.completedInfo(evt.RunID)
-			a.Send(Event{Type: EventRunCompleted, Payload: info})
+			a.Send(Event{Type: EventRunCompleted, RunCompleted: &info})
 			select {
 			case runDone <- nil:
 			default:
@@ -247,7 +255,7 @@ func (a *Agent) ResolveDecision(ctx context.Context, workspaceID string, ticketI
 		WorkspaceID:    wsID,
 		TicketID:       common.TicketID(ticketID),
 		ResolutionType: resolutionType,
-		Payload:        map[string]any{"note": note},
+		Payload:        workorcheventpayload.New(workorcheventpayload.StringField("note", note)),
 	})
 	return err
 }
@@ -262,10 +270,10 @@ func (a *Agent) ResolveApproval(ctx context.Context, workspaceID string, approva
 	}
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
 	if approved {
-		_, err := a.be.Approval().Approve(ctx, wsID, common.ApprovalID(approvalID))
+		_, err := a.be.Approval().Approve(ctx, wsID, common.ApprovalID(approvalID), workorcheventpayload.Payload{})
 		return err
 	}
-	_, err := a.be.Approval().Reject(ctx, wsID, common.ApprovalID(approvalID))
+	_, err := a.be.Approval().Reject(ctx, wsID, common.ApprovalID(approvalID), workorcheventpayload.Payload{})
 	return err
 }
 

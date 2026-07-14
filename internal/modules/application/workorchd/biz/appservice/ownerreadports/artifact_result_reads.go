@@ -6,6 +6,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -15,7 +16,10 @@ func ListArtifactsByResultOwnerCommand(ctx context.Context, hub magicevent.Hub, 
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := sendMagicCommand[resultevents.ListArtifactsByResultCommand, resultevents.ResultCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, resultevents.TopicArtifactCommandListByResult, resultevents.CommandDestination, "result", string(resultID), resultevents.ListArtifactsByResultCommand{ResultID: resultID})
+	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	event := magicevent.NewEventWithContext(resultevents.TopicArtifactCommandListByResult, sourceModule, resultevents.CommandDestination, magicevent.NewHeader(), commandCtx, resultevents.ListArtifactsByResultCommand{ResultID: resultID})
+	ownerevent.BindLane(event, resultevents.TopicArtifactCommandListByResult, "result", string(resultID), workspaceID, "", "")
+	response, err := ownerevent.Result(hub.Send(event), resultevents.TopicArtifactCommandListByResult)
 	if err != nil {
 		return nil, err
 	}

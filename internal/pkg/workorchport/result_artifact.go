@@ -1,6 +1,9 @@
 package workorchport
 
-import "github.com/muidea/workorch/internal/pkg/common"
+import (
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
 type ResultSummaryInfo struct {
 	GoalOutcome           string
@@ -11,7 +14,7 @@ type ResultSummaryInfo struct {
 	KnownLimitations      []string
 	ResidualRisks         []string
 	NextActions           []string
-	Diagnostics           map[string]any
+	Diagnostics           workorcheventpayload.Payload
 }
 
 type ResultInfo struct {
@@ -65,7 +68,7 @@ type ArtifactContinuationInfo struct {
 	FailureReason     string
 	CreatedAt         string
 	UpdatedAt         string
-	Progress          map[string]any
+	Progress          workorcheventpayload.Payload
 }
 
 type PatchInfo struct {
@@ -87,7 +90,7 @@ type PatchInfo struct {
 	AffectedFiles    []string
 	RiskLevel        string
 	RiskReasons      []string
-	Diagnostics      []map[string]any
+	Diagnostics      []workorcheventpayload.Payload
 	CreatedAt        string
 	AppliedAt        string
 	RevertedAt       string

@@ -52,11 +52,17 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	for evt := range a.Events() {
 		switch evt.Type {
 		case agent.EventRunCreated:
-			info := evt.Payload.(agent.RunCreatedInfo)
+			if evt.RunCreated == nil {
+				continue
+			}
+			info := *evt.RunCreated
 			fmt.Printf("→ Run started: %s\n", info.RunID)
 
 		case agent.EventDecision:
-			info := evt.Payload.(agent.DecisionInfo)
+			if evt.Decision == nil {
+				continue
+			}
+			info := *evt.Decision
 			fmt.Printf("\n⚠ Decision required [%s]\n  %s\n\n  Your answer: ", info.TicketID, info.Question)
 			var answer string
 			fmt.Scanln(&answer)
@@ -75,7 +81,10 @@ func runAgent(cmd *cobra.Command, args []string) error {
 			}
 
 		case agent.EventApproval:
-			info := evt.Payload.(agent.ApprovalInfo)
+			if evt.Approval == nil {
+				continue
+			}
+			info := *evt.Approval
 			fmt.Printf("\n⚡ Approval required [%s]\n  %s\n  Approve? [y/N]: ", info.ApprovalID, info.Reason)
 			var answer string
 			fmt.Scanln(&answer)
@@ -87,7 +96,10 @@ func runAgent(cmd *cobra.Command, args []string) error {
 			}
 
 		case agent.EventRunCompleted:
-			info, _ := evt.Payload.(agent.RunCompletedInfo)
+			if evt.RunCompleted == nil {
+				continue
+			}
+			info := *evt.RunCompleted
 			fmt.Println("\n✓ Run completed successfully.")
 			if info.Summary != "" {
 				fmt.Println("── Result ──")

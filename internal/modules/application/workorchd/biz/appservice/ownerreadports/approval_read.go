@@ -6,6 +6,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -15,10 +16,12 @@ func ReadApprovalByOwnerCommand(ctx context.Context, hub magicevent.Hub, approva
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	response, err := sendMagicCommand[approvalevents.GetApprovalCommand, approvalevents.ApprovalCommandResult](ctx, hub, approvalevents.TopicApprovalCommandGet, approvalevents.CommandDestination, "approval", string(approvalID), approvalevents.GetApprovalCommand{
+	event := magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandGet, sourceModule, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, approvalevents.GetApprovalCommand{
 		WorkspaceID: workspaceID,
 		ApprovalID:  approvalID,
 	})
+	ownerevent.BindLane(event, approvalevents.TopicApprovalCommandGet, "approval", string(approvalID), workspaceID, "", "")
+	response, err := ownerevent.Approval(hub.Send(event), approvalevents.TopicApprovalCommandGet)
 	if err != nil {
 		return nil, err
 	}

@@ -13,18 +13,18 @@ import (
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/eventvalue"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func mustRuntimeGovernancePayload(t *testing.T, input map[string]any) eventvalue.Payload {
+func mustRuntimeGovernancePayload(t *testing.T, input map[string]any) []decisionevents.DecisionEvidenceField {
 	t.Helper()
-	payload, err := eventvalue.FromMap(input)
+	payload, err := workorcheventpayload.FromMap(input)
 	if err != nil {
-		t.Fatalf("eventvalue.FromMap: %v", err)
+		t.Fatalf("DecisionFieldsFromMap: %v", err)
 	}
-	return payload
+	return payload.Fields
 }
 
 func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testing.T) {

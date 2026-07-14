@@ -15,7 +15,17 @@ import (
 	approvalservice "github.com/muidea/workorch/internal/modules/blocks/approval/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
+
+func mustApprovalPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
+	t.Helper()
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
 
 type recordingApprovalHub struct {
 	magicevent.Hub
@@ -105,7 +115,7 @@ func TestService_CreateApproval_SeedsPendingState(t *testing.T) {
 		RunID:          common.RunID("run-1"),
 		StepID:         common.StepID("run-1/step-1"),
 		Reason:         "need human approval",
-		AutoGovernance: map[string]any{"policy": "manual"},
+		AutoGovernance: mustApprovalPayload(t, map[string]any{"policy": "manual"}),
 	}
 	if err := service.CreateApproval(ctx, cmd); err != nil {
 		t.Fatalf("create approval: %v", err)
@@ -118,7 +128,8 @@ func TestService_CreateApproval_SeedsPendingState(t *testing.T) {
 	if approval.State != common.ApprovalStatePending {
 		t.Fatalf("approval state = %q, want pending", approval.State)
 	}
-	if approval.AutoGovernance["policy"] != "manual" {
+	policy, _ := approval.AutoGovernance.String("policy")
+	if policy != "manual" {
 		t.Fatalf("approval auto governance = %+v", approval.AutoGovernance)
 	}
 }
@@ -294,7 +305,7 @@ func TestService_ResolveApproval_PendingTransitions(t *testing.T) {
 
 			if err := tc.resolve(service, ctx, approvalservice.ResolveApprovalCommand{
 				ApprovalID: cmd.ApprovalID,
-				Context:    map[string]any{"actor": "operator"},
+				Context:    mustApprovalPayload(t, map[string]any{"actor": "operator"}),
 			}); err != nil {
 				t.Fatalf("resolve approval: %v", err)
 			}
@@ -360,7 +371,7 @@ func TestService_ResolveApproval_RecordsGovernanceEvidence(t *testing.T) {
 				StepID:      common.StepID("run-evidence/approval"),
 				Reason:      "need human approval",
 				Action:      "apply pending change",
-				Context:     map[string]any{"scope": "runtime governance"},
+				Context:     mustApprovalPayload(t, map[string]any{"scope": "runtime governance"}),
 			}
 			if err := service.CreateApproval(ctx, cmd); err != nil {
 				t.Fatalf("create approval: %v", err)
@@ -368,7 +379,7 @@ func TestService_ResolveApproval_RecordsGovernanceEvidence(t *testing.T) {
 
 			resolveCmd := approvalservice.ResolveApprovalCommand{
 				ApprovalID: cmd.ApprovalID,
-				Context:    map[string]any{"resolution": tc.name},
+				Context:    mustApprovalPayload(t, map[string]any{"resolution": tc.name}),
 			}
 			if _, err := tc.resolve(service, ctx, resolveCmd); err != nil {
 				t.Fatalf("resolve approval: %v", err)
@@ -636,18 +647,18 @@ func TestService_ResolveApprovalMergesResolutionContext(t *testing.T) {
 		WorkspaceID: "ws-context",
 		RunID:       "run-context",
 		Reason:      "need human approval",
-		Context:     map[string]any{"existing": "kept"},
+		Context:     mustApprovalPayload(t, map[string]any{"existing": "kept"}),
 	}); err != nil {
 		t.Fatalf("create approval: %v", err)
 	}
 	if err := service.Approve(ctx, approvalservice.ResolveApprovalCommand{
 		ApprovalID: approvalID,
-		Context: map[string]any{
+		Context: mustApprovalPayload(t, map[string]any{
 			"governanceSemantic": map[string]any{
 				"intent": "approve",
 				"source": "tui",
 			},
-		},
+		}),
 	}); err != nil {
 		t.Fatalf("approve approval: %v", err)
 	}
@@ -656,12 +667,15 @@ func TestService_ResolveApprovalMergesResolutionContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get approval: %v", err)
 	}
-	if item.Context["existing"] != "kept" {
-		t.Fatalf("existing context = %v, want kept", item.Context["existing"])
+	existing, _ := item.Context.String("existing")
+	if existing != "kept" {
+		t.Fatalf("existing context = %v, want kept", existing)
 	}
-	semantic, ok := item.Context["governanceSemantic"].(map[string]any)
-	if !ok || semantic["intent"] != "approve" || semantic["source"] != "tui" {
-		t.Fatalf("governance semantic = %#v, want approve from tui", item.Context["governanceSemantic"])
+	semantic, ok := item.Context.Object("governanceSemantic")
+	intent, _ := semantic.String("intent")
+	source, _ := semantic.String("source")
+	if !ok || intent != "approve" || source != "tui" {
+		t.Fatalf("governance semantic = %#v, want approve from tui", item.Context)
 	}
 }
 

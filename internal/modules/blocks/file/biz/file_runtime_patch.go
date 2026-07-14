@@ -1,7 +1,6 @@
 package file
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const (
@@ -32,7 +30,32 @@ type patchExecutionRequest struct {
 	NewText         string
 	BaseHash        string
 	Occurrence      int
-	CoverageTargets any
+	CoverageTargets []string
+}
+
+type patchExecutionResult struct {
+	Status           string
+	Stage            string
+	Operation        string
+	PatchType        string
+	TargetRef        string
+	AffectedFiles    []string
+	BeforeHash       string
+	AfterHash        string
+	ContentHash      string
+	DiffHash         string
+	AddedLines       int64
+	DeletedLines     int64
+	ApprovalRequired bool
+	RiskLevel        string
+	RiskReasons      []string
+	WillWrite        bool
+	Summary          string
+	BaseHash         string
+	CoverageTargets  []string
+	MatchCount       int64
+	FailureCode      string
+	FailureMessage   string
 }
 
 type patchUnifiedDiffFilePatch struct {
@@ -69,23 +92,7 @@ func (e *patchParentConflictError) Unwrap() error {
 	return common.ErrConflict
 }
 
-func (a *RuntimeAdapter) patchPreview(request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
-	return a.executePatch(request, "preview", false)
-}
-
-func (a *RuntimeAdapter) patchApply(request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
-	return a.executePatch(request, "apply", true)
-}
-
-func (a *RuntimeAdapter) executePatch(request runtimemodel.StepExecutionRequest, operation string, apply bool) (runtimemodel.StepExecutionResult, error) {
-	patchReq, err := patchRequestFromInput(request.Input, operation)
-	if err != nil {
-		return patchErrorResult(patchStage(operation), operation, "", "", err, "patch_invalid_input"), err
-	}
-	return a.executePatchRequest(request.WorkspaceDeliverableDirectory, patchReq, apply)
-}
-
-func (a *RuntimeAdapter) executePatchRequest(workspaceDirectory string, patchReq patchExecutionRequest, apply bool) (runtimemodel.StepExecutionResult, error) {
+func (a *RuntimeAdapter) executePatchRequest(workspaceDirectory string, patchReq patchExecutionRequest, apply bool) (patchExecutionResult, error) {
 	root, target, rel, err := guardedWorkspacePath(workspaceDirectory, patchReq.TargetRef, false)
 	if err != nil {
 		return patchErrorResult(patchStage(patchReq.Operation), patchReq.Operation, patchReq.PatchType, patchReq.TargetRef, err, "patch_invalid_path"), err
@@ -105,45 +112,7 @@ func (a *RuntimeAdapter) executePatchRequest(workspaceDirectory string, patchReq
 	}
 }
 
-func patchRequestFromInput(input map[string]any, operation string) (patchExecutionRequest, error) {
-	if strings.TrimSpace(operation) == "" {
-		return patchExecutionRequest{}, common.ErrInvalidArgument
-	}
-	req := patchExecutionRequest{
-		Operation:  operation,
-		PatchType:  stringInput(input, "patchType"),
-		TargetRef:  stringInput(input, "targetRef"),
-		Summary:    stringInput(input, "summary"),
-		Content:    rawStringInput(input, "content"),
-		Diff:       rawStringInput(input, "diff"),
-		OldText:    rawStringInput(input, "oldText"),
-		NewText:    rawStringInput(input, "newText"),
-		BaseHash:   stringInput(input, "baseHash"),
-		Occurrence: intInput(input, "occurrence", 0),
-	}
-	if input != nil {
-		req.CoverageTargets = input["coverageTargets"]
-	}
-	if req.TargetRef == "" {
-		req.TargetRef = stringInput(input, "path")
-	}
-	if req.PatchType == "" {
-		switch {
-		case req.Diff != "":
-			req.PatchType = patchTypeUnifiedDiff
-		case req.OldText != "":
-			req.PatchType = patchTypeTextReplace
-		case input != nil && input["content"] != nil:
-			req.PatchType = patchTypeFileWrite
-		}
-	}
-	if req.TargetRef == "" || req.PatchType == "" {
-		return patchExecutionRequest{}, common.ErrInvalidArgument
-	}
-	return req, nil
-}
-
-func executeFileWritePatch(root string, target string, req patchExecutionRequest, apply bool) (runtimemodel.StepExecutionResult, error) {
+func executeFileWritePatch(root string, target string, req patchExecutionRequest, apply bool) (patchExecutionResult, error) {
 	if err := ensurePatchParentDirectory(root, target, req.TargetRef, req.PatchType, apply); err != nil {
 		return patchErrorResult(patchStage(req.Operation), req.Operation, req.PatchType, req.TargetRef, err, "patch_parent_conflict"), err
 	}
@@ -168,7 +137,7 @@ func executeFileWritePatch(root string, target string, req patchExecutionRequest
 	return patchSuccessResult(req, before, after, exists, sha256Hex(after), "", addedLines, deletedLines), nil
 }
 
-func executeTextReplacePatch(root string, target string, req patchExecutionRequest, apply bool) (runtimemodel.StepExecutionResult, error) {
+func executeTextReplacePatch(root string, target string, req patchExecutionRequest, apply bool) (patchExecutionResult, error) {
 	_ = root
 	before, exists, err := readPatchTarget(target)
 	if err != nil || !exists {
@@ -196,11 +165,11 @@ func executeTextReplacePatch(root string, target string, req patchExecutionReque
 	}
 	addedLines, deletedLines := patchChangedLineStats(req.OldText, req.NewText, true)
 	result := patchSuccessResult(req, before, after, exists, sha256Hex(after), "", addedLines, deletedLines)
-	result.Output["matchCount"] = matchCount
+	result.MatchCount = int64(matchCount)
 	return result, nil
 }
 
-func executeUnifiedDiffPatch(root string, target string, req patchExecutionRequest, apply bool) (runtimemodel.StepExecutionResult, error) {
+func executeUnifiedDiffPatch(root string, target string, req patchExecutionRequest, apply bool) (patchExecutionResult, error) {
 	filePatch, err := parsePatchUnifiedDiff(req.Diff)
 	if err != nil {
 		return patchErrorResult(patchStage(req.Operation), req.Operation, req.PatchType, req.TargetRef, err, "unified_diff_invalid"), err
@@ -316,7 +285,7 @@ func ensurePatchParentDirectory(root string, target string, targetRef string, op
 	return os.MkdirAll(parent, 0o755)
 }
 
-func patchSuccessResult(req patchExecutionRequest, before []byte, after []byte, beforeExists bool, contentHash string, diffHash string, addedLines int, deletedLines int) runtimemodel.StepExecutionResult {
+func patchSuccessResult(req patchExecutionRequest, before []byte, after []byte, beforeExists bool, contentHash string, diffHash string, addedLines int, deletedLines int) patchExecutionResult {
 	beforeHash := ""
 	if beforeExists {
 		beforeHash = sha256Hex(before)
@@ -330,72 +299,21 @@ func patchSuccessResult(req patchExecutionRequest, before []byte, after []byte, 
 		riskLevel = "high"
 		riskReasons = append(riskReasons, "approval_required")
 	}
-	output := map[string]any{
-		"status":           "completed",
-		"stage":            patchStage(req.Operation),
-		"operation":        req.Operation,
-		"patchType":        req.PatchType,
-		"targetRef":        req.TargetRef,
-		"affectedFiles":    []string{req.TargetRef},
-		"beforeHash":       beforeHash,
-		"afterHash":        afterHash,
-		"addedLines":       addedLines,
-		"deletedLines":     deletedLines,
-		"approvalRequired": approvalRequired,
-		"riskLevel":        riskLevel,
-		"riskReasons":      riskReasons,
-		"willWrite":        req.Operation == "apply",
+	return patchExecutionResult{
+		Status: "completed", Stage: patchStage(req.Operation), Operation: req.Operation,
+		PatchType: req.PatchType, TargetRef: req.TargetRef, AffectedFiles: []string{req.TargetRef},
+		BeforeHash: beforeHash, AfterHash: afterHash, ContentHash: contentHash, DiffHash: diffHash,
+		AddedLines: int64(addedLines), DeletedLines: int64(deletedLines), ApprovalRequired: approvalRequired,
+		RiskLevel: riskLevel, RiskReasons: riskReasons, WillWrite: req.Operation == "apply", Summary: req.Summary,
+		BaseHash: req.BaseHash, CoverageTargets: append([]string(nil), req.CoverageTargets...),
 	}
-	if req.Summary != "" {
-		output["summary"] = req.Summary
-	}
-	if contentHash != "" {
-		output["contentHash"] = contentHash
-	}
-	if diffHash != "" {
-		output["diffHash"] = diffHash
-	}
-	if req.BaseHash != "" {
-		output["baseHash"] = req.BaseHash
-	}
-	if req.CoverageTargets != nil {
-		output["coverageTargets"] = req.CoverageTargets
-	}
-	return runtimemodel.StepExecutionResult{Output: output}
 }
 
-func patchErrorResult(stage string, operation string, patchType string, targetRef string, err error, code string) runtimemodel.StepExecutionResult {
-	diagnostic := map[string]any{
-		"code":    code,
-		"message": err.Error(),
+func patchErrorResult(stage string, operation string, patchType string, targetRef string, err error, code string) patchExecutionResult {
+	return patchExecutionResult{
+		Status: "failed", Stage: stage, Operation: operation, PatchType: patchType, TargetRef: targetRef,
+		FailureCode: code, FailureMessage: err.Error(),
 	}
-	output := map[string]any{
-		"status":      "failed",
-		"stage":       stage,
-		"operation":   operation,
-		"patchType":   patchType,
-		"targetRef":   targetRef,
-		"error":       err.Error(),
-		"diagnostics": []map[string]any{diagnostic},
-	}
-	if errors.Is(err, common.ErrConflict) {
-		output["conflict"] = map[string]any{
-			"code":    code,
-			"message": err.Error(),
-		}
-	}
-	var parentConflict *patchParentConflictError
-	if errors.As(err, &parentConflict) {
-		output["runtimeDiagnostics"] = map[string]any{
-			"kind":         "workspace_path_conflict",
-			"operation":    parentConflict.Operation,
-			"targetRef":    parentConflict.TargetRef,
-			"conflictRef":  parentConflict.ConflictRef,
-			"conflictKind": parentConflict.ConflictKind,
-			"guidance":     "Choose a targetRef whose parent path is a directory, or write the resource at the existing workspace root. Do not treat an existing file as a directory.",
-		}
-	}
-	return runtimemodel.StepExecutionResult{Output: output}
 }
 
 func patchStage(operation string) string {

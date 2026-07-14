@@ -25,13 +25,13 @@ func artifactContinuationProgress(item *orchestratormodel.ArtifactContinuation) 
 }
 
 func artifactContinuationFailureReason(item *orchestratormodel.ArtifactContinuation) string {
-	if item == nil || len(item.Metadata) == 0 {
+	if item == nil || len(item.Metadata.Fields) == 0 {
 		return ""
 	}
-	if failure := readModelStringValue(item.Metadata["failureError"]); strings.TrimSpace(failure) != "" {
+	if failure, _ := item.Metadata.String("failureError"); strings.TrimSpace(failure) != "" {
 		return strings.TrimSpace(failure)
 	}
-	if failure := readModelStringValue(item.Metadata["applyFailure"]); strings.TrimSpace(failure) != "" {
+	if failure, _ := item.Metadata.String("applyFailure"); strings.TrimSpace(failure) != "" {
 		return strings.TrimSpace(failure)
 	}
 	return ""

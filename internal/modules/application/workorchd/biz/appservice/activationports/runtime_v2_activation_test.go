@@ -8,6 +8,7 @@ import (
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -23,7 +24,12 @@ func TestRuntimeV2ActivationContextUsesConcreteSelectionSnapshots(t *testing.T) 
 		[]string{"mcp-1"},
 		[]*mcpmodel.Capability{{ID: "cap-1", ServerID: "mcp-1", Kind: "tool", Name: "read", Enabled: true}},
 		[]*memorymodel.MemoryItem{{ID: "memory-1", MemoryType: "fact", Summary: "memory summary", Content: "memory content"}},
-		[]map[string]any{{"id": "policy-1", "appliesTo": "shell/command", "zeroWorkMarkers": []any{"no tests"}, "qualityOnZeroWork": "inconclusive"}},
+		[]workorcheventpayload.Payload{workorcheventpayload.New(
+			workorcheventpayload.StringField("id", "policy-1"),
+			workorcheventpayload.StringField("appliesTo", "shell/command"),
+			workorcheventpayload.StringArrayField("zeroWorkMarkers", []string{"no tests"}),
+			workorcheventpayload.StringField("qualityOnZeroWork", "inconclusive"),
+		)},
 		map[string]any{
 			"stateChangePolicy":       "must_produce_state_change",
 			"capabilityUsagePolicies": []any{map[string]any{"id": "usage-1", "preferredTools": []any{"lsp_diagnostics"}}},

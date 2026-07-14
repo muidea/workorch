@@ -4,11 +4,28 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-06-08
+Last Updated: 2026-07-14
 
 ## Purpose
 
 本文件说明 LLM provider 相关配置解析、上下文预算、request 组装和 provider-facing 审计的实现落点。
+
+生产主线以 **Runtime V2** 为准：`blocks/llm` 经 EventHub 响应 Orchestrator 的
+`RequestRuntimeCandidateCommand/Result`，只做 provider-facing 组装与 typed candidate
+解码；不拥有 Run aggregate，不裁决 acceptance，不驱动 `StagePacket` / `NextAction` /
+`DispatchNextStep`。
+
+## Runtime V2 Boundary
+
+| 关注点 | 边界 |
+| --- | --- |
+| 入口 | Orchestrator sealed `RuntimeDecision` + `AuthorityTransaction` + 已持久化 definition context + candidate attempt |
+| 输出 | 与当前 action 对应的 typed candidate（state-change / validation / assessment / governance）或 `RuntimeCandidateFailure` |
+| 不输出 | convergence state、focus 重排、authority、repair objective、Result owner 写入指令 |
+| 状态 | 不写 Run / Result / Memory / EvidenceRecord；attempt 预算与 retry disposition 由 Orchestrator |
+| 非生产 | V1 `RuntimeAdapter` registry、execution decision map 解析、通用 runtime executor、`StagePacket` / `NextAction` / `DispatchNextStep` |
+
+语义层 stage / output policy 只用于 LLM 意图与严格度（层 A），**不是** Orchestrator 状态机状态（层 B 以 `RuntimeDecision.Action` 为准）。下文 output mode / stage-contract 描述若仍使用历史字段名，一律理解为 provider-facing 渲染输入，不得回写成 V1 调度权威。
 
 ## Main Responsibility
 
@@ -17,17 +34,19 @@ Last Updated: 2026-06-08
 - provider/model capability resolution
 - context profile resolution
 - auto/manual budget calculation
-- stage-aware budget application
+- stage-aware / required-output-aware budget application
 - request audit projection
 - provider request rendering
+- Runtime V2 candidate 严格解码与 contract 校验
 
 ## Main Inputs
 
 - provider config
 - model capability table
-- runtime stage
-- context bundle
+- Orchestrator 投影的 typed decision / authority / definition / requiredOutput
+- runtime stage / output policy（语义层，非 V2 状态机）
 - context budget policy
+- typed `PromptContext`（C0–C5）
 
 ## Provider Resolution
 
@@ -36,20 +55,22 @@ Last Updated: 2026-06-08
 - provider type / model / endpoint 的解析
 - model capability table 与 context profile 的匹配
 - auto/manual budget resolution
-- stage-aware budget application
+- stage-aware / ceiling-aware budget application
 
 但不决定：
 
 - Goal / DoD 语义
 - acceptance gate
 - Result / Artifact 结论
+- Runtime V2 focus / authority / terminal 推进
 
 ## Main Outputs
 
 - normalized provider context profile
 - request messages / prompt sections
 - contextBudget / request audit metadata
-- provider-facing output mode / stage-contract projection
+- provider-facing output mode / stage-contract projection（渲染用）
+- typed Runtime V2 candidate 或具体 failure
 
 ## Request Rendering Direction
 
@@ -63,16 +84,23 @@ provider-facing request 组装应至少负责：
 
 provider-specific 差异应尽量限制在 adapter 内，不扩散到上层 flow / product 文档。
 
+C0/C1/C2 由 typed `PromptContext` 渲染为稳定前缀；C3 及以后只进入动态消息。请求不得携带自由 `Input map[string]any`、V1 execution decision 或 capability map 重建。
+
 ## Output Mode Selector Landing
 
-当 runtime 进入 `need_state_change` 且存在大输出风险时，output mode 采用
+> **Runtime V2 注**：output mode 选择若仍存在，只能作为 Orchestrator 已密封决策的
+> provider-facing 渲染输入；不得由 LLM block 重选，也不得改写 V2 authority /
+> focus / terminal。下列 `executionGraph` / `incrementalArtifact` 字段属于历史渲染
+> 合同面，不是 `StagePacket` / `NextAction` 生产调度。
+
+当 runtime 需要大输出承载且 Orchestrator 已选定输出模式时，采用
 orchestrator 选择 + LLM block provider-facing 渲染的双落点合同。
 
 orchestrator 至少负责：
 
 - 基于 runtime policy、continuation state、上下文预算和中立阈值选择
-  `executionGraph` 或 `incrementalArtifact`
-- 将选择结果写入 step input / stage contract：
+  `executionGraph` 或 `incrementalArtifact`（若该路径仍启用）
+- 将选择结果写入 sealed candidate context / step 投影字段（非 V1 executionContext map）：
   - `outputMode`
   - `requestedOutputMode`
   - `outputModeSelector.reason`
@@ -90,14 +118,15 @@ LLM provider assembly 至少负责：
 
 约束：
 
-- selector 只能选择输出承载模式，不能改写 `ConvergenceContract.State`
+- selector 只能选择输出承载模式，不能改写 V2 `RuntimeDecision` / authority / focus
 - selector 只能使用中立信号，不能依赖业务类型、语言、框架、文件名或 deliverable 文本
-- selector 结果必须进入 LLM-facing stage contract，不能只保留在 runtime internal executionContext
-- LLM block 不得重新选择 output mode；发现 stage contract 缺失或互斥字段冲突时，应记录 request assembly defect / contract violation
+- selector 结果必须进入 LLM-facing contract 投影，不能只保留在 runtime internal map
+- LLM block 不得重新选择 output mode；发现 contract 缺失或互斥字段冲突时，应返回
+  request assembly defect / contract failure（typed），由 Orchestrator 处理 attempt
 
 ## Mode-Specific Request Assembly
 
-本层必须对不同输出模式生成互斥的 provider-facing request 形态。
+本层必须对不同输出模式生成互斥的 provider-facing request 形态（渲染合同；非 V1 调度）。
 
 ### `executionGraph`
 
@@ -125,6 +154,7 @@ LLM provider assembly 至少负责：
 - `artifact_context` 只能要求 bounded read graph
 - chunk 请求只能携带 metadata-only 连续性信号，不能把 raw tail 正文重新注入 prompt
 - 当上一轮 `incrementalArtifact` 响应因 schema / mode contract / artifact 字段合同失败被拒绝时，下一轮 request 仍必须投影 `incrementalArtifact` 及对应 phase contract；只允许修正 artifact 输出结构，不得把大载荷回退到普通 `executionGraph`
+- same-contract retry 最多 attempt 1；disposition 由 Orchestrator，不由本层发起第三次请求
 
 ## Stage-Contract Projection Boundary
 
@@ -134,7 +164,7 @@ LLM provider assembly 至少负责：
 - `runtimeStageMode`
 - `stateChangingOutputRequired`
 - `repairObjective`
-- `requiredOutput`
+- `requiredOutput` / `RequiredOutputContract`
 - `outputMode`
 - `artifactOutputContract`
 - `artifactContinuationContext`
@@ -142,10 +172,11 @@ LLM provider assembly 至少负责：
 
 约束：
 
-- 当 mode 回落为 `executionGraph` 时，incremental-only 字段必须从当前 step input 中清理
+- 当 mode 回落为 `executionGraph` 时，incremental-only 字段必须从当前 step 投影中清理
 - 当 mode 保持 `incrementalArtifact` 做 contract retry 时，`requiredOutput` 不得残留 `mustIncludeStateChangingNode=true` 等 graph-only 强约束
 - completion follow-up / assessment-only correction 不得继承已完成 artifact 的 chunk/plan contract
 - stage-contract 投影缺失时，应视为 request assembly defect，而不是让 LLM 自行猜测输出模式
+- assessment candidate 只能声明当前 focus 的 satisfied/failed、summary 与 evidence/artifact refs；不得夹带 execution graph 或 Result 写入指令
 
 ## Provider-Specific Cache Mapping
 
@@ -290,8 +321,10 @@ mode-specific schema 的正式维护责任应落在本层及其相邻实现中�
 - Goal / DoD 正式定义
 - acceptance gate
 - Result / Artifact 创建
+- Runtime V2 drive / focus / authority / terminal 推进
+- `StagePacket` / `NextAction` / `DispatchNextStep` 生产调度
 
-它只负责把上游已准备好的 contract/context，映射成 provider-facing request。
+它只负责把上游已准备好的 contract/context，映射成 provider-facing request 与 typed candidate。
 
 补充：
 
@@ -299,9 +332,13 @@ mode-specific schema 的正式维护责任应落在本层及其相邻实现中�
 - 本层不负责正式 Goal / DoD definition 版本裁决
 - 本层不负责把 provider-specific cache 策略解释成业务规则
 - 本层不负责决定 artifact 是否业务上满足 DoD；它只负责 mode-specific request assembly
+- 本层不从历史 execution-context map 或 governance 文本重建 definition context
+- attempt 预算、same-contract retry 与 failure disposition 属于 Orchestrator
 
 ## Source Documents
 
 - `../00-core/runtime-request-cache-note.md`
 - `../00-core/runtime-stage-contract.md`
+- `kernel-orchestrator-governance.md`
 - `../60-verification/core-runtime-verifier.md`
+- `internal/modules/blocks/llm/readme.md`

@@ -190,17 +190,18 @@ func setPrerequisiteMagicError(result magicevent.Result, err error) {
 }
 
 func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
-	response, err := m.executeCommand(ev.Context(), ev.ID(), ev.Data())
+	response, err := m.executeCommand(ev)
 	setLLMMagicResult(result, response, err)
 }
 
-func (m *Module) executeCommand(ctx context.Context, topic string, data any) (llmevents.LLMCommandResult, error) {
+func (m *Module) executeCommand(ev magicevent.Event) (llmevents.LLMCommandResult, error) {
 	if m == nil {
 		return llmevents.LLMCommandResult{}, common.ErrInvalidArgument
 	}
-	switch topic {
+	ctx := ev.Context()
+	switch ev.ID() {
 	case llmevents.TopicLLMCommandCompleteProvider:
-		cmd, ok := data.(llmevents.CompleteProviderCommand)
+		cmd, ok := ev.Data().(llmevents.CompleteProviderCommand)
 		if !ok {
 			return llmevents.LLMCommandResult{}, common.ErrInvalidArgument
 		}
@@ -208,9 +209,9 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (ll
 		if err != nil {
 			return llmevents.LLMCommandResult{}, err
 		}
-		return llmevents.LLMCommandResult{ProviderID: providerID, Model: model, Completion: &completion}, nil
+		return llmevents.LLMCommandResult{ProviderID: providerID, Model: model, Completion: llmCompletionEventData(completion)}, nil
 	case llmevents.TopicLLMCommandGenerateEmbedding:
-		cmd, ok := data.(llmevents.GenerateEmbeddingCommand)
+		cmd, ok := ev.Data().(llmevents.GenerateEmbeddingCommand)
 		if !ok || strings.TrimSpace(cmd.ProviderID) == "" || strings.TrimSpace(cmd.Input) == "" {
 			return llmevents.LLMCommandResult{}, common.ErrInvalidArgument
 		}
@@ -222,6 +223,19 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (ll
 	default:
 		return llmevents.LLMCommandResult{}, common.ErrInvalidArgument
 	}
+}
+
+func llmCompletionEventData(completion llmmodels.ProviderCompletionResult) *llmevents.ProviderCompletionData {
+	ret := &llmevents.ProviderCompletionData{Content: string(completion.Payload)}
+	if completion.Usage != nil {
+		ret.Usage = &llmevents.ProviderUsageData{
+			InputTokens: completion.Usage.InputTokens, OutputTokens: completion.Usage.OutputTokens,
+			TotalTokens: completion.Usage.TotalTokens, CacheReadTokens: completion.Usage.CacheReadTokens,
+			CacheWriteTokens: completion.Usage.CacheWriteTokens, CacheCreationTokens: completion.Usage.CacheCreationTokens,
+			CacheableInputTokens: completion.Usage.CacheableInputTokens, NonCacheableInputTokens: completion.Usage.NonCacheableInputTokens,
+		}
+	}
+	return ret
 }
 
 func setLLMMagicResult(result magicevent.Result, data llmevents.LLMCommandResult, err error) {

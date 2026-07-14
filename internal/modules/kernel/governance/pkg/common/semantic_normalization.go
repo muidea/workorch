@@ -5,6 +5,7 @@ import (
 	"unicode"
 
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 const (
@@ -35,7 +36,7 @@ type ApprovalSemanticNormalization struct {
 	Inferred   bool
 }
 
-func NormalizeDecisionResolution(resolutionType string, payload map[string]any) DecisionSemanticNormalization {
+func NormalizeDecisionResolution(resolutionType string, payload workorcheventpayload.Payload) DecisionSemanticNormalization {
 	rawInput := firstNonEmptyPayloadString(payload, "answer", "value", "input", "note", "text", "message")
 	source := firstNonEmptyPayloadString(payload, "source", "operator", "entry", "client", "channel")
 	if strings.TrimSpace(source) == "" {
@@ -237,16 +238,9 @@ func hasLettersOrDigits(value string) bool {
 	return false
 }
 
-func firstNonEmptyPayloadString(payload map[string]any, keys ...string) string {
-	if payload == nil {
-		return ""
-	}
+func firstNonEmptyPayloadString(payload workorcheventpayload.Payload, keys ...string) string {
 	for _, key := range keys {
-		raw, ok := payload[key]
-		if !ok {
-			continue
-		}
-		if value, ok := raw.(string); ok {
+		if value, ok := payload.String(key); ok {
 			value = strings.TrimSpace(value)
 			if value != "" {
 				return value

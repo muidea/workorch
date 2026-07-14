@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -31,6 +30,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 var structuredValuePattern = regexp.MustCompile(`([A-Za-z0-9_\-\p{Han}]{2,32})\s*[:：=]\s*([^\s,，。;；]+)`)
@@ -39,7 +39,7 @@ const (
 	recoveryPolicyRuntimeRepairExhausted = "runtime_repair_exhausted_requires_strategy"
 )
 
-type ResolveDecisionFunc func(context.Context, common.TicketID, string, map[string]any) error
+type ResolveDecisionFunc func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error
 type ResolveApprovalFunc func(context.Context, common.ApprovalID) error
 type ResumeRunFunc func(context.Context, common.RunID) error
 
@@ -413,28 +413,25 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 		_ = s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoEscalated, trace, eval.policyBlocked)
 		return
 	}
-	payload := map[string]any{
-		"answer":     eval.answer,
-		"source":     "auto_governance",
-		"confidence": eval.confidence,
-		"reason":     eval.reason,
-	}
-	for key, value := range eval.resolutionPayload {
-		payload[key] = value
-	}
-	payload[events.PayloadKeyWorkspaceID] = string(ticket.WorkspaceID)
-	payload[events.PayloadKeyRunID] = string(ticket.RunID)
-	payload[events.PayloadKeyStepID] = string(ticket.StepID)
+	payload := workorcheventpayload.New(
+		workorcheventpayload.StringField("answer", eval.answer),
+		workorcheventpayload.StringField("source", "auto_governance"),
+		workorcheventpayload.FloatField("confidence", eval.confidence),
+		workorcheventpayload.StringField("reason", eval.reason),
+		workorcheventpayload.StringField(events.PayloadKeyWorkspaceID, string(ticket.WorkspaceID)),
+		workorcheventpayload.StringField(events.PayloadKeyRunID, string(ticket.RunID)),
+		workorcheventpayload.StringField(events.PayloadKeyStepID, string(ticket.StepID)),
+	).Merge(eval.resolutionPayload)
 	semantic := governancecommon.NormalizeDecisionResolution("", payload)
-	payload["governanceSemantic"] = map[string]any{
-		"resolutionType": semantic.ResolutionType,
-		"intent":         semantic.Intent,
-		"confidence":     semantic.Confidence,
-		"rawInput":       semantic.RawInput,
-		"source":         semantic.Source,
-		"inferred":       semantic.Inferred,
-		"version":        "v1",
-	}
+	payload = payload.Merge(workorcheventpayload.New(workorcheventpayload.ObjectField("governanceSemantic", workorcheventpayload.New(
+		workorcheventpayload.StringField("resolutionType", semantic.ResolutionType),
+		workorcheventpayload.StringField("intent", semantic.Intent),
+		workorcheventpayload.FloatField("confidence", semantic.Confidence),
+		workorcheventpayload.StringField("rawInput", semantic.RawInput),
+		workorcheventpayload.StringField("source", semantic.Source),
+		workorcheventpayload.BoolField("inferred", semantic.Inferred),
+		workorcheventpayload.StringField("version", "v1"),
+	))))
 	scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, ticket.WorkspaceID)
 	if err := s.resolve(scopedCtx, ticket.ID, semantic.ResolutionType, payload); err != nil {
 		trace.Status = "blocked"
@@ -629,7 +626,7 @@ type ticketEvaluation struct {
 	budgetAfter       int
 	promptKey         string
 	evidenceRefs      []string
-	resolutionPayload map[string]any
+	resolutionPayload workorcheventpayload.Payload
 }
 
 type approvalEvaluation struct {
@@ -762,9 +759,7 @@ func (s *Service) evaluateTicket(ctx context.Context, ticket *decisionmodel.Tick
 		ret.policyBlocked = ""
 		ret.policyMatched = "decision_kind_replan_auto_resolve"
 		ret.budgetAfter = budgetUsed + 1
-		ret.resolutionPayload = map[string]any{
-			"recoveryAction": "replan",
-		}
+		ret.resolutionPayload = workorcheventpayload.New(workorcheventpayload.StringField("recoveryAction", "replan"))
 		if goal != nil && goal.ID != "" {
 			ret.evidenceRefs = append(ret.evidenceRefs, string(goal.ID))
 		}
@@ -809,9 +804,7 @@ func (s *Service) evaluateRuntimeRepairExhaustionTicket(ctx context.Context, tic
 	ret.reason = "runtime repair exhausted and structured recovery policy allows replan"
 	ret.policyBlocked = ""
 	ret.policyMatched = "runtime_repair_exhausted_auto_replan"
-	ret.resolutionPayload = map[string]any{
-		"recoveryAction": "replan",
-	}
+	ret.resolutionPayload = workorcheventpayload.New(workorcheventpayload.StringField("recoveryAction", "replan"))
 	return true, ret
 }
 
@@ -939,7 +932,7 @@ func (s *Service) evaluateApproval(ctx context.Context, approval *approvalmodel.
 }
 
 func inferMissingInfoAnswer(
-	ctxMap map[string]any,
+	ctxMap workorcheventpayload.Payload,
 	question string,
 	reason string,
 	goalText string,
@@ -991,46 +984,26 @@ func inferMissingInfoAnswer(
 	return "", 0.0, "", evidenceRefs
 }
 
-func hasCandidateValues(input map[string]any) bool {
-	if input == nil {
-		return false
-	}
-	raw, ok := input["candidateValues"]
-	return ok && raw != nil
+func hasCandidateValues(input workorcheventpayload.Payload) bool {
+	_, ok := input.Field("candidateValues")
+	return ok
 }
 
-func continuationCandidateAnswer(input map[string]any) (string, float64, bool) {
-	if input == nil {
-		return "", 0, false
-	}
-	raw, ok := input["candidateValues"]
-	if !ok || raw == nil {
-		return "", 0, false
-	}
-	candidates := map[string]any{}
-	switch typed := raw.(type) {
-	case map[string]any:
-		candidates = typed
-	case map[string]string:
-		for key, value := range typed {
-			candidates[key] = value
-		}
-	default:
-		return "", 0, false
-	}
-	if len(candidates) == 0 {
+func continuationCandidateAnswer(input workorcheventpayload.Payload) (string, float64, bool) {
+	candidates, ok := input.Object("candidateValues")
+	if !ok || len(candidates.Fields) == 0 {
 		return "", 0, false
 	}
 	confidences := confidenceMapFromMap(input, "confidenceByField")
 	selected := map[string]string{}
 	confidence := 1.0
 	confidenceSeen := false
-	for field, value := range candidates {
-		field = strings.TrimSpace(field)
+	for _, fieldValue := range candidates.Fields {
+		field := strings.TrimSpace(fieldValue.Name)
 		if field == "" {
 			continue
 		}
-		candidate := preferredAutoContinuationCandidate(value)
+		candidate := preferredAutoContinuationCandidate(fieldValue.Value)
 		if candidate == "" {
 			continue
 		}
@@ -1050,32 +1023,29 @@ func continuationCandidateAnswer(input map[string]any) (string, float64, bool) {
 	return answer, confidence, answer != ""
 }
 
-func preferredAutoContinuationCandidate(value any) string {
-	switch typed := value.(type) {
-	case string:
-		if isAutoContinuationCandidateText(typed) {
-			return strings.TrimSpace(typed)
+func preferredAutoContinuationCandidate(value workorcheventpayload.Value) string {
+	switch value.Kind {
+	case workorcheventpayload.ValueString:
+		if isAutoContinuationCandidateText(value.String) {
+			return strings.TrimSpace(value.String)
 		}
-	case []string:
-		for _, item := range typed {
-			if isAutoContinuationCandidateText(item) {
-				return strings.TrimSpace(item)
-			}
-		}
-	case []any:
-		for _, item := range typed {
+	case workorcheventpayload.ValueArray:
+		for _, item := range value.Array {
 			if candidate := preferredAutoContinuationCandidate(item); candidate != "" {
 				return candidate
 			}
 		}
-	case map[string]any:
+	case workorcheventpayload.ValueObject:
+		object := workorcheventpayload.Payload{Fields: value.Object}
 		for _, key := range []string{"value", "id", "mode", "target", "name"} {
-			if candidate := preferredAutoContinuationCandidate(typed[key]); candidate != "" {
-				return candidate
+			if nested, ok := object.Field(key); ok {
+				if candidate := preferredAutoContinuationCandidate(nested); candidate != "" {
+					return candidate
+				}
 			}
 		}
-		for _, nested := range typed {
-			if candidate := preferredAutoContinuationCandidate(nested); candidate != "" {
+		for _, nested := range value.Object {
+			if candidate := preferredAutoContinuationCandidate(nested.Value); candidate != "" {
 				return candidate
 			}
 		}
@@ -1106,10 +1076,7 @@ func normalizeContinuationCandidateText(value string) string {
 	return replacer.Replace(value)
 }
 
-func structuredCandidateAnswer(input map[string]any) (string, float64, bool) {
-	if input == nil {
-		return "", 0, false
-	}
+func structuredCandidateAnswer(input workorcheventpayload.Payload) (string, float64, bool) {
 	if boolFromMap(input, "humanRequired") ||
 		boolFromMap(input, "requiresHuman") ||
 		boolFromMap(input, "manualRequired") ||
@@ -1121,7 +1088,8 @@ func structuredCandidateAnswer(input map[string]any) (string, float64, bool) {
 	resolvedValues := stringMapFromMap(input, "resolvedValues")
 	missingFields := stringSliceFromMap(input, "missingFields")
 	confidenceByField := confidenceMapFromMap(input, "confidenceByField")
-	topConfidence, hasTopConfidence := confidenceValue(input["confidence"])
+	topConfidenceValue, hasTopConfidence := input.Field("confidence")
+	topConfidence, hasTopConfidence := confidenceValue(topConfidenceValue, hasTopConfidence)
 
 	values := make(map[string]string, len(knownValues)+len(candidateValues)+len(resolvedValues))
 	for key, value := range knownValues {
@@ -1259,20 +1227,14 @@ func requiresHumanByQuestion(question string, reason string) bool {
 	return false
 }
 
-func hasManualRequiredMarker(input map[string]any) bool {
-	if input == nil {
-		return false
-	}
+func hasManualRequiredMarker(input workorcheventpayload.Payload) bool {
 	return boolFromMap(input, "humanRequired") ||
 		boolFromMap(input, "requiresHuman") ||
 		boolFromMap(input, "manualRequired") ||
 		len(stringSliceFromMap(input, "requiresHumanFields")) > 0
 }
 
-func runtimeRecoveryRequiresExternalOperator(ctxMap map[string]any, question string, reason string) bool {
-	if ctxMap == nil {
-		return false
-	}
+func runtimeRecoveryRequiresExternalOperator(ctxMap workorcheventpayload.Payload, question string, reason string) bool {
 	scope := normalize(stringFromMap(ctxMap, "scope"))
 	dependency := normalize(stringFromMap(ctxMap, "dependency"))
 	policy := normalize(stringFromMap(ctxMap, "recoveryPolicy"))
@@ -1307,7 +1269,7 @@ func normalize(input string) string {
 	return strings.ToLower(strings.TrimSpace(input))
 }
 
-func firstNonEmptyMapValue(input map[string]any, keys []string) string {
+func firstNonEmptyMapValue(input workorcheventpayload.Payload, keys []string) string {
 	for _, key := range keys {
 		value := strings.TrimSpace(stringFromMap(input, key))
 		if value != "" {
@@ -1317,147 +1279,87 @@ func firstNonEmptyMapValue(input map[string]any, keys []string) string {
 	return ""
 }
 
-func singleStringMapValue(input map[string]any) string {
-	if input == nil {
+func singleStringMapValue(input workorcheventpayload.Payload) string {
+	if len(input.Fields) != 1 {
 		return ""
 	}
-	if len(input) != 1 {
+	field := input.Fields[0]
+	if field.Value.Kind != workorcheventpayload.ValueString {
 		return ""
 	}
-	value := ""
-	for _, raw := range input {
-		text, ok := raw.(string)
-		if !ok {
-			continue
-		}
-		text = strings.TrimSpace(text)
-		if text == "" {
-			continue
-		}
-		if value != "" {
-			return ""
-		}
-		value = text
-	}
-	return value
+	return strings.TrimSpace(field.Value.String)
 }
 
-func stringMapFromMap(input map[string]any, key string) map[string]string {
+func stringMapFromMap(input workorcheventpayload.Payload, key string) map[string]string {
 	ret := map[string]string{}
-	raw, ok := input[key]
-	if !ok || raw == nil {
+	object, ok := input.Object(key)
+	if !ok {
 		return ret
 	}
-	switch typed := raw.(type) {
-	case map[string]any:
-		for k, v := range typed {
-			if value := stringifyScalar(v); value != "" {
-				ret[strings.TrimSpace(k)] = value
-			}
-		}
-	case map[string]string:
-		for k, v := range typed {
-			if value := strings.TrimSpace(v); value != "" {
-				ret[strings.TrimSpace(k)] = value
-			}
+	for _, field := range object.Fields {
+		if value := stringifyScalar(field.Value); value != "" {
+			ret[strings.TrimSpace(field.Name)] = value
 		}
 	}
 	return ret
 }
 
-func confidenceMapFromMap(input map[string]any, key string) map[string]float64 {
+func confidenceMapFromMap(input workorcheventpayload.Payload, key string) map[string]float64 {
 	ret := map[string]float64{}
-	raw, ok := input[key]
-	if !ok || raw == nil {
+	object, ok := input.Object(key)
+	if !ok {
 		return ret
 	}
-	switch typed := raw.(type) {
-	case map[string]any:
-		for k, v := range typed {
-			if value, ok := confidenceValue(v); ok {
-				ret[normalize(k)] = value
-			}
-		}
-	case map[string]float64:
-		for k, v := range typed {
-			ret[normalize(k)] = v
+	for _, field := range object.Fields {
+		if value, ok := confidenceValue(field.Value, true); ok {
+			ret[normalize(field.Name)] = value
 		}
 	}
 	return ret
 }
 
-func stringSliceFromMap(input map[string]any, key string) []string {
-	raw, ok := input[key]
-	if !ok || raw == nil {
+func stringSliceFromMap(input workorcheventpayload.Payload, key string) []string {
+	values, ok := input.StringSlice(key)
+	if !ok {
 		return nil
 	}
-	switch typed := raw.(type) {
-	case []string:
-		ret := make([]string, 0, len(typed))
-		for _, value := range typed {
-			if value = strings.TrimSpace(value); value != "" {
-				ret = append(ret, value)
-			}
+	ret := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			ret = append(ret, value)
 		}
-		return ret
-	case []any:
-		ret := make([]string, 0, len(typed))
-		for _, value := range typed {
-			if text := stringifyScalar(value); text != "" {
-				ret = append(ret, text)
-			}
-		}
-		return ret
 	}
-	return nil
+	return ret
 }
 
-func mapFromMap(input map[string]any, key string) map[string]any {
-	if input == nil {
-		return nil
-	}
-	raw, ok := input[key]
-	if !ok || raw == nil {
-		return nil
-	}
-	switch typed := raw.(type) {
-	case map[string]any:
-		return typed
-	default:
-		return nil
-	}
-}
-
-func boolFromMap(input map[string]any, key string) bool {
-	raw, ok := input[key]
-	if !ok || raw == nil {
+func boolFromMap(input workorcheventpayload.Payload, key string) bool {
+	value, ok := input.Field(key)
+	if !ok {
 		return false
 	}
-	switch typed := raw.(type) {
-	case bool:
-		return typed
-	case string:
-		parsed, err := strconv.ParseBool(strings.TrimSpace(typed))
+	switch value.Kind {
+	case workorcheventpayload.ValueBool:
+		return value.Bool
+	case workorcheventpayload.ValueString:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(value.String))
 		return err == nil && parsed
 	}
 	return false
 }
 
-func confidenceValue(input any) (float64, bool) {
-	switch typed := input.(type) {
-	case float64:
-		return typed, true
-	case float32:
-		return float64(typed), true
-	case int:
-		return float64(typed), true
-	case int64:
-		return float64(typed), true
-	case json.Number:
-		value, err := typed.Float64()
-		return value, err == nil
-	case string:
-		switch normalize(typed) {
+func confidenceValue(input workorcheventpayload.Value, present bool) (float64, bool) {
+	if !present {
+		return 0, false
+	}
+	switch input.Kind {
+	case workorcheventpayload.ValueFloat:
+		return input.Float, true
+	case workorcheventpayload.ValueInt:
+		return float64(input.Int), true
+	case workorcheventpayload.ValueUint:
+		return float64(input.Uint), true
+	case workorcheventpayload.ValueString:
+		switch normalize(input.String) {
 		case "high":
 			return 0.9, true
 		case "medium":
@@ -1465,21 +1367,25 @@ func confidenceValue(input any) (float64, bool) {
 		case "low":
 			return 0.5, true
 		default:
-			value, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+			value, err := strconv.ParseFloat(strings.TrimSpace(input.String), 64)
 			return value, err == nil
 		}
 	}
 	return 0, false
 }
 
-func stringifyScalar(input any) string {
-	switch typed := input.(type) {
-	case string:
-		return strings.TrimSpace(typed)
-	case fmt.Stringer:
-		return strings.TrimSpace(typed.String())
-	case float64, float32, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, bool, json.Number:
-		return strings.TrimSpace(fmt.Sprint(typed))
+func stringifyScalar(input workorcheventpayload.Value) string {
+	switch input.Kind {
+	case workorcheventpayload.ValueString:
+		return strings.TrimSpace(input.String)
+	case workorcheventpayload.ValueFloat:
+		return strconv.FormatFloat(input.Float, 'g', -1, 64)
+	case workorcheventpayload.ValueInt:
+		return strconv.FormatInt(input.Int, 10)
+	case workorcheventpayload.ValueUint:
+		return strconv.FormatUint(input.Uint, 10)
+	case workorcheventpayload.ValueBool:
+		return strconv.FormatBool(input.Bool)
 	}
 	return ""
 }
@@ -1491,19 +1397,9 @@ func minFloat(a float64, b float64) float64 {
 	return a
 }
 
-func stringFromMap(input map[string]any, key string) string {
-	if input == nil {
-		return ""
-	}
-	value, ok := input[key]
-	if !ok || value == nil {
-		return ""
-	}
-	text, ok := value.(string)
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(text)
+func stringFromMap(input workorcheventpayload.Payload, key string) string {
+	value, _ := input.String(key)
+	return strings.TrimSpace(value)
 }
 
 func (s *Service) countResolvedTicketTraces(ctx context.Context, runID common.RunID) int {
@@ -1752,42 +1648,38 @@ func declaresLowRiskWorkspaceDependencyMetadata(approval *approvalmodel.Approval
 	return containsAnyText(combined, []string{"dependency", "dependencies", "manifest", "metadata", "lockfile", "lock file", "lock", "checksum", "checksums", "module", "modules", "package", "packages", "requirements"})
 }
 
-func flattenApprovalContextText(input map[string]any) string {
-	if len(input) == 0 {
+func flattenApprovalContextText(input workorcheventpayload.Payload) string {
+	if len(input.Fields) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	for _, value := range input {
-		appendApprovalContextValue(&b, value)
+	for _, field := range input.Fields {
+		appendApprovalContextValue(&b, field.Value)
 	}
 	return b.String()
 }
 
-func appendApprovalContextValue(b *strings.Builder, value any) {
-	switch typed := value.(type) {
-	case string:
-		if text := strings.TrimSpace(typed); text != "" {
+func appendApprovalContextValue(b *strings.Builder, value workorcheventpayload.Value) {
+	switch value.Kind {
+	case workorcheventpayload.ValueString:
+		if text := strings.TrimSpace(value.String); text != "" {
 			if b.Len() > 0 {
 				b.WriteString("\n")
 			}
 			b.WriteString(text)
 		}
-	case []string:
-		for _, item := range typed {
+	case workorcheventpayload.ValueArray:
+		for _, item := range value.Array {
 			appendApprovalContextValue(b, item)
 		}
-	case []any:
-		for _, item := range typed {
-			appendApprovalContextValue(b, item)
-		}
-	case map[string]any:
-		for _, item := range typed {
-			appendApprovalContextValue(b, item)
+	case workorcheventpayload.ValueObject:
+		for _, field := range value.Object {
+			appendApprovalContextValue(b, field.Value)
 		}
 	}
 }
 
-func containsRemoteOperationSignal(actionText string, contextMap map[string]any) bool {
+func containsRemoteOperationSignal(actionText string, contextMap workorcheventpayload.Payload) bool {
 	actionText = normalize(actionText)
 	if actionText == "" {
 		return false
@@ -1868,39 +1760,26 @@ func compactPromptKey(input string) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-func stableContextDigest(input map[string]any) string {
-	if len(input) == 0 {
+func stableContextDigest(input workorcheventpayload.Payload) string {
+	if len(input.Fields) == 0 {
 		return ""
 	}
-	bytes, err := json.Marshal(input)
-	if err != nil {
-		return ""
-	}
-	sum := sha256.Sum256(bytes)
+	sum := sha256.Sum256([]byte(input.CanonicalString()))
 	return hex.EncodeToString(sum[:8])
 }
 
-func containsRiskReason(input map[string]any, target string) bool {
+func containsRiskReason(input workorcheventpayload.Payload, target string) bool {
 	target = normalize(target)
 	if target == "" {
 		return false
 	}
-	switch reasons := input["riskReasons"].(type) {
-	case []any:
-		for _, item := range reasons {
-			text, ok := item.(string)
-			if !ok {
-				continue
-			}
-			if normalize(text) == target {
-				return true
-			}
-		}
-	case []string:
-		for _, item := range reasons {
-			if normalize(item) == target {
-				return true
-			}
+	reasons, ok := input.StringSlice("riskReasons")
+	if !ok {
+		return false
+	}
+	for _, item := range reasons {
+		if normalize(item) == target {
+			return true
 		}
 	}
 	return false

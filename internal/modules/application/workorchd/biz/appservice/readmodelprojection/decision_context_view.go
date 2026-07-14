@@ -1,5 +1,7 @@
 package readmodelprojection
 
+import "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+
 const (
 	decisionContextStringLimit      = 512
 	decisionContextSliceLimit       = 8
@@ -30,68 +32,50 @@ var decisionContextViewKeys = []string{
 	"structuredFailureSignals",
 }
 
-func ProjectDecisionContextView(input map[string]any) map[string]any {
-	if len(input) == 0 {
-		return nil
+func ProjectDecisionContextView(input workorcheventpayload.Payload) workorcheventpayload.Payload {
+	if len(input.Fields) == 0 {
+		return workorcheventpayload.Payload{}
 	}
-	ret := make(map[string]any, len(decisionContextViewKeys))
+	ret := make([]workorcheventpayload.Field, 0, len(decisionContextViewKeys))
 	for _, key := range decisionContextViewKeys {
-		value, ok := input[key]
+		value, ok := input.Field(key)
 		if !ok {
 			continue
 		}
 		if projected, ok := projectDecisionContextValue(key, value, 0); ok {
-			ret[key] = projected
+			ret = append(ret, workorcheventpayload.Field{Name: key, Value: projected})
 		}
 	}
-	if len(ret) == 0 {
-		return nil
-	}
-	return ret
+	return workorcheventpayload.New(ret...)
 }
 
-func ProjectDecisionPayloadView(input map[string]any) map[string]any {
+func ProjectDecisionPayloadView(input workorcheventpayload.Payload) workorcheventpayload.Payload {
 	projected, ok := projectDecisionContextMap(input, 1)
 	if !ok {
-		return nil
+		return workorcheventpayload.Payload{}
 	}
 	return projected
 }
 
-func projectDecisionContextValue(key string, value any, depth int) (any, bool) {
+func projectDecisionContextValue(key string, value workorcheventpayload.Value, depth int) (workorcheventpayload.Value, bool) {
 	if depth > 2 {
-		return nil, false
+		return workorcheventpayload.Value{}, false
 	}
-	switch typed := value.(type) {
-	case nil:
-		return nil, false
-	case string:
-		return trimDecisionContextString(typed), true
-	case bool:
-		return typed, true
-	case int:
-		return typed, true
-	case int64:
-		return typed, true
-	case float64:
-		return typed, true
-	case []string:
-		limit := decisionContextSliceLimit
-		ret := make([]string, 0, min(len(typed), limit))
-		for idx, item := range typed {
-			if idx >= limit {
-				break
-			}
-			ret = append(ret, trimDecisionContextString(item))
-		}
-		return ret, true
-	case []any:
+	switch value.Kind {
+	case workorcheventpayload.ValueNull:
+		return workorcheventpayload.Value{}, false
+	case workorcheventpayload.ValueString:
+		value.String = trimDecisionContextString(value.String)
+		return value, true
+	case workorcheventpayload.ValueBool, workorcheventpayload.ValueInt, workorcheventpayload.ValueUint, workorcheventpayload.ValueFloat:
+		return value, true
+	case workorcheventpayload.ValueArray:
 		limit := decisionContextSliceLimit
 		if key == "recentFailures" {
 			limit = decisionContextRecentErrorLimit
 		}
-		ret := make([]any, 0, min(len(typed), limit))
-		for idx, item := range typed {
+		ret := make([]workorcheventpayload.Value, 0, min(len(value.Array), limit))
+		for idx, item := range value.Array {
 			if idx >= limit {
 				break
 			}
@@ -100,39 +84,41 @@ func projectDecisionContextValue(key string, value any, depth int) (any, bool) {
 				ret = append(ret, projected)
 			}
 		}
-		return ret, len(ret) > 0
-	case map[string]any:
-		return projectDecisionContextMap(typed, depth+1)
+		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueArray, Array: ret}, len(ret) > 0
+	case workorcheventpayload.ValueObject:
+		projected, ok := projectDecisionContextMap(workorcheventpayload.Payload{Fields: value.Object}, depth+1)
+		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueObject, Object: projected.Fields}, ok
 	default:
-		return nil, false
+		return workorcheventpayload.Value{}, false
 	}
 }
 
-func projectDecisionContextMap(input map[string]any, depth int) (map[string]any, bool) {
-	if len(input) == 0 || depth > 2 {
-		return nil, false
+func projectDecisionContextMap(input workorcheventpayload.Payload, depth int) (workorcheventpayload.Payload, bool) {
+	if len(input.Fields) == 0 || depth > 2 {
+		return workorcheventpayload.Payload{}, false
 	}
 	limit := decisionContextNestedMapLimit
 	if depth == 1 {
 		limit = decisionContextMapLimit
 	}
-	ret := make(map[string]any, min(len(input), limit))
+	ret := make([]workorcheventpayload.Field, 0, min(len(input.Fields), limit))
 	count := 0
 	for _, key := range orderedDecisionContextMapKeys(input) {
 		if count >= limit {
 			break
 		}
-		projected, ok := projectDecisionContextValue(key, input[key], depth)
+		value, _ := input.Field(key)
+		projected, ok := projectDecisionContextValue(key, value, depth)
 		if !ok {
 			continue
 		}
-		ret[key] = projected
+		ret = append(ret, workorcheventpayload.Field{Name: key, Value: projected})
 		count++
 	}
-	return ret, len(ret) > 0
+	return workorcheventpayload.New(ret...), len(ret) > 0
 }
 
-func orderedDecisionContextMapKeys(input map[string]any) []string {
+func orderedDecisionContextMapKeys(input workorcheventpayload.Payload) []string {
 	preferred := []string{
 		"totalSteps",
 		"recoverySteps",
@@ -150,19 +136,19 @@ func orderedDecisionContextMapKeys(input map[string]any) []string {
 		"messages",
 		"sources",
 	}
-	ret := make([]string, 0, len(input))
+	ret := make([]string, 0, len(input.Fields))
 	seen := map[string]struct{}{}
 	for _, key := range preferred {
-		if _, ok := input[key]; ok {
+		if _, ok := input.Field(key); ok {
 			ret = append(ret, key)
 			seen[key] = struct{}{}
 		}
 	}
-	for key := range input {
-		if _, ok := seen[key]; ok {
+	for _, field := range input.Fields {
+		if _, ok := seen[field.Name]; ok {
 			continue
 		}
-		ret = append(ret, key)
+		ret = append(ret, field.Name)
 	}
 	return ret
 }

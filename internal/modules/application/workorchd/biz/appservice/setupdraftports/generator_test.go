@@ -25,8 +25,8 @@ func TestEventHubGeneratorUsesLLMCommandEvent(t *testing.T) {
 		}
 		seenRequest = cmd.Request
 		result.Set(llmevents.LLMCommandResult{
-			Completion: &llmmodels.ProviderCompletionResult{
-				Payload: []byte(`{"draft":{"goalText":"Generated goal","doDItems":["Generated DoD"],"confidence":"high"}}`),
+			Completion: &llmevents.ProviderCompletionData{
+				Content: `{"draft":{"goalText":"Generated goal","doDItems":["Generated DoD"],"confidence":"high"}}`,
 			},
 		}, nil)
 	})

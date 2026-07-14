@@ -11,15 +11,24 @@ import (
 
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/eventvalue"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-func mustDecisionEventPayload(t *testing.T, input map[string]any) eventvalue.Payload {
+func mustDecisionEventPayload(t *testing.T, input map[string]any) []decisionevents.DecisionEvidenceField {
 	t.Helper()
-	payload, err := eventvalue.FromMap(input)
+	payload, err := workorcheventpayload.FromMap(input)
 	if err != nil {
-		t.Fatalf("eventvalue.FromMap: %v", err)
+		t.Fatalf("DecisionFieldsFromMap: %v", err)
+	}
+	return payload.Fields
+}
+
+func mustDecisionModelPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
+	t.Helper()
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		t.Fatal(err)
 	}
 	return payload
 }
@@ -510,7 +519,8 @@ func TestDecisionCreateResolutionCommandAcceptsContractPayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get resolution: %v", err)
 	}
-	if item.ID != "resolution-contract" || item.Type != "provide_missing_info" || item.Payload["answer"] != "ok" {
+	answer, _ := item.Payload.String("answer")
+	if item.ID != "resolution-contract" || item.Type != "provide_missing_info" || answer != "ok" {
 		t.Fatalf("resolution = %+v, want command fields", item)
 	}
 	if item.ContinuationAction != "resume" || item.ResumeRunID != "run-current" || item.SuccessorRunID != "run-next" {
@@ -630,7 +640,7 @@ func TestDecisionResolutionCommandGetHonorsTicketScope(t *testing.T) {
 		ID:       "resolution-owner-a",
 		TicketID: ticketID,
 		Type:     "provide_missing_info",
-		Payload:  map[string]any{"answer": "ok"},
+		Payload:  mustDecisionModelPayload(t, map[string]any{"answer": "ok"}),
 	}); err != nil {
 		t.Fatalf("create resolution: %v", err)
 	}
@@ -744,7 +754,7 @@ func TestDecisionResolutionDeleteWithoutScopeDeletesUniqueTicketResolution(t *te
 		ID:       "resolution-delete-unique",
 		TicketID: ticketID,
 		Type:     "provide_missing_info",
-		Payload:  map[string]any{"answer": "ok"},
+		Payload:  mustDecisionModelPayload(t, map[string]any{"answer": "ok"}),
 	}); err != nil {
 		t.Fatalf("create resolution: %v", err)
 	}
@@ -796,7 +806,7 @@ func TestDecisionUpdateTicketCommandPublishesUpdatedNotification(t *testing.T) {
 		Reason:       "provider unavailable",
 		DecisionKind: "operator_input",
 		Question:     "provide runtime config",
-		Context:      map[string]any{"attempt": float64(1)},
+		Context:      mustDecisionModelPayload(t, map[string]any{"attempt": float64(1)}),
 	}); err != nil {
 		t.Fatalf("create ticket: %v", err)
 	}
@@ -846,7 +856,8 @@ func TestDecisionUpdateTicketCommandPublishesUpdatedNotification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get ticket: %v", err)
 	}
-	if item.State != common.DecisionTicketStateOpen || item.Context["attempt"] != float64(2) {
+	attempt, _ := item.Context.Float64("attempt")
+	if item.State != common.DecisionTicketStateOpen || attempt != float64(2) {
 		t.Fatalf("ticket after update = %+v, want reopened ticket with updated context", item)
 	}
 

@@ -170,7 +170,7 @@ func TestListDecisionPageWithBackendProjectsAuditPayloads(t *testing.T) {
 	second := prepareDecisionRun(t, dataRoot, "ws-decision-page-b", "run-decision-page-b")
 	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, first.BlockingTicketID, ResolveDecisionCommand{
 		ResolutionType:    decisioncommon.ResolutionTypeProvideMissingInfo,
-		ResolutionPayload: map[string]any{"answer": "first decision payload"},
+		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"answer": "first decision payload"}),
 	}); err != nil {
 		t.Fatalf("ResolveDecisionWithBackend: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestListDecisionPageWithBackendProjectsAuditPayloads(t *testing.T) {
 	if !page.HasMore || page.NextCursorAfterID != wantCursor {
 		t.Fatalf("page cursor = %+v, want hasMore with second cursor", page)
 	}
-	if page.Decisions[0].Context != nil || page.Decisions[0].ResolutionPayload != nil {
+	if len(page.Decisions[0].Context.Fields) != 0 || len(page.Decisions[0].ResolutionPayload.Fields) != 0 {
 		t.Fatalf("projected decision carries unexpected payloads: %+v", page.Decisions[0])
 	}
 
@@ -226,7 +226,7 @@ func TestListDecisionPageWithBackendProjectsAuditPayloads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadDecisionWithBackend: %v", err)
 	}
-	if detail.Context == nil || detail.ResolutionPayload == nil {
+	if len(detail.Context.Fields) == 0 || len(detail.ResolutionPayload.Fields) == 0 {
 		t.Fatalf("detail decision lost full payloads: %+v", detail)
 	}
 }
@@ -259,7 +259,7 @@ func TestListDecisionPageWithBackendScopesResolvedDuplicateTicketIDs(t *testing.
 			ID:       common.ResolutionID("resolution-" + string(workspaceID)),
 			TicketID: common.TicketID(first.BlockingTicketID),
 			Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
-			Payload:  map[string]any{"workspaceId": string(workspaceID)},
+			Payload:  mustAppserviceGovernancePayload(t, map[string]any{"workspaceId": string(workspaceID)}),
 		}); err != nil {
 			t.Fatalf("create resolution %s/%s: %v", workspaceID, first.BlockingTicketID, err)
 		}
@@ -281,7 +281,8 @@ func TestListDecisionPageWithBackendScopesResolvedDuplicateTicketIDs(t *testing.
 		if !ok {
 			t.Fatalf("page decisions = %+v, missing workspace %s", page.Decisions, workspaceID)
 		}
-		if item.ID != first.BlockingTicketID || item.ResolutionPayload["workspaceId"] != workspaceID {
+		itemWorkspaceID, _ := item.ResolutionPayload.String("workspaceId")
+		if item.ID != first.BlockingTicketID || itemWorkspaceID != string(workspaceID) {
 			t.Fatalf("decision for %s = %+v, want scoped resolution payload", workspaceID, item)
 		}
 	}
@@ -395,7 +396,7 @@ func TestResolveDecisionWithBackendReturnsResolvedDecision(t *testing.T) {
 
 	item, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
 		ResolutionType:    decisioncommon.ResolutionTypeProvideMissingInfo,
-		ResolutionPayload: map[string]any{"operator": "tester"},
+		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"operator": "tester"}),
 	})
 	if err != nil {
 		t.Fatalf("ResolveDecisionWithBackend: %v", err)
@@ -407,7 +408,8 @@ func TestResolveDecisionWithBackendReturnsResolvedDecision(t *testing.T) {
 	if item.ResolutionID != wantResolutionID {
 		t.Fatalf("resolutionID = %q, want %s", item.ResolutionID, wantResolutionID)
 	}
-	if item.ResolutionPayload["operator"] != "tester" {
+	operator, _ := item.ResolutionPayload.String("operator")
+	if operator != "tester" {
 		t.Fatalf("resolutionPayload = %+v, want operator tester", item.ResolutionPayload)
 	}
 }
@@ -436,7 +438,7 @@ func TestResolveDecisionWithSessionWithoutScopePrefersOpenDuplicateFileTicket(t 
 		ID:       "resolution-ws-duplicate-old-ticket-duplicate-resolution-replan",
 		TicketID: ticketID,
 		Type:     decisioncommon.ResolutionTypeReplan,
-		Payload:  map[string]any{"operator": "old"},
+		Payload:  mustAppserviceGovernancePayload(t, map[string]any{"operator": "old"}),
 	}); err != nil {
 		t.Fatalf("create old resolution: %v", err)
 	}
@@ -453,7 +455,7 @@ func TestResolveDecisionWithSessionWithoutScopePrefersOpenDuplicateFileTicket(t 
 
 	item, err := ResolveDecisionWithSession(context.Background(), session, string(ticketID), ResolveDecisionCommand{
 		ResolutionType:    decisioncommon.ResolutionTypeReplan,
-		ResolutionPayload: map[string]any{"operator": "current"},
+		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"operator": "current"}),
 	})
 	if err != nil {
 		t.Fatalf("ResolveDecisionWithSession: %v", err)
@@ -472,10 +474,10 @@ func TestResolveDecisionWithBackendNormalizesSemanticIntent(t *testing.T) {
 
 	item, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
 		ResolutionType: "auto",
-		ResolutionPayload: map[string]any{
+		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{
 			"answer":   "请重新规划执行方案",
 			"operator": "tui",
-		},
+		}),
 	})
 	if err != nil {
 		t.Fatalf("ResolveDecisionWithBackend: %v", err)
@@ -483,8 +485,11 @@ func TestResolveDecisionWithBackendNormalizesSemanticIntent(t *testing.T) {
 	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeReplan {
 		t.Fatalf("decision = %+v, want resolved replan", item)
 	}
-	semantic, _ := item.ResolutionPayload["governanceSemantic"].(map[string]any)
-	if semantic["intent"] != "request_replan" || semantic["source"] != "tui" || semantic["rawInput"] != "请重新规划执行方案" {
+	semantic, _ := item.ResolutionPayload.Object("governanceSemantic")
+	intent, _ := semantic.String("intent")
+	source, _ := semantic.String("source")
+	rawInput, _ := semantic.String("rawInput")
+	if intent != "request_replan" || source != "tui" || rawInput != "请重新规划执行方案" {
 		t.Fatalf("semantic payload = %+v, want normalized intent/source/rawInput", semantic)
 	}
 }
@@ -501,7 +506,7 @@ func TestResolveDecisionWithSessionSelectsContinuationCandidateFromApproveIntent
 		Reason:       "execution target choice is missing",
 		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
 		Question:     "Continue in the current workspace or provide another target?",
-		Context: map[string]any{
+		Context: mustAppserviceGovernancePayload(t, map[string]any{
 			"candidateValues": map[string]any{
 				"executionTargetMode": []any{"init_from_scratch", "use_existing_project"},
 			},
@@ -510,7 +515,7 @@ func TestResolveDecisionWithSessionSelectsContinuationCandidateFromApproveIntent
 			"confidenceByField":    map[string]any{"executionTargetMode": 0.98},
 			"knownValues":          map[string]any{"workspaceState": "empty"},
 			"decisionContextScope": "target_workspace",
-		},
+		}),
 		State: common.DecisionTicketStateOpen,
 	}); err != nil {
 		t.Fatalf("create ticket: %v", err)
@@ -518,10 +523,10 @@ func TestResolveDecisionWithSessionSelectsContinuationCandidateFromApproveIntent
 
 	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
-		ResolutionPayload: map[string]any{
+		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{
 			"answer":   "继续处理",
 			"operator": "tui",
-		},
+		}),
 	})
 	if err != nil {
 		t.Fatalf("ResolveDecisionWithSession: %v", err)
@@ -529,17 +534,14 @@ func TestResolveDecisionWithSessionSelectsContinuationCandidateFromApproveIntent
 	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo {
 		t.Fatalf("decision = %+v, want resolved provide_missing_info", item)
 	}
-	if item.ResolutionPayload["executionTargetMode"] != "init_from_scratch" ||
-		item.ResolutionPayload["candidateSelectionMode"] != "semantic_resume" {
+	executionTargetMode, _ := item.ResolutionPayload.String("executionTargetMode")
+	candidateSelectionMode, _ := item.ResolutionPayload.String("candidateSelectionMode")
+	if executionTargetMode != "init_from_scratch" || candidateSelectionMode != "semantic_resume" {
 		t.Fatalf("resolutionPayload = %+v, want selected continuation candidate", item.ResolutionPayload)
 	}
-	fields, ok := item.ResolutionPayload["selectedCandidateFields"].([]any)
-	if ok {
-		if len(fields) != 1 || fields[0] != "executionTargetMode" {
-			t.Fatalf("selectedCandidateFields = %+v, want executionTargetMode", fields)
-		}
-	} else if fieldsString, ok := item.ResolutionPayload["selectedCandidateFields"].([]string); !ok || len(fieldsString) != 1 || fieldsString[0] != "executionTargetMode" {
-		t.Fatalf("selectedCandidateFields = %+v, want executionTargetMode", item.ResolutionPayload["selectedCandidateFields"])
+	fields, ok := item.ResolutionPayload.StringSlice("selectedCandidateFields")
+	if !ok || len(fields) != 1 || fields[0] != "executionTargetMode" {
+		t.Fatalf("selectedCandidateFields = %+v, want executionTargetMode", fields)
 	}
 }
 
@@ -554,12 +556,12 @@ func TestResolveDecisionWithSessionRejectsInlineProviderConfigForProviderRecover
 		StepID:      common.StepID("run-provider-recovery/step-1"),
 		Reason:      "LLM provider retry attempts exhausted after 2 attempts",
 		Question:    "Fix or switch the LLM provider in system configuration first.",
-		Context: map[string]any{
+		Context: mustAppserviceGovernancePayload(t, map[string]any{
 			"failureClass":                                  "provider_timeout",
 			governancecore.DecisionContextKeyScope:          governancecore.DecisionContextScopeWorkorchRuntime,
 			governancecore.DecisionContextKeyDependency:     governancecore.DecisionContextDependencyLLMProvider,
 			governancecore.DecisionContextKeyRecoveryPolicy: governancecore.DecisionContextRecoveryPolicyConfigOnly,
-		},
+		}),
 		State: common.DecisionTicketStateOpen,
 	}); err != nil {
 		t.Fatalf("create ticket: %v", err)
@@ -567,9 +569,9 @@ func TestResolveDecisionWithSessionRejectsInlineProviderConfigForProviderRecover
 
 	_, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
-		ResolutionPayload: map[string]any{
+		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{
 			"answer": "provider = compatible\nbaseURL = https://api.example.com\napiKey = sk-secret\nmodel = model-a",
-		},
+		}),
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("ResolveDecisionWithSession err = %v, want invalid argument", err)
@@ -604,10 +606,10 @@ func TestResolveDecisionWithSessionRejectsEmptyProvideMissingInfo(t *testing.T) 
 
 	_, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
-		ResolutionPayload: map[string]any{
+		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{
 			"answer":   "/",
 			"operator": "tui",
-		},
+		}),
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("ResolveDecisionWithSession err = %v, want invalid argument", err)
@@ -635,12 +637,12 @@ func TestResolveDecisionWithSessionAllowsProviderRecoveryConfirmationWithoutSecr
 		StepID:      common.StepID("run-provider-recovery-confirmed/step-1"),
 		Reason:      "LLM provider retry attempts exhausted after 2 attempts",
 		Question:    "Fix or switch the LLM provider in system configuration first.",
-		Context: map[string]any{
+		Context: mustAppserviceGovernancePayload(t, map[string]any{
 			"failureClass":                                  "provider_timeout",
 			governancecore.DecisionContextKeyScope:          governancecore.DecisionContextScopeWorkorchRuntime,
 			governancecore.DecisionContextKeyDependency:     governancecore.DecisionContextDependencyLLMProvider,
 			governancecore.DecisionContextKeyRecoveryPolicy: governancecore.DecisionContextRecoveryPolicyConfigOnly,
-		},
+		}),
 		State: common.DecisionTicketStateOpen,
 	}); err != nil {
 		t.Fatalf("create ticket: %v", err)
@@ -648,10 +650,10 @@ func TestResolveDecisionWithSessionAllowsProviderRecoveryConfirmationWithoutSecr
 
 	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
-		ResolutionPayload: map[string]any{
+		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{
 			"answer":   "已在系统配置中切换默认 LLM provider，继续执行",
 			"operator": "console",
-		},
+		}),
 	})
 	if err != nil {
 		t.Fatalf("ResolveDecisionWithSession: %v", err)
@@ -659,7 +661,8 @@ func TestResolveDecisionWithSessionAllowsProviderRecoveryConfirmationWithoutSecr
 	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo {
 		t.Fatalf("decision = %+v, want resolved provider recovery confirmation", item)
 	}
-	if item.ResolutionPayload["recoveryAction"] != "retry_same_step" {
+	recoveryAction, _ := item.ResolutionPayload.String("recoveryAction")
+	if recoveryAction != "retry_same_step" {
 		t.Fatalf("resolutionPayload = %+v, want retry_same_step recovery action", item.ResolutionPayload)
 	}
 }
@@ -675,10 +678,10 @@ func TestResolveDecisionWithSessionAllowsTargetWorkspaceExternalDependencyConfig
 		StepID:      common.StepID("run-target-workspace-test-config/step-1"),
 		Reason:      "integration test configuration is missing",
 		Question:    "Provide the target workspace external dependency test configuration.",
-		Context: map[string]any{
+		Context: mustAppserviceGovernancePayload(t, map[string]any{
 			governancecore.DecisionContextKeyScope: governancecore.DecisionContextScopeTargetWorkspace,
 			"dependencyKind":                       "external_service",
-		},
+		}),
 		State: common.DecisionTicketStateOpen,
 	}); err != nil {
 		t.Fatalf("create ticket: %v", err)
@@ -686,9 +689,9 @@ func TestResolveDecisionWithSessionAllowsTargetWorkspaceExternalDependencyConfig
 
 	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
-		ResolutionPayload: map[string]any{
+		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{
 			"answer": "provider = compatible\nbaseURL = https://api.example.com\napiKey = sk-secret\nmodel = model-a",
-		},
+		}),
 	})
 	if err != nil {
 		t.Fatalf("ResolveDecisionWithSession: %v", err)
@@ -712,10 +715,10 @@ func TestResolveDecisionWithSessionInfersRepairExhaustionReplanFromContinueUnder
 		StepID:      common.StepID("run-repair-exhaustion-continue/step-1"),
 		Reason:      "runtime repair attempts exhausted after 3 attempts",
 		Question:    "Provide missing implementation guidance, choose replan, or reject the current path.",
-		Context: map[string]any{
+		Context: mustAppserviceGovernancePayload(t, map[string]any{
 			governancecore.DecisionContextKeyRecoveryPolicy: governancecore.DecisionContextRecoveryPolicyRepairPlan,
 			"allowedRecoveryActions":                        []any{"replan"},
-		},
+		}),
 		State: common.DecisionTicketStateOpen,
 	}); err != nil {
 		t.Fatalf("create ticket: %v", err)
@@ -723,10 +726,10 @@ func TestResolveDecisionWithSessionInfersRepairExhaustionReplanFromContinueUnder
 
 	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
 		ResolutionType: "auto",
-		ResolutionPayload: map[string]any{
+		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{
 			"answer":   "继续",
 			"operator": "tui",
-		},
+		}),
 	})
 	if err != nil {
 		t.Fatalf("ResolveDecisionWithSession: %v", err)
@@ -734,7 +737,8 @@ func TestResolveDecisionWithSessionInfersRepairExhaustionReplanFromContinueUnder
 	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeReplan {
 		t.Fatalf("decision = %+v, want resolved replan", item)
 	}
-	if item.ResolutionPayload["recoveryAction"] != "replan" {
+	recoveryAction, _ := item.ResolutionPayload.String("recoveryAction")
+	if recoveryAction != "replan" {
 		t.Fatalf("resolutionPayload = %+v, want inferred replan", item.ResolutionPayload)
 	}
 }
@@ -750,10 +754,10 @@ func TestResolveDecisionWithSessionKeepsExplicitRepairExhaustionTerminateUnderRe
 		StepID:      common.StepID("run-repair-exhaustion-terminate-replan-policy/step-1"),
 		Reason:      "runtime repair attempts exhausted after 3 attempts",
 		Question:    "Provide missing implementation guidance, choose replan, or reject the current path.",
-		Context: map[string]any{
+		Context: mustAppserviceGovernancePayload(t, map[string]any{
 			governancecore.DecisionContextKeyRecoveryPolicy: governancecore.DecisionContextRecoveryPolicyRepairPlan,
 			"allowedRecoveryActions":                        []any{"replan"},
-		},
+		}),
 		State: common.DecisionTicketStateOpen,
 	}); err != nil {
 		t.Fatalf("create ticket: %v", err)
@@ -761,10 +765,10 @@ func TestResolveDecisionWithSessionKeepsExplicitRepairExhaustionTerminateUnderRe
 
 	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
-		ResolutionPayload: map[string]any{
+		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{
 			"recoveryAction": "terminate",
 			"operator":       "e2e",
-		},
+		}),
 	})
 	if err != nil {
 		t.Fatalf("ResolveDecisionWithSession: %v", err)
@@ -772,7 +776,8 @@ func TestResolveDecisionWithSessionKeepsExplicitRepairExhaustionTerminateUnderRe
 	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeRejectCurrentPath {
 		t.Fatalf("decision = %+v, want resolved reject_current_path", item)
 	}
-	if item.ResolutionPayload["recoveryAction"] != "terminate" {
+	recoveryAction, _ := item.ResolutionPayload.String("recoveryAction")
+	if recoveryAction != "terminate" {
 		t.Fatalf("resolutionPayload = %+v, want explicit terminate preserved", item.ResolutionPayload)
 	}
 }
@@ -788,9 +793,9 @@ func TestResolveDecisionWithSessionAllowsExplicitRepairExhaustionRecoveryAction(
 		StepID:      common.StepID("run-repair-exhaustion-explicit/step-1"),
 		Reason:      "runtime repair attempts exhausted after 3 attempts",
 		Question:    "Provide missing implementation guidance, choose replan, or reject the current path.",
-		Context: map[string]any{
+		Context: mustAppserviceGovernancePayload(t, map[string]any{
 			governancecore.DecisionContextKeyRecoveryPolicy: governancecore.DecisionContextRecoveryPolicyRepairPlan,
-		},
+		}),
 		State: common.DecisionTicketStateOpen,
 	}); err != nil {
 		t.Fatalf("create ticket: %v", err)
@@ -798,11 +803,11 @@ func TestResolveDecisionWithSessionAllowsExplicitRepairExhaustionRecoveryAction(
 
 	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
-		ResolutionPayload: map[string]any{
+		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{
 			"recoveryAction":    "retry_same_step",
 			"resumeInstruction": "retry the failed verification after applying the clarified constraint",
 			"operator":          "tui",
-		},
+		}),
 	})
 	if err != nil {
 		t.Fatalf("ResolveDecisionWithSession: %v", err)
@@ -833,9 +838,9 @@ func TestResolveDecisionWithSessionMapsRepairExhaustionReplanAndTerminate(t *tes
 				StepID:      common.StepID("run-repair-exhaustion-" + tc.name + "/step-1"),
 				Reason:      "runtime repair attempts exhausted after 3 attempts",
 				Question:    "Provide missing implementation guidance, choose replan, or reject the current path.",
-				Context: map[string]any{
+				Context: mustAppserviceGovernancePayload(t, map[string]any{
 					governancecore.DecisionContextKeyRecoveryPolicy: governancecore.DecisionContextRecoveryPolicyRepairPlan,
-				},
+				}),
 				State: common.DecisionTicketStateOpen,
 			}); err != nil {
 				t.Fatalf("create ticket: %v", err)
@@ -843,15 +848,16 @@ func TestResolveDecisionWithSessionMapsRepairExhaustionReplanAndTerminate(t *tes
 
 			item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
 				ResolutionType: "auto",
-				ResolutionPayload: map[string]any{
+				ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{
 					"answer":   tc.answer,
 					"operator": "tui",
-				},
+				}),
 			})
 			if err != nil {
 				t.Fatalf("ResolveDecisionWithSession: %v", err)
 			}
-			if item.ResolutionType != tc.wantResolutionType || item.ResolutionPayload["recoveryAction"] != tc.wantAction {
+			action, _ := item.ResolutionPayload.String("recoveryAction")
+			if item.ResolutionType != tc.wantResolutionType || action != tc.wantAction {
 				t.Fatalf("decision = %+v, want type=%s action=%s", item, tc.wantResolutionType, tc.wantAction)
 			}
 		})
@@ -877,12 +883,13 @@ func TestResolveDecisionWithSessionReusesReturnedEntitiesForResponse(t *testing.
 
 	item, err := ResolveDecisionWithSession(ctx, session, "ticket-app-return-loaded", ResolveDecisionCommand{
 		ResolutionType:    decisioncommon.ResolutionTypeProvideMissingInfo,
-		ResolutionPayload: map[string]any{"operator": "tester"},
+		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"operator": "tester"}),
 	})
 	if err != nil {
 		t.Fatalf("ResolveDecisionWithSession: %v", err)
 	}
-	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo || item.ResolutionPayload["operator"] != "tester" {
+	operator, _ := item.ResolutionPayload.String("operator")
+	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo || operator != "tester" {
 		t.Fatalf("decision = %+v, want resolved response from returned entities", item)
 	}
 	if got := tickets.getCount.Load(); got != 1 {
@@ -899,7 +906,7 @@ func TestResolveDecisionWithBackendSupportsRejectCurrentPath(t *testing.T) {
 
 	item, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
 		ResolutionType:    decisioncommon.ResolutionTypeRejectCurrentPath,
-		ResolutionPayload: map[string]any{"operator": "tester", "reason": "not viable"},
+		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"operator": "tester", "reason": "not viable"}),
 	})
 	if err != nil {
 		t.Fatalf("ResolveDecisionWithBackend: %v", err)
@@ -911,7 +918,8 @@ func TestResolveDecisionWithBackendSupportsRejectCurrentPath(t *testing.T) {
 	if item.ResolutionID != wantResolutionID {
 		t.Fatalf("resolutionID = %q, want %s", item.ResolutionID, wantResolutionID)
 	}
-	if item.ResolutionPayload["reason"] != "not viable" {
+	reason, _ := item.ResolutionPayload.String("reason")
+	if reason != "not viable" {
 		t.Fatalf("resolutionPayload = %+v, want reject reason", item.ResolutionPayload)
 	}
 }
@@ -935,7 +943,7 @@ func TestResolveDecisionWithBackendReturnsConflictAfterResolution(t *testing.T) 
 func TestResolveDecisionWithBackendIsIdempotentForSamePayloadAfterResolution(t *testing.T) {
 	dataRoot := t.TempDir()
 	started := prepareDecisionRun(t, dataRoot, "ws-decision-idempotent", "run-decision-idempotent")
-	payload := map[string]any{"operator": "idempotent-tester", "note": "retry-safe"}
+	payload := mustAppserviceGovernancePayload(t, map[string]any{"operator": "idempotent-tester", "note": "retry-safe"})
 	first, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
 		ResolutionType:    decisioncommon.ResolutionTypeProvideMissingInfo,
 		ResolutionPayload: payload,
@@ -967,14 +975,14 @@ func TestResolveDecisionWithBackendReturnsConflictForDifferentPayloadAfterResolu
 	started := prepareDecisionRun(t, dataRoot, "ws-decision-diffpayload", "run-decision-diffpayload")
 	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
 		ResolutionType:    decisioncommon.ResolutionTypeProvideMissingInfo,
-		ResolutionPayload: map[string]any{"operator": "first"},
+		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"operator": "first"}),
 	}); err != nil {
 		t.Fatalf("first ResolveDecisionWithBackend: %v", err)
 	}
 
 	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
 		ResolutionType:    decisioncommon.ResolutionTypeProvideMissingInfo,
-		ResolutionPayload: map[string]any{"operator": "second"},
+		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"operator": "second"}),
 	}); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("err = %v, want conflict for payload mismatch", err)
 	}
@@ -999,7 +1007,7 @@ func TestBatchResolveDecisionsWithBackendResolvesTicketsInRequestOrder(t *testin
 	items, err := BatchResolveDecisionsWithBackend(context.Background(), "file", dataRoot, BatchResolveDecisionCommand{
 		TicketIDs:         []string{second.BlockingTicketID, first.BlockingTicketID},
 		ResolutionType:    decisioncommon.ResolutionTypeReplan,
-		ResolutionPayload: map[string]any{"operator": "batch-tester"},
+		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"operator": "batch-tester"}),
 	})
 	if err != nil {
 		t.Fatalf("BatchResolveDecisionsWithBackend: %v", err)
@@ -1008,7 +1016,8 @@ func TestBatchResolveDecisionsWithBackendResolvesTicketsInRequestOrder(t *testin
 		t.Fatalf("items = %+v, want request order", items)
 	}
 	for _, item := range items {
-		if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeReplan || item.ResolutionPayload["operator"] != "batch-tester" {
+		operator, _ := item.ResolutionPayload.String("operator")
+		if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeReplan || operator != "batch-tester" {
 			t.Fatalf("item = %+v, want resolved replan with payload", item)
 		}
 	}
@@ -1036,7 +1045,7 @@ func TestBatchResolveDecisionsWithSessionReusesReturnedEntitiesAfterPrevalidatio
 	items, err := BatchResolveDecisionsWithSession(ctx, session, BatchResolveDecisionCommand{
 		TicketIDs:         []string{"ticket-app-batch-b", "ticket-app-batch-a"},
 		ResolutionType:    decisioncommon.ResolutionTypeReplan,
-		ResolutionPayload: map[string]any{"operator": "batch-tester"},
+		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"operator": "batch-tester"}),
 	})
 	if err != nil {
 		t.Fatalf("BatchResolveDecisionsWithSession: %v", err)
@@ -1045,7 +1054,8 @@ func TestBatchResolveDecisionsWithSessionReusesReturnedEntitiesAfterPrevalidatio
 		t.Fatalf("items = %+v, want request order", items)
 	}
 	for _, item := range items {
-		if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeReplan || item.ResolutionPayload["operator"] != "batch-tester" {
+		operator, _ := item.ResolutionPayload.String("operator")
+		if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeReplan || operator != "batch-tester" {
 			t.Fatalf("item = %+v, want resolved replan response", item)
 		}
 	}
@@ -1079,7 +1089,7 @@ func TestBatchResolveDecisionsWithBackendRejectsAlreadyResolvedTicketBeforeMutat
 	// is resolved normally. Both decisions end up resolved.
 	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, second.BlockingTicketID, ResolveDecisionCommand{
 		ResolutionType:    decisioncommon.ResolutionTypeReplan,
-		ResolutionPayload: map[string]any{"operator": "batch-tester"},
+		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"operator": "batch-tester"}),
 	}); err != nil {
 		t.Fatalf("ResolveDecisionWithBackend: %v", err)
 	}
@@ -1087,7 +1097,7 @@ func TestBatchResolveDecisionsWithBackendRejectsAlreadyResolvedTicketBeforeMutat
 	items, err := BatchResolveDecisionsWithBackend(context.Background(), "file", dataRoot, BatchResolveDecisionCommand{
 		TicketIDs:         []string{first.BlockingTicketID, second.BlockingTicketID},
 		ResolutionType:    decisioncommon.ResolutionTypeReplan,
-		ResolutionPayload: map[string]any{"operator": "batch-tester"},
+		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"operator": "batch-tester"}),
 	})
 	if err != nil {
 		t.Fatalf("BatchResolveDecisionsWithBackend: %v", err)
@@ -1096,7 +1106,8 @@ func TestBatchResolveDecisionsWithBackendRejectsAlreadyResolvedTicketBeforeMutat
 		t.Fatalf("items = %+v, want request order with both tickets resolved", items)
 	}
 	for _, item := range items {
-		if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeReplan || item.ResolutionPayload["operator"] != "batch-tester" {
+		operator, _ := item.ResolutionPayload.String("operator")
+		if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeReplan || operator != "batch-tester" {
 			t.Fatalf("item = %+v, want resolved replan with operator payload", item)
 		}
 	}

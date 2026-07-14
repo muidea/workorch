@@ -19,10 +19,26 @@ type GenerateEmbeddingCommand struct {
 	Input      string
 }
 
+type ProviderUsageData struct {
+	InputTokens             int
+	OutputTokens            int
+	TotalTokens             int
+	CacheReadTokens         int
+	CacheWriteTokens        int
+	CacheCreationTokens     int
+	CacheableInputTokens    int
+	NonCacheableInputTokens int
+}
+
+type ProviderCompletionData struct {
+	Content string
+	Usage   *ProviderUsageData
+}
+
 type LLMCommandResult struct {
 	ProviderID string
 	Model      string
-	Completion *llmmodel.ProviderCompletionResult
+	Completion *ProviderCompletionData
 	Embedding  *llmmodel.ProviderEmbeddingResult
 }
 

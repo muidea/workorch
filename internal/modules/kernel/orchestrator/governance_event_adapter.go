@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
@@ -10,8 +9,6 @@ import (
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
-	"github.com/muidea/workorch/internal/pkg/eventvalue"
 )
 
 type decisionEventTicketRepository struct {
@@ -26,12 +23,23 @@ func (r decisionEventTicketRepository) Create(ctx context.Context, item *decisio
 	if err != nil {
 		return err
 	}
-	_, err = sendGovernanceOwnerCommand[decisionevents.CreateTicketCommand, decisionevents.DecisionCommandResult](ctx, r.hub, decisionevents.TopicDecisionCommandCreateTicket, decisionevents.CommandDestination, "decision_ticket", string(item.ID), item.WorkspaceID, item.RunID, item.StepID, command)
+	if r.hub == nil {
+		return common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandCreateTicket, ModuleID, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	bindGovernanceCommandLane(event, decisionevents.TopicDecisionCommandCreateTicket, "decision_ticket", string(item.ID), item.WorkspaceID, item.RunID, item.StepID)
+	_, err = decisionCommandResponse(r.hub.Send(event), decisionevents.TopicDecisionCommandCreateTicket)
 	return err
 }
 
 func (r decisionEventTicketRepository) Get(ctx context.Context, id common.TicketID) (*decisionmodel.Ticket, error) {
-	response, err := sendGovernanceOwnerCommand[decisionevents.GetTicketCommand, decisionevents.DecisionCommandResult](ctx, r.hub, decisionevents.TopicDecisionCommandGetTicket, decisionevents.CommandDestination, "decision_ticket", string(id), "", "", "", decisionevents.GetTicketCommand{TicketID: id})
+	if r.hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandGetTicket, ModuleID, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.GetTicketCommand{TicketID: id})
+	bindGovernanceCommandLane(event, decisionevents.TopicDecisionCommandGetTicket, "decision_ticket", string(id), workspaceID, "", "")
+	response, err := decisionCommandResponse(r.hub.Send(event), decisionevents.TopicDecisionCommandGetTicket)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +51,13 @@ func (r decisionEventTicketRepository) Get(ctx context.Context, id common.Ticket
 }
 
 func (r decisionEventTicketRepository) List(ctx context.Context) ([]*decisionmodel.Ticket, error) {
-	response, err := sendGovernanceOwnerCommand[decisionevents.ListTicketsCommand, decisionevents.DecisionCommandResult](ctx, r.hub, decisionevents.TopicDecisionCommandListTickets, decisionevents.CommandDestination, "decision_ticket", "all", "", "", "", decisionevents.ListTicketsCommand{})
+	if r.hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandListTickets, ModuleID, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.ListTicketsCommand{})
+	bindGovernanceCommandLane(event, decisionevents.TopicDecisionCommandListTickets, "decision_ticket", "all", workspaceID, "", "")
+	response, err := decisionCommandResponse(r.hub.Send(event), decisionevents.TopicDecisionCommandListTickets)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +65,13 @@ func (r decisionEventTicketRepository) List(ctx context.Context) ([]*decisionmod
 }
 
 func (r decisionEventTicketRepository) ListByRunID(ctx context.Context, runID common.RunID) ([]*decisionmodel.Ticket, error) {
-	response, err := sendGovernanceOwnerCommand[decisionevents.ListTicketsByRunCommand, decisionevents.DecisionCommandResult](ctx, r.hub, decisionevents.TopicDecisionCommandListTicketsByRun, decisionevents.CommandDestination, "run", string(runID), "", runID, "", decisionevents.ListTicketsByRunCommand{RunID: runID})
+	if r.hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandListTicketsByRun, ModuleID, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.ListTicketsByRunCommand{RunID: runID})
+	bindGovernanceCommandLane(event, decisionevents.TopicDecisionCommandListTicketsByRun, "run", string(runID), workspaceID, runID, "")
+	response, err := decisionCommandResponse(r.hub.Send(event), decisionevents.TopicDecisionCommandListTicketsByRun)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +79,12 @@ func (r decisionEventTicketRepository) ListByRunID(ctx context.Context, runID co
 }
 
 func (r decisionEventTicketRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*decisionmodel.Ticket, error) {
-	response, err := sendGovernanceOwnerCommand[decisionevents.ListTicketsByWorkspaceCommand, decisionevents.DecisionCommandResult](ctx, r.hub, decisionevents.TopicDecisionCommandListTicketsByWS, decisionevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", "", decisionevents.ListTicketsByWorkspaceCommand{WorkspaceID: workspaceID})
+	if r.hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandListTicketsByWS, ModuleID, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.ListTicketsByWorkspaceCommand{WorkspaceID: workspaceID})
+	bindGovernanceCommandLane(event, decisionevents.TopicDecisionCommandListTicketsByWS, "workspace", string(workspaceID), workspaceID, "", "")
+	response, err := decisionCommandResponse(r.hub.Send(event), decisionevents.TopicDecisionCommandListTicketsByWS)
 	if err != nil {
 		return nil, err
 	}
@@ -74,12 +99,23 @@ func (r decisionEventTicketRepository) Update(ctx context.Context, item *decisio
 	if err != nil {
 		return err
 	}
-	_, err = sendGovernanceOwnerCommand[decisionevents.UpdateTicketCommand, decisionevents.DecisionCommandResult](ctx, r.hub, decisionevents.TopicDecisionCommandUpdateTicket, decisionevents.CommandDestination, "decision_ticket", string(item.ID), item.WorkspaceID, item.RunID, item.StepID, command)
+	if r.hub == nil {
+		return common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandUpdateTicket, ModuleID, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	bindGovernanceCommandLane(event, decisionevents.TopicDecisionCommandUpdateTicket, "decision_ticket", string(item.ID), item.WorkspaceID, item.RunID, item.StepID)
+	_, err = decisionCommandResponse(r.hub.Send(event), decisionevents.TopicDecisionCommandUpdateTicket)
 	return err
 }
 
 func (r decisionEventTicketRepository) Delete(ctx context.Context, id common.TicketID) error {
-	_, err := sendGovernanceOwnerCommand[decisionevents.DeleteTicketCommand, decisionevents.DecisionCommandResult](ctx, r.hub, decisionevents.TopicDecisionCommandDeleteTicket, decisionevents.CommandDestination, "decision_ticket", string(id), "", "", "", decisionevents.DeleteTicketCommand{TicketID: id})
+	if r.hub == nil {
+		return common.ErrInvalidArgument
+	}
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandDeleteTicket, ModuleID, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.DeleteTicketCommand{TicketID: id})
+	bindGovernanceCommandLane(event, decisionevents.TopicDecisionCommandDeleteTicket, "decision_ticket", string(id), workspaceID, "", "")
+	_, err := decisionCommandResponse(r.hub.Send(event), decisionevents.TopicDecisionCommandDeleteTicket)
 	return err
 }
 
@@ -95,12 +131,24 @@ func (r decisionEventResolutionRepository) Create(ctx context.Context, item *dec
 	if err != nil {
 		return err
 	}
-	_, err = sendGovernanceOwnerCommand[decisionevents.CreateResolutionCommand, decisionevents.DecisionCommandResult](ctx, r.hub, decisionevents.TopicDecisionCommandCreateResolution, decisionevents.CommandDestination, "decision_resolution", string(item.ID), "", "", "", command)
+	if r.hub == nil {
+		return common.ErrInvalidArgument
+	}
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandCreateResolution, ModuleID, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	bindGovernanceCommandLane(event, decisionevents.TopicDecisionCommandCreateResolution, "decision_resolution", string(item.ID), workspaceID, "", "")
+	_, err = decisionCommandResponse(r.hub.Send(event), decisionevents.TopicDecisionCommandCreateResolution)
 	return err
 }
 
 func (r decisionEventResolutionRepository) GetByTicketID(ctx context.Context, ticketID common.TicketID) (*decisionmodel.Resolution, error) {
-	response, err := sendGovernanceOwnerCommand[decisionevents.GetResolutionCommand, decisionevents.DecisionCommandResult](ctx, r.hub, decisionevents.TopicDecisionCommandGetResolution, decisionevents.CommandDestination, "decision_ticket", string(ticketID), "", "", "", decisionevents.GetResolutionCommand{TicketID: ticketID})
+	if r.hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandGetResolution, ModuleID, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.GetResolutionCommand{TicketID: ticketID})
+	bindGovernanceCommandLane(event, decisionevents.TopicDecisionCommandGetResolution, "decision_ticket", string(ticketID), workspaceID, "", "")
+	response, err := decisionCommandResponse(r.hub.Send(event), decisionevents.TopicDecisionCommandGetResolution)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +160,13 @@ func (r decisionEventResolutionRepository) GetByTicketID(ctx context.Context, ti
 }
 
 func (r decisionEventResolutionRepository) DeleteByTicketID(ctx context.Context, ticketID common.TicketID) error {
-	_, err := sendGovernanceOwnerCommand[decisionevents.DeleteResolutionCommand, decisionevents.DecisionCommandResult](ctx, r.hub, decisionevents.TopicDecisionCommandDeleteResolution, decisionevents.CommandDestination, "decision_ticket", string(ticketID), "", "", "", decisionevents.DeleteResolutionCommand{TicketID: ticketID})
+	if r.hub == nil {
+		return common.ErrInvalidArgument
+	}
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandDeleteResolution, ModuleID, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.DeleteResolutionCommand{TicketID: ticketID})
+	bindGovernanceCommandLane(event, decisionevents.TopicDecisionCommandDeleteResolution, "decision_ticket", string(ticketID), workspaceID, "", "")
+	_, err := decisionCommandResponse(r.hub.Send(event), decisionevents.TopicDecisionCommandDeleteResolution)
 	return err
 }
 
@@ -128,12 +182,23 @@ func (r approvalEventRepository) Create(ctx context.Context, item *approvalmodel
 	if err != nil {
 		return err
 	}
-	_, err = sendGovernanceOwnerCommand[approvalevents.CreateApprovalCommand, approvalevents.ApprovalCommandResult](ctx, r.hub, approvalevents.TopicApprovalCommandCreate, approvalevents.CommandDestination, "approval", string(item.ID), item.WorkspaceID, item.RunID, item.StepID, command)
+	if r.hub == nil {
+		return common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandCreate, ModuleID, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	bindGovernanceCommandLane(event, approvalevents.TopicApprovalCommandCreate, "approval", string(item.ID), item.WorkspaceID, item.RunID, item.StepID)
+	_, err = approvalCommandResponse(r.hub.Send(event), approvalevents.TopicApprovalCommandCreate)
 	return err
 }
 
 func (r approvalEventRepository) Get(ctx context.Context, id common.ApprovalID) (*approvalmodel.Approval, error) {
-	response, err := sendGovernanceOwnerCommand[approvalevents.GetApprovalCommand, approvalevents.ApprovalCommandResult](ctx, r.hub, approvalevents.TopicApprovalCommandGet, approvalevents.CommandDestination, "approval", string(id), "", "", "", approvalevents.GetApprovalCommand{ApprovalID: id})
+	if r.hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	event := magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandGet, ModuleID, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, approvalevents.GetApprovalCommand{ApprovalID: id})
+	bindGovernanceCommandLane(event, approvalevents.TopicApprovalCommandGet, "approval", string(id), workspaceID, "", "")
+	response, err := approvalCommandResponse(r.hub.Send(event), approvalevents.TopicApprovalCommandGet)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +210,13 @@ func (r approvalEventRepository) Get(ctx context.Context, id common.ApprovalID) 
 }
 
 func (r approvalEventRepository) List(ctx context.Context) ([]*approvalmodel.Approval, error) {
-	response, err := sendGovernanceOwnerCommand[approvalevents.ListApprovalsCommand, approvalevents.ApprovalCommandResult](ctx, r.hub, approvalevents.TopicApprovalCommandList, approvalevents.CommandDestination, "approval", "all", "", "", "", approvalevents.ListApprovalsCommand{})
+	if r.hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	event := magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandList, ModuleID, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, approvalevents.ListApprovalsCommand{})
+	bindGovernanceCommandLane(event, approvalevents.TopicApprovalCommandList, "approval", "all", workspaceID, "", "")
+	response, err := approvalCommandResponse(r.hub.Send(event), approvalevents.TopicApprovalCommandList)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +224,13 @@ func (r approvalEventRepository) List(ctx context.Context) ([]*approvalmodel.App
 }
 
 func (r approvalEventRepository) ListByRunID(ctx context.Context, runID common.RunID) ([]*approvalmodel.Approval, error) {
-	response, err := sendGovernanceOwnerCommand[approvalevents.ListApprovalsByRunCommand, approvalevents.ApprovalCommandResult](ctx, r.hub, approvalevents.TopicApprovalCommandListByRun, approvalevents.CommandDestination, "run", string(runID), "", runID, "", approvalevents.ListApprovalsByRunCommand{RunID: runID})
+	if r.hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	event := magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandListByRun, ModuleID, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, approvalevents.ListApprovalsByRunCommand{RunID: runID})
+	bindGovernanceCommandLane(event, approvalevents.TopicApprovalCommandListByRun, "run", string(runID), workspaceID, runID, "")
+	response, err := approvalCommandResponse(r.hub.Send(event), approvalevents.TopicApprovalCommandListByRun)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +238,12 @@ func (r approvalEventRepository) ListByRunID(ctx context.Context, runID common.R
 }
 
 func (r approvalEventRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*approvalmodel.Approval, error) {
-	response, err := sendGovernanceOwnerCommand[approvalevents.ListApprovalsByWorkspaceCommand, approvalevents.ApprovalCommandResult](ctx, r.hub, approvalevents.TopicApprovalCommandListByWorkspace, approvalevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", "", approvalevents.ListApprovalsByWorkspaceCommand{WorkspaceID: workspaceID})
+	if r.hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandListByWorkspace, ModuleID, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, approvalevents.ListApprovalsByWorkspaceCommand{WorkspaceID: workspaceID})
+	bindGovernanceCommandLane(event, approvalevents.TopicApprovalCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
+	response, err := approvalCommandResponse(r.hub.Send(event), approvalevents.TopicApprovalCommandListByWorkspace)
 	if err != nil {
 		return nil, err
 	}
@@ -176,60 +258,29 @@ func (r approvalEventRepository) Update(ctx context.Context, item *approvalmodel
 	if err != nil {
 		return err
 	}
-	_, err = sendGovernanceOwnerCommand[approvalevents.UpdateApprovalCommand, approvalevents.ApprovalCommandResult](ctx, r.hub, approvalevents.TopicApprovalCommandUpdate, approvalevents.CommandDestination, "approval", string(item.ID), item.WorkspaceID, item.RunID, item.StepID, command)
+	if r.hub == nil {
+		return common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandUpdate, ModuleID, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	bindGovernanceCommandLane(event, approvalevents.TopicApprovalCommandUpdate, "approval", string(item.ID), item.WorkspaceID, item.RunID, item.StepID)
+	_, err = approvalCommandResponse(r.hub.Send(event), approvalevents.TopicApprovalCommandUpdate)
 	return err
 }
 
 func (r approvalEventRepository) Delete(ctx context.Context, id common.ApprovalID) error {
-	_, err := sendGovernanceOwnerCommand[approvalevents.DeleteApprovalCommand, approvalevents.ApprovalCommandResult](ctx, r.hub, approvalevents.TopicApprovalCommandDelete, approvalevents.CommandDestination, "approval", string(id), "", "", "", approvalevents.DeleteApprovalCommand{ApprovalID: id})
+	if r.hub == nil {
+		return common.ErrInvalidArgument
+	}
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	event := magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandDelete, ModuleID, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, approvalevents.DeleteApprovalCommand{ApprovalID: id})
+	bindGovernanceCommandLane(event, approvalevents.TopicApprovalCommandDelete, "approval", string(id), workspaceID, "", "")
+	_, err := approvalCommandResponse(r.hub.Send(event), approvalevents.TopicApprovalCommandDelete)
 	return err
-}
-
-func sendGovernanceOwnerCommand[Command any, Result any](ctx context.Context, hub magicevent.Hub, topic string, destination string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID, command Command) (Result, error) {
-	var zero Result
-	if hub == nil || topic == "" {
-		return zero, common.ErrInvalidArgument
-	}
-	if workspaceID == "" {
-		workspaceID = common.RuntimeWorkspaceIDFromContext(ctx)
-	}
-	ev := magicevent.NewEventWithContext(topic, ModuleID, destination, magicevent.NewHeader(), ctx, command)
-	ev.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{
-		SubjectType: subjectType,
-		SubjectID:   subjectID,
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-		StepID:      string(stepID),
-	}))
-	response := hub.Send(ev)
-	if response == nil {
-		return zero, common.ErrInvalidArgument
-	}
-	if responseErr := response.Error(); responseErr != nil {
-		return zero, responseErr
-	}
-	data, resultErr := response.Get()
-	if resultErr != nil {
-		return zero, resultErr
-	}
-	typed, ok := data.(Result)
-	if !ok {
-		return zero, fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
-	}
-	return typed, nil
 }
 
 func createTicketCommandFromModel(item *decisionmodel.Ticket) (decisionevents.CreateTicketCommand, error) {
 	if item == nil {
 		return decisionevents.CreateTicketCommand{}, common.ErrInvalidArgument
-	}
-	contextPayload, err := eventvalue.FromMap(item.Context)
-	if err != nil {
-		return decisionevents.CreateTicketCommand{}, err
-	}
-	autoGovernance, err := eventvalue.FromMap(item.AutoGovernance)
-	if err != nil {
-		return decisionevents.CreateTicketCommand{}, err
 	}
 	return decisionevents.CreateTicketCommand{
 		TicketID:               item.ID,
@@ -239,8 +290,8 @@ func createTicketCommandFromModel(item *decisionmodel.Ticket) (decisionevents.Cr
 		Reason:                 item.Reason,
 		DecisionKind:           item.DecisionKind,
 		Question:               item.Question,
-		Context:                contextPayload,
-		AutoGovernance:         autoGovernance,
+		Context:                item.Context.Clone().Fields,
+		AutoGovernance:         item.AutoGovernance.Clone().Fields,
 		FailureClass:           item.FailureClass,
 		FailureSignature:       item.FailureSignature,
 		AllowedRecoveryActions: append([]string(nil), item.AllowedRecoveryActions...),
@@ -251,14 +302,6 @@ func updateTicketCommandFromModel(item *decisionmodel.Ticket) (decisionevents.Up
 	if item == nil {
 		return decisionevents.UpdateTicketCommand{}, common.ErrInvalidArgument
 	}
-	contextPayload, err := eventvalue.FromMap(item.Context)
-	if err != nil {
-		return decisionevents.UpdateTicketCommand{}, err
-	}
-	autoGovernance, err := eventvalue.FromMap(item.AutoGovernance)
-	if err != nil {
-		return decisionevents.UpdateTicketCommand{}, err
-	}
 	return decisionevents.UpdateTicketCommand{
 		TicketID:               item.ID,
 		WorkspaceID:            item.WorkspaceID,
@@ -267,9 +310,9 @@ func updateTicketCommandFromModel(item *decisionmodel.Ticket) (decisionevents.Up
 		Reason:                 item.Reason,
 		DecisionKind:           item.DecisionKind,
 		Question:               item.Question,
-		Context:                contextPayload,
+		Context:                item.Context.Clone().Fields,
 		State:                  item.State,
-		AutoGovernance:         autoGovernance,
+		AutoGovernance:         item.AutoGovernance.Clone().Fields,
 		FailureClass:           item.FailureClass,
 		FailureSignature:       item.FailureSignature,
 		AllowedRecoveryActions: append([]string(nil), item.AllowedRecoveryActions...),
@@ -284,15 +327,11 @@ func createResolutionCommandFromModel(item *decisionmodel.Resolution) (decisione
 	if item == nil {
 		return decisionevents.CreateResolutionCommand{}, common.ErrInvalidArgument
 	}
-	payload, err := eventvalue.FromMap(item.Payload)
-	if err != nil {
-		return decisionevents.CreateResolutionCommand{}, err
-	}
 	return decisionevents.CreateResolutionCommand{
 		ResolutionID:       item.ID,
 		TicketID:           item.TicketID,
 		Type:               item.Type,
-		Payload:            payload,
+		Payload:            item.Payload.Clone().Fields,
 		ContinuationAction: item.ContinuationAction,
 		ResumeRunID:        item.ResumeRunID,
 		SuccessorRunID:     item.SuccessorRunID,
@@ -303,14 +342,6 @@ func createApprovalCommandFromModel(item *approvalmodel.Approval) (approvalevent
 	if item == nil {
 		return approvalevents.CreateApprovalCommand{}, common.ErrInvalidArgument
 	}
-	contextPayload, err := eventvalue.FromMap(item.Context)
-	if err != nil {
-		return approvalevents.CreateApprovalCommand{}, err
-	}
-	autoGovernance, err := eventvalue.FromMap(item.AutoGovernance)
-	if err != nil {
-		return approvalevents.CreateApprovalCommand{}, err
-	}
 	return approvalevents.CreateApprovalCommand{
 		ApprovalID:     item.ID,
 		WorkspaceID:    item.WorkspaceID,
@@ -318,22 +349,14 @@ func createApprovalCommandFromModel(item *approvalmodel.Approval) (approvalevent
 		StepID:         item.StepID,
 		Reason:         item.Reason,
 		Action:         item.Action,
-		Context:        contextPayload,
-		AutoGovernance: autoGovernance,
+		Context:        item.Context.Clone().Fields,
+		AutoGovernance: item.AutoGovernance.Clone().Fields,
 	}, nil
 }
 
 func updateApprovalCommandFromModel(item *approvalmodel.Approval) (approvalevents.UpdateApprovalCommand, error) {
 	if item == nil {
 		return approvalevents.UpdateApprovalCommand{}, common.ErrInvalidArgument
-	}
-	contextPayload, err := eventvalue.FromMap(item.Context)
-	if err != nil {
-		return approvalevents.UpdateApprovalCommand{}, err
-	}
-	autoGovernance, err := eventvalue.FromMap(item.AutoGovernance)
-	if err != nil {
-		return approvalevents.UpdateApprovalCommand{}, err
 	}
 	return approvalevents.UpdateApprovalCommand{
 		ApprovalID:     item.ID,
@@ -342,9 +365,9 @@ func updateApprovalCommandFromModel(item *approvalmodel.Approval) (approvalevent
 		StepID:         item.StepID,
 		Reason:         item.Reason,
 		Action:         item.Action,
-		Context:        contextPayload,
+		Context:        item.Context.Clone().Fields,
 		State:          item.State,
-		AutoGovernance: autoGovernance,
+		AutoGovernance: item.AutoGovernance.Clone().Fields,
 		ResolvedAt:     item.ResolvedAt,
 		ResolvedBy:     item.ResolvedBy,
 		CreatedAt:      item.CreatedAt,

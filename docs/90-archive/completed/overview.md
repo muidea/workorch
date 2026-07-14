@@ -4,60 +4,42 @@ Status: active
 
 Type: archive
 
-Last Updated: 2026-05-30
+Last Updated: 2026-07-14
 
 ## Purpose
 
-本目录承接已完成的阶段计划、专项收口和历史实现记录。
-
-## Candidate Inputs
-
-- `mvp-closure-record.md`
-- `p1-development-record.md`
-- `runtime-expansion-plan.md`
-- `advanced-runtime-scheduling-plan.md`
-- `result-event-development-plan.md`
-- `software-dev-code-agent-closure-plan.md`
-- `tui-improvements-absorption-plan.md`
-
-## Current Completed Themes
-
-- MVP closure
-- P1 delivery
-- result / artifact / event stream delivery
-- runtime expansion
-- advanced runtime and scheduling
-- llm-driven workspace execution
-- framework alignment
+承接已完成的阶段计划、专项收口和历史实现记录。**不再作为当前 active 设计入口。**
 
 ## Archive Handling Rule
 
-本目录中的文档当前统一视为：
+- 正文保留稳定历史价值 → 留在 `completed/`
+- 仅过渡或被新结构完全替代 → 可再迁 `superseded/`
+- 当前事实 / API / 验收 **不得** 回写本目录
+- 实现约束以 `00-core` + 模块 readme + `workorchruntimecontract` 为准
 
-- 已完成主题的历史实现/收口记录
-- 仍可用于追溯实现决策和验收结论
-- 不再作为当前 active 设计入口
+## 2026-07-14 Runtime V2 Docs Refresh Ingest
 
-处理方式：
+本轮从 `70-roadmap/active/` 迁入约 **146** 份文档，主要类别：
 
-- 若正文仍有稳定历史价值，保留在 `completed/`
-- 若只剩过渡或被更强的新结构完全替代，则后续迁入 `superseded/`
-- 当前事实、当前 API、当前验收不应再回写到本目录
+| 类别 | 说明 |
+| --- | --- |
+| goal-dod-nextaction | `goal-dod-nextaction-s0`～`s11` 全系列 + iterative delivery plan |
+| V1 contract-retry | batch1–7 audit、evidence index、full-chain / convergence 计划 |
+| convergence-authority | 旧 authority/single-source/focus-drift 等收口（已被 V2 reducer 吸收） |
+| runtime-*-closure | 各类 V1 nextaction / ledger / validation / statechange hardening |
+| 其他 completed/code-closed | Status 已关闭的收口与 audit |
 
-## Cross-Archive Navigation
+完整文件列表以本目录 `ls` 为准（约 150+ 文件）。检索时按文件名主题过滤即可。
 
-若需要按“当前 -> 历史”切换，优先使用：
+## Early Completed Themes（既有）
 
-- 当前事实入口
-  - `../../01-overview/current-state.md`
-- 当前 roadmap 入口
-  - `../../70-roadmap/active/overview.md`
-- 历史记录入口
-  - `../records/overview.md`
-- 已被取代旧文档入口
-  - `../superseded/overview.md`
+- MVP closure / P1 delivery
+- result / artifact / event stream
+- runtime expansion / advanced scheduling
+- llm-driven workspace execution
+- framework alignment / recovery governance
 
-## Completed Documents
+## Representative Early Documents
 
 - [mvp-closure-record.md](mvp-closure-record.md)
 - [p1-development-record.md](p1-development-record.md)
@@ -69,3 +51,10 @@ Last Updated: 2026-05-30
 - [runtime-recovery-governance-closure-design.md](runtime-recovery-governance-closure-design.md)
 - [llm-driven-development-plan.md](llm-driven-development-plan.md)
 - [core-runtime-closure-history.md](core-runtime-closure-history.md)
+
+## Cross-Archive Navigation
+
+- 当前事实：[../../01-overview/current-state.md](../../01-overview/current-state.md)
+- 当前 roadmap：[../../70-roadmap/active/overview.md](../../70-roadmap/active/overview.md)
+- 历史 records：[../records/overview.md](../records/overview.md)
+- superseded：[../superseded/overview.md](../superseded/overview.md)

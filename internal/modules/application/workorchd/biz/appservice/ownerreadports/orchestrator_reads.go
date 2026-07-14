@@ -6,6 +6,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -15,7 +16,9 @@ func ListToolCallsByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, run
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := sendMagicCommand[orchestratorevents.ListToolCallsByRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandListToolCallsByRun, orchestratorevents.CommandDestination, "run", string(runID), orchestratorevents.ListToolCallsByRunCommand{WorkspaceID: workspaceID, RunID: runID})
+	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandListToolCallsByRun, sourceModule, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.ListToolCallsByRunCommand{WorkspaceID: workspaceID, RunID: runID})
+	ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorCommandListToolCallsByRun, "run", string(runID), workspaceID, runID, "")
+	response, err := ownerevent.Orchestrator(hub.Send(event), orchestratorevents.TopicOrchestratorCommandListToolCallsByRun)
 	if err != nil {
 		return nil, err
 	}
@@ -27,7 +30,9 @@ func ListPatchesByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, runID
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := sendMagicCommand[orchestratorevents.ListPatchesByRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandListPatchesByRun, orchestratorevents.CommandDestination, "run", string(runID), orchestratorevents.ListPatchesByRunCommand{WorkspaceID: workspaceID, RunID: runID})
+	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandListPatchesByRun, sourceModule, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.ListPatchesByRunCommand{WorkspaceID: workspaceID, RunID: runID})
+	ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorCommandListPatchesByRun, "run", string(runID), workspaceID, runID, "")
+	response, err := ownerevent.Orchestrator(hub.Send(event), orchestratorevents.TopicOrchestratorCommandListPatchesByRun)
 	if err != nil {
 		return nil, err
 	}
@@ -39,7 +44,9 @@ func ListValidationResultsByRunOwnerCommand(ctx context.Context, hub magicevent.
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := sendMagicCommand[orchestratorevents.ListValidationResultsByRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun, orchestratorevents.CommandDestination, "run", string(runID), orchestratorevents.ListValidationResultsByRunCommand{WorkspaceID: workspaceID, RunID: runID})
+	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun, sourceModule, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.ListValidationResultsByRunCommand{WorkspaceID: workspaceID, RunID: runID})
+	ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun, "run", string(runID), workspaceID, runID, "")
+	response, err := ownerevent.Orchestrator(hub.Send(event), orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun)
 	if err != nil {
 		return nil, err
 	}

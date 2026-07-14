@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 var approvalCmd = &cobra.Command{
@@ -79,7 +80,7 @@ var approvalApproveCmd = &cobra.Command{
 		if wsID == "" {
 			return fmt.Errorf("--workspace is required")
 		}
-		a, err := mustBackend().Approval().Approve(ctx(), common.WorkspaceID(wsID), common.ApprovalID(args[0]))
+		a, err := mustBackend().Approval().Approve(ctx(), common.WorkspaceID(wsID), common.ApprovalID(args[0]), workorcheventpayload.Payload{})
 		if err != nil {
 			return fmt.Errorf("approve: %w", err)
 		}
@@ -98,7 +99,7 @@ var approvalRejectCmd = &cobra.Command{
 		if wsID == "" {
 			return fmt.Errorf("--workspace is required")
 		}
-		a, err := mustBackend().Approval().Reject(ctx(), common.WorkspaceID(wsID), common.ApprovalID(args[0]))
+		a, err := mustBackend().Approval().Reject(ctx(), common.WorkspaceID(wsID), common.ApprovalID(args[0]), workorcheventpayload.Payload{})
 		if err != nil {
 			return fmt.Errorf("reject: %w", err)
 		}

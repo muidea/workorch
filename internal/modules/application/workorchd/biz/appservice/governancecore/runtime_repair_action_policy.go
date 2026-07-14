@@ -7,7 +7,7 @@ func NormalizeRuntimeRepairRecoveryActionByTicketPolicy(ticket *decisionmodel.Ti
 	if action == "terminate" {
 		return action
 	}
-	if ticket == nil || ticket.Context == nil {
+	if ticket == nil || len(ticket.Context.Fields) == 0 {
 		return action
 	}
 	allowed := RuntimeRepairAllowedRecoveryActions(ticket.Context)

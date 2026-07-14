@@ -11,6 +11,7 @@ import (
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -28,33 +29,33 @@ func (m *Module) recordDecisionEvidence(ctx context.Context, command decisioneve
 	if m == nil || m.evidenceRecords == nil || command.EvidenceRecordID == "" || command.WorkspaceID == "" || command.RunID == "" || command.TicketID == "" || command.ResolutionID == "" {
 		return decisionevents.RecordDecisionEvidenceResult{}, common.ErrInvalidArgument
 	}
-	payload, err := decisionEvidenceFieldsToMap(command.ResolutionPayload)
+	payload, err := decisionEvidenceFieldsToPayload(command.ResolutionPayload)
 	if err != nil {
 		return decisionevents.RecordDecisionEvidenceResult{}, err
 	}
-	metadata := map[string]any{
-		"ticketId":       string(command.TicketID),
-		"resolutionId":   string(command.ResolutionID),
-		"resolutionType": strings.TrimSpace(command.ResolutionType),
-		"decisionKind":   strings.TrimSpace(command.DecisionKind),
+	metadataFields := []workorcheventpayload.Field{
+		workorcheventpayload.StringField("ticketId", string(command.TicketID)),
+		workorcheventpayload.StringField("resolutionId", string(command.ResolutionID)),
+		workorcheventpayload.StringField("resolutionType", strings.TrimSpace(command.ResolutionType)),
+		workorcheventpayload.StringField("decisionKind", strings.TrimSpace(command.DecisionKind)),
 	}
 	if command.Reason != "" {
-		metadata["reason"] = strings.TrimSpace(command.Reason)
+		metadataFields = append(metadataFields, workorcheventpayload.StringField("reason", strings.TrimSpace(command.Reason)))
 	}
 	if command.Question != "" {
-		metadata["question"] = strings.TrimSpace(command.Question)
+		metadataFields = append(metadataFields, workorcheventpayload.StringField("question", strings.TrimSpace(command.Question)))
 	}
-	if len(payload) > 0 {
-		metadata["resolutionPayload"] = payload
+	if len(payload.Fields) > 0 {
+		metadataFields = append(metadataFields, workorcheventpayload.ObjectField("resolutionPayload", payload))
 	}
 	if command.ContinuationAction != "" {
-		metadata["continuationAction"] = strings.TrimSpace(command.ContinuationAction)
+		metadataFields = append(metadataFields, workorcheventpayload.StringField("continuationAction", strings.TrimSpace(command.ContinuationAction)))
 	}
 	if command.ResumeRunID != "" {
-		metadata["resumeRunId"] = string(command.ResumeRunID)
+		metadataFields = append(metadataFields, workorcheventpayload.StringField("resumeRunId", string(command.ResumeRunID)))
 	}
 	if command.SuccessorRunID != "" {
-		metadata["successorRunId"] = string(command.SuccessorRunID)
+		metadataFields = append(metadataFields, workorcheventpayload.StringField("successorRunId", string(command.SuccessorRunID)))
 	}
 	record := &orchestratormodel.EvidenceRecord{
 		ID:          command.EvidenceRecordID,
@@ -69,7 +70,7 @@ func (m *Module) recordDecisionEvidence(ctx context.Context, command decisioneve
 		SubjectID:   string(command.TicketID),
 		CreatedAt:   command.Timestamp,
 		UpdatedAt:   command.Timestamp,
-		Metadata:    metadata,
+		Metadata:    workorcheventpayload.New(metadataFields...),
 	}
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
 	if err := repository.CreateOrUpdateEvidenceRecord(ctx, m.evidenceRecords, record); err != nil {
@@ -112,22 +113,22 @@ func (m *Module) recordApprovalEvidence(ctx context.Context, command approvaleve
 	default:
 		return approvalevents.RecordApprovalEvidenceResult{}, common.ErrInvalidArgument
 	}
-	approvalContext, err := approvalEvidenceFieldsToMap(command.Context)
+	approvalContext, err := approvalEvidenceFieldsToPayload(command.Context)
 	if err != nil {
 		return approvalevents.RecordApprovalEvidenceResult{}, err
 	}
-	metadata := map[string]any{
-		"approvalId":    string(command.ApprovalID),
-		"approvalState": string(command.ApprovalState),
+	metadataFields := []workorcheventpayload.Field{
+		workorcheventpayload.StringField("approvalId", string(command.ApprovalID)),
+		workorcheventpayload.StringField("approvalState", string(command.ApprovalState)),
 	}
 	if command.Reason != "" {
-		metadata["reason"] = strings.TrimSpace(command.Reason)
+		metadataFields = append(metadataFields, workorcheventpayload.StringField("reason", strings.TrimSpace(command.Reason)))
 	}
 	if command.Action != "" {
-		metadata["action"] = strings.TrimSpace(command.Action)
+		metadataFields = append(metadataFields, workorcheventpayload.StringField("action", strings.TrimSpace(command.Action)))
 	}
-	if len(approvalContext) > 0 {
-		metadata["context"] = approvalContext
+	if len(approvalContext.Fields) > 0 {
+		metadataFields = append(metadataFields, workorcheventpayload.ObjectField("context", approvalContext))
 	}
 	record := &orchestratormodel.EvidenceRecord{
 		ID:          command.EvidenceRecordID,
@@ -142,7 +143,7 @@ func (m *Module) recordApprovalEvidence(ctx context.Context, command approvaleve
 		SubjectID:   string(command.ApprovalID),
 		CreatedAt:   command.Timestamp,
 		UpdatedAt:   command.Timestamp,
-		Metadata:    metadata,
+		Metadata:    workorcheventpayload.New(metadataFields...),
 	}
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
 	if err := repository.CreateOrUpdateEvidenceRecord(ctx, m.evidenceRecords, record); err != nil {
@@ -162,100 +163,102 @@ func setApprovalEvidenceResult(result magicevent.Result, response approvalevents
 	result.Set(response, nil)
 }
 
-func decisionEvidenceFieldsToMap(fields []decisionevents.DecisionEvidenceField) (map[string]any, error) {
+func decisionEvidenceFieldsToPayload(fields []decisionevents.DecisionEvidenceField) (workorcheventpayload.Payload, error) {
 	if len(fields) == 0 {
-		return nil, nil
+		return workorcheventpayload.Payload{}, nil
 	}
-	ret := make(map[string]any, len(fields))
+	ret := make([]workorcheventpayload.Field, 0, len(fields))
 	for _, field := range fields {
 		if strings.TrimSpace(field.Name) == "" {
-			return nil, common.ErrInvalidArgument
+			return workorcheventpayload.Payload{}, common.ErrInvalidArgument
 		}
-		value, err := decisionEvidenceValueToAny(field.Value)
+		value, err := decisionEvidenceValueToPayloadValue(field.Value)
 		if err != nil {
-			return nil, fmt.Errorf("decision evidence field %s: %w", field.Name, err)
+			return workorcheventpayload.Payload{}, fmt.Errorf("decision evidence field %s: %w", field.Name, err)
 		}
-		ret[field.Name] = value
+		ret = append(ret, workorcheventpayload.Field{Name: field.Name, Value: value})
 	}
-	return ret, nil
+	return workorcheventpayload.New(ret...), nil
 }
 
-func decisionEvidenceValueToAny(value decisionevents.DecisionEvidenceValue) (any, error) {
+func decisionEvidenceValueToPayloadValue(value decisionevents.DecisionEvidenceValue) (workorcheventpayload.Value, error) {
 	switch value.Kind {
 	case decisionevents.DecisionEvidenceValueNull:
-		return nil, nil
+		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueNull}, nil
 	case decisionevents.DecisionEvidenceValueString:
-		return value.String, nil
+		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueString, String: value.String}, nil
 	case decisionevents.DecisionEvidenceValueBool:
-		return value.Bool, nil
+		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueBool, Bool: value.Bool}, nil
 	case decisionevents.DecisionEvidenceValueInt:
-		return value.Int, nil
+		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueInt, Int: value.Int}, nil
 	case decisionevents.DecisionEvidenceValueUint:
-		return value.Uint, nil
+		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueUint, Uint: value.Uint}, nil
 	case decisionevents.DecisionEvidenceValueFloat:
-		return value.Float, nil
+		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueFloat, Float: value.Float}, nil
 	case decisionevents.DecisionEvidenceValueObject:
-		return decisionEvidenceFieldsToMap(value.Object)
+		payload, err := decisionEvidenceFieldsToPayload(value.Object)
+		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueObject, Object: payload.Fields}, err
 	case decisionevents.DecisionEvidenceValueArray:
-		items := make([]any, 0, len(value.Array))
+		items := make([]workorcheventpayload.Value, 0, len(value.Array))
 		for _, item := range value.Array {
-			converted, err := decisionEvidenceValueToAny(item)
+			converted, err := decisionEvidenceValueToPayloadValue(item)
 			if err != nil {
-				return nil, err
+				return workorcheventpayload.Value{}, err
 			}
 			items = append(items, converted)
 		}
-		return items, nil
+		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueArray, Array: items}, nil
 	default:
-		return nil, common.ErrInvalidArgument
+		return workorcheventpayload.Value{}, common.ErrInvalidArgument
 	}
 }
 
-func approvalEvidenceFieldsToMap(fields []approvalevents.ApprovalEvidenceField) (map[string]any, error) {
+func approvalEvidenceFieldsToPayload(fields []approvalevents.ApprovalEvidenceField) (workorcheventpayload.Payload, error) {
 	if len(fields) == 0 {
-		return nil, nil
+		return workorcheventpayload.Payload{}, nil
 	}
-	ret := make(map[string]any, len(fields))
+	ret := make([]workorcheventpayload.Field, 0, len(fields))
 	for _, field := range fields {
 		if strings.TrimSpace(field.Name) == "" {
-			return nil, common.ErrInvalidArgument
+			return workorcheventpayload.Payload{}, common.ErrInvalidArgument
 		}
-		value, err := approvalEvidenceValueToAny(field.Value)
+		value, err := approvalEvidenceValueToPayloadValue(field.Value)
 		if err != nil {
-			return nil, fmt.Errorf("approval evidence field %s: %w", field.Name, err)
+			return workorcheventpayload.Payload{}, fmt.Errorf("approval evidence field %s: %w", field.Name, err)
 		}
-		ret[field.Name] = value
+		ret = append(ret, workorcheventpayload.Field{Name: field.Name, Value: value})
 	}
-	return ret, nil
+	return workorcheventpayload.New(ret...), nil
 }
 
-func approvalEvidenceValueToAny(value approvalevents.ApprovalEvidenceValue) (any, error) {
+func approvalEvidenceValueToPayloadValue(value approvalevents.ApprovalEvidenceValue) (workorcheventpayload.Value, error) {
 	switch value.Kind {
 	case approvalevents.ApprovalEvidenceValueNull:
-		return nil, nil
+		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueNull}, nil
 	case approvalevents.ApprovalEvidenceValueString:
-		return value.String, nil
+		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueString, String: value.String}, nil
 	case approvalevents.ApprovalEvidenceValueBool:
-		return value.Bool, nil
+		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueBool, Bool: value.Bool}, nil
 	case approvalevents.ApprovalEvidenceValueInt:
-		return value.Int, nil
+		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueInt, Int: value.Int}, nil
 	case approvalevents.ApprovalEvidenceValueUint:
-		return value.Uint, nil
+		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueUint, Uint: value.Uint}, nil
 	case approvalevents.ApprovalEvidenceValueFloat:
-		return value.Float, nil
+		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueFloat, Float: value.Float}, nil
 	case approvalevents.ApprovalEvidenceValueObject:
-		return approvalEvidenceFieldsToMap(value.Object)
+		payload, err := approvalEvidenceFieldsToPayload(value.Object)
+		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueObject, Object: payload.Fields}, err
 	case approvalevents.ApprovalEvidenceValueArray:
-		items := make([]any, 0, len(value.Array))
+		items := make([]workorcheventpayload.Value, 0, len(value.Array))
 		for _, item := range value.Array {
-			converted, err := approvalEvidenceValueToAny(item)
+			converted, err := approvalEvidenceValueToPayloadValue(item)
 			if err != nil {
-				return nil, err
+				return workorcheventpayload.Value{}, err
 			}
 			items = append(items, converted)
 		}
-		return items, nil
+		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueArray, Array: items}, nil
 	default:
-		return nil, common.ErrInvalidArgument
+		return workorcheventpayload.Value{}, common.ErrInvalidArgument
 	}
 }

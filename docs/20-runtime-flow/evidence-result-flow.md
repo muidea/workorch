@@ -4,245 +4,136 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-05-30
+Last Updated: 2026-07-14
 
 ## Purpose
 
-本文件定义过程证据如何被记录、整理、投影，并最终支撑正式 Result / Artifact。
+本文件定义 Runtime V2 过程 evidence 如何提交、如何与 authority 对齐、如何进入
+assessment / Result projection，以及 aggregate 如何 CAS 持久化。
 
 ## Flow
 
 ```text
-step / tool / patch / validation / checkpoint / event
--> evidence summary and refs
--> verification / acceptance consumption
--> Result / Artifact creation
--> read model and observability projection
+sealed operation / assessment / governance resolution
+  -> validate authority snapshot + dispatch + operation identity
+  -> commit path:
+       accepted evidence  -> EvidenceLedger + evidenceRevision++
+       focus advance if required evidence satisfied
+       reducer
+  -> stale / duplicate / conflict path:
+       DiagnosticRecord only (no ledger closeout)
+  -> terminal:
+       project Result (Result owner)
+       project Run / Workspace terminal
+  -> persist RuntimeStateRecord via Run owner CAS (expected revision)
 ```
 
-## Evidence Sources
+## Evidence Sources (V2)
 
-主要 evidence 来源包括：
+生产主线 evidence 来自 typed 提交，而不是 V1 Step/ToolCall/Checkpoint 事件总线重放：
 
-- Step
-- ToolCall
-- Patch
-- ValidationResult
-- RuntimeCheckpoint
-- EventRecord
-- MemoryRecallTrace
+| 来源 | 提交形态 |
+| --- | --- |
+| sealed operation result | execution / validation evidence（coverage-bound） |
+| AssessmentCandidate commit | `RuntimeAssessmentFact` → assessment ledger |
+| governance resolution | accepted governance evidence 或 rejected terminal |
+| prerequisite commit | resource facts（manifest、target snapshot、capabilities 等），并触发 reducer |
 
-这些对象共同形成运行态证据面，但不应被重新命名为最终业务结果。
+同步 typed operation result 是提交 execution evidence 的**唯一**执行回执。
+Eventstream 通知可作审计，**不**驱动 V2 状态推进。
 
-## Result Creation Path
+## Commit Invariants
 
-Result 的形成应当：
+evidence commit 必须同时满足：
 
-- 依赖正式 `dodAssessment`
-- 依赖 evidence refs
-- 与 Goal / DoD / Run / Step 保持可追溯关系
+1. **Authority 一致**：workspace/run、definition revision、evidence revision、focus、
+   authority snapshot 与当前 aggregate 决策一致
+2. **Dispatch 一致**：存在对应 `SealedDispatch`；candidate hash / transaction 匹配
+3. **Operation 一致**：evidence 来自 sealed operation（kind、id、coverage work item IDs、target refs）
+4. **Coverage 绑定**：execution evidence 必须携带 sealed operation 的 coverage work item IDs；
+   前序 focus evidence 不得关闭后续 focus
+5. **幂等**：duplicate event id / 已处理 resolution 不得二次改变 ledger；重复调用只返回一致结果
+6. **Definition 一致**：definition context revision 与 facts / transaction 一致，漂移 → conflict
 
-Artifact 则是 Result 的具体业务交付物或 runtime evidence 附件。
+Orchestrator 判定 evidence quality、coverage binding 与 next action；block 输出不能自封 accepted。
 
-artifact ownership 必须与领域层保持一致：
+## Stale → Diagnostic
 
-- deliverable artifact 应优先挂到 `resultId`
-- 过程 evidence artifact 可以只挂到 `runId` / `stepId`
-- 读模型不能把所有 artifact 都默认渲染为最终交付物
+下列情况**不得**写入 accepted ledger closeout，只能进入 diagnostic lineage：
 
-## Projection Path
+- authority snapshot 已漂移（stale snapshot）
+- dispatch 已 committed 或不存在
+- governance resolution 与 binding 不匹配或已消费
+- 重复 event / 重复 resolution
+- 与当前 focus / required output 无关的迟到结果
 
-evidence 进入以下投影：
+`RuntimeDiagnosticRecord` 至少记录 event id、authority snapshot id、current snapshot id、
+dispatch id、reason。diagnostic 保留可审计性，不推进 coverage satisfied。
 
-- Run snapshot
-- Workspace snapshot
-- Run observability
-- task progress
-- context bundle
-- final outcome display
+## CAS Aggregate
 
-## Evidence Quality And Closure Priority
+Runtime V2 正式状态是 `RuntimeStateRecord`，经 Run owner EventHub update 合同持久化：
 
-evidence 在进入 Result / Artifact / outcome 投影前，必须先按中立质量分层。
+- Orchestrator 使用 **expected revision** 执行 CAS
+- **不**直接访问 Run repository
+- **不**把 aggregate 编码进 `map[string]any`
+- 每个非等待、非终态 drive transition 必须增加 `stateRevision`
+- 无持久化进展或超过 transition guard → fail-fast，禁止进程内空转
+- 重启只加载 persisted aggregate；不依赖进程内去重 map
 
-当前最小质量层次应包括：
+主要持久化字段族：
 
-- `direct`
-- `indirect`
-- `smoke`
-- `unrelated`
-- `invalid`
+- `Definition` / `Facts` / `Decision`
+- `ActiveDispatch` / `CompletedDispatches`
+- `CandidateAttempts`
+- `GovernanceRequests` / `GovernanceResolutions`
+- `ProcessedEventIDs` / `Diagnostics`
+- `StateRevision` / `EvidenceSequence`
 
-稳定规则：
-
-- 只有 `direct` 或可接受的 `indirect` evidence 可以关闭对应 coverage target
-- `smoke` 只能证明基础可执行或环境可用，不得单独关闭功能 Goal / DoD / deliverable coverage
-- `unrelated` / `invalid` 必须保留 rejected reason，但不得进入 accepted closure
-
-## Coverage-Evidence Projection
-
-当 runtime 维护 coverage ledger / `coverageWorkItems` 时，evidence flow 必须支持：
-
-- accepted evidence refs
-- rejected evidence refs
-- latest closure evidence
-- superseded failure evidence
-- coverage target / work item 关联
-
-这意味着 evidence flow 不只是“保留 refs”，还必须回答：
-
-- 哪条证据正在关闭哪个 coverage source
-- 哪条失败证据已经被后续成功 evidence 覆盖
-- 哪些 wrapper failure 只属于诊断，不属于 closure evidence
-
-## Result / Artifact Closeout Rules
-
-Result / Artifact closeout 当前至少应满足以下顺序：
+## Result Path
 
 ```text
-evidence captured
--> quality / alignment / coverage target check
--> accepted vs rejected closure decision
--> Result creation
--> Artifact ownership projection
--> outcome / snapshot / observability projection
+reducer Terminal (Complete | Fail)
+  -> Orchestrator builds Result projection from:
+       Terminal summary
+       assessment ledger facts + evidence refs
+       GoalID / DoDID from definition
+  -> Result owner create (accepted | rejected)
+  -> Run / Workspace terminal projection
 ```
 
-补充约束：
-
-- accepted Result 必须引用当前最新 non-superseded closure evidence
-- rejected Result 必须能解释 DoD gap、rejected evidence 和 next action 来源
-- wrapper failure、schema invalid、provider retry、旧失败 step 只能保留为 lineage / diagnostics，
-  不得覆盖最新 accepted closure
-- 若存在 accepted Result，workspace/run outcome 投影必须优先引用该 Result 的 closure evidence
-
-## Patch / Payload / Artifact Boundary
-
-以下边界必须保持一致：
-
-- `patch/apply`、`patchRequests`、`executionGraph.nodes[].input.coverageTargets`
-  必须在副作用执行前通过 coverage target / target relevance / bounded verification 校验
-- raw payload 继续默认走 ref-only 路径
-- deliverable artifact 与 process evidence artifact 必须在 ownership 上继续区分：
-  - deliverable 优先挂 `resultId`
-  - process evidence 可挂 `runId` / `stepId`
-- `public API` 与 read-model 不得把所有 artifact 都默认展示成最终交付物
-
-## Raw Payload Ref Taxonomy
-
-raw payload 默认不直接进入主投影，而应按受控 ref 分类打开。
-
-当前稳定分类方向至少包括：
-
-| Raw Ref 类型 | 典型来源 | 当前方向 |
-| --- | --- | --- |
-| provider request / response / stream | LLM call raw I/O | 只通过 ref/detail 打开，不进入默认 summary |
-| step input / output | step 级原始输入输出 | 只作为诊断或 replay 输入 |
-| tool call arguments / output | MCP / shell / adapter 原始内容 | 只服务 detail/debug，不替代 ToolCall summary |
-| runtime checkpoint data | 恢复与诊断快照 | 只通过 ref 打开，不默认塞进 observability 主视图 |
-| result detail blob | 长 summary / full assessment / manifest detail | 只在显式 detail 时读取 |
-
 约束：
 
-- raw ref 只表达“如何打开原始内容”，不表达业务结果等级
-- raw ref 不应绕过 evidence quality / closeout gate
-- raw 打开链路属于模块/API/detail 层，默认 summary 仍应优先展示 compact metadata
+- Result **不判断** acceptance；只持久化正式 outcome
+- accepted Result 引用 assessment ledger 中的 current-run evidence refs
+- rejected Result 携带 terminal summary 与未满足 assessment / failure 解释
+- 同一 Result identity 幂等创建；状态冲突 → conflict
+- 不得借 terminal 投影创建 V1 Step 或经过 V1 Result/DoD completion gate
 
-## Event Payload Summary Contract
+## Ownership Boundary
 
-Event evidence 进入 result / observability / event list 时，应优先使用：
+仍属 Orchestrator 收敛状态机内部、不对外暴露写入 repository 的对象包括：
 
-- 小型结构化 `payload`
-- `payloadSummary`
-- `payloadRef`
+- ToolCall / Patch / ValidationResult 过程记录（若作为 internal 证据载体）
+- EvidenceRecord / CoverageWorkItem 运行态
+- ArtifactContinuation（若存在）仅在 V2 不变量内，不得形成第二套 dispatch owner
 
-当前稳定合同：
-
-- `payloadSummary` 用于默认列表、snapshot、observability 摘要
-- `payloadRef` 用于显式打开 raw event payload
-- 大 payload 存在时，不得因为提供了 `payloadRef` 就完全丢失默认摘要
-- event payload summary 属于 evidence view，不直接表达 accepted result 结论
-
-## Final Result Summary Schema
-
-final Result 的稳定摘要层应至少围绕以下字段组织：
-
-| 字段 | 当前方向 |
-| --- | --- |
-| `title` | 最终结果标题 |
-| `summary` | 紧凑结论摘要 |
-| `summaryDetail` | 可展开的详细结果说明 |
-| `doDAssessment` | DoD / Goal / deliverable coverage 结果 |
-| `evidenceRefs` | 支撑该结果的 accepted closure evidence |
-| `artifactRefs` | 最终交付物或附件引用 |
-| `nextActions` / residual gap | rejected / incomplete 时的后续方向 |
-
-约束：
-
-- `summary` 与 `summaryDetail` 都属于 Result 本体层
-- 它们可以引用 evidence / artifact，但不替代 evidence ledger
-- `summaryDetail` 可较长，但仍应保持“结果解释”而不是原始 payload dump
-
-## Artifact Manifest Classification
-
-artifact manifest 至少应稳定区分：
-
-| 分类 | 当前方向 |
-| --- | --- |
-| deliverable manifest | 最终交付物索引、面向用户交付 |
-| evidence manifest | 运行证据、验证附件、诊断附件 |
-| mixed summary manifest | 同时列出 deliverable 与 evidence，但必须显式分组 |
-
-约束：
-
-- deliverable artifact 优先挂 `resultId`
-- evidence artifact 可挂 `runId` / `stepId`
-- manifest 分类必须能告诉产品层“哪些可以默认展示为最终交付，哪些只应作为证据附件”
-
-## Profile Boundary
-
-artifact manifest 的最终样式可以被 profile / template 细化，但 evidence/result flow
-层至少保持以下边界：
-
-- core / flow 层只区分 deliverable vs evidence vs mixed grouping
-- profile / capability 层才细化：
-  - 软件开发的 diff / build / test 附件
-  - 文档生成的正文 / 索引 / 摘要
-  - 数据分析的报告 / 数据片段 / 图表
-
-也就是说：
-
-- flow 层定义“分类与关闭关系”
-- profile 层定义“具体交付长相”
-
-## Patch Target And Closeout Exceptions
-
-当 state-changing artifact 与当前 target snapshot、coverage target 或 closeout 发生冲突时，
-evidence/result flow 必须保持以下例外处理：
-
-- patch target 例外
-  - 缺少 concrete target snapshot / targetRef / contentHash 时，不得直接进入 accepted closeout
-  - `coverageTargets` 缺失或与当前 scope 不匹配时，只能进入 repair / schema recovery / evidence acquisition
-- closeout 例外
-  - provider retry、schema invalid、wrapper failure、旧失败 step 只能保留为 lineage / diagnostics
-  - 它们不得被提升为最新 accepted closure evidence
-- latest evidence priority
-  - 若旧失败 evidence 之后已有成功 validation / patch / action evidence，closeout 必须优先使用新的 non-superseded evidence
-
-该规则只表达 closeout 优先级和 evidence 边界，不表达具体业务修复方案。
+Result / Artifact 的产品展示分层（deliverable vs process evidence）可在 read-model / API 层细化；
+flow 层只要求：**正式业务结果与过程 evidence 分层**，raw payload 默认 ref-only。
 
 ## Key Flow Guarantees
 
-- raw payload 默认通过 ref 暴露，而不是直接塞进主投影
-- 证据与正式业务结果必须分层
-- accepted / rejected closeout 都必须显式依赖 evidence quality 与 coverage / alignment 结果
-- 历史失败证据保留为诊断和 lineage，不应覆盖最新 accepted closure
-- 若存在 accepted Result，workspace/run outcome 投影必须优先引用该 Result 的 evidence closure
-- public API 不得暴露本地绝对路径
+- snapshot、dispatch、operation 三者一致才能提交 accepted evidence
+- stale / duplicate → diagnostic only
+- aggregate CAS + stateRevision 进展是 drive 安全阀
+- Result 是 projection，不是 judge
+- `runtimeContractVersion=v2` 仅为审计字段；正式状态以 typed `RuntimeStateRecord` 为准
 
 ## Source Documents
 
-- `../90-archive/completed/result-event-development-plan.md`
-- `../90-archive/superseded/workspace-data-layout-plan.md`
-- `../70-roadmap/active/run-closure-quality-improvement-plan.md`
+- [overview.md](overview.md)
+- [verification-acceptance-flow.md](verification-acceptance-flow.md)
+- [planning-execution-flow.md](planning-execution-flow.md)
 - `../00-core/runtime-stage-contract.md`
+- `../../internal/modules/kernel/orchestrator/readme.md`
+- `../../internal/pkg/workorchruntimecontract`（`runtime_state.go`、`evidence_record.go`、`canonical_runtime.go`）

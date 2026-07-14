@@ -15,6 +15,7 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func TestBuildWorkorchSnapshotIncludesExpectedPublishedTopics(t *testing.T) {
@@ -158,7 +159,7 @@ func TestBuildWorkorchSnapshotPublishedTicketIncludesResolvedTicketResolution(t 
 		ID:       common.ResolutionID("resolution-observed"),
 		TicketID: ticket.ID,
 		Type:     "provide_missing_info",
-		Payload:  map[string]any{"operator": "workorch"},
+		Payload:  workorcheventpayload.New(workorcheventpayload.StringField("operator", "workorch")),
 	}
 
 	items := BuildWorkorchSnapshot(ws, run, ticket, resolution, nil, []eventstreamevents.EventRecordData{
@@ -177,7 +178,7 @@ func TestBuildWorkorchSnapshotPublishedTicketIncludesResolvedTicketResolution(t 
 				events.PayloadKeyState:        string(ticket.State),
 				events.PayloadKeyResolutionID: string(resolution.ID),
 				events.PayloadKeyType:         resolution.Type,
-				events.PayloadKeyPayload:      resolution.Payload,
+				events.PayloadKeyPayload:      resolution.Payload.Map(),
 			},
 		}),
 	})
@@ -193,8 +194,9 @@ func TestBuildWorkorchSnapshotPublishedTicketIncludesResolvedTicketResolution(t 
 	if ticketPayload.ResolutionType != resolution.Type {
 		t.Fatalf("ticket resolutionType = %s, want %s", ticketPayload.ResolutionType, resolution.Type)
 	}
-	if ticketPayload.ResolutionPayload["operator"] != "workorch" {
-		t.Fatalf("ticket resolution payload operator = %v, want workorch", ticketPayload.ResolutionPayload["operator"])
+	operator, _ := ticketPayload.ResolutionPayload.String("operator")
+	if operator != "workorch" {
+		t.Fatalf("ticket resolution payload operator = %v, want workorch", operator)
 	}
 }
 

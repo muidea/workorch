@@ -12,6 +12,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/doditems"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
@@ -1396,7 +1397,7 @@ func artifactContinuationInfoFromEvent(evt backend.Event) backend.ArtifactContin
 		FinalReceived:     payloadBoolValue(evt.Payload, "finalReceived", "FinalReceived"),
 		BytesWritten:      int64(payloadIntValue(evt.Payload, "bytesWritten", "BytesWritten", backend.PayloadKeyReceivedBytes)),
 		FailureReason:     firstPayloadString(evt.Payload, "failureReason", "FailureReason", "error", "Error", backend.PayloadKeyError),
-		Progress:          payloadMapValue(evt.Payload, "progress", "Progress"),
+		Progress:          eventPayloadFromMap(payloadMapValue(evt.Payload, "progress", "Progress")),
 	}
 }
 
@@ -1450,10 +1451,15 @@ func mergeArtifactContinuationInfo(existing backend.ArtifactContinuationInfo, ne
 	if next.FailureReason != "" {
 		existing.FailureReason = next.FailureReason
 	}
-	if next.Progress != nil {
-		existing.Progress = clonePayloadMap(next.Progress)
+	if len(next.Progress.Fields) > 0 {
+		existing.Progress = next.Progress.Clone()
 	}
 	return existing
+}
+
+func eventPayloadFromMap(input map[string]any) workorcheventpayload.Payload {
+	payload, _ := workorcheventpayload.FromMap(input)
+	return payload
 }
 
 func memoryRecallInfoFromEvent(evt backend.Event) backend.MemoryRecallTraceInfo {
@@ -1650,13 +1656,17 @@ func (m *AppModel) setBlockingApproval(id common.ApprovalID, workspaceID common.
 	if id == "" {
 		return
 	}
+	typedContext, err := workorcheventpayload.FromMap(context)
+	if err != nil {
+		return
+	}
 	item := backend.ApprovalInfo{
 		ID:          id,
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 		Reason:      reason,
 		Action:      action,
-		Context:     clonePayloadMap(context),
+		Context:     typedContext,
 		State:       "pending",
 	}
 	m.blockingApproval = &item
@@ -2070,13 +2080,17 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		m.progressText = nonEmpty(m.blockingDecision.Question, m.blockingDecision.Reason, string(m.blockingDecision.ID))
 		return m.fetchActiveBlockerDetails()
 	case backend.EventApprovalCreated:
+		approvalContext, err := workorcheventpayload.FromMap(payloadMapValue(evt.Payload, "context", "Context", backend.PayloadKeyContext))
+		if err != nil {
+			return nil
+		}
 		approval := backend.ApprovalInfo{
 			ID:          common.ApprovalID(firstPayloadString(evt.Payload, "approvalId", "ID", "id", backend.PayloadKeyBlockingApprovalID)),
 			WorkspaceID: evt.WorkspaceID,
 			RunID:       evt.RunID,
 			Reason:      firstPayloadString(evt.Payload, "reason", "Reason", backend.PayloadKeyReason),
 			Action:      firstPayloadString(evt.Payload, "action", "Action", backend.PayloadKeyAction),
-			Context:     payloadMapValue(evt.Payload, "context", "Context", backend.PayloadKeyContext),
+			Context:     approvalContext,
 			State:       "pending",
 		}
 		m.blockingApproval = &approval
@@ -3473,8 +3487,8 @@ func mergeDecisionInfo(existing backend.DecisionInfo, next backend.DecisionInfo)
 	if next.Question != "" {
 		existing.Question = next.Question
 	}
-	if next.Context != nil {
-		existing.Context = clonePayloadMap(next.Context)
+	if len(next.Context.Fields) > 0 {
+		existing.Context = next.Context.Clone()
 	}
 	if next.State != "" {
 		existing.State = next.State
@@ -3510,8 +3524,8 @@ func mergeApprovalInfo(existing backend.ApprovalInfo, next backend.ApprovalInfo)
 	if next.Action != "" {
 		existing.Action = next.Action
 	}
-	if next.Context != nil {
-		existing.Context = clonePayloadMap(next.Context)
+	if len(next.Context.Fields) > 0 {
+		existing.Context = next.Context.Clone()
 	}
 	if next.State != "" {
 		existing.State = next.State

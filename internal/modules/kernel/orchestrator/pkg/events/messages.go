@@ -25,19 +25,6 @@ type SupersedeRunCommand = runcontracts.SupersedeRunCommand
 type FailRunCommand = runcontracts.FailRunCommand
 type PurgeRunCommand = orchestratorcontracts.PurgeRunCommand
 
-type ReleaseRuntimeV1ResourcesCommand struct {
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-}
-
-type ReleaseRuntimeV1ResourcesResult struct {
-	ReleasedValidationResources int
-	ClosedSteps                 int
-	ClosedToolCalls             int
-	ClosedArtifactContinuations int
-	ReleasedTotal               int
-}
-
 type AcquireTargetSnapshotCommand struct {
 	WorkspaceID                   common.WorkspaceID
 	RunID                         common.RunID
@@ -188,26 +175,28 @@ type OpenRuntimeGovernanceRequestResult struct {
 	AuthoritySnapshotID string
 }
 
-type ExecuteRuntimeOperationCommand struct {
-	WorkspaceID                   common.WorkspaceID
-	RunID                         common.RunID
-	DispatchID                    string
-	Transaction                   runtimecontract.AuthorityTransaction
-	Operation                     runtimecontract.RuntimeOperation
-	EvidenceKind                  string
-	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
-	WorkspaceDeliverableDirectory string
-	WorkspaceInternalDirectory    string
+type FileListOperationData struct {
+	Path       string
+	Recursive  bool
+	MaxEntries int64
 }
 
-type ExecuteRuntimeOperationResult struct {
-	EventID      string
-	OperationID  string
-	EvidenceKind string
-	Status       runtimecontract.RuntimeOperationExecutionStatus
-	SourceRef    string
-	Evidence     runtimecontract.RuntimeOperationEvidence
-	Failure      *runtimecontract.FailureFact
+type FileReadOperationData struct {
+	Path      string
+	Optional  bool
+	MaxBytes  int64
+	StartLine int64
+	EndLine   int64
+}
+
+type FileListEntry struct {
+	Path        string
+	Kind        string
+	Size        int64
+	ModifiedAt  string
+	ContentHash string
+	Binary      bool
+	Ignored     bool
 }
 
 type FileEditOperationData struct {
@@ -231,6 +220,109 @@ type PatchApplyOperationData struct {
 	Occurrence      int64
 	CoverageTargets []string
 	Summary         string
+}
+
+type ShellOperationData struct {
+	Command                         string
+	Args                            []string
+	TimeoutMillis                   int64
+	StateChanging                   bool
+	TargetRef                       string
+	TargetRefs                      []string
+	RelatedFailureTargets           []string
+	VerificationScope               string
+	BoundedReason                   string
+	ValidationScratchDirectory      string
+	ValidationScratchAutoCleanup    bool
+	ValidationScratchAutoCleanupSet bool
+	ValidationEvidence              runtimecontract.RuntimeValidationEvidence
+	ManagedValidation               runtimecontract.RuntimeManagedValidation
+}
+
+type GitOperationData struct {
+	Operation     string
+	TimeoutMillis int64
+	Pathspecs     []string
+	Ref           string
+	BaseRef       string
+	Limit         int64
+	Message       string
+	ExpectedHead  string
+}
+
+type MCPArgument struct {
+	Name       string
+	String     *string
+	Integer    *int64
+	Boolean    *bool
+	StringList []string
+}
+
+type MCPOperationData struct {
+	ServerID  string
+	Tool      string
+	URI       string
+	Prompt    string
+	Input     []MCPArgument
+	Arguments []MCPArgument
+	Summary   string
+	Stream    bool
+}
+
+type SSHOperationData struct {
+	Host           string
+	Port           int64
+	Username       string
+	Password       string
+	PrivateKey     string
+	PrivateKeyPath string
+	Command        string
+	TimeoutMillis  int64
+}
+
+type WebOperationData struct {
+	ProviderID     string
+	Query          string
+	Locale         string
+	Recency        string
+	Domains        []string
+	ExcludeDomains []string
+	MaxResults     int64
+	SafeSearch     bool
+	ApprovalID     common.ApprovalID
+	URL            string
+	MaxBytes       int64
+	ExtractMode    string
+}
+
+type ExecuteFileListOperationCommand struct {
+	WorkspaceID                   common.WorkspaceID
+	RunID                         common.RunID
+	DispatchID                    string
+	Transaction                   runtimecontract.AuthorityTransaction
+	OperationID                   string
+	CoverageWorkItemIDs           []common.CoverageWorkItemID
+	TargetRefs                    []string
+	EvidenceKind                  string
+	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
+	WorkspaceDeliverableDirectory string
+	WorkspaceInternalDirectory    string
+	Data                          FileListOperationData
+}
+
+type ExecuteFileReadOperationCommand struct {
+	WorkspaceID                   common.WorkspaceID
+	RunID                         common.RunID
+	DispatchID                    string
+	Transaction                   runtimecontract.AuthorityTransaction
+	OperationID                   string
+	CoverageWorkItemIDs           []common.CoverageWorkItemID
+	TargetRefs                    []string
+	EvidenceKind                  string
+	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
+	WorkspaceDeliverableDirectory string
+	WorkspaceInternalDirectory    string
+	Data                          FileReadOperationData
 }
 
 type ExecuteFileEditOperationCommand struct {
@@ -263,6 +355,99 @@ type ExecutePatchApplyOperationCommand struct {
 	Data                          PatchApplyOperationData
 }
 
+type ExecutePatchPreviewOperationCommand struct {
+	WorkspaceID                   common.WorkspaceID
+	RunID                         common.RunID
+	DispatchID                    string
+	Transaction                   runtimecontract.AuthorityTransaction
+	OperationID                   string
+	CoverageWorkItemIDs           []common.CoverageWorkItemID
+	TargetRefs                    []string
+	EvidenceKind                  string
+	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
+	WorkspaceDeliverableDirectory string
+	WorkspaceInternalDirectory    string
+	Data                          PatchApplyOperationData
+}
+
+type ExecuteShellOperationCommand struct {
+	WorkspaceID                   common.WorkspaceID
+	RunID                         common.RunID
+	DispatchID                    string
+	Transaction                   runtimecontract.AuthorityTransaction
+	OperationID                   string
+	CoverageWorkItemIDs           []common.CoverageWorkItemID
+	TargetRefs                    []string
+	EvidenceKind                  string
+	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
+	WorkspaceDeliverableDirectory string
+	WorkspaceInternalDirectory    string
+	Data                          ShellOperationData
+}
+
+type ExecuteGitOperationCommand struct {
+	WorkspaceID                   common.WorkspaceID
+	RunID                         common.RunID
+	DispatchID                    string
+	Transaction                   runtimecontract.AuthorityTransaction
+	OperationID                   string
+	OperationKind                 string
+	CoverageWorkItemIDs           []common.CoverageWorkItemID
+	TargetRefs                    []string
+	EvidenceKind                  string
+	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
+	WorkspaceDeliverableDirectory string
+	WorkspaceInternalDirectory    string
+	Data                          GitOperationData
+}
+
+type ExecuteMCPOperationCommand struct {
+	WorkspaceID                   common.WorkspaceID
+	RunID                         common.RunID
+	DispatchID                    string
+	Transaction                   runtimecontract.AuthorityTransaction
+	OperationID                   string
+	OperationKind                 string
+	CoverageWorkItemIDs           []common.CoverageWorkItemID
+	TargetRefs                    []string
+	EvidenceKind                  string
+	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
+	WorkspaceDeliverableDirectory string
+	WorkspaceInternalDirectory    string
+	Data                          MCPOperationData
+}
+
+type ExecuteSSHOperationCommand struct {
+	WorkspaceID                   common.WorkspaceID
+	RunID                         common.RunID
+	DispatchID                    string
+	Transaction                   runtimecontract.AuthorityTransaction
+	OperationID                   string
+	CoverageWorkItemIDs           []common.CoverageWorkItemID
+	TargetRefs                    []string
+	EvidenceKind                  string
+	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
+	WorkspaceDeliverableDirectory string
+	WorkspaceInternalDirectory    string
+	Data                          SSHOperationData
+}
+
+type ExecuteWebOperationCommand struct {
+	WorkspaceID                   common.WorkspaceID
+	RunID                         common.RunID
+	DispatchID                    string
+	Transaction                   runtimecontract.AuthorityTransaction
+	OperationID                   string
+	OperationKind                 string
+	CoverageWorkItemIDs           []common.CoverageWorkItemID
+	TargetRefs                    []string
+	EvidenceKind                  string
+	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
+	WorkspaceDeliverableDirectory string
+	WorkspaceInternalDirectory    string
+	Data                          WebOperationData
+}
+
 type ExecuteFileEditOperationResult struct {
 	EventID      string
 	OperationID  string
@@ -273,6 +458,60 @@ type ExecuteFileEditOperationResult struct {
 	Failure      *runtimecontract.FailureFact
 }
 
+type ExecuteFileListOperationResult struct {
+	EventID      string
+	OperationID  string
+	EvidenceKind string
+	Status       runtimecontract.RuntimeOperationExecutionStatus
+	SourceRef    string
+	Evidence     runtimecontract.RuntimeOperationEvidence
+	Failure      *runtimecontract.FailureFact
+	Data         FileListOperationResultData
+}
+
+type FileListOperationResultData struct {
+	Status         string
+	Stage          string
+	Path           string
+	Entries        []FileListEntry
+	Truncated      bool
+	MaxEntries     int64
+	FailureCode    string
+	FailureMessage string
+}
+
+type ExecuteFileReadOperationResult struct {
+	EventID      string
+	OperationID  string
+	EvidenceKind string
+	Status       runtimecontract.RuntimeOperationExecutionStatus
+	SourceRef    string
+	Evidence     runtimecontract.RuntimeOperationEvidence
+	Failure      *runtimecontract.FailureFact
+	Data         FileReadOperationResultData
+}
+
+type FileReadOperationResultData struct {
+	Status           string
+	Stage            string
+	Path             string
+	TargetRef        string
+	Exists           bool
+	Content          string
+	ContentHash      string
+	Size             int64
+	ModifiedAt       string
+	LineCount        int64
+	Truncated        bool
+	Binary           bool
+	Redacted         bool
+	ContentComplete  bool
+	SafeForPatch     bool
+	SafeForFileWrite bool
+	FailureCode      string
+	FailureMessage   string
+}
+
 type ExecutePatchApplyOperationResult struct {
 	EventID      string
 	OperationID  string
@@ -281,6 +520,276 @@ type ExecutePatchApplyOperationResult struct {
 	SourceRef    string
 	Evidence     runtimecontract.RuntimeOperationEvidence
 	Failure      *runtimecontract.FailureFact
+}
+
+type ExecutePatchPreviewOperationResult struct {
+	EventID      string
+	OperationID  string
+	EvidenceKind string
+	Status       runtimecontract.RuntimeOperationExecutionStatus
+	SourceRef    string
+	Evidence     runtimecontract.RuntimeOperationEvidence
+	Failure      *runtimecontract.FailureFact
+	Data         PatchPreviewOperationResultData
+}
+
+type PatchPreviewOperationResultData struct {
+	Status           string
+	Stage            string
+	Operation        string
+	PatchType        string
+	TargetRef        string
+	AffectedFiles    []string
+	BeforeHash       string
+	AfterHash        string
+	ContentHash      string
+	DiffHash         string
+	AddedLines       int64
+	DeletedLines     int64
+	ApprovalRequired bool
+	RiskLevel        string
+	RiskReasons      []string
+	WillWrite        bool
+	Summary          string
+	FailureCode      string
+	FailureMessage   string
+}
+
+type ExecuteShellOperationResult struct {
+	EventID      string
+	OperationID  string
+	EvidenceKind string
+	Status       runtimecontract.RuntimeOperationExecutionStatus
+	SourceRef    string
+	Evidence     runtimecontract.RuntimeOperationEvidence
+	Failure      *runtimecontract.FailureFact
+	Data         ShellOperationResultData
+}
+
+type ShellOperationResultData struct {
+	Status                      string
+	Stage                       string
+	Command                     string
+	Args                        []string
+	ActualCommand               string
+	WorkingDirectory            string
+	Stdout                      string
+	Stderr                      string
+	ExitCode                    int64
+	DurationMillis              int64
+	TimeoutMillis               int64
+	OutputTruncated             bool
+	StdoutTruncated             bool
+	StderrTruncated             bool
+	StdoutBytes                 int64
+	StderrBytes                 int64
+	FailureCode                 string
+	FailureMessage              string
+	Summary                     string
+	Reason                      string
+	FailureReason               string
+	UnavailableCommand          string
+	CapabilityMissing           bool
+	ZeroWork                    bool
+	EvidenceQuality             string
+	EvidenceReason              string
+	EvidenceTags                []string
+	TargetRefs                  []string
+	CommandNormalization        string
+	MaxOutputBytes              int64
+	ValidationEvidence          runtimecontract.RuntimeValidationEvidence
+	ManagedValidation           runtimecontract.RuntimeManagedValidation
+	ValidationResources         []runtimecontract.RuntimeValidationResource
+	RuntimeDiagnostics          runtimecontract.RuntimeDiagnostics
+	ValidationFailureDiagnostic *runtimecontract.ValidationFailureDiagnostic
+}
+
+type GitFileChangeData struct {
+	Path      string
+	OldPath   string
+	Status    string
+	Staged    bool
+	Unstaged  bool
+	Untracked bool
+}
+
+type GitAheadBehindData struct {
+	Ahead  int64
+	Behind int64
+}
+
+type GitCommitData struct {
+	Hash       string
+	ShortHash  string
+	Author     string
+	AuthorTime string
+	Subject    string
+}
+
+type GitBranchData struct {
+	Name     string
+	Commit   string
+	Current  bool
+	Upstream string
+}
+
+type ExecuteGitOperationResult struct {
+	EventID      string
+	OperationID  string
+	EvidenceKind string
+	Status       runtimecontract.RuntimeOperationExecutionStatus
+	SourceRef    string
+	Evidence     runtimecontract.RuntimeOperationEvidence
+	Failure      *runtimecontract.FailureFact
+	Data         GitOperationResultData
+}
+
+type GitOperationResultData struct {
+	Status             string
+	Stage              string
+	Operation          string
+	RepoRoot           string
+	WorkingDirectory   string
+	Branch             string
+	HeadCommit         string
+	HeadCommitBefore   string
+	HeadCommitAfter    string
+	DetachedHead       bool
+	UnbornHead         bool
+	Stdout             string
+	Stderr             string
+	ExitCode           int64
+	DurationMillis     int64
+	TimeoutMillis      int64
+	Truncated          bool
+	ErrorCode          string
+	ErrorMessage       string
+	Summary            string
+	ZeroWork           bool
+	Initialized        bool
+	ExistingRepository bool
+	Pathspecs          []string
+	Ref                string
+	Limit              int64
+	LimitClamped       bool
+	Message            string
+	CommitHash         string
+	CommitSubject      string
+	ChangedFiles       []GitFileChangeData
+	StagedFiles        []GitFileChangeData
+	CommittedFiles     []GitFileChangeData
+	Commits            []GitCommitData
+	Branches           []GitBranchData
+	AheadBehind        GitAheadBehindData
+}
+
+type ExecuteMCPOperationResult struct {
+	EventID      string
+	OperationID  string
+	EvidenceKind string
+	Status       runtimecontract.RuntimeOperationExecutionStatus
+	SourceRef    string
+	Evidence     runtimecontract.RuntimeOperationEvidence
+	Failure      *runtimecontract.FailureFact
+	Data         MCPOperationResultData
+}
+
+type MCPOperationResultData struct {
+	Status         string
+	Stage          string
+	Operation      string
+	ServerID       string
+	Tool           string
+	URI            string
+	Prompt         string
+	Summary        string
+	Transport      string
+	Endpoint       string
+	DurationMillis int64
+	StatusCode     int64
+	Stderr         string
+	FailureCode    string
+	FailureMessage string
+	TargetRefs     []string
+	Diagnostics    MCPFailureDiagnosticsData
+}
+
+type MCPFailureDiagnosticsData struct {
+	Operation      string
+	ServerID       string
+	Tool           string
+	URI            string
+	Prompt         string
+	TargetRef      string
+	FailureTargets []string
+}
+
+type ExecuteSSHOperationResult struct {
+	EventID      string
+	OperationID  string
+	EvidenceKind string
+	Status       runtimecontract.RuntimeOperationExecutionStatus
+	SourceRef    string
+	Evidence     runtimecontract.RuntimeOperationEvidence
+	Failure      *runtimecontract.FailureFact
+	Data         SSHOperationResultData
+}
+
+type SSHOperationResultData struct {
+	Status          string
+	Host            string
+	Port            int64
+	Username        string
+	Command         string
+	Stdout          string
+	Stderr          string
+	ExitCode        int64
+	DurationMillis  int64
+	TimeoutMillis   int64
+	AuthMethod      string
+	OutputTruncated bool
+	StdoutTruncated bool
+	StderrTruncated bool
+	StdoutBytes     int64
+	StderrBytes     int64
+	FailureCode     string
+	FailureMessage  string
+}
+
+type ExecuteWebOperationResult struct {
+	EventID      string
+	OperationID  string
+	EvidenceKind string
+	Status       runtimecontract.RuntimeOperationExecutionStatus
+	SourceRef    string
+	Evidence     runtimecontract.RuntimeOperationEvidence
+	Failure      *runtimecontract.FailureFact
+	Data         WebOperationResultData
+}
+
+type WebOperationResultData struct {
+	Status         string
+	Stage          string
+	ProviderID     string
+	Query          string
+	URL            string
+	FinalURL       string
+	Title          string
+	Summary        string
+	ContentType    string
+	ContentHash    string
+	RetrievedAt    string
+	PublishedAt    string
+	Source         string
+	Size           int64
+	ResultCount    int64
+	Truncated      bool
+	ApprovalID     common.ApprovalID
+	ApprovalNeeded bool
+	DurationMillis int64
+	FailureCode    string
+	FailureMessage string
+	TargetRefs     []string
 }
 
 func ResolveRuntimeCapabilities(command AcquireRuntimeCapabilitiesCommand, moduleID string, supportedKinds ...string) (AcquireRuntimeCapabilitiesResult, error) {
@@ -390,7 +899,6 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[SupersedeRunCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommandSupersedeRun).MessageContract(),
 		eventcontract.CommandTopic[FailRunCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommandFailRun).MessageContract(),
 		eventcontract.CommandTopic[PurgeRunCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommandPurgeRun).MessageContract(),
-		eventcontract.CommandTopic[ReleaseRuntimeV1ResourcesCommand, ReleaseRuntimeV1ResourcesResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommandReleaseRuntimeV1Resources).MessageContract(),
 		eventcontract.CommandTopic[ListToolCallsByRunCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorCommandListToolCallsByRun).MessageContract(),
 		eventcontract.CommandTopic[ListPatchesByRunCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorCommandListPatchesByRun).MessageContract(),
 		eventcontract.CommandTopic[ListValidationResultsByRunCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorCommandListValidationResultsByRun).MessageContract(),
@@ -402,9 +910,16 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[AcquireRuntimeCapabilitiesCommand, AcquireRuntimeCapabilitiesResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireRuntimeCapabilities).MessageContract(),
 		eventcontract.CommandTopic[DriveRuntimeV2Command, DriveRuntimeV2Result]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorDriveRuntimeV2).MessageContract(),
 		eventcontract.CommandTopic[RequestRuntimeCandidateCommand, RequestRuntimeCandidateResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorRequestRuntimeCandidate).MessageContract(),
-		eventcontract.CommandTopic[ExecuteRuntimeOperationCommand, ExecuteRuntimeOperationResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorExecuteRuntimeOperation).MessageContract(),
+		eventcontract.CommandTopic[ExecuteFileListOperationCommand, ExecuteFileListOperationResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorExecuteFileListOperation).MessageContract(),
+		eventcontract.CommandTopic[ExecuteFileReadOperationCommand, ExecuteFileReadOperationResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorExecuteFileReadOperation).MessageContract(),
 		eventcontract.CommandTopic[ExecuteFileEditOperationCommand, ExecuteFileEditOperationResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorExecuteFileEditOperation).MessageContract(),
 		eventcontract.CommandTopic[ExecutePatchApplyOperationCommand, ExecutePatchApplyOperationResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorExecutePatchApplyOperation).MessageContract(),
+		eventcontract.CommandTopic[ExecutePatchPreviewOperationCommand, ExecutePatchPreviewOperationResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorExecutePatchPreviewOperation).MessageContract(),
+		eventcontract.CommandTopic[ExecuteShellOperationCommand, ExecuteShellOperationResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorExecuteShellOperation).MessageContract(),
+		eventcontract.CommandTopic[ExecuteGitOperationCommand, ExecuteGitOperationResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorExecuteGitOperation).MessageContract(),
+		eventcontract.CommandTopic[ExecuteMCPOperationCommand, ExecuteMCPOperationResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorExecuteMCPOperation).MessageContract(),
+		eventcontract.CommandTopic[ExecuteSSHOperationCommand, ExecuteSSHOperationResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorExecuteSSHOperation).MessageContract(),
+		eventcontract.CommandTopic[ExecuteWebOperationCommand, ExecuteWebOperationResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorExecuteWebOperation).MessageContract(),
 		eventcontract.CommandTopic[CommitRuntimeGovernanceResolutionCommand, CommitRuntimeGovernanceResolutionResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommitRuntimeGovernanceResolution).MessageContract(),
 		eventcontract.CommandTopic[CommitRuntimeGovernanceTicketResolutionCommand, CommitRuntimeGovernanceResolutionResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommitRuntimeGovernanceTicket).MessageContract(),
 		eventcontract.CommandTopic[OpenRuntimeGovernanceRequestCommand, OpenRuntimeGovernanceRequestResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorOpenRuntimeGovernanceRequest).MessageContract(),

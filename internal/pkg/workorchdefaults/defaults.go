@@ -12,6 +12,7 @@ import (
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 //go:embed defaults/templates.json defaults/souls.json defaults/souls/*/*.md defaults/mcp_servers.json defaults/mcp_capabilities.json
@@ -237,7 +238,11 @@ func EnsureBuiltinWorkspaceTemplateDefaults(ctx context.Context, templateRepo re
 		if t.ID == "" {
 			continue
 		}
-		if err := upsertBuiltinWorkspaceTemplate(ctx, templateRepo, workspaceTemplateFromEmbedded(t)); err != nil {
+		item, err := workspaceTemplateFromEmbedded(t)
+		if err != nil {
+			return err
+		}
+		if err := upsertBuiltinWorkspaceTemplate(ctx, templateRepo, item); err != nil {
 			return err
 		}
 	}
@@ -268,7 +273,11 @@ func EnsureBuiltinMCPDefaults(ctx context.Context, mcpServerRepo repository.MCPS
 			if capability.ID == "" {
 				continue
 			}
-			if err := upsertBuiltinMCPCapability(ctx, mcpCapabilityRepo, mcpCapabilityFromEmbedded(capability)); err != nil {
+			item, err := mcpCapabilityFromEmbedded(capability)
+			if err != nil {
+				return err
+			}
+			if err := upsertBuiltinMCPCapability(ctx, mcpCapabilityRepo, item); err != nil {
 				return err
 			}
 		}
@@ -328,7 +337,15 @@ func upsertBuiltinMCPCapability(ctx context.Context, repo repository.MCPCapabili
 	return nil
 }
 
-func workspaceTemplateFromEmbedded(t embeddedTemplate) *repository.WorkspaceTemplate {
+func workspaceTemplateFromEmbedded(t embeddedTemplate) (*repository.WorkspaceTemplate, error) {
+	contextHints, err := workorcheventpayload.FromMap(t.ContextHints)
+	if err != nil {
+		return nil, fmt.Errorf("decode embedded workspace template %q context hints: %w", t.ID, err)
+	}
+	evidencePolicies, err := workorcheventpayload.FromMapSlice(t.EvidencePolicies)
+	if err != nil {
+		return nil, fmt.Errorf("decode embedded workspace template %q evidence policies: %w", t.ID, err)
+	}
 	return &repository.WorkspaceTemplate{
 		ID:               t.ID,
 		Name:             t.Name,
@@ -337,9 +354,9 @@ func workspaceTemplateFromEmbedded(t embeddedTemplate) *repository.WorkspaceTemp
 		DoDItems:         filterEmptyStrings(t.DoDItems),
 		DefaultSoulID:    t.DefaultSoulID,
 		SoulBindings:     t.SoulBindings,
-		ContextHints:     cloneContextMap(t.ContextHints),
-		EvidencePolicies: cloneEmbeddedEvidencePolicies(t.EvidencePolicies),
-	}
+		ContextHints:     contextHints,
+		EvidencePolicies: evidencePolicies,
+	}, nil
 }
 
 func mcpServerFromEmbedded(item embeddedMCPServer) *mcpmodel.Server {
@@ -361,7 +378,11 @@ func mcpServerFromEmbedded(item embeddedMCPServer) *mcpmodel.Server {
 	}
 }
 
-func mcpCapabilityFromEmbedded(item embeddedMCPCapability) *mcpmodel.Capability {
+func mcpCapabilityFromEmbedded(item embeddedMCPCapability) (*mcpmodel.Capability, error) {
+	schema, err := workorcheventpayload.FromMap(item.Schema)
+	if err != nil {
+		return nil, fmt.Errorf("decode embedded mcp capability %q schema: %w", item.ID, err)
+	}
 	return &mcpmodel.Capability{
 		ID:             common.MCPCapabilityID(item.ID),
 		ServerID:       common.MCPServerID(item.ServerID),
@@ -376,12 +397,12 @@ func mcpCapabilityFromEmbedded(item embeddedMCPCapability) *mcpmodel.Capability 
 		OutputSummary:  strings.TrimSpace(item.OutputSummary),
 		StageHints:     filterEmptyStrings(item.StageHints),
 		RiskLevel:      strings.TrimSpace(item.RiskLevel),
-		Schema:         cloneContextMap(item.Schema),
+		Schema:         schema,
 		URI:            strings.TrimSpace(item.URI),
 		Enabled:        item.Enabled,
 		ApprovalPolicy: strings.TrimSpace(item.ApprovalPolicy),
 		Status:         strings.TrimSpace(item.Status),
-	}
+	}, nil
 }
 
 func cloneContextMap(input map[string]any) map[string]any {

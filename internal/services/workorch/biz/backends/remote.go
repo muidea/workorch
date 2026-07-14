@@ -12,6 +12,8 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	client "github.com/muidea/workorch/internal/pkg/workorchclient"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchpayloadmapper"
 )
 
 // remoteBackend implements Backend using an HTTP client to a running workorch --server.
@@ -221,8 +223,8 @@ func workspaceSnapshotInfoFromClient(input client.WorkspaceSnapshot) WorkspaceSn
 		ConvergenceStatus:       convergenceStatusInfoFromClient(input.ConvergenceStatus),
 		RunCommand:              runCommandStatusInfoFromClient(input.RunCommand),
 		SchedulerDiagnostics:    schedulerDiagnosticsInfoFromClient(input.SchedulerDiagnostics),
-		ContextBundle:           clonePayloadMap(input.ContextBundle),
-		CoverageSummary:         clonePayloadMap(input.CoverageSummary),
+		ContextBundle:           payloadFromRemoteMap(input.ContextBundle),
+		CoverageSummary:         payloadFromRemoteMap(input.CoverageSummary),
 		GapBaseline:             gapBaselineInfoFromClient(input.GapBaseline),
 		Acceptance:              acceptanceProjectionInfoFromClient(input.Acceptance),
 		TaskDecompositions:      taskDecompositionInfosFromClient(input.TaskDecompositions),
@@ -341,8 +343,8 @@ func gapBaselineInfoFromClient(input *client.GapBaseline) *GapBaselineInfo {
 		RunID:                 common.RunID(input.RunID),
 		DefinitionRevision:    input.DefinitionRevision,
 		BaselineRevision:      input.BaselineRevision,
-		CurrentFocus:          clonePayloadMap(input.CurrentFocus),
-		OpenCoverageWorkItems: clonePayloadMapSlice(input.OpenCoverageWorkItems),
+		CurrentFocus:          payloadFromRemoteMap(input.CurrentFocus),
+		OpenCoverageWorkItems: payloadsFromRemoteMaps(input.OpenCoverageWorkItems),
 		AcceptedEvidenceRefs:  append([]string(nil), input.AcceptedEvidenceRefs...),
 		RejectedEvidenceRefs:  append([]string(nil), input.RejectedEvidenceRefs...),
 		NextAction:            GapNextActionInfo{Kind: input.NextAction.Kind, Reason: input.NextAction.Reason},
@@ -357,7 +359,7 @@ func gapBaselineInfoFromClient(input *client.GapBaseline) *GapBaselineInfo {
 			Status:                item.Status,
 			Priority:              item.Priority,
 			Reason:                item.Reason,
-			Metadata:              clonePayloadMap(item.Metadata),
+			Metadata:              payloadFromRemoteMap(item.Metadata),
 		})
 	}
 	return ret
@@ -455,8 +457,8 @@ func taskProgressInfoFromClient(input client.TaskProgress) TaskProgressInfo {
 			LastFailureSignature:     input.RepairLoop.LastFailureSignature,
 			LastFailureTargetScope:   input.RepairLoop.LastFailureTargetScope,
 			LastFailureAt:            input.RepairLoop.LastFailureAt,
-			StructuredFailureSignals: clonePayloadMap(input.RepairLoop.StructuredFailureSignals),
-			RepairInputCompaction:    clonePayloadMap(input.RepairLoop.RepairInputCompaction),
+			StructuredFailureSignals: payloadFromRemoteMap(input.RepairLoop.StructuredFailureSignals),
+			RepairInputCompaction:    payloadFromRemoteMap(input.RepairLoop.RepairInputCompaction),
 			LastRepairInputBytes:     input.RepairLoop.LastRepairInputBytes,
 			RepeatedFailureReason:    input.RepairLoop.RepeatedFailureReason,
 			NextAction:               input.RepairLoop.NextAction,
@@ -556,7 +558,7 @@ func taskDecompositionNodeInfosFromClient(items []client.TaskDecompositionNode) 
 			BlockingTicketID: common.TicketID(item.BlockingTicketID),
 			EvidenceRefs:     append([]string(nil), item.EvidenceRefs...),
 			CoverageTargets:  append([]string(nil), item.CoverageTargets...),
-			Input:            clonePayloadMap(item.Input),
+			Input:            payloadFromRemoteMap(item.Input),
 		})
 	}
 	return ret
@@ -588,7 +590,7 @@ func resultInfosFromClient(items []client.Result) []ResultInfo {
 				KnownLimitations:      append([]string(nil), summary.KnownLimitations...),
 				ResidualRisks:         append([]string(nil), summary.ResidualRisks...),
 				NextActions:           append([]string(nil), summary.NextActions...),
-				Diagnostics:           clonePayloadMap(summary.Diagnostics),
+				Diagnostics:           payloadFromRemoteMap(summary.Diagnostics),
 			},
 		})
 	}
@@ -639,7 +641,7 @@ func artifactContinuationInfosFromClient(items []client.ArtifactContinuation) []
 			FailureReason:     item.FailureReason,
 			CreatedAt:         item.CreatedAt,
 			UpdatedAt:         item.UpdatedAt,
-			Progress:          clonePayloadMap(item.Progress),
+			Progress:          payloadFromRemoteMap(item.Progress),
 		})
 	}
 	return ret
@@ -664,6 +666,7 @@ func patchInfosFromClient(items []client.Patch) []PatchInfo {
 			DeletedLines:     item.DeletedLines,
 			BeforeHash:       item.BeforeHash,
 			AfterHash:        item.AfterHash,
+			Diagnostics:      payloadsFromRemoteMaps(item.Diagnostics),
 			CreatedAt:        item.CreatedAt,
 			AppliedAt:        item.AppliedAt,
 			RevertedAt:       item.RevertedAt,
@@ -757,8 +760,8 @@ func llmContextBudgetTraceInfosFromClient(items []client.LLMContextBudgetTrace) 
 			TracePolicy:           item.TracePolicy,
 			PromptCaptured:        item.PromptCaptured,
 			Estimator:             item.Estimator,
-			Profile:               clonePayloadMap(item.Profile),
-			CachePlan:             clonePayloadMap(item.CachePlan),
+			Profile:               payloadFromRemoteMap(item.Profile),
+			CachePlan:             payloadFromRemoteMap(item.CachePlan),
 		})
 	}
 	return ret
@@ -808,8 +811,8 @@ func llmUsageTraceInfosFromClient(items []client.LLMUsageTrace) []LLMUsageTraceI
 			RequestBytes:  item.RequestBytes,
 			ResponseBytes: item.ResponseBytes,
 			Streaming:     item.Streaming,
-			ContextBudget: clonePayloadMap(item.ContextBudget),
-			CacheUsage:    clonePayloadMap(item.CacheUsage),
+			ContextBudget: payloadFromRemoteMap(item.ContextBudget),
+			CacheUsage:    payloadFromRemoteMap(item.CacheUsage),
 			Status:        item.Status,
 			FailureClass:  item.FailureClass,
 			OccurredAt:    item.OccurredAt,
@@ -862,20 +865,24 @@ func llmUsageProviderModelBreakdownInfosFromClient(items []client.LLMUsageProvid
 func eventRecordInfosFromClient(items []client.EventRecord) []EventRecordInfo {
 	ret := make([]EventRecordInfo, 0, len(items))
 	for _, item := range items {
+		if len(item.Payload.Fields) == 0 {
+			continue
+		}
+		typedPayload := workorchpayloadmapper.FromEventPayload(item.Payload)
 		ret = append(ret, EventRecordInfo{
-			ID:             common.EventRecordID(item.ID),
-			Version:        item.Version,
-			Topic:          item.Topic,
-			OccurredAt:     item.OccurredAt,
-			SourceModule:   item.SourceModule,
-			SubjectType:    item.SubjectType,
-			SubjectID:      item.SubjectID,
-			WorkspaceID:    common.WorkspaceID(item.WorkspaceID),
-			RunID:          common.RunID(item.RunID),
-			StepID:         common.StepID(item.StepID),
-			Payload:        clonePayloadMap(item.Payload),
-			PayloadSummary: clonePayloadMap(item.PayloadSummary),
-			PayloadRef:     item.PayloadRef,
+			ID:           common.EventRecordID(item.ID),
+			Version:      item.Version,
+			Topic:        item.Topic,
+			OccurredAt:   item.OccurredAt,
+			SourceModule: item.SourceModule,
+			SubjectType:  item.SubjectType,
+			SubjectID:    item.SubjectID,
+			WorkspaceID:  common.WorkspaceID(item.WorkspaceID),
+			RunID:        common.RunID(item.RunID),
+			StepID:       common.StepID(item.StepID),
+			Payload:      typedPayload,
+			Summary:      typedPayload.CompactSummary(),
+			PayloadRef:   item.PayloadRef,
 		})
 	}
 	return ret
@@ -890,7 +897,7 @@ func decisionInfosFromClient(items []client.Decision) []DecisionInfo {
 			RunID:              common.RunID(item.RunID),
 			Reason:             item.Reason,
 			Question:           item.Question,
-			Context:            clonePayloadMap(item.Context),
+			Context:            item.Context.Clone(),
 			State:              item.State,
 			ResolutionType:     item.ResolutionType,
 			ContinuationAction: item.ContinuationAction,
@@ -911,7 +918,7 @@ func approvalInfosFromClient(items []client.Approval) []ApprovalInfo {
 			RunID:          common.RunID(item.RunID),
 			Reason:         item.Reason,
 			Action:         item.Action,
-			Context:        clonePayloadMap(item.Context),
+			Context:        item.Context.Clone(),
 			State:          item.State,
 			AutoGovernance: mapRemoteAutoGovernanceSummary(item.AutoGovernance),
 		})
@@ -1347,7 +1354,7 @@ func (b *remoteDecisionBackend) Resolve(ctx context.Context, req ResolveDecision
 	item := mapRemoteDecisionInfoPtr(d)
 	return &item, nil
 }
-func (b *remoteDecisionBackend) BatchResolve(ctx context.Context, workspaceID common.WorkspaceID, ticketIDs []common.TicketID, resolutionType string, payload map[string]any) ([]DecisionInfo, error) {
+func (b *remoteDecisionBackend) BatchResolve(ctx context.Context, workspaceID common.WorkspaceID, ticketIDs []common.TicketID, resolutionType string, payload workorcheventpayload.Payload) ([]DecisionInfo, error) {
 	ids := make([]string, len(ticketIDs))
 	for i, id := range ticketIDs {
 		ids[i] = string(id)
@@ -1396,7 +1403,7 @@ func mapRemoteDecisionInfo(d client.Decision) DecisionInfo {
 		RunID:              common.RunID(d.RunID),
 		Reason:             d.Reason,
 		Question:           d.Question,
-		Context:            clonePayloadMap(d.Context),
+		Context:            d.Context.Clone(),
 		State:              d.State,
 		ResolutionType:     d.ResolutionType,
 		ContinuationAction: d.ContinuationAction,
@@ -1428,25 +1435,35 @@ func clonePayloadMapSlice(input []map[string]any) []map[string]any {
 	return ret
 }
 
+func payloadFromRemoteMap(input map[string]any) workorcheventpayload.Payload {
+	payload, _ := workorcheventpayload.FromMap(input)
+	return payload
+}
+
+func payloadsFromRemoteMaps(input []map[string]any) []workorcheventpayload.Payload {
+	payloads, _ := workorcheventpayload.FromMapSlice(input)
+	return payloads
+}
+
 // ── Remote Approval ──
 
 type remoteApprovalBackend struct{ cl *client.Client }
 
-func (b *remoteApprovalBackend) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...map[string]any) (*ApprovalInfo, error) {
+func (b *remoteApprovalBackend) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*ApprovalInfo, error) {
 	a, err := b.cl.Approve(ctx, string(wsID), string(id), payload...)
 	if err != nil {
 		return nil, err
 	}
 	return &ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)}, nil
 }
-func (b *remoteApprovalBackend) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...map[string]any) (*ApprovalInfo, error) {
+func (b *remoteApprovalBackend) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*ApprovalInfo, error) {
 	a, err := b.cl.Reject(ctx, string(wsID), string(id), payload...)
 	if err != nil {
 		return nil, err
 	}
 	return &ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)}, nil
 }
-func (b *remoteApprovalBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...map[string]any) ([]ApprovalInfo, error) {
+func (b *remoteApprovalBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...workorcheventpayload.Payload) ([]ApprovalInfo, error) {
 	_idStrings := make([]string, len(ids))
 	for i, id := range ids {
 		_idStrings[i] = string(id)
@@ -1695,7 +1712,7 @@ func clientTemplateFromInfo(info *TemplateInfo) *client.WorkspaceTemplate {
 		DoDItems:         append([]string(nil), info.DoDItems...),
 		DefaultSoulID:    string(info.DefaultSoulID),
 		SoulBindings:     cloneStringMap(info.SoulBindings),
-		EvidencePolicies: cloneTemplateEvidencePolicies(info.EvidencePolicies),
+		EvidencePolicies: workorcheventpayload.MapSlice(info.EvidencePolicies),
 	}
 }
 
@@ -1711,7 +1728,7 @@ func templateInfoFromClient(item *client.WorkspaceTemplate) *TemplateInfo {
 		DoDItems:         append([]string(nil), item.DoDItems...),
 		DefaultSoulID:    common.SoulID(item.DefaultSoulID),
 		SoulBindings:     cloneStringMap(item.SoulBindings),
-		EvidencePolicies: cloneTemplateEvidencePolicies(item.EvidencePolicies),
+		EvidencePolicies: payloadsFromRemoteMaps(item.EvidencePolicies),
 	}
 }
 

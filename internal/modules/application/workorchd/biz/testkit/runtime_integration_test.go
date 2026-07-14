@@ -28,7 +28,17 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
+
+func mustTestkitStepPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
+	t.Helper()
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
 
 func newRuntimeWithBackend(backend string, dataRoot string) *bootstrap.Runtime {
 	return NewRuntime(backend, dataRoot, nil)
@@ -123,7 +133,7 @@ func TestRuntimeRegistersOrchestratorCommandHandlers(t *testing.T) {
 		RunID:  "run-command",
 		Kind:   "llm/workspace_execution",
 		State:  common.StepStateSucceeded,
-		Output: map[string]any{"stage": "blocked_on_approval"},
+		Output: mustTestkitStepPayload(t, map[string]any{"stage": "blocked_on_approval"}),
 	}); err != nil {
 		t.Fatalf("CreateStep: %v", err)
 	}
@@ -184,7 +194,7 @@ func TestWorkspaceScopedStepRepositoryUsesRuntimeWorkspaceForDuplicateRunIDs(t *
 		RunID:  runID,
 		Kind:   "llm/workspace_execution",
 		State:  common.StepStateSucceeded,
-		Output: map[string]any{"status": "completed"},
+		Output: mustTestkitStepPayload(t, map[string]any{"status": "completed"}),
 	}); err != nil {
 		t.Fatalf("create step in workspace A: %v", err)
 	}

@@ -109,8 +109,7 @@ func TestProjectWorkspaceSnapshotSummaryOmitsPollingHeavyRuntimeFields(t *testin
 			},
 		}},
 		EventRecords: []readmodelcore.EventRecord{{
-			ID:      "evt-summary-compact",
-			Payload: map[string]any{"large": strings.Repeat("event", 2000)},
+			ID: "evt-summary-compact",
 		}},
 	})
 
@@ -252,7 +251,7 @@ func TestProjectWorkspaceSnapshotDetailCompactsTypedContextSectionData(t *testin
 	decision := readmodelcore.Decision{
 		ID:    "decision-heavy",
 		State: "open",
-		Context: map[string]any{
+		Context: mustProjectionPayload(t, map[string]any{
 			"failedStepInput": map[string]any{
 				"failureTargetRepairContext": []any{
 					map[string]any{"contentPreview": strings.Repeat("preview", 2000)},
@@ -261,7 +260,7 @@ func TestProjectWorkspaceSnapshotDetailCompactsTypedContextSectionData(t *testin
 			"failedStepOutput": map[string]any{
 				"error": strings.Repeat("decision-error", 2000),
 			},
-		},
+		}),
 	}
 
 	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{

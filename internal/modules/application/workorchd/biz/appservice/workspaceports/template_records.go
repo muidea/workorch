@@ -2,15 +2,15 @@ package workspaceports
 
 import (
 	"context"
-	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/eventvalue"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func ReadWorkspaceTemplateRecord(ctx context.Context, hub magicevent.Hub, templateID string) (*repository.WorkspaceTemplate, error) {
@@ -22,48 +22,46 @@ func ListWorkspaceTemplateRecords(ctx context.Context, hub magicevent.Hub) ([]*r
 }
 
 func CreateWorkspaceTemplateRecord(ctx context.Context, hub magicevent.Hub, item *repository.WorkspaceTemplate) error {
-	if item == nil {
+	if hub == nil || item == nil {
 		return common.ErrInvalidArgument
 	}
 	command, err := workspaceTemplateCommandFromRepository(item)
 	if err != nil {
 		return err
 	}
-	_, err = sendWorkspaceMagicCommand[workspaceevents.CreateWorkspaceTemplateCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceTemplateCommandCreate, workspaceevents.CommandDestination, "workspace_template", item.ID, "", "", command)
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandCreate, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceTemplateCommandCreate, "workspace_template", item.ID, "", "", "")
+	_, err = ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceTemplateCommandCreate)
 	return err
 }
 
 func UpdateWorkspaceTemplateRecord(ctx context.Context, hub magicevent.Hub, item *repository.WorkspaceTemplate) error {
-	if item == nil {
+	if hub == nil || item == nil {
 		return common.ErrInvalidArgument
 	}
 	command, err := workspaceTemplateCommandFromRepository(item)
 	if err != nil {
 		return err
 	}
-	_, err = sendWorkspaceMagicCommand[workspaceevents.UpdateWorkspaceTemplateCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceTemplateCommandUpdate, workspaceevents.CommandDestination, "workspace_template", item.ID, "", "", workspaceevents.UpdateWorkspaceTemplateCommand(command))
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandUpdate, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.UpdateWorkspaceTemplateCommand(command))
+	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceTemplateCommandUpdate, "workspace_template", item.ID, "", "", "")
+	_, err = ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceTemplateCommandUpdate)
 	return err
 }
 
 func DeleteWorkspaceTemplateRecord(ctx context.Context, hub magicevent.Hub, templateID string) error {
-	if templateID == "" {
+	if hub == nil || templateID == "" {
 		return common.ErrInvalidArgument
 	}
-	_, err := sendWorkspaceMagicCommand[workspaceevents.DeleteWorkspaceTemplateCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceTemplateCommandDelete, workspaceevents.CommandDestination, "workspace_template", templateID, "", "", workspaceevents.DeleteWorkspaceTemplateCommand{TemplateID: templateID})
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandDelete, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.DeleteWorkspaceTemplateCommand{TemplateID: templateID})
+	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceTemplateCommandDelete, "workspace_template", templateID, "", "", "")
+	_, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceTemplateCommandDelete)
 	return err
 }
 
 func workspaceTemplateCommandFromRepository(item *repository.WorkspaceTemplate) (workspaceevents.CreateWorkspaceTemplateCommand, error) {
 	if item == nil {
 		return workspaceevents.CreateWorkspaceTemplateCommand{}, common.ErrInvalidArgument
-	}
-	contextHints, err := eventvalue.FromMap(item.ContextHints)
-	if err != nil {
-		return workspaceevents.CreateWorkspaceTemplateCommand{}, fmt.Errorf("invalid workspace template context hints: %w", err)
-	}
-	evidencePolicies, err := eventvalue.FromMapSlice(item.EvidencePolicies)
-	if err != nil {
-		return workspaceevents.CreateWorkspaceTemplateCommand{}, fmt.Errorf("invalid workspace template evidence policies: %w", err)
 	}
 	return workspaceevents.CreateWorkspaceTemplateCommand{
 		TemplateID:       item.ID,
@@ -73,7 +71,7 @@ func workspaceTemplateCommandFromRepository(item *repository.WorkspaceTemplate) 
 		DoDItems:         append([]string(nil), item.DoDItems...),
 		DefaultSoulID:    item.DefaultSoulID,
 		SoulBindings:     cloneStringMap(item.SoulBindings),
-		ContextHints:     contextHints,
-		EvidencePolicies: evidencePolicies,
+		ContextHints:     item.ContextHints.Clone(),
+		EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies),
 	}, nil
 }

@@ -4,252 +4,163 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-05-30
+Last Updated: 2026-07-14
 
 ## Purpose
 
-本文件定义 WorkOrch 从 planning 到 execution 的主运行链路。
+本文件定义 Runtime V2 从 reducer decision 到 candidate、sealed dispatch、operation
+execution 与 evidence commit 的主执行链路。
+
+生产主线是：
+
+```text
+candidate → seal → ExecuteRuntimeOperation → evidence → reducer
+```
+
+**不是** V1 的 `llm → executionGraph → checkpoint`。
 
 ## Flow
 
 ```text
-llm/workspace_execution
--> normalized LLM output
--> next step / executionGraph / governance gate / failed assessment
--> orchestrator dispatch
--> block runtime adapters execute
--> Step / ToolCall / Patch / ValidationResult / RuntimeCheckpoint evidence
--> next graph batch or follow-up LLM step
+RuntimeDecision.Action ∈ {
+  ProduceStateChange,
+  ProduceValidation,
+  ProduceAssessment,
+  RequestGovernance
+}
+  -> BeginRuntimeV2CandidateAttempt (attempt 0 or 1)
+  -> RequestRuntimeCandidate
+       Decision + AuthorityTransaction
+       DefinitionContext
+       RuntimeCandidateContext (from persisted facts)
+       StablePrefixHash
+  -> Accept / Fail candidate attempt
+  -> seal SealedDispatch
+       full transaction + candidate hash + typed step input
+  -> branch:
+       Assessment  -> CommitRuntimeV2Assessment
+       Governance  -> OpenRuntimeGovernanceRequest -> governed_wait
+       Operations  -> dependency-ordered ExecuteRuntimeOperation*
+                       each op commits evidence independently
+  -> reducer (focus advance / next action / terminal)
 ```
 
 ## Main Stages
 
-### 1. Planning
+### 1. Planning = Candidate Request（不是 graph 规划）
 
-planning 的职责是将 Goal / DoD 拆成可执行单元。
+在 V2 中，“planning” 的实现形态是 **LLM 返回 typed candidate**，绑定当前 authority transaction。
 
-允许输出：
+允许的 candidate 形态：
 
-- plan
-- implementation units
-- executionGraph
-- risk / blocker
-- stage transition proposal
-
-planning 不应直接冒充：
-
-- 已完成的 accepted Result
-- 已验证的 DoD satisfied
-
-### 2. Execution
-
-execution 的职责是：
-
-- 产生真实状态变更，或
-- 明确说明当前不能继续自动变更
-
-execution graph、shell、patch、MCP、file/generic runtime action 都属于 execution
-阶段的实际动作。
-
-补充稳定链路要求：
-
-- Workspace activation 的首个正式运行步骤应进入 `llm/workspace_execution`
-- LLM 只产生结构化 execution decision；它不能直接写文件、执行 shell 或调用 MCP
-- 只有进入 Step output 的 normalized LLM output 才具备业务意义
-- 决策、审批、patch、tool call、validation、memory write 都必须继续经由 orchestrator 映射为正式运行链路
-
-### 3. Graph Dispatch
-
-当 LLM 输出 executionGraph 后：
-
-- orchestrator 持有 graph 的调度权
-- ready nodes 可并发执行
-- block adapters 只执行单节点动作，不拥有 Run 生命周期
-- graph leaf 结束后，应进入 follow-up、verification 或 acceptance，而不是无界扩图
-
-graph / follow-up 补充要求：
-
-- executionGraph 是 advisory plan，直到被验证并写入 Step output 后才成为正式调度输入
-- graph leaf 完成后如仍要求 DoD assessment，应进入 follow-up LLM step，而不是让执行 block 直接判定业务成功
-- graph exhausted 不能无限返回新的空转 continuation；应进入 verification / acceptance / repair / replan 分流
-
-#### Graph Parallel Dispatch
-
-graph 调度的稳定并发规则至少应保持：
-
-- ready nodes 可以并发执行
-- 同一依赖链上的节点必须保持拓扑顺序
-- graph leaf 全部完成后，才能进入 follow-up / verification / acceptance 分流
-- block adapter 只执行单节点动作，不持有 graph 全局生命周期
+| Candidate | 对应 action | 内容 |
+| --- | --- | --- |
+| StateChangeCandidate | `ProduceStateChange` | 一组 `RuntimeOperation`（state-changing） |
+| ValidationCandidate | `ProduceValidation` | 一组 validation operations |
+| AssessmentCandidate | `ProduceAssessment` | focus / coverage / satisfied / evidence refs |
+| Governance candidate | `RequestGovernance` | external dependency ticket 输入 |
 
 约束：
 
-- 并发执行不等于并行关闭业务收口；closeout 仍回到 verification / acceptance
-- graph 扩展上限、空转 continuation 和 wrapper failure 不得因为并发分发而被隐藏
+- block / LLM 输出只是 **candidate**，不是 accepted Result
+- candidate 必须绑定同一 authority snapshot；transaction 漂移不得进入执行
+- attempt 0/1 的 pending / failed / accepted 随 aggregate 持久化
+- attempt 1 **必须**复用相同 transaction 与 stable prefix；第二次失败后只能进入 governance 或 terminal
+- 不存在第三次 candidate 请求；accepted attempt 必须对应 active 或 completed sealed dispatch
 
-### 4. Patch And State-Changing Execution
+### 2. Seal Before Execute
 
-state-changing execution 在 planning/execution 主链中至少应区分：
+执行前必须持久化：
 
-| 动作 | 当前职责 |
-| --- | --- |
-| `patch/preview` | 只预演 diff / 风险 / approvalRequired / conflict，不落盘 |
-| `patch/apply` | 正式落盘，并生成 patch record / evidence / event |
-| `patch/revert` | 对已有 patch 或变更做受控回退，不等于任意重置工作区 |
+- `SealedDispatch`（state = sealed）
+- 完整 `AuthorityTransaction`
+- `candidateHash`
+- typed step / operation input
 
-稳定规则：
+没有 sealed dispatch 的 accepted attempt 会被 invariant validation 拒绝。
 
-- `patch/preview` 不替代 `patch/apply`
-- `patch/apply` 进入副作用前必须通过 target relevance、coverage target、bounded verification 等合同校验
-- `patch/revert` 只属于受治理的恢复动作，不等于自由 `git reset` 或任意 destructive rollback
+### 3. Operation Execution
 
-### 5. File / Git / Web Capability Participation
+sealed candidate 通过 Orchestrator 自有 `ExecuteRuntimeOperationCommand/Result` 按
+operation kind 投递到：
 
-planning/execution 主链中，file / git / web capability 的稳定角色至少包括：
+- File
+- Git
+- Shell
+- MCP
+- Web
+- SSH
 
-| 能力族 | 主链职责 |
-| --- | --- |
-| `file/*` / `patch/*` | 文件读取、变更预演、正式落盘 |
-| `git/*` | 仓库状态观察、差异、最小提交闭环 |
-| `web/search` / `web/fetch` | 受控来源发现与来源读取 |
+规则：
 
-约束：
+- command/result 使用**具体类型**；同步返回的 typed result 是提交 execution evidence 的**唯一**执行回执
+- 跨组件只经 EventHub；不持有 owner service / repository
+- 多 operation 按 dependency graph **确定性**执行；每个 operation **独立**提交 evidence
+- 全部成功或任一失败后才结束 dispatch，再进入 reducer
+- execution evidence 必须携带来自 sealed operation 的 coverage work item IDs
+- 前序 focus 的 evidence **不得**满足后续 focus
 
-- 这些能力都属于 execution 证据面，不直接表达 accepted business outcome
-- file/git/web 的业务解释由 profile/capability 层细化，不下沉到本 flow
-- 大正文、raw payload、大 diff、网页正文都优先通过摘要 + ref，而不是塞入默认主链输出
+Orchestrator **不**注册通用 runtime executor、V1 step kind matrix 或 RuntimeAdapter registry。
 
-### 6. Incremental Artifact Output Flow
+### 4. Coverage Focus And Required Output
 
-当 `need_state_change` 的目标预计无法稳定放入单次 `executionGraph` JSON 时，
-planning/execution 主链必须允许切换到 `incrementalArtifact`。
+- `RuntimeFacts` 持久化当前 focus 与有序 remaining focus queue
+- 当前 focus 的 required evidence 满足后，evidence commit **原子**切换到下一 focus，再调用同一 reducer
+- `CoverageFocus` 可携带 evidence role、accepted/rejected step kinds、accepted operations
+- reducer 只在 owner 已确认的 capability kinds 中做中立交集/排除，结果封入 `RequiredOutputContract`
+- 若声明 accepted operations，candidate 至少包含一个匹配的具体 operation 参数；同 step kind 的其他动作不能替代
 
-该模式的职责是：
+### 5. Prerequisite Gate Before LLM
 
-- 用小 envelope 承载 plan/chunk
-- 让 runtime 持有 continuation cursor
-- 在 assemble/apply 后回到普通 verification / acceptance 闭环
+LLM dispatch 前必须先完成 preflight：
 
-它不负责：
+- manifest
+- target snapshot
+- failure target
+- capability
+- validation scratch
+- provider ceiling
 
-- 改写 `ConvergenceContract.State`
-- 直接表达 accepted Result
-- 绕过 evidence / validation / acceptance gate
+缺失资源只能进入确定性 `AcquirePrerequisite`，不得混入 LLM state-changing requiredOutput。
 
-稳定主链：
+### 6. What Is Not On This Path
 
-```text
-planning/execution
--> output mode selector
--> artifact_plan
--> artifact_chunk*
--> assemble
--> apply
--> validation / follow-up
--> verification / acceptance
-```
+以下内容已从生产主线移除，不得作为 planning/execution 正式路径：
 
-约束：
-
-- `incrementalArtifact` 只是 `need_state_change` 的输出承载模式，不是新的 runtime stage
-- plan/chunk 阶段不得直接 satisfied DoD / Goal / deliverable coverage
-- assemble/apply 前不得把 chunk 正文当成正式业务证据
-- 只有 apply/validation 产生的 evidence refs 才能进入 acceptance 候选集
-
-#### Mode Selection Boundary
-
-本 flow 层只承接 mode 切换后的运行链，不重写 selector 细节。
-
-最小稳定语义：
-
-- selector 只能在 `executionGraph` 与 `incrementalArtifact` 之间选择输出模式
-- 切换到 `incrementalArtifact` 后，当前 LLM step 只允许返回该 mode 对应的单一结构
-- 若 selector 回落到 `executionGraph`，当前 step input 中的 artifact continuation contract 必须被清理
-
-selector 阈值、schema 和 request-side 细节见：
-
-- `../00-core/runtime-stage-contract.md`
-- `../30-module-architecture/llm-provider-assembly.md`
-
-#### Artifact Context Read Phase
-
-分片过程中若缺少 concrete target context，允许进入受控 `artifact_context` 读阶段。
-
-稳定规则：
-
-- 只允许 bounded read / list / command / fetch
-- 该阶段只能补上下文，不能推进 chunk cursor
-- `artifact_context` 输出必须是独立的只读 `executionGraph`
-- 不得与 `artifactPlan`、`artifactChunk`、`dodAssessment` 混在同一响应
-
-#### Assemble / Apply / Validation Routing
-
-artifact chunk 全部通过合同校验后，主链必须进入：
-
-1. assemble
-2. apply
-3. validation / follow-up
-
-稳定要求：
-
-- assemble 只生成 runtime internal payload，不直接生成 accepted evidence
-- apply 才是正式 state-changing 落点
-- validation 负责把 apply evidence 绑定到 `coverageTargets` / current work item scope
-- 若 apply 失败、hash 不一致、sequence 缺失或 chunk 合同失效，必须进入 repair /
-  retry / governance 分流，而不是静默丢弃 continuation
-
-#### Continuation Resume Boundary
-
-服务重启、provider retry、schema repair、repair-of-repair 或 follow-up 后，
-若当前 run 存在未完成 continuation，planning/execution 主链必须先恢复 continuation 再继续。
-
-恢复时至少应保留：
-
-- `artifactContinuationId`
-- 当前 phase / state
-- expected sequence
-- targetRef / artifactId
-- accepted plan / chunk hashes / tail hash
-- latest apply / validation evidence refs
-
-恢复后：
-
-- 继续 chunking，或
-- 进入 assemble/apply/validation，或
-- 转入 repair / governance
-
-但不得把未完成 continuation 误投影为普通 graph follow-up。
+- V1 `executionGraph` 作为 orchestrator 调度权威
+- graph follow-up expansion / leaf → NextAction
+- `RuntimeCheckpoint` 推进状态
+- `DispatchNextStep` / `EnableEventDrivenDispatch`
+- `StagePacket` / `NextAction` 包装 candidate 或 evidence
+- incremental artifact 作为独立 V1 stage 主链（若 profile 需要大正文承载，仍须落入
+  sealed operation + evidence，不得绕过 seal/commit）
 
 ## Key Flow Guarantees
 
-- LLM 输出是结构化建议，只有进入 Step output 后才产生业务意义
-- orchestrator 拥有状态迁移和证据映射
+- LLM 只产生 structured candidate；不能直接写文件、执行 shell 或调用 MCP
+- Orchestrator 拥有 seal、evidence quality、coverage binding 与 next action 判定
 - block modules 只拥有外部动作执行
-- patch preview / apply / revert 必须保持预演、落盘、回退三种职责分离
-- file / git / web capability 参与 execution 主链，但不直接拥有 closeout 语义
-- graph 并发只属于调度优化，不改变 verification / acceptance 的收口顺序
-- execution 不得以无限只读 graph 代替真实 state-changing output
-- `incrementalArtifact` 只能作为 state-changing 的输出承载，不得绕过 apply/validation/acceptance
-- 缺失 LLM 配置或 provider 不可用必须清晰失败，不能静默 fallback 成已完成运行
-- Soul / Skill / MCP / Memory 都应作为一等 execution context 输入，而不是拼接型 prompt helper
+- 每次 dispatch 基于一致的 workspace/run/definition/evidence 快照
+- authority attempt 仅在 state、action、focus、definition/evidence revision、requiredOutput hash 全部相同时才增加；prerequisite 或其他事实推进必须重置 attempt
+- drive 每个非等待、非终态 transition 必须增加 `stateRevision`
 
 ## Evidence Produced
 
-planning / execution 主链会沉淀：
+本链路沉淀的是 Runtime V2 typed facts / evidence ledger 输入，例如：
 
-- Step
-- ToolCall
-- Patch
-- ValidationResult
-- RuntimeCheckpoint
-- Memory write request
+- operation evidence（coverage-bound）
+- assessment facts（见 verification-acceptance-flow）
+- governance request / resolution records
+- diagnostic lineage（stale / duplicate）
 
-这些都是后续 verification / acceptance 的输入，而不是最终业务结果本体。
+这些是后续 assessment / Result projection 的输入，不是最终业务结果本体。
 
 ## Source Documents
 
+- [overview.md](overview.md)
+- [verification-acceptance-flow.md](verification-acceptance-flow.md)
+- [evidence-result-flow.md](evidence-result-flow.md)
+- [context-assembly-flow.md](context-assembly-flow.md)
 - `../00-core/runtime-stage-contract.md`
-- `../30-module-architecture/llm-provider-assembly.md`
-- `../30-module-architecture/storage-readmodel.md`
-- `verification-acceptance-flow.md`
-- `../70-roadmap/active/run-closure-quality-improvement-plan.md`
+- `../../internal/modules/kernel/orchestrator/readme.md`
+- `../../internal/pkg/workorchruntimecontract`（`runtime_candidate.go`、`runtime_execution_contract.go`）

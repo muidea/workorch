@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
@@ -17,7 +18,9 @@ func CreateSoul(ctx context.Context, hub magicevent.Hub, cmd contextregistrycore
 	if hub == nil {
 		return contextregistrycore.Soul{}, common.ErrInvalidArgument
 	}
-	result, err := sendMagicCommand[soulevents.CreateSoulCommand, soulevents.SoulCommandResult](ctx, hub, soulevents.TopicSoulCommandCreate, soulevents.CommandDestination, "soul", cmd.ID, soulevents.CreateSoulCommand(soulCommandFromView(cmd)))
+	event := magicevent.NewEventWithContext(soulevents.TopicSoulCommandCreate, sourceModule, soulevents.CommandDestination, magicevent.NewHeader(), ctx, soulevents.CreateSoulCommand(soulCommandFromView(cmd)))
+	ownerevent.BindLane(event, soulevents.TopicSoulCommandCreate, "soul", cmd.ID, "", "", "")
+	result, err := ownerevent.Soul(hub.Send(event), soulevents.TopicSoulCommandCreate)
 	if err != nil {
 		return contextregistrycore.Soul{}, err
 	}
@@ -28,7 +31,9 @@ func UpdateSoul(ctx context.Context, hub magicevent.Hub, cmd contextregistrycore
 	if hub == nil {
 		return contextregistrycore.Soul{}, common.ErrInvalidArgument
 	}
-	result, err := sendMagicCommand[soulevents.UpdateSoulCommand, soulevents.SoulCommandResult](ctx, hub, soulevents.TopicSoulCommandUpdate, soulevents.CommandDestination, "soul", cmd.ID, soulevents.UpdateSoulCommand(soulCommandFromView(cmd)))
+	event := magicevent.NewEventWithContext(soulevents.TopicSoulCommandUpdate, sourceModule, soulevents.CommandDestination, magicevent.NewHeader(), ctx, soulevents.UpdateSoulCommand(soulCommandFromView(cmd)))
+	ownerevent.BindLane(event, soulevents.TopicSoulCommandUpdate, "soul", cmd.ID, "", "", "")
+	result, err := ownerevent.Soul(hub.Send(event), soulevents.TopicSoulCommandUpdate)
 	if err != nil {
 		return contextregistrycore.Soul{}, err
 	}
@@ -53,7 +58,9 @@ func DeleteSoul(ctx context.Context, hub magicevent.Hub, soulID string) error {
 	if hub == nil || soulID == "" {
 		return common.ErrInvalidArgument
 	}
-	_, err := sendMagicCommand[soulevents.DeleteSoulCommand, soulevents.SoulCommandResult](ctx, hub, soulevents.TopicSoulCommandDelete, soulevents.CommandDestination, "soul", soulID, soulevents.DeleteSoulCommand{SoulID: common.SoulID(soulID)})
+	event := magicevent.NewEventWithContext(soulevents.TopicSoulCommandDelete, sourceModule, soulevents.CommandDestination, magicevent.NewHeader(), ctx, soulevents.DeleteSoulCommand{SoulID: common.SoulID(soulID)})
+	ownerevent.BindLane(event, soulevents.TopicSoulCommandDelete, "soul", soulID, "", "", "")
+	_, err := ownerevent.Soul(hub.Send(event), soulevents.TopicSoulCommandDelete)
 	return err
 }
 
@@ -61,7 +68,9 @@ func ReadSoul(ctx context.Context, hub magicevent.Hub, soulID string) (contextre
 	if hub == nil {
 		return contextregistrycore.Soul{}, common.ErrInvalidArgument
 	}
-	result, err := sendMagicCommand[soulevents.GetSoulCommand, soulevents.SoulCommandResult](ctx, hub, soulevents.TopicSoulCommandGet, soulevents.CommandDestination, "soul", soulID, soulevents.GetSoulCommand{SoulID: common.SoulID(soulID)})
+	event := magicevent.NewEventWithContext(soulevents.TopicSoulCommandGet, sourceModule, soulevents.CommandDestination, magicevent.NewHeader(), ctx, soulevents.GetSoulCommand{SoulID: common.SoulID(soulID)})
+	ownerevent.BindLane(event, soulevents.TopicSoulCommandGet, "soul", soulID, "", "", "")
+	result, err := ownerevent.Soul(hub.Send(event), soulevents.TopicSoulCommandGet)
 	if err != nil {
 		return contextregistrycore.Soul{}, err
 	}
@@ -76,7 +85,9 @@ func ListSouls(ctx context.Context, hub magicevent.Hub) ([]contextregistrycore.S
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	result, err := sendMagicCommand[soulevents.ListSoulsCommand, soulevents.SoulCommandResult](ctx, hub, soulevents.TopicSoulCommandList, soulevents.CommandDestination, "soul", "all", soulevents.ListSoulsCommand{})
+	event := magicevent.NewEventWithContext(soulevents.TopicSoulCommandList, sourceModule, soulevents.CommandDestination, magicevent.NewHeader(), ctx, soulevents.ListSoulsCommand{})
+	ownerevent.BindLane(event, soulevents.TopicSoulCommandList, "soul", "all", "", "", "")
+	result, err := ownerevent.Soul(hub.Send(event), soulevents.TopicSoulCommandList)
 	if err != nil {
 		return nil, err
 	}

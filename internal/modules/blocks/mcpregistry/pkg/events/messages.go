@@ -6,7 +6,7 @@ import (
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
-	"github.com/muidea/workorch/internal/pkg/eventvalue"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
@@ -28,7 +28,7 @@ type CreateCapabilityCommand struct {
 	OutputSummary  string
 	StageHints     []string
 	RiskLevel      string
-	Schema         eventvalue.Payload
+	Schema         workorcheventpayload.Payload
 	URI            string
 	Enabled        bool
 	ApprovalPolicy string

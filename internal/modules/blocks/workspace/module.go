@@ -14,16 +14,15 @@ import (
 	systemevents "github.com/muidea/workorch/internal/modules/kernel/system/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
-	"github.com/muidea/workorch/internal/pkg/eventvalue"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorchdefaults"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 const ModuleID = modulecommon.ModuleID
 
 type CreateWorkspaceCommand = workspacecontracts.CreateWorkspaceCommand
 type EnsureWorkspaceCommand = workspacecontracts.EnsureWorkspaceCommand
-type UpdateWorkspaceCommand = workspacecontracts.UpdateWorkspaceCommand
 type DefineGoalCommand = workspacecontracts.DefineGoalCommand
 type UpdateGoalCommand = workspacecontracts.UpdateGoalCommand
 type DefineDoDCommand = workspacecontracts.DefineDoDCommand
@@ -159,24 +158,25 @@ func (m *Module) Service() Service {
 }
 
 func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
-	response, err := m.executeCommand(ev.Context(), ev.ID(), ev.Data())
+	response, err := m.executeCommand(ev)
 	setWorkspaceMagicResult(result, response, err)
 }
 
-func (m *Module) executeCommand(ctx context.Context, topic string, data any) (workspaceevents.WorkspaceCommandResult, error) {
+func (m *Module) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceCommandResult, error) {
 	if m == nil || m.servicePtr == nil {
 		return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 	}
-	workspaceID, err := workspaceScopeFromCommand(topic, data)
+	workspaceID, err := workspaceScopeFromCommand(ev)
 	if err != nil {
 		return workspaceevents.WorkspaceCommandResult{}, err
 	}
+	ctx := ev.Context()
 	if workspaceID != "" {
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 	}
-	switch topic {
+	switch ev.ID() {
 	case workspaceevents.TopicWorkspaceCommandCreate:
-		cmd, ok := data.(workspaceevents.CreateWorkspaceCommand)
+		cmd, ok := ev.Data().(workspaceevents.CreateWorkspaceCommand)
 		if !ok {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
@@ -185,7 +185,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (wo
 		}
 		return workspaceevents.WorkspaceCommandResult{}, nil
 	case workspaceevents.TopicWorkspaceCommandEnsure:
-		cmd, ok := data.(workspaceevents.EnsureWorkspaceCommand)
+		cmd, ok := ev.Data().(workspaceevents.EnsureWorkspaceCommand)
 		if !ok {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
@@ -194,7 +194,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (wo
 		}
 		return workspaceevents.WorkspaceCommandResult{}, nil
 	case workspaceevents.TopicWorkspaceCommandGet:
-		cmd, ok := data.(workspaceevents.GetWorkspaceCommand)
+		cmd, ok := ev.Data().(workspaceevents.GetWorkspaceCommand)
 		if !ok || cmd.WorkspaceID == "" || m.workspaces == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
@@ -204,7 +204,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (wo
 		}
 		return workspaceevents.WorkspaceCommandResult{Workspace: item}, nil
 	case workspaceevents.TopicWorkspaceCommandList:
-		if _, ok := data.(workspaceevents.ListWorkspacesCommand); !ok || m.workspaces == nil {
+		if _, ok := ev.Data().(workspaceevents.ListWorkspacesCommand); !ok || m.workspaces == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
 		items, err := m.workspaces.List(ctx)
@@ -213,7 +213,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (wo
 		}
 		return workspaceevents.WorkspaceCommandResult{Workspaces: items}, nil
 	case workspaceevents.TopicWorkspaceCommandUpdate:
-		cmd, ok := data.(workspaceevents.UpdateWorkspaceCommand)
+		cmd, ok := ev.Data().(workspaceevents.UpdateWorkspaceCommand)
 		if !ok || m.workspaces == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
@@ -224,7 +224,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (wo
 		m.publishWorkspaceUpdated(ctx, item)
 		return workspaceevents.WorkspaceCommandResult{Workspace: item}, nil
 	case workspaceevents.TopicWorkspaceCommandDelete, workspaceevents.TopicWorkspaceCommandPurge:
-		cmd, ok := data.(workspaceevents.DeleteWorkspaceCommand)
+		cmd, ok := ev.Data().(workspaceevents.DeleteWorkspaceCommand)
 		if !ok || cmd.WorkspaceID == "" {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
@@ -233,7 +233,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (wo
 		}
 		return workspaceevents.WorkspaceCommandResult{}, nil
 	case workspaceevents.TopicWorkspaceCommandDefineGoal:
-		cmd, ok := data.(workspaceevents.DefineGoalCommand)
+		cmd, ok := ev.Data().(workspaceevents.DefineGoalCommand)
 		if !ok || m.goals == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
@@ -246,7 +246,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (wo
 		}
 		return workspaceevents.WorkspaceCommandResult{Goal: item}, nil
 	case workspaceevents.TopicWorkspaceCommandUpdateGoal:
-		cmd, ok := data.(workspaceevents.UpdateGoalCommand)
+		cmd, ok := ev.Data().(workspaceevents.UpdateGoalCommand)
 		if !ok || m.goals == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
@@ -259,7 +259,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (wo
 		}
 		return workspaceevents.WorkspaceCommandResult{Goal: item}, nil
 	case workspaceevents.TopicWorkspaceCommandDeleteGoal:
-		cmd, ok := data.(workspaceevents.DeleteGoalCommand)
+		cmd, ok := ev.Data().(workspaceevents.DeleteGoalCommand)
 		if !ok || cmd.GoalID == "" || m.goals == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
@@ -268,7 +268,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (wo
 		}
 		return workspaceevents.WorkspaceCommandResult{}, nil
 	case workspaceevents.TopicWorkspaceCommandGetGoal:
-		cmd, ok := data.(workspaceevents.GetGoalCommand)
+		cmd, ok := ev.Data().(workspaceevents.GetGoalCommand)
 		if !ok || cmd.GoalID == "" || m.goals == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
@@ -278,7 +278,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (wo
 		}
 		return workspaceevents.WorkspaceCommandResult{Goal: item}, nil
 	case workspaceevents.TopicWorkspaceCommandListGoalsByWS:
-		cmd, ok := data.(workspaceevents.ListGoalsByWorkspaceCommand)
+		cmd, ok := ev.Data().(workspaceevents.ListGoalsByWorkspaceCommand)
 		if !ok || cmd.WorkspaceID == "" || m.goals == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
@@ -288,7 +288,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (wo
 		}
 		return workspaceevents.WorkspaceCommandResult{Goals: items}, nil
 	case workspaceevents.TopicWorkspaceCommandDefineDoD:
-		cmd, ok := data.(workspaceevents.DefineDoDCommand)
+		cmd, ok := ev.Data().(workspaceevents.DefineDoDCommand)
 		if !ok || m.dods == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
@@ -301,7 +301,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (wo
 		}
 		return workspaceevents.WorkspaceCommandResult{DoD: item}, nil
 	case workspaceevents.TopicWorkspaceCommandUpdateDoD:
-		cmd, ok := data.(workspaceevents.UpdateDoDCommand)
+		cmd, ok := ev.Data().(workspaceevents.UpdateDoDCommand)
 		if !ok || m.dods == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
@@ -314,7 +314,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (wo
 		}
 		return workspaceevents.WorkspaceCommandResult{DoD: item}, nil
 	case workspaceevents.TopicWorkspaceCommandDeleteDoD:
-		cmd, ok := data.(workspaceevents.DeleteDoDCommand)
+		cmd, ok := ev.Data().(workspaceevents.DeleteDoDCommand)
 		if !ok || cmd.DoDID == "" || m.dods == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
@@ -323,7 +323,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (wo
 		}
 		return workspaceevents.WorkspaceCommandResult{}, nil
 	case workspaceevents.TopicWorkspaceCommandGetDoD:
-		cmd, ok := data.(workspaceevents.GetDoDCommand)
+		cmd, ok := ev.Data().(workspaceevents.GetDoDCommand)
 		if !ok || cmd.DoDID == "" || m.dods == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
@@ -333,7 +333,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (wo
 		}
 		return workspaceevents.WorkspaceCommandResult{DoD: item}, nil
 	case workspaceevents.TopicWorkspaceCommandListDoDsByWS:
-		cmd, ok := data.(workspaceevents.ListDoDsByWorkspaceCommand)
+		cmd, ok := ev.Data().(workspaceevents.ListDoDsByWorkspaceCommand)
 		if !ok || cmd.WorkspaceID == "" || m.dods == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
@@ -343,7 +343,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (wo
 		}
 		return workspaceevents.WorkspaceCommandResult{DoDs: items}, nil
 	case workspaceevents.TopicWorkspaceTemplateCommandCreate:
-		cmd, ok := data.(workspaceevents.CreateWorkspaceTemplateCommand)
+		cmd, ok := ev.Data().(workspaceevents.CreateWorkspaceTemplateCommand)
 		if !ok || m.templates == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
@@ -356,7 +356,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (wo
 		}
 		return workspaceevents.WorkspaceCommandResult{Template: item}, nil
 	case workspaceevents.TopicWorkspaceTemplateCommandGet:
-		cmd, ok := data.(workspaceevents.GetWorkspaceTemplateCommand)
+		cmd, ok := ev.Data().(workspaceevents.GetWorkspaceTemplateCommand)
 		if !ok || cmd.TemplateID == "" || m.templates == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
@@ -366,7 +366,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (wo
 		}
 		return workspaceevents.WorkspaceCommandResult{Template: item}, nil
 	case workspaceevents.TopicWorkspaceTemplateCommandList:
-		if _, ok := data.(workspaceevents.ListWorkspaceTemplatesCommand); !ok || m.templates == nil {
+		if _, ok := ev.Data().(workspaceevents.ListWorkspaceTemplatesCommand); !ok || m.templates == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
 		items, err := m.templates.List(ctx)
@@ -375,7 +375,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (wo
 		}
 		return workspaceevents.WorkspaceCommandResult{Templates: items}, nil
 	case workspaceevents.TopicWorkspaceTemplateCommandUpdate:
-		cmd, ok := data.(workspaceevents.UpdateWorkspaceTemplateCommand)
+		cmd, ok := ev.Data().(workspaceevents.UpdateWorkspaceTemplateCommand)
 		if !ok || m.templates == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
@@ -388,7 +388,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (wo
 		}
 		return workspaceevents.WorkspaceCommandResult{Template: item}, nil
 	case workspaceevents.TopicWorkspaceTemplateCommandDelete:
-		cmd, ok := data.(workspaceevents.DeleteWorkspaceTemplateCommand)
+		cmd, ok := ev.Data().(workspaceevents.DeleteWorkspaceTemplateCommand)
 		if !ok || cmd.TemplateID == "" || m.templates == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
@@ -414,8 +414,11 @@ func (m *Module) publishWorkspaceUpdated(ctx context.Context, item *workspacemod
 	m.eventHub.Post(event)
 }
 
-func workspaceScopeFromCommand(topic string, data any) (common.WorkspaceID, error) {
-	switch cmd := data.(type) {
+func workspaceScopeFromCommand(ev magicevent.Event) (common.WorkspaceID, error) {
+	if ev == nil {
+		return "", common.ErrInvalidArgument
+	}
+	switch cmd := ev.Data().(type) {
 	case workspaceevents.CreateWorkspaceCommand:
 		return cmd.WorkspaceID, nil
 	case workspaceevents.EnsureWorkspaceCommand:
@@ -447,7 +450,7 @@ func workspaceScopeFromCommand(topic string, data any) (common.WorkspaceID, erro
 	case workspaceevents.ListDoDsByWorkspaceCommand:
 		return cmd.WorkspaceID, nil
 	default:
-		if topic == "" {
+		if ev.ID() == "" {
 			return "", common.ErrInvalidArgument
 		}
 		return "", nil
@@ -477,8 +480,8 @@ func workspaceTemplateFromCommand(cmd workspaceevents.CreateWorkspaceTemplateCom
 		DoDItems:         append([]string(nil), cmd.DoDItems...),
 		DefaultSoulID:    cmd.DefaultSoulID,
 		SoulBindings:     cloneStringMap(cmd.SoulBindings),
-		ContextHints:     cmd.ContextHints.Map(),
-		EvidencePolicies: eventvalue.MapSlice(cmd.EvidencePolicies),
+		ContextHints:     cmd.ContextHints.Clone(),
+		EvidencePolicies: workorcheventpayload.CloneSlice(cmd.EvidencePolicies),
 	}, nil
 }
 
@@ -495,8 +498,8 @@ func workspaceFromUpdateCommand(cmd workspaceevents.UpdateWorkspaceCommand) *wor
 		ProfileID:            cmd.ProfileID,
 		DefaultSoulID:        cmd.DefaultSoulID,
 		SoulBindings:         cloneSoulBindingMap(cmd.SoulBindings),
-		ContextHints:         cmd.ContextHints.Map(),
-		EvidencePolicies:     eventvalue.MapSlice(cmd.EvidencePolicies),
+		ContextHints:         cmd.ContextHints.Clone(),
+		EvidencePolicies:     workorcheventpayload.CloneSlice(cmd.EvidencePolicies),
 	}
 }
 

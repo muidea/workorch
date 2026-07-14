@@ -4,12 +4,21 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-06-01
+Last Updated: 2026-07-14
 
 ## Purpose
 
 本文件说明 WorkOrch 的持久化布局、payload refs、read-model projection
 和 file backend / memory backend 的实现边界。
+
+## Runtime V2 Boundary
+
+| 关注点 | 边界 |
+| --- | --- |
+| Run owner 持久化 | `RuntimeStateRecord` / V2 aggregate 经 Run repository CAS；正式 V2 状态唯一来源 |
+| Projection / read model | 只读组装展示；**不**写 owner 状态，**不**推导 next action / StagePacket |
+| Eventstream 存储 | 审计 EventRecord；不是业务修复或 drive 入口 |
+| V1 遗留表/文件 | ToolCall/Patch/Checkpoint 等可能仍存在于存储面，仅查询/retirement；非 V2 调度权威 |
 
 ## Main Responsibility
 
@@ -42,12 +51,14 @@ run 级对象应按 itemized 文件组织，而不是单个大 JSON map 重写�
 
 典型 itemized 资源包括：
 
-- step metadata / input / output
+- Runtime V2 aggregate / `RuntimeStateRecord`（Run owner CAS 权威面；恢复主源）
+- step metadata / input / output（过程/观测面，非 V2 调度权威）
 - tool call metadata / arguments / output
 - validation metadata
 - result / artifact records
 - LLM call request / response / usage
 - artifact continuation metadata / plan / chunk / assembled payload
+- runtime checkpoint（诊断/观测；不得作为 V1 progress/terminal replay 驱动）
 
 ### Artifact Continuation Persistence Boundary
 
@@ -106,7 +117,7 @@ read model 应以：
 长期运行时，workspace list/detail、TUI prompt/status、Web board/detail 和 watchdog
 等高频读取必须以服务端 projection 或有界 metadata query 为主，不得通过全量扫描
 event history 或默认 hydrate payload 来临时重建视图。完整收口设计见
-`projection-first-readmodel-io-closure-design.md`。
+`../90-archive/superseded/projection-first-readmodel-io-closure-design.md`。
 
 默认至少应区分：
 
@@ -241,7 +252,7 @@ storage/read-model 层对 detail endpoint 的支撑关系至少应保持：
 
 | Detail Endpoint Family | 主要仓储/投影输入 |
 | --- | --- |
-| `steps` / `tool-calls` / `runtime-checkpoints` | itemized run evidence records |
+| `steps` / `tool-calls` / `runtime-checkpoints` | itemized run evidence records（过程/观测；非 V2 dispatch 权威） |
 | `results` / `artifacts` / `patches` / `validation-results` | result / artifact / patch / validation repositories |
 | `artifact-continuations` | continuation metadata / plan / chunk / assembled repositories |
 | `decisions` / `approvals` | governance repositories + resolution/approval state |
@@ -267,7 +278,9 @@ storage/read-model 层对 detail endpoint 的支撑关系至少应保持：
   - `payloadRef` -> raw payload
   - `artifact URI` -> artifact content
 - replay / restart contract
-  - file backend 重启后 snapshot / observability / event replay 可重建
+  - file backend 重启后可 load `RuntimeStateRecord` / V2 aggregate 并幂等再 drive
+  - snapshot / observability / event replay 可重建展示与审计面
+  - **不得**把 V1 progress/terminal checkpoint replay 或 `ExecutionContextPatch` 作为恢复驱动
 
 path-safe readable naming 方向：
 
@@ -353,23 +366,28 @@ workorch://workspaces/<workspace-id>/runs/<run-id>/steps/<run-id>/graph-002/007-
 
 当 run-scoped ledger、read-model projection、result artifact 或 UI 展示不一致时：
 
-- 以 run-scoped ledger 为准
-- projection 负责重建 summary / detail / currentFocus
-- result artifact 或 UI 不得反向覆盖 ledger
+- Runtime V2 正式状态以 Run owner 的 `RuntimeStateRecord` / aggregate CAS 为准
+- run-scoped coverage / focus ledger 以 Run aggregate 内权威事实为准
+- projection 只重建 summary / detail / currentFocus 视图，**只读**
+- result artifact 或 UI 不得反向覆盖 ledger 或 V2 authority
+- 不得用 event stream 扫描或 `StagePacket` / `NextAction` 推导修复业务状态
 - console / TUI / Web 应使用 pagination 和 lazy loading，而不是默认全量加载
 
 ## Boundary
 
 该层不负责：
 
-- business outcome 语义裁决
+- business outcome 语义裁决（Result 不判断；裁决在 Orchestrator）
 - provider request contract
+- Runtime V2 drive / sealed dispatch / candidate attempt 推进
 - TUI/Web 产品展示策略
 
 ## Source Documents
 
 - `../10-domain-model/workspace-goal-dod.md`
 - `../10-domain-model/event-observability.md`
-- `projection-first-readmodel-io-closure-design.md`
+- `../10-domain-model/run-step-result-artifact.md`
+- `kernel-workspace-run-result.md`
+- `../90-archive/superseded/projection-first-readmodel-io-closure-design.md`
 - `../50-product-interface/service-api.md`
 - `../60-verification/service-acceptance.md`

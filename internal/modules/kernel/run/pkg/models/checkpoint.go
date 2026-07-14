@@ -1,6 +1,7 @@
 package run
 
 import "github.com/muidea/workorch/internal/pkg/common"
+import "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 
 type RuntimeCheckpoint struct {
 	ID                 common.CheckpointID
@@ -14,5 +15,5 @@ type RuntimeCheckpoint struct {
 	ThreadRef          string
 	OccurredAt         string
 	RestorableUntil    string
-	Data               map[string]any
+	Data               workorcheventpayload.Payload
 }

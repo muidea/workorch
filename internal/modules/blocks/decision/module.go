@@ -16,6 +16,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -178,15 +179,41 @@ func (m *Module) Service() Service {
 }
 
 func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
-	response, err := m.executeCommand(ev.Context(), ev.ID(), ev.Data())
+	response, err := m.executeCommand(ev)
 	setDecisionMagicResult(result, response, err)
 }
 
-func (m *Module) executeCommand(ctx context.Context, topic string, data any) (decisionevents.DecisionCommandResult, error) {
+func (m *Module) executeCommand(ev magicevent.Event) (decisionevents.DecisionCommandResult, error) {
+	ctx := ev.Context()
+	topic := ev.ID()
+	data := ev.Data()
 	if m == nil || m.tickets == nil || m.resolutions == nil || m.servicePtr == nil {
 		return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
 	}
-	if workspaceID := decisionCommandWorkspaceID(data); workspaceID != "" {
+	workspaceID := common.WorkspaceID("")
+	switch cmd := data.(type) {
+	case decisionevents.CreateTicketCommand:
+		workspaceID = cmd.WorkspaceID
+	case decisionevents.UpdateTicketCommand:
+		workspaceID = cmd.WorkspaceID
+	case decisionevents.DeleteTicketCommand:
+		workspaceID = cmd.WorkspaceID
+	case decisionevents.CreateResolutionCommand:
+		workspaceID = cmd.WorkspaceID
+	case decisionevents.EnsureResolvedCommand:
+		workspaceID = cmd.WorkspaceID
+	case decisionevents.DeleteResolutionCommand:
+		workspaceID = cmd.WorkspaceID
+	case decisionevents.GetTicketCommand:
+		workspaceID = cmd.WorkspaceID
+	case decisionevents.ListTicketsByRunCommand:
+		workspaceID = cmd.WorkspaceID
+	case decisionevents.ListTicketsByWorkspaceCommand:
+		workspaceID = cmd.WorkspaceID
+	case decisionevents.GetResolutionCommand:
+		workspaceID = cmd.WorkspaceID
+	}
+	if workspaceID != "" {
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 	}
 	switch topic {
@@ -402,7 +429,7 @@ func (m *Module) commitRuntimeV2GovernanceTicketResolution(ctx context.Context, 
 
 func runtimeV2GovernanceResolutionSummary(ticket *decisionmodel.Ticket, resolution *decisionmodel.Resolution) string {
 	if resolution != nil {
-		if value, ok := resolution.Payload["summary"].(string); ok && strings.TrimSpace(value) != "" {
+		if value, ok := resolution.Payload.String("summary"); ok && strings.TrimSpace(value) != "" {
 			return strings.TrimSpace(value)
 		}
 	}
@@ -467,33 +494,6 @@ func (s decisionCommandScope) hasScope() bool {
 	return s.WorkspaceID != "" || s.RunID != "" || s.StepID != ""
 }
 
-func decisionCommandWorkspaceID(data any) common.WorkspaceID {
-	switch cmd := data.(type) {
-	case decisionevents.CreateTicketCommand:
-		return cmd.WorkspaceID
-	case decisionevents.UpdateTicketCommand:
-		return cmd.WorkspaceID
-	case decisionevents.DeleteTicketCommand:
-		return cmd.WorkspaceID
-	case decisionevents.CreateResolutionCommand:
-		return cmd.WorkspaceID
-	case decisionevents.EnsureResolvedCommand:
-		return cmd.WorkspaceID
-	case decisionevents.DeleteResolutionCommand:
-		return cmd.WorkspaceID
-	case decisionevents.GetTicketCommand:
-		return cmd.WorkspaceID
-	case decisionevents.ListTicketsByRunCommand:
-		return cmd.WorkspaceID
-	case decisionevents.ListTicketsByWorkspaceCommand:
-		return cmd.WorkspaceID
-	case decisionevents.GetResolutionCommand:
-		return cmd.WorkspaceID
-	default:
-		return ""
-	}
-}
-
 func decisionCommandHasScope(cmd decisionevents.EnsureResolvedCommand) bool {
 	return cmd.WorkspaceID != "" || cmd.RunID != "" || cmd.StepID != ""
 }
@@ -536,8 +536,8 @@ func createTicketContract(cmd decisionevents.CreateTicketCommand) decisioncontra
 		Reason:                 cmd.Reason,
 		DecisionKind:           cmd.DecisionKind,
 		Question:               cmd.Question,
-		Context:                cmd.Context.Map(),
-		AutoGovernance:         cmd.AutoGovernance.Map(),
+		Context:                workorcheventpayload.New(cmd.Context...),
+		AutoGovernance:         workorcheventpayload.New(cmd.AutoGovernance...),
 		FailureClass:           cmd.FailureClass,
 		FailureSignature:       cmd.FailureSignature,
 		AllowedRecoveryActions: append([]string(nil), cmd.AllowedRecoveryActions...),
@@ -552,7 +552,7 @@ func resolveTicketContract(cmd decisionevents.EnsureResolvedCommand) decisioncon
 		RunID:              cmd.RunID,
 		StepID:             cmd.StepID,
 		Type:               cmd.Type,
-		Payload:            cmd.Payload.Map(),
+		Payload:            workorcheventpayload.New(cmd.Payload...),
 		ContinuationAction: cmd.ContinuationAction,
 		ResumeRunID:        cmd.ResumeRunID,
 		SuccessorRunID:     cmd.SuccessorRunID,
@@ -568,9 +568,9 @@ func ticketFromUpdateCommand(cmd decisionevents.UpdateTicketCommand) *decisionmo
 		Reason:                 cmd.Reason,
 		DecisionKind:           cmd.DecisionKind,
 		Question:               cmd.Question,
-		Context:                cmd.Context.Map(),
+		Context:                workorcheventpayload.New(cmd.Context...),
 		State:                  cmd.State,
-		AutoGovernance:         cmd.AutoGovernance.Map(),
+		AutoGovernance:         workorcheventpayload.New(cmd.AutoGovernance...),
 		FailureClass:           cmd.FailureClass,
 		FailureSignature:       cmd.FailureSignature,
 		AllowedRecoveryActions: append([]string(nil), cmd.AllowedRecoveryActions...),
@@ -675,7 +675,7 @@ func resolutionFromCreateCommand(cmd decisionevents.CreateResolutionCommand) (*d
 	if !modulecommon.IsSupportedResolutionType(cmd.Type) {
 		return nil, common.ErrInvalidArgument
 	}
-	payload := cmd.Payload.Map()
+	payload := workorcheventpayload.New(cmd.Payload...)
 	return &decisionmodel.Resolution{
 		ID:                 cmd.ResolutionID,
 		TicketID:           cmd.TicketID,
@@ -687,8 +687,8 @@ func resolutionFromCreateCommand(cmd decisionevents.CreateResolutionCommand) (*d
 	}, nil
 }
 
-func stringPayloadValue(payload map[string]any, key string) string {
-	value, _ := payload[key].(string)
+func stringPayloadValue(payload workorcheventpayload.Payload, key string) string {
+	value, _ := payload.String(key)
 	return value
 }
 
@@ -708,12 +708,4 @@ func nonEmptyRunID(values ...common.RunID) common.RunID {
 		}
 	}
 	return ""
-}
-
-func cloneMap(value map[string]any) map[string]any {
-	ret := make(map[string]any, len(value))
-	for key, item := range value {
-		ret[key] = item
-	}
-	return ret
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
@@ -20,7 +21,10 @@ func CreateRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) erro
 	if kind == "" {
 		kind = llmcommon.StepKindWorkspaceExecution
 	}
-	_, err := sendRunMagicCommand[runevents.CreateRunCommand, runevents.RunCommandResult](ctx, hub, runevents.TopicRunCommandCreate, runevents.CommandDestination, "run", string(item.ID), item.WorkspaceID, item.ID, runevents.CreateRunCommand{
+	if hub == nil {
+		return common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandCreate, "application/workorchd/appservice", runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.CreateRunCommand{
 		RunID:              item.ID,
 		WorkspaceID:        item.WorkspaceID,
 		GoalID:             item.GoalID,
@@ -30,6 +34,8 @@ func CreateRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) erro
 		RuntimeBootstrap:   item.RuntimeBootstrap,
 		Priority:           item.Priority,
 	})
+	ownerevent.BindLane(event, runevents.TopicRunCommandCreate, "run", string(item.ID), item.WorkspaceID, item.ID, "")
+	_, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandCreate)
 	return err
 }
 
@@ -37,9 +43,14 @@ func StartRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) error
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
-	_, err := sendRunMagicCommand[orchestratorevents.StartRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandStartRun, orchestratorevents.CommandDestination, "run", string(item.ID), item.WorkspaceID, item.ID, orchestratorevents.StartRunCommand{
+	if hub == nil {
+		return common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandStartRun, "application/workorchd/appservice", orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.StartRunCommand{
 		RunID: item.ID,
 	})
+	ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorCommandStartRun, "run", string(item.ID), item.WorkspaceID, item.ID, "")
+	_, err := ownerevent.Orchestrator(hub.Send(event), orchestratorevents.TopicOrchestratorCommandStartRun)
 	return err
 }
 
@@ -47,20 +58,14 @@ func ResumeRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) erro
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
-	_, err := sendRunMagicCommand[orchestratorevents.ResumeRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandResumeRun, orchestratorevents.CommandDestination, "run", string(item.ID), item.WorkspaceID, item.ID, orchestratorevents.ResumeRunCommand{
+	if hub == nil {
+		return common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandResumeRun, "application/workorchd/appservice", orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.ResumeRunCommand{
 		WorkspaceID: item.WorkspaceID,
 		RunID:       item.ID,
 	})
+	ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorCommandResumeRun, "run", string(item.ID), item.WorkspaceID, item.ID, "")
+	_, err := ownerevent.Orchestrator(hub.Send(event), orchestratorevents.TopicOrchestratorCommandResumeRun)
 	return err
-}
-
-func cloneMap(input map[string]any) map[string]any {
-	if input == nil {
-		return nil
-	}
-	ret := make(map[string]any, len(input))
-	for key, value := range input {
-		ret[key] = value
-	}
-	return ret
 }

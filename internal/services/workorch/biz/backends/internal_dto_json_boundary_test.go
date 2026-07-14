@@ -16,9 +16,10 @@ func TestInternalDTOJSONBoundaryDoesNotRegress(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "../../../../.."))
 	files := []string{
 		"internal/services/workorch/biz/backends/eventhub.go",
-		"internal/services/workorch/biz/backends/snapshot.go",
-		"internal/modules/application/workorchd/biz/appservice/clicore/resources.go",
-		"internal/modules/application/workorchd/biz/appservice/clicore/payload_values.go",
+		"internal/services/workorch/biz/backends/cli_typed_response.go",
+		"internal/modules/application/workorchd/biz/appservice/cli_typed_dispatcher.go",
+		"internal/modules/application/workorchd/pkg/events/cli_contracts.go",
+		"internal/modules/application/workorchd/pkg/events/messages.go",
 	}
 	for _, rel := range files {
 		data, err := os.ReadFile(filepath.Join(repoRoot, rel))
@@ -33,7 +34,13 @@ func TestInternalDTOJSONBoundaryDoesNotRegress(t *testing.T) {
 			"DecodeOrZero",
 			"ResourceMapAlias",
 			"resourceMapAlias",
+			"decodeResultResource",
+			"decodeResultResources",
+			"func resourceMap(",
 			"typedWorkspaceSnapshotInfo",
+			"type CLICommand struct",
+			"type CLIResult struct",
+			"TopicCLICommand =",
 		} {
 			if strings.Contains(text, forbidden) {
 				t.Fatalf("%s contains forbidden internal DTO JSON boundary pattern %q", rel, forbidden)

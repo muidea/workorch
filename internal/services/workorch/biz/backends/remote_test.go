@@ -23,7 +23,7 @@ func TestRemoteEventsBackendSubscribesToSSEStream(t *testing.T) {
 	envelope := backendEventData{
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-remote",
-		Payload:     events.WorkspacePayload("remote workspace", "", "/tmp/remote", "", common.WorkspaceStateActive, "run-remote"),
+		Payload:     events.WorkspacePayloadData{Title: "remote workspace", DeliverableDirectory: "/tmp/remote", State: common.WorkspaceStateActive, ActiveRunID: "run-remote"}.EventPayload().Map(),
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/workorch/events/stream" {
@@ -221,7 +221,7 @@ func TestRemoteEventsBackendReconnectsAndSignalsWorkspaceListRefresh(t *testing.
 	envelope := backendEventData{
 		Topic:       workspaceevents.TopicWorkspaceCreated,
 		WorkspaceID: "ws-created-after-reconnect",
-		Payload:     events.WorkspacePayload("created after reconnect", "", "/tmp/reconnect", "", common.WorkspaceStateActive, ""),
+		Payload:     events.WorkspacePayloadData{Title: "created after reconnect", DeliverableDirectory: "/tmp/reconnect", State: common.WorkspaceStateActive}.EventPayload().Map(),
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/workorch/events/stream" {
@@ -292,13 +292,13 @@ func TestRemoteEventsBackendReconnectsWithLastEventID(t *testing.T) {
 		ID:          "evt-first",
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-replay",
-		Payload:     events.WorkspacePayload("replay", "", "/tmp/replay", "", common.WorkspaceStateActive, "run-replay"),
+		Payload:     events.WorkspacePayloadData{Title: "replay", DeliverableDirectory: "/tmp/replay", State: common.WorkspaceStateActive, ActiveRunID: "run-replay"}.EventPayload().Map(),
 	}
 	second := backendEventData{
 		ID:          "evt-second",
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-replay",
-		Payload:     events.WorkspacePayload("replay", "", "/tmp/replay", "", common.WorkspaceStateActive, "run-replay"),
+		Payload:     events.WorkspacePayloadData{Title: "replay", DeliverableDirectory: "/tmp/replay", State: common.WorkspaceStateActive, ActiveRunID: "run-replay"}.EventPayload().Map(),
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/workorch/events/stream" {

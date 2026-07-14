@@ -4,6 +4,7 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
@@ -29,7 +30,9 @@ func (r MemoryRecallTraceReader) List(ctx context.Context, query repository.Memo
 	if r.Hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := sendMagicCommand[memoryevents.ListMemoryRecallTracesCommand, memoryevents.MemoryCommandResult](ctx, r.Hub, memoryevents.TopicMemoryRecallTraceCommandList, memoryevents.CommandDestination, "workorchd/readmodelports", "memory_recall_trace", "list", memoryevents.ListMemoryRecallTracesCommand{Query: query})
+	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryRecallTraceCommandList, "workorchd/readmodelports", memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.ListMemoryRecallTracesCommand{Query: query})
+	ownerevent.BindLane(event, memoryevents.TopicMemoryRecallTraceCommandList, "memory_recall_trace", "list", query.WorkspaceID, query.RunID, "")
+	response, err := ownerevent.Memory(r.Hub.Send(event), memoryevents.TopicMemoryRecallTraceCommandList)
 	if err != nil {
 		return nil, err
 	}

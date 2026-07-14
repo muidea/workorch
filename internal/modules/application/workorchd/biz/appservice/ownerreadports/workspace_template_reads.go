@@ -6,6 +6,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
@@ -14,7 +15,9 @@ func ReadWorkspaceTemplateByOwnerCommand(ctx context.Context, hub magicevent.Hub
 	if hub == nil || templateID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := sendMagicCommand[workspaceevents.GetWorkspaceTemplateCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceTemplateCommandGet, workspaceevents.CommandDestination, "workspace_template", templateID, workspaceevents.GetWorkspaceTemplateCommand{TemplateID: templateID})
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandGet, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.GetWorkspaceTemplateCommand{TemplateID: templateID})
+	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceTemplateCommandGet, "workspace_template", templateID, "", "", "")
+	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceTemplateCommandGet)
 	if err != nil {
 		return nil, err
 	}
@@ -28,7 +31,9 @@ func ListWorkspaceTemplatesByOwnerCommand(ctx context.Context, hub magicevent.Hu
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := sendMagicCommand[workspaceevents.ListWorkspaceTemplatesCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceTemplateCommandList, workspaceevents.CommandDestination, "workspace_template", "all", workspaceevents.ListWorkspaceTemplatesCommand{})
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandList, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.ListWorkspaceTemplatesCommand{})
+	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceTemplateCommandList, "workspace_template", "all", "", "", "")
+	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceTemplateCommandList)
 	if err != nil {
 		return nil, err
 	}

@@ -6,6 +6,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -14,9 +15,11 @@ func ListDecisionTicketsByWorkspaceOwnerCommand(ctx context.Context, hub magicev
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := sendMagicCommand[decisionevents.ListTicketsByWorkspaceCommand, decisionevents.DecisionCommandResult](ctx, hub, decisionevents.TopicDecisionCommandListTicketsByWS, decisionevents.CommandDestination, "workspace", string(workspaceID), decisionevents.ListTicketsByWorkspaceCommand{
+	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandListTicketsByWS, sourceModule, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.ListTicketsByWorkspaceCommand{
 		WorkspaceID: workspaceID,
 	})
+	ownerevent.BindLane(event, decisionevents.TopicDecisionCommandListTicketsByWS, "workspace", string(workspaceID), workspaceID, "", "")
+	response, err := ownerevent.Decision(hub.Send(event), decisionevents.TopicDecisionCommandListTicketsByWS)
 	if err != nil {
 		return nil, err
 	}
@@ -27,7 +30,9 @@ func ListDecisionTicketsByOwnerCommand(ctx context.Context, hub magicevent.Hub) 
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := sendMagicCommand[decisionevents.ListTicketsCommand, decisionevents.DecisionCommandResult](ctx, hub, decisionevents.TopicDecisionCommandListTickets, decisionevents.CommandDestination, "decision_ticket", "all", decisionevents.ListTicketsCommand{})
+	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandListTickets, sourceModule, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.ListTicketsCommand{})
+	ownerevent.BindLane(event, decisionevents.TopicDecisionCommandListTickets, "decision_ticket", "all", "", "", "")
+	response, err := ownerevent.Decision(hub.Send(event), decisionevents.TopicDecisionCommandListTickets)
 	if err != nil {
 		return nil, err
 	}
@@ -39,10 +44,12 @@ func ListDecisionTicketsByRunOwnerCommand(ctx context.Context, hub magicevent.Hu
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	response, err := sendMagicCommand[decisionevents.ListTicketsByRunCommand, decisionevents.DecisionCommandResult](ctx, hub, decisionevents.TopicDecisionCommandListTicketsByRun, decisionevents.CommandDestination, "run", string(runID), decisionevents.ListTicketsByRunCommand{
+	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandListTicketsByRun, sourceModule, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.ListTicketsByRunCommand{
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 	})
+	ownerevent.BindLane(event, decisionevents.TopicDecisionCommandListTicketsByRun, "run", string(runID), workspaceID, runID, "")
+	response, err := ownerevent.Decision(hub.Send(event), decisionevents.TopicDecisionCommandListTicketsByRun)
 	if err != nil {
 		return nil, err
 	}

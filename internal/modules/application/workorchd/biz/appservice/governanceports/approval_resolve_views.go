@@ -11,6 +11,7 @@ import (
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func ResolveApprovalView(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, approvalID common.ApprovalID, action string, scope common.WorkspaceID) (readmodelcore.Approval, error) {
@@ -79,7 +80,7 @@ func ReadApprovalForResolution(ctx context.Context, hub magicevent.Hub, approval
 }
 
 func resolveApprovalItemByAction(ctx context.Context, hub magicevent.Hub, item *approvalmodel.Approval, action string) (*approvalmodel.Approval, error) {
-	return ResolveApprovalItemWithContext(ctx, hub, item, action, nil)
+	return ResolveApprovalItemWithContext(ctx, hub, item, action, workorcheventpayload.Payload{})
 }
 
 func approvalSemanticFromCommand(cmd appmodelcore.ResolveApprovalCommand, fallbackReason string) governancecommon.ApprovalSemanticNormalization {
@@ -90,7 +91,7 @@ func approvalSemanticFromCommand(cmd appmodelcore.ResolveApprovalCommand, fallba
 	return governancecommon.NormalizeApprovalAction(cmd.Action, rawInput, fallbackReason)
 }
 
-func approvalSemanticSource(payload map[string]any) string {
+func approvalSemanticSource(payload workorcheventpayload.Payload) string {
 	source := approvalPayloadString(payload, "source", "operator", "entry", "client", "channel")
 	if strings.TrimSpace(source) == "" {
 		return "unknown"
@@ -98,9 +99,9 @@ func approvalSemanticSource(payload map[string]any) string {
 	return source
 }
 
-func approvalPayloadString(payload map[string]any, keys ...string) string {
+func approvalPayloadString(payload workorcheventpayload.Payload, keys ...string) string {
 	for _, key := range keys {
-		if value, ok := payload[key].(string); ok && strings.TrimSpace(value) != "" {
+		if value, ok := payload.String(key); ok && strings.TrimSpace(value) != "" {
 			return strings.TrimSpace(value)
 		}
 	}

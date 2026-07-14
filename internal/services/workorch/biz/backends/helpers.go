@@ -75,40 +75,18 @@ func memoryIDStrings(ids []common.MemoryID) []string {
 	return out
 }
 
-func cloneTemplateEvidencePolicies(input []map[string]any) []map[string]any {
-	if input == nil {
-		return nil
+func skillIDStrings(ids []common.SkillID) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, string(id))
 	}
-	ret := make([]map[string]any, 0, len(input))
-	for _, item := range input {
-		cloned := make(map[string]any, len(item))
-		for key, value := range item {
-			cloned[key] = cloneTemplateEvidencePolicyValue(value)
-		}
-		ret = append(ret, cloned)
-	}
-	return ret
+	return out
 }
 
-func cloneTemplateEvidencePolicyValue(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		cloned := make(map[string]any, len(typed))
-		for key, value := range typed {
-			cloned[key] = cloneTemplateEvidencePolicyValue(value)
-		}
-		return cloned
-	case []map[string]any:
-		return cloneTemplateEvidencePolicies(typed)
-	case []any:
-		ret := make([]any, 0, len(typed))
-		for _, item := range typed {
-			ret = append(ret, cloneTemplateEvidencePolicyValue(item))
-		}
-		return ret
-	case []string:
-		return append([]string(nil), typed...)
-	default:
-		return value
+func mcpServerIDStrings(ids []common.MCPServerID) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, string(id))
 	}
+	return out
 }

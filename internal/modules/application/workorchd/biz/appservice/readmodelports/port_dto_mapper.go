@@ -8,6 +8,8 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchpayloadmapper"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
@@ -22,8 +24,8 @@ func PortWorkspaceSnapshotInfo(snapshot readmodelcore.WorkspaceSnapshot) port.Wo
 		ConvergenceStatus:       portConvergenceStatusInfo(snapshot.ConvergenceStatus),
 		RunCommand:              portRunCommandStatusInfo(snapshot.RunCommand),
 		SchedulerDiagnostics:    PortSchedulerDiagnosticsInfo(snapshot.SchedulerDiagnostics),
-		ContextBundle:           portContextBundle(snapshot.ContextBundle),
-		CoverageSummary:         cloneDTOMap(snapshot.CoverageSummary),
+		ContextBundle:           portPayload(portContextBundle(snapshot.ContextBundle)),
+		CoverageSummary:         portPayload(snapshot.CoverageSummary),
 		GapBaseline:             PortGapBaselineInfo(snapshot.GapBaseline),
 		Acceptance:              portAcceptanceProjectionInfo(snapshot.Acceptance),
 		TaskDecompositions:      portTaskDecompositionInfos(snapshot.TaskDecompositions),
@@ -137,7 +139,7 @@ func PortDecisionInfo(item appmodelcore.Decision) port.DecisionInfo {
 		RunID:              common.RunID(item.RunID),
 		Reason:             item.Reason,
 		Question:           item.Question,
-		Context:            cloneDTOMap(item.Context),
+		Context:            item.Context.Clone(),
 		State:              item.State,
 		ResolutionType:     item.ResolutionType,
 		ContinuationAction: item.ContinuationAction,
@@ -162,7 +164,7 @@ func PortApprovalInfo(item appmodelcore.Approval) port.ApprovalInfo {
 		RunID:          common.RunID(item.RunID),
 		Reason:         item.Reason,
 		Action:         item.Action,
-		Context:        cloneDTOMap(item.Context),
+		Context:        item.Context.Clone(),
 		State:          item.State,
 		AutoGovernance: portAutoGovernanceSummaryInfo(item.AutoGovernance),
 	}
@@ -240,8 +242,8 @@ func PortGapBaselineInfo(item *readmodelcore.GapBaseline) *port.GapBaselineInfo 
 		RunID:                 common.RunID(item.RunID),
 		DefinitionRevision:    item.DefinitionRevision,
 		BaselineRevision:      item.BaselineRevision,
-		CurrentFocus:          cloneDTOMap(item.CurrentFocus),
-		OpenCoverageWorkItems: cloneDTOMapSlice(item.OpenCoverageWorkItems),
+		CurrentFocus:          portPayload(item.CurrentFocus),
+		OpenCoverageWorkItems: portPayloadSlice(item.OpenCoverageWorkItems),
 		AcceptedEvidenceRefs:  cloneStrings(item.AcceptedEvidenceRefs),
 		RejectedEvidenceRefs:  cloneStrings(item.RejectedEvidenceRefs),
 		NextAction: port.GapNextActionInfo{
@@ -259,7 +261,7 @@ func PortGapBaselineInfo(item *readmodelcore.GapBaseline) *port.GapBaselineInfo 
 			Status:                todo.Status,
 			Priority:              todo.Priority,
 			Reason:                todo.Reason,
-			Metadata:              cloneDTOMap(todo.Metadata),
+			Metadata:              portPayload(todo.Metadata),
 		})
 	}
 	for _, diagnostic := range item.Diagnostics {
@@ -385,7 +387,7 @@ func PortTemplateInfo(item workspacecore.WorkspaceTemplate) port.TemplateInfo {
 		DoDItems:         cloneStrings(item.DoDItems),
 		DefaultSoulID:    common.SoulID(item.DefaultSoulID),
 		SoulBindings:     cloneStringMap(item.SoulBindings),
-		EvidencePolicies: cloneDTOMapSlice(item.EvidencePolicies),
+		EvidencePolicies: portPayloadSlice(item.EvidencePolicies),
 	}
 }
 
@@ -498,8 +500,8 @@ func portRepairLoopInfo(item readmodelcore.RepairLoop) port.RepairLoopInfo {
 		LastFailureSignature:     item.LastFailureSignature,
 		LastFailureTargetScope:   item.LastFailureTargetScope,
 		LastFailureAt:            item.LastFailureAt,
-		StructuredFailureSignals: cloneDTOMap(item.StructuredFailureSignals),
-		RepairInputCompaction:    cloneDTOMap(item.RepairInputCompaction),
+		StructuredFailureSignals: portPayload(item.StructuredFailureSignals),
+		RepairInputCompaction:    portPayload(item.RepairInputCompaction),
 		LastRepairInputBytes:     item.LastRepairInputBytes,
 		RepeatedFailureReason:    item.RepeatedFailureReason,
 		NextAction:               item.NextAction,
@@ -809,7 +811,7 @@ func portTaskDecompositionNodeInfos(items []readmodelcore.TaskDecompositionNode)
 			BlockingTicketID: common.TicketID(item.BlockingTicketID),
 			EvidenceRefs:     cloneStrings(item.EvidenceRefs),
 			CoverageTargets:  cloneStrings(item.CoverageTargets),
-			Input:            cloneDTOMap(item.Input),
+			Input:            portPayload(item.Input),
 		})
 	}
 	return ret
@@ -850,7 +852,7 @@ func portResultSummaryInfo(item *readmodelcore.ResultSummary) *port.ResultSummar
 		KnownLimitations:      cloneStrings(item.KnownLimitations),
 		ResidualRisks:         cloneStrings(item.ResidualRisks),
 		NextActions:           cloneStrings(item.NextActions),
-		Diagnostics:           cloneDTOMap(item.Diagnostics),
+		Diagnostics:           portPayload(item.Diagnostics),
 	}
 }
 
@@ -898,7 +900,7 @@ func portArtifactContinuationInfos(items []readmodelcore.ArtifactContinuation) [
 			FailureReason:     item.FailureReason,
 			CreatedAt:         item.CreatedAt,
 			UpdatedAt:         item.UpdatedAt,
-			Progress:          cloneDTOMap(item.Progress),
+			Progress:          portPayload(item.Progress),
 		})
 	}
 	return ret
@@ -926,7 +928,7 @@ func portPatchInfos(items []readmodelcore.Patch) []port.PatchInfo {
 			AffectedFiles:    cloneStrings(item.AffectedFiles),
 			RiskLevel:        item.RiskLevel,
 			RiskReasons:      cloneStrings(item.RiskReasons),
-			Diagnostics:      cloneDTOMapSlice(item.Diagnostics),
+			Diagnostics:      portPayloadSlice(item.Diagnostics),
 			CreatedAt:        item.CreatedAt,
 			AppliedAt:        item.AppliedAt,
 			RevertedAt:       item.RevertedAt,
@@ -1062,8 +1064,8 @@ func portLLMContextBudgetTraceInfos(items []readmodelcore.LLMContextBudgetTrace)
 			TracePolicy:           item.TracePolicy,
 			PromptCaptured:        item.PromptCaptured,
 			Estimator:             item.Estimator,
-			Profile:               cloneDTOMap(item.Profile),
-			CachePlan:             cloneDTOMap(item.CachePlan),
+			Profile:               portPayload(item.Profile),
+			CachePlan:             portPayload(item.CachePlan),
 		})
 	}
 	return ret
@@ -1113,8 +1115,8 @@ func portLLMUsageTraceInfos(items []readmodelcore.LLMUsageTrace) []port.LLMUsage
 			RequestBytes:  item.RequestBytes,
 			ResponseBytes: item.ResponseBytes,
 			Streaming:     item.Streaming,
-			ContextBudget: cloneDTOMap(item.ContextBudget),
-			CacheUsage:    cloneDTOMap(item.CacheUsage),
+			ContextBudget: portPayload(item.ContextBudget),
+			CacheUsage:    portPayload(item.CacheUsage),
 			Status:        item.Status,
 			FailureClass:  item.FailureClass,
 			OccurredAt:    item.OccurredAt,
@@ -1167,19 +1169,24 @@ func portLLMUsageProviderModelBreakdownInfos(items []readmodelcore.LLMUsageProvi
 func portEventRecordInfos(items []readmodelcore.EventRecord) []port.EventRecordInfo {
 	ret := make([]port.EventRecordInfo, 0, len(items))
 	for _, item := range items {
+		if len(item.Payload.Fields) == 0 {
+			continue
+		}
+		typedPayload := workorchpayloadmapper.FromEventPayload(item.Payload)
 		ret = append(ret, port.EventRecordInfo{
-			ID:             common.EventRecordID(item.ID),
-			Version:        item.Version,
-			Topic:          item.Topic,
-			OccurredAt:     item.OccurredAt,
-			SourceModule:   item.SourceModule,
-			SubjectType:    item.SubjectType,
-			SubjectID:      item.SubjectID,
-			WorkspaceID:    common.WorkspaceID(item.WorkspaceID),
-			RunID:          common.RunID(item.RunID),
-			StepID:         common.StepID(item.StepID),
-			PayloadSummary: cloneDTOMap(item.PayloadSummary),
-			PayloadRef:     item.PayloadRef,
+			ID:           common.EventRecordID(item.ID),
+			Version:      item.Version,
+			Topic:        item.Topic,
+			OccurredAt:   item.OccurredAt,
+			SourceModule: item.SourceModule,
+			SubjectType:  item.SubjectType,
+			SubjectID:    item.SubjectID,
+			WorkspaceID:  common.WorkspaceID(item.WorkspaceID),
+			RunID:        common.RunID(item.RunID),
+			StepID:       common.StepID(item.StepID),
+			Payload:      typedPayload,
+			Summary:      typedPayload.CompactSummary(),
+			PayloadRef:   item.PayloadRef,
 		})
 	}
 	return ret
@@ -1350,6 +1357,22 @@ func cloneDTOMapSlice(input []map[string]any) []map[string]any {
 		ret = append(ret, cloneDTOMap(item))
 	}
 	return ret
+}
+
+func portPayload(input map[string]any) workorcheventpayload.Payload {
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		return workorcheventpayload.Payload{}
+	}
+	return payload
+}
+
+func portPayloadSlice(input []map[string]any) []workorcheventpayload.Payload {
+	payloads, err := workorcheventpayload.FromMapSlice(input)
+	if err != nil {
+		return nil
+	}
+	return payloads
 }
 
 func cloneDTOValue(value any, depth int) any {

@@ -64,22 +64,21 @@ func validObservedRecord(item eventstreamevents.EventRecordData) bool {
 	if !events.ValidateWorkorchEventVersion(item.Topic, item.Version) {
 		return false
 	}
-	payload := item.Payload.Map()
 	switch item.Topic {
 	case workspaceevents.TopicWorkspaceCreated, workspaceevents.TopicWorkspaceStateChanged:
-		_, ok := events.DecodeWorkspacePayload(payload)
+		_, ok := events.DecodeWorkspaceEventPayload(item.Payload)
 		return ok
 	case runevents.TopicRunCreated, runevents.TopicRunStateChanged:
-		_, ok := events.DecodeRunPayload(payload)
+		_, ok := events.DecodeRunEventPayload(item.Payload)
 		return ok
 	case decisionevents.TopicTicketResolved:
-		_, ok := events.DecodeDecisionResolutionPayload(payload)
+		_, ok := events.DecodeDecisionResolutionEventPayload(item.Payload)
 		return ok
 	case decisionevents.TopicTicketCreated, decisionevents.TopicTicketUpdated:
-		_, ok := events.DecodeDecisionTicketPayload(payload)
+		_, ok := events.DecodeDecisionTicketEventPayload(item.Payload)
 		return ok
 	case approvalevents.TopicApprovalCreated, approvalevents.TopicApprovalResolved:
-		_, ok := events.DecodeApprovalPayload(payload)
+		_, ok := events.DecodeApprovalEventPayload(item.Payload)
 		return ok
 	default:
 		return false

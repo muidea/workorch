@@ -4,92 +4,160 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-05-29
+Last Updated: 2026-07-14
 
 ## Purpose
 
-本文件说明当前仓库的稳定目录组织和模块形状。
+本文件说明当前仓库的稳定目录组织与模块形状，对齐 Runtime V2 生产主链与 `internal/` 树。
 
 ## Repository Shape
 
-当前仓库仍是单 `go.mod` 代码库。
+单 `go.mod` 代码库。
 
-主要结构：
-
-- `application/workorch`
-- `internal/initiators/workorchruntime`
-- `internal/modules/application`
-- `internal/modules/kernel`
-- `internal/modules/blocks`
-- `internal/pkg`
-- `web/workorch-console`
+```text
+application/workorch/          # thin main
+internal/
+  initiators/workorchruntime/  # repository provider 装配
+  modules/
+    application/workorchd/     # appservice / server / bootstrap / projection
+    kernel/
+      orchestrator/            # Runtime V2 convergence authority
+      run/                     # Run / Step / Checkpoint / RuntimeStateRecord
+      governance/              # auto-governance coordination
+      eventstream/             # audit event persistence
+      system/                  # defaults ensure
+    blocks/
+      workspace/ result/ decision/ approval/ memory/
+      soul/ skill/ mcpregistry/
+      llm/ file/ git/ shell/ mcp/ web/ ssh/
+      pkg/                     # blocks 共享辅助（若有）
+  pkg/
+    workorchruntimecontract/   # Runtime V2 中立 contract
+    workorchrepo/ workorchport/ workorchownercontract/
+    workorchconfig/ workorchdefaults/ workorchmanagedconfig/
+    workorchruntimepolicy/ workorchclient/ workorchdeps/
+    repository/                # memory / file backends
+    eventcontract/ events/ eventvalue/ runtimeevent/
+    common/ dialoglanguage/ doditems/ runtimepath/
+  services/workorch/           # CLI / TUI / agent session backends
+web/workorch-console/          # Web Console
+docs/                          # 设计与模块文档
+```
 
 ### Top-Level Intent
 
-- `application/workorch`: 进程入口
-- `internal/initiators`: runtime / framework initiator
-- `internal/modules/application`: appservice、server、observed/presenter 等应用层模块
-- `internal/modules/kernel`: 正式业务模型与 orchestrator
-- `internal/modules/blocks`: runtime adapters
-- `internal/pkg`: 全局共享基础设施
-- `web/workorch-console`: Web Console 前端
+| 路径 | 意图 |
+| --- | --- |
+| `application/workorch` | 进程入口 |
+| `internal/initiators` | framework / repository initiator |
+| `internal/modules/application` | appservice、server、bootstrap、observed/presenter |
+| `internal/modules/kernel` | Run owner、Orchestrator 收敛、governance、eventstream |
+| `internal/modules/blocks` | stateful owners + capability execution |
+| `internal/pkg` | 全局共享 contract 与基础设施 |
+| `internal/services` | CLI/TUI 等人机入口服务 |
+| `web/workorch-console` | 前端 |
 
 ## Module Shape
 
-模块最小形状建议为：
+模块最小形状：
 
-- `module.go`
-- `plugin.go`
-- `biz/`
-- `service/`
-- `pkg/common`
-- `pkg/models`（按需）
+```text
+module.go
+plugin.go
+biz/
+service/          # 按需
+pkg/common/
+pkg/models/       # 按需
+pkg/events/       # EventHub 具体 command/data/result
+pkg/contracts/    # 按需
+readme.md
+```
 
 含义：
 
-- `plugin.go`: 向 magicCommon/pluginmodule 注册模块
-- `module.go`: 暴露模块生命周期入口
-- `biz/`: 业务实现
-- `service/`: 面向外部的模块服务面
-- `pkg/common`: 模块级常量/枚举
-- `pkg/models`: 模块本地实体/DTO/view-model
+- `plugin.go`：向 magicCommon/pluginmodule 注册
+- `module.go`：生命周期入口
+- `biz/`：业务实现
+- `service/`：模块服务面（生产跨组件优先 EventHub，不依赖 service facade 推进 V2）
+- `pkg/events`：跨组件唯一交互合同
+- `pkg/common` / `pkg/models`：常量与本地模型
+
+## Kernel / Orchestrator Layout
+
+```text
+internal/modules/kernel/orchestrator/
+  biz/runtimev2/          # controller, reducer, prerequisite, dispatch, executor, governance
+  pkg/events/             # Drive / Operation / Candidate / Governance 合同
+  pkg/contracts/
+  runtime_v2_*.go         # drive, state repository, operation executor, result projection
+  service/
+  readme.md
+```
+
+```text
+internal/modules/kernel/run/
+  biz/ service/ pkg/events/ pkg/models/ pkg/contracts/
+  # RuntimeBootstrap + RuntimeStateRecord 随 Run 持久化与 CAS
+```
+
+## Blocks Layout
+
+```text
+internal/modules/blocks/
+  # Stateful owners
+  workspace/ result/ decision/ approval/ memory/
+  soul/ skill/ mcpregistry/
+  # Capability execution
+  llm/          # 含 biz/runtimev2 candidate 边界
+  file/ git/ shell/ mcp/ web/ ssh/
+```
+
+Capability block 不再依赖“注册到 Orchestrator RuntimeAdapter registry”的生产路径；Orchestrator 通过 typed operation/candidate EventHub 命令调用。
+
+## Shared Package Highlights
+
+| 包 | 职责 |
+| --- | --- |
+| `workorchruntimecontract` | `RuntimeBootstrap`、`RuntimeStateRecord`、`RuntimeFacts`、candidate、dispatch、governance、evidence、profile/execution contract |
+| `workorchrepo` / `repository` | repository 接口与 memory/file 实现 |
+| `workorchport` / `workorchownercontract` | 跨模块 port / owner 合同辅助 |
+| `workorchconfig` / `workorchdefaults` / `workorchmanagedconfig` | 配置与默认 Soul/Template 等 |
+| `eventcontract` / `runtimeevent` | 事件合同与运行时事件定义 |
+| `workorchclient` | 客户端访问 |
 
 ## Application Shape
 
-`application/{app}` 层建议保持：
-
-- `main.go` 尽量薄
-- 应用层装配显式
-- 业务 orchestration 在 appservice
-- bootstrap 提供分组后的 capability exports
-
-补充约束：
-
-- `main.go` 只负责解析启动参数和触发 lifecycle
-- appservice 负责 use-case 组合，不承担 provider/block 细节
-- bootstrap 负责 grouped exports、runtime shell 和基础依赖装配
-- observed / presenter / read model 语义应从纯渲染逻辑中分离
-
-## Refactor Direction
-
-当前整理方向是：
-
-- keep main thin
-- keep appservice for workflow composition
-- keep bootstrap for grouped assembly exports
-- split large runtime files by responsibility
+- `main.go` 尽量薄：解析参数 + lifecycle
+- bootstrap：application-owned infrastructure only（无 owner repository export）
+- appservice：activation、Start/Resume 转发、read-model、retirement migration
+- observed / presenter：与 HTTP 渲染分离
 
 ## Current Mapping Direction
 
-当前已稳定的映射方向包括：
+| 关注点 | 落点 |
+| --- | --- |
+| thin main | `application/workorch/main.go` |
+| application wiring | `internal/modules/application/workorchd/biz/bootstrap` |
+| appservice composition | `internal/modules/application/workorchd/biz/appservice` |
+| Runtime V2 drive | `internal/modules/kernel/orchestrator/biz/runtimev2` + `runtime_v2_drive.go` |
+| Runtime V2 contract | `internal/pkg/workorchruntimecontract` |
+| Run aggregate CAS | `internal/modules/kernel/run` |
+| TUI / CLI | `internal/services/workorch/service/{tui,cli}` |
+| workspace projection | `internal/modules/application/workorchd` observed / appservice |
 
-- thin main -> `application/workorch/main.go`
-- application runtime wiring -> `internal/modules/application/workorchd/biz/bootstrap`
-- appservice workflow composition -> `internal/modules/application/workorchd/biz/appservice`
-- TUI surface -> `internal/services/workorch/service/tui`
-- orchestrator split-by-responsibility -> `internal/modules/kernel/orchestrator/biz`
-- observed snapshot assembly -> `internal/modules/application/workorchd/pkg/observed`
+## Explicit Non-Structure（V1 已移除主链）
+
+- 无生产路径依赖 `DispatchNextStep` / RuntimeAdapter registry 目录
+- 无 application continuation queue 状态目录作为主链
+- 无 `ExecutionContext` map 作为 activation/resume payload
+- retirement / migration 代码可仍存在于 appservice，但不是 Runtime V2 生产调度
 
 ## Source Documents
 
-- `repository-structure.md`
+- `architecture-overview.md`
+- `kernel-orchestrator-governance.md`
+- `application-workorchd.md`
+- `blocks-runtime-adapters.md`
+- `internal/modules/kernel/orchestrator/readme.md`
+- `internal/modules/kernel/run/readme.md`
+- `internal/modules/application/workorchd/readme.md`

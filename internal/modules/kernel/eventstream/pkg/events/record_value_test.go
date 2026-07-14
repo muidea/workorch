@@ -1,11 +1,11 @@
 package events
 
 import (
-	"reflect"
 	"testing"
 
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func TestEventRecordDataRoundTripWithoutAnyInContract(t *testing.T) {
@@ -14,13 +14,13 @@ func TestEventRecordDataRoundTripWithoutAnyInContract(t *testing.T) {
 		Topic:       "/run/state/changed",
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		RunID:       common.RunID("run-1"),
-		Payload: map[string]any{
-			"state": "running",
-			"count": 3,
-			"flags": []any{true, "bounded"},
-			"scope": map[string]any{"workspaceId": "ws-1"},
-		},
-		PayloadSummary: map[string]any{"fieldCount": 4},
+		Payload: workorcheventpayload.New(
+			workorcheventpayload.StringField("state", "running"),
+			workorcheventpayload.IntField("count", 3),
+			workorcheventpayload.Field{Name: "flags", Value: workorcheventpayload.Value{Kind: workorcheventpayload.ValueArray, Array: []workorcheventpayload.Value{{Kind: workorcheventpayload.ValueBool, Bool: true}, {Kind: workorcheventpayload.ValueString, String: "bounded"}}}},
+			workorcheventpayload.ObjectField("scope", workorcheventpayload.New(workorcheventpayload.StringField("workspaceId", "ws-1"))),
+		),
+		PayloadSummary: workorcheventpayload.New(workorcheventpayload.IntField("fieldCount", 4)),
 	}
 
 	data, err := EventRecordDataFromModel(input)
@@ -34,22 +34,22 @@ func TestEventRecordDataRoundTripWithoutAnyInContract(t *testing.T) {
 	if output == nil {
 		t.Fatal("round trip model is nil")
 	}
-	if !reflect.DeepEqual(output.Payload, map[string]any{
-		"state": "running",
-		"count": int64(3),
-		"flags": []any{true, "bounded"},
-		"scope": map[string]any{"workspaceId": "ws-1"},
-	}) {
+	if !output.Payload.Equal(input.Payload) {
 		t.Fatalf("round trip payload = %#v", output.Payload)
 	}
 }
 
-func TestEventRecordDataRejectsUnsupportedPayloadValue(t *testing.T) {
-	_, err := EventRecordDataFromModel(&eventstreammodel.EventRecord{
-		ID:      common.EventRecordID("event-invalid"),
-		Payload: map[string]any{"invalid": make(chan struct{})},
-	})
-	if err == nil {
-		t.Fatal("unsupported payload value was accepted")
+func TestEventRecordDataClonesPayload(t *testing.T) {
+	input := &eventstreammodel.EventRecord{
+		ID:      common.EventRecordID("event-clone"),
+		Payload: workorcheventpayload.New(workorcheventpayload.StringField("state", "running")),
+	}
+	data, err := EventRecordDataFromModel(input)
+	if err != nil {
+		t.Fatalf("EventRecordDataFromModel: %v", err)
+	}
+	input.Payload.Fields[0].Value.String = "mutated"
+	if state, ok := data.Payload.String("state"); !ok || state != "running" {
+		t.Fatalf("cloned payload state = %q/%v, want running/true", state, ok)
 	}
 }

@@ -25,6 +25,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 type statusResponse struct {
@@ -430,24 +431,24 @@ type createMCPCapabilityRequest = appservice.CreateMCPCapabilityCommand
 type createMemoryItemRequest = appservice.CreateMemoryItemCommand
 
 type resolveDecisionRequest struct {
-	ResolutionType    string         `json:"resolutionType"`
-	ResolutionPayload map[string]any `json:"resolutionPayload,omitempty"`
+	ResolutionType    string                       `json:"resolutionType"`
+	ResolutionPayload workorcheventpayload.Payload `json:"resolutionPayload,omitempty"`
 }
 
 type batchResolveDecisionsRequest struct {
-	TicketIDs         []string       `json:"ticketIds"`
-	ResolutionType    string         `json:"resolutionType"`
-	ResolutionPayload map[string]any `json:"resolutionPayload,omitempty"`
+	TicketIDs         []string                     `json:"ticketIds"`
+	ResolutionType    string                       `json:"resolutionType"`
+	ResolutionPayload workorcheventpayload.Payload `json:"resolutionPayload,omitempty"`
 }
 
 type resolveApprovalRequest struct {
-	Payload map[string]any `json:"payload,omitempty"`
+	Payload workorcheventpayload.Payload `json:"payload,omitempty"`
 }
 
 type batchResolveApprovalsRequest struct {
-	ApprovalIDs []string       `json:"approvalIds"`
-	Action      string         `json:"action"`
-	Payload     map[string]any `json:"payload,omitempty"`
+	ApprovalIDs []string                     `json:"approvalIds"`
+	Action      string                       `json:"action"`
+	Payload     workorcheventpayload.Payload `json:"payload,omitempty"`
 }
 
 type defineGoalRequest struct {

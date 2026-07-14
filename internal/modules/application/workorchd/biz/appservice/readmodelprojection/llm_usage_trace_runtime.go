@@ -1,19 +1,22 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/pkg/events"
+import (
+	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
-func llmUsageTraceStreaming(payload map[string]any) bool {
-	return readModelBoolValue(payload[events.PayloadKeyStreaming])
+func llmUsageTraceStreaming(payload workorcheventpayload.Payload) bool {
+	return eventPayloadBool(payload, events.PayloadKeyStreaming)
 }
 
-func llmUsageTraceContextBudget(payload map[string]any) map[string]any {
-	return readModelMapValue(payload[events.PayloadKeyContextBudget])
+func llmUsageTraceContextBudget(payload workorcheventpayload.Payload) map[string]any {
+	return eventPayloadMap(payload, events.PayloadKeyContextBudget)
 }
 
-func llmUsageTraceCacheUsage(payload map[string]any) map[string]any {
-	return readModelMapValue(payload[events.PayloadKeyCacheUsage])
+func llmUsageTraceCacheUsage(payload workorcheventpayload.Payload) map[string]any {
+	return eventPayloadMap(payload, events.PayloadKeyCacheUsage)
 }
 
-func llmUsageTraceCacheMarkers(payload map[string]any) map[string]any {
-	return readModelMapValue(payload[events.PayloadKeyCacheMarkersSent])
+func llmUsageTraceCacheMarkers(payload workorcheventpayload.Payload) map[string]any {
+	return eventPayloadMap(payload, events.PayloadKeyCacheMarkersSent)
 }

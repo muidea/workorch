@@ -1,19 +1,22 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/pkg/events"
+import (
+	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
-func llmUsageTraceStartedAt(payload map[string]any) string {
-	return readModelStringValue(payload[events.PayloadKeyStartedAt])
+func llmUsageTraceStartedAt(payload workorcheventpayload.Payload) string {
+	return eventPayloadString(payload, events.PayloadKeyStartedAt)
 }
 
-func llmUsageTraceCompletedAt(payload map[string]any) string {
-	return readModelStringValue(payload[events.PayloadKeyCompletedAt])
+func llmUsageTraceCompletedAt(payload workorcheventpayload.Payload) string {
+	return eventPayloadString(payload, events.PayloadKeyCompletedAt)
 }
 
-func llmUsageTraceStatus(payload map[string]any) string {
-	return readModelStringValue(payload[events.PayloadKeyStatus])
+func llmUsageTraceStatus(payload workorcheventpayload.Payload) string {
+	return eventPayloadString(payload, events.PayloadKeyStatus)
 }
 
-func llmUsageTraceFailureClass(payload map[string]any) string {
-	return readModelStringValue(payload[events.PayloadKeyFailureClass])
+func llmUsageTraceFailureClass(payload workorcheventpayload.Payload) string {
+	return eventPayloadString(payload, events.PayloadKeyFailureClass)
 }

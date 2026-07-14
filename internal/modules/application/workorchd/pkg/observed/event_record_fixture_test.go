@@ -5,6 +5,7 @@ import (
 
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 type eventRecordFixture struct {
@@ -25,11 +26,11 @@ type eventRecordFixture struct {
 }
 
 func eventRecordDataFromFixture(record eventRecordFixture) (eventstreamevents.EventRecordData, error) {
-	payload, err := eventstreamevents.EventPayloadFromMap(record.Payload)
+	payload, err := workorcheventpayload.FromMap(record.Payload)
 	if err != nil {
 		return eventstreamevents.EventRecordData{}, err
 	}
-	summary, err := eventstreamevents.EventPayloadFromMap(record.PayloadSummary)
+	summary, err := workorcheventpayload.FromMap(record.PayloadSummary)
 	if err != nil {
 		return eventstreamevents.EventRecordData{}, err
 	}

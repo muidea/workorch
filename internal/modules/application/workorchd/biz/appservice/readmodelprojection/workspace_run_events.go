@@ -60,11 +60,11 @@ func hasNonSupersededRun(runs map[common.RunID]*runmodel.Run) bool {
 }
 
 func runEventState(item *eventstreammodel.EventRecord) common.RunState {
-	if item == nil || item.Payload == nil {
+	if item == nil || len(item.Payload.Fields) == 0 {
 		return ""
 	}
 	for _, key := range []string{"state", "State"} {
-		if value, ok := item.Payload[key].(string); ok {
+		if value, ok := item.Payload.String(key); ok {
 			return common.RunState(value)
 		}
 	}

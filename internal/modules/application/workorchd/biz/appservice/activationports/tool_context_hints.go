@@ -23,7 +23,7 @@ func WorkspaceToolContextHintsFor(ctx context.Context, hub magicevent.Hub, works
 		if workspace == nil {
 			return WorkspaceToolContextHints{}
 		}
-		workspaceHints := activationcore.CloneContextHints(workspace.ContextHints)
+		workspaceHints := activationcore.CloneContextHints(workspace.ContextHints.Map())
 		return WorkspaceToolContextHints{
 			Workspace: workspaceHints,
 			Effective: activationcore.MergeTemplateWorkspaceToolContextHints(
@@ -33,7 +33,7 @@ func WorkspaceToolContextHintsFor(ctx context.Context, hub magicevent.Hub, works
 		}
 	}
 	templateHints := activationcore.MatchingWorkspaceTemplateContextHints(ctx, workspaceTemplateReader{hub: hub}, workspace)
-	workspaceHints := activationcore.CloneContextHints(workspace.ContextHints)
+	workspaceHints := activationcore.CloneContextHints(workspace.ContextHints.Map())
 	return WorkspaceToolContextHints{
 		Template:  templateHints,
 		Workspace: workspaceHints,

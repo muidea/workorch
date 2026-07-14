@@ -15,8 +15,8 @@ func MapToolCalls(items []*runmodel.ToolCall) []readmodelcore.ToolCall {
 			continue
 		}
 		projected := projectToolCallBase(item)
-		projected.Arguments = cloneReadModelMap(item.Arguments)
-		projected.Output = cloneReadModelMap(item.Output)
+		projected.Arguments = cloneReadModelMap(item.Arguments.Map())
+		projected.Output = cloneReadModelMap(item.Output.Map())
 		ret = append(ret, projected)
 	}
 	if len(ret) == 0 {

@@ -1,6 +1,7 @@
 package readmodelprojection
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
@@ -478,7 +479,7 @@ func compactTraceValueMap(input map[string]any, depth int) map[string]any {
 	}
 	ret := make(map[string]any, min(len(input), workspaceSnapshotTraceMapLimit))
 	count := 0
-	for _, key := range orderedDecisionContextMapKeys(input) {
+	for _, key := range orderedTraceMapKeys(input) {
 		if count >= workspaceSnapshotTraceMapLimit {
 			break
 		}
@@ -490,6 +491,15 @@ func compactTraceValueMap(input map[string]any, depth int) map[string]any {
 	if len(ret) == 0 {
 		return nil
 	}
+	return ret
+}
+
+func orderedTraceMapKeys(input map[string]any) []string {
+	ret := make([]string, 0, len(input))
+	for key := range input {
+		ret = append(ret, key)
+	}
+	sort.Strings(ret)
 	return ret
 }
 

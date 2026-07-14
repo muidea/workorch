@@ -32,10 +32,11 @@ var runCoverageCmd = &cobra.Command{
 			return nil
 		}
 		fmt.Println(styleTitle.Render("Run Coverage: " + string(runID)))
-		if summary := stringFromMap(snapshot.CoverageSummary, "summary"); summary != "" {
+		coverageSummary := snapshot.CoverageSummary.Map()
+		if summary := stringFromMap(coverageSummary, "summary"); summary != "" {
 			fmt.Printf("  Summary: %s\n", summary)
 		}
-		if fullLedgerRef := stringFromMap(snapshot.CoverageSummary, "fullLedgerRef"); fullLedgerRef != "" {
+		if fullLedgerRef := stringFromMap(coverageSummary, "fullLedgerRef"); fullLedgerRef != "" {
 			fmt.Printf("  Ledger: %s\n", fullLedgerRef)
 		}
 		if len(snapshot.DoDs) == 0 {
@@ -139,13 +140,11 @@ func stringFromMap(data map[string]any, key string) string {
 }
 
 func eventRecordCompactSummary(item backend.EventRecordInfo) string {
-	for _, key := range []string{"summary", "state", "reason", "kind", "action"} {
-		if value, ok := item.Payload[key].(string); ok && strings.TrimSpace(value) != "" {
-			return value
-		}
+	if summary := item.Payload.CompactSummary(); summary != "" {
+		return summary
 	}
-	if len(item.PayloadSummary) > 0 {
-		return fmt.Sprintf("%v", item.PayloadSummary)
+	if strings.TrimSpace(item.Summary) != "" {
+		return strings.TrimSpace(item.Summary)
 	}
 	return "-"
 }

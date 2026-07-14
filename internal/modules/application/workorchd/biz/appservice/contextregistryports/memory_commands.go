@@ -4,6 +4,7 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 
 	memorycontracts "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/contracts"
@@ -16,12 +17,19 @@ func PublishMemoryItem(ctx context.Context, hub magicevent.Hub, topic string, it
 		return common.ErrInvalidArgument
 	}
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID)
+	if hub == nil {
+		return common.ErrInvalidArgument
+	}
 	switch topic {
 	case memoryevents.TopicMemoryCommandCreate:
-		_, err := sendMagicCommand[memoryevents.CreateMemoryCommand, memoryevents.MemoryCommandResult](ctx, hub, topic, memoryevents.CommandDestination, "memory", string(item.ID), memoryevents.CreateMemoryCommand(memoryCommandFromModel(item)))
+		event := magicevent.NewEventWithContext(topic, sourceModule, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.CreateMemoryCommand(memoryCommandFromModel(item)))
+		ownerevent.BindLane(event, topic, "memory", string(item.ID), item.WorkspaceID, item.RunID, "")
+		_, err := ownerevent.Memory(hub.Send(event), topic)
 		return err
 	case memoryevents.TopicMemoryCommandUpdate:
-		_, err := sendMagicCommand[memoryevents.UpdateMemoryCommand, memoryevents.MemoryCommandResult](ctx, hub, topic, memoryevents.CommandDestination, "memory", string(item.ID), memoryevents.UpdateMemoryCommand(memoryCommandFromModel(item)))
+		event := magicevent.NewEventWithContext(topic, sourceModule, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.UpdateMemoryCommand(memoryCommandFromModel(item)))
+		ownerevent.BindLane(event, topic, "memory", string(item.ID), item.WorkspaceID, item.RunID, "")
+		_, err := ownerevent.Memory(hub.Send(event), topic)
 		return err
 	default:
 		return common.ErrInvalidArgument
@@ -54,7 +62,13 @@ func UpdateMemoryItem(ctx context.Context, commandHub magicevent.Hub, item *memo
 
 func DeleteMemoryItem(ctx context.Context, hub magicevent.Hub, memoryID string) error {
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	_, err := sendMagicCommand[memoryevents.DeleteMemoryCommand, memoryevents.MemoryCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, memoryevents.TopicMemoryCommandDelete, memoryevents.CommandDestination, "memory", memoryID, memoryevents.DeleteMemoryCommand{WorkspaceID: workspaceID, MemoryID: common.MemoryID(memoryID)})
+	if hub == nil {
+		return common.ErrInvalidArgument
+	}
+	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandDelete, sourceModule, memoryevents.CommandDestination, magicevent.NewHeader(), commandCtx, memoryevents.DeleteMemoryCommand{WorkspaceID: workspaceID, MemoryID: common.MemoryID(memoryID)})
+	ownerevent.BindLane(event, memoryevents.TopicMemoryCommandDelete, "memory", memoryID, workspaceID, "", "")
+	_, err := ownerevent.Memory(hub.Send(event), memoryevents.TopicMemoryCommandDelete)
 	return err
 }
 

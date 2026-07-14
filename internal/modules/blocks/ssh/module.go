@@ -9,6 +9,7 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/common"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const ModuleID = modulecommon.ModuleID
@@ -45,14 +46,14 @@ func (m *Module) Start() error {
 	}
 	m.capabilityObserver = magicevent.NewSimpleObserver(ModuleID, m.eventHub)
 	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
-	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteRuntimeOperation, m.handleRuntimeOperation)
+	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteSSHOperation, m.handleSSHOperation)
 	return nil
 }
 
 func (m *Module) Stop(ctx context.Context) error {
 	_ = ctx
 	if m.capabilityObserver != nil {
-		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteRuntimeOperation)
+		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteSSHOperation)
 		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
 	}
 	m.capabilityObserver = nil
@@ -61,16 +62,40 @@ func (m *Module) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (m *Module) handleRuntimeOperation(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.ExecuteRuntimeOperationCommand)
+func (m *Module) handleSSHOperation(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.ExecuteSSHOperationCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	response, err := orchestratorevents.ExecuteRuntimeOperation(event.Context(), command, m.runtimeAdapter)
-	if err != nil {
+	if err := orchestratorevents.ValidateRuntimeOperationScope(command.WorkspaceID, command.RunID, command.DispatchID, command.Transaction, command.OperationID, command.EvidenceKind, command.WorkspaceDeliverableDirectory); err != nil {
 		setCapabilityError(result, err)
 		return
+	}
+	operationResult, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), sshbiz.RuntimeCommandRequest{
+		WorkspaceID: command.WorkspaceID, RunID: command.RunID, StepID: common.StepID(command.DispatchID + "/" + command.OperationID),
+		WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
+		WorkspaceInternalDirectory:    command.WorkspaceInternalDirectory,
+		Host:                          command.Data.Host, Port: command.Data.Port, Username: command.Data.Username,
+		Password: command.Data.Password, PrivateKey: command.Data.PrivateKey, PrivateKeyPath: command.Data.PrivateKeyPath,
+		Command: command.Data.Command, TimeoutMillis: command.Data.TimeoutMillis, EvidencePolicies: command.EvidencePolicies,
+	})
+	response := orchestratorevents.ExecuteSSHOperationResult{
+		EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID,
+		EvidenceKind: command.EvidenceKind, Status: runtimecontract.RuntimeOperationExecutionStatusAccepted,
+		SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: operationResult.Evidence,
+		Data: orchestratorevents.SSHOperationResultData{
+			Status: operationResult.Status, Host: operationResult.Host, Port: operationResult.Port, Username: operationResult.Username,
+			Command: operationResult.Command, Stdout: operationResult.Stdout, Stderr: operationResult.Stderr, ExitCode: operationResult.ExitCode,
+			DurationMillis: operationResult.DurationMillis, TimeoutMillis: operationResult.TimeoutMillis, AuthMethod: operationResult.AuthMethod,
+			OutputTruncated: operationResult.OutputTruncated, StdoutTruncated: operationResult.StdoutTruncated, StderrTruncated: operationResult.StderrTruncated,
+			StdoutBytes: operationResult.StdoutBytes, StderrBytes: operationResult.StderrBytes,
+			FailureCode: operationResult.FailureCode, FailureMessage: operationResult.FailureMessage,
+		},
+	}
+	if executeErr != nil {
+		response.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
+		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindSSHCommand, operationResult.FailureCode, operationResult.FailureMessage, command.TargetRefs)
 	}
 	result.Set(response, nil)
 }

@@ -8,8 +8,8 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/eventvalue"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func TestWorkspaceTemplateViewUsesOwnerPorts(t *testing.T) {
@@ -112,8 +112,8 @@ func workspaceTemplateRecordFromCommand(cmd workspaceevents.CreateWorkspaceTempl
 		DoDItems:         append([]string(nil), cmd.DoDItems...),
 		DefaultSoulID:    cmd.DefaultSoulID,
 		SoulBindings:     cmd.SoulBindings,
-		ContextHints:     cmd.ContextHints.Map(),
-		EvidencePolicies: eventvalue.MapSlice(cmd.EvidencePolicies),
+		ContextHints:     cmd.ContextHints.Clone(),
+		EvidencePolicies: workorcheventpayload.CloneSlice(cmd.EvidencePolicies),
 	}
 }
 

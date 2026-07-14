@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 type CreateWorkspaceRequest struct {
@@ -109,8 +110,8 @@ type GapBaselineInfo struct {
 	RunID                 common.RunID
 	DefinitionRevision    string
 	BaselineRevision      string
-	CurrentFocus          map[string]any
-	OpenCoverageWorkItems []map[string]any
+	CurrentFocus          workorcheventpayload.Payload
+	OpenCoverageWorkItems []workorcheventpayload.Payload
 	AcceptedEvidenceRefs  []string
 	RejectedEvidenceRefs  []string
 	TodoItems             []GapTodoItemInfo
@@ -127,7 +128,7 @@ type GapTodoItemInfo struct {
 	Status                string
 	Priority              int
 	Reason                string
-	Metadata              map[string]any
+	Metadata              workorcheventpayload.Payload
 }
 
 type GapNextActionInfo struct {
@@ -164,8 +165,8 @@ type WorkspaceSnapshotInfo struct {
 	ConvergenceStatus       *ConvergenceStatusInfo
 	RunCommand              *RunCommandStatusInfo
 	SchedulerDiagnostics    *SchedulerDiagnosticsInfo
-	ContextBundle           map[string]any
-	CoverageSummary         map[string]any
+	ContextBundle           workorcheventpayload.Payload
+	CoverageSummary         workorcheventpayload.Payload
 	GapBaseline             *GapBaselineInfo
 	Acceptance              AcceptanceProjectionInfo
 	TaskDecompositions      []TaskDecompositionInfo

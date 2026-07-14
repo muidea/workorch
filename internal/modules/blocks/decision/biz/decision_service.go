@@ -3,7 +3,7 @@ package decision
 import (
 	"context"
 	"errors"
-	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,6 +15,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 type Service struct {
@@ -73,7 +74,7 @@ func (s *Service) EnsureTicket(ctx context.Context, cmd decisioncontracts.Create
 			!sameResolutionPayload(item.AutoGovernance, cmd.AutoGovernance) ||
 			item.FailureClass != nonEmptyString(cmd.FailureClass, stringPayloadValue(cmd.Context, "failureClass")) ||
 			item.FailureSignature != nonEmptyString(cmd.FailureSignature, stringPayloadValue(cmd.Context, "failureSignature")) ||
-			!reflect.DeepEqual(item.AllowedRecoveryActions, nonEmptyStringSlice(cmd.AllowedRecoveryActions, stringSlicePayloadValue(cmd.Context, "allowedRecoveryActions"))) {
+			!slices.Equal(item.AllowedRecoveryActions, nonEmptyStringSlice(cmd.AllowedRecoveryActions, stringSlicePayloadValue(cmd.Context, "allowedRecoveryActions"))) {
 			return common.ErrConflict
 		}
 		return nil
@@ -124,7 +125,7 @@ func (s *Service) resolveTicketItem(ctx context.Context, ticket *decisionModel.T
 		ID:                 cmd.ResolutionID,
 		TicketID:           cmd.TicketID,
 		Type:               cmd.Type,
-		Payload:            common.RedactSensitiveMap(clonePayload(cmd.Payload)),
+		Payload:            common.RedactSensitivePayload(cmd.Payload),
 		ContinuationAction: nonEmptyString(cmd.ContinuationAction, stringPayloadValue(cmd.Payload, "continuationAction")),
 		ResumeRunID:        nonEmptyRunID(cmd.ResumeRunID, common.RunID(stringPayloadValue(cmd.Payload, "resumeRunId"))),
 		SuccessorRunID:     nonEmptyRunID(cmd.SuccessorRunID, common.RunID(stringPayloadValue(cmd.Payload, "successorRunId"))),
@@ -229,27 +230,25 @@ func (s *Service) publishResolvedTicketEvent(ctx context.Context, ticket *decisi
 	if s == nil || s.commandHub == nil || ticket == nil || resolution == nil {
 		return nil
 	}
-	payload, err := decisionEvidenceFields(resolution.Payload)
-	if err != nil {
-		return err
-	}
 	data := decisionevents.TicketResolvedData{
 		Ticket:             ticketChangedData(ticket),
 		ResolutionID:       resolution.ID,
 		ResolutionType:     resolution.Type,
-		ResolutionPayload:  payload,
+		ResolutionPayload:  resolution.Payload.Clone().Fields,
 		ContinuationAction: resolution.ContinuationAction,
 		ResumeRunID:        resolution.ResumeRunID,
 		SuccessorRunID:     resolution.SuccessorRunID,
 	}
-	return s.postNotification(ctx, decisionevents.TopicTicketResolved, data, ticket)
+	event := magicevent.NewEventWithContext(decisionevents.TopicTicketResolved, modulecommon.ModuleID, decisionevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
+	return s.postNotification(event, ticket)
 }
 
 func (s *Service) publishTicketChanged(ctx context.Context, topic string, ticket *decisionModel.Ticket) error {
 	if s == nil || s.commandHub == nil || ticket == nil {
 		return nil
 	}
-	return s.postNotification(ctx, topic, ticketChangedData(ticket), ticket)
+	event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, decisionevents.NotificationDestination, magicevent.NewHeader(), ctx, ticketChangedData(ticket))
+	return s.postNotification(event, ticket)
 }
 
 func ticketChangedData(ticket *decisionModel.Ticket) decisionevents.TicketChangedData {
@@ -267,12 +266,11 @@ func ticketChangedData(ticket *decisionModel.Ticket) decisionevents.TicketChange
 	}
 }
 
-func (s *Service) postNotification(ctx context.Context, topic string, data any, ticket *decisionModel.Ticket) error {
+func (s *Service) postNotification(event magicevent.Event, ticket *decisionModel.Ticket) error {
 	if s == nil || s.commandHub == nil || ticket == nil {
 		return nil
 	}
-	event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, decisionevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(topic, workorchevents.EventHubLaneScope{
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{
 		SubjectType: "decision_ticket",
 		SubjectID:   string(ticket.ID),
 		WorkspaceID: string(ticket.WorkspaceID),
@@ -306,22 +304,12 @@ func resolveCommandContext(ctx context.Context, cmd decisioncontracts.ResolveTic
 	return common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
 }
 
-func sameResolutionPayload(left map[string]any, right map[string]any) bool {
-	if len(left) == 0 && len(right) == 0 {
-		return true
-	}
-	return reflect.DeepEqual(left, right)
+func sameResolutionPayload(left workorcheventpayload.Payload, right workorcheventpayload.Payload) bool {
+	return left.Equal(right)
 }
 
-func clonePayload(input map[string]any) map[string]any {
-	if input == nil {
-		return nil
-	}
-	out := make(map[string]any, len(input))
-	for k, v := range input {
-		out[k] = v
-	}
-	return out
+func clonePayload(input workorcheventpayload.Payload) workorcheventpayload.Payload {
+	return input.Clone()
 }
 
 func nonEmptyString(values ...string) string {
@@ -351,24 +339,21 @@ func nonEmptyStringSlice(values ...[]string) []string {
 	return nil
 }
 
-func stringPayloadValue(payload map[string]any, key string) string {
-	value, _ := payload[key].(string)
+func stringPayloadValue(payload workorcheventpayload.Payload, key string) string {
+	value, _ := payload.String(key)
 	return value
 }
 
-func stringSlicePayloadValue(payload map[string]any, key string) []string {
-	switch typed := payload[key].(type) {
-	case []string:
-		return append([]string(nil), typed...)
-	case []any:
-		ret := make([]string, 0, len(typed))
-		for _, item := range typed {
-			if value, ok := item.(string); ok && strings.TrimSpace(value) != "" {
-				ret = append(ret, strings.TrimSpace(value))
-			}
-		}
-		return ret
-	default:
+func stringSlicePayloadValue(payload workorcheventpayload.Payload, key string) []string {
+	values, ok := payload.StringSlice(key)
+	if !ok {
 		return nil
 	}
+	ret := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			ret = append(ret, value)
+		}
+	}
+	return ret
 }

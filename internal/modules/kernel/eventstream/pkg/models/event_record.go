@@ -1,6 +1,9 @@
 package eventstream
 
-import "github.com/muidea/workorch/internal/pkg/common"
+import (
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
 type EventRecord struct {
 	ID             common.EventRecordID
@@ -14,7 +17,7 @@ type EventRecord struct {
 	RunID          common.RunID
 	StepID         common.StepID
 	Revision       int64
-	Payload        map[string]any
-	PayloadSummary map[string]any
+	Payload        workorcheventpayload.Payload
+	PayloadSummary workorcheventpayload.Payload
 	PayloadRef     string
 }

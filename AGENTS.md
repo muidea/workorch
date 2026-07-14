@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-WorkOrch is a Go service with an embedded Web console. Main entry points live in `application/workorch`. Core runtime code is under `internal/modules/kernel`, reusable packages under `internal/pkg`, application adapters under `internal/modules/application`, and initiator wiring under `internal/initiators`. Web console source is in `web/workorch-console`; production assets are generated during build. Runtime docs are under `docs/`, with `docs/00-core/runtime-stage-contract.md` as the orchestration source of truth.
+WorkOrch is a Go service with an embedded Web console. Main entry points live in `application/workorch`. Core runtime code is under `internal/modules/kernel` (Runtime V2 authority in `kernel/orchestrator`), reusable packages under `internal/pkg` (especially `workorchruntimecontract`), application adapters under `internal/modules/application/workorchd`, capability/owner blocks under `internal/modules/blocks`, and initiator wiring under `internal/initiators`. Web console source is in `web/workorch-console`; production assets are generated during build. Runtime docs are under `docs/`, with `docs/00-core/runtime-stage-contract.md` as the design contract (neutral stage semantics + Runtime V2 mapping) and module `readme.md` files (especially `kernel/orchestrator/readme.md`) as implementation SoT. Fact entry: `docs/01-overview/current-state.md`.
 
 ## Build, Test, and Development Commands
 
@@ -30,8 +30,10 @@ History uses concise imperative summaries such as `fix runtime incremental artif
 
 ## Agent-Specific Runtime Constraints
 
-Before changing runtime behavior, read `docs/00-core/runtime-stage-contract.md`. For LLM request rendering, context budget, cache planning, provider adapters, memory recall, or evidence packaging, also read `docs/00-core/runtime-request-cache-note.md`.
+Before changing runtime behavior, read `docs/00-core/runtime-stage-contract.md` and `internal/modules/kernel/orchestrator/readme.md`. For LLM request rendering, context budget, cache planning, provider adapters, memory recall, or evidence packaging, also read `docs/00-core/runtime-request-cache-note.md`.
 
-Core runtime must remain functionally neutral. Do not hard-code software development, language stacks, test frameworks, MCP-specific behavior, or business-domain logic into orchestrator core. Put feature behavior in profile, capability, template, or adapter layers.
+Production path is **Runtime V2 only** (`DriveRuntimeV2` + reducer + sealed dispatch). Do not reintroduce V1 StagePacket, NextAction, DispatchNextStep, ExecutionContextPatch, auto replan successor, or map-based authority rebuild.
+
+Core runtime must remain functionally neutral. Do not hard-code software development, language stacks, test frameworks, MCP-specific behavior, or business-domain logic into orchestrator core. Put feature behavior in profile, capability, template, or adapter layers. Cross-owner I/O must use EventHub + concrete typed command/result.
 
 Keep the provider-facing LLM cache prefix stable: long-lived system/schema/runtime contracts belong in `C0`, Goal/DoD definitions in `C1`, declarative capability/governance contracts in `C2`, and volatile runtime details in `C3` through `C5`. Treat unexpected `stablePrefixHash` drift as a request rendering bug.
