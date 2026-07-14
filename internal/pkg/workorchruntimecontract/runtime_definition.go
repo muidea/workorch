@@ -18,7 +18,7 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 	execution = execution.Normalized()
 	h := sha256.New()
 	writeHashString(h, RuntimeContractVersionV2)
-	writeHashString(h, "runtime-candidate-contract-v1")
+	writeHashString(h, "runtime-candidate-contract-v2")
 	writeHashString(h, definition.Revision)
 	writeHashString(h, string(definition.GoalID))
 	writeHashString(h, definition.GoalDefinition)

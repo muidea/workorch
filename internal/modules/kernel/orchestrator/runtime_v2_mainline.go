@@ -133,9 +133,14 @@ func (m *Module) requestAndSealRuntimeV2Candidate(
 		return runtimev2.RuntimeAggregate{}, err
 	}
 	transaction := aggregate.Decision.AuthorityTransaction()
+	previousFailure, err := runtimeV2PreviousCandidateFailure(aggregate, candidateAttempt)
+	if err != nil {
+		return runtimev2.RuntimeAggregate{}, err
+	}
 	response, err := RequestRuntimeCandidate(ctx, m.rawEventHub, events.RequestRuntimeCandidateCommand{
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		Decision: aggregate.Decision, Transaction: transaction, CandidateAttempt: candidateAttempt,
+		PreviousFailure:  previousFailure,
 		StablePrefixHash: stablePrefixHash, DefinitionContext: aggregate.Definition,
 		CandidateContext: runtimecontract.RuntimeCandidateContextFromFacts(aggregate.Facts),
 	})
@@ -153,6 +158,27 @@ func (m *Module) requestAndSealRuntimeV2Candidate(
 		return m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, *response.Failure)
 	}
 	return m.bizPtr.AcceptRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, response.Candidate)
+}
+
+func runtimeV2PreviousCandidateFailure(aggregate runtimev2.RuntimeAggregate, candidateAttempt int) (*runtimecontract.RuntimeCandidateFailure, error) {
+	if candidateAttempt == 0 {
+		return nil, nil
+	}
+	if candidateAttempt != 1 {
+		return nil, fmt.Errorf("runtime candidate attempt must be 0 or 1")
+	}
+	for idx := range aggregate.CandidateAttempts {
+		record := aggregate.CandidateAttempts[idx]
+		if record.Transaction.AuthoritySnapshotID != aggregate.Decision.AuthoritySnapshot.ID || record.Attempt != 0 {
+			continue
+		}
+		if record.State != runtimecontract.RuntimeCandidateAttemptStateFailed || record.Failure == nil {
+			return nil, fmt.Errorf("runtime candidate retry requires a failed first attempt")
+		}
+		failure := *record.Failure
+		return &failure, nil
+	}
+	return nil, fmt.Errorf("runtime candidate retry has no first attempt failure")
 }
 
 func (m *Module) requestAndSealRuntimeV2CandidateWithRetry(

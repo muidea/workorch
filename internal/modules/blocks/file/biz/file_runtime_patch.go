@@ -82,9 +82,13 @@ func (a *RuntimeAdapter) executePatch(request runtimemodel.StepExecutionRequest,
 	if err != nil {
 		return patchErrorResult(patchStage(operation), operation, "", "", err, "patch_invalid_input"), err
 	}
-	root, target, rel, err := guardedWorkspacePath(request.WorkspaceDeliverableDirectory, patchReq.TargetRef, false)
+	return a.executePatchRequest(request.WorkspaceDeliverableDirectory, patchReq, apply)
+}
+
+func (a *RuntimeAdapter) executePatchRequest(workspaceDirectory string, patchReq patchExecutionRequest, apply bool) (runtimemodel.StepExecutionResult, error) {
+	root, target, rel, err := guardedWorkspacePath(workspaceDirectory, patchReq.TargetRef, false)
 	if err != nil {
-		return patchErrorResult(patchStage(operation), operation, patchReq.PatchType, patchReq.TargetRef, err, "patch_invalid_path"), err
+		return patchErrorResult(patchStage(patchReq.Operation), patchReq.Operation, patchReq.PatchType, patchReq.TargetRef, err, "patch_invalid_path"), err
 	}
 	patchReq.TargetRef = filepath.ToSlash(rel)
 
@@ -97,7 +101,7 @@ func (a *RuntimeAdapter) executePatch(request runtimemodel.StepExecutionRequest,
 		return executeUnifiedDiffPatch(root, target, patchReq, apply)
 	default:
 		err := fmt.Errorf("%w: unsupported patchType %q", common.ErrInvalidArgument, patchReq.PatchType)
-		return patchErrorResult(patchStage(operation), patchReq.Operation, patchReq.PatchType, patchReq.TargetRef, err, "patch_type_unsupported"), err
+		return patchErrorResult(patchStage(patchReq.Operation), patchReq.Operation, patchReq.PatchType, patchReq.TargetRef, err, "patch_type_unsupported"), err
 	}
 }
 

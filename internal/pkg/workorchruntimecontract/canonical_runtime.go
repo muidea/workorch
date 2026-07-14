@@ -90,6 +90,8 @@ type EvidenceFact struct {
 	OperationID         string
 	Revision            string
 	FailureClass        FailureClass
+	FailureCode         string
+	FailureSignature    string
 	FailureMessage      string
 	Summary             string
 	ContentHash         string
@@ -113,6 +115,7 @@ const (
 	FailureClassGovernanceDependency         FailureClass = "governance_dependency"
 	FailureClassRuntimeContractMisalignment  FailureClass = "runtime_internal_contract_misalignment"
 	FailureClassExecutionFailure             FailureClass = "execution_failure"
+	FailureClassNoProgressExhausted          FailureClass = "no_progress_exhausted"
 	FailureClassCandidateExhausted           FailureClass = "candidate_retry_exhausted"
 	FailureClassGovernanceRejected           FailureClass = "governance_rejected"
 )
@@ -126,6 +129,7 @@ const (
 
 type FailureFact struct {
 	Class      FailureClass
+	Code       string
 	Signature  string
 	Message    string
 	TargetRefs []string
@@ -318,6 +322,7 @@ func (f RuntimeFacts) Normalized() RuntimeFacts {
 	if f.Failure != nil {
 		failure := *f.Failure
 		failure.Class = FailureClass(strings.TrimSpace(string(failure.Class)))
+		failure.Code = strings.TrimSpace(failure.Code)
 		failure.Signature = strings.TrimSpace(failure.Signature)
 		failure.Message = strings.TrimSpace(failure.Message)
 		failure.TargetRefs = normalizeStrings(failure.TargetRefs)
@@ -732,6 +737,8 @@ func normalizeEvidenceFacts(values []EvidenceFact) []EvidenceFact {
 		value.OperationID = strings.TrimSpace(value.OperationID)
 		value.Revision = strings.TrimSpace(value.Revision)
 		value.FailureClass = FailureClass(strings.TrimSpace(string(value.FailureClass)))
+		value.FailureCode = strings.TrimSpace(value.FailureCode)
+		value.FailureSignature = strings.TrimSpace(value.FailureSignature)
 		value.FailureMessage = strings.TrimSpace(value.FailureMessage)
 		value.Summary = strings.TrimSpace(value.Summary)
 		value.ContentHash = strings.TrimSpace(value.ContentHash)

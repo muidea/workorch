@@ -1,6 +1,7 @@
 package runtimev2
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -87,6 +88,44 @@ func TestReduceRuntimeStateIsDeterministic(t *testing.T) {
 	}
 	if left.AuthoritySnapshot != right.AuthoritySnapshot {
 		t.Fatalf("snapshot changed for identical facts: left=%+v right=%+v", left.AuthoritySnapshot, right.AuthoritySnapshot)
+	}
+}
+
+func TestReduceRuntimeStateBoundsRepeatedStableFailureAcrossAuthorities(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+	facts.Capabilities.StateChangeKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
+	facts.Failure = &runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassExecutionFailure, Signature: "stable-patch-failure", Message: "patch input remains invalid", TargetRefs: []string{"main.go"},
+	}
+	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{ID: "accepted-unrelated", Kind: runtimecontract.EvidenceKindValidation, Revision: "evidence-v2-00000000000000000001"}}
+	for idx := 0; idx < 2; idx++ {
+		facts.Evidence.Rejected = append(facts.Evidence.Rejected, runtimecontract.EvidenceFact{
+			ID: common.EvidenceRecordID("rejected-" + string(rune('a'+idx))), Kind: runtimecontract.EvidenceKindStateChange,
+			FailureClass: runtimecontract.FailureClassExecutionFailure, FailureSignature: "stable-patch-failure",
+			Revision:            fmt.Sprintf("evidence-v2-%020d", idx+2),
+			CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+		})
+	}
+	decision, err := ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+		t.Fatalf("two repeated failures action = %s, want bounded retry", decision.Action)
+	}
+	facts.Evidence.Rejected = append(facts.Evidence.Rejected, runtimecontract.EvidenceFact{
+		ID: "rejected-c", Kind: runtimecontract.EvidenceKindStateChange,
+		FailureClass: runtimecontract.FailureClassExecutionFailure, FailureSignature: "stable-patch-failure",
+		Revision:            "evidence-v2-00000000000000000004",
+		CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+	})
+	decision, err = ReduceRuntimeState(facts, &decision.AuthoritySnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "no_progress_exhausted" {
+		t.Fatalf("three repeated failures decision = %+v", decision)
 	}
 }
 

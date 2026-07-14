@@ -20,33 +20,36 @@ func (s *runtimeOperationAdapterStub) ExecuteRuntimeStep(_ context.Context, requ
 	return s.result, s.err
 }
 
-func TestExecuteRuntimeOperationUsesTypedCommandAndConcreteResult(t *testing.T) {
-	content := "hello"
-	adapter := &runtimeOperationAdapterStub{result: runtimecontract.StepExecutionResult{Output: map[string]any{
-		"summary": "written", "contentHash": "hash-1", "evidenceRefs": []string{"artifact-1"},
-	}}}
-	result, err := ExecuteRuntimeOperation(context.Background(), ExecuteRuntimeOperationCommand{
-		WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1",
-		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "snapshot-1"},
-		Operation: runtimecontract.RuntimeOperation{
-			ID: "write-1", Kind: runtimecontract.StepKindFileEdit,
-			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"target.txt"},
-			Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &content}},
+func TestFileEditOperationUsesConcreteParameterContract(t *testing.T) {
+	path := "target.txt"
+	oldText := "hello"
+	newText := "world"
+	data, err := FileEditOperationDataFromRuntimeOperation(runtimecontract.RuntimeOperation{
+		ID: "write-1", Kind: runtimecontract.StepKindFileEdit,
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{path},
+		Parameters: []runtimecontract.OperationParameter{
+			{Name: "path", String: &path}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText},
 		},
-		EvidenceKind:     runtimecontract.EvidenceKindStateChange,
-		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{ID: "policy-1", AppliesTo: runtimecontract.StepKindFileEdit}},
-	}, adapter)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != runtimecontract.RuntimeOperationExecutionStatusAccepted || result.OperationID != "write-1" || result.Evidence.ContentHash != "hash-1" {
-		t.Fatalf("result = %+v", result)
+	if data.Path != path || data.OldText != oldText || data.NewText != newText {
+		t.Fatalf("file/edit data = %+v", data)
 	}
-	if adapter.request.Kind != runtimecontract.StepKindFileEdit || adapter.request.Input["path"] != "hello" {
-		t.Fatalf("adapter request = %+v", adapter.request)
-	}
-	if len(adapter.request.EvidencePolicies) != 1 || adapter.request.EvidencePolicies[0].ID != "policy-1" {
-		t.Fatalf("adapter request lost typed evidence policies: %+v", adapter.request.EvidencePolicies)
+}
+
+func TestGenericRuntimeOperationBridgeRejectsConcreteFileKinds(t *testing.T) {
+	adapter := &runtimeOperationAdapterStub{}
+	for _, kind := range []string{runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindPatchApply} {
+		_, err := ExecuteRuntimeOperation(context.Background(), ExecuteRuntimeOperationCommand{
+			WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1",
+			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
+			Operation:   runtimecontract.RuntimeOperation{ID: "operation-1", Kind: kind}, EvidenceKind: runtimecontract.EvidenceKindStateChange,
+		}, adapter)
+		if err == nil {
+			t.Fatalf("generic bridge accepted concrete file kind %q", kind)
+		}
 	}
 }
 

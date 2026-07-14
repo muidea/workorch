@@ -9,6 +9,7 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/file/pkg/common"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const ModuleID = modulecommon.ModuleID
@@ -55,6 +56,8 @@ func (m *Module) Start() error {
 	m.capabilityObserver = magicevent.NewSimpleObserver(ModuleID, m.eventHub)
 	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
 	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteRuntimeOperation, m.handleRuntimeOperation)
+	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteFileEditOperation, m.handleFileEditOperation)
+	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorExecutePatchApplyOperation, m.handlePatchApplyOperation)
 	return nil
 }
 
@@ -66,6 +69,8 @@ func (m *Module) Stop(ctx context.Context) error {
 	}
 	m.prerequisiteObserver = nil
 	if m.capabilityObserver != nil {
+		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecutePatchApplyOperation)
+		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteFileEditOperation)
 		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteRuntimeOperation)
 		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
 	}
@@ -73,6 +78,76 @@ func (m *Module) Stop(ctx context.Context) error {
 	m.runtimeAdapter = nil
 	m.eventHub = nil
 	return nil
+}
+
+func (m *Module) handleFileEditOperation(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.ExecuteFileEditOperationCommand)
+	if !ok || m.runtimeAdapter == nil {
+		setPrerequisiteError(result, common.ErrInvalidArgument)
+		return
+	}
+	if err := orchestratorevents.ValidateFileOperationScope(command.WorkspaceID, command.RunID, command.DispatchID, command.Transaction, command.OperationID, command.EvidenceKind, command.WorkspaceDeliverableDirectory); err != nil {
+		setPrerequisiteError(result, err)
+		return
+	}
+	operationResult, executeErr := m.runtimeAdapter.ApplyFileEdit(filebiz.FileEditRequest{
+		WorkspaceDirectory: command.WorkspaceDeliverableDirectory,
+		Path:               command.Data.Path, OldText: command.Data.OldText, NewText: command.Data.NewText,
+		BaseHash: command.Data.BaseHash, Occurrence: command.Data.Occurrence,
+	})
+	response := orchestratorevents.ExecuteFileEditOperationResult{
+		EventID: orchestratorevents.RuntimeFileOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID,
+		EvidenceKind: command.EvidenceKind, Status: runtimeOperationStatus(executeErr),
+		SourceRef: orchestratorevents.RuntimeFileOperationSourceRef(command.DispatchID, command.OperationID),
+		Evidence:  runtimeOperationEvidence(operationResult),
+	}
+	if executeErr != nil {
+		response.Failure = orchestratorevents.RuntimeFileOperationFailure(command.Transaction, runtimecontract.StepKindFileEdit, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
+	}
+	result.Set(response, nil)
+}
+
+func (m *Module) handlePatchApplyOperation(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.ExecutePatchApplyOperationCommand)
+	if !ok || m.runtimeAdapter == nil {
+		setPrerequisiteError(result, common.ErrInvalidArgument)
+		return
+	}
+	if err := orchestratorevents.ValidateFileOperationScope(command.WorkspaceID, command.RunID, command.DispatchID, command.Transaction, command.OperationID, command.EvidenceKind, command.WorkspaceDeliverableDirectory); err != nil {
+		setPrerequisiteError(result, err)
+		return
+	}
+	operationResult, executeErr := m.runtimeAdapter.ApplyPatch(filebiz.PatchApplyRequest{
+		WorkspaceDirectory: command.WorkspaceDeliverableDirectory,
+		TargetRef:          command.Data.TargetRef, PatchType: command.Data.PatchType,
+		Content: command.Data.Content, ContentPresent: command.Data.ContentPresent,
+		Diff: command.Data.Diff, OldText: command.Data.OldText, NewText: command.Data.NewText, NewTextPresent: command.Data.NewTextPresent,
+		BaseHash: command.Data.BaseHash, Occurrence: command.Data.Occurrence,
+		CoverageTargets: command.Data.CoverageTargets, Summary: command.Data.Summary,
+	})
+	response := orchestratorevents.ExecutePatchApplyOperationResult{
+		EventID: orchestratorevents.RuntimeFileOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID,
+		EvidenceKind: command.EvidenceKind, Status: runtimeOperationStatus(executeErr),
+		SourceRef: orchestratorevents.RuntimeFileOperationSourceRef(command.DispatchID, command.OperationID),
+		Evidence:  runtimeOperationEvidence(operationResult),
+	}
+	if executeErr != nil {
+		response.Failure = orchestratorevents.RuntimeFileOperationFailure(command.Transaction, runtimecontract.RuntimeBlockKindPatchApply, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
+	}
+	result.Set(response, nil)
+}
+
+func runtimeOperationStatus(err error) runtimecontract.RuntimeOperationExecutionStatus {
+	if err != nil {
+		return runtimecontract.RuntimeOperationExecutionStatusRejected
+	}
+	return runtimecontract.RuntimeOperationExecutionStatusAccepted
+}
+
+func runtimeOperationEvidence(value filebiz.RuntimeFileOperationResult) runtimecontract.RuntimeOperationEvidence {
+	return runtimecontract.RuntimeOperationEvidence{
+		Summary: value.Summary, ContentHash: value.ContentHash, EvidenceRefs: append([]string(nil), value.EvidenceRefs...),
+	}
 }
 
 func (m *Module) handleRuntimeOperation(event magicevent.Event, result magicevent.Result) {

@@ -20,6 +20,9 @@ func ExecuteRuntimeOperation(ctx context.Context, command ExecuteRuntimeOperatio
 		return ExecuteRuntimeOperationResult{}, fmt.Errorf("invalid runtime operation command")
 	}
 	operation := command.Operation.Normalized()
+	if operation.Kind == runtimecontract.StepKindFileEdit || operation.Kind == runtimecontract.RuntimeBlockKindPatchApply {
+		return ExecuteRuntimeOperationResult{}, fmt.Errorf("runtime operation kind %q requires its concrete EventHub contract", operation.Kind)
+	}
 	input, err := runtimeOperationInput(operation)
 	if err != nil {
 		return ExecuteRuntimeOperationResult{}, err
@@ -42,19 +45,25 @@ func ExecuteRuntimeOperation(ctx context.Context, command ExecuteRuntimeOperatio
 	if executeErr != nil {
 		response.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
 		failureClass := runtimecontract.FailureClassExecutionFailure
-		failureSignature := eventID
+		failureCode := "runtime_operation_failed"
 		failureMessage := executeErr.Error()
 		if value, ok := result.Output["failureClass"].(string); ok && strings.TrimSpace(value) != "" {
 			failureClass = runtimecontract.FailureClass(strings.TrimSpace(value))
 		}
-		if value, ok := result.Output["failureSignature"].(string); ok && strings.TrimSpace(value) != "" {
-			failureSignature = strings.TrimSpace(value)
+		if value, ok := result.Output["failureCode"].(string); ok && strings.TrimSpace(value) != "" {
+			failureCode = strings.TrimSpace(value)
+		} else if value, ok := result.Output["code"].(string); ok && strings.TrimSpace(value) != "" {
+			failureCode = strings.TrimSpace(value)
 		}
 		if value, ok := result.Output["error"].(string); ok && strings.TrimSpace(value) != "" {
 			failureMessage = strings.TrimSpace(value)
 		}
+		failureSignature := StableRuntimeOperationFailureSignature(command.Transaction, operation.Kind, failureCode, operation.TargetRefs)
+		if value, ok := result.Output["failureSignature"].(string); ok && strings.TrimSpace(value) != "" {
+			failureSignature = strings.TrimSpace(value)
+		}
 		response.Failure = &runtimecontract.FailureFact{
-			Class: failureClass, Signature: failureSignature,
+			Class: failureClass, Code: failureCode, Signature: failureSignature,
 			Message: failureMessage, TargetRefs: operation.TargetRefs,
 		}
 	}

@@ -3,6 +3,7 @@ package runtimev2
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
@@ -26,6 +27,20 @@ func TestDecodeCandidatePayloadRejectsAuthorityFields(t *testing.T) {
 	}
 }
 
+func TestDecodeCandidatePayloadRejectsLegacyCandidateWrappers(t *testing.T) {
+	for name, payload := range map[string]string{
+		"candidate":      `{"candidate":{"operations":[{"id":"op-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"]}]}}`,
+		"candidates":     `{"candidates":[{"operations":[{"id":"op-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"]}]}]}`,
+		"executionGraph": `{"executionGraph":{"operations":[{"id":"op-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"]}]}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := DecodeCandidatePayload(runtimecontract.RuntimeActionProduceStateChange, []byte(payload)); err == nil {
+				t.Fatalf("legacy %s wrapper was accepted", name)
+			}
+		})
+	}
+}
+
 func TestValidateCandidateAttemptAcceptsOnlyCurrentActionCandidate(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
 	candidate, err := DecodeCandidatePayload(request.Decision.Action, []byte(`{
@@ -34,7 +49,11 @@ func TestValidateCandidateAttemptAcceptsOnlyCurrentActionCandidate(t *testing.T)
 			"kind":"patch/apply",
 			"coverageWorkItemIds":["cwi-1"],
 			"targetRefs":["main.go"],
-			"parameters":[{"name":"targetRef","string":"main.go"}]
+			"parameters":[
+				{"name":"targetRef","string":"main.go"},
+				{"name":"patchType","string":"file_write"},
+				{"name":"content","string":"package main\n"}
+			]
 		}]
 	}`))
 	if err != nil {
@@ -54,16 +73,39 @@ func TestValidateCandidateAttemptAcceptsOnlyCurrentActionCandidate(t *testing.T)
 	}
 }
 
+func TestRequestCandidateRejectsFilePathAliasAsContractFailureBeforeDispatch(t *testing.T) {
+	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
+	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) ([]byte, error) {
+		return []byte(`{"operations":[{"id":"patch-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"filePath","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`), nil
+	})
+	_, err := RequestCandidate(context.Background(), provider, request)
+	if err == nil {
+		t.Fatal("filePath alias candidate was accepted")
+	}
+	failure := CandidateFailureFromError(err)
+	if failure.Class != CandidateFailureClassContract || !strings.Contains(failure.Reason, `does not accept parameter "filePath"`) {
+		t.Fatalf("candidate failure = %+v", failure)
+	}
+	retry, retryErr := RetrySameContract(request, failure)
+	if retryErr != nil {
+		t.Fatal(retryErr)
+	}
+	if retry.Transaction != request.Transaction || retry.StablePrefixHash != request.StablePrefixHash || retry.PreviousFailure == nil || retry.PreviousFailure.Class != CandidateFailureClassContract {
+		t.Fatalf("contract retry changed authority: initial=%+v retry=%+v", request, retry)
+	}
+}
+
 func TestCandidateRetryIsExactlyOnceAndKeepsSealedContract(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedValidation)
-	retry, err := RetrySameContract(request)
+	failure := runtimecontract.RuntimeCandidateFailure{Class: CandidateFailureClassSchema, Reason: `json: unknown field "candidate"`}
+	retry, err := RetrySameContract(request, failure)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if retry.CandidateAttempt != 1 || retry.Transaction != request.Transaction || retry.StablePrefixHash != request.StablePrefixHash || retry.Decision.AuthoritySnapshot.RequiredOutputHash != request.Decision.AuthoritySnapshot.RequiredOutputHash {
+	if retry.CandidateAttempt != 1 || retry.PreviousFailure == nil || *retry.PreviousFailure != failure || retry.Transaction != request.Transaction || retry.StablePrefixHash != request.StablePrefixHash || retry.Decision.AuthoritySnapshot.RequiredOutputHash != request.Decision.AuthoritySnapshot.RequiredOutputHash {
 		t.Fatalf("retry changed sealed request: initial=%+v retry=%+v", request, retry)
 	}
-	if _, err := RetrySameContract(retry); err == nil {
+	if _, err := RetrySameContract(retry, failure); err == nil {
 		t.Fatal("third candidate request was allowed")
 	}
 
@@ -80,7 +122,7 @@ func TestCandidateFailuresDoNotSwitchAuthorityAction(t *testing.T) {
 	if first.Disposition != CandidateDispositionRetrySameContract || request.Decision.Action != runtimecontract.RuntimeActionProduceValidation {
 		t.Fatalf("first failure = %+v request=%+v", first, request)
 	}
-	retry, err := RetrySameContract(request)
+	retry, err := RetrySameContract(request, runtimecontract.RuntimeCandidateFailure{Class: CandidateFailureClassSchema, Reason: first.Reason})
 	if err != nil {
 		t.Fatal(err)
 	}

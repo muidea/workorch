@@ -319,6 +319,9 @@ func validateRuntimeOperations(operations []RuntimeOperation, required RequiredO
 		if err := validateOperationParameters(operation.Parameters); err != nil {
 			return fmt.Errorf("runtime candidate operation %q: %w", operation.ID, err)
 		}
+		if err := ValidateRuntimeOperationContract(operation); err != nil {
+			return fmt.Errorf("runtime candidate operation %q: %w", operation.ID, err)
+		}
 		if operationName := operationStringParameter(operation.Parameters, "operation"); operationName != "" {
 			if _, ok := acceptedOperations[operationName]; ok {
 				acceptedOperationObserved = true

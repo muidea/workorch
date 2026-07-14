@@ -80,6 +80,22 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 	if request.PromptContext.Sections[3].Content == "" || request.Schema == "" {
 		t.Fatalf("provider request lost dynamic context: %+v", request)
 	}
+	contractSection := request.PromptContext.Sections[0].Content
+	for _, value := range []string{`"operations"`, `"focusId"`, `"externalDependency"`, "candidate", "candidates", "executionGraph"} {
+		if !strings.Contains(contractSection, value) {
+			t.Fatalf("provider request stable contract lost %q: %s", value, contractSection)
+		}
+	}
+	dynamicSection := request.PromptContext.Sections[3].Content
+	for _, value := range []string{
+		`"outputContract"`, `"requiredTopLevelExample":"{\"operations\":[...]}"`, `"schema":{"type":"object"`, `"forbiddenTopLevelFields"`,
+		`"operationContracts":[{"kind":"file/edit"`, `"name":"path"`, `"name":"oldText"`, `"name":"newText"`,
+		`"forbiddenParameters":["filePath","fileContent","targetRef","targetRefs"]`,
+	} {
+		if !strings.Contains(dynamicSection, value) {
+			t.Fatalf("provider request dynamic output contract lost %q: %s", value, dynamicSection)
+		}
+	}
 	if !strings.Contains(request.PromptContext.Sections[1].Content, "identify additive constraints") || !strings.Contains(request.PromptContext.Sections[1].Content, "cumulative") {
 		t.Fatalf("provider request lost typed definition change impact: %s", request.PromptContext.Sections[1].Content)
 	}
@@ -98,6 +114,23 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 		if !strings.Contains(capabilitySection, value) {
 			t.Fatalf("provider request lost typed profile contract %q: %s", value, capabilitySection)
 		}
+	}
+	retryFailure := runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassSchema, Reason: `json: unknown field "candidate"`}
+	retryRequest, err := runtimeV2ProviderRequest(llmmodels.RuntimeCandidateRequest{
+		Decision: decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1, PreviousFailure: &retryFailure, StablePrefixHash: prefix,
+		DefinitionContext: definition, CandidateContext: runtimecontract.RuntimeCandidateContextFromFacts(facts),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	retrySection := retryRequest.PromptContext.Sections[3].Content
+	for _, value := range []string{`"candidateAttempt":1`, `"previousFailure"`, `unknown field \"candidate\"`, "do not repeat any wrapper", "executionGraph"} {
+		if !strings.Contains(retrySection, value) {
+			t.Fatalf("provider retry lost correction %q: %s", value, retrySection)
+		}
+	}
+	if retryRequest.ContextBudget.CachePlan.StablePrefixHash != request.ContextBudget.CachePlan.StablePrefixHash || retryRequest.PromptContext.Sections[0].Content != contractSection {
+		t.Fatalf("retry changed stable provider contract: initial=%+v retry=%+v", request.ContextBudget.CachePlan, retryRequest.ContextBudget.CachePlan)
 	}
 	limitedContext := runtimecontract.RuntimeCandidateContextFromFacts(facts)
 	limitedContext.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{ProviderID: "provider-1", MaxBytes: 1, Revision: "config-1"}

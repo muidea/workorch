@@ -101,6 +101,7 @@ type RequestRuntimeCandidateCommand struct {
 	Decision          runtimecontract.RuntimeDecision
 	Transaction       runtimecontract.AuthorityTransaction
 	CandidateAttempt  int
+	PreviousFailure   *runtimecontract.RuntimeCandidateFailure
 	StablePrefixHash  string
 	DefinitionContext runtimecontract.RuntimeDefinitionContext
 	CandidateContext  runtimecontract.RuntimeCandidateContext
@@ -200,6 +201,79 @@ type ExecuteRuntimeOperationCommand struct {
 }
 
 type ExecuteRuntimeOperationResult struct {
+	EventID      string
+	OperationID  string
+	EvidenceKind string
+	Status       runtimecontract.RuntimeOperationExecutionStatus
+	SourceRef    string
+	Evidence     runtimecontract.RuntimeOperationEvidence
+	Failure      *runtimecontract.FailureFact
+}
+
+type FileEditOperationData struct {
+	Path       string
+	OldText    string
+	NewText    string
+	BaseHash   string
+	Occurrence int64
+}
+
+type PatchApplyOperationData struct {
+	TargetRef       string
+	PatchType       string
+	Content         string
+	ContentPresent  bool
+	Diff            string
+	OldText         string
+	NewText         string
+	NewTextPresent  bool
+	BaseHash        string
+	Occurrence      int64
+	CoverageTargets []string
+	Summary         string
+}
+
+type ExecuteFileEditOperationCommand struct {
+	WorkspaceID                   common.WorkspaceID
+	RunID                         common.RunID
+	DispatchID                    string
+	Transaction                   runtimecontract.AuthorityTransaction
+	OperationID                   string
+	CoverageWorkItemIDs           []common.CoverageWorkItemID
+	TargetRefs                    []string
+	EvidenceKind                  string
+	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
+	WorkspaceDeliverableDirectory string
+	WorkspaceInternalDirectory    string
+	Data                          FileEditOperationData
+}
+
+type ExecutePatchApplyOperationCommand struct {
+	WorkspaceID                   common.WorkspaceID
+	RunID                         common.RunID
+	DispatchID                    string
+	Transaction                   runtimecontract.AuthorityTransaction
+	OperationID                   string
+	CoverageWorkItemIDs           []common.CoverageWorkItemID
+	TargetRefs                    []string
+	EvidenceKind                  string
+	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
+	WorkspaceDeliverableDirectory string
+	WorkspaceInternalDirectory    string
+	Data                          PatchApplyOperationData
+}
+
+type ExecuteFileEditOperationResult struct {
+	EventID      string
+	OperationID  string
+	EvidenceKind string
+	Status       runtimecontract.RuntimeOperationExecutionStatus
+	SourceRef    string
+	Evidence     runtimecontract.RuntimeOperationEvidence
+	Failure      *runtimecontract.FailureFact
+}
+
+type ExecutePatchApplyOperationResult struct {
 	EventID      string
 	OperationID  string
 	EvidenceKind string
@@ -329,6 +403,8 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[DriveRuntimeV2Command, DriveRuntimeV2Result]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorDriveRuntimeV2).MessageContract(),
 		eventcontract.CommandTopic[RequestRuntimeCandidateCommand, RequestRuntimeCandidateResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorRequestRuntimeCandidate).MessageContract(),
 		eventcontract.CommandTopic[ExecuteRuntimeOperationCommand, ExecuteRuntimeOperationResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorExecuteRuntimeOperation).MessageContract(),
+		eventcontract.CommandTopic[ExecuteFileEditOperationCommand, ExecuteFileEditOperationResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorExecuteFileEditOperation).MessageContract(),
+		eventcontract.CommandTopic[ExecutePatchApplyOperationCommand, ExecutePatchApplyOperationResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorExecutePatchApplyOperation).MessageContract(),
 		eventcontract.CommandTopic[CommitRuntimeGovernanceResolutionCommand, CommitRuntimeGovernanceResolutionResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommitRuntimeGovernanceResolution).MessageContract(),
 		eventcontract.CommandTopic[CommitRuntimeGovernanceTicketResolutionCommand, CommitRuntimeGovernanceResolutionResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommitRuntimeGovernanceTicket).MessageContract(),
 		eventcontract.CommandTopic[OpenRuntimeGovernanceRequestCommand, OpenRuntimeGovernanceRequestResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorOpenRuntimeGovernanceRequest).MessageContract(),

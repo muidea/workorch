@@ -47,6 +47,9 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 		return base, nil
 	}
 	if facts.Failure != nil {
+		if repeatedFailureCount(facts, facts.Failure.Signature) >= 3 {
+			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "no_progress_exhausted", facts.Failure.Message), nil
+		}
 		switch facts.Failure.Class {
 		case runtimecontract.FailureClassGovernanceDependency:
 			return governanceDecision(base, facts, facts.Failure.Message)
@@ -82,6 +85,27 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 		return validationDecision(base, facts)
 	}
 	return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "unsupported_evidence_gap", fmt.Sprintf("unsupported required evidence kinds: %s", strings.Join(missing, ","))), nil
+}
+
+func repeatedFailureCount(facts runtimecontract.RuntimeFacts, signature string) int {
+	signature = strings.TrimSpace(signature)
+	if signature == "" {
+		return 0
+	}
+	latestAcceptedRevision := ""
+	for _, evidence := range facts.Evidence.Accepted {
+		if evidenceAppliesToCurrentFocus(facts, evidence) && evidence.Revision > latestAcceptedRevision {
+			latestAcceptedRevision = evidence.Revision
+		}
+	}
+	count := 0
+	for _, evidence := range facts.Evidence.Rejected {
+		if evidenceAppliesToCurrentFocus(facts, evidence) && strings.TrimSpace(evidence.FailureSignature) == signature &&
+			(latestAcceptedRevision == "" || evidence.Revision == "" || evidence.Revision > latestAcceptedRevision) {
+			count++
+		}
+	}
+	return count
 }
 
 func assessmentDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeDecision {

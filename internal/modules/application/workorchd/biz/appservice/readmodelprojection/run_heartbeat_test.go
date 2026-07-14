@@ -95,6 +95,20 @@ func TestMapRunHeartbeatMarksConvergenceBudgetEscalationIneffectiveRetry(t *test
 	}
 }
 
+func TestMapRunHeartbeatMarksRuntimeV2NoProgressTerminalAsIneffectiveRetry(t *testing.T) {
+	snapshot := readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-v2"},
+		Run: &readmodelcore.Run{
+			ID: "run-v2", WorkspaceID: "ws-v2", State: string(common.RunStateFailed),
+			FailureReason: "no_progress_exhausted: patch input remains invalid",
+		},
+	}
+	got := mapRunHeartbeatAt(snapshot, time.Now().UTC())
+	if !got.IneffectiveRetry || got.Stalled {
+		t.Fatalf("heartbeat = %+v, want terminal ineffective retry without stalled", got)
+	}
+}
+
 func TestMapRunHeartbeatMarksWaitingDecisionRetryExhaustionIneffectiveRetry(t *testing.T) {
 	t.Parallel()
 

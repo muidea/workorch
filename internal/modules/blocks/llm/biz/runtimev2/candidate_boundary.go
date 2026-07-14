@@ -135,15 +135,19 @@ func CandidateFailureOutcome(request llmmodels.RuntimeCandidateRequest, class Ca
 	return CandidateAttemptOutcome{Disposition: CandidateDispositionRequestGovernance, FailureClass: class, Reason: reason}
 }
 
-func RetrySameContract(request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateRequest, error) {
+func RetrySameContract(request llmmodels.RuntimeCandidateRequest, failure runtimecontract.RuntimeCandidateFailure) (llmmodels.RuntimeCandidateRequest, error) {
 	if err := validateCandidateRequest(request); err != nil {
 		return llmmodels.RuntimeCandidateRequest{}, err
 	}
 	if request.CandidateAttempt != 0 {
 		return llmmodels.RuntimeCandidateRequest{}, fmt.Errorf("same-contract candidate retry is already exhausted")
 	}
+	if failure.Class == "" || strings.TrimSpace(failure.Reason) == "" {
+		return llmmodels.RuntimeCandidateRequest{}, fmt.Errorf("same-contract candidate retry requires the previous failure")
+	}
 	retry := request
 	retry.CandidateAttempt = 1
+	retry.PreviousFailure = &failure
 	if retry.Transaction != request.Transaction || retry.StablePrefixHash != request.StablePrefixHash || retry.Decision.AuthoritySnapshot.ID != request.Decision.AuthoritySnapshot.ID || retry.Decision.AuthoritySnapshot.RequiredOutputHash != request.Decision.AuthoritySnapshot.RequiredOutputHash {
 		return llmmodels.RuntimeCandidateRequest{}, fmt.Errorf("same-contract retry changed sealed authority")
 	}
@@ -197,6 +201,12 @@ func DecodeCandidatePayload(action runtimecontract.RuntimeAction, payload []byte
 func validateCandidateRequest(request llmmodels.RuntimeCandidateRequest) error {
 	if request.CandidateAttempt < 0 || request.CandidateAttempt > 1 {
 		return fmt.Errorf("candidate attempt must be 0 or 1")
+	}
+	if request.CandidateAttempt == 0 && request.PreviousFailure != nil {
+		return fmt.Errorf("initial candidate attempt must not carry a previous failure")
+	}
+	if request.CandidateAttempt == 1 && (request.PreviousFailure == nil || request.PreviousFailure.Class == "" || strings.TrimSpace(request.PreviousFailure.Reason) == "") {
+		return fmt.Errorf("candidate retry requires the previous failure")
 	}
 	if strings.TrimSpace(request.StablePrefixHash) == "" {
 		return fmt.Errorf("candidate request requires stable prefix hash")

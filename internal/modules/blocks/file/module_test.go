@@ -3,10 +3,14 @@ package file
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestFileModuleIdentityConfigureStartStopContract(t *testing.T) {
@@ -58,5 +62,128 @@ func TestFileModuleStartRequiresEventHub(t *testing.T) {
 	}
 	if err := module.Start(); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Start without EventHub err = %v, want invalid argument", err)
+	}
+}
+
+func TestFileModuleExecutesConcreteFileEditEventAndWritesState(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	module := New()
+	if err := module.Configure(Dependencies{EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "main.txt")
+	if err := os.WriteFile(path, []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	transaction := runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1", RequiredOutputHash: "required-output-1"}
+	result := hub.Send(magicevent.NewEventWithContext(
+		orchestratorevents.TopicOrchestratorExecuteFileEditOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
+		orchestratorevents.ExecuteFileEditOperationCommand{
+			WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1", Transaction: transaction,
+			OperationID: "edit-1", TargetRefs: []string{"main.txt"}, EvidenceKind: runtimecontract.EvidenceKindStateChange,
+			WorkspaceDeliverableDirectory: workspace,
+			Data:                          orchestratorevents.FileEditOperationData{Path: "main.txt", OldText: "old", NewText: "new"},
+		},
+	))
+	data, magicErr := result.Get()
+	if magicErr != nil {
+		t.Fatal(magicErr)
+	}
+	response := data.(orchestratorevents.ExecuteFileEditOperationResult)
+	if response.Status != runtimecontract.RuntimeOperationExecutionStatusAccepted || response.Evidence.ContentHash == "" || len(response.Evidence.EvidenceRefs) != 1 {
+		t.Fatalf("file/edit response = %+v", response)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil || string(content) != "new\n" {
+		t.Fatalf("file/edit content = %q err=%v", string(content), err)
+	}
+}
+
+func TestFileModulePatchFailureKeepsStableSignatureAcrossDispatches(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	module := New()
+	if err := module.Configure(Dependencies{EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "main.txt"), []byte("current\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	transaction := runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1", RequiredOutputHash: "required-output-1"}
+	execute := func(dispatchID string) orchestratorevents.ExecutePatchApplyOperationResult {
+		result := hub.Send(magicevent.NewEventWithContext(
+			orchestratorevents.TopicOrchestratorExecutePatchApplyOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
+			orchestratorevents.ExecutePatchApplyOperationCommand{
+				WorkspaceID: "ws-1", RunID: "run-1", DispatchID: dispatchID, Transaction: transaction,
+				OperationID: "patch-1", TargetRefs: []string{"main.txt"}, EvidenceKind: runtimecontract.EvidenceKindStateChange,
+				WorkspaceDeliverableDirectory: workspace,
+				Data: orchestratorevents.PatchApplyOperationData{
+					TargetRef: "main.txt", PatchType: "text_replace", OldText: "missing", NewText: "next", NewTextPresent: true,
+				},
+			},
+		))
+		data, magicErr := result.Get()
+		if magicErr != nil {
+			t.Fatal(magicErr)
+		}
+		return data.(orchestratorevents.ExecutePatchApplyOperationResult)
+	}
+	first := execute("dispatch-1")
+	second := execute("dispatch-2")
+	if first.Status != runtimecontract.RuntimeOperationExecutionStatusRejected || first.Failure == nil || second.Failure == nil ||
+		first.Failure.Code != "patch_text_replace_conflict" || first.Failure.Signature == "" || first.Failure.Signature != second.Failure.Signature || first.Failure.Message == "" {
+		t.Fatalf("stable failures = first:%+v second:%+v", first.Failure, second.Failure)
+	}
+}
+
+func TestFileModuleExecutesConcretePatchApplyEvent(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	module := New()
+	if err := module.Configure(Dependencies{EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+	workspace := t.TempDir()
+	result := hub.Send(magicevent.NewEventWithContext(
+		orchestratorevents.TopicOrchestratorExecutePatchApplyOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
+		orchestratorevents.ExecutePatchApplyOperationCommand{
+			WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1",
+			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1", RequiredOutputHash: "required-output-1"},
+			OperationID: "patch-1", TargetRefs: []string{"README.md"}, EvidenceKind: runtimecontract.EvidenceKindStateChange,
+			WorkspaceDeliverableDirectory: workspace,
+			Data: orchestratorevents.PatchApplyOperationData{
+				TargetRef: "README.md", PatchType: "file_write", Content: "hello\n", ContentPresent: true,
+			},
+		},
+	))
+	data, magicErr := result.Get()
+	if magicErr != nil {
+		t.Fatal(magicErr)
+	}
+	response := data.(orchestratorevents.ExecutePatchApplyOperationResult)
+	if response.Status != runtimecontract.RuntimeOperationExecutionStatusAccepted || response.Evidence.ContentHash == "" {
+		t.Fatalf("patch/apply response = %+v", response)
+	}
+	content, err := os.ReadFile(filepath.Join(workspace, "README.md"))
+	if err != nil || string(content) != "hello\n" {
+		t.Fatalf("patch/apply content = %q err=%v", string(content), err)
 	}
 }

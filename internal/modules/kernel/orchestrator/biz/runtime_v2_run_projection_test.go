@@ -71,3 +71,27 @@ func TestProjectRuntimeV2CompleteBypassesLegacyResultGate(t *testing.T) {
 		t.Fatalf("run=%+v workspace=%+v", run, workspace)
 	}
 }
+
+func TestProjectRuntimeV2FailurePreservesTerminalCodeForObservation(t *testing.T) {
+	ctx := context.Background()
+	runs := memory.NewRunRepository()
+	workspaces := memory.NewWorkspaceRepository()
+	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive}); err != nil {
+		t.Fatal(err)
+	}
+	orchestrator := NewRuntimeOrchestrator(runs, memory.NewStepRepository(), workspaces, nil, nil)
+	terminal := &runtimecontract.TerminalOutcome{Code: "no_progress_exhausted", Summary: "patch input remains invalid"}
+	if err := orchestrator.ProjectRuntimeV2Terminal(ctx, "ws-v2", "run-v2", runtimecontract.RuntimeActionFail, terminal); err != nil {
+		t.Fatal(err)
+	}
+	run, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.State != common.RunStateFailed || run.FailureReason != "no_progress_exhausted: patch input remains invalid" {
+		t.Fatalf("failed run = %+v", run)
+	}
+}

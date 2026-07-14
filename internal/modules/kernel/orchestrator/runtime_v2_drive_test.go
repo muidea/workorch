@@ -57,18 +57,18 @@ func TestDriveRuntimeV2CompletesTypedPathAndIsRestartIdempotent(t *testing.T) {
 		result.Set(response, nil)
 	})
 	operationCount := 0
-	fileObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteRuntimeOperation, func(event magicevent.Event, result magicevent.Result) {
+	fileObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteFileEditOperation, func(event magicevent.Event, result magicevent.Result) {
 		operationCount++
-		command := event.Data().(orchestratorevents.ExecuteRuntimeOperationCommand)
-		result.Set(orchestratorevents.ExecuteRuntimeOperationResult{
-			EventID: "event-" + command.Operation.ID, OperationID: command.Operation.ID,
+		command := event.Data().(orchestratorevents.ExecuteFileEditOperationCommand)
+		result.Set(orchestratorevents.ExecuteFileEditOperationResult{
+			EventID: "event-" + command.OperationID, OperationID: command.OperationID,
 			EvidenceKind: command.EvidenceKind, Status: runtimecontract.RuntimeOperationExecutionStatusAccepted,
-			SourceRef: "workorch://runtime-operations/" + command.DispatchID + "/" + command.Operation.ID,
+			SourceRef: "workorch://runtime-operations/" + command.DispatchID + "/" + command.OperationID,
 			Evidence:  runtimecontract.RuntimeOperationEvidence{Summary: "状态变更已完成"},
 		}, nil)
 	})
 	t.Cleanup(func() {
-		fileObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteRuntimeOperation)
+		fileObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteFileEditOperation)
 		fileObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
 	})
 
@@ -82,6 +82,7 @@ func TestDriveRuntimeV2CompletesTypedPathAndIsRestartIdempotent(t *testing.T) {
 			Candidate: runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 				ID: "write-1", Kind: runtimecontract.StepKindFileEdit,
 				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"},
+				Parameters: runtimeV2FileEditParameters("target.txt"),
 			}}}}},
 		}, nil)
 	})
@@ -231,10 +232,12 @@ func TestDriveRuntimeV2CandidateFailureStopsAfterSameContractRetry(t *testing.T)
 	}
 
 	requestCount := 0
+	var requests []orchestratorevents.RequestRuntimeCandidateCommand
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		requestCount++
 		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		requests = append(requests, command)
 		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
 			Transaction: command.Transaction,
 			Failure: &runtimecontract.RuntimeCandidateFailure{
@@ -255,6 +258,10 @@ func TestDriveRuntimeV2CandidateFailureStopsAfterSameContractRetry(t *testing.T)
 	if requestCount != 2 || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal ||
 		completed.Action != runtimecontract.RuntimeActionFail || completed.Terminal == nil || completed.Terminal.Code != "candidate_retry_exhausted" {
 		t.Fatalf("completed=%+v requestCount=%d, want bounded terminal after two requests", completed, requestCount)
+	}
+	if len(requests) != 2 || requests[0].PreviousFailure != nil || requests[1].PreviousFailure == nil ||
+		requests[1].PreviousFailure.Class != runtimecontract.RuntimeCandidateFailureClassProvider || requests[1].PreviousFailure.Reason != "provider unavailable" {
+		t.Fatalf("candidate retry did not carry the persisted first failure: %+v", requests)
 	}
 }
 

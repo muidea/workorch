@@ -68,7 +68,7 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 		EventHub: hub,
 		CandidateProvider: eventCandidateProviderFunc(func(_ context.Context, request llmmodels.RuntimeCandidateRequest) ([]byte, error) {
 			captured = append(captured, request)
-			return []byte(`{"operations":[{"id":"op-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"]}]}`), nil
+			return []byte(`{"operations":[{"id":"op-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"targetRef","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`), nil
 		}),
 	}); err != nil {
 		t.Fatal(err)
@@ -92,6 +92,7 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 	}
 	retry := base
 	retry.CandidateAttempt = 1
+	retry.PreviousFailure = &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassSchema, Reason: `json: unknown field "candidate"`}
 	second, err := RequestRuntimeCandidate(ctx, hub, retry)
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +100,7 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 	if err := second.Candidate.Validate(decision); err != nil {
 		t.Fatal(err)
 	}
-	if len(captured) != 2 || captured[0].Transaction != captured[1].Transaction || captured[0].StablePrefixHash != captured[1].StablePrefixHash || captured[0].Decision.AuthoritySnapshot.RequiredOutputHash != captured[1].Decision.AuthoritySnapshot.RequiredOutputHash {
+	if len(captured) != 2 || captured[1].PreviousFailure == nil || captured[1].PreviousFailure.Reason != `json: unknown field "candidate"` || captured[0].Transaction != captured[1].Transaction || captured[0].StablePrefixHash != captured[1].StablePrefixHash || captured[0].Decision.AuthoritySnapshot.RequiredOutputHash != captured[1].Decision.AuthoritySnapshot.RequiredOutputHash {
 		t.Fatalf("candidate retries changed sealed contract: %+v", captured)
 	}
 }
@@ -114,6 +115,21 @@ func TestRequestRuntimeCandidateRejectsScopeDriftBeforeEventHub(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("scope drift was accepted")
+	}
+}
+
+func TestRequestRuntimeCandidateRejectsRetryWithoutPreviousFailure(t *testing.T) {
+	decision := sealedCandidateTestDecision(t)
+	ctx := context.Background()
+	hub := magicevent.NewHub(1)
+	defer hub.Terminate(ctx)
+	_, err := RequestRuntimeCandidate(ctx, hub, orchestratorevents.RequestRuntimeCandidateCommand{
+		WorkspaceID: "ws-1", RunID: "run-1", Decision: decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1, StablePrefixHash: "stable-prefix-1",
+		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
+		CandidateContext:  candidateContextForDecision(decision),
+	})
+	if err == nil {
+		t.Fatal("candidate retry without previous failure was accepted")
 	}
 }
 

@@ -204,6 +204,7 @@ func TestRuntimeV2MainlineRequestsAndSealsTypedCandidate(t *testing.T) {
 			Transaction: command.Transaction,
 			Candidate: runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 				ID: "write-1", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"},
+				Parameters: runtimeV2FileEditParameters("target.txt"),
 			}}}}},
 		}, nil)
 	})
@@ -214,15 +215,15 @@ func TestRuntimeV2MainlineRequestsAndSealsTypedCandidate(t *testing.T) {
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	fileObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
-	fileObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteRuntimeOperation, func(event magicevent.Event, result magicevent.Result) {
-		command := event.Data().(orchestratorevents.ExecuteRuntimeOperationCommand)
-		result.Set(orchestratorevents.ExecuteRuntimeOperationResult{
-			EventID: "event-" + command.Operation.ID, OperationID: command.Operation.ID,
+	fileObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteFileEditOperation, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.ExecuteFileEditOperationCommand)
+		result.Set(orchestratorevents.ExecuteFileEditOperationResult{
+			EventID: "event-" + command.OperationID, OperationID: command.OperationID,
 			EvidenceKind: command.EvidenceKind, Status: runtimecontract.RuntimeOperationExecutionStatusAccepted,
-			SourceRef: "workorch://runtime-operations/" + command.DispatchID + "/" + command.Operation.ID,
+			SourceRef: "workorch://runtime-operations/" + command.DispatchID + "/" + command.OperationID,
 		}, nil)
 	})
-	t.Cleanup(func() { fileObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteRuntimeOperation) })
+	t.Cleanup(func() { fileObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteFileEditOperation) })
 
 	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil, nil)
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
@@ -268,28 +269,30 @@ func TestRuntimeV2OperationExecutorRoutesTypedCommandToCapabilityOwner(t *testin
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 
-	var captured orchestratorevents.ExecuteRuntimeOperationCommand
+	var captured orchestratorevents.ExecuteFileEditOperationCommand
 	fileObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
-	fileObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteRuntimeOperation, func(event magicevent.Event, result magicevent.Result) {
-		captured = event.Data().(orchestratorevents.ExecuteRuntimeOperationCommand)
-		result.Set(orchestratorevents.ExecuteRuntimeOperationResult{
+	fileObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteFileEditOperation, func(event magicevent.Event, result magicevent.Result) {
+		captured = event.Data().(orchestratorevents.ExecuteFileEditOperationCommand)
+		result.Set(orchestratorevents.ExecuteFileEditOperationResult{
 			EventID: "event-write-1", OperationID: "write-1", EvidenceKind: runtimecontract.EvidenceKindStateChange,
 			Status: runtimecontract.RuntimeOperationExecutionStatusAccepted, SourceRef: "workorch://runtime-operations/dispatch-1/write-1",
 		}, nil)
 	})
-	t.Cleanup(func() { fileObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteRuntimeOperation) })
+	t.Cleanup(func() { fileObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteFileEditOperation) })
 
 	response, err := (eventRuntimeV2OperationExecutor{hub: hub}).ExecuteRuntimeOperation(ctx, runtimev2.RuntimeOperationExecutionRequest{
 		WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: "dispatch-1",
-		Transaction:      runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "snapshot-1"},
-		Operation:        runtimecontract.RuntimeOperation{ID: "write-1", Kind: runtimecontract.StepKindFileEdit},
+		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "snapshot-1"},
+		Operation: runtimecontract.RuntimeOperation{
+			ID: "write-1", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileEditParameters("target.txt"),
+		},
 		EvidenceKind:     runtimecontract.EvidenceKindStateChange,
 		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{ID: "policy-1", AppliesTo: runtimecontract.StepKindFileEdit}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.Status != runtimecontract.RuntimeOperationExecutionStatusAccepted || captured.WorkspaceDeliverableDirectory != "/tmp/workspace" || captured.Operation.ID != "write-1" ||
+	if response.Status != runtimecontract.RuntimeOperationExecutionStatusAccepted || captured.WorkspaceDeliverableDirectory != "/tmp/workspace" || captured.OperationID != "write-1" || captured.Data.Path != "target.txt" ||
 		len(captured.EvidencePolicies) != 1 || captured.EvidencePolicies[0].ID != "policy-1" {
 		t.Fatalf("response=%+v command=%+v", response, captured)
 	}
@@ -326,6 +329,7 @@ func TestRuntimeV2MainlineRetriesSameCandidateContractOnce(t *testing.T) {
 			Transaction: command.Transaction,
 			Candidate: runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 				ID: "write-1", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+				TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileEditParameters("target.txt"),
 			}}}}},
 		}, nil)
 	})
@@ -350,6 +354,16 @@ func TestRuntimeV2MainlineRetriesSameCandidateContractOnce(t *testing.T) {
 	}
 	if len(sealed.CandidateAttempts) != 2 || sealed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || sealed.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStateAccepted {
 		t.Fatalf("persisted attempts = %+v", sealed.CandidateAttempts)
+	}
+}
+
+func runtimeV2FileEditParameters(path string) []runtimecontract.OperationParameter {
+	oldText := "old"
+	newText := "new"
+	return []runtimecontract.OperationParameter{
+		{Name: "path", String: &path},
+		{Name: "oldText", String: &oldText},
+		{Name: "newText", String: &newText},
 	}
 }
 

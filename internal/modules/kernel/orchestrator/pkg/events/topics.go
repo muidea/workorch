@@ -26,6 +26,8 @@ const (
 	TopicOrchestratorDriveRuntimeV2                    = "/orchestrator/runtime-v2/drive"
 	TopicOrchestratorRequestRuntimeCandidate           = "/orchestrator/runtime-candidate/request"
 	TopicOrchestratorExecuteRuntimeOperation           = "/orchestrator/runtime-operation/execute"
+	TopicOrchestratorExecuteFileEditOperation          = "/orchestrator/runtime-operation/file-edit"
+	TopicOrchestratorExecutePatchApplyOperation        = "/orchestrator/runtime-operation/patch-apply"
 	TopicOrchestratorCommitRuntimeGovernanceResolution = "/orchestrator/runtime-governance/commit-resolution"
 	TopicOrchestratorCommitRuntimeGovernanceTicket     = "/orchestrator/runtime-governance/commit-ticket-resolution"
 	TopicOrchestratorOpenRuntimeGovernanceRequest      = "/orchestrator/runtime-governance/open-request"

@@ -134,6 +134,7 @@ func (m *Module) handleRuntimeCandidate(event magicevent.Event, result magiceven
 		Decision:          command.Decision,
 		Transaction:       command.Transaction,
 		CandidateAttempt:  command.CandidateAttempt,
+		PreviousFailure:   command.PreviousFailure,
 		StablePrefixHash:  command.StablePrefixHash,
 		DefinitionContext: command.DefinitionContext,
 		CandidateContext:  command.CandidateContext,

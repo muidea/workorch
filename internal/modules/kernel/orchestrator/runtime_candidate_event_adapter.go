@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -27,6 +28,9 @@ func RequestRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command or
 		return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("runtime candidate definition revision does not match authority transaction")
 	}
 	if err := command.CandidateContext.Validate(command.Decision); err != nil {
+		return orchestratorevents.RequestRuntimeCandidateResult{}, err
+	}
+	if err := validateRuntimeCandidateRetryContract(command.CandidateAttempt, command.PreviousFailure); err != nil {
 		return orchestratorevents.RequestRuntimeCandidateResult{}, err
 	}
 	if ctx == nil {
@@ -67,4 +71,20 @@ func RequestRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command or
 		return orchestratorevents.RequestRuntimeCandidateResult{}, err
 	}
 	return response, nil
+}
+
+func validateRuntimeCandidateRetryContract(attempt int, previousFailure *runtimecontract.RuntimeCandidateFailure) error {
+	if attempt < 0 || attempt > 1 {
+		return fmt.Errorf("runtime candidate attempt must be 0 or 1")
+	}
+	if attempt == 0 {
+		if previousFailure != nil {
+			return fmt.Errorf("initial runtime candidate attempt must not carry a previous failure")
+		}
+		return nil
+	}
+	if previousFailure == nil || previousFailure.Class == "" || strings.TrimSpace(previousFailure.Reason) == "" {
+		return fmt.Errorf("runtime candidate retry requires the previous failure")
+	}
+	return nil
 }

@@ -252,6 +252,8 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 	case ExecutionEvidenceStatusRejected:
 		if evidence.Failure != nil {
 			fact.FailureClass = evidence.Failure.Class
+			fact.FailureCode = evidence.Failure.Code
+			fact.FailureSignature = evidence.Failure.Signature
 			fact.FailureMessage = evidence.Failure.Message
 			failure := *evidence.Failure
 			aggregate.Facts.Failure = &failure

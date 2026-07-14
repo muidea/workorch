@@ -139,8 +139,12 @@ func TestDispatchCoordinatorCommitsMultiOperationDispatchOnlyAfterAllOperations(
 	repository := &durableRuntimeStateRepository{aggregate: stateChangeAggregate(t)}
 	coordinator, _ := NewDispatchCoordinator(repository)
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{
-		{Operation: runtimecontract.RuntimeOperation{ID: "write-1", Kind: "patch/apply", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"}}},
-		{Operation: runtimecontract.RuntimeOperation{ID: "write-2", Kind: "patch/apply", DependsOn: []string{"write-1"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"other.go"}}},
+		{Operation: patchApplyTestOperation("write-1", "main.go")},
+		{Operation: func() runtimecontract.RuntimeOperation {
+			operation := patchApplyTestOperation("write-2", "other.go")
+			operation.DependsOn = []string{"write-1"}
+			return operation
+		}()},
 	}}}
 	sealed, err := coordinator.PersistDispatch(context.Background(), repository.aggregate.Decision, candidate)
 	if err != nil {
@@ -250,8 +254,25 @@ func baseDispatchFacts() runtimecontract.RuntimeFacts {
 
 func stateChangeCandidate() runtimecontract.RuntimeCandidate {
 	return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
-		ID: "patch-1", Kind: "patch/apply", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
+		ID: "patch-1", Kind: "patch/apply", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"}, Parameters: patchApplyTestParameters("main.go"),
 	}}}}}
+}
+
+func patchApplyTestOperation(id string, targetRef string) runtimecontract.RuntimeOperation {
+	return runtimecontract.RuntimeOperation{
+		ID: id, Kind: runtimecontract.RuntimeBlockKindPatchApply,
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{targetRef}, Parameters: patchApplyTestParameters(targetRef),
+	}
+}
+
+func patchApplyTestParameters(targetRef string) []runtimecontract.OperationParameter {
+	patchType := "file_write"
+	content := "updated\n"
+	return []runtimecontract.OperationParameter{
+		{Name: "targetRef", String: &targetRef},
+		{Name: "patchType", String: &patchType},
+		{Name: "content", String: &content},
+	}
 }
 
 func validationCandidate() runtimecontract.RuntimeCandidate {

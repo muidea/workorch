@@ -33,6 +33,8 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorDriveRuntimeV2,
 		TopicOrchestratorRequestRuntimeCandidate,
 		TopicOrchestratorExecuteRuntimeOperation,
+		TopicOrchestratorExecuteFileEditOperation,
+		TopicOrchestratorExecutePatchApplyOperation,
 	)...)
 	ret = append(ret, eventcontract.Build("orchestrator", eventcontract.CommandClassNotify, eventcontract.LanePolicyState,
 		TopicPatchPreviewed,

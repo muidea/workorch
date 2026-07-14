@@ -53,6 +53,33 @@ type runtimeCandidateContextProjection struct {
 	Activation         runtimeCandidateActivationProjection    `json:"activation"`
 }
 
+type runtimeCandidateOutputContractProjection struct {
+	Action                  runtimecontract.RuntimeAction                 `json:"action"`
+	Schema                  json.RawMessage                               `json:"schema"`
+	RequiredTopLevelExample string                                        `json:"requiredTopLevelExample"`
+	ForbiddenTopLevelFields []string                                      `json:"forbiddenTopLevelFields"`
+	OperationContracts      []runtimeCandidateOperationContractProjection `json:"operationContracts,omitempty"`
+}
+
+type runtimeCandidateOperationContractProjection struct {
+	Kind                string                                         `json:"kind"`
+	Parameters          []runtimeCandidateOperationParameterProjection `json:"parameters"`
+	ForbiddenParameters []string                                       `json:"forbiddenParameters,omitempty"`
+	Rules               []string                                       `json:"rules,omitempty"`
+}
+
+type runtimeCandidateOperationParameterProjection struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Required    bool   `json:"required"`
+	Description string `json:"description"`
+}
+
+type runtimeCandidateRetryProjection struct {
+	PreviousFailure runtimecontract.RuntimeCandidateFailure `json:"previousFailure"`
+	Instruction     string                                  `json:"instruction"`
+}
+
 func (m *Module) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCandidateRequest) ([]byte, error) {
 	if m == nil || m.providerConfigLoader == nil {
 		return nil, fmt.Errorf("runtime candidate provider is not configured")
@@ -96,11 +123,20 @@ func runtimeV2ProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmod
 		return llmmodels.ProviderRequest{}, err
 	}
 	dynamicJSON, err := json.Marshal(struct {
-		Decision    runtimecontract.RuntimeDecision      `json:"decision"`
-		Transaction runtimecontract.AuthorityTransaction `json:"transaction"`
-		Attempt     int                                  `json:"candidateAttempt"`
-		Context     runtimeCandidateContextProjection    `json:"context"`
-	}{request.Decision, request.Transaction, request.CandidateAttempt, runtimeV2CandidateContextProjection(candidateContext, request.Decision.Action)})
+		Decision       runtimecontract.RuntimeDecision          `json:"decision"`
+		Transaction    runtimecontract.AuthorityTransaction     `json:"transaction"`
+		Attempt        int                                      `json:"candidateAttempt"`
+		OutputContract runtimeCandidateOutputContractProjection `json:"outputContract"`
+		Retry          *runtimeCandidateRetryProjection         `json:"retry,omitempty"`
+		Context        runtimeCandidateContextProjection        `json:"context"`
+	}{
+		request.Decision,
+		request.Transaction,
+		request.CandidateAttempt,
+		runtimeV2CandidateOutputContract(request.Decision),
+		runtimeV2CandidateRetry(request.CandidateAttempt, request.PreviousFailure),
+		runtimeV2CandidateContextProjection(candidateContext, request.Decision.Action),
+	})
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
 	}
@@ -109,7 +145,7 @@ func runtimeV2ProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmod
 		StepID: request.Transaction.AuthoritySnapshotID, Kind: "runtime_v2_candidate",
 		Schema: runtimeV2CandidateSchema(request.Decision.Action),
 		PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.runtime_candidate_prompt.v1", Sections: []llmmodels.PromptSection{
-			{ID: "C0.runtime-candidate-contract", Name: "Runtime candidate contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, Content: "Return exactly one JSON candidate matching the requested action. Do not return or modify convergence state, focus, authority, transaction, or output mode."},
+			{ID: "C0.runtime-candidate-contract", Name: "Runtime candidate contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, Content: runtimeV2CandidateContractCatalog()},
 			{ID: "C1.goal-dod", Name: "Goal and DoD", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 1, DefinitionRevision: definitionContext.Revision, Content: string(definitionJSON)},
 			{ID: "C2.capability-contract", Name: "Capability contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 2, Content: string(capabilityJSON)},
 			{ID: "C3.runtime-authority", Name: "Current runtime authority", Role: "user", Cacheability: "volatile", Protected: true, DisplayOrder: 3, Content: string(dynamicJSON)},
@@ -186,7 +222,7 @@ func runtimeV2CandidateSoul(activation runtimecontract.RuntimeActivationContext,
 func runtimeV2CandidateSchema(action runtimecontract.RuntimeAction) string {
 	switch action {
 	case runtimecontract.RuntimeActionProduceStateChange, runtimecontract.RuntimeActionProduceValidation:
-		return `{"type":"object","additionalProperties":false,"required":["operations"],"properties":{"operations":{"type":"array","minItems":1,"items":{"type":"object","required":["id","kind","coverageWorkItemIds"],"properties":{"id":{"type":"string"},"kind":{"type":"string"},"dependsOn":{"type":"array","items":{"type":"string"}},"coverageWorkItemIds":{"type":"array","items":{"type":"string"}},"targetRefs":{"type":"array","items":{"type":"string"}},"parameters":{"type":"array"}}}}}}`
+		return `{"type":"object","additionalProperties":false,"required":["operations"],"properties":{"operations":{"type":"array","minItems":1,"items":{"type":"object","additionalProperties":false,"required":["id","kind","coverageWorkItemIds"],"properties":{"id":{"type":"string"},"kind":{"type":"string"},"dependsOn":{"type":"array","items":{"type":"string"}},"coverageWorkItemIds":{"type":"array","minItems":1,"items":{"type":"string"}},"targetRefs":{"type":"array","items":{"type":"string"}},"parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["name"],"properties":{"name":{"type":"string"},"string":{"type":"string"},"integer":{"type":"integer"},"boolean":{"type":"boolean"},"stringList":{"type":"array","items":{"type":"string"}}}}}}}}}}`
 	case runtimecontract.RuntimeActionProduceAssessment:
 		return `{"type":"object","additionalProperties":false,"required":["focusId","coverageWorkItemIds","satisfied","summary"],"properties":{"focusId":{"type":"string"},"coverageWorkItemIds":{"type":"array","minItems":1,"items":{"type":"string"}},"satisfied":{"type":"boolean"},"summary":{"type":"string"},"evidenceRefs":{"type":"array","items":{"type":"string"}},"artifactRefs":{"type":"array","items":{"type":"string"}}}}`
 	case runtimecontract.RuntimeActionRequestGovernance:
@@ -194,4 +230,82 @@ func runtimeV2CandidateSchema(action runtimecontract.RuntimeAction) string {
 	default:
 		return ""
 	}
+}
+
+func runtimeV2CandidateContractCatalog() string {
+	return strings.Join([]string{
+		"Return exactly one JSON object for the requested Runtime V2 action. The JSON object itself is the candidate; never wrap it in another object.",
+		"The only legal top-level shapes are:",
+		"produce_state_change or produce_validation: " + runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceStateChange),
+		"produce_assessment: " + runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceAssessment),
+		"request_governance: " + runtimeV2CandidateSchema(runtimecontract.RuntimeActionRequestGovernance),
+		"Forbidden top-level fields include candidate, candidates, executionGraph, convergenceState, focus, authority, transaction, outputMode, result, and runtimeState.",
+		"Use the requested action, required output kinds, coverage work item IDs, and available capabilities from the current runtime authority. Do not invent or modify convergence state, focus, authority, transaction, or output mode. Do not use markdown fences or explanatory text.",
+	}, "\n")
+}
+
+func runtimeV2CandidateOutputContract(decision runtimecontract.RuntimeDecision) runtimeCandidateOutputContractProjection {
+	return runtimeCandidateOutputContractProjection{
+		Action:                  decision.Action,
+		Schema:                  json.RawMessage(runtimeV2CandidateSchema(decision.Action)),
+		RequiredTopLevelExample: runtimeV2CandidateTopLevelExample(decision.Action),
+		ForbiddenTopLevelFields: []string{"candidate", "candidates", "executionGraph", "convergenceState", "focus", "authority", "transaction", "outputMode", "result", "runtimeState"},
+		OperationContracts:      runtimeV2CandidateOperationContracts(decision.RequiredOutput.AcceptedKinds),
+	}
+}
+
+func runtimeV2CandidateOperationContracts(kinds []string) []runtimeCandidateOperationContractProjection {
+	ret := make([]runtimeCandidateOperationContractProjection, 0, len(kinds))
+	for _, kind := range kinds {
+		contract, ok := runtimecontract.RuntimeOperationContractForKind(kind)
+		if !ok {
+			continue
+		}
+		projection := runtimeCandidateOperationContractProjection{
+			Kind: contract.Kind, ForbiddenParameters: append([]string(nil), contract.ForbiddenParameters...), Rules: append([]string(nil), contract.Rules...),
+			Parameters: make([]runtimeCandidateOperationParameterProjection, 0, len(contract.Parameters)),
+		}
+		for _, parameter := range contract.Parameters {
+			projection.Parameters = append(projection.Parameters, runtimeCandidateOperationParameterProjection{
+				Name: parameter.Name, Type: string(parameter.Type), Required: parameter.Required, Description: parameter.Description,
+			})
+		}
+		ret = append(ret, projection)
+	}
+	return ret
+}
+
+func runtimeV2CandidateTopLevelExample(action runtimecontract.RuntimeAction) string {
+	switch action {
+	case runtimecontract.RuntimeActionProduceStateChange, runtimecontract.RuntimeActionProduceValidation:
+		return `{"operations":[...]}`
+	case runtimecontract.RuntimeActionProduceAssessment:
+		return `{"focusId":"...","coverageWorkItemIds":["..."],"satisfied":false,"summary":"..."}`
+	case runtimecontract.RuntimeActionRequestGovernance:
+		return `{"externalDependency":{"kind":"...","reason":"..."}}`
+	default:
+		return `{}`
+	}
+}
+
+func runtimeV2CandidateRetry(attempt int, failure *runtimecontract.RuntimeCandidateFailure) *runtimeCandidateRetryProjection {
+	if attempt != 1 || failure == nil {
+		return nil
+	}
+	previous := *failure
+	previous.Reason = boundedRuntimeCandidateFailureReason(previous.Reason)
+	instruction := "Retry the exact same sealed authority contract. Return only the legal top-level object for the requested action."
+	if previous.Class == runtimecontract.RuntimeCandidateFailureClassSchema || previous.Class == runtimecontract.RuntimeCandidateFailureClassContract {
+		instruction += " The previous candidate shape was rejected; do not repeat any wrapper or field named candidate, candidates, or executionGraph."
+	}
+	return &runtimeCandidateRetryProjection{PreviousFailure: previous, Instruction: instruction}
+}
+
+func boundedRuntimeCandidateFailureReason(reason string) string {
+	const maxBytes = 1024
+	reason = strings.TrimSpace(reason)
+	if len(reason) <= maxBytes {
+		return reason
+	}
+	return reason[:maxBytes] + "...[truncated]"
 }

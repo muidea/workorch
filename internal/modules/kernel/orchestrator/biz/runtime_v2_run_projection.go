@@ -78,9 +78,12 @@ func (o *RuntimeOrchestrator) ProjectRuntimeV2Terminal(ctx context.Context, work
 		if run.State == common.RunStateFailed {
 			return nil
 		}
+		code := strings.TrimSpace(terminal.Code)
 		reason := strings.TrimSpace(terminal.Summary)
-		if reason == "" {
-			reason = strings.TrimSpace(terminal.Code)
+		if code != "" && reason != "" {
+			reason = code + ": " + reason
+		} else if reason == "" {
+			reason = code
 		}
 		return o.closeLoadedRun(ctx, run, common.RunStateFailed, reason)
 	default:
