@@ -7,10 +7,11 @@ import (
 
 func MapRunStatus(snapshot readmodelcore.RunSnapshot) readmodelcore.RunStatus {
 	ret := readmodelcore.RunStatus{
-		ID:                 snapshot.Run.ID,
-		WorkspaceID:        snapshot.Run.WorkspaceID,
-		State:              snapshot.Run.State,
-		StepCount:          len(snapshot.Steps),
+		ID:          snapshot.Run.ID,
+		WorkspaceID: snapshot.Run.WorkspaceID,
+		State:       snapshot.Run.State,
+		StepCount:   runtimeV2AwareStepCount(snapshot),
+
 		DecisionCount:      len(snapshot.Decisions),
 		ApprovalCount:      len(snapshot.Approvals),
 		BlockingTicketID:   snapshot.Run.BlockingTicketID,
@@ -26,4 +27,20 @@ func MapRunStatus(snapshot readmodelcore.RunSnapshot) readmodelcore.RunStatus {
 	ret.CurrentActionLabel = currentActionLabelFromRunSnapshot(snapshot)
 	ret.ConvergenceStatus = MapConvergenceStatus(snapshot)
 	return ret
+}
+
+func runtimeV2AwareStepCount(snapshot readmodelcore.RunSnapshot) int {
+	if len(snapshot.Steps) > 0 {
+		return len(snapshot.Steps)
+	}
+	if snapshot.TaskProgress.RuntimeV2 == nil {
+		return 0
+	}
+	// Candidate attempts are not steps; keep dispatch/operation units only.
+	summary := snapshot.TaskProgress.RuntimeV2
+	count := summary.CompletedDispatchCount
+	if summary.ActiveDispatchID != "" {
+		count++
+	}
+	return count
 }

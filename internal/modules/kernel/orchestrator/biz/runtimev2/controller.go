@@ -172,7 +172,13 @@ func (c *RuntimeController) AcceptCandidateAttempt(ctx context.Context, workspac
 	if !ok {
 		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d is not pending", common.ErrConflict, attempt)
 	}
-	dispatch, err := SealDispatch(aggregate.Decision, candidate)
+	if err := runtimecontract.ValidateCandidateAgainstRejectedShapes(aggregate.Facts, sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches), candidate); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := runtimecontract.ValidateCandidateAgainstMissingValidationGap(aggregate.Facts, aggregate.Decision, candidate); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	dispatch, err := SealDispatchWithActivation(aggregate.Decision, candidate, aggregate.Facts.Activation)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -338,4 +344,16 @@ func sameRuntimeDefinition(left runtimecontract.RuntimeFacts, right runtimecontr
 		left.DefinitionRevision == right.DefinitionRevision &&
 		left.Focus.ID == right.Focus.ID &&
 		runtimecontract.SameRuntimeActivationContext(left.Activation, right.Activation)
+}
+
+func sealedDispatchesToRuntimeRecords(values []SealedDispatch) []runtimecontract.RuntimeDispatchRecord {
+	ret := make([]runtimecontract.RuntimeDispatchRecord, 0, len(values))
+	for _, value := range values {
+		ret = append(ret, runtimecontract.RuntimeDispatchRecord{
+			ID: value.ID, WorkspaceID: value.WorkspaceID, RunID: value.RunID,
+			Transaction: value.Transaction, CandidateHash: value.CandidateHash, Candidate: value.Candidate,
+			State: runtimecontract.RuntimeDispatchState(value.State), CompletedOperationIDs: append([]string(nil), value.CompletedOperationIDs...),
+		})
+	}
+	return ret
 }

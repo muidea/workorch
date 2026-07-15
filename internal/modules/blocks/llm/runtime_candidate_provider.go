@@ -40,17 +40,19 @@ type runtimeCandidateActivationProjection struct {
 }
 
 type runtimeCandidateContextProjection struct {
-	WorkspaceID        common.WorkspaceID                      `json:"workspaceId"`
-	RunID              common.RunID                            `json:"runId"`
-	DefinitionRevision string                                  `json:"definitionRevision"`
-	EvidenceRevision   string                                  `json:"evidenceRevision"`
-	Focus              runtimecontract.CoverageFocus           `json:"focus"`
-	Evidence           runtimecontract.EvidenceLedger          `json:"evidence"`
-	Assessments        []runtimecontract.RuntimeAssessmentFact `json:"assessments,omitempty"`
-	Failure            *runtimecontract.FailureFact            `json:"failure,omitempty"`
-	Capabilities       runtimecontract.RuntimeCapabilities     `json:"capabilities"`
-	Resources          runtimeCandidateResourceProjection      `json:"resources"`
-	Activation         runtimeCandidateActivationProjection    `json:"activation"`
+	WorkspaceID          common.WorkspaceID                      `json:"workspaceId"`
+	RunID                common.RunID                            `json:"runId"`
+	DefinitionRevision   string                                  `json:"definitionRevision"`
+	EvidenceRevision     string                                  `json:"evidenceRevision"`
+	Focus                runtimecontract.CoverageFocus           `json:"focus"`
+	MissingEvidenceKinds []string                                `json:"missingEvidenceKinds,omitempty"`
+	Evidence             runtimecontract.EvidenceLedger          `json:"evidence"`
+	Assessments          []runtimecontract.RuntimeAssessmentFact `json:"assessments,omitempty"`
+	Failure              *runtimecontract.FailureFact            `json:"failure,omitempty"`
+	RepairHints          []runtimecontract.RuntimeRepairHint     `json:"repairHints,omitempty"`
+	Capabilities         runtimecontract.RuntimeCapabilities     `json:"capabilities"`
+	Resources            runtimeCandidateResourceProjection      `json:"resources"`
+	Activation           runtimeCandidateActivationProjection    `json:"activation"`
 }
 
 type runtimeCandidateOutputContractProjection struct {
@@ -174,10 +176,17 @@ func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidat
 	context = context.Normalized()
 	activation := context.Activation
 	stage := runtimeV2CandidateStage(action)
+	facts := runtimecontract.RuntimeFacts{
+		WorkspaceID: context.WorkspaceID, RunID: context.RunID, DefinitionRevision: context.DefinitionRevision,
+		EvidenceRevision: context.EvidenceRevision, Focus: context.Focus, RemainingFocuses: context.RemainingFocuses,
+		Evidence: context.Evidence, Assessments: context.Assessments, Failure: context.Failure,
+		Capabilities: context.Capabilities, Resources: context.Resources, Activation: context.Activation,
+	}.Normalized()
 	return runtimeCandidateContextProjection{
 		WorkspaceID: context.WorkspaceID, RunID: context.RunID,
 		DefinitionRevision: context.DefinitionRevision, EvidenceRevision: context.EvidenceRevision,
-		Focus: context.Focus, Evidence: context.Evidence, Assessments: context.Assessments, Failure: context.Failure,
+		Focus: context.Focus, MissingEvidenceKinds: runtimecontract.MissingRequiredEvidenceKinds(facts), Evidence: context.Evidence,
+		Assessments: context.Assessments, Failure: context.Failure, RepairHints: runtimecontract.DeriveRuntimeRepairHints(facts),
 		Capabilities: context.Capabilities,
 		Resources: runtimeCandidateResourceProjection{
 			Manifest: context.Resources.Manifest, TargetSnapshots: context.Resources.TargetSnapshots,
@@ -241,6 +250,9 @@ func runtimeV2CandidateContractCatalog() string {
 		"request_governance: " + runtimeV2CandidateSchema(runtimecontract.RuntimeActionRequestGovernance),
 		"Forbidden top-level fields include candidate, candidates, executionGraph, convergenceState, focus, authority, transaction, outputMode, result, and runtimeState.",
 		"Use the requested action, required output kinds, coverage work item IDs, and available capabilities from the current runtime authority. Do not invent or modify convergence state, focus, authority, transaction, or output mode. Do not use markdown fences or explanatory text.",
+		"When context.missingEvidenceKinds is present, produce only those missing evidence kinds.",
+		"Use operationContracts for allowed parameters of each kind. Dynamic fields are only valid where the contract permits them.",
+		"When context.repairHints is present, follow those domain-neutral hints and do not repeat an active rejected operation shape.",
 	}, "\n")
 }
 
@@ -298,7 +310,23 @@ func runtimeV2CandidateRetry(attempt int, failure *runtimecontract.RuntimeCandid
 	if previous.Class == runtimecontract.RuntimeCandidateFailureClassSchema || previous.Class == runtimecontract.RuntimeCandidateFailureClassContract {
 		instruction += " The previous candidate shape was rejected; do not repeat any wrapper or field named candidate, candidates, or executionGraph."
 	}
+	instruction += runtimeV2CandidateRetryParameterHint(previous.Reason)
 	return &runtimeCandidateRetryProjection{PreviousFailure: previous, Instruction: instruction}
+}
+
+func runtimeV2CandidateRetryParameterHint(reason string) string {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return ""
+	}
+	lower := strings.ToLower(reason)
+	if strings.Contains(lower, "does not accept parameter") || strings.Contains(lower, "requires parameter") {
+		return " Rewrite illegal operation parameters to the allowed typed fields for the requested kind. Do not repeat rejected parameter names."
+	}
+	if strings.Contains(lower, "conflict") || strings.Contains(lower, "not found") || strings.Contains(lower, "mismatch") {
+		return " Re-read current target content and realign operation inputs before retrying a conflicting state-changing operation."
+	}
+	return ""
 }
 
 func boundedRuntimeCandidateFailureReason(reason string) string {

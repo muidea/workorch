@@ -116,10 +116,16 @@ func NewDispatchCoordinator(repository RuntimeStateRepository) (*DispatchCoordin
 }
 
 func SealDispatch(decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate) (SealedDispatch, error) {
+	return SealDispatchWithActivation(decision, candidate, runtimecontract.RuntimeActivationContext{})
+}
+
+// SealDispatchWithActivation seals a candidate using owner-sealed activation capability
+// metadata for side-effect gating (MCP RiskLevel, etc.).
+func SealDispatchWithActivation(decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate, activation runtimecontract.RuntimeActivationContext) (SealedDispatch, error) {
 	if err := decision.Validate(); err != nil {
 		return SealedDispatch{}, err
 	}
-	if err := candidate.Validate(decision); err != nil {
+	if err := candidate.ValidateWithActivation(decision, activation); err != nil {
 		return SealedDispatch{}, err
 	}
 	transaction := decision.AuthorityTransaction()
@@ -137,6 +143,10 @@ func SealDispatch(decision runtimecontract.RuntimeDecision, candidate runtimecon
 }
 
 func (d SealedDispatch) Validate(decision runtimecontract.RuntimeDecision) error {
+	return d.ValidateWithActivation(decision, runtimecontract.RuntimeActivationContext{})
+}
+
+func (d SealedDispatch) ValidateWithActivation(decision runtimecontract.RuntimeDecision, activation runtimecontract.RuntimeActivationContext) error {
 	if strings.TrimSpace(d.ID) == "" || d.WorkspaceID == "" || d.RunID == "" || strings.TrimSpace(d.CandidateHash) == "" {
 		return fmt.Errorf("sealed dispatch requires id, scope and candidate hash")
 	}
@@ -146,7 +156,7 @@ func (d SealedDispatch) Validate(decision runtimecontract.RuntimeDecision) error
 	if d.WorkspaceID != decision.AuthoritySnapshot.WorkspaceID || d.RunID != decision.AuthoritySnapshot.RunID {
 		return fmt.Errorf("sealed dispatch scope mismatch")
 	}
-	if err := d.Candidate.Validate(decision); err != nil {
+	if err := d.Candidate.ValidateWithActivation(decision, activation); err != nil {
 		return err
 	}
 	if d.CandidateHash != runtimecontract.StableRuntimeCandidateHash(d.Candidate) {
@@ -309,7 +319,7 @@ func (a RuntimeAggregate) Validate() error {
 		return fmt.Errorf("runtime aggregate decision scope mismatch")
 	}
 	if a.ActiveDispatch != nil {
-		if err := a.ActiveDispatch.Validate(a.Decision); err != nil {
+		if err := a.ActiveDispatch.ValidateWithActivation(a.Decision, a.Facts.Activation); err != nil {
 			return fmt.Errorf("runtime aggregate active dispatch: %w", err)
 		}
 	}

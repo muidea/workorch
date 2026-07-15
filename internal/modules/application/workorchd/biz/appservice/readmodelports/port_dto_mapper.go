@@ -455,8 +455,13 @@ func portTaskProgressInfo(item readmodelcore.TaskProgress) port.TaskProgressInfo
 		RunID:              common.RunID(item.RunID),
 		State:              item.State,
 		Summary:            item.Summary,
+		CurrentStepID:      common.StepID(item.CurrentStepID),
+		CurrentStepKind:    item.CurrentStepKind,
+		CurrentStepState:   item.CurrentStepState,
 		CurrentActionLabel: item.CurrentActionLabel,
 		DiagnosticLineage:  common.StepID(item.DiagnosticLineage),
+		CurrentMilestone:   item.CurrentMilestone,
+		Milestones:         portProgressMilestones(item.Milestones),
 		Recovery:           portRecoveryPlanInfo(item.Recovery),
 		RepairLoop:         portRepairLoopInfo(item.RepairLoop),
 		AssessmentOutcome: port.AssessmentOutcomeInfo{
@@ -471,6 +476,35 @@ func portTaskProgressInfo(item readmodelcore.TaskProgress) port.TaskProgressInfo
 			LatestRejectedResultID:      common.ResultID(item.AssessmentOutcome.LatestRejectedResultID),
 			LatestRejectedReason:        item.AssessmentOutcome.LatestRejectedReason,
 		},
+		RuntimeV2: portRuntimeV2ProgressInfo(item.RuntimeV2),
+	}
+}
+
+func portProgressMilestones(items []readmodelcore.ProgressMilestone) []port.ProgressMilestoneInfo {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]port.ProgressMilestoneInfo, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, port.ProgressMilestoneInfo{
+			ID: item.ID, Title: item.Title, State: item.State, EvidenceRefs: append([]string(nil), item.EvidenceRefs...),
+		})
+	}
+	return ret
+}
+
+func portRuntimeV2ProgressInfo(item *readmodelcore.RuntimeV2Progress) *port.RuntimeV2ProgressInfo {
+	if item == nil {
+		return nil
+	}
+	return &port.RuntimeV2ProgressInfo{
+		StateRevision: item.StateRevision, EvidenceSequence: item.EvidenceSequence,
+		CompletedDispatchCount: item.CompletedDispatchCount, ActiveDispatchID: item.ActiveDispatchID,
+		CandidateAttemptCount: item.CandidateAttemptCount, AcceptedEvidenceCount: item.AcceptedEvidenceCount,
+		RejectedEvidenceCount: item.RejectedEvidenceCount, MissingEvidenceKinds: append([]string(nil), item.MissingEvidenceKinds...),
+		CurrentFocusID: item.CurrentFocusID, CurrentAction: item.CurrentAction, FailureClass: item.FailureClass,
+		FailureCode: item.FailureCode, FailureSignature: item.FailureSignature, FailureMessage: item.FailureMessage,
+		RepairHintCodes: append([]string(nil), item.RepairHintCodes...),
 	}
 }
 

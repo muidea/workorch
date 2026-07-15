@@ -433,8 +433,13 @@ func taskProgressInfoFromClient(input client.TaskProgress) TaskProgressInfo {
 		RunID:              common.RunID(input.RunID),
 		State:              input.State,
 		Summary:            input.Summary,
+		CurrentStepID:      common.StepID(input.CurrentStepID),
+		CurrentStepKind:    input.CurrentStepKind,
+		CurrentStepState:   input.CurrentStepState,
 		CurrentActionLabel: input.CurrentActionLabel,
 		DiagnosticLineage:  common.StepID(input.DiagnosticLineage),
+		CurrentMilestone:   input.CurrentMilestone,
+		Milestones:         progressMilestonesFromClient(input.Milestones),
 		Recovery: RecoveryPlanInfo{
 			Mode:               input.Recovery.Mode,
 			NextAction:         input.Recovery.NextAction,
@@ -479,6 +484,35 @@ func taskProgressInfoFromClient(input client.TaskProgress) TaskProgressInfo {
 			LatestRejectedResultID:      common.ResultID(input.AssessmentOutcome.LatestRejectedResultID),
 			LatestRejectedReason:        input.AssessmentOutcome.LatestRejectedReason,
 		},
+		RuntimeV2: runtimeV2ProgressFromClient(input.RuntimeV2),
+	}
+}
+
+func progressMilestonesFromClient(items []client.ProgressMilestone) []ProgressMilestoneInfo {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]ProgressMilestoneInfo, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, ProgressMilestoneInfo{
+			ID: item.ID, Title: item.Title, State: item.State, EvidenceRefs: append([]string(nil), item.EvidenceRefs...),
+		})
+	}
+	return ret
+}
+
+func runtimeV2ProgressFromClient(item *client.RuntimeV2Progress) *RuntimeV2ProgressInfo {
+	if item == nil {
+		return nil
+	}
+	return &RuntimeV2ProgressInfo{
+		StateRevision: item.StateRevision, EvidenceSequence: item.EvidenceSequence,
+		CompletedDispatchCount: item.CompletedDispatchCount, ActiveDispatchID: item.ActiveDispatchID,
+		CandidateAttemptCount: item.CandidateAttemptCount, AcceptedEvidenceCount: item.AcceptedEvidenceCount,
+		RejectedEvidenceCount: item.RejectedEvidenceCount, MissingEvidenceKinds: append([]string(nil), item.MissingEvidenceKinds...),
+		CurrentFocusID: item.CurrentFocusID, CurrentAction: item.CurrentAction, FailureClass: item.FailureClass,
+		FailureCode: item.FailureCode, FailureSignature: item.FailureSignature, FailureMessage: item.FailureMessage,
+		RepairHintCodes: append([]string(nil), item.RepairHintCodes...),
 	}
 }
 

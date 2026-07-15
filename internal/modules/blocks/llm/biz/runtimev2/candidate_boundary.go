@@ -36,7 +36,7 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 	if err != nil {
 		return llmmodels.RuntimeCandidateResponse{}, candidateRequestError(CandidateFailureClassSchema, err)
 	}
-	if err := candidate.Validate(request.Decision); err != nil {
+	if err := candidate.ValidateWithActivation(request.Decision, request.CandidateContext.Activation); err != nil {
 		return llmmodels.RuntimeCandidateResponse{}, candidateRequestError(CandidateFailureClassContract, err)
 	}
 	return llmmodels.RuntimeCandidateResponse{Transaction: request.Transaction, Candidate: candidate}, nil
@@ -109,7 +109,7 @@ func ValidateCandidateAttempt(request llmmodels.RuntimeCandidateRequest, respons
 	if err := runtimecontract.ValidateAuthorityTransaction(request.Decision, response.Transaction); err != nil {
 		return CandidateAttemptOutcome{Disposition: CandidateDispositionTerminal, FailureClass: CandidateFailureClassInternal, Reason: err.Error()}
 	}
-	if err := response.Candidate.Validate(request.Decision); err != nil {
+	if err := response.Candidate.ValidateWithActivation(request.Decision, request.CandidateContext.Activation); err != nil {
 		if request.CandidateAttempt == 0 {
 			return CandidateAttemptOutcome{Disposition: CandidateDispositionRetrySameContract, FailureClass: CandidateFailureClassContract, Reason: err.Error()}
 		}

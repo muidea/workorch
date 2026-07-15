@@ -85,7 +85,7 @@ func (r RuntimeStateRecord) Validate() error {
 		return fmt.Errorf("runtime state decision scope mismatch")
 	}
 	if r.ActiveDispatch != nil {
-		if err := r.ActiveDispatch.Validate(r.Decision); err != nil {
+		if err := r.ActiveDispatch.ValidateWithActivation(r.Decision, r.Facts.Activation); err != nil {
 			return fmt.Errorf("runtime state active dispatch: %w", err)
 		}
 	}
@@ -245,6 +245,10 @@ func cloneRuntimeDecision(decision RuntimeDecision) RuntimeDecision {
 }
 
 func (d RuntimeDispatchRecord) Validate(decision RuntimeDecision) error {
+	return d.ValidateWithActivation(decision, RuntimeActivationContext{})
+}
+
+func (d RuntimeDispatchRecord) ValidateWithActivation(decision RuntimeDecision, activation RuntimeActivationContext) error {
 	if strings.TrimSpace(d.ID) == "" || d.WorkspaceID == "" || d.RunID == "" || strings.TrimSpace(d.CandidateHash) == "" {
 		return fmt.Errorf("runtime dispatch requires id, scope and candidate hash")
 	}
@@ -254,7 +258,7 @@ func (d RuntimeDispatchRecord) Validate(decision RuntimeDecision) error {
 	if d.WorkspaceID != decision.AuthoritySnapshot.WorkspaceID || d.RunID != decision.AuthoritySnapshot.RunID {
 		return fmt.Errorf("runtime dispatch scope mismatch")
 	}
-	if err := d.Candidate.Validate(decision); err != nil {
+	if err := d.Candidate.ValidateWithActivation(decision, activation); err != nil {
 		return err
 	}
 	if d.CandidateHash != StableRuntimeCandidateHash(d.Candidate) {

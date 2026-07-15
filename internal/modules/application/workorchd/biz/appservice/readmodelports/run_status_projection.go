@@ -8,11 +8,19 @@ import (
 )
 
 func projectRunStatus(item *runmodel.Run, related runStatusRelatedModels) readmodelcore.RunStatus {
+	// StepCount uses dispatch/operation units only. Candidate attempts are not steps.
+	stepCount := len(related.steps)
+	if stepCount == 0 && item.RuntimeState != nil {
+		stepCount = len(item.RuntimeState.CompletedDispatches)
+		if item.RuntimeState.ActiveDispatch != nil {
+			stepCount++
+		}
+	}
 	ret := readmodelcore.RunStatus{
 		ID:                 string(item.ID),
 		WorkspaceID:        string(item.WorkspaceID),
 		State:              string(item.State),
-		StepCount:          len(related.steps),
+		StepCount:          stepCount,
 		DecisionCount:      len(related.decisions),
 		ApprovalCount:      len(related.approvals),
 		BlockingTicketID:   string(item.BlockingTicketID),

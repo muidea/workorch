@@ -16,6 +16,7 @@ func applyRunSnapshotDerivedReadModels(ret *readmodelcore.RunSnapshot, input Run
 	ret.SelectedCapabilities = SelectedRuntimeCapabilitiesFromRun(input.Run, capabilityCatalog)
 	ret.UsedCapabilities = UsedRuntimeCapabilities(*ret, capabilityCatalog)
 	ret.TaskProgress = MapLocalizedTaskProgress(*ret)
+	applyRuntimeV2Progress(&ret.TaskProgress, input.Run)
 	ret.RepairLoop = ret.TaskProgress.RepairLoop
 	ret.TaskDecompositions = MapTaskDecompositions(*ret)
 	ret.TaskPlans = MapTaskPlansFromSnapshot(*ret)

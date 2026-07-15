@@ -110,6 +110,20 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 		attachShellValidationFailureDiagnostic(&output, request, execCommand, 0, false, true, err)
 		return finalizeShellResult(output, err)
 	}
+	if err := validateShellValidationPreflight(deliverableDirectory, execCommand, execArgs, request); err != nil {
+		now := time.Now().UTC()
+		output := shellBaseOutput(request, command, args, deliverableDirectory, commandNormalization, execCommand)
+		output.Status = "failed"
+		output.Stage = "shell_validation_preflight_failed"
+		output.Reason = err.Error()
+		output.FailureReason = "validation_target_missing"
+		output.FailureCode = "validation_target_missing"
+		output.EvidenceQuality = string(common.EvidenceQualityInconclusive)
+		output.EvidenceReason = err.Error()
+		attachManagedValidationResources(&output, request, 0, now, now, "released")
+		attachShellValidationFailureDiagnostic(&output, request, execCommand, 0, false, true, err)
+		return finalizeShellResult(output, err)
+	}
 	beforeChange := workspaceStateChangeFingerprint(ctx, deliverableDirectory, request.StateChanging)
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -172,6 +186,11 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 		output.Status = "failed"
 		attachManagedValidationResources(&output, request, pid, startedAt, time.Now().UTC(), "failed")
 		attachShellCommandFailureDiagnostics(&output, execCommand, err)
+		if output.FailureCode == "" && output.FailureReason == "" && output.Stage == "" {
+			output.Stage = "shell_command_failed"
+			output.FailureReason = "shell_exit_nonzero"
+			output.FailureCode = "shell_exit_nonzero"
+		}
 		attachShellValidationFailureDiagnostic(&output, request, execCommand, exitCode, false, false, err)
 		return finalizeShellResult(output, err)
 	}
@@ -758,6 +777,100 @@ func (a *RuntimeAdapter) filteredEnv() []string {
 	return out
 }
 
+// validateShellValidationPreflight performs domain-neutral executability checks for validation-like shell commands.
+// It does not encode product-domain test frameworks beyond generic package/tool presence signals.
+func validateShellValidationPreflight(deliverableDirectory string, command string, args []string, request RuntimeCommandRequest) error {
+	if !shellRequestLooksLikeValidation(request, command, args) {
+		return nil
+	}
+	base := filepath.Base(strings.TrimSpace(command))
+	switch base {
+	case "go":
+		return validateGoTestValidationPreflight(deliverableDirectory, args)
+	default:
+		return nil
+	}
+}
+
+func shellRequestLooksLikeValidation(request RuntimeCommandRequest, command string, args []string) bool {
+	if !runtimeValidationEvidenceEmpty(request.ValidationEvidence) {
+		return true
+	}
+	// Heuristic for validation-shaped go test invocations used as verification evidence.
+	if filepath.Base(strings.TrimSpace(command)) == "go" && len(args) > 0 && strings.TrimSpace(args[0]) == "test" {
+		return true
+	}
+	return false
+}
+
+func validateGoTestValidationPreflight(deliverableDirectory string, args []string) error {
+	if len(args) == 0 || strings.TrimSpace(args[0]) != "test" {
+		return nil
+	}
+	runPattern := goTestRunPattern(args)
+	hasTestFiles, err := workspaceContainsGoTestFiles(deliverableDirectory)
+	if err != nil {
+		return err
+	}
+	if !hasTestFiles {
+		if runPattern != "" {
+			return fmt.Errorf("%w: validation preflight failed: no *_test.go files found for go test -run %q; create a matching test first or choose an executable validation command", common.ErrInvalidArgument, runPattern)
+		}
+		return fmt.Errorf("%w: validation preflight failed: no *_test.go files found for go test; create tests first or choose an executable validation command", common.ErrInvalidArgument)
+	}
+	return nil
+}
+
+func goTestRunPattern(args []string) string {
+	for idx := 0; idx < len(args); idx++ {
+		arg := strings.TrimSpace(args[idx])
+		switch {
+		case arg == "-run" || arg == "--run":
+			if idx+1 < len(args) {
+				return strings.TrimSpace(args[idx+1])
+			}
+		case strings.HasPrefix(arg, "-run="):
+			return strings.TrimSpace(strings.TrimPrefix(arg, "-run="))
+		case strings.HasPrefix(arg, "--run="):
+			return strings.TrimSpace(strings.TrimPrefix(arg, "--run="))
+		}
+	}
+	return ""
+}
+
+func workspaceContainsGoTestFiles(root string) (bool, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return false, common.ErrInvalidArgument
+	}
+	found := false
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			// Permission or transient path errors should not hard-fail preflight broadly.
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		name := d.Name()
+		if d.IsDir() {
+			if name == ".git" || name == "vendor" || name == "node_modules" || name == ".workorch-data" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(name, "_test.go") {
+			found = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, filepath.SkipAll) {
+		return false, err
+	}
+	return found, nil
+}
+
 func shellCommandSpec(command string, args []string) (string, []string, error) {
 	command = strings.TrimSpace(command)
 	if command == "" {
@@ -1200,13 +1313,42 @@ func runtimeValidationEvidenceEmpty(value runtimemodel.RuntimeValidationEvidence
 
 func finalizeShellResult(output RuntimeCommandResult, executeErr error) (RuntimeCommandResult, error) {
 	output.FailureCode = firstNonEmptyShellString(output.FailureCode, output.FailureReason, output.Stage)
-	output.FailureMessage = firstNonEmptyShellString(output.FailureMessage, output.Reason, errorString(executeErr), output.EvidenceReason)
+	baseMessage := firstNonEmptyShellString(output.FailureMessage, output.Reason, errorString(executeErr), output.EvidenceReason)
+	output.FailureMessage = enrichShellFailureMessage(baseMessage, output)
 	summary := firstNonEmptyShellString(output.Summary, output.Status)
 	if summary == "" && output.Command != "" {
 		summary = fmt.Sprintf("shell command %s", output.Command)
+	}
+	// On failure, prefer a diagnostic summary so RuntimeEvidence carries repairable signal.
+	if executeErr != nil || output.Status == "failed" || output.Status == "timeout" || output.ExitCode != 0 {
+		summary = firstNonEmptyShellString(output.FailureMessage, summary)
 	}
 	output.Summary = summary
 	exitCode := output.ExitCode
 	output.Evidence = runtimemodel.RuntimeOperationEvidence{Summary: summary, ExitCode: &exitCode}
 	return output, executeErr
+}
+
+func enrichShellFailureMessage(base string, output RuntimeCommandResult) string {
+	base = strings.TrimSpace(base)
+	// Redact before preview so secrets never enter FailureMessage / RuntimeFacts / LLM context.
+	stderrPreview := shellPreview(common.RedactSensitiveString(output.Stderr), 512)
+	stdoutPreview := shellPreview(common.RedactSensitiveString(output.Stdout), 256)
+	base = common.RedactSensitiveString(base)
+	parts := make([]string, 0, 4)
+	if base != "" {
+		parts = append(parts, base)
+	}
+	if output.ExitCode != 0 && !strings.Contains(base, fmt.Sprintf("exit status %d", output.ExitCode)) && !strings.Contains(base, fmt.Sprintf("exit code %d", output.ExitCode)) {
+		parts = append(parts, fmt.Sprintf("exitCode=%d", output.ExitCode))
+	}
+	if stage := strings.TrimSpace(output.Stage); stage != "" && !strings.Contains(base, stage) {
+		parts = append(parts, "stage="+stage)
+	}
+	if stderrPreview != "" {
+		parts = append(parts, "stderr="+stderrPreview)
+	} else if stdoutPreview != "" {
+		parts = append(parts, "stdout="+stdoutPreview)
+	}
+	return strings.Join(parts, "; ")
 }

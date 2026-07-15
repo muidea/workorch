@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -61,7 +60,7 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "governance_rejected", facts.Failure.Message), nil
 		}
 	}
-	if rejectedValidationFailure(facts) {
+	if needsStateChangeAfterRejectedValidation(facts) {
 		return stateChangeDecision(base, facts)
 	}
 	missing := missingEvidenceKinds(facts)
@@ -198,28 +197,50 @@ func terminalDecision(base runtimecontract.RuntimeDecision, state runtimecontrac
 }
 
 func missingEvidenceKinds(facts runtimecontract.RuntimeFacts) []string {
-	accepted := make(map[string]struct{}, len(facts.Evidence.Accepted))
-	for _, evidence := range facts.Evidence.Accepted {
-		if evidenceAppliesToCurrentFocus(facts, evidence) {
-			accepted[evidence.Kind] = struct{}{}
-		}
-	}
-	missing := make([]string, 0, len(facts.Focus.RequiredEvidenceKinds))
-	for _, kind := range facts.Focus.RequiredEvidenceKinds {
-		if _, ok := accepted[kind]; !ok {
-			missing = append(missing, kind)
-		}
-	}
-	return missing
+	return runtimecontract.MissingRequiredEvidenceKinds(facts)
 }
 
-func rejectedValidationFailure(facts runtimecontract.RuntimeFacts) bool {
-	for _, evidence := range facts.Evidence.Rejected {
-		if evidenceAppliesToCurrentFocus(facts, evidence) && evidence.Kind == runtimecontract.EvidenceKindValidation && (evidence.FailureClass != "" || evidence.FailureMessage != "") {
-			return true
+// needsStateChangeAfterRejectedValidation forces repair state-change after a focus-local
+// validation rejection until a later state-change is accepted. Rejected repair attempts do
+// not re-open produce_validation: replaying the same failed validation would be blocked by
+// anti-replay and only waste candidate budget. Re-validation is allowed only after accepted
+// state-change progress supersedes the failed validation lineage.
+func needsStateChangeAfterRejectedValidation(facts runtimecontract.RuntimeFacts) bool {
+	validationRevision, ok := latestRejectedValidationRevision(facts)
+	if !ok {
+		return false
+	}
+	for _, evidence := range facts.Evidence.Accepted {
+		if !runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) || evidence.Kind != runtimecontract.EvidenceKindStateChange {
+			continue
+		}
+		if evidenceRevisionAfter(evidence.Revision, validationRevision) {
+			return false
 		}
 	}
-	return false
+	return true
+}
+
+func latestRejectedValidationRevision(facts runtimecontract.RuntimeFacts) (string, bool) {
+	found := false
+	revision := ""
+	for _, evidence := range facts.Evidence.Rejected {
+		if !runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) || evidence.Kind != runtimecontract.EvidenceKindValidation {
+			continue
+		}
+		if evidence.FailureClass == "" && strings.TrimSpace(evidence.FailureMessage) == "" {
+			continue
+		}
+		if !found || evidenceRevisionAfter(evidence.Revision, revision) || (evidence.Revision == "" && revision == "") {
+			found = true
+			revision = evidence.Revision
+		}
+	}
+	return revision, found
+}
+
+func evidenceRevisionAfter(left string, right string) bool {
+	return runtimecontract.EvidenceRevisionAfter(left, right)
 }
 
 func advanceSatisfiedCoverageFocus(facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeFacts {
@@ -245,19 +266,7 @@ func assessmentForCurrentFocus(facts runtimecontract.RuntimeFacts) (runtimecontr
 }
 
 func evidenceAppliesToCurrentFocus(facts runtimecontract.RuntimeFacts, evidence runtimecontract.EvidenceFact) bool {
-	if len(evidence.CoverageWorkItemIDs) == 0 {
-		return len(facts.RemainingFocuses) == 0
-	}
-	current := map[common.CoverageWorkItemID]struct{}{}
-	for _, id := range facts.Focus.CoverageWorkItemIDs {
-		current[id] = struct{}{}
-	}
-	for _, id := range evidence.CoverageWorkItemIDs {
-		if _, ok := current[id]; ok {
-			return true
-		}
-	}
-	return false
+	return runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence)
 }
 
 func contains(values []string, target string) bool {

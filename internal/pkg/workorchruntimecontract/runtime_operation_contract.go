@@ -221,7 +221,7 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 			continue
 		}
 		if !ok {
-			return fmt.Errorf("kind %q does not accept parameter %q", operation.Kind, parameter.Name)
+			return fmt.Errorf("%s", invalidRuntimeOperationParameterError(operation.Kind, parameter.Name, contract))
 		}
 		if !operationParameterMatchesType(parameter, definition.Type) {
 			return fmt.Errorf("kind %q parameter %q requires %s", operation.Kind, parameter.Name, definition.Type)
@@ -392,6 +392,40 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 		}
 	}
 	return nil
+}
+
+func invalidRuntimeOperationParameterError(kind string, name string, contract RuntimeOperationContract) string {
+	kind = strings.TrimSpace(kind)
+	name = strings.TrimSpace(name)
+	allowedNames := make([]string, 0, len(contract.Parameters))
+	for _, parameter := range contract.Parameters {
+		allowedNames = append(allowedNames, parameter.Name)
+	}
+	message := fmt.Sprintf("kind %q does not accept parameter %q", kind, name)
+	switch kind {
+	case StepKindMCPToolCall:
+		suggestion := "input." + name
+		if strings.HasPrefix(name, "input.") {
+			suggestion = "a declared tool field or a different input.<name> key"
+		}
+		message += fmt.Sprintf("; for mcp/tool_call use fixed parameters %s or dynamic input.<name> fields (example: %q)", strings.Join(allowedNames, ", "), suggestion)
+	case StepKindMCPPromptGet:
+		suggestion := "arguments." + name
+		if strings.HasPrefix(name, "arguments.") {
+			suggestion = "a declared prompt field or a different arguments.<name> key"
+		}
+		message += fmt.Sprintf("; for mcp/prompt_get use fixed parameters %s or dynamic arguments.<name> fields (example: %q)", strings.Join(allowedNames, ", "), suggestion)
+	case StepKindMCPResourceRead:
+		message += fmt.Sprintf("; for mcp/resource_read use fixed parameters %s", strings.Join(allowedNames, ", "))
+	default:
+		if len(allowedNames) > 0 {
+			message += fmt.Sprintf("; allowed parameters: %s", strings.Join(allowedNames, ", "))
+		}
+	}
+	if len(contract.ForbiddenParameters) > 0 {
+		message += fmt.Sprintf("; forbidden parameters: %s", strings.Join(contract.ForbiddenParameters, ", "))
+	}
+	return message
 }
 
 func isMCPDynamicOperationParameter(kind string, name string) bool {

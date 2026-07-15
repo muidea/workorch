@@ -20,6 +20,27 @@ type TaskProgress struct {
 	RepairLoop         RepairLoop          `json:"repairLoop"`
 	AssessmentOutcome  AssessmentOutcome   `json:"assessmentOutcome,omitempty"`
 	EvidenceRefs       []string            `json:"evidenceRefs,omitempty"`
+	RuntimeV2          *RuntimeV2Progress  `json:"runtimeV2,omitempty"`
+}
+
+// RuntimeV2Progress is a product-boundary summary projected from Run.RuntimeState.
+// It is read-only and must never reverse-drive runtime authority.
+type RuntimeV2Progress struct {
+	StateRevision          uint64   `json:"stateRevision,omitempty"`
+	EvidenceSequence       uint64   `json:"evidenceSequence,omitempty"`
+	CompletedDispatchCount int      `json:"completedDispatchCount"`
+	ActiveDispatchID       string   `json:"activeDispatchId,omitempty"`
+	CandidateAttemptCount  int      `json:"candidateAttemptCount"`
+	AcceptedEvidenceCount  int      `json:"acceptedEvidenceCount"`
+	RejectedEvidenceCount  int      `json:"rejectedEvidenceCount"`
+	MissingEvidenceKinds   []string `json:"missingEvidenceKinds,omitempty"`
+	CurrentFocusID         string   `json:"currentFocusId,omitempty"`
+	CurrentAction          string   `json:"currentAction,omitempty"`
+	FailureClass           string   `json:"failureClass,omitempty"`
+	FailureCode            string   `json:"failureCode,omitempty"`
+	FailureSignature       string   `json:"failureSignature,omitempty"`
+	FailureMessage         string   `json:"failureMessage,omitempty"`
+	RepairHintCodes        []string `json:"repairHintCodes,omitempty"`
 }
 
 type AssessmentOutcome struct {

@@ -6,18 +6,31 @@ import (
 )
 
 func StepProgressState(snapshot readmodelcore.RunSnapshot) string {
-	if len(snapshot.Steps) == 0 {
-		return "pending"
-	}
 	if HasAcceptedRunResult(snapshot) && snapshot.Run.State == string(common.RunStateCompleted) {
 		return "completed"
+	}
+	// Terminal run state always wins over partial evidence counters.
+	if snapshot.Run.State == string(common.RunStateFailed) {
+		return "failed"
+	}
+	if snapshot.Run.State == string(common.RunStateCompleted) {
+		return "completed"
+	}
+	if len(snapshot.Steps) == 0 {
+		if snapshot.TaskProgress.RuntimeV2 != nil {
+			summary := snapshot.TaskProgress.RuntimeV2
+			if summary.CompletedDispatchCount > 0 || summary.AcceptedEvidenceCount > 0 || summary.CandidateAttemptCount > 0 || summary.ActiveDispatchID != "" {
+				return "running"
+			}
+		}
+		return "pending"
 	}
 	for _, item := range snapshot.Steps {
 		if item.State == string(common.StepStateFailed) {
 			return "failed"
 		}
 	}
-	if MapRuntimeProgress(snapshot).StepCompleted == len(snapshot.Steps) {
+	if MapRuntimeProgress(snapshot).StepCompleted == len(snapshot.Steps) && len(snapshot.Steps) > 0 {
 		return "completed"
 	}
 	return "running"

@@ -237,11 +237,43 @@ type TaskProgressInfo struct {
 	RunID              common.RunID
 	State              string
 	Summary            string
+	CurrentStepID      common.StepID
+	CurrentStepKind    string
+	CurrentStepState   string
 	CurrentActionLabel string
 	DiagnosticLineage  common.StepID
+	CurrentMilestone   string
+	Milestones         []ProgressMilestoneInfo
 	Recovery           RecoveryPlanInfo
 	RepairLoop         RepairLoopInfo
 	AssessmentOutcome  AssessmentOutcomeInfo
+	RuntimeV2          *RuntimeV2ProgressInfo
+}
+
+type ProgressMilestoneInfo struct {
+	ID           string
+	Title        string
+	State        string
+	EvidenceRefs []string
+}
+
+// RuntimeV2ProgressInfo is a product-boundary summary projected from Run.RuntimeState.
+type RuntimeV2ProgressInfo struct {
+	StateRevision          uint64
+	EvidenceSequence       uint64
+	CompletedDispatchCount int
+	ActiveDispatchID       string
+	CandidateAttemptCount  int
+	AcceptedEvidenceCount  int
+	RejectedEvidenceCount  int
+	MissingEvidenceKinds   []string
+	CurrentFocusID         string
+	CurrentAction          string
+	FailureClass           string
+	FailureCode            string
+	FailureSignature       string
+	FailureMessage         string
+	RepairHintCodes        []string
 }
 
 type AssessmentOutcomeInfo struct {

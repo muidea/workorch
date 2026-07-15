@@ -16,6 +16,7 @@ type RuntimeCandidateContext struct {
 	DefinitionRevision string
 	EvidenceRevision   string
 	Focus              CoverageFocus
+	RemainingFocuses   []CoverageFocus
 	Evidence           EvidenceLedger
 	Assessments        []RuntimeAssessmentFact
 	Failure            *FailureFact
@@ -29,7 +30,8 @@ func RuntimeCandidateContextFromFacts(facts RuntimeFacts) RuntimeCandidateContex
 	return RuntimeCandidateContext{
 		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID,
 		DefinitionRevision: facts.DefinitionRevision, EvidenceRevision: facts.EvidenceRevision,
-		Focus: facts.Focus, Evidence: facts.Evidence, Assessments: facts.Assessments, Failure: facts.Failure,
+		Focus: facts.Focus, RemainingFocuses: facts.RemainingFocuses, Evidence: facts.Evidence,
+		Assessments: facts.Assessments, Failure: facts.Failure,
 		Capabilities: facts.Capabilities, Resources: facts.Resources, Activation: facts.Activation,
 	}.Normalized()
 }
@@ -37,13 +39,15 @@ func RuntimeCandidateContextFromFacts(facts RuntimeFacts) RuntimeCandidateContex
 func (c RuntimeCandidateContext) Normalized() RuntimeCandidateContext {
 	facts := RuntimeFacts{
 		WorkspaceID: c.WorkspaceID, RunID: c.RunID, DefinitionRevision: c.DefinitionRevision,
-		EvidenceRevision: c.EvidenceRevision, Focus: c.Focus, Evidence: c.Evidence, Assessments: c.Assessments,
+		EvidenceRevision: c.EvidenceRevision, Focus: c.Focus, RemainingFocuses: c.RemainingFocuses,
+		Evidence: c.Evidence, Assessments: c.Assessments,
 		Failure: c.Failure, Capabilities: c.Capabilities, Resources: c.Resources,
 		Activation: c.Activation,
 	}.Normalized()
 	c.DefinitionRevision = facts.DefinitionRevision
 	c.EvidenceRevision = facts.EvidenceRevision
 	c.Focus = facts.Focus
+	c.RemainingFocuses = facts.RemainingFocuses
 	c.Evidence = facts.Evidence
 	c.Assessments = facts.Assessments
 	c.Failure = facts.Failure
@@ -221,9 +225,17 @@ type RuntimeCandidate struct {
 }
 
 func (c RuntimeCandidate) Validate(decision RuntimeDecision) error {
+	return c.ValidateWithActivation(decision, RuntimeActivationContext{})
+}
+
+// ValidateWithActivation validates a candidate against a sealed decision, using
+// owner-sealed activation capability metadata for side-effect gating. Unknown MCP
+// tools default to mutating and cannot enter produce_validation.
+func (c RuntimeCandidate) ValidateWithActivation(decision RuntimeDecision, activation RuntimeActivationContext) error {
 	if err := decision.Validate(); err != nil {
 		return err
 	}
+	activation = activation.Normalized()
 	count := 0
 	if c.StateChange != nil {
 		count++
@@ -245,12 +257,12 @@ func (c RuntimeCandidate) Validate(decision RuntimeDecision) error {
 		if c.StateChange == nil {
 			return fmt.Errorf("action %s requires a state-change candidate", decision.Action)
 		}
-		return validateRuntimeOperations(stateChangingRuntimeOperations(c.StateChange.Operations), decision.RequiredOutput)
+		return validateRuntimeOperations(stateChangingRuntimeOperations(c.StateChange.Operations), decision.RequiredOutput, activation.MCPCapabilities)
 	case RuntimeActionProduceValidation:
 		if c.Validation == nil {
 			return fmt.Errorf("action %s requires a validation candidate", decision.Action)
 		}
-		return validateRuntimeOperations(validationRuntimeOperations(c.Validation.Operations), decision.RequiredOutput)
+		return validateRuntimeOperations(validationRuntimeOperations(c.Validation.Operations), decision.RequiredOutput, activation.MCPCapabilities)
 	case RuntimeActionProduceAssessment:
 		if c.Assessment == nil {
 			return fmt.Errorf("action %s requires an assessment candidate", decision.Action)
@@ -292,7 +304,7 @@ func ValidateAuthorityTransaction(decision RuntimeDecision, transaction Authorit
 	return nil
 }
 
-func validateRuntimeOperations(operations []RuntimeOperation, required RequiredOutputContract) error {
+func validateRuntimeOperations(operations []RuntimeOperation, required RequiredOutputContract, capabilities []RuntimeMCPCapabilityContext) error {
 	if len(operations) == 0 {
 		return fmt.Errorf("runtime candidate requires at least one operation")
 	}
@@ -312,6 +324,9 @@ func validateRuntimeOperations(operations []RuntimeOperation, required RequiredO
 		ids[operation.ID] = struct{}{}
 		if _, ok := accepted[operation.Kind]; !ok {
 			return fmt.Errorf("runtime candidate operation kind %q is not accepted", operation.Kind)
+		}
+		if required.Kind == RequiredOutputKindValidation && OperationHasWorkspaceSideEffectsWithCapabilities(operation, capabilities) {
+			return fmt.Errorf("runtime candidate operation %q has workspace side effects and cannot satisfy produce_validation; emit a non-mutating validation operation or request produce_state_change first", operation.ID)
 		}
 		if len(requiredCoverage) > 0 && !coverageIDsIntersect(requiredCoverage, operation.CoverageWorkItemIDs) {
 			return fmt.Errorf("runtime candidate operation %q is not bound to required coverage", operation.ID)
@@ -360,7 +375,7 @@ func (o RuntimeOperation) Normalized() RuntimeOperation {
 	parameters := make([]OperationParameter, 0, len(o.Parameters))
 	for _, parameter := range o.Parameters {
 		parameter.Name = strings.TrimSpace(parameter.Name)
-		parameter.StringList = normalizeStrings(parameter.StringList)
+		parameter.StringList = normalizeOperationParameterStringList(parameter.Name, parameter.StringList)
 		if parameter.Name != "" {
 			parameters = append(parameters, parameter)
 		}
@@ -368,6 +383,22 @@ func (o RuntimeOperation) Normalized() RuntimeOperation {
 	sort.Slice(parameters, func(i, j int) bool { return parameters[i].Name < parameters[j].Name })
 	o.Parameters = parameters
 	return o
+}
+
+// orderedStringListParameterNames are positional lists: sorting/deduping changes
+// execution semantics (e.g. go test -run becomes go -run when "test" is reordered).
+func orderedStringListParameterNames() map[string]struct{} {
+	return map[string]struct{}{
+		"args":      {},
+		"pathspecs": {},
+	}
+}
+
+func normalizeOperationParameterStringList(name string, values []string) []string {
+	if _, ordered := orderedStringListParameterNames()[strings.TrimSpace(name)]; ordered {
+		return normalizeOrderedStrings(values)
+	}
+	return normalizeStrings(values)
 }
 
 func validateOperationParameters(parameters []OperationParameter) error {

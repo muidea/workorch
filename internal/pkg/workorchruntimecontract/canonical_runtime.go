@@ -642,6 +642,27 @@ func normalizeStrings(values []string) []string {
 	return ret
 }
 
+// normalizeOrderedStrings trims and drops empty entries while preserving order
+// and duplicates. Use for positional argument lists (e.g. shell args, git pathspecs)
+// where sorting would change execution semantics.
+func normalizeOrderedStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		ret = append(ret, value)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
 func normalizeCoverageWorkItemIDs(values []common.CoverageWorkItemID) []common.CoverageWorkItemID {
 	stringsValue := make([]string, 0, len(values))
 	for _, value := range values {

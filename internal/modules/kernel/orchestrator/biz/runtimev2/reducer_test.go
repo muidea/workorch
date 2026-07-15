@@ -236,6 +236,123 @@ func TestReduceRuntimeStateFiltersCapabilitiesByFocusContract(t *testing.T) {
 	}
 }
 
+func TestReduceRuntimeStateKeepsStateChangeAfterRejectedRepair(t *testing.T) {
+	// Validation rejected, then state-change repair also rejected: stay on produce_state_change.
+	// Re-opening produce_validation would anti-replay the same failed validation shape.
+	facts := runtimecontract.RuntimeFacts{
+		WorkspaceID: "ws-1", RunID: "run-2", DefinitionRevision: "def-1", EvidenceRevision: "ev-6",
+		Focus: runtimecontract.CoverageFocus{
+			ID: "focus-001", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},
+			TargetRefs:            []string{"cmd/proxy/main.go"},
+		},
+		Evidence: runtimecontract.EvidenceLedger{
+			Accepted: []runtimecontract.EvidenceFact{{
+				ID: "acc-state", Kind: runtimecontract.EvidenceKindStateChange, Revision: "evidence-v2-00000000000000000001",
+				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+			}},
+			Rejected: []runtimecontract.EvidenceFact{
+				{
+					ID: "rej-val", Kind: runtimecontract.EvidenceKindValidation, Revision: "evidence-v2-00000000000000000002",
+					FailureClass: runtimecontract.FailureClassExecutionFailure, FailureMessage: "exit status 2",
+					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+				},
+				{
+					ID: "rej-patch", Kind: runtimecontract.EvidenceKindStateChange, Revision: "evidence-v2-00000000000000000003",
+					FailureClass: runtimecontract.FailureClassExecutionFailure, FailureCode: "conflict",
+					FailureSignature: "sig-repair", FailureMessage: "conflict",
+					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+				},
+			},
+		},
+		Failure: &runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassExecutionFailure, Code: "conflict",
+			Signature: "sig-repair", Message: "conflict",
+		},
+		Capabilities: runtimecontract.RuntimeCapabilities{
+			StateChangeKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+			ValidationKinds:  []string{runtimecontract.StepKindShellCommand},
+		},
+	}
+	got, err := ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Action != runtimecontract.RuntimeActionProduceStateChange {
+		t.Fatalf("action = %s, want produce_state_change after rejected repair", got.Action)
+	}
+}
+
+func TestReduceRuntimeStateAllowsValidationAfterAcceptedRepair(t *testing.T) {
+	facts := runtimecontract.RuntimeFacts{
+		WorkspaceID: "ws-1", RunID: "run-2", DefinitionRevision: "def-1", EvidenceRevision: "ev-4",
+		Focus: runtimecontract.CoverageFocus{
+			ID: "focus-001", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},
+		},
+		Evidence: runtimecontract.EvidenceLedger{
+			Accepted: []runtimecontract.EvidenceFact{
+				{
+					ID: "acc-old", Kind: runtimecontract.EvidenceKindStateChange, Revision: "evidence-v2-00000000000000000001",
+					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+				},
+				{
+					ID: "acc-repair", Kind: runtimecontract.EvidenceKindStateChange, Revision: "evidence-v2-00000000000000000003",
+					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+				},
+			},
+			Rejected: []runtimecontract.EvidenceFact{{
+				ID: "rej-val", Kind: runtimecontract.EvidenceKindValidation, Revision: "evidence-v2-00000000000000000002",
+				FailureClass: runtimecontract.FailureClassExecutionFailure, FailureMessage: "exit status 2",
+				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+			}},
+		},
+		Capabilities: runtimecontract.RuntimeCapabilities{
+			StateChangeKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+			ValidationKinds:  []string{runtimecontract.StepKindShellCommand},
+		},
+	}
+	got, err := ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Action != runtimecontract.RuntimeActionProduceValidation {
+		t.Fatalf("action = %s, want produce_validation after accepted repair", got.Action)
+	}
+}
+
+func TestReduceRuntimeStateForcesStateChangeOnlyForUnresolvedValidationFailure(t *testing.T) {
+	facts := runtimecontract.RuntimeFacts{
+		WorkspaceID: "ws-1", RunID: "run-2", DefinitionRevision: "def-1", EvidenceRevision: "ev-2",
+		Focus: runtimecontract.CoverageFocus{
+			ID: "focus-001", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},
+		},
+		Evidence: runtimecontract.EvidenceLedger{
+			Accepted: []runtimecontract.EvidenceFact{{
+				ID: "acc-state", Kind: runtimecontract.EvidenceKindStateChange, Revision: "evidence-v2-00000000000000000001",
+				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+			}},
+			Rejected: []runtimecontract.EvidenceFact{{
+				ID: "rej-val", Kind: runtimecontract.EvidenceKindValidation, Revision: "evidence-v2-00000000000000000002",
+				FailureClass: runtimecontract.FailureClassExecutionFailure, FailureMessage: "exit status 2",
+				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+			}},
+		},
+		Capabilities: runtimecontract.RuntimeCapabilities{
+			StateChangeKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+			ValidationKinds:  []string{runtimecontract.StepKindShellCommand},
+		},
+	}
+	got, err := ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Action != runtimecontract.RuntimeActionProduceStateChange {
+		t.Fatalf("action = %s, want produce_state_change immediately after rejected validation", got.Action)
+	}
+}
+
 func validationFacts() runtimecontract.RuntimeFacts {
 	return runtimecontract.RuntimeFacts{
 		WorkspaceID:        "ws-1",

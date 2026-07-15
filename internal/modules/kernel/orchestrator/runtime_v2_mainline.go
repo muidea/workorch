@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
 	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -157,7 +158,27 @@ func (m *Module) requestAndSealRuntimeV2Candidate(
 	if response.Failure != nil {
 		return m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, *response.Failure)
 	}
-	return m.bizPtr.AcceptRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, response.Candidate)
+	accepted, err := m.bizPtr.AcceptRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, response.Candidate)
+	if err != nil {
+		if isRuntimeCandidateReplayError(err) {
+			return m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, runtimecontract.RuntimeCandidateFailure{
+				Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: err.Error(),
+			})
+		}
+		return runtimev2.RuntimeAggregate{}, err
+	}
+	return accepted, nil
+}
+
+func isRuntimeCandidateReplayError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "replays active rejected operation shape") ||
+		strings.Contains(message, "replays rejected operation shape") ||
+		strings.Contains(message, "replay rejected shape") ||
+		strings.Contains(message, "only validation evidence is missing")
 }
 
 func runtimeV2PreviousCandidateFailure(aggregate runtimev2.RuntimeAggregate, candidateAttempt int) (*runtimecontract.RuntimeCandidateFailure, error) {
