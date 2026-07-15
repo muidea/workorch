@@ -148,6 +148,80 @@ def decision_payload(request):
 
 
 class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        if path in ("/v1/models", "/models"):
+            # WorkOrch catalog expects explicit capacity + operations; without these models stay not-ready.
+            models = [
+                {
+                    "id": "verify-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "gpt-4o",
+                    "object": "model",
+                    "owned_by": "openai",
+                    "operations": ["chat_completions"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "text-embedding-3-small",
+                    "object": "model",
+                    "owned_by": "openai",
+                    "operations": ["embeddings"],
+                    "contextWindowTokens": 8192,
+                    "maxOutputTokens": 1024,
+                },
+
+                {
+                    "id": "verify-stream-native-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "verify-stream-estimated-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "web-search-e2e-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "container-verify-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+            ]
+            response = {"object": "list", "data": models}
+            encoded = json.dumps(response).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+            return
+        self.send_response(404)
+        self.end_headers()
+
     def do_POST(self):
         size = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(size)
@@ -222,16 +296,37 @@ maxConcurrentRuns = 1
 backend = "$BACKEND"
 dataDir = "$data_dir"
 
-[llm]
-defaultProvider = "local"
-
-[llm.providers.local]
-provider = "compatible"
+[llm.aiProxy]
 baseURL = "$MOCK_BASE_URL"
 apiKey = "container-verify-key"
-model = "container-verify-model"
+timeout = "180s"
+catalogRequestTimeout = "5s"
+catalogTTL = "5m"
+catalogMaxStaleAge = "24h"
+maxCatalogResponseBytes = 1048576
+maxCatalogModels = 1000
+
+[llm.defaultChat]
+providerID = "verify"
+modelID = "container-verify-model"
+
+[llm.budget]
+contextUtilizationRatio = 0.75
+estimatedTokensPerByte = 0.25
+defaultMaxOutputTokens = 4096
+maxRequestBytes = 4194304
+
+[llm.customProviders.verify]
+provider = "compatible"
+apiSurface = "openai_compatible_http"
+baseURL = "$MOCK_BASE_URL"
+apiKey = "container-verify-key"
 timeout = "60s"
-disabled = false
+
+[llm.customProviders.verify.models.container-verify-model]
+contextWindowTokens = 128000
+maxOutputTokens = 8192
+operations = ["chat_completions", "embeddings"]
 EOF
   local docker_args=(run -d --add-host=host.docker.internal:host-gateway -p "$ADDR_PORT:8080" -v "$CONFIG_DIR/application.toml:/etc/workorch/application.toml:ro")
   if [[ "$BACKEND" == "file" ]]; then

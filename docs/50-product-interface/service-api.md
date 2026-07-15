@@ -839,7 +839,7 @@ Web/TUI 自行 fallback 聚合。
 | --- | --- | --- |
 | `createWorkspaceRequest` | `workspaceId?` / `title` / `deliverableDirectory` / `templateId` | 创建 Workspace，本体目录和 template 初始化入口 |
 | `createRunRequest` | `runId` / `goalId` / `doDId` | 在已定义 Goal/DoD 上创建 Run |
-| `resumeWorkspaceExecutionRequest` | `intent=resume` / `requestId` / `source` / `reason` / `goalId` / `doDId` / `llmProviderId` / `soulId` / `skillIds` / `mcpServerIds` / `capabilityIds` / `memoryIds` | 提交 workspace-scoped execution command；可携带生成 **typed activation / RuntimeBootstrap 输入** 所需字段。Resume 语义进入同一 V2 drive，**不得**携带 ExecutionContextPatch；replan 语义只能通过新 activation / replacement run，不是自动 successor |
+| `resumeWorkspaceExecutionRequest` | `intent=resume` / `requestId` / `source` / `reason` / `goalId` / `doDId` / `llmTarget` / `soulId` / `skillIds` / `mcpServerIds` / `capabilityIds` / `memoryIds` | 提交 workspace-scoped execution command；可携带生成 **typed activation / RuntimeBootstrap 输入** 所需字段。Resume 语义进入同一 V2 drive，**不得**携带 ExecutionContextPatch；replan 语义只能通过新 activation / replacement run，不是自动 successor |
 | `resolveDecisionRequest` | `resolutionType` / `resolutionPayload` | 解决 Ticket |
 | `batchResolveApprovalsRequest` | `approvalIds` / `action` | 批量批准/拒绝 Approval |
 | `defineGoalRequest` | `text` | 创建或更新 Goal 文本 |

@@ -41,55 +41,25 @@ maxChunkRetryAttempts = 3
 maxArtifactPlanAttempts = 2
 maxArtifactReplanAttempts = 2
 
-[llm]
-defaultProvider = "local"
-defaultEmbeddingProvider = ""
-
-[llm.modelCapabilities.gpt-codex-1m]
-provider = "compatible"
-modelPattern = "*codex*"
-contextWindowTokens = 1000000
-
-[llm.modelCapabilities.gpt-thinking-256k]
-modelPattern = "*gpt-5.5*thinking*"
-contextWindowTokens = 262144
-
-[llm.modelCapabilities.gpt-instant-128k]
-modelPattern = "*gpt-5.5*instant*"
-contextWindowTokens = 131072
-
-[llm.modelCapabilities.deepseek-v4-1m]
-modelPattern = "*deepseek*v4*"
-contextWindowTokens = 1000000
-
-[llm.modelCapabilities.minimax-m2-7-highspeed-205k]
-provider = "openai"
-modelPattern = "*MiniMax-M2.7-highspeed*"
-contextWindowTokens = 204800
-
-[llm.modelCapabilities.claude-4-6-1m]
-modelPattern = "*claude*4?6*"
-contextWindowTokens = 1000000
-
-[llm.modelCapabilities.claude-4-7-1m]
-modelPattern = "*claude*4?7*"
-contextWindowTokens = 1000000
-
-[llm.modelCapabilities.claude-4-5-200k]
-modelPattern = "*claude*4?5*"
-contextWindowTokens = 200000
-
-[llm.providers.local]
-provider = ""
-baseURL = ""
+[llm.aiProxy]
+baseURL = "http://127.0.0.1:8080"
 apiKey = ""
-model = ""
-timeout = "60s"
-disabled = false
-temperature = 0.0
-maxOutputTokens = 0
-reasoningEffort = ""
-thinkingBudgetTokens = 0
+timeout = "180s"
+catalogRequestTimeout = "5s"
+catalogTTL = "5m"
+catalogMaxStaleAge = "24h"
+maxCatalogResponseBytes = 1048576
+maxCatalogModels = 1000
+
+[llm.defaultChat]
+providerID = "ai-proxy"
+modelID = "gpt-4o"
+
+[llm.budget]
+contextUtilizationRatio = 0.75
+estimatedTokensPerByte = 0.25
+defaultMaxOutputTokens = 4096
+maxRequestBytes = 4194304
 
 [governance.autoTicket]
 enabled = true

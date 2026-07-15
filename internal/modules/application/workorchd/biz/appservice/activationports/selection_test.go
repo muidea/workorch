@@ -10,14 +10,15 @@ import (
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestSelectedWorkspaceMemoryItemsLoadsDefaultProviderOnlyForImplicitSelection(t *testing.T) {
 	ctx := context.Background()
 	calls := 0
-	loader := func(context.Context) (string, error) {
+	loader := func(context.Context) (runtimecontract.ProviderModelTarget, error) {
 		calls++
-		return "", errors.New("config unavailable")
+		return runtimecontract.ProviderModelTarget{}, errors.New("config unavailable")
 	}
 
 	if _, _, err := SelectedWorkspaceMemoryItems(ctx, WorkspaceMemorySelectionRequest{
@@ -63,7 +64,7 @@ func TestSelectedWorkspaceMemoryItemsReadsExplicitIDsWithWorkspaceScope(t *testi
 	if len(items) != 1 || items[0].ID != "memory-selection-scope" {
 		t.Fatalf("items = %+v, want scoped explicit memory", items)
 	}
-	if evidence["policy"] != "explicit_memory_selection" {
+	if evidence == nil || evidence.Policy != "explicit_memory_selection" {
 		t.Fatalf("evidence = %+v, want explicit policy", evidence)
 	}
 }

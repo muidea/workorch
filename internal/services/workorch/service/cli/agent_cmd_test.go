@@ -78,6 +78,9 @@ func (b agentCommandFailureBackend) Config() backend.ConfigBackend {
 func (b agentCommandFailureBackend) Events() backend.EventsBackend {
 	return agentCommandEventsBackend{}
 }
+func (b agentCommandFailureBackend) ProjectionEvents() backend.WorkspaceProjectionEventsBackend {
+	return nil
+}
 
 type agentCommandWorkspaceBackend struct{}
 
@@ -93,6 +96,11 @@ func (agentCommandWorkspaceBackend) List(context.Context) ([]backend.WorkspaceIn
 func (agentCommandWorkspaceBackend) Snapshot(context.Context, common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
 	return nil, common.ErrNotFound
 }
+
+func (agentCommandWorkspaceBackend) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
+	return nil, nil
+}
+
 func (agentCommandWorkspaceBackend) Delete(context.Context, common.WorkspaceID, bool) error {
 	return nil
 }

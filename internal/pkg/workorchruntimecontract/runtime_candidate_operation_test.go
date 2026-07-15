@@ -310,7 +310,7 @@ func TestOperationHasWorkspaceSideEffectsDefaultsSSHAndMCP(t *testing.T) {
 	if err := mcpCandidate.Validate(decision); err == nil || !strings.Contains(err.Error(), "cannot satisfy produce_validation") {
 		t.Fatalf("unknown mcp validation candidate must be rejected, got %v", err)
 	}
-	activation := RuntimeActivationContext{MCPCapabilities: readOnlyCaps}
+	activation := RuntimeActivationContext{ProviderTarget: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, MCPCapabilities: readOnlyCaps}
 	if err := mcpCandidate.ValidateWithActivation(decision, activation); err != nil {
 		t.Fatalf("read_only mcp validation candidate should be allowed: %v", err)
 	}
@@ -318,6 +318,7 @@ func TestOperationHasWorkspaceSideEffectsDefaultsSSHAndMCP(t *testing.T) {
 
 func TestEvidenceAppliesToCurrentFocusRequiresLastFocusForEmptyCoverage(t *testing.T) {
 	facts := RuntimeFacts{
+		Activation:  RuntimeActivationContext{ProviderTarget: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def-1", EvidenceRevision: "ev-1",
 		Focus: CoverageFocus{
 			ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},

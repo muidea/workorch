@@ -12,6 +12,7 @@ import (
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
@@ -56,6 +57,7 @@ func (s *Service) Start() error {
 	s.subscribeWorkspaceNotifications()
 	s.subscribeResultNotifications()
 	s.subscribeMemoryNotifications()
+	s.subscribeLLMNotifications()
 	s.subscribeOrchestratorDetailNotifications()
 	return nil
 }
@@ -143,6 +145,25 @@ func (s *Service) subscribeMemoryNotifications() {
 			observer.Unsubscribe(topic)
 		}
 		observer.Unsubscribe(memoryevents.TopicMemoryRecallRecorded)
+	})
+}
+
+func (s *Service) subscribeLLMNotifications() {
+	if s == nil || s.commandHub == nil {
+		return
+	}
+	const observerID = "/llm/consumers/kernel/eventstream"
+	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, s.commandHub)
+	observer.Subscribe(llmevents.TopicLLMUsageRecorded, func(event magicevent.Event, result magicevent.Result) {
+		if data, ok := event.Data().(llmevents.LLMUsageRecordedData); ok {
+			_ = s.appendRecord(event.Context(), llmUsageRecord(event.Source(), data))
+		}
+		if result != nil {
+			result.Set(nil, nil)
+		}
+	})
+	s.unsubscribers = append(s.unsubscribers, func() {
+		observer.Unsubscribe(llmevents.TopicLLMUsageRecorded)
 	})
 }
 
@@ -588,6 +609,53 @@ func memoryRecallRecord(source string, data memoryevents.MemoryRecallRecordedDat
 		Payload: (events.MemoryRecallPayloadData{
 			TraceID: data.TraceID, Stage: data.Stage, Source: data.Source, Policy: data.Policy, Status: data.Status,
 			ProviderID: data.ProviderID, Operation: data.Operation, RetrievedMemoryIDs: data.RetrievedMemoryIDs, Reason: data.Reason,
+		}).EventPayload(),
+	}
+}
+
+func llmUsageRecord(source string, data llmevents.LLMUsageRecordedData) *eventstreammodel.EventRecord {
+	subjectID := data.RequestID
+	if subjectID == "" {
+		subjectID = string(data.RunID)
+	}
+	return &eventstreammodel.EventRecord{
+		Topic:        llmevents.TopicLLMUsageRecorded,
+		SourceModule: source,
+		SubjectType:  "llm_usage",
+		SubjectID:    subjectID,
+		WorkspaceID:  data.WorkspaceID,
+		RunID:        data.RunID,
+		StepID:       common.StepID(data.StepID),
+		OccurredAt:   data.OccurredAt,
+		Payload: (events.LLMUsagePayloadData{
+			RequestID:             data.RequestID,
+			WorkspaceID:           string(data.WorkspaceID),
+			RunID:                 string(data.RunID),
+			StepID:                data.StepID,
+			ProviderID:            data.Target.ProviderID,
+			Provider:              data.Provider,
+			APISurface:            data.APISurface,
+			Model:                 data.Target.ModelID,
+			Operation:             data.Operation,
+			CapabilityRevision:    data.CapabilityRevision,
+			ConfigurationRevision: data.ConfigurationRevision,
+			StablePrefixHash:      data.StablePrefixHash,
+			Kind:                  data.Kind,
+			InputTokens:           data.InputTokens,
+			OutputTokens:          data.OutputTokens,
+			TotalTokens:           data.TotalTokens,
+			Estimated:             data.Estimated,
+			UsageSource:           data.UsageSource,
+			RequestBytes:          data.RequestBytes,
+			ResponseBytes:         data.ResponseBytes,
+			ContextBudget:         data.ContextBudget,
+			CacheUsage:            data.CacheUsage,
+			StartedAt:             data.StartedAt,
+			CompletedAt:           data.CompletedAt,
+			DurationMs:            data.DurationMs,
+			Status:                data.Status,
+			FailureClass:          data.FailureClass,
+			ProviderSubmitted:     data.ProviderSubmitted,
 		}).EventPayload(),
 	}
 }

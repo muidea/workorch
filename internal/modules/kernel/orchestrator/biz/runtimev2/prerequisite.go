@@ -103,8 +103,19 @@ func applyPrerequisiteResult(facts *runtimecontract.RuntimeFacts, prerequisite r
 		}
 		facts.Resources.ValidationScratch = result.ValidationScratch
 	case runtimecontract.PrerequisiteKindProviderCeiling:
-		if result.ProviderCeiling == nil || result.ProviderCeiling.MaxBytes < prerequisite.MinimumBytes {
+		if result.ProviderCeiling == nil {
+			return fmt.Errorf("provider ceiling prerequisite returned no ceiling")
+		}
+		if err := result.ProviderCeiling.Validate(); err != nil {
+			return fmt.Errorf("provider ceiling prerequisite returned invalid ceiling: %w", err)
+		}
+		if result.ProviderCeiling.MaxBytes < prerequisite.MinimumBytes {
 			return fmt.Errorf("provider ceiling prerequisite returned an insufficient ceiling")
+		}
+		if target := facts.Activation.ProviderTarget.Normalized(); target.ProviderID != "" || target.ModelID != "" {
+			if !result.ProviderCeiling.Target.Same(target) {
+				return fmt.Errorf("provider ceiling target does not match activation target")
+			}
 		}
 		facts.Resources.ProviderCeiling = result.ProviderCeiling
 	default:

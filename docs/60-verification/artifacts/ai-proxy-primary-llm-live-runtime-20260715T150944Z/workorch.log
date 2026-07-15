@@ -1,0 +1,110 @@
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/debug/pprof/** method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/healthz method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/readyz method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/metrics method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/configuration method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/configuration/server method=PUT
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/configuration/runtime method=PUT
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/configuration/llm method=PUT
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/configuration/llm/models method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/configuration/llm/models/refresh method=POST
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/configuration/web-search method=PUT
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/events method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/events/stream method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/decisions method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/decisions/:ticketId method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/approvals method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/approvals/:approvalId method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/memory method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/memory/:memoryId method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/memory/:memoryId method=PUT
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/memory/:memoryId method=DELETE
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/memory/:memoryId method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/mcp/servers method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/mcp/capabilities method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/mcp/capabilities/:capabilityId method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/mcp/servers/:serverId method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/mcp/servers/:serverId/tools method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/mcp/servers/:serverId/resources method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/mcp/servers/:serverId/prompts method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/souls method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/souls/:soulId method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspace-templates method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/skills method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/skills/:skillId method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/snapshot method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/runtime-view method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/memory-recalls method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/soul-bindings method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/goals method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/goals/:goalId method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/dods method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/dods/:dodId method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/runs method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/artifacts/content method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/runtime/payloads method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspace-setup-draft-sessions method=POST
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspace-setup-draft-sessions/:draftSessionId/messages method=POST
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspace-setup-draft-sessions/:draftSessionId/regenerate method=POST
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/decisions/:ticketId/resolve method=POST
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/decisions/resolve-batch method=POST
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/approvals/:approvalId/approve method=POST
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/approvals/:approvalId/reject method=POST
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/approvals/resolve-batch method=POST
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/memory method=POST
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/memory/:memoryId method=PUT
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/memory/:memoryId method=DELETE
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/mcp/servers method=POST
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/mcp/servers/:serverId method=PUT
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/mcp/capabilities method=POST
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/mcp/capabilities/:capabilityId method=PUT
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/souls method=POST
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/souls/:soulId method=PUT
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/souls/:soulId method=DELETE
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspace-templates method=POST
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspace-templates/:templateId method=PUT
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspace-templates/:templateId method=DELETE
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/skills method=POST
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces method=POST
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId method=DELETE
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/execution-activations method=POST
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/soul-bindings method=PUT
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/goals method=POST
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/goals/:goalId method=PUT
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/dods method=POST
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/dods/:dodId method=PUT
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/goal-dod-quality-check method=POST
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/runs method=POST
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/runs method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/runs/:runId method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/runs/:runId/:action method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/api/v1/workorch/workspaces/:workspaceId/runs/:runId/:action method=POST
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/favicon.ico method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/console method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/console/ method=GET
+2026/07/15 23:09:47 INFO addRoute apiVersion="" pattern=/console/** method=GET
+2026/07/15 23:09:47 INFO workorch service startup completed service=workorch addr=127.0.0.1:18080
+2026/07/15 23:09:48 INFO request started serial=1 method=GET path=/readyz addr=127.0.0.1:40488
+2026/07/15 23:09:48 INFO request completed serial=1 status=200 status_text=OK elapsed=312.67µs
+2026/07/15 23:09:48 INFO request started serial=2 method=GET path=/api/v1/workorch/configuration/llm/models addr=127.0.0.1:43202
+2026/07/15 23:09:48 INFO request completed serial=2 status=200 status_text=OK elapsed=3.630329ms
+2026/07/15 23:09:48 INFO request started serial=3 method=POST path=/api/v1/workorch/configuration/llm/models/refresh addr=127.0.0.1:43208
+2026/07/15 23:09:48 INFO request completed serial=3 status=200 status_text=OK elapsed=2.397099ms
+2026/07/15 23:09:48 INFO request started serial=4 method=POST path=/api/v1/workorch/workspaces addr=127.0.0.1:43220
+2026/07/15 23:09:48 INFO request completed serial=4 status=201 status_text=Created elapsed=7.570656ms
+2026/07/15 23:09:48 INFO request started serial=5 method=POST path=/api/v1/workorch/workspaces/ws-f584518b5343ee0e/goals addr=127.0.0.1:43234
+2026/07/15 23:09:48 INFO request completed serial=5 status=201 status_text=Created elapsed=2.295448ms
+2026/07/15 23:09:48 INFO request started serial=6 method=POST path=/api/v1/workorch/workspaces/ws-f584518b5343ee0e/dods addr=127.0.0.1:43248
+2026/07/15 23:09:48 INFO request completed serial=6 status=201 status_text=Created elapsed=2.279593ms
+2026/07/15 23:09:48 INFO request started serial=7 method=POST path=/api/v1/workorch/workspaces/ws-f584518b5343ee0e/execution-activations addr=127.0.0.1:39160
+2026/07/15 23:09:48 INFO request completed serial=7 status=202 status_text=Accepted elapsed=320.45462ms
+2026/07/15 23:09:49 INFO request started serial=8 method=GET path=/api/v1/workorch/workspaces/ws-f584518b5343ee0e/runs addr=127.0.0.1:39176
+2026/07/15 23:09:49 INFO request completed serial=8 status=200 status_text=OK elapsed=481.181µs
+2026/07/15 23:09:49 INFO request started serial=9 method=GET path=/api/v1/workorch/workspaces/ws-f584518b5343ee0e/runs/run-001/snapshot addr=127.0.0.1:39178
+2026/07/15 23:09:49 INFO request completed serial=9 status=200 status_text=OK elapsed=1.780678ms
+2026/07/15 23:09:49 INFO request started serial=10 method=GET path=/api/v1/workorch/workspaces/ws-f584518b5343ee0e/runs/run-001/observability addr=127.0.0.1:39180
+2026/07/15 23:09:49 INFO request completed serial=10 status=200 status_text=OK elapsed=3.415387ms
+2026/07/15 23:09:49 INFO request started serial=11 method=GET path=/api/v1/workorch/events addr=127.0.0.1:39196
+2026/07/15 23:09:49 INFO request completed serial=11 status=200 status_text=OK elapsed=971.572µs

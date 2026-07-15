@@ -9,9 +9,11 @@ import (
 )
 
 // RuntimeActivationContext 是一次 Runtime V2 Run 在 application activation 阶段
-// 已解析完成的 typed 运行输入。它只保存 provider-facing 所需的稳定内容快照，
-// 不保存 provider/model 动态绑定，也不使用 map/JSON bridge 表达组件合同。
+// 已解析完成的 typed 运行输入。它保存 provider/model target identity 与
+// provider-facing 所需的稳定内容快照，不使用 map/JSON bridge 表达组件合同。
+// ProviderTarget 是 identity 快照，不进入 C0/C1/C2 stable prefix。
 type RuntimeActivationContext struct {
+	ProviderTarget    ProviderModelTarget
 	DialogLanguage    string
 	DefaultSoul       *RuntimeSoulContext
 	StageSoulBindings []RuntimeStageSoulBinding
@@ -95,6 +97,7 @@ type RuntimeMemoryContext struct {
 }
 
 func (c RuntimeActivationContext) Normalized() RuntimeActivationContext {
+	c.ProviderTarget = c.ProviderTarget.Normalized()
 	c.DialogLanguage = strings.TrimSpace(c.DialogLanguage)
 	if c.DefaultSoul != nil {
 		value := c.DefaultSoul.Normalized()
@@ -117,6 +120,9 @@ func (c RuntimeActivationContext) Normalized() RuntimeActivationContext {
 
 func (c RuntimeActivationContext) Validate() error {
 	c = c.Normalized()
+	if err := c.ProviderTarget.Validate(); err != nil {
+		return fmt.Errorf("runtime activation provider target: %w", err)
+	}
 	for _, binding := range c.StageSoulBindings {
 		if binding.Stage == "" || binding.Soul.ID == "" {
 			return fmt.Errorf("runtime activation stage soul binding requires stage and soul")
@@ -156,7 +162,7 @@ func (c RuntimeActivationContext) Clone() RuntimeActivationContext {
 func SameRuntimeActivationContext(left RuntimeActivationContext, right RuntimeActivationContext) bool {
 	left = left.Normalized()
 	right = right.Normalized()
-	if left.DialogLanguage != right.DialogLanguage || !sameRuntimeSoulPointers(left.DefaultSoul, right.DefaultSoul) ||
+	if !left.ProviderTarget.Same(right.ProviderTarget) || left.DialogLanguage != right.DialogLanguage || !sameRuntimeSoulPointers(left.DefaultSoul, right.DefaultSoul) ||
 		len(left.StageSoulBindings) != len(right.StageSoulBindings) || len(left.Skills) != len(right.Skills) ||
 		len(left.MCPServerIDs) != len(right.MCPServerIDs) || len(left.MCPCapabilities) != len(right.MCPCapabilities) || len(left.Memories) != len(right.Memories) ||
 		!SameRuntimeEvidencePolicies(left.EvidencePolicies, right.EvidencePolicies) {

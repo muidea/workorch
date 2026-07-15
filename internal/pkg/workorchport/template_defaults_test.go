@@ -52,19 +52,20 @@ func newFakeBackend() *fakeBackend {
 	return &fakeBackend{}
 }
 
-func (b *fakeBackend) Workspace() backend.WorkspaceBackend { return fakeWorkspaceBackend{b: b} }
-func (b *fakeBackend) Goal() backend.GoalBackend           { return nil }
-func (b *fakeBackend) DoD() backend.DoDBackend             { return nil }
-func (b *fakeBackend) Run() backend.RunBackend             { return nil }
-func (b *fakeBackend) Decision() backend.DecisionBackend   { return nil }
-func (b *fakeBackend) Approval() backend.ApprovalBackend   { return nil }
-func (b *fakeBackend) Soul() backend.SoulBackend           { return nil }
-func (b *fakeBackend) Skill() backend.SkillBackend         { return nil }
-func (b *fakeBackend) MCP() backend.MCPBackend             { return nil }
-func (b *fakeBackend) Memory() backend.MemoryBackend       { return nil }
-func (b *fakeBackend) Template() backend.TemplateBackend   { return fakeTemplateBackend{b: b} }
-func (b *fakeBackend) Config() backend.ConfigBackend       { return nil }
-func (b *fakeBackend) Events() backend.EventsBackend       { return nil }
+func (b *fakeBackend) Workspace() backend.WorkspaceBackend                        { return fakeWorkspaceBackend{b: b} }
+func (b *fakeBackend) Goal() backend.GoalBackend                                  { return nil }
+func (b *fakeBackend) DoD() backend.DoDBackend                                    { return nil }
+func (b *fakeBackend) Run() backend.RunBackend                                    { return nil }
+func (b *fakeBackend) Decision() backend.DecisionBackend                          { return nil }
+func (b *fakeBackend) Approval() backend.ApprovalBackend                          { return nil }
+func (b *fakeBackend) Soul() backend.SoulBackend                                  { return nil }
+func (b *fakeBackend) Skill() backend.SkillBackend                                { return nil }
+func (b *fakeBackend) MCP() backend.MCPBackend                                    { return nil }
+func (b *fakeBackend) Memory() backend.MemoryBackend                              { return nil }
+func (b *fakeBackend) Template() backend.TemplateBackend                          { return fakeTemplateBackend{b: b} }
+func (b *fakeBackend) Config() backend.ConfigBackend                              { return nil }
+func (b *fakeBackend) Events() backend.EventsBackend                              { return nil }
+func (b *fakeBackend) ProjectionEvents() backend.WorkspaceProjectionEventsBackend { return nil }
 
 type fakeWorkspaceBackend struct {
 	b *fakeBackend
@@ -93,6 +94,10 @@ func (b fakeWorkspaceBackend) Snapshot(ctx context.Context, id common.WorkspaceI
 		return nil, err
 	}
 	return &backend.WorkspaceSnapshotInfo{Workspace: *workspace}, nil
+}
+
+func (b fakeWorkspaceBackend) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
+	return nil, nil
 }
 
 func (b fakeWorkspaceBackend) Delete(context.Context, common.WorkspaceID, bool) error {

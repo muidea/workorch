@@ -17,7 +17,6 @@ type CreateAndStartWorkspaceExecutionRunRequest struct {
 	DoDID              common.DoDID
 	DefinitionRevision string
 	Priority           int
-	LLMProviderID      string
 	MaxAttempts        int
 	RuntimeBootstrap   *runtimecontract.RuntimeBootstrap
 }
@@ -44,7 +43,7 @@ func CreateAndStartWorkspaceExecutionRun(ctx context.Context, commandHub magicev
 		if err := RecordActivationMemoryRecallTrace(ctx, commandHub, runID, request.WorkspaceID, request.RuntimeBootstrap, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 			return "", err
 		}
-		startCtx := common.ContextWithRuntimeWorkspaceID(common.ContextWithRuntimeLLMProviderID(ctx, request.LLMProviderID), request.WorkspaceID)
+		startCtx := common.ContextWithRuntimeWorkspaceID(ctx, request.WorkspaceID)
 		if err := StartRun(startCtx, commandHub, request.WorkspaceID, runID); err != nil {
 			if errors.Is(err, common.ErrConflict) {
 				observable, getErr := RunObservableAfterStartConflict(startCtx, commandHub, runID)

@@ -96,6 +96,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const [loading, setLoading] = useState(false);
   const [activationOpen, setActivationOpen] = useState(false);
   const [activationLoading, setActivationLoading] = useState(false);
+  const [activationAdvancedLLM, setActivationAdvancedLLM] = useState(false);
   const [workspaceSetupOpen, setWorkspaceSetupOpen] = useState(false);
   const [workspaceSetupDraftSession, setWorkspaceSetupDraftSession] = useState<WorkspaceSetupDraftSession | undefined>(undefined);
   const [workspaceSetupDraftInput, setWorkspaceSetupDraftInput] = useState('');
@@ -204,7 +205,20 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   });
 
   const readyDoDs = dods.filter((item) => item.state === 'ready' || item.state === 'satisfied');
-  const llmProviders = configuration?.llm.providers ?? [];
+  const activationLLMTargetOptions = helpers.chatTargetOptions(configuration, activationAdvancedLLM);
+  const defaultChatModelId = configuration?.llm.defaultChat?.modelId;
+  const defaultChatProviderId = configuration?.llm.defaultChat?.providerId || 'ai-proxy';
+  // Readiness for system default: catalog ready models or custom provider models that declare chat_completions.
+  const defaultChatReady = Boolean(
+    defaultChatModelId &&
+      (
+        helpers.chatTargetOptions(configuration, true).some(
+          (item) => item.providerId === defaultChatProviderId && item.modelId === defaultChatModelId
+        )
+      )
+  );
+  // Disable submit when neither a selectable ready model nor a ready defaultChat is available.
+  const activationLLMReady = activationLLMTargetOptions.length > 0 || defaultChatReady;
   const soulBindingStages = soulBindings?.availableStages?.length ? soulBindings.availableStages : defaultSoulBindingStages;
   const soulOptions = souls.map((item) => ({
     value: item.id,
@@ -1054,15 +1068,24 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     }
   };
 
-  const resumeWorkspaceExecution = (request: WorkspaceExecutionActivationRequest) => {
+  const resumeWorkspaceExecution = (request: WorkspaceExecutionActivationRequest & { llmTargetKey?: string }) => {
     if (!workspaceId) {
       return;
     }
     const selectedCapabilityServerIds = (request.capabilityIds ?? [])
       .map((capabilityId) => mcpCapabilities.find((item) => item.id === capabilityId)?.serverId)
       .filter((value): value is string => Boolean(value));
+    const selectedModelId = request.llmTarget?.modelId?.trim();
+    const normalizedLLMTarget = selectedModelId
+      ? {
+          providerId: request.llmTarget?.providerId?.trim() || 'ai-proxy',
+          modelId: selectedModelId
+        }
+      : undefined;
+    const { llmTargetKey: _llmTargetKey, ...activationRequest } = request;
     const requestWithCapabilityServers: WorkspaceExecutionActivationRequest = {
-      ...request,
+      ...activationRequest,
+      llmTarget: normalizedLLMTarget,
       mcpServerIds: Array.from(new Set([...(request.mcpServerIds ?? []), ...selectedCapabilityServerIds]))
     };
     const targetWorkspaceId = workspaceId;
@@ -1114,10 +1137,14 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   };
 
   const requestWorkspaceActivation = () => {
+    setActivationAdvancedLLM(false);
     activationForm.setFieldsValue({
       goalId: goals[0]?.id,
       doDId: readyDoDs[0]?.id,
-      llmProviderId: configuration?.llm.defaultProviderId,
+      llmTarget: configuration?.llm.defaultChat ? { providerId: configuration.llm.defaultChat.providerId || 'ai-proxy', modelId: configuration.llm.defaultChat.modelId } : { providerId: 'ai-proxy' },
+      llmTargetKey: configuration?.llm.defaultChat?.modelId
+        ? `${configuration.llm.defaultChat.providerId || 'ai-proxy'}/${configuration.llm.defaultChat.modelId}`
+        : undefined,
       soulId: undefined,
       soulBindings: {},
       skillIds: [],
@@ -2747,11 +2774,12 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
         onCancel={() => setActivationOpen(false)}
         onOk={() => activationForm.submit()}
         okText="提交后台执行"
+        okButtonProps={{ disabled: !activationLLMReady || readyDoDs.length === 0 }}
       >
         <Form
           form={activationForm}
           layout="vertical"
-          onFinish={(values: WorkspaceExecutionActivationRequest) => void resumeWorkspaceExecution(values)}
+          onFinish={(values: WorkspaceExecutionActivationRequest & { llmTargetKey?: string }) => void resumeWorkspaceExecution(values)}
         >
           <Form.Item name="goalId" label="目标" rules={[{ required: true }]}>
             <Select options={goals.map((item) => ({ value: item.id, label: `${item.text} (${item.id})` }))} />
@@ -2759,15 +2787,66 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           <Form.Item name="doDId" label="验收标准" rules={[{ required: true }]}>
             <Select options={readyDoDs.map((item) => ({ value: item.id, label: `${item.items.join(' / ')} (${item.id})` }))} />
           </Form.Item>
-          <Form.Item name="llmProviderId" label="LLM 服务商">
+          <Form.Item label="LLM 模型选择模式">
+            <Space>
+              <Button
+                type={!activationAdvancedLLM ? 'primary' : 'default'}
+                onClick={() => {
+                  setActivationAdvancedLLM(false);
+                  activationForm.setFieldValue(['llmTarget', 'providerId'], 'ai-proxy');
+                }}
+              >
+                普通（ai-proxy）
+              </Button>
+              <Button
+                type={activationAdvancedLLM ? 'primary' : 'default'}
+                onClick={() => setActivationAdvancedLLM(true)}
+              >
+                高级（含自定义 Provider）
+              </Button>
+            </Space>
+          </Form.Item>
+          <Form.Item
+            name="llmTargetKey"
+            label="LLM 模型"
+            extra={
+              !activationLLMReady
+                ? '当前没有 ready 的对话模型；请先在配置页刷新 catalog 或声明自定义模型 operations'
+                : defaultChatModelId
+                  ? `未选择时使用系统默认：${defaultChatProviderId}/${defaultChatModelId}${defaultChatReady ? '' : '（默认目标当前未 ready，请显式选择 ready 模型）'}`
+                  : '未选择时使用系统默认对话模型'
+            }
+          >
             <Select
               allowClear
-              placeholder="使用系统默认 LLM 服务商"
-              options={llmProviders.map((item) => ({
-                value: item.id,
-                label: `${item.default ? '[默认] ' : ''}${item.id} / ${item.model || item.provider || '未配置'}${item.ready ? '' : ` / ${item.reason || '不可用'}`}`
+              showSearch
+              placeholder="使用系统默认对话模型"
+              options={activationLLMTargetOptions.map((item) => ({
+                value: item.value,
+                label: item.label
               }))}
+              onChange={(value?: string) => {
+                if (!value) {
+                  activationForm.setFieldsValue({
+                    llmTarget: { providerId: 'ai-proxy', modelId: undefined }
+                  });
+                  return;
+                }
+                const selected = activationLLMTargetOptions.find((item) => item.value === value);
+                activationForm.setFieldsValue({
+                  llmTarget: {
+                    providerId: selected?.providerId || 'ai-proxy',
+                    modelId: selected?.modelId
+                  }
+                });
+              }}
             />
+          </Form.Item>
+          <Form.Item name={['llmTarget', 'providerId']} hidden initialValue="ai-proxy">
+            <Input />
+          </Form.Item>
+          <Form.Item name={['llmTarget', 'modelId']} hidden>
+            <Input />
           </Form.Item>
           <Form.Item name="soulId" label="本次默认执行人格（Soul）">
             <Select allowClear placeholder="继承工作空间默认和阶段执行人格配置" options={soulOptions} />

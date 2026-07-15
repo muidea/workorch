@@ -1,56 +1,82 @@
 package configcore
 
-import llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
+import (
+	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+)
 
 type LLMConfiguration struct {
-	DefaultProviderID          string                            `json:"defaultProviderId"`
-	DefaultEmbeddingProviderID string                            `json:"defaultEmbeddingProviderId,omitempty"`
-	ModelCapabilities          []LLMModelCapabilityConfiguration `json:"modelCapabilities,omitempty"`
-	Providers                  []LLMProviderConfiguration        `json:"providers"`
-	ProviderTemplates          []LLMProviderTemplate             `json:"providerTemplates"`
+	AIProxy          AIProxyConfigurationView             `json:"aiProxy"`
+	DefaultChat      runtimecontract.ProviderModelTarget  `json:"defaultChat"`
+	DefaultEmbedding *runtimecontract.ProviderModelTarget `json:"defaultEmbedding,omitempty"`
+	Budget           LLMContextBudgetPolicyView           `json:"budget"`
+	CustomProviders  []CustomProviderConfigurationView    `json:"customProviders,omitempty"`
+	Catalog          ProviderCatalogSummary               `json:"catalog"`
 }
 
-type LLMModelCapabilityConfiguration struct {
-	ID                  string `json:"id"`
-	Provider            string `json:"provider,omitempty"`
-	ModelPattern        string `json:"modelPattern"`
-	ContextWindowTokens int    `json:"contextWindowTokens"`
+type AIProxyConfigurationView struct {
+	BaseURL                 string `json:"baseUrl"`
+	APIKeyConfigured        bool   `json:"apiKeyConfigured"`
+	Timeout                 string `json:"timeout,omitempty"`
+	CatalogRequestTimeout   string `json:"catalogRequestTimeout,omitempty"`
+	CatalogTTL              string `json:"catalogTTL,omitempty"`
+	CatalogMaxStaleAge      string `json:"catalogMaxStaleAge,omitempty"`
+	MaxCatalogResponseBytes int    `json:"maxCatalogResponseBytes,omitempty"`
+	MaxCatalogModels        int    `json:"maxCatalogModels,omitempty"`
 }
 
-type LLMProviderConfiguration struct {
-	ID                string                             `json:"id"`
-	Provider          string                             `json:"provider,omitempty"`
-	APISurface        string                             `json:"apiSurface,omitempty"`
-	BaseURL           string                             `json:"baseUrl,omitempty"`
-	Model             string                             `json:"model,omitempty"`
-	Timeout           string                             `json:"timeout,omitempty"`
-	Disabled          bool                               `json:"disabled"`
-	Ready             bool                               `json:"ready"`
-	Reason            string                             `json:"reason,omitempty"`
-	Default           bool                               `json:"default"`
-	APIKeyConfigured  bool                               `json:"apiKeyConfigured"`
-	ChatCompletions   bool                               `json:"chatCompletions"`
-	Streaming         bool                               `json:"streaming"`
-	NonChatOperations []string                           `json:"nonChatOperations,omitempty"`
-	FailoverEnabled   bool                               `json:"failoverEnabled"`
-	FailoverProviders []string                           `json:"failoverProviders,omitempty"`
-	CacheCapability   llmmodels.ProviderCacheCapability  `json:"cacheCapability,omitempty"`
-	InferenceProfile  llmmodels.ProviderInferenceProfile `json:"inferenceProfile,omitempty"`
-	ContextProfile    llmmodels.ProviderContextProfile   `json:"contextProfile,omitempty"`
+type LLMContextBudgetPolicyView struct {
+	ContextUtilizationRatio float64 `json:"contextUtilizationRatio"`
+	EstimatedTokensPerByte  float64 `json:"estimatedTokensPerByte"`
+	DefaultMaxOutputTokens  int     `json:"defaultMaxOutputTokens"`
+	MaxRequestBytes         int     `json:"maxRequestBytes"`
 }
 
-type LLMProviderTemplate struct {
-	TemplateID        string   `json:"templateId"`
-	Name              string   `json:"name"`
-	Description       string   `json:"description,omitempty"`
-	ID                string   `json:"id"`
-	Provider          string   `json:"provider"`
-	APISurface        string   `json:"apiSurface,omitempty"`
-	BaseURL           string   `json:"baseUrl,omitempty"`
-	Model             string   `json:"model,omitempty"`
-	Timeout           string   `json:"timeout,omitempty"`
-	Disabled          bool     `json:"disabled"`
-	ChatCompletions   bool     `json:"chatCompletions"`
-	Streaming         bool     `json:"streaming"`
-	NonChatOperations []string `json:"nonChatOperations,omitempty"`
+type CustomProviderConfigurationView struct {
+	ID               string                    `json:"id"`
+	Provider         string                    `json:"provider"`
+	APISurface       string                    `json:"apiSurface,omitempty"`
+	BaseURL          string                    `json:"baseUrl,omitempty"`
+	Timeout          string                    `json:"timeout,omitempty"`
+	APIKeyConfigured bool                      `json:"apiKeyConfigured"`
+	Models           []CustomProviderModelView `json:"models"`
+}
+
+type CustomProviderModelView struct {
+	ID                   string   `json:"id"`
+	ContextWindowTokens  int      `json:"contextWindowTokens"`
+	MaxOutputTokens      int      `json:"maxOutputTokens"`
+	Operations           []string `json:"operations"`
+	Temperature          *float64 `json:"temperature,omitempty"`
+	ReasoningEffort      string   `json:"reasoningEffort,omitempty"`
+	ThinkingBudgetTokens int      `json:"thinkingBudgetTokens,omitempty"`
+	CacheMode            string   `json:"cacheMode,omitempty"`
+	PromptCacheKey       *bool    `json:"promptCacheKey,omitempty"`
+	MessageCacheControl  *bool    `json:"messageCacheControl,omitempty"`
+	CacheUsageFields     []string `json:"cacheUsageFields,omitempty"`
+}
+
+type ProviderCatalogSummary struct {
+	ProviderID   string                         `json:"providerId"`
+	State        llmmodels.ProviderCatalogState `json:"state"`
+	Revision     string                         `json:"revision,omitempty"`
+	FetchedAt    string                         `json:"fetchedAt,omitempty"`
+	ExpiresAt    string                         `json:"expiresAt,omitempty"`
+	Stale        bool                           `json:"stale"`
+	Source       string                         `json:"source,omitempty"`
+	ErrorCode    string                         `json:"errorCode,omitempty"`
+	ErrorMessage string                         `json:"errorMessage,omitempty"`
+	Models       []ProviderModelDescriptorView  `json:"models,omitempty"`
+}
+
+type ProviderModelDescriptorView struct {
+	ProviderID          string   `json:"providerId"`
+	ModelID             string   `json:"modelId"`
+	RouteOwner          string   `json:"routeOwner,omitempty"`
+	ContextWindowTokens int      `json:"contextWindowTokens,omitempty"`
+	MaxOutputTokens     int      `json:"maxOutputTokens,omitempty"`
+	Operations          []string `json:"operations,omitempty"`
+	CapabilityReady     bool     `json:"capabilityReady"`
+	UnavailableReason   string   `json:"unavailableReason,omitempty"`
+	CapabilityRevision  string   `json:"capabilityRevision,omitempty"`
 }

@@ -14,8 +14,11 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+// CandidateProvider produces a typed Runtime V2 candidate generation result.
+// Implementations must return sealed audit (target/revision/budget/status) for both
+// successful and failed provider submissions so callers can persist usage audit.
 type CandidateProvider interface {
-	GenerateCandidate(context.Context, llmmodels.RuntimeCandidateRequest) ([]byte, error)
+	GenerateCandidate(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error)
 }
 
 func RequestCandidate(ctx context.Context, provider CandidateProvider, request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateResponse, error) {
@@ -23,28 +26,56 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 		return llmmodels.RuntimeCandidateResponse{}, fmt.Errorf("candidate provider is required")
 	}
 	if err := validateCandidateRequest(request); err != nil {
-		return llmmodels.RuntimeCandidateResponse{}, candidateRequestError(CandidateFailureClassInternal, err)
+		return llmmodels.RuntimeCandidateResponse{}, candidateRequestError(CandidateFailureClassInternal, err, nil, "", "")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	payload, err := provider.GenerateCandidate(ctx, request)
+	generation, err := provider.GenerateCandidate(ctx, request)
 	if err != nil {
-		return llmmodels.RuntimeCandidateResponse{}, candidateRequestError(CandidateFailureClassProvider, err)
+		return llmmodels.RuntimeCandidateResponse{
+			Transaction: request.Transaction,
+			Audit:       generation.Audit,
+			Usage:       generation.Usage,
+			RequestID:   generation.RequestID,
+			Status:      firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusFailed),
+		}, candidateRequestError(CandidateFailureClassProvider, err, generation.Audit, generation.RequestID, generation.Status)
 	}
-	candidate, err := DecodeCandidatePayload(request.Decision.Action, payload)
+	candidate, err := DecodeCandidatePayload(request.Decision.Action, generation.Payload)
 	if err != nil {
-		return llmmodels.RuntimeCandidateResponse{}, candidateRequestError(CandidateFailureClassSchema, err)
+		return llmmodels.RuntimeCandidateResponse{
+			Transaction: request.Transaction,
+			Audit:       generation.Audit,
+			Usage:       generation.Usage,
+			RequestID:   generation.RequestID,
+			Status:      firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted),
+		}, candidateRequestError(CandidateFailureClassSchema, err, generation.Audit, generation.RequestID, generation.Status)
 	}
 	if err := candidate.ValidateWithActivation(request.Decision, request.CandidateContext.Activation); err != nil {
-		return llmmodels.RuntimeCandidateResponse{}, candidateRequestError(CandidateFailureClassContract, err)
+		return llmmodels.RuntimeCandidateResponse{
+			Transaction: request.Transaction,
+			Audit:       generation.Audit,
+			Usage:       generation.Usage,
+			RequestID:   generation.RequestID,
+			Status:      firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted),
+		}, candidateRequestError(CandidateFailureClassContract, err, generation.Audit, generation.RequestID, generation.Status)
 	}
-	return llmmodels.RuntimeCandidateResponse{Transaction: request.Transaction, Candidate: candidate}, nil
+	return llmmodels.RuntimeCandidateResponse{
+		Transaction: request.Transaction,
+		Candidate:   candidate,
+		Audit:       generation.Audit,
+		Usage:       generation.Usage,
+		RequestID:   generation.RequestID,
+		Status:      firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted),
+	}, nil
 }
 
 type CandidateRequestError struct {
-	Class CandidateFailureClass
-	Err   error
+	Class     CandidateFailureClass
+	Err       error
+	Audit     *llmmodels.ProviderRequestAudit
+	RequestID string
+	Status    string
 }
 
 func (e *CandidateRequestError) Error() string {
@@ -74,8 +105,26 @@ func CandidateFailureFromError(err error) runtimecontract.RuntimeCandidateFailur
 	return failure
 }
 
-func candidateRequestError(class CandidateFailureClass, err error) error {
-	return &CandidateRequestError{Class: class, Err: err}
+// CandidateAuditFromError extracts sealed request audit carried on a CandidateRequestError.
+func CandidateAuditFromError(err error) (*llmmodels.ProviderRequestAudit, string, string) {
+	var typed *CandidateRequestError
+	if errors.As(err, &typed) && typed != nil {
+		return typed.Audit, typed.RequestID, typed.Status
+	}
+	return nil, "", ""
+}
+
+func candidateRequestError(class CandidateFailureClass, err error, audit *llmmodels.ProviderRequestAudit, requestID, status string) error {
+	return &CandidateRequestError{Class: class, Err: err, Audit: audit, RequestID: requestID, Status: status}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 type CandidateDisposition string

@@ -113,9 +113,9 @@ func TestStoreReplaceAllListSnapshotAndDelete(t *testing.T) {
 			LLMUsageTraces: []readmodelcore.LLMUsageTrace{{
 				ID:    "usage-a",
 				RunID: "run-a",
-				ContextBudget: map[string]any{
+				ContextBudget: mustManagerEventPayload(map[string]any{
 					"failureSignature": strings.Repeat("x", 2048),
-				},
+				}),
 			}},
 		},
 	}, nil)
@@ -177,7 +177,7 @@ func TestStoreReplaceAllListSnapshotAndDelete(t *testing.T) {
 	if len(snapshot.Runs) != 1 {
 		t.Fatalf("snapshot runs = %+v, want compact detail run stored", snapshot.Runs)
 	}
-	if signature := snapshot.LLMUsageTraces[0].ContextBudget["failureSignature"].(string); len(signature) > 1024+len("...[truncated]") {
+	if signature, ok := snapshot.LLMUsageTraces[0].ContextBudget.String("failureSignature"); !ok || len(signature) > 1024+len("...[truncated]") {
 		t.Fatalf("stored LLM trace signature length = %d, want bounded detail projection", len(signature))
 	}
 
@@ -287,7 +287,7 @@ func TestStoreListSnapshotOmitsDetailHeavyPayloads(t *testing.T) {
 			Runs:           []readmodelcore.Run{{ID: "run-compact-detail", WorkspaceID: "ws-compact-detail", State: "running"}},
 			Results:        []readmodelcore.Result{{ID: "result-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", State: "accepted", Summary: strings.Repeat("x", 4096)}},
 			Artifacts:      []readmodelcore.Artifact{{ID: "artifact-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", ArtifactType: "trace", State: "active", Metadata: map[string]any{"payload": strings.Repeat("x", 4096)}}},
-			LLMUsageTraces: []readmodelcore.LLMUsageTrace{{ID: "usage-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", ContextBudget: map[string]any{"payload": strings.Repeat("x", 4096)}}},
+			LLMUsageTraces: []readmodelcore.LLMUsageTrace{{ID: "usage-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", ContextBudget: mustManagerEventPayload(map[string]any{"payload": strings.Repeat("x", 4096)})}},
 			EventRecords:   []readmodelcore.EventRecord{{ID: "event-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail"}},
 			Decisions:      []readmodelcore.Decision{{ID: "ticket-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", State: string(common.DecisionTicketStateOpen)}},
 			Approvals:      []readmodelcore.Approval{{ID: "approval-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", State: string(common.ApprovalStatePending)}},

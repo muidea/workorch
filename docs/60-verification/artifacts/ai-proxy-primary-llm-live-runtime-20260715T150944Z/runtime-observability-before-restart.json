@@ -1,0 +1,682 @@
+{
+  "service": "workorch",
+  "backend": "file",
+  "dataRoot": "/home/rangh/aispace/workorch/docs/60-verification/artifacts/ai-proxy-primary-llm-live-runtime-20260715T150944Z/data",
+  "observability": {
+    "run": {
+      "id": "run-001",
+      "workspaceId": "ws-f584518b5343ee0e",
+      "goalId": "goal-cb4aa055f6e49555",
+      "doDId": "dod-2943e2ca4bd65151",
+      "lineage": {},
+      "definitionRevision": "goal:goal-cb4aa055f6e49555|dod:dod-2943e2ca4bd65151",
+      "initialStepKind": "llm/workspace_execution",
+      "state": "completed"
+    },
+    "outcome": {
+      "runId": "run-001",
+      "state": "accepted",
+      "rawState": "completed",
+      "accepted": true,
+      "terminal": true,
+      "resultId": "ws-f584518b5343ee0e/run-001/result/dod-assessment",
+      "summary": "current coverage focus is satisfied",
+      "evidenceRefs": [
+        "runtime-operation|dispatch-e8bee5ed00df41330abf|live-validation"
+      ]
+    },
+    "progress": {
+      "state": "completed",
+      "currentStepKind": "runtime_v2/complete",
+      "currentStepState": "completed",
+      "stepTotal": 2,
+      "stepDispatched": 0,
+      "stepCompleted": 2,
+      "stepFailed": 0,
+      "blocked": false,
+      "terminal": true
+    },
+    "taskProgress": {
+      "workspaceId": "ws-f584518b5343ee0e",
+      "runId": "run-001",
+      "state": "completed",
+      "summary": "revision 14 | evidence 2 | focus focus-001 | action complete | dispatch 2 | attempts 2 | accepted 1 rejected 0",
+      "currentStepId": "authority-bbe6382e8317c2a86aed",
+      "currentStepKind": "result/dod_assessment",
+      "currentStepState": "accepted",
+      "currentActionLabel": "complete",
+      "diagnosticLineage": "authority-bbe6382e8317c2a86aed",
+      "currentMilestone": "formal_result",
+      "milestones": [
+        {
+          "id": "run_created",
+          "title": "Run created",
+          "state": "completed",
+          "evidenceRefs": [
+            "run-001"
+          ]
+        },
+        {
+          "id": "execution_steps",
+          "title": "Execution steps",
+          "state": "completed",
+          "evidenceRefs": [
+            "runtime-v2/accepted-evidence"
+          ]
+        },
+        {
+          "id": "governance",
+          "title": "Decision and approval governance",
+          "state": "completed"
+        },
+        {
+          "id": "validation",
+          "title": "Validation",
+          "state": "completed",
+          "evidenceRefs": [
+            "runtime-v2/validation-evidence"
+          ]
+        },
+        {
+          "id": "formal_result",
+          "title": "Result / Artifact",
+          "state": "completed",
+          "evidenceRefs": [
+            "ws-f584518b5343ee0e/run-001/result/dod-assessment",
+            "runtime-operation|dispatch-e8bee5ed00df41330abf|live-validation"
+          ]
+        }
+      ],
+      "items": [
+        {
+          "id": "ws-f584518b5343ee0e/run-001/result/dod-assessment",
+          "kind": "result",
+          "title": "Runtime V2 acceptance result",
+          "state": "accepted",
+          "evidenceRefs": [
+            "ws-f584518b5343ee0e/run-001/result/dod-assessment",
+            "authority-bbe6382e8317c2a86aed",
+            "runtime-operation|dispatch-e8bee5ed00df41330abf|live-validation"
+          ]
+        }
+      ],
+      "recovery": {
+        "mode": "none",
+        "nextAction": "inspect_result",
+        "runId": "run-001",
+        "stepId": "authority-bbe6382e8317c2a86aed",
+        "reason": "run completed"
+      },
+      "repairLoop": {
+        "state": "inactive",
+        "attemptCount": 0,
+        "nextAction": "inspect_result",
+        "escalated": false
+      },
+      "assessmentOutcome": {
+        "state": "accepted",
+        "acceptedResultCount": 1,
+        "latestAcceptedResultId": "ws-f584518b5343ee0e/run-001/result/dod-assessment"
+      },
+      "evidenceRefs": [
+        "run-001",
+        "ws-f584518b5343ee0e/run-001/result/dod-assessment",
+        "runtime-operation|dispatch-e8bee5ed00df41330abf|live-validation"
+      ],
+      "runtimeV2": {
+        "stateRevision": 14,
+        "evidenceSequence": 2,
+        "completedDispatchCount": 2,
+        "candidateAttemptCount": 2,
+        "acceptedEvidenceCount": 1,
+        "rejectedEvidenceCount": 0,
+        "currentFocusId": "focus-001",
+        "currentAction": "complete"
+      }
+    },
+    "repairLoop": {
+      "state": "inactive",
+      "attemptCount": 0,
+      "nextAction": "inspect_result",
+      "escalated": false
+    },
+    "acceptance": {
+      "summary": {
+        "acceptedSlices": 0,
+        "activeSlices": 0,
+        "openSlices": 0,
+        "failedSlices": 0
+      }
+    },
+    "llmContextBudgetSummary": {
+      "traceTotal": 0
+    },
+    "llmUsageTraces": [
+      {
+        "id": "evt-1784128189015969714-17",
+        "workspaceId": "ws-f584518b5343ee0e",
+        "runId": "run-001",
+        "stepId": "authority-c88ee59e2dc5effeb7f3",
+        "providerId": "ai-proxy",
+        "model": "live-chat-a",
+        "operation": "chat_completions",
+        "inputTokens": 3,
+        "outputTokens": 2,
+        "totalTokens": 5,
+        "estimated": false,
+        "usageSource": "provider_native",
+        "requestBytes": 15701,
+        "responseBytes": 275,
+        "streaming": false,
+        "contextBudget": {
+          "actualBytes": 15701,
+          "actualTokens": 5,
+          "cacheStrategy": "stable_prefix_dynamic_tail",
+          "capabilityRevision": "capability-sha256:093125f87870d06c066bdf3790b640c04f1748831698a654f02683cfff3c959a",
+          "capabilitySource": "sealed_ceiling",
+          "configurationRevision": "target-config-sha256:e79ab84cfe0bdb6baed71834148027365a282c78ebe5ff67f7230173fdca4b2e",
+          "contextWindowTokens": 65536,
+          "effectiveMaxOutputTokens": 4096,
+          "estimatedInputTokens": 0,
+          "estimatedOutputTokens": 4096,
+          "maxBytes": 184320,
+          "maxRequestBytes": 184320,
+          "maxTokens": 46080,
+          "modelId": "live-chat-a",
+          "overBudget": false,
+          "profileMode": "runtime_v2_sealed_ceiling",
+          "providerId": "ai-proxy",
+          "providerMaxOutputTokens": 4096,
+          "providerSubmitted": true,
+          "renderedStablePrefixHash": "candidate-prefix-d9dc5147b30b7cfaea10",
+          "stablePrefixHash": "candidate-prefix-d9dc5147b30b7cfaea10",
+          "truncated": false
+        },
+        "cacheUsage": {},
+        "cacheMarkersSent": {},
+        "startedAt": "2026-07-15T15:09:49.009412091Z",
+        "completedAt": "2026-07-15T15:09:49.015646219Z",
+        "durationMs": 6,
+        "status": "completed",
+        "occurredAt": "2026-07-15T15:09:49.015646219Z",
+        "evidenceRef": "authority-c88ee59e2dc5effeb7f3"
+      },
+      {
+        "id": "evt-1784128189025240778-21",
+        "workspaceId": "ws-f584518b5343ee0e",
+        "runId": "run-001",
+        "stepId": "authority-759a537b1401016c4abf",
+        "providerId": "ai-proxy",
+        "model": "live-chat-a",
+        "operation": "chat_completions",
+        "inputTokens": 3,
+        "outputTokens": 2,
+        "totalTokens": 5,
+        "estimated": false,
+        "usageSource": "provider_native",
+        "requestBytes": 12510,
+        "responseBytes": 220,
+        "streaming": false,
+        "contextBudget": {
+          "actualBytes": 12510,
+          "actualTokens": 5,
+          "cacheStrategy": "stable_prefix_dynamic_tail",
+          "capabilityRevision": "capability-sha256:093125f87870d06c066bdf3790b640c04f1748831698a654f02683cfff3c959a",
+          "capabilitySource": "sealed_ceiling",
+          "configurationRevision": "target-config-sha256:e79ab84cfe0bdb6baed71834148027365a282c78ebe5ff67f7230173fdca4b2e",
+          "contextWindowTokens": 65536,
+          "effectiveMaxOutputTokens": 4096,
+          "estimatedInputTokens": 0,
+          "estimatedOutputTokens": 4096,
+          "maxBytes": 184320,
+          "maxRequestBytes": 184320,
+          "maxTokens": 46080,
+          "modelId": "live-chat-a",
+          "overBudget": false,
+          "profileMode": "runtime_v2_sealed_ceiling",
+          "providerId": "ai-proxy",
+          "providerMaxOutputTokens": 4096,
+          "providerSubmitted": true,
+          "renderedStablePrefixHash": "candidate-prefix-d9dc5147b30b7cfaea10",
+          "stablePrefixHash": "candidate-prefix-d9dc5147b30b7cfaea10",
+          "truncated": false
+        },
+        "cacheUsage": {},
+        "cacheMarkersSent": {},
+        "startedAt": "2026-07-15T15:09:49.019287515Z",
+        "completedAt": "2026-07-15T15:09:49.025086616Z",
+        "durationMs": 5,
+        "status": "completed",
+        "occurredAt": "2026-07-15T15:09:49.025086616Z",
+        "evidenceRef": "authority-759a537b1401016c4abf"
+      }
+    ],
+    "llmUsageSummary": {
+      "entryTotal": 2,
+      "inputTokens": 6,
+      "outputTokens": 4,
+      "totalTokens": 10,
+      "estimatedEntries": 0,
+      "providerNativeEntries": 2,
+      "failedEntries": 0,
+      "providerModelBreakdown": [
+        {
+          "providerId": "ai-proxy",
+          "model": "live-chat-a",
+          "entryTotal": 2,
+          "inputTokens": 6,
+          "outputTokens": 4,
+          "totalTokens": 10,
+          "estimatedEntries": 0,
+          "failedEntries": 0
+        }
+      ]
+    },
+    "doDEvidence": [
+      {
+        "resultId": "ws-f584518b5343ee0e/run-001/result/dod-assessment",
+        "doDId": "dod-2943e2ca4bd65151",
+        "satisfied": true,
+        "summary": "current coverage focus is satisfied",
+        "items": [
+          {
+            "item": "A result is traceable",
+            "state": "satisfied",
+            "evidenceRefs": [
+              "runtime-operation|dispatch-e8bee5ed00df41330abf|live-validation"
+            ],
+            "evidenceStatus": "linked"
+          }
+        ]
+      }
+    ],
+    "resultQuality": [
+      {
+        "resultId": "ws-f584518b5343ee0e/run-001/result/dod-assessment",
+        "doDId": "dod-2943e2ca4bd65151",
+        "state": "failed",
+        "summary": "current coverage focus is satisfied",
+        "evidenceRefs": [
+          "runtime-operation|dispatch-e8bee5ed00df41330abf|live-validation"
+        ],
+        "issues": [
+          {
+            "code": "missing_verification_summary",
+            "severity": "error",
+            "message": "result is missing verification summary",
+            "suggestion": "populate summaryDetail.verificationSummary with verification scope and conclusions",
+            "evidenceRefs": [
+              "runtime-operation|dispatch-e8bee5ed00df41330abf|live-validation"
+            ]
+          },
+          {
+            "code": "missing_risk_disclosure",
+            "severity": "error",
+            "message": "result is missing known limitations and residual risks",
+            "suggestion": "populate summaryDetail.knownLimitations or summaryDetail.residualRisks",
+            "evidenceRefs": [
+              "runtime-operation|dispatch-e8bee5ed00df41330abf|live-validation"
+            ]
+          },
+          {
+            "code": "missing_next_actions",
+            "severity": "warning",
+            "message": "result is missing next actions",
+            "suggestion": "populate summaryDetail.nextActions for follow-up guidance",
+            "evidenceRefs": [
+              "runtime-operation|dispatch-e8bee5ed00df41330abf|live-validation"
+            ]
+          }
+        ]
+      }
+    ],
+    "evidence": {
+      "toolCallTotal": 0,
+      "toolCallRunning": 0,
+      "toolCallCompleted": 0,
+      "toolCallFailed": 0,
+      "patchTotal": 0,
+      "patchApplied": 0,
+      "patchFailed": 0,
+      "validationTotal": 0,
+      "validationPassed": 0,
+      "validationFailed": 0,
+      "validationWarning": 0,
+      "runtimeCheckpointTotal": 0,
+      "resultTotal": 1,
+      "artifactTotal": 0,
+      "eventTotal": 20
+    },
+    "timeline": [
+      {
+        "source": "persisted_event",
+        "type": "run",
+        "id": "evt-1784128188989844375-5",
+        "topic": "/run/created",
+        "runState": "pending",
+        "occurredAt": "2026-07-15T15:09:48.989845789Z",
+        "data": {
+          "blockingApprovalId": "",
+          "blockingTicketId": "",
+          "doDId": "dod-2943e2ca4bd65151",
+          "goalId": "goal-cb4aa055f6e49555",
+          "state": "pending"
+        }
+      },
+      {
+        "source": "persisted_event",
+        "type": "run",
+        "id": "evt-1784128188992659888-7",
+        "topic": "/run/state/changed",
+        "runState": "active",
+        "occurredAt": "2026-07-15T15:09:48.992661413Z",
+        "data": {
+          "blockingApprovalId": "",
+          "blockingTicketId": "",
+          "doDId": "dod-2943e2ca4bd65151",
+          "goalId": "goal-cb4aa055f6e49555",
+          "state": "active"
+        }
+      },
+      {
+        "source": "persisted_event",
+        "type": "run",
+        "id": "evt-1784128188994577497-8",
+        "topic": "/run/state/changed",
+        "runState": "active",
+        "occurredAt": "2026-07-15T15:09:48.994578693Z",
+        "data": {
+          "blockingApprovalId": "",
+          "blockingTicketId": "",
+          "doDId": "dod-2943e2ca4bd65151",
+          "goalId": "goal-cb4aa055f6e49555",
+          "state": "active"
+        }
+      },
+      {
+        "source": "persisted_event",
+        "type": "run",
+        "id": "evt-1784128188996147156-9",
+        "topic": "/run/state/changed",
+        "runState": "active",
+        "occurredAt": "2026-07-15T15:09:48.996148464Z",
+        "data": {
+          "blockingApprovalId": "",
+          "blockingTicketId": "",
+          "doDId": "dod-2943e2ca4bd65151",
+          "goalId": "goal-cb4aa055f6e49555",
+          "state": "active"
+        }
+      },
+      {
+        "source": "persisted_event",
+        "type": "run",
+        "id": "evt-1784128189000388972-10",
+        "topic": "/run/state/changed",
+        "runState": "active",
+        "occurredAt": "2026-07-15T15:09:49.000391514Z",
+        "data": {
+          "blockingApprovalId": "",
+          "blockingTicketId": "",
+          "doDId": "dod-2943e2ca4bd65151",
+          "goalId": "goal-cb4aa055f6e49555",
+          "state": "active"
+        }
+      },
+      {
+        "source": "persisted_event",
+        "type": "run",
+        "id": "evt-1784128189002329418-11",
+        "topic": "/run/state/changed",
+        "runState": "active",
+        "occurredAt": "2026-07-15T15:09:49.002331171Z",
+        "data": {
+          "blockingApprovalId": "",
+          "blockingTicketId": "",
+          "doDId": "dod-2943e2ca4bd65151",
+          "goalId": "goal-cb4aa055f6e49555",
+          "state": "active"
+        }
+      },
+      {
+        "source": "persisted_event",
+        "type": "run",
+        "id": "evt-1784128189003425111-12",
+        "topic": "/run/state/changed",
+        "runState": "active",
+        "occurredAt": "2026-07-15T15:09:49.00342606Z",
+        "data": {
+          "blockingApprovalId": "",
+          "blockingTicketId": "",
+          "doDId": "dod-2943e2ca4bd65151",
+          "goalId": "goal-cb4aa055f6e49555",
+          "state": "active"
+        }
+      },
+      {
+        "source": "persisted_event",
+        "type": "run",
+        "id": "evt-1784128189004758112-13",
+        "topic": "/run/state/changed",
+        "runState": "active",
+        "occurredAt": "2026-07-15T15:09:49.004759376Z",
+        "data": {
+          "blockingApprovalId": "",
+          "blockingTicketId": "",
+          "doDId": "dod-2943e2ca4bd65151",
+          "goalId": "goal-cb4aa055f6e49555",
+          "state": "active"
+        }
+      },
+      {
+        "source": "persisted_event",
+        "type": "run",
+        "id": "evt-1784128189005823464-14",
+        "topic": "/run/state/changed",
+        "runState": "active",
+        "occurredAt": "2026-07-15T15:09:49.005824461Z",
+        "data": {
+          "blockingApprovalId": "",
+          "blockingTicketId": "",
+          "doDId": "dod-2943e2ca4bd65151",
+          "goalId": "goal-cb4aa055f6e49555",
+          "state": "active"
+        }
+      },
+      {
+        "source": "persisted_event",
+        "type": "run",
+        "id": "evt-1784128189007176735-15",
+        "topic": "/run/state/changed",
+        "runState": "active",
+        "occurredAt": "2026-07-15T15:09:49.007177766Z",
+        "data": {
+          "blockingApprovalId": "",
+          "blockingTicketId": "",
+          "doDId": "dod-2943e2ca4bd65151",
+          "goalId": "goal-cb4aa055f6e49555",
+          "state": "active"
+        }
+      },
+      {
+        "source": "persisted_event",
+        "type": "run",
+        "id": "evt-1784128189008861104-16",
+        "topic": "/run/state/changed",
+        "runState": "active",
+        "occurredAt": "2026-07-15T15:09:49.00886311Z",
+        "data": {
+          "blockingApprovalId": "",
+          "blockingTicketId": "",
+          "doDId": "dod-2943e2ca4bd65151",
+          "goalId": "goal-cb4aa055f6e49555",
+          "state": "active"
+        }
+      },
+      {
+        "source": "persisted_event",
+        "type": "llm_usage",
+        "id": "evt-1784128189015969714-17",
+        "topic": "/run/llm_usage/recorded",
+        "stepId": "authority-c88ee59e2dc5effeb7f3",
+        "occurredAt": "2026-07-15T15:09:49.015646219Z",
+        "data": {
+          "completedAt": "2026-07-15T15:09:49.015646219Z",
+          "durationMs": 6,
+          "estimated": false,
+          "kind": "runtime_v2_candidate",
+          "model": "live-chat-a",
+          "operation": "chat_completions",
+          "outputTokens": 2,
+          "providerId": "ai-proxy",
+          "requestBytes": 15701,
+          "responseBytes": 275,
+          "runId": "run-001",
+          "startedAt": "2026-07-15T15:09:49.009412091Z",
+          "status": "completed",
+          "stepId": "authority-c88ee59e2dc5effeb7f3",
+          "streaming": false,
+          "totalTokens": 5,
+          "usageSource": "provider_native",
+          "workspaceId": "ws-f584518b5343ee0e"
+        }
+      },
+      {
+        "source": "persisted_event",
+        "type": "run",
+        "id": "evt-1784128189016612406-18",
+        "topic": "/run/state/changed",
+        "runState": "active",
+        "occurredAt": "2026-07-15T15:09:49.016613665Z",
+        "data": {
+          "blockingApprovalId": "",
+          "blockingTicketId": "",
+          "doDId": "dod-2943e2ca4bd65151",
+          "goalId": "goal-cb4aa055f6e49555",
+          "state": "active"
+        }
+      },
+      {
+        "source": "persisted_event",
+        "type": "run",
+        "id": "evt-1784128189017759129-19",
+        "topic": "/run/state/changed",
+        "runState": "active",
+        "occurredAt": "2026-07-15T15:09:49.017760139Z",
+        "data": {
+          "blockingApprovalId": "",
+          "blockingTicketId": "",
+          "doDId": "dod-2943e2ca4bd65151",
+          "goalId": "goal-cb4aa055f6e49555",
+          "state": "active"
+        }
+      },
+      {
+        "source": "persisted_event",
+        "type": "run",
+        "id": "evt-1784128189018704992-20",
+        "topic": "/run/state/changed",
+        "runState": "active",
+        "occurredAt": "2026-07-15T15:09:49.018706015Z",
+        "data": {
+          "blockingApprovalId": "",
+          "blockingTicketId": "",
+          "doDId": "dod-2943e2ca4bd65151",
+          "goalId": "goal-cb4aa055f6e49555",
+          "state": "active"
+        }
+      },
+      {
+        "source": "persisted_event",
+        "type": "llm_usage",
+        "id": "evt-1784128189025240778-21",
+        "topic": "/run/llm_usage/recorded",
+        "stepId": "authority-759a537b1401016c4abf",
+        "occurredAt": "2026-07-15T15:09:49.025086616Z",
+        "data": {
+          "completedAt": "2026-07-15T15:09:49.025086616Z",
+          "durationMs": 5,
+          "estimated": false,
+          "kind": "runtime_v2_candidate",
+          "model": "live-chat-a",
+          "operation": "chat_completions",
+          "outputTokens": 2,
+          "providerId": "ai-proxy",
+          "requestBytes": 12510,
+          "responseBytes": 220,
+          "runId": "run-001",
+          "startedAt": "2026-07-15T15:09:49.019287515Z",
+          "status": "completed",
+          "stepId": "authority-759a537b1401016c4abf",
+          "streaming": false,
+          "totalTokens": 5,
+          "usageSource": "provider_native",
+          "workspaceId": "ws-f584518b5343ee0e"
+        }
+      },
+      {
+        "source": "persisted_event",
+        "type": "run",
+        "id": "evt-1784128189025938511-22",
+        "topic": "/run/state/changed",
+        "runState": "active",
+        "occurredAt": "2026-07-15T15:09:49.025958995Z",
+        "data": {
+          "blockingApprovalId": "",
+          "blockingTicketId": "",
+          "doDId": "dod-2943e2ca4bd65151",
+          "goalId": "goal-cb4aa055f6e49555",
+          "state": "active"
+        }
+      },
+      {
+        "source": "persisted_event",
+        "type": "run",
+        "id": "evt-1784128189026844077-23",
+        "topic": "/run/state/changed",
+        "runState": "active",
+        "occurredAt": "2026-07-15T15:09:49.026844934Z",
+        "data": {
+          "blockingApprovalId": "",
+          "blockingTicketId": "",
+          "doDId": "dod-2943e2ca4bd65151",
+          "goalId": "goal-cb4aa055f6e49555",
+          "state": "active"
+        }
+      },
+      {
+        "source": "persisted_event",
+        "type": "result",
+        "id": "evt-1784128189031804582-24",
+        "topic": "/result/accepted",
+        "runState": "accepted",
+        "occurredAt": "2026-07-15T15:09:49.031810368Z",
+        "data": {
+          "doDId": "dod-2943e2ca4bd65151",
+          "evidenceRefs": [
+            "runtime-operation|dispatch-e8bee5ed00df41330abf|live-validation"
+          ],
+          "goalId": "goal-cb4aa055f6e49555",
+          "sourceRef": "authority-bbe6382e8317c2a86aed",
+          "state": "accepted",
+          "summary": "current coverage focus is satisfied"
+        }
+      },
+      {
+        "source": "persisted_event",
+        "type": "run",
+        "id": "evt-1784128189032923844-25",
+        "topic": "/run/state/changed",
+        "runState": "completed",
+        "occurredAt": "2026-07-15T15:09:49.03292579Z",
+        "data": {
+          "blockingApprovalId": "",
+          "blockingTicketId": "",
+          "doDId": "dod-2943e2ca4bd65151",
+          "goalId": "goal-cb4aa055f6e49555",
+          "state": "completed"
+        }
+      }
+    ]
+  }
+}

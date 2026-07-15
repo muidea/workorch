@@ -144,6 +144,18 @@ export const workorchApi = {
     });
     return body.configuration;
   },
+  getLLMModelCatalog: async (providerId = 'ai-proxy') => {
+    const query = new URLSearchParams({ providerId });
+    const body = await request<{ catalog: import('./types').ProviderCatalogSummary }>(`${apiBase}/configuration/llm/models?${query.toString()}`);
+    return body.catalog;
+  },
+  refreshLLMModelCatalog: async (providerId = 'ai-proxy') => {
+    const body = await request<{ catalog: import('./types').ProviderCatalogSummary }>(`${apiBase}/configuration/llm/models/refresh`, {
+      method: 'POST',
+      body: JSON.stringify({ providerId })
+    });
+    return body.catalog;
+  },
   updateServerConfiguration: async (configuration: UpdateServerConfigurationRequest) => {
     const body = await request<{ configuration: ServiceConfiguration }>(`${apiBase}/configuration/server`, {
       method: 'PUT',

@@ -243,6 +243,7 @@ func dispatchDefinition() runtimecontract.RuntimeDefinitionContext {
 
 func baseDispatchFacts() runtimecontract.RuntimeFacts {
 	return runtimecontract.RuntimeFacts{
+		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-v2-00000000000000000000",
 		Focus: runtimecontract.CoverageFocus{
 			ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},

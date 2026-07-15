@@ -5,6 +5,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
@@ -29,7 +30,7 @@ type WorkspaceRunRequestedCommand struct {
 	Priority           int
 	GoalID             common.GoalID
 	DoDID              common.DoDID
-	LLMProviderID      string
+	LLMTarget          *runtimecontract.ProviderModelTarget
 	SoulID             common.SoulID
 	SoulBindings       map[string]string
 	SkillIDs           []common.SkillID
@@ -46,25 +47,24 @@ type WorkspaceRunRequestedResult struct {
 type WorkspaceProjectionChangedData struct {
 	WorkspaceID             common.WorkspaceID
 	RunID                   common.RunID
-	GlobalRevision          int64
 	StreamGeneration        string
+	GlobalRevision          int64
 	WorkspaceRevision       int64
 	SourceEventRevision     int64
 	ProjectedSourceRevision int64
-	WorkspaceTotal          int
 	RuntimeStateRevision    uint64
 	EvidenceSequence        uint64
 	ActivityRevision        int64
+	WorkspaceTotal          int
 	ChangeKind              string
-	ProjectionState         string
 	ChangedSections         []workorchport.WorkspaceProjectionSection
+	ProjectionState         string
 	UpdatedAt               string
 	RebuiltAt               string
 	StaleReason             string
 	Error                   string
 }
 
-type CLIProgress struct {
 // ReadWorkspaceRuntimeViewCommand is the typed EventHub read for the TUI
 // runtime main view. Local backends require a concrete response.
 type ReadWorkspaceRuntimeViewCommand struct {
@@ -77,6 +77,7 @@ type ReadWorkspaceRuntimeViewResult struct {
 	View workorchport.WorkspaceRuntimeViewInfo
 }
 
+type CLIProgress struct {
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
 	StepID      common.StepID
@@ -90,8 +91,8 @@ func MessageContracts() []eventcontract.MessageContract {
 	ret := eventcontract.MessageContracts(
 		eventcontract.FacadeTopic[DoneCommand, DoneCommandResult]("workorchd", definitionPackage, TopicWorkorchDCommandDone),
 		eventcontract.CommandTopic[WorkspaceRunRequestedCommand, WorkspaceRunRequestedResult]("workorchd.scheduler", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkorchDCommandWorkspaceRunRequested),
-		eventcontract.DataTopic[WorkspaceProjectionChangedData]("workorchd.workspace_projection", definitionPackage, eventcontract.LanePolicyState, TopicWorkspaceProjectionChanged),
 		eventcontract.CommandTopic[ReadWorkspaceRuntimeViewCommand, ReadWorkspaceRuntimeViewResult]("workorchd.workspace_runtime_view", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkorchDCommandReadWorkspaceRuntimeView),
+		eventcontract.DataTopic[WorkspaceProjectionChangedData]("workorchd.workspace_projection", definitionPackage, eventcontract.LanePolicyState, TopicWorkspaceProjectionChanged),
 		eventcontract.DataTopic[CLIProgress]("cli", definitionPackage, eventcontract.LanePolicyTopic, TopicCLIProgress),
 	)
 	return append(ret, CLIMessageContracts()...)

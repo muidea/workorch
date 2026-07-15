@@ -9,6 +9,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/localizationcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type workspaceExecutionDefaults struct {
@@ -26,8 +27,13 @@ func workspaceExecutionDefaultsFromContext(ctx context.Context, hub magicevent.H
 	return workspaceExecutionDefaults{
 		systemDefaultSoulID:   common.SoulID(cfg.Runtime.DefaultSoulID),
 		defaultDialogLanguage: localizationcore.DefaultDialogLanguageFromContext(ctx),
-		defaultEmbeddingProviderLoader: func(context.Context) (string, error) {
-			return cfg.LLM.DefaultEmbeddingProvider, nil
+		defaultEmbeddingProviderLoader: func(context.Context) (runtimecontract.ProviderModelTarget, error) {
+			// defaultEmbedding is optional. Empty means semantic recall is disabled and
+			// memory selection must fall back to workspace list baseline.
+			if cfg.LLM.DefaultEmbedding == nil {
+				return runtimecontract.ProviderModelTarget{}, nil
+			}
+			return cfg.LLM.DefaultEmbedding.ToRuntimeTarget(), nil
 		},
 		skillHubCatalog: skillHubCatalogForEventHub(hub),
 	}, nil

@@ -311,9 +311,7 @@ func orchestratorBackgroundContext(ctx context.Context, workspaceID common.Works
 	} else if workspaceID := common.RuntimeWorkspaceIDFromContext(ctx); workspaceID != "" {
 		bgCtx = common.ContextWithRuntimeWorkspaceID(bgCtx, workspaceID)
 	}
-	if providerID := common.RuntimeLLMProviderIDFromContext(ctx); providerID != "" {
-		bgCtx = common.ContextWithRuntimeLLMProviderID(bgCtx, providerID)
-	}
+
 	return bgCtx
 }
 

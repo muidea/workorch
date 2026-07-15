@@ -2,10 +2,14 @@ package llm
 
 import (
 	"strings"
+	"time"
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 )
+
+// defaultProviderTimeout is used when a resolved provider client has no explicit timeout.
+const defaultProviderTimeout = 60 * time.Second
 
 func normalizedProviderConfigForRuntime(config llmmodels.ProviderConfig) llmmodels.ProviderConfig {
 	if strings.TrimSpace(config.APISurface) == "" {

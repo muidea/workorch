@@ -259,5 +259,6 @@ type WorkspaceBackend interface {
 	Get(ctx context.Context, id common.WorkspaceID) (*WorkspaceInfo, error)
 	List(ctx context.Context) ([]WorkspaceInfo, error)
 	Snapshot(ctx context.Context, id common.WorkspaceID) (*WorkspaceSnapshotInfo, error)
+	RuntimeView(ctx context.Context, req ReadWorkspaceRuntimeViewRequest) (*WorkspaceRuntimeViewInfo, error)
 	Delete(ctx context.Context, id common.WorkspaceID, purge bool) error
 }

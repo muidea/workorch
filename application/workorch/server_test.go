@@ -372,9 +372,37 @@ maxConcurrentRuns = 1
 backend = %q
 dataDir = %q
 
-[llm]
+[llm.aiProxy]
+baseURL = "http://127.0.0.1:9"
+apiKey = "test-key"
 timeout = "60s"
-disabled = false
+catalogRequestTimeout = "5s"
+catalogTTL = "5m"
+catalogMaxStaleAge = "24h"
+maxCatalogResponseBytes = 1048576
+maxCatalogModels = 1000
+
+[llm.defaultChat]
+providerID = "custom-test"
+modelID = "model-1"
+
+[llm.budget]
+contextUtilizationRatio = 0.75
+estimatedTokensPerByte = 0.25
+defaultMaxOutputTokens = 4096
+maxRequestBytes = 4194304
+
+[llm.customProviders.custom-test]
+provider = "compatible"
+apiSurface = "openai_compatible_http"
+baseURL = "http://127.0.0.1:9"
+apiKey = "test-key"
+timeout = "30s"
+
+[llm.customProviders.custom-test.models.model-1]
+contextWindowTokens = 128000
+maxOutputTokens = 8192
+operations = ["chat_completions"]
 `, addr, values["server.readTimeout"], values["repository.backend"], values["repository.dataDir"])
 	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
 		t.Fatalf("write workorch config: %v", err)

@@ -1,0 +1,492 @@
+package llm
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+)
+
+// External wire DTOs for ai-proxy GET /v1/models.
+type aiProxyModelsResponse struct {
+	Object string               `json:"object"`
+	Data   []aiProxyModelRecord `json:"data"`
+}
+
+type aiProxyModelRecord struct {
+	ID                  string   `json:"id"`
+	Object              string   `json:"object"`
+	Created             int64    `json:"created"`
+	OwnedBy             string   `json:"owned_by"`
+	Operations          []string `json:"operations"`
+	ContextWindowTokens int      `json:"contextWindowTokens"`
+	MaxOutputTokens     int      `json:"maxOutputTokens"`
+}
+
+type catalogCacheKey struct {
+	ProviderID         string
+	BaseURL            string
+	ConnectionRevision string
+}
+
+type catalogCacheEntry struct {
+	key           catalogCacheKey
+	catalog       llmmodels.ProviderModelCatalog
+	connectionRev string
+}
+
+// CatalogService owns ai-proxy catalog HTTP access, TTL/LKG cache, and refresh merge.
+// Entries and inflight refreshes are isolated by catalog cache key.
+type CatalogService struct {
+	mu       sync.Mutex
+	entries  map[catalogCacheKey]*catalogCacheEntry
+	inflight map[catalogCacheKey]*catalogRefreshCall
+	client   *http.Client
+	now      func() time.Time
+}
+
+type catalogRefreshCall struct {
+	key     catalogCacheKey
+	done    chan struct{}
+	catalog llmmodels.ProviderModelCatalog
+	err     error
+}
+
+func NewCatalogService() *CatalogService {
+	return &CatalogService{
+		entries:  map[catalogCacheKey]*catalogCacheEntry{},
+		inflight: map[catalogCacheKey]*catalogRefreshCall{},
+		client:   &http.Client{CheckRedirect: sameHostRedirectsOnly},
+		now:      time.Now,
+	}
+}
+
+func catalogCacheKeyFromConfig(cfg workorchconfig.LLMConfig) catalogCacheKey {
+	return catalogCacheKey{
+		ProviderID:         runtimecontract.BuiltinAIProxyProviderID,
+		BaseURL:            strings.TrimSpace(cfg.AIProxy.BaseURL),
+		ConnectionRevision: CatalogConnectionRevision(cfg),
+	}
+}
+
+func sameHostRedirectsOnly(req *http.Request, via []*http.Request) error {
+	if len(via) == 0 {
+		return nil
+	}
+	if len(via) >= 5 {
+		return fmt.Errorf("too many redirects")
+	}
+	origin := via[0].URL
+	if req.URL.Scheme != origin.Scheme || req.URL.Host != origin.Host {
+		return fmt.Errorf("cross-host redirect is not allowed")
+	}
+	// Do not forward Authorization across redirects.
+	req.Header.Del("Authorization")
+	return nil
+}
+
+func (s *CatalogService) GetCatalog(ctx context.Context, cfg workorchconfig.LLMConfig, forceRefresh bool) (llmmodels.ProviderModelCatalog, error) {
+	if s == nil {
+		return llmmodels.ProviderModelCatalog{}, common.ErrInvalidArgument
+	}
+	cfg, err := workorchconfig.NormalizeLLMConfig(cfg)
+	if err != nil {
+		return llmmodels.ProviderModelCatalog{}, err
+	}
+	key := catalogCacheKeyFromConfig(cfg)
+	now := s.now()
+
+	s.mu.Lock()
+	if s.entries == nil {
+		s.entries = map[catalogCacheKey]*catalogCacheEntry{}
+	}
+	if s.inflight == nil {
+		s.inflight = map[catalogCacheKey]*catalogRefreshCall{}
+	}
+	if !forceRefresh {
+		if entry := s.entries[key]; entry != nil {
+			if now.Before(entry.catalog.ExpiresAt) {
+				catalog := cloneCatalog(entry.catalog)
+				catalog.State = llmmodels.ProviderCatalogStateFresh
+				catalog.Stale = false
+				s.mu.Unlock()
+				return catalog, nil
+			}
+			maxStaleAge, _ := time.ParseDuration(cfg.AIProxy.CatalogMaxStaleAge)
+			if now.Sub(entry.catalog.FetchedAt) > maxStaleAge {
+				delete(s.entries, key)
+			}
+		}
+	}
+	if call := s.inflight[key]; call != nil {
+		s.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return llmmodels.ProviderModelCatalog{}, ctx.Err()
+		case <-call.done:
+			if call.err != nil {
+				return s.fallbackOrError(cfg, key, call.err)
+			}
+			// Only accept result when call key still matches request key.
+			if call.key != key {
+				return s.fallbackOrError(cfg, key, fmt.Errorf("%w: catalog refresh key mismatch", common.ErrInvalidArgument))
+			}
+			return cloneCatalog(call.catalog), nil
+		}
+	}
+	call := &catalogRefreshCall{key: key, done: make(chan struct{})}
+	s.inflight[key] = call
+	s.mu.Unlock()
+
+	catalog, refreshErr := s.fetchCatalog(ctx, cfg)
+	s.mu.Lock()
+	call.catalog = catalog
+	call.err = refreshErr
+	close(call.done)
+	delete(s.inflight, key)
+	if refreshErr == nil {
+		// Reject stale writes if the entry key no longer matches (config changed mid-flight).
+		if call.key == key {
+			s.entries[key] = &catalogCacheEntry{key: key, catalog: cloneCatalog(catalog), connectionRev: key.ConnectionRevision}
+		}
+		s.mu.Unlock()
+		if call.key != key {
+			return llmmodels.ProviderModelCatalog{}, fmt.Errorf("%w: catalog refresh result discarded due to key change", common.ErrInvalidArgument)
+		}
+		return cloneCatalog(catalog), nil
+	}
+	s.mu.Unlock()
+	return s.fallbackOrError(cfg, key, refreshErr)
+}
+
+func (s *CatalogService) fallbackOrError(cfg workorchconfig.LLMConfig, key catalogCacheKey, refreshErr error) (llmmodels.ProviderModelCatalog, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.entries[key]
+	if entry == nil || entry.key != key {
+		return llmmodels.ProviderModelCatalog{
+			ProviderID:   runtimecontract.BuiltinAIProxyProviderID,
+			State:        llmmodels.ProviderCatalogStateUnavailable,
+			Source:       "ai_proxy",
+			ErrorCode:    string(llmmodels.ProviderModelFailureCatalogUnavailable),
+			ErrorMessage: redactCatalogError(refreshErr, cfg.AIProxy.APIKey),
+		}, refreshErr
+	}
+	maxStaleAge, _ := time.ParseDuration(cfg.AIProxy.CatalogMaxStaleAge)
+	if s.now().Sub(entry.catalog.FetchedAt) > maxStaleAge {
+		delete(s.entries, key)
+		return llmmodels.ProviderModelCatalog{
+			ProviderID:   runtimecontract.BuiltinAIProxyProviderID,
+			State:        llmmodels.ProviderCatalogStateUnavailable,
+			Source:       "ai_proxy",
+			ErrorCode:    string(llmmodels.ProviderModelFailureCatalogUnavailable),
+			ErrorMessage: redactCatalogError(refreshErr, cfg.AIProxy.APIKey),
+		}, refreshErr
+	}
+	catalog := cloneCatalog(entry.catalog)
+	catalog.Stale = true
+	catalog.State = llmmodels.ProviderCatalogStateStale
+	catalog.ErrorCode = string(llmmodels.ProviderModelFailureCatalogUnavailable)
+	catalog.ErrorMessage = redactCatalogError(refreshErr, cfg.AIProxy.APIKey)
+	return catalog, nil
+}
+
+func (s *CatalogService) fetchCatalog(ctx context.Context, cfg workorchconfig.LLMConfig) (llmmodels.ProviderModelCatalog, error) {
+	timeout, err := time.ParseDuration(cfg.AIProxy.CatalogRequestTimeout)
+	if err != nil || timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	endpoint, err := normalizeAIProxyModelsURL(cfg.AIProxy.BaseURL)
+	if err != nil {
+		return llmmodels.ProviderModelCatalog{}, err
+	}
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return llmmodels.ProviderModelCatalog{}, err
+	}
+	req.Header.Set("Accept", "application/json")
+	if apiKey := strings.TrimSpace(cfg.AIProxy.APIKey); apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	client := s.client
+	if client == nil {
+		client = &http.Client{CheckRedirect: sameHostRedirectsOnly}
+	}
+	// One retry for network/5xx within the same timeout budget.
+	var resp *http.Response
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		resp, lastErr = client.Do(req.Clone(reqCtx))
+		if lastErr == nil && resp.StatusCode < 500 {
+			break
+		}
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		if attempt == 1 || reqCtx.Err() != nil {
+			break
+		}
+	}
+	if lastErr != nil {
+		return llmmodels.ProviderModelCatalog{}, fmt.Errorf("%w: catalog request failed: %v", common.ErrInvalidArgument, lastErr)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		summary := readLimitedErrorBody(resp.Body, 1024, cfg.AIProxy.APIKey)
+		return llmmodels.ProviderModelCatalog{}, fmt.Errorf("%w: catalog request status %d: %s", common.ErrInvalidArgument, resp.StatusCode, summary)
+	}
+	limited := io.LimitReader(resp.Body, int64(cfg.AIProxy.MaxCatalogResponseBytes)+1)
+	body, err := io.ReadAll(limited)
+	if err != nil {
+		return llmmodels.ProviderModelCatalog{}, fmt.Errorf("%w: catalog response read failed: %v", common.ErrInvalidArgument, err)
+	}
+	if len(body) > cfg.AIProxy.MaxCatalogResponseBytes {
+		return llmmodels.ProviderModelCatalog{}, fmt.Errorf("%w: catalog response exceeds maxCatalogResponseBytes", common.ErrInvalidArgument)
+	}
+	var wire aiProxyModelsResponse
+	if err := json.Unmarshal(body, &wire); err != nil {
+		return llmmodels.ProviderModelCatalog{}, fmt.Errorf("%w: catalog response decode failed: %v", common.ErrInvalidArgument, err)
+	}
+	if strings.TrimSpace(wire.Object) != "list" {
+		return llmmodels.ProviderModelCatalog{}, fmt.Errorf("%w: catalog object must be list", common.ErrInvalidArgument)
+	}
+	if len(wire.Data) > cfg.AIProxy.MaxCatalogModels {
+		return llmmodels.ProviderModelCatalog{}, fmt.Errorf("%w: catalog model count exceeds maxCatalogModels", common.ErrInvalidArgument)
+	}
+	return buildCatalogFromWire(wire, cfg, s.now())
+}
+
+func buildCatalogFromWire(wire aiProxyModelsResponse, cfg workorchconfig.LLMConfig, now time.Time) (llmmodels.ProviderModelCatalog, error) {
+	ttl, _ := time.ParseDuration(cfg.AIProxy.CatalogTTL)
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
+	seen := map[string]struct{}{}
+	models := make([]llmmodels.ProviderModelDescriptor, 0, len(wire.Data))
+	for _, item := range wire.Data {
+		modelID := sanitizeCatalogLogValue(strings.TrimSpace(item.ID), 256)
+		if modelID == "" {
+			return llmmodels.ProviderModelCatalog{}, fmt.Errorf("%w: catalog model id is required", common.ErrInvalidArgument)
+		}
+		fold := strings.ToLower(modelID)
+		if _, ok := seen[fold]; ok {
+			return llmmodels.ProviderModelCatalog{}, fmt.Errorf("%w: catalog contains duplicate model id %q", common.ErrInvalidArgument, modelID)
+		}
+		seen[fold] = struct{}{}
+		routeOwner := sanitizeCatalogLogValue(strings.TrimSpace(item.OwnedBy), 128)
+		if routeOwner == "" {
+			routeOwner = runtimecontract.BuiltinAIProxyProviderID
+		}
+		ops := normalizeCatalogOperations(item.Operations)
+		desc := llmmodels.ProviderModelDescriptor{
+			Target: runtimecontract.ProviderModelTarget{
+				ProviderID: runtimecontract.BuiltinAIProxyProviderID,
+				ModelID:    modelID,
+			},
+			RouteOwner:          routeOwner,
+			ContextWindowTokens: item.ContextWindowTokens,
+			MaxOutputTokens:     item.MaxOutputTokens,
+			Operations:          ops,
+		}
+		switch {
+		case item.ContextWindowTokens <= 0 || item.MaxOutputTokens <= 0:
+			desc.CapabilityReady = false
+			desc.UnavailableReason = string(llmmodels.ProviderModelFailureCapabilityIncomplete)
+		case item.MaxOutputTokens >= item.ContextWindowTokens:
+			desc.CapabilityReady = false
+			desc.UnavailableReason = string(llmmodels.ProviderModelFailureCapabilityIncomplete)
+		case len(ops) == 0:
+			// operations missing: still displayable, but not ready for new Run until operation known.
+			desc.CapabilityReady = false
+			desc.UnavailableReason = string(llmmodels.ProviderModelFailureCapabilityIncomplete)
+		default:
+			desc.CapabilityReady = true
+		}
+		desc.CapabilityRevision = capabilityRevision(desc.Target, desc.ContextWindowTokens, desc.MaxOutputTokens, strings.Join(ops, ","))
+		models = append(models, desc)
+	}
+	sort.SliceStable(models, func(i, j int) bool {
+		return strings.ToLower(models[i].Target.ModelID) < strings.ToLower(models[j].Target.ModelID)
+	})
+	catalog := llmmodels.ProviderModelCatalog{
+		ProviderID: runtimecontract.BuiltinAIProxyProviderID,
+		Models:     models,
+		Revision:   catalogRevision(runtimecontract.BuiltinAIProxyProviderID, models),
+		FetchedAt:  now,
+		ExpiresAt:  now.Add(ttl),
+		Stale:      false,
+		Source:     "ai_proxy",
+		State:      llmmodels.ProviderCatalogStateFresh,
+	}
+	return catalog, nil
+}
+
+func normalizeAIProxyModelsURL(baseURL string) (string, error) {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return "", fmt.Errorf("%w: ai-proxy baseURL is required", common.ErrInvalidArgument)
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("%w: ai-proxy baseURL is invalid: %v", common.ErrInvalidArgument, err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("%w: ai-proxy baseURL must use http or https", common.ErrInvalidArgument)
+	}
+	path := strings.TrimRight(parsed.Path, "/")
+	switch {
+	case strings.HasSuffix(path, "/v1/models"):
+		// already correct
+	case strings.HasSuffix(path, "/v1"):
+		path = path + "/models"
+	case path == "":
+		path = "/v1/models"
+	default:
+		path = path + "/v1/models"
+	}
+	parsed.Path = path
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String(), nil
+}
+
+func catalogRevision(providerID string, models []llmmodels.ProviderModelDescriptor) string {
+	h := sha256.New()
+	writeLenPrefixed(h, providerID)
+	_ = binary.Write(h, binary.BigEndian, int64(len(models)))
+	for _, model := range models {
+		writeLenPrefixed(h, model.Target.ModelID)
+		writeLenPrefixed(h, model.RouteOwner)
+		_ = binary.Write(h, binary.BigEndian, int64(model.ContextWindowTokens))
+		_ = binary.Write(h, binary.BigEndian, int64(model.MaxOutputTokens))
+		ops := append([]string(nil), model.Operations...)
+		sort.Strings(ops)
+		for _, op := range ops {
+			writeLenPrefixed(h, op)
+		}
+		if model.CapabilityReady {
+			writeLenPrefixed(h, "1")
+		} else {
+			writeLenPrefixed(h, "0")
+		}
+	}
+	return "catalog-sha256:" + hex.EncodeToString(h.Sum(nil))
+}
+
+func capabilityRevision(target runtimecontract.ProviderModelTarget, contextWindowTokens int, maxOutputTokens int, overrideRevision string) string {
+	h := sha256.New()
+	writeLenPrefixed(h, target.ProviderID)
+	writeLenPrefixed(h, target.ModelID)
+	_ = binary.Write(h, binary.BigEndian, int64(contextWindowTokens))
+	_ = binary.Write(h, binary.BigEndian, int64(maxOutputTokens))
+	writeLenPrefixed(h, overrideRevision)
+	return "capability-sha256:" + hex.EncodeToString(h.Sum(nil))
+}
+
+func writeLenPrefixed(w io.Writer, value string) {
+	_ = binary.Write(w, binary.BigEndian, int64(len(value)))
+	_, _ = io.WriteString(w, value)
+}
+
+// configurationRevision is retained as a package-local alias for catalog connection identity.
+// Target-specific sealed revisions must use TargetConfigurationRevision.
+func configurationRevision(cfg workorchconfig.LLMConfig) string {
+	return CatalogConnectionRevision(cfg)
+}
+
+func cloneCatalog(catalog llmmodels.ProviderModelCatalog) llmmodels.ProviderModelCatalog {
+	catalog.Models = append([]llmmodels.ProviderModelDescriptor(nil), catalog.Models...)
+	return catalog
+}
+
+func readLimitedErrorBody(r io.Reader, limit int64, secrets ...string) string {
+	body, _ := io.ReadAll(io.LimitReader(r, limit))
+	text := strings.TrimSpace(string(body))
+	text = strings.ReplaceAll(text, "\n", " ")
+	if len(text) > 256 {
+		text = text[:256]
+	}
+	return redactCatalogError(fmt.Errorf("%s", text), secrets...)
+}
+
+func redactCatalogError(err error, secrets ...string) string {
+	if err == nil {
+		return ""
+	}
+	text := err.Error()
+	// Drop control characters and collapse whitespace for safe log/read models.
+	cleaned := make([]rune, 0, len(text))
+	for _, r := range text {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t':
+			cleaned = append(cleaned, ' ')
+		case r < 0x20 || r == 0x7f:
+			continue
+		default:
+			cleaned = append(cleaned, r)
+		}
+	}
+	text = strings.Join(strings.Fields(string(cleaned)), " ")
+	for _, secret := range secrets {
+		secret = strings.TrimSpace(secret)
+		if secret == "" {
+			continue
+		}
+		text = strings.ReplaceAll(text, secret, RedactSecret(secret))
+		text = strings.ReplaceAll(text, "Bearer "+secret, "Bearer "+RedactSecret(secret))
+		text = strings.ReplaceAll(text, "bearer "+secret, "bearer "+RedactSecret(secret))
+	}
+	text = strings.ReplaceAll(text, "Bearer ", "Bearer [redacted] ")
+	text = strings.ReplaceAll(text, "bearer ", "bearer [redacted] ")
+	if len(text) > 512 {
+		text = text[:512]
+	}
+	return text
+}
+
+// normalizeCatalogOperations validates catalog operations strictly.
+// Empty, unknown, or duplicate operations return nil so the descriptor is marked not-ready.
+// Aliases are rejected; only canonical chat_completions / embeddings are accepted.
+func normalizeCatalogOperations(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return nil
+		}
+		switch value {
+		case workorchconfig.LLMOperationChatCompletions, workorchconfig.LLMOperationEmbeddings:
+		default:
+			return nil
+		}
+		if _, ok := seen[value]; ok {
+			return nil
+		}
+		seen[value] = struct{}{}
+		ret = append(ret, value)
+	}
+	sort.Strings(ret)
+	return ret
+}

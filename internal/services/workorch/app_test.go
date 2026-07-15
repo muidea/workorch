@@ -141,6 +141,9 @@ func (b serviceDefaultWorkspaceBackend) Memory() backend.MemoryBackend     { ret
 func (b serviceDefaultWorkspaceBackend) Template() backend.TemplateBackend { return nil }
 func (b serviceDefaultWorkspaceBackend) Config() backend.ConfigBackend     { return nil }
 func (b serviceDefaultWorkspaceBackend) Events() backend.EventsBackend     { return nil }
+func (b serviceDefaultWorkspaceBackend) ProjectionEvents() backend.WorkspaceProjectionEventsBackend {
+	return nil
+}
 
 type serviceDefaultWorkspaceWorkspaceBackend struct {
 	workspaces []backend.WorkspaceInfo
@@ -164,6 +167,10 @@ func (b serviceDefaultWorkspaceWorkspaceBackend) List(context.Context) ([]backen
 }
 
 func (b serviceDefaultWorkspaceWorkspaceBackend) Snapshot(context.Context, common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
+	return nil, nil
+}
+
+func (b serviceDefaultWorkspaceWorkspaceBackend) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
 	return nil, nil
 }
 

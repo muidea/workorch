@@ -4,7 +4,7 @@ Status: active
 
 Type: roadmap
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-15
 
 ## Purpose
 
@@ -38,6 +38,7 @@ Last Updated: 2026-07-14
 | [next-mvp-acceptance.md](next-mvp-acceptance.md) | 下一阶段 MVP 验收 |
 | [run-closure-quality-improvement-plan.md](run-closure-quality-improvement-plan.md) | Run 收口质量 |
 | [llm-context-budget-todo.md](llm-context-budget-todo.md) | LLM context budget 产品/实现跟进 |
+| [ai-proxy-primary-llm-provider-cutover-design-2026-07-15.md](ai-proxy-primary-llm-provider-cutover-design-2026-07-15.md) | ai-proxy cutover：RR01–RR06 代码与门禁收口（make test/fmt/vet/build/boundary 绿）；仅待 live 后改 code-closed |
 | [authority-live-verification-e2e-closure-design.md](authority-live-verification-e2e-closure-design.md) | authority live e2e 验证设计 |
 | [module-block-contract-closure-validation-plan.md](module-block-contract-closure-validation-plan.md) | module/block 合同校验 |
 | [module-block-initiator-inventory-audit-2026-07-09.md](module-block-initiator-inventory-audit-2026-07-09.md) | initiator 清单审计 |
@@ -46,6 +47,8 @@ Last Updated: 2026-07-14
 ## Archived From Active (this refresh)
 
 本轮从 `active/` 迁出约 **146** 份文档，包括：
+
+- `tui-workspace-runtime-refresh-history-closure-plan-2026-07-15.md`（FR01–FR07 + TC10 live completed, 2026-07-15）
 
 - 全部 `goal-dod-nextaction-s*` 与 iterative delivery plan（completed）
 - V1 contract-retry batch audit / evidence index
@@ -56,7 +59,7 @@ Last Updated: 2026-07-14
 
 ## Rules
 
-1. 新增 active 项必须对应真实未完成工作；不得把已归档 plan 改回 active 充当设计入口。
+1. 新增 active 项必须对应真实未完成工作；已归档 plan 只有在代码/证据复核给出明确反证并同步作废旧 completion record 时才允许重新打开。
 2. 实现约束以 `00-core` + 模块 readme + `workorchruntimecontract` 为准。
 3. 某项 code-closed 且无运维/产品尾巴时，应 `git mv` 至 `90-archive/completed/` 并更新本 overview。
 4. 清理失效内容：V1 主链术语、重复 audit、假活跃 Status 不得继续占用 active。

@@ -127,6 +127,13 @@ func (s *Service) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID str
 	return s.http.ReadWorkspaceViewSnapshot(ctx, workspaceID)
 }
 
+func (s *Service) ReadWorkspaceActivity(ctx context.Context, workspaceID string) (appservice.WorkspaceActivityFeed, bool, error) {
+	if s == nil || s.http == nil {
+		return appservice.WorkspaceActivityFeed{}, false, errors.New("workorch http server is not configured")
+	}
+	return s.http.ReadWorkspaceActivity(ctx, workspaceID)
+}
+
 func (s *Service) RebuildWorkspaceProjection(ctx context.Context) (int64, error) {
 	if s == nil || s.http == nil || s.http.state == nil || s.http.state.workspaceProjection == nil {
 		return 0, errors.New("workspace projection is not configured")

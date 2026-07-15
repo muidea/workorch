@@ -1,0 +1,173 @@
+package configcore
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	magicevent "github.com/muidea/magicCommon/event"
+	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+)
+
+type GetLLMModelCatalogCommand struct {
+	ProviderID string `json:"providerId,omitempty"`
+}
+
+type RefreshLLMModelCatalogCommand struct {
+	ProviderID string `json:"providerId,omitempty"`
+}
+
+func GetLLMModelCatalog(ctx context.Context, hub magicevent.Hub, cmd GetLLMModelCatalogCommand) (ProviderCatalogSummary, error) {
+	if hub == nil {
+		return ProviderCatalogSummary{}, common.ErrInvalidArgument
+	}
+	providerID := catalogProviderID(cmd.ProviderID)
+	ev := magicevent.NewEventWithContext(
+		llmevents.TopicLLMCommandGetProviderModelCatalog,
+		modulecommon.ModuleID,
+		llmevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		llmevents.GetProviderModelCatalogCommand{ProviderID: providerID},
+	)
+	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.TopicLLMCommandGetProviderModelCatalog, events.EventHubLaneScope{
+		SubjectType: "llm_catalog",
+		SubjectID:   providerID,
+	}))
+	catalog, err := sendLLMCatalogCommand(hub, ev)
+	if err != nil {
+		return ProviderCatalogSummary{}, err
+	}
+	return catalogSummaryFromModel(catalog), nil
+}
+
+func RefreshLLMModelCatalog(ctx context.Context, hub magicevent.Hub, cmd RefreshLLMModelCatalogCommand) (ProviderCatalogSummary, error) {
+	if hub == nil {
+		return ProviderCatalogSummary{}, common.ErrInvalidArgument
+	}
+	providerID := catalogProviderID(cmd.ProviderID)
+	ev := magicevent.NewEventWithContext(
+		llmevents.TopicLLMCommandRefreshProviderModelCatalog,
+		modulecommon.ModuleID,
+		llmevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		llmevents.RefreshProviderModelCatalogCommand{ProviderID: providerID},
+	)
+	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.TopicLLMCommandRefreshProviderModelCatalog, events.EventHubLaneScope{
+		SubjectType: "llm_catalog",
+		SubjectID:   providerID,
+	}))
+	catalog, err := sendLLMCatalogCommand(hub, ev)
+	if err != nil {
+		return ProviderCatalogSummary{}, err
+	}
+	return catalogSummaryFromModel(catalog), nil
+}
+
+func catalogProviderID(providerID string) string {
+	providerID = strings.TrimSpace(providerID)
+	if providerID == "" {
+		return runtimecontract.BuiltinAIProxyProviderID
+	}
+	return providerID
+}
+
+func sendLLMCatalogCommand(hub magicevent.Hub, ev magicevent.Event) (llmmodels.ProviderModelCatalog, error) {
+	if hub == nil || ev == nil {
+		return llmmodels.ProviderModelCatalog{}, common.ErrInvalidArgument
+	}
+	result := hub.Send(ev)
+	if result == nil {
+		return llmmodels.ProviderModelCatalog{}, common.ErrInvalidArgument
+	}
+	if resultErr := result.Error(); resultErr != nil {
+		if resultErr.Cause != nil {
+			return llmmodels.ProviderModelCatalog{}, resultErr.Cause
+		}
+		return llmmodels.ProviderModelCatalog{}, resultErr
+	}
+	data, resultErr := result.Get()
+	if resultErr != nil {
+		return llmmodels.ProviderModelCatalog{}, resultErr
+	}
+	switch response := data.(type) {
+	case llmevents.GetProviderModelCatalogResult:
+		return response.Catalog, nil
+	case llmevents.RefreshProviderModelCatalogResult:
+		return response.Catalog, nil
+	case llmmodels.ProviderModelCatalog:
+		return response, nil
+	default:
+		return llmmodels.ProviderModelCatalog{}, fmt.Errorf("%w: llm catalog result type %T", common.ErrInvalidArgument, data)
+	}
+}
+
+func catalogSummaryFromModel(catalog llmmodels.ProviderModelCatalog) ProviderCatalogSummary {
+	models := make([]ProviderModelDescriptorView, 0, len(catalog.Models))
+	for _, model := range catalog.Models {
+		models = append(models, ProviderModelDescriptorView{
+			ProviderID:          model.Target.ProviderID,
+			ModelID:             model.Target.ModelID,
+			RouteOwner:          model.RouteOwner,
+			ContextWindowTokens: model.ContextWindowTokens,
+			MaxOutputTokens:     model.MaxOutputTokens,
+			Operations:          append([]string(nil), model.Operations...),
+			CapabilityReady:     model.CapabilityReady,
+			UnavailableReason:   model.UnavailableReason,
+			CapabilityRevision:  model.CapabilityRevision,
+		})
+	}
+	return ProviderCatalogSummary{
+		ProviderID:   catalog.ProviderID,
+		State:        catalog.State,
+		Revision:     catalog.Revision,
+		FetchedAt:    formatCatalogTime(catalog.FetchedAt),
+		ExpiresAt:    formatCatalogTime(catalog.ExpiresAt),
+		Stale:        catalog.Stale,
+		Source:       catalog.Source,
+		ErrorCode:    catalog.ErrorCode,
+		ErrorMessage: catalog.ErrorMessage,
+		Models:       models,
+	}
+}
+
+func formatCatalogTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
+}
+
+// ReadServiceConfigurationWithCatalog enriches the LLM read model with a live catalog when hub is available.
+func ReadServiceConfigurationWithCatalog(ctx context.Context, hub magicevent.Hub) (ServiceConfiguration, error) {
+	item, err := ReadServiceConfiguration()
+	if err != nil {
+		return ServiceConfiguration{}, err
+	}
+	if hub == nil {
+		return item, nil
+	}
+	catalog, catalogErr := GetLLMModelCatalog(ctx, hub, GetLLMModelCatalogCommand{ProviderID: runtimecontract.BuiltinAIProxyProviderID})
+	if catalogErr != nil {
+		item.LLM.Catalog = ProviderCatalogSummary{
+			ProviderID:   runtimecontract.BuiltinAIProxyProviderID,
+			State:        llmmodels.ProviderCatalogStateUnavailable,
+			ErrorCode:    string(llmmodels.ProviderModelFailureCatalogUnavailable),
+			ErrorMessage: catalogErr.Error(),
+		}
+		return item, nil
+	}
+	item.LLM.Catalog = catalog
+	return item, nil
+}
+
+// Ensure package reference for workorchconfig in this file is not required; keep for future.
+var _ = workorchconfig.BuiltinAIProxyProviderID

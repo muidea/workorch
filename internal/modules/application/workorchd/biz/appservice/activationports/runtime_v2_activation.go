@@ -15,6 +15,7 @@ import (
 )
 
 func RuntimeV2ActivationContext(
+	providerTarget runtimecontract.ProviderModelTarget,
 	dialogLanguage string,
 	defaultSoul *soulmodel.Soul,
 	stageSouls map[string]*soulmodel.Soul,
@@ -28,6 +29,7 @@ func RuntimeV2ActivationContext(
 	continuation runtimecontract.RuntimeContinuationContext,
 ) runtimecontract.RuntimeActivationContext {
 	ret := runtimecontract.RuntimeActivationContext{
+		ProviderTarget:    providerTarget.Normalized(),
 		DialogLanguage:    strings.TrimSpace(dialogLanguage),
 		DefaultSoul:       runtimeV2SoulContext(defaultSoul),
 		Skills:            runtimeV2SkillContexts(skills),

@@ -1,33 +1,37 @@
 package readmodelcore
 
+import "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+
 type LLMUsageTrace struct {
-	ID            string         `json:"id"`
-	WorkspaceID   string         `json:"workspaceId"`
-	RunID         string         `json:"runId"`
-	StepID        string         `json:"stepId,omitempty"`
-	ProviderID    string         `json:"providerId,omitempty"`
-	Provider      string         `json:"provider,omitempty"`
-	APISurface    string         `json:"apiSurface,omitempty"`
-	Model         string         `json:"model,omitempty"`
-	Operation     string         `json:"operation,omitempty"`
-	InputTokens   int            `json:"inputTokens,omitempty"`
-	OutputTokens  int            `json:"outputTokens,omitempty"`
-	TotalTokens   int            `json:"totalTokens,omitempty"`
-	Estimated     bool           `json:"estimated"`
-	UsageSource   string         `json:"usageSource,omitempty"`
-	RequestBytes  int            `json:"requestBytes,omitempty"`
-	ResponseBytes int            `json:"responseBytes,omitempty"`
-	Streaming     bool           `json:"streaming"`
-	ContextBudget map[string]any `json:"contextBudget,omitempty"`
-	CacheUsage    map[string]any `json:"cacheUsage,omitempty"`
-	CacheMarkers  map[string]any `json:"cacheMarkersSent,omitempty"`
-	StartedAt     string         `json:"startedAt,omitempty"`
-	CompletedAt   string         `json:"completedAt,omitempty"`
-	DurationMs    int            `json:"durationMs,omitempty"`
-	Status        string         `json:"status,omitempty"`
-	FailureClass  string         `json:"failureClass,omitempty"`
-	OccurredAt    string         `json:"occurredAt,omitempty"`
-	EvidenceRef   string         `json:"evidenceRef,omitempty"`
+	ID            string `json:"id"`
+	WorkspaceID   string `json:"workspaceId"`
+	RunID         string `json:"runId"`
+	StepID        string `json:"stepId,omitempty"`
+	ProviderID    string `json:"providerId,omitempty"`
+	Provider      string `json:"provider,omitempty"`
+	APISurface    string `json:"apiSurface,omitempty"`
+	Model         string `json:"model,omitempty"`
+	Operation     string `json:"operation,omitempty"`
+	InputTokens   int    `json:"inputTokens,omitempty"`
+	OutputTokens  int    `json:"outputTokens,omitempty"`
+	TotalTokens   int    `json:"totalTokens,omitempty"`
+	Estimated     bool   `json:"estimated"`
+	UsageSource   string `json:"usageSource,omitempty"`
+	RequestBytes  int    `json:"requestBytes,omitempty"`
+	ResponseBytes int    `json:"responseBytes,omitempty"`
+	Streaming     bool   `json:"streaming"`
+	// These values originate from the durable EventRecord and retain the
+	// concrete Payload representation through projection and port mapping.
+	ContextBudget workorcheventpayload.Payload `json:"contextBudget,omitempty"`
+	CacheUsage    workorcheventpayload.Payload `json:"cacheUsage,omitempty"`
+	CacheMarkers  workorcheventpayload.Payload `json:"cacheMarkersSent,omitempty"`
+	StartedAt     string                       `json:"startedAt,omitempty"`
+	CompletedAt   string                       `json:"completedAt,omitempty"`
+	DurationMs    int                          `json:"durationMs,omitempty"`
+	Status        string                       `json:"status,omitempty"`
+	FailureClass  string                       `json:"failureClass,omitempty"`
+	OccurredAt    string                       `json:"occurredAt,omitempty"`
+	EvidenceRef   string                       `json:"evidenceRef,omitempty"`
 }
 
 type LLMUsageSummary struct {

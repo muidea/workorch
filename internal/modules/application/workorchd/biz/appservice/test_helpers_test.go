@@ -137,6 +137,7 @@ func testSessionExports(session *RuntimeSession) (testkit.Exports, error) {
 
 func newTestRuntimeSession(t *testing.T, backend string, dataRoot string) (*RuntimeSession, context.Context) {
 	t.Helper()
+	useWorkorchTestConfig(t, backend, dataRoot)
 
 	ctx := context.Background()
 	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
@@ -144,7 +145,11 @@ func newTestRuntimeSession(t *testing.T, backend string, dataRoot string) (*Runt
 		t.Fatalf("new runtime session: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := session.Close(ctx); err != nil {
+		// FR01: bound cleanup so leaked workers surface as test failures instead of
+		// hanging the full recursive package for the default 10m timeout.
+		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := session.Close(closeCtx); err != nil {
 			t.Errorf("close runtime session: %v", err)
 		}
 	})
@@ -171,15 +176,46 @@ maxConcurrentRuns = 1
 backend = %q
 dataDir = %q
 
-[llm]
-timeout = "60s"
-disabled = false
+[llm.aiProxy]
+baseURL = "http://127.0.0.1:9"
+timeout = "180s"
+catalogRequestTimeout = "1s"
+catalogTTL = "5m"
+catalogMaxStaleAge = "24h"
+maxCatalogResponseBytes = 1048576
+maxCatalogModels = 1000
+
+[llm.defaultChat]
+providerID = "custom-test"
+modelID = "model-1"
+
+[llm.budget]
+contextUtilizationRatio = 0.75
+estimatedTokensPerByte = 0.25
+defaultMaxOutputTokens = 4096
+maxRequestBytes = 4194304
+
+[llm.customProviders.custom-test]
+provider = "compatible"
+apiSurface = "openai_compatible_http"
+baseURL = "http://127.0.0.1:9"
+timeout = "30s"
+
+[llm.customProviders.custom-test.models.model-1]
+contextWindowTokens = 128000
+maxOutputTokens = 8192
+operations = ["chat_completions"]
+
+
 `, backend, dataRoot)
 	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	t.Setenv("CONFIG_PATH", configDir)
 	t.Cleanup(func() { _ = workorchconfig.Close() })
+	if _, err := workorchconfig.Current(); err != nil {
+		t.Fatalf("current config: %v", err)
+	}
 }
 
 func createWorkspaceWithIDWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, title string, description string, deliverableDirectory string) (ret Workspace, err error) {
@@ -247,7 +283,39 @@ func cleanupSharedBackendSession(t *testing.T, backend string, dataRoot string) 
 		if err := closeSharedBackendSession(ctx, backend, dataRoot); err != nil {
 			t.Errorf("close shared backend session: %v", err)
 		}
+		// Drain residual background file writers so t.TempDir cleanup does not
+		// fail with "directory not empty" after async Runtime V2 drives finish.
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if err := removeIfEmptyTree(dataRoot); err == nil {
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
 	})
+}
+
+// openFileRepositories opens file-backed repositories for test seeding without
+// starting a second RuntimeSession (avoids dual-session TempDir races).
+func openFileRepositories(t *testing.T, dataRoot string) testkit.RepositoryExports {
+	t.Helper()
+	return testkit.OpenRepositories("file", dataRoot)
+}
+
+func removeIfEmptyTree(root string) error {
+	// Best-effort: if residual writers still hold files, return error so caller retries.
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	// Do not delete content; only signal residual activity for wait loop.
+	return fmt.Errorf("data root still has %d entries", len(entries))
 }
 
 func waitRunWithBackend(t *testing.T, backend string, dataRoot string, runID string, timeout time.Duration, accept func(Run) bool) Run {

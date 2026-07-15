@@ -1,33 +1,35 @@
 package readmodelprojection
 
-func llmContextBudgetProfileMode(budget map[string]any) string {
-	return readModelStringValue(budget["profileMode"])
+import "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+
+func llmContextBudgetString(budget workorcheventpayload.Payload, key string) string {
+	value, _ := budget.String(key)
+	return value
 }
 
-func llmContextBudgetCapabilitySource(budget map[string]any) string {
-	return readModelStringValue(budget["capabilitySource"])
+func llmContextBudgetProfileMode(budget workorcheventpayload.Payload) string {
+	return llmContextBudgetString(budget, "profileMode")
 }
-
-func llmContextBudgetContextUtilization(budget map[string]any) float64 {
-	return readModelFloatValue(budget["contextUtilizationRatio"])
+func llmContextBudgetCapabilitySource(budget workorcheventpayload.Payload) string {
+	return llmContextBudgetString(budget, "capabilitySource")
 }
-
-func llmContextBudgetMaxRequestBytes(budget map[string]any) int {
-	return readModelIntValue(budget["maxRequestBytes"])
+func llmContextBudgetContextUtilization(budget workorcheventpayload.Payload) float64 {
+	value, _ := budget.Float64("contextUtilizationRatio")
+	return value
 }
-
-func llmContextBudgetStageBudgetRatio(budget map[string]any) float64 {
-	return readModelFloatValue(budget["stageBudgetRatio"])
+func llmContextBudgetMaxRequestBytes(budget workorcheventpayload.Payload) int {
+	return llmContextBudgetInt(budget, "maxRequestBytes")
 }
-
-func llmContextBudgetStageBudgetSource(budget map[string]any) string {
-	return readModelStringValue(budget["stageBudgetSource"])
+func llmContextBudgetStageBudgetRatio(budget workorcheventpayload.Payload) float64 {
+	value, _ := budget.Float64("stageBudgetRatio")
+	return value
 }
-
-func llmContextBudgetTracePolicy(budget map[string]any) string {
-	return readModelStringValue(budget["tracePolicy"])
+func llmContextBudgetStageBudgetSource(budget workorcheventpayload.Payload) string {
+	return llmContextBudgetString(budget, "stageBudgetSource")
 }
-
-func llmContextBudgetEstimator(budget map[string]any) string {
-	return readModelStringValue(budget["estimator"])
+func llmContextBudgetTracePolicy(budget workorcheventpayload.Payload) string {
+	return llmContextBudgetString(budget, "tracePolicy")
+}
+func llmContextBudgetEstimator(budget workorcheventpayload.Payload) string {
+	return llmContextBudgetString(budget, "estimator")
 }

@@ -31,23 +31,23 @@ func addLLMUsageProviderModelBreakdown(entry *readmodelcore.LLMUsageProviderMode
 	entry.TotalTokens += item.TotalTokens
 	entry.CacheReadTokens += cacheReadTokens
 	entry.CacheWriteTokens += cacheWriteTokens
-	entry.CacheCreationTokens += readModelIntValue(item.CacheUsage["cacheCreationTokens"])
-	if readModelIntValue(item.CacheMarkers["renderedStablePrefixBytes"]) > 0 {
+	entry.CacheCreationTokens += llmUsagePayloadInt(item.CacheUsage, "cacheCreationTokens")
+	if llmUsagePayloadInt(item.CacheMarkers, "renderedStablePrefixBytes") > 0 {
 		entry.CacheablePromptCount++
 	}
 	if cacheReadTokens > 0 {
 		entry.ActualCacheHitCount++
 	}
-	if cacheWriteTokens > 0 || readModelIntValue(item.CacheUsage["cacheCreationTokens"]) > 0 {
+	if cacheWriteTokens > 0 || llmUsagePayloadInt(item.CacheUsage, "cacheCreationTokens") > 0 {
 		entry.CacheCreationCount++
 	}
-	if readModelBoolValue(item.CacheMarkers["promptCacheKeySent"]) {
+	if llmUsagePayloadBool(item.CacheMarkers, "promptCacheKeySent") {
 		entry.PromptCacheKeySentCount++
 	}
-	if readModelBoolValue(item.CacheMarkers["cacheControlSent"]) {
+	if llmUsagePayloadBool(item.CacheMarkers, "cacheControlSent") {
 		entry.CacheControlSentCount++
 	}
-	if readModelBoolValue(item.CacheMarkers["autoPrefixCacheExpected"]) {
+	if llmUsagePayloadBool(item.CacheMarkers, "autoPrefixCacheExpected") {
 		entry.AutoPrefixExpectedCount++
 	}
 	if item.Estimated {
@@ -59,5 +59,6 @@ func addLLMUsageProviderModelBreakdown(entry *readmodelcore.LLMUsageProviderMode
 }
 
 func llmUsageProviderMode(item readmodelcore.LLMUsageTrace) string {
-	return strings.TrimSpace(readModelStringValue(item.CacheMarkers["providerMode"]))
+	value, _ := item.CacheMarkers.String("providerMode")
+	return strings.TrimSpace(value)
 }

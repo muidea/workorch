@@ -1,0 +1,24 @@
+server:
+  listen_addr: 127.0.0.1:18183
+  request_timeout_seconds: 30
+providers:
+  live:
+    enabled: true
+    protocol: openai
+    base_url: http://127.0.0.1:18182/v1
+    allow_unauthenticated: true
+    endpoint_capabilities: chat_completions, embeddings
+    models: live-chat-a, live-chat-b, live-embedding
+model_catalog:
+  live-chat-a:
+    context_window_tokens: 65536
+    max_output_tokens: 4096
+    operations: chat_completions
+  live-chat-b:
+    context_window_tokens: 196608
+    max_output_tokens: 8192
+    operations: chat_completions
+  live-embedding:
+    context_window_tokens: 8192
+    max_output_tokens: 1024
+    operations: embeddings

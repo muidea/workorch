@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,9 +12,9 @@ import (
 	magictask "github.com/muidea/magicCommon/task"
 	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
-	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -66,15 +67,8 @@ func TestAcquireAndCommitManifestAndProviderCeilingPrerequisites(t *testing.T) {
 	}
 	defer file.Stop(ctx)
 	llm := llmmodule.New()
-	if err := llm.Configure(llmmodule.Dependencies{
-		EventHub: hub,
-		ProviderConfigLoader: func() (string, map[string]llmmodels.ProviderConfig, error) {
-			return "provider-1", map[string]llmmodels.ProviderConfig{
-				"provider-1": {ID: "provider-1", ContextProfile: llmmodels.ProviderContextProfile{MaxRequestBytes: 4 * 1024 * 1024}},
-			}, nil
-		},
-		ProviderConfigRevision: func() uint64 { return 7 },
-	}); err != nil {
+	useTestLLMConfig(t, 4*1024*1024)
+	if err := llm.Configure(llmmodule.Dependencies{EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := llm.Start(); err != nil {
@@ -92,6 +86,7 @@ func TestAcquireAndCommitManifestAndProviderCeilingPrerequisites(t *testing.T) {
 		DefinitionRevision: "definition-1",
 		EvidenceRevision:   "evidence-1",
 		Focus:              runtimecontract.CoverageFocus{ID: "cwi-1"},
+		Activation:         runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "custom-test", ModelID: "model-1"}},
 	}, []runtimev2.RuntimeRequirement{
 		{Kind: runtimecontract.PrerequisiteKindManifest},
 		{Kind: runtimecontract.PrerequisiteKindCapability, SubjectRef: filemodule.ModuleID, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{filemodule.StepKindPatchApply}},
@@ -106,7 +101,8 @@ func TestAcquireAndCommitManifestAndProviderCeilingPrerequisites(t *testing.T) {
 			})
 		case runtimecontract.PrerequisiteKindProviderCeiling:
 			facts, err = AcquireAndCommitProviderCeilingPrerequisite(ctx, hub, facts, orchestratorevents.AcquireProviderCeilingCommand{
-				WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: "authority-1", PrerequisiteID: item.ID, MinimumBytes: 64 * 1024,
+				WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: "authority-1", PrerequisiteID: item.ID,
+				Target: facts.Activation.ProviderTarget, MinimumBytes: 64 * 1024,
 			})
 		case runtimecontract.PrerequisiteKindCapability:
 			facts, err = AcquireAndCommitRuntimeCapabilitiesPrerequisite(ctx, hub, facts, orchestratorevents.AcquireRuntimeCapabilitiesCommand{
@@ -121,7 +117,12 @@ func TestAcquireAndCommitManifestAndProviderCeilingPrerequisites(t *testing.T) {
 	if facts.Resources.Manifest == nil || facts.Resources.Manifest.Revision == "" || len(facts.Resources.Manifest.TargetRefs) != 1 || facts.Resources.Manifest.TargetRefs[0] != "go.mod" {
 		t.Fatalf("manifest = %+v", facts.Resources.Manifest)
 	}
-	if facts.Resources.ProviderCeiling == nil || facts.Resources.ProviderCeiling.MaxBytes != 4*1024*1024 || facts.Resources.ProviderCeiling.ProviderID == "" {
+	if facts.Resources.ProviderCeiling == nil ||
+		facts.Resources.ProviderCeiling.MaxBytes < 64*1024 ||
+		facts.Resources.ProviderCeiling.Target.ProviderID != "custom-test" ||
+		facts.Resources.ProviderCeiling.Target.ModelID != "model-1" ||
+		facts.Resources.ProviderCeiling.CapabilityRevision == "" ||
+		facts.Resources.ProviderCeiling.ConfigurationRevision == "" {
 		t.Fatalf("provider ceiling = %+v", facts.Resources.ProviderCeiling)
 	}
 	if len(facts.Capabilities.StateChangeKinds) != 1 || facts.Capabilities.StateChangeKinds[0] != filemodule.StepKindPatchApply {
@@ -134,15 +135,8 @@ func TestProviderCeilingPrerequisiteRejectsProviderBelowRequiredMinimum(t *testi
 	hub := magicevent.NewHub(16)
 	defer hub.Terminate(ctx)
 	llm := llmmodule.New()
-	if err := llm.Configure(llmmodule.Dependencies{
-		EventHub: hub,
-		ProviderConfigLoader: func() (string, map[string]llmmodels.ProviderConfig, error) {
-			return "provider-1", map[string]llmmodels.ProviderConfig{
-				"provider-1": {ID: "provider-1", ContextProfile: llmmodels.ProviderContextProfile{MaxRequestBytes: 16 * 1024}},
-			}, nil
-		},
-		ProviderConfigRevision: func() uint64 { return 1 },
-	}); err != nil {
+	useTestLLMConfig(t, 16*1024)
+	if err := llm.Configure(llmmodule.Dependencies{EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := llm.Start(); err != nil {
@@ -151,12 +145,13 @@ func TestProviderCeilingPrerequisiteRejectsProviderBelowRequiredMinimum(t *testi
 	defer llm.Stop(ctx)
 
 	facts := runtimev2.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
+		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "custom-test", ModelID: "model-1"}},
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
 		Focus: runtimecontract.CoverageFocus{ID: "focus-1"},
 	}, []runtimev2.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindProviderCeiling, MinimumBytes: 32 * 1024}})
 	item := facts.Prerequisites.Pending[0]
 	_, err := AcquireAndCommitProviderCeilingPrerequisite(ctx, hub, facts, orchestratorevents.AcquireProviderCeilingCommand{
-		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: "authority-1",
+		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: "authority-1", Target: facts.Activation.ProviderTarget,
 		PrerequisiteID: item.ID, MinimumBytes: item.MinimumBytes,
 	})
 	if err == nil || !strings.Contains(err.Error(), "below required minimum") {
@@ -184,6 +179,7 @@ func TestAcquireAndCommitTargetSnapshotPrerequisiteAdvancesTypedFacts(t *testing
 		t.Fatal(err)
 	}
 	facts := runtimev2.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
+		Activation:         runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "custom-test", ModelID: "model-1"}},
 		WorkspaceID:        "ws-1",
 		RunID:              "run-1",
 		DefinitionRevision: "definition-1",
@@ -204,5 +200,61 @@ func TestAcquireAndCommitTargetSnapshotPrerequisiteAdvancesTypedFacts(t *testing
 	}
 	if len(committed.Prerequisites.Pending) != 0 || len(committed.Prerequisites.Satisfied) != 1 || len(committed.Resources.TargetSnapshots) != 1 || !committed.Resources.TargetSnapshots[0].Complete() {
 		t.Fatalf("committed facts = %+v, want one completed snapshot prerequisite", committed)
+	}
+}
+
+func useTestLLMConfig(t *testing.T, maxRequestBytes int) {
+	t.Helper()
+	if maxRequestBytes <= 0 {
+		maxRequestBytes = 1024
+	}
+	configDir := t.TempDir()
+	content := fmt.Sprintf(`endpointName = "workorch"
+
+[server]
+addr = "127.0.0.1:18080"
+
+[repository]
+backend = "file"
+dataDir = ".workorch-data"
+
+[llm.aiProxy]
+baseURL = "http://127.0.0.1:9"
+timeout = "180s"
+catalogRequestTimeout = "5s"
+catalogTTL = "5m"
+catalogMaxStaleAge = "24h"
+maxCatalogResponseBytes = 1048576
+maxCatalogModels = 1000
+
+[llm.defaultChat]
+providerID = "custom-test"
+modelID = "model-1"
+
+[llm.budget]
+contextUtilizationRatio = 0.75
+estimatedTokensPerByte = 0.25
+defaultMaxOutputTokens = 4096
+maxRequestBytes = %d
+
+[llm.customProviders.custom-test]
+provider = "compatible"
+apiSurface = "openai_compatible_http"
+baseURL = "http://127.0.0.1:9"
+timeout = "30s"
+
+[llm.customProviders.custom-test.models.model-1]
+contextWindowTokens = 128000
+maxOutputTokens = 8192
+operations = ["chat_completions"]
+`, maxRequestBytes)
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_ = workorchconfig.Close()
+	t.Setenv(workorchconfig.EnvConfigDir, configDir)
+	t.Cleanup(func() { _ = workorchconfig.Close() })
+	if _, err := workorchconfig.Current(); err != nil {
+		t.Fatalf("current config: %v", err)
 	}
 }

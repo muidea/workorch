@@ -9,14 +9,17 @@ func llmUsageTraceStreaming(payload workorcheventpayload.Payload) bool {
 	return eventPayloadBool(payload, events.PayloadKeyStreaming)
 }
 
-func llmUsageTraceContextBudget(payload workorcheventpayload.Payload) map[string]any {
-	return eventPayloadMap(payload, events.PayloadKeyContextBudget)
+func llmUsageTraceContextBudget(payload workorcheventpayload.Payload) workorcheventpayload.Payload {
+	value, _ := payload.Object(events.PayloadKeyContextBudget)
+	return value
 }
 
-func llmUsageTraceCacheUsage(payload workorcheventpayload.Payload) map[string]any {
-	return eventPayloadMap(payload, events.PayloadKeyCacheUsage)
+func llmUsageTraceCacheUsage(payload workorcheventpayload.Payload) workorcheventpayload.Payload {
+	value, _ := payload.Object(events.PayloadKeyCacheUsage)
+	return value
 }
 
-func llmUsageTraceCacheMarkers(payload workorcheventpayload.Payload) map[string]any {
-	return eventPayloadMap(payload, events.PayloadKeyCacheMarkersSent)
+func llmUsageTraceCacheMarkers(payload workorcheventpayload.Payload) workorcheventpayload.Payload {
+	value, _ := payload.Object(events.PayloadKeyCacheMarkersSent)
+	return value
 }

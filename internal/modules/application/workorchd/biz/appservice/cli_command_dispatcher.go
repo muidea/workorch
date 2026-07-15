@@ -18,6 +18,10 @@ type CLICommandDispatcher struct {
 type WorkspaceViewReader interface {
 	ListWorkspaceView(ctx context.Context) ([]Workspace, error)
 	ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (WorkspaceSnapshot, error)
+	// ReadWorkspaceActivity returns the store-owned bounded activity feed.
+	// Optional: implementations that do not yet persist activity may return
+	// ok=false and RuntimeView will fall back to content rebuild with revision 0.
+	ReadWorkspaceActivity(ctx context.Context, workspaceID string) (WorkspaceActivityFeed, bool, error)
 }
 
 func NewCLICommandDispatcher(session *RuntimeSession, commandHub magicevent.Hub, viewReader WorkspaceViewReader) *CLICommandDispatcher {

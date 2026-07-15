@@ -1,29 +1,30 @@
 package readmodelprojection
 
-func llmContextBudgetMaxBytes(budget map[string]any) int {
-	return readModelIntValue(budget["maxBytes"])
+import "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+
+func llmContextBudgetInt(budget workorcheventpayload.Payload, key string) int {
+	value, _ := budget.Int64(key)
+	return int(value)
 }
 
-func llmContextBudgetActualBytes(budget map[string]any) int {
-	return readModelIntValue(budget["actualBytes"])
+func llmContextBudgetMaxBytes(budget workorcheventpayload.Payload) int {
+	return llmContextBudgetInt(budget, "maxBytes")
 }
-
-func llmContextBudgetMaxTokens(budget map[string]any) int {
-	return readModelIntValue(budget["maxTokens"])
+func llmContextBudgetActualBytes(budget workorcheventpayload.Payload) int {
+	return llmContextBudgetInt(budget, "actualBytes")
 }
-
-func llmContextBudgetEstimatedInputTokens(budget map[string]any) int {
-	return readModelIntValue(budget["estimatedInputTokens"])
+func llmContextBudgetMaxTokens(budget workorcheventpayload.Payload) int {
+	return llmContextBudgetInt(budget, "maxTokens")
 }
-
-func llmContextBudgetEstimatedOutputTokens(budget map[string]any) int {
-	return readModelIntValue(budget["estimatedOutputTokens"])
+func llmContextBudgetEstimatedInputTokens(budget workorcheventpayload.Payload) int {
+	return llmContextBudgetInt(budget, "estimatedInputTokens")
 }
-
-func llmContextBudgetActualTokens(budget map[string]any) int {
-	return readModelIntValue(budget["actualTokens"])
+func llmContextBudgetEstimatedOutputTokens(budget workorcheventpayload.Payload) int {
+	return llmContextBudgetInt(budget, "estimatedOutputTokens")
 }
-
-func llmContextBudgetShrinkLevel(budget map[string]any) int {
-	return readModelIntValue(budget["shrinkLevel"])
+func llmContextBudgetActualTokens(budget workorcheventpayload.Payload) int {
+	return llmContextBudgetInt(budget, "actualTokens")
+}
+func llmContextBudgetShrinkLevel(budget workorcheventpayload.Payload) int {
+	return llmContextBudgetInt(budget, "shrinkLevel")
 }

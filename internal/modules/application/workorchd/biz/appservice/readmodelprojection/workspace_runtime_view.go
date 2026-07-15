@@ -554,9 +554,9 @@ func llmUsageEqual(a, b readmodelcore.LLMUsageTrace) bool {
 		a.RequestBytes == b.RequestBytes &&
 		a.ResponseBytes == b.ResponseBytes &&
 		a.Streaming == b.Streaming &&
-		stableMapFactsEqual(a.ContextBudget, b.ContextBudget) &&
-		stableMapFactsEqual(a.CacheUsage, b.CacheUsage) &&
-		stableMapFactsEqual(a.CacheMarkers, b.CacheMarkers) &&
+		a.ContextBudget.Equal(b.ContextBudget) &&
+		a.CacheUsage.Equal(b.CacheUsage) &&
+		a.CacheMarkers.Equal(b.CacheMarkers) &&
 		strings.TrimSpace(a.StartedAt) == strings.TrimSpace(b.StartedAt) &&
 		strings.TrimSpace(a.CompletedAt) == strings.TrimSpace(b.CompletedAt) &&
 		a.DurationMs == b.DurationMs &&

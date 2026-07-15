@@ -629,6 +629,80 @@ def provider_request_from_payload(payload):
     }
 
 class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        if path in ("/v1/models", "/models"):
+            # WorkOrch catalog expects explicit capacity + operations; without these models stay not-ready.
+            models = [
+                {
+                    "id": "verify-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "gpt-4o",
+                    "object": "model",
+                    "owned_by": "openai",
+                    "operations": ["chat_completions"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "text-embedding-3-small",
+                    "object": "model",
+                    "owned_by": "openai",
+                    "operations": ["embeddings"],
+                    "contextWindowTokens": 8192,
+                    "maxOutputTokens": 1024,
+                },
+
+                {
+                    "id": "verify-stream-native-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "verify-stream-estimated-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "web-search-e2e-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "container-verify-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+            ]
+            response = {"object": "list", "data": models}
+            encoded = json.dumps(response).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+            return
+        self.send_response(404)
+        self.end_headers()
+
     def do_POST(self):
         if self.path == "/v1/embeddings":
             size = int(self.headers.get("Content-Length", "0"))
@@ -751,132 +825,155 @@ import sys
 config_path, original_path, update_path, mock_base_url = sys.argv[1:]
 data = json.load(open(config_path, encoding="utf-8"))
 llm = data.get("configuration", {}).get("llm", {})
-providers = llm.get("providers") or []
-default_provider = llm.get("defaultProviderId") or "verify"
-default_embedding_provider = llm.get("defaultEmbeddingProviderId") or ""
-model_capabilities = llm.get("modelCapabilities") or []
+ai_proxy = llm.get("aiProxy") or {}
+default_chat = llm.get("defaultChat") or {}
+default_embedding = llm.get("defaultEmbedding") or {}
+budget = llm.get("budget") or {}
+custom_providers = llm.get("customProviders") or []
 
-def clean_inference_profile(item):
-    profile = item.get("inferenceProfile") or {}
-    allowed = {
-        "temperature",
-        "maxOutputTokens",
-        "reasoningEffort",
-        "thinkingBudgetTokens",
-    }
-    return {key: profile[key] for key in allowed if key in profile}
-
-def clean_context_profile(item):
-    profile = item.get("contextProfile") or {}
-    allowed = {
-        "profileMode",
-        "contextWindowTokens",
-        "maxInputTokens",
-        "reservedOutputTokens",
-        "safetyRatio",
-        "contextUtilizationRatio",
-        "bytesHardLimit",
-        "maxRequestBytes",
-        "estimatedTokensPerByte",
-    }
-    return {key: profile[key] for key in allowed if key in profile}
-
-def clean_provider(item):
-    ret = {
-        "id": item.get("id", ""),
-        "provider": item.get("provider", ""),
-        "baseUrl": item.get("baseUrl", ""),
-        "model": item.get("model", ""),
-        "timeout": item.get("timeout", ""),
-        "disabled": bool(item.get("disabled", False)),
-        "chatCompletions": bool(item.get("chatCompletions", True)),
-        "streaming": bool(item.get("streaming", False)),
-        "nonChatOperations": item.get("nonChatOperations") or [],
-        "failoverEnabled": bool(item.get("failoverEnabled", False)),
-        "failoverProviders": item.get("failoverProviders") or [],
-    }
-    inference_profile = clean_inference_profile(item)
-    if inference_profile:
-        ret["inferenceProfile"] = inference_profile
-    context_profile = clean_context_profile(item)
-    if context_profile:
-        ret["contextProfile"] = context_profile
-    return ret
+def custom_providers_payload(items, include_api_key=False, mock_base_url=""):
+    payload = {}
+    for item in items:
+        provider_id = (item.get("id") or "").strip()
+        if not provider_id:
+            continue
+        models = {}
+        for model in item.get("models") or []:
+            model_id = (model.get("id") or "").strip()
+            if not model_id:
+                continue
+            models[model_id] = {
+                "contextWindowTokens": int(model.get("contextWindowTokens") or 128000),
+                "maxOutputTokens": int(model.get("maxOutputTokens") or 8192),
+                "operations": list(model.get("operations") or ["chat_completions"]),
+            }
+        if not models:
+            models["verify-model"] = {
+                "contextWindowTokens": 128000,
+                "maxOutputTokens": 8192,
+                "operations": ["chat_completions", "embeddings"],
+            }
+        entry = {
+            "provider": item.get("provider") or "compatible",
+            "apiSurface": item.get("apiSurface") or "openai_compatible_http",
+            "baseURL": item.get("baseUrl") or item.get("baseURL") or mock_base_url,
+            "timeout": item.get("timeout") or "60s",
+            "models": models,
+        }
+        if include_api_key:
+            entry["apiKey"] = "verify-secret"
+        payload[provider_id] = entry
+    return payload
 
 original = {
-    "defaultProviderId": default_provider,
-    "defaultEmbeddingProviderId": default_embedding_provider,
-    "modelCapabilities": model_capabilities,
-    "providers": [clean_provider(item) for item in providers if item.get("id")],
+    "aiProxy": {
+        "baseURL": ai_proxy.get("baseUrl") or ai_proxy.get("baseURL") or mock_base_url,
+        "timeout": ai_proxy.get("timeout") or "180s",
+        "catalogRequestTimeout": ai_proxy.get("catalogRequestTimeout") or "5s",
+        "catalogTTL": ai_proxy.get("catalogTTL") or "5m",
+        "catalogMaxStaleAge": ai_proxy.get("catalogMaxStaleAge") or "24h",
+        "maxCatalogResponseBytes": int(ai_proxy.get("maxCatalogResponseBytes") or 1048576),
+        "maxCatalogModels": int(ai_proxy.get("maxCatalogModels") or 1000),
+    },
+    "defaultChat": {
+        "providerID": default_chat.get("providerId") or default_chat.get("providerID") or "verify",
+        "modelID": default_chat.get("modelId") or default_chat.get("modelID") or "verify-model",
+    },
+    "budget": {
+        "contextUtilizationRatio": float(budget.get("contextUtilizationRatio") or 0.75),
+        "estimatedTokensPerByte": float(budget.get("estimatedTokensPerByte") or 0.25),
+        "defaultMaxOutputTokens": int(budget.get("defaultMaxOutputTokens") or 4096),
+        "maxRequestBytes": int(budget.get("maxRequestBytes") or 4194304),
+    },
+    "customProviders": custom_providers_payload(custom_providers, include_api_key=False, mock_base_url=mock_base_url),
 }
-if not original["providers"]:
-    original["providers"].append({
-        "id": "verify",
-        "provider": "compatible",
-        "baseUrl": mock_base_url,
-        "model": "verify-model",
-        "timeout": "60s",
-        "disabled": False,
-        "chatCompletions": True,
-        "streaming": False,
-        "nonChatOperations": ["embeddings"],
-    })
-    original["defaultProviderId"] = "verify"
-    original["defaultEmbeddingProviderId"] = "verify"
+if default_embedding.get("modelId") or default_embedding.get("modelID"):
+    original["defaultEmbedding"] = {
+        "providerID": default_embedding.get("providerId") or default_embedding.get("providerID") or "verify",
+        "modelID": default_embedding.get("modelId") or default_embedding.get("modelID"),
+    }
+if not original["customProviders"]:
+    original["customProviders"] = {
+        "verify": {
+            "provider": "compatible",
+            "apiSurface": "openai_compatible_http",
+            "baseURL": mock_base_url,
+            "timeout": "60s",
+            "models": {
+                "verify-model": {
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                    "operations": ["chat_completions", "embeddings"],
+                }
+            },
+        }
+    }
+    original["defaultChat"] = {"providerID": "verify", "modelID": "verify-model"}
 with open(original_path, "w", encoding="utf-8") as handle:
     json.dump(original, handle, separators=(",", ":"))
 
-updated_providers = [item for item in original["providers"] if item["id"] != "verify"]
-updated_providers.append({
-    "id": "verify",
-    "provider": "compatible",
-    "baseUrl": mock_base_url,
-    "apiKey": "verify-secret",
-    "model": "verify-model",
-    "timeout": "60s",
-    "disabled": False,
-    "chatCompletions": True,
-    "streaming": False,
-    "nonChatOperations": ["embeddings"],
-    "contextProfile": {
-        "estimatedTokensPerByte": 0.25,
-    },
-})
-updated_providers.append({
-    "id": "verify-stream-native",
-    "provider": "compatible",
-    "baseUrl": mock_base_url,
-    "apiKey": "verify-secret",
-    "model": "verify-stream-native-model",
-    "timeout": "60s",
-    "disabled": False,
-    "chatCompletions": True,
-    "streaming": True,
-    "nonChatOperations": ["embeddings"],
-    "contextProfile": {
-        "estimatedTokensPerByte": 0.25,
-    },
-})
-updated_providers.append({
-    "id": "verify-stream-estimated",
-    "provider": "compatible",
-    "baseUrl": mock_base_url,
-    "apiKey": "verify-secret",
-    "model": "verify-stream-estimated-model",
-    "timeout": "60s",
-    "disabled": False,
-    "chatCompletions": True,
-    "streaming": True,
-    "nonChatOperations": ["embeddings"],
-    "contextProfile": {
-        "estimatedTokensPerByte": 0.25,
-    },
-})
 update = {
-    "defaultProviderId": "verify",
-    "defaultEmbeddingProviderId": "verify",
-    "modelCapabilities": model_capabilities,
-    "providers": updated_providers,
+    "aiProxy": {
+        "baseURL": mock_base_url,
+        "apiKey": "verify-secret",
+        "timeout": "180s",
+        "catalogRequestTimeout": "5s",
+        "catalogTTL": "5m",
+        "catalogMaxStaleAge": "24h",
+        "maxCatalogResponseBytes": 1048576,
+        "maxCatalogModels": 1000,
+        "modelOverrides": {
+            "verify-model": {"contextWindowTokens": 128000, "maxOutputTokens": 8192, "operations": ["chat_completions", "embeddings"]},
+            "gpt-4o": {"contextWindowTokens": 128000, "maxOutputTokens": 8192, "operations": ["chat_completions", "embeddings"]},
+        },
+    },
+    "defaultChat": {"providerID": "verify", "modelID": "verify-model"},
+    "defaultEmbedding": {"providerID": "verify", "modelID": "verify-model"},
+    "budget": original["budget"],
+    "customProviders": {
+        "verify": {
+            "provider": "compatible",
+            "apiSurface": "openai_compatible_http",
+            "baseURL": mock_base_url,
+            "apiKey": "verify-secret",
+            "timeout": "60s",
+            "models": {
+                "verify-model": {
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                    "operations": ["chat_completions", "embeddings"],
+                }
+            },
+        },
+        "verify-stream-native": {
+            "provider": "compatible",
+            "apiSurface": "openai_compatible_http",
+            "baseURL": mock_base_url,
+            "apiKey": "verify-secret",
+            "timeout": "60s",
+            "models": {
+                "verify-stream-native-model": {
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                    "operations": ["chat_completions", "embeddings"],
+                }
+            },
+        },
+        "verify-stream-estimated": {
+            "provider": "compatible",
+            "apiSurface": "openai_compatible_http",
+            "baseURL": mock_base_url,
+            "apiKey": "verify-secret",
+            "timeout": "60s",
+            "models": {
+                "verify-stream-estimated-model": {
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                    "operations": ["chat_completions", "embeddings"],
+                }
+            },
+        },
+    },
 }
 with open(update_path, "w", encoding="utf-8") as handle:
     json.dump(update, handle, separators=(",", ":"))
@@ -890,7 +987,7 @@ activate_workspace_execution() {
   capture_runs_before_activation "$output_file"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d '{"intent":"resume","requestId":"'"$request_id"'","reason":"e2e_resume","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"memoryIds":["'"$MEMORY_ID"'"],"priority":2}' >"$output_file"
+    -d '{"intent":"resume","requestId":"'"$request_id"'","reason":"e2e_resume","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmTarget":{"providerId":"verify","modelId":"verify-model"},"soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"memoryIds":["'"$MEMORY_ID"'"],"priority":2}' >"$output_file"
 }
 
 activate_workspace_execution_without_memory() {
@@ -900,7 +997,7 @@ activate_workspace_execution_without_memory() {
   capture_runs_before_activation "$output_file"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d '{"intent":"resume","requestId":"'"$request_id"'","reason":"e2e_resume","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
+    -d '{"intent":"resume","requestId":"'"$request_id"'","reason":"e2e_resume","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmTarget":{"providerId":"verify","modelId":"verify-model"},"soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
 }
 
 activate_workspace_execution_with_auto_memory() {
@@ -910,18 +1007,19 @@ activate_workspace_execution_with_auto_memory() {
   capture_runs_before_activation "$output_file"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d '{"intent":"resume","requestId":"'"$request_id"'","reason":"e2e_resume","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
+    -d '{"intent":"resume","requestId":"'"$request_id"'","reason":"e2e_resume","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmTarget":{"providerId":"verify","modelId":"verify-model"},"soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
 }
 
 activate_workspace_execution_with_provider() {
   local output_file="$1"
   local provider_id="$2"
-  local activation_dod_id="${3:-$dod_id}"
+  local model_id="${3:-verify-model}"
+  local activation_dod_id="${4:-$dod_id}"
   local request_id="llm-e2e-$(basename "${output_file%.json}")"
   capture_runs_before_activation "$output_file"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d '{"intent":"resume","requestId":"'"$request_id"'","reason":"e2e_resume","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmProviderId":"'"$provider_id"'","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
+    -d '{"intent":"resume","requestId":"'"$request_id"'","reason":"e2e_resume","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmTarget":{"providerId":"'"$provider_id"'","modelId":"'"$model_id"'"},"soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
 }
 
 capture_runs_before_activation() {
@@ -1665,13 +1763,13 @@ stream_baseline_run_id="$(wait_activation_run "$TMP_DIR/stream-baseline-activati
 wait_run_state "$stream_baseline_run_id" "completed" "$TMP_DIR/stream-baseline-completed-status.json"
 assert_run_recovery_read_models "$stream_baseline_run_id" "stream-baseline" "completed" "provider_native"
 
-activate_workspace_execution_with_provider "$TMP_DIR/stream-native-activation.json" "verify-stream-native"
+activate_workspace_execution_with_provider "$TMP_DIR/stream-native-activation.json" "verify-stream-native" "verify-stream-native-model"
 stream_native_run_id="$(wait_activation_run "$TMP_DIR/stream-native-activation.json" "$TMP_DIR/stream-native-activation-run.json")"
 wait_run_state "$stream_native_run_id" "completed" "$TMP_DIR/stream-native-completed-status.json"
 assert_run_recovery_read_models "$stream_native_run_id" "stream-native" "completed" "provider_native"
 assert_run_llm_usage_semantics "$stream_native_run_id" "provider_native" "true"
 
-activate_workspace_execution_with_provider "$TMP_DIR/stream-estimated-activation.json" "verify-stream-estimated"
+activate_workspace_execution_with_provider "$TMP_DIR/stream-estimated-activation.json" "verify-stream-estimated" "verify-stream-estimated-model"
 stream_estimated_run_id="$(wait_activation_run "$TMP_DIR/stream-estimated-activation.json" "$TMP_DIR/stream-estimated-activation-run.json")"
 wait_run_state "$stream_estimated_run_id" "completed" "$TMP_DIR/stream-estimated-completed-status.json"
 assert_run_recovery_read_models "$stream_estimated_run_id" "stream-estimated" "completed" "estimated"

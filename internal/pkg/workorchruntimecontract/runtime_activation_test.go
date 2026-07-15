@@ -8,6 +8,7 @@ import (
 
 func TestRuntimeActivationContextCloneAndEqualityPreserveTypedSelections(t *testing.T) {
 	activation := RuntimeActivationContext{
+		ProviderTarget:    ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 		DialogLanguage:    "zh-CN",
 		DefaultSoul:       &RuntimeSoulContext{ID: "soul-default", Name: "默认 Soul", Instructions: "遵守当前阶段合同", AllowedToolKinds: []string{"shell/command"}},
 		StageSoulBindings: []RuntimeStageSoulBinding{{Stage: "execution", Source: "workspace_stage_binding", Soul: RuntimeSoulContext{ID: "soul-execution", Instructions: "执行阶段指令"}}},

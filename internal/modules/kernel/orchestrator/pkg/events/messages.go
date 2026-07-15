@@ -58,7 +58,7 @@ type AcquireProviderCeilingCommand struct {
 	RunID               common.RunID
 	AuthoritySnapshotID string
 	PrerequisiteID      string
-	ProviderID          string
+	Target              runtimecontract.ProviderModelTarget
 	MinimumBytes        int
 }
 
@@ -98,6 +98,15 @@ type RequestRuntimeCandidateResult struct {
 	Transaction runtimecontract.AuthorityTransaction
 	Candidate   runtimecontract.RuntimeCandidate
 	Failure     *runtimecontract.RuntimeCandidateFailure
+	// RequestID correlates this result with the persisted LLM usage audit record.
+	RequestID string
+	// Status is completed | failed when a provider request audit is available.
+	Status string
+	// Audit is the sealed provider request audit (target/revision/budget/submitted).
+	// Present for both successful and failed provider submissions when generation ran.
+	Audit *runtimecontract.ProviderRequestAuditView
+	// Usage is provider-reported token usage when available.
+	Usage *runtimecontract.ProviderUsageView
 }
 
 type RuntimeV2DriveDisposition string

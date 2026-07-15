@@ -1,0 +1,15 @@
+{
+  "service": "workorch",
+  "backend": "file",
+  "dataRoot": "/home/rangh/aispace/workorch/docs/60-verification/artifacts/ai-proxy-primary-llm-live-runtime-20260715T150944Z/data",
+  "dod": {
+    "id": "dod-9a7ac7e3e519801a",
+    "workspaceId": "ws-d857b778e58b569c",
+    "items": [
+      "A second result is traceable"
+    ],
+    "state": "ready",
+    "definitionRevision": "dod:c9170c709a1b3aed58344b4a6703fdbca9799c0ce066359d9eeed385a1eb4119",
+    "lineageState": "active"
+  }
+}

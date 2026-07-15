@@ -792,7 +792,7 @@ func embeddingsURL(baseURL string) (string, error) {
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return "", fmt.Errorf("%w: invalid llm provider base url", common.ErrInvalidArgument)
 	}
-	trimmedPath := strings.TrimRight(parsed.Path, "/")
+	trimmedPath := ensureOpenAICompatibleAPIRoot(strings.TrimRight(parsed.Path, "/"))
 	if strings.HasSuffix(trimmedPath, "/embeddings") {
 		parsed.Path = trimmedPath
 	} else {
@@ -812,7 +812,7 @@ func chatCompletionsURL(baseURL string) (string, error) {
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return "", fmt.Errorf("%w: invalid llm provider base url", common.ErrInvalidArgument)
 	}
-	trimmedPath := strings.TrimRight(parsed.Path, "/")
+	trimmedPath := ensureOpenAICompatibleAPIRoot(strings.TrimRight(parsed.Path, "/"))
 	if strings.HasSuffix(trimmedPath, "/chat/completions") {
 		parsed.Path = trimmedPath
 	} else {
@@ -821,6 +821,26 @@ func chatCompletionsURL(baseURL string) (string, error) {
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
 	return parsed.String(), nil
+}
+
+// ensureOpenAICompatibleAPIRoot normalizes an OpenAI-compatible base path so that
+// both host-only bases (http://proxy:8080) and /v1 bases produce the same API root.
+// Full endpoint paths (/chat/completions, /embeddings) are left unchanged.
+func ensureOpenAICompatibleAPIRoot(path string) string {
+	path = strings.TrimRight(strings.TrimSpace(path), "/")
+	if path == "" {
+		return "/v1"
+	}
+	if strings.HasSuffix(path, "/chat/completions") ||
+		strings.HasSuffix(path, "/embeddings") ||
+		strings.HasSuffix(path, "/models") ||
+		strings.HasSuffix(path, "/messages") {
+		return path
+	}
+	if path == "/v1" || strings.HasSuffix(path, "/v1") {
+		return path
+	}
+	return path + "/v1"
 }
 
 func readChatCompletionStream(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error) (string, *llmmodels.ProviderUsage, error) {
@@ -1018,11 +1038,48 @@ func sanitizeProviderBody(body []byte, secret string) string {
 	}
 	if secret = strings.TrimSpace(secret); secret != "" {
 		text = strings.ReplaceAll(text, secret, RedactSecret(secret))
+		// Also redact common Authorization bearer forms if the secret is embedded.
+		text = strings.ReplaceAll(text, "Bearer "+secret, "Bearer "+RedactSecret(secret))
+		text = strings.ReplaceAll(text, "bearer "+secret, "bearer "+RedactSecret(secret))
 	}
-	text = strings.ReplaceAll(text, "\n", " ")
-	text = strings.ReplaceAll(text, "\r", " ")
+	// Strip control characters while preserving readable spaces.
+	cleaned := make([]rune, 0, len(text))
+	for _, r := range text {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t':
+			cleaned = append(cleaned, ' ')
+		case r < 0x20 || r == 0x7f:
+			continue
+		default:
+			cleaned = append(cleaned, r)
+		}
+	}
+	text = strings.Join(strings.Fields(string(cleaned)), " ")
 	if len(text) > maxProviderErrorBodyBytes {
 		return text[:maxProviderErrorBodyBytes]
 	}
 	return text
+}
+
+// sanitizeCatalogLogValue bounds model IDs / route owners for logs and strips control characters.
+func sanitizeCatalogLogValue(value string, maxLen int) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	cleaned := make([]rune, 0, len(value))
+	for _, r := range value {
+		if r < 0x20 || r == 0x7f {
+			continue
+		}
+		cleaned = append(cleaned, r)
+	}
+	value = string(cleaned)
+	if maxLen <= 0 {
+		maxLen = 128
+	}
+	if len(value) > maxLen {
+		return value[:maxLen]
+	}
+	return value
 }

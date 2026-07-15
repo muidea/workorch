@@ -16,6 +16,7 @@ func TestRuntimeV2ActivationContextUsesConcreteSelectionSnapshots(t *testing.T) 
 	defaultSoul := &soulmodel.Soul{ID: "soul-default", Name: "default", SoulMD: "default instructions"}
 	executionSoul := &soulmodel.Soul{ID: "soul-execution", Name: "execution", SoulMD: "execution instructions"}
 	activation := RuntimeV2ActivationContext(
+		runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 		"zh-CN",
 		defaultSoul,
 		map[string]*soulmodel.Soul{"execution": executionSoul},

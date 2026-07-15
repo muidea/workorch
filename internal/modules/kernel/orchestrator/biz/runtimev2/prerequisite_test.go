@@ -9,6 +9,7 @@ import (
 
 func TestGatewayPreflightAcquiresSnapshotsBeforeStateChange(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
+		Activation:         runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		WorkspaceID:        "ws-gateway",
 		RunID:              "run-gateway",
 		DefinitionRevision: "definition-1",
@@ -114,7 +115,16 @@ func TestPreflightRuntimeFactsChecksAllRuntimeManagedPrerequisites(t *testing.T)
 		case runtimecontract.PrerequisiteKindValidationScratch:
 			result.ValidationScratch = &runtimecontract.ValidationScratch{Reference: ".workorch-validation/run-1", Revision: "scratch-1"}
 		case runtimecontract.PrerequisiteKindProviderCeiling:
-			result.ProviderCeiling = &runtimecontract.ProviderCeiling{ProviderID: "provider-1", MaxBytes: 128 * 1024, Revision: "ceiling-1"}
+			result.ProviderCeiling = &runtimecontract.ProviderCeiling{
+				Target:                   runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+				ContextWindowTokens:      128000,
+				ProviderMaxOutputTokens:  16384,
+				EffectiveMaxOutputTokens: 4096,
+				MaxInputTokens:           92928,
+				MaxBytes:                 128 * 1024,
+				CapabilityRevision:       "capability-1",
+				ConfigurationRevision:    "config-1",
+			}
 		}
 		var err error
 		facts, err = CommitPrerequisiteResult(facts, result)
@@ -130,6 +140,7 @@ func TestPreflightRuntimeFactsChecksAllRuntimeManagedPrerequisites(t *testing.T)
 
 func TestCommitPrerequisiteResultMergesCapabilitiesFromMultipleOwners(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
+		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		WorkspaceID: "ws", RunID: "run", DefinitionRevision: "definition", EvidenceRevision: "evidence",
 		Focus: runtimecontract.CoverageFocus{ID: "focus"},
 	}

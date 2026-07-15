@@ -10,7 +10,6 @@ const ModuleID = runtimemodel.RuntimeModuleLLM
 
 const StepKindWorkspaceExecution = runtimemodel.StepKindLLMWorkspaceExecution
 const StepKindWorkspacePlan = runtimemodel.StepKindLLMWorkspacePlan
-const DefaultProviderID = "default"
 
 const (
 	RuntimeBlockKindPatchApply               = runtimemodel.RuntimeBlockKindPatchApply
@@ -42,39 +41,6 @@ const (
 	ProviderCacheModePromptCacheKey        = "prompt_cache_key"
 	ProviderCacheModeAnthropicCacheControl = "anthropic_cache_control"
 	ProviderCacheModeCompatibleDeclared    = "compatible_declared"
-)
-
-const (
-	EnvProvider                = "provider"
-	EnvAPISurface              = "apiSurface"
-	EnvBaseURL                 = "baseURL"
-	EnvAPIKey                  = "apiKey"
-	EnvModel                   = "model"
-	EnvTimeout                 = "timeout"
-	EnvDisabled                = "disabled"
-	EnvChatCompletions         = "chatCompletions"
-	EnvStreaming               = "streaming"
-	EnvNonChatOperations       = "nonChatOperations"
-	EnvTemperature             = "temperature"
-	EnvMaxOutputTokens         = "maxOutputTokens"
-	EnvReasoningEffort         = "reasoningEffort"
-	EnvThinkingBudget          = "thinkingBudgetTokens"
-	EnvContextProfileMode      = "contextProfileMode"
-	EnvContextCapabilitySource = "contextCapabilitySource"
-	EnvContextWindow           = "contextWindowTokens"
-	EnvMaxInputTokens          = "maxInputTokens"
-	EnvReservedOutput          = "reservedOutputTokens"
-	EnvSafetyRatio             = "safetyRatio"
-	EnvContextUtilization      = "contextUtilizationRatio"
-	EnvBytesHardLimit          = "bytesHardLimit"
-	EnvMaxRequestBytes         = "maxRequestBytes"
-	EnvTokensPerByte           = "estimatedTokensPerByte"
-	EnvFailoverEnabled         = "failoverEnabled"
-	EnvFailoverProviders       = "failoverProviders"
-	EnvCacheMode               = "cacheMode"
-	EnvPromptCacheKey          = "promptCacheKey"
-	EnvMessageCacheControl     = "messageCacheControl"
-	EnvCacheUsageFields        = "cacheUsageFields"
 )
 
 const (

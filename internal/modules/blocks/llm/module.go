@@ -4,18 +4,19 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
-	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
-
 	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	llmruntimev2 "github.com/muidea/workorch/internal/modules/blocks/llm/biz/runtimev2"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	llmproviderconfig "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/providerconfig"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -24,13 +25,12 @@ const ModuleID = modulecommon.ModuleID
 const StepKindWorkspaceExecution = modulecommon.StepKindWorkspaceExecution
 
 type Module struct {
-	rawEventHub            magicevent.Hub
-	observer               magicevent.SimpleObserver
-	prerequisiteObserver   magicevent.SimpleObserver
-	providerConfigLoader   llmbiz.ProviderConfigLoader
-	providerConfigRevision llmbiz.ProviderConfigRevision
-	candidateProvider      llmruntimev2.CandidateProvider
-	topics                 []string
+	rawEventHub          magicevent.Hub
+	observer             magicevent.SimpleObserver
+	prerequisiteObserver magicevent.SimpleObserver
+	catalogService       *llmbiz.CatalogService
+	candidateProvider    llmruntimev2.CandidateProvider
+	topics               []string
 }
 
 func New() *Module { return &Module{} }
@@ -38,24 +38,19 @@ func New() *Module { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
 
 type Dependencies struct {
-	EventHub               magicevent.Hub
-	ProviderConfigLoader   llmbiz.ProviderConfigLoader
-	ProviderConfigRevision llmbiz.ProviderConfigRevision
-	CandidateProvider      llmruntimev2.CandidateProvider
+	EventHub          magicevent.Hub
+	CatalogService    *llmbiz.CatalogService
+	CandidateProvider llmruntimev2.CandidateProvider
 }
 
 func (m *Module) Configure(deps ...Dependencies) error {
 	if len(deps) > 0 {
 		m.rawEventHub = deps[0].EventHub
-		m.providerConfigLoader = deps[0].ProviderConfigLoader
-		m.providerConfigRevision = deps[0].ProviderConfigRevision
+		m.catalogService = deps[0].CatalogService
 		m.candidateProvider = deps[0].CandidateProvider
 	}
-	if m.providerConfigLoader == nil {
-		m.providerConfigLoader = loadProviderConfigsFromWorkorchConfig
-	}
-	if m.providerConfigRevision == nil {
-		m.providerConfigRevision = workorchconfig.Revision
+	if m.catalogService == nil {
+		m.catalogService = llmbiz.NewCatalogService()
 	}
 	if m.candidateProvider == nil {
 		m.candidateProvider = m
@@ -64,7 +59,7 @@ func (m *Module) Configure(deps ...Dependencies) error {
 }
 
 func (m *Module) Start() error {
-	if m == nil || m.providerConfigLoader == nil || m.rawEventHub == nil {
+	if m == nil || m.catalogService == nil || m.rawEventHub == nil {
 		return common.ErrInvalidArgument
 	}
 	if m.observer != nil {
@@ -74,6 +69,9 @@ func (m *Module) Start() error {
 	m.topics = []string{
 		llmevents.TopicLLMCommandCompleteProvider,
 		llmevents.TopicLLMCommandGenerateEmbedding,
+		llmevents.TopicLLMCommandGetProviderModelCatalog,
+		llmevents.TopicLLMCommandRefreshProviderModelCatalog,
+		llmevents.TopicLLMCommandResolveProviderModelTarget,
 	}
 	for _, topic := range m.topics {
 		m.observer.Subscribe(topic, m.handleCommand)
@@ -117,8 +115,7 @@ func (m *Module) Stop(ctx context.Context) error {
 	}
 	m.prerequisiteObserver = nil
 	m.rawEventHub = nil
-	m.providerConfigLoader = nil
-	m.providerConfigRevision = nil
+	m.catalogService = nil
 	m.candidateProvider = nil
 	return nil
 }
@@ -139,12 +136,228 @@ func (m *Module) handleRuntimeCandidate(event magicevent.Event, result magiceven
 		DefinitionContext: command.DefinitionContext,
 		CandidateContext:  command.CandidateContext,
 	})
+	// Always attempt to persist sealed request audit when generation produced one.
+	// Audit may also ride on CandidateRequestError for failed provider calls.
+	audit := response.Audit
+	usage := response.Usage
+	requestID := response.RequestID
+	status := response.Status
 	if err != nil {
+		if audit == nil {
+			if errAudit, errRequestID, errStatus := llmruntimev2.CandidateAuditFromError(err); errAudit != nil {
+				audit = errAudit
+				requestID = errRequestID
+				status = errStatus
+			}
+		}
 		failure := llmruntimev2.CandidateFailureFromError(err)
-		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Failure: &failure}, nil)
+		if status == "" {
+			status = llmmodels.RuntimeCandidateStatusFailed
+		}
+		m.publishLLMUsageRecorded(event.Context(), audit, usage, status, string(failure.Class))
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
+			Transaction: command.Transaction,
+			Failure:     &failure,
+			RequestID:   requestID,
+			Status:      status,
+			Audit:       providerRequestAuditView(audit),
+			Usage:       providerUsageView(usage),
+		}, nil)
 		return
 	}
-	result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: response.Transaction, Candidate: response.Candidate}, nil)
+	if status == "" {
+		status = llmmodels.RuntimeCandidateStatusCompleted
+	}
+	m.publishLLMUsageRecorded(event.Context(), audit, usage, status, "")
+	result.Set(orchestratorevents.RequestRuntimeCandidateResult{
+		Transaction: response.Transaction,
+		Candidate:   response.Candidate,
+		RequestID:   requestID,
+		Status:      status,
+		Audit:       providerRequestAuditView(audit),
+		Usage:       providerUsageView(usage),
+	}, nil)
+}
+
+func (m *Module) publishLLMUsageRecorded(ctx context.Context, audit *llmmodels.ProviderRequestAudit, usage *llmmodels.ProviderUsage, status, failureClass string) {
+	if m == nil || m.rawEventHub == nil || audit == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if status == "" {
+		status = audit.Status
+	}
+	if failureClass == "" {
+		failureClass = audit.FailureClass
+	}
+	occurredAt := audit.CompletedAt
+	if occurredAt == "" {
+		occurredAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	data := llmevents.LLMUsageRecordedData{
+		RequestID:             audit.RequestID,
+		WorkspaceID:           common.WorkspaceID(audit.WorkspaceID),
+		RunID:                 common.RunID(audit.RunID),
+		StepID:                audit.StepID,
+		Target:                audit.Target,
+		Operation:             audit.Operation,
+		CapabilityRevision:    audit.CapabilityRevision,
+		ConfigurationRevision: audit.ConfigurationRevision,
+		StablePrefixHash:      audit.StablePrefixHash,
+		Kind:                  audit.Kind,
+		APISurface:            audit.APISurface,
+		Provider:              audit.Provider,
+		ProviderSubmitted:     audit.ProviderSubmitted,
+		Status:                status,
+		FailureClass:          failureClass,
+		StartedAt:             audit.StartedAt,
+		CompletedAt:           audit.CompletedAt,
+		DurationMs:            audit.DurationMs,
+		RequestBytes:          audit.RequestBytes,
+		ResponseBytes:         audit.ResponseBytes,
+		ContextBudget:         providerContextBudgetMap(audit.ContextBudget),
+		OccurredAt:            occurredAt,
+	}
+	if usage != nil {
+		data.InputTokens = usage.InputTokens
+		data.OutputTokens = usage.OutputTokens
+		data.TotalTokens = usage.TotalTokens
+		data.Estimated = false
+		data.UsageSource = modulecommon.UsageSourceProviderNative
+		data.CacheUsage = providerCacheUsageMap(usage)
+	} else if audit.ContextBudget != nil && audit.ContextBudget.ActualTokens > 0 {
+		data.TotalTokens = audit.ContextBudget.ActualTokens
+		data.Estimated = true
+		data.UsageSource = modulecommon.UsageSourceEstimated
+	} else if audit.ContextBudget != nil {
+		// No provider usage: still record estimated budget snapshot when available.
+		data.Estimated = true
+		data.UsageSource = modulecommon.UsageSourceEstimated
+	}
+	event := magicevent.NewEventWithContext(
+		llmevents.TopicLLMUsageRecorded,
+		ModuleID,
+		llmevents.NotificationDestination,
+		magicevent.NewHeader(),
+		ctx,
+		data,
+	)
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{
+		SubjectType: "llm_usage",
+		SubjectID:   audit.RequestID,
+		WorkspaceID: audit.WorkspaceID,
+		RunID:       audit.RunID,
+		StepID:      audit.StepID,
+	}))
+	m.rawEventHub.Post(event)
+}
+
+func providerRequestAuditView(audit *llmmodels.ProviderRequestAudit) *runtimecontract.ProviderRequestAuditView {
+	if audit == nil {
+		return nil
+	}
+	return &runtimecontract.ProviderRequestAuditView{
+		RequestID:             audit.RequestID,
+		WorkspaceID:           audit.WorkspaceID,
+		RunID:                 audit.RunID,
+		StepID:                audit.StepID,
+		Target:                audit.Target,
+		Operation:             audit.Operation,
+		CapabilityRevision:    audit.CapabilityRevision,
+		ConfigurationRevision: audit.ConfigurationRevision,
+		StablePrefixHash:      audit.StablePrefixHash,
+		Kind:                  audit.Kind,
+		APISurface:            audit.APISurface,
+		Provider:              audit.Provider,
+		ContextBudget:         providerContextBudgetMap(audit.ContextBudget),
+		ProviderSubmitted:     audit.ProviderSubmitted,
+		Status:                audit.Status,
+		FailureClass:          audit.FailureClass,
+		StartedAt:             audit.StartedAt,
+		CompletedAt:           audit.CompletedAt,
+		DurationMs:            audit.DurationMs,
+		RequestBytes:          audit.RequestBytes,
+		ResponseBytes:         audit.ResponseBytes,
+	}
+}
+
+func providerUsageView(usage *llmmodels.ProviderUsage) *runtimecontract.ProviderUsageView {
+	if usage == nil {
+		return nil
+	}
+	return &runtimecontract.ProviderUsageView{
+		InputTokens:             usage.InputTokens,
+		OutputTokens:            usage.OutputTokens,
+		TotalTokens:             usage.TotalTokens,
+		CacheReadTokens:         usage.CacheReadTokens,
+		CacheWriteTokens:        usage.CacheWriteTokens,
+		CacheCreationTokens:     usage.CacheCreationTokens,
+		CacheableInputTokens:    usage.CacheableInputTokens,
+		NonCacheableInputTokens: usage.NonCacheableInputTokens,
+	}
+}
+
+func providerContextBudgetMap(budget *llmmodels.ProviderContextBudget) map[string]any {
+	if budget == nil {
+		return nil
+	}
+	out := map[string]any{
+		"providerId":               budget.ProviderID,
+		"modelId":                  budget.ModelID,
+		"capabilityRevision":       budget.CapabilityRevision,
+		"configurationRevision":    budget.ConfigurationRevision,
+		"contextWindowTokens":      budget.ContextWindowTokens,
+		"providerMaxOutputTokens":  budget.ProviderMaxOutputTokens,
+		"effectiveMaxOutputTokens": budget.EffectiveMaxOutputTokens,
+		"maxBytes":                 budget.MaxBytes,
+		"actualBytes":              budget.ActualBytes,
+		"maxTokens":                budget.MaxTokens,
+		"estimatedInputTokens":     budget.EstimatedInputTokens,
+		"estimatedOutputTokens":    budget.EstimatedOutputTokens,
+		"actualTokens":             budget.ActualTokens,
+		"maxRequestBytes":          budget.MaxRequestBytes,
+		"profileMode":              budget.ProfileMode,
+		"capabilitySource":         budget.CapabilitySource,
+		"providerSubmitted":        budget.ProviderSubmitted,
+		"overBudget":               budget.OverBudget,
+		"truncated":                budget.Truncated,
+	}
+	if budget.CachePlan != nil {
+		out["stablePrefixHash"] = budget.CachePlan.StablePrefixHash
+		out["renderedStablePrefixHash"] = budget.CachePlan.RenderedStablePrefixHash
+		out["cacheStrategy"] = budget.CachePlan.Strategy
+	}
+	if budget.ContextGateAction != "" {
+		out["contextGateAction"] = budget.ContextGateAction
+	}
+	if budget.ContextGateReason != "" {
+		out["contextGateReason"] = budget.ContextGateReason
+	}
+	if budget.BudgetFailureClass != "" {
+		out["budgetFailureClass"] = budget.BudgetFailureClass
+	}
+	return out
+}
+
+func providerCacheUsageMap(usage *llmmodels.ProviderUsage) map[string]any {
+	if usage == nil {
+		return nil
+	}
+	if usage.CacheReadTokens == 0 && usage.CacheWriteTokens == 0 && usage.CacheCreationTokens == 0 &&
+		usage.CacheableInputTokens == 0 && usage.NonCacheableInputTokens == 0 {
+		return nil
+	}
+	return map[string]any{
+		"estimated":               false,
+		"source":                  modulecommon.UsageSourceProviderNative,
+		"cacheReadTokens":         usage.CacheReadTokens,
+		"cacheWriteTokens":        usage.CacheWriteTokens,
+		"cacheCreationTokens":     usage.CacheCreationTokens,
+		"cacheableInputTokens":    usage.CacheableInputTokens,
+		"nonCacheableInputTokens": usage.NonCacheableInputTokens,
+	}
 }
 
 func (m *Module) handleProviderCeilingPrerequisite(event magicevent.Event, result magicevent.Result) {
@@ -153,32 +366,28 @@ func (m *Module) handleProviderCeilingPrerequisite(event magicevent.Event, resul
 		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
 		return
 	}
-	defaultProviderID, configs, err := m.providerConfigLoader()
+	target := command.Target.Normalized()
+	if err := target.Validate(); err != nil {
+		setPrerequisiteMagicError(result, err)
+		return
+	}
+	profile, err := m.resolveTarget(event.Context(), target, "chat_completions")
 	if err != nil {
 		setPrerequisiteMagicError(result, err)
 		return
 	}
-	config, providerID, err := selectProviderConfig(strings.TrimSpace(command.ProviderID), defaultProviderID, configs)
-	if err != nil {
+	ceiling := llmbiz.ProfileToProviderCeiling(profile)
+	if command.MinimumBytes > 0 && ceiling.MaxBytes < command.MinimumBytes {
+		setPrerequisiteMagicError(result, fmt.Errorf("provider %q model %q request ceiling %d is below required minimum %d", target.ProviderID, target.ModelID, ceiling.MaxBytes, command.MinimumBytes))
+		return
+	}
+	if err := ceiling.Validate(); err != nil {
 		setPrerequisiteMagicError(result, err)
-		return
-	}
-	maxBytes := config.ContextProfile.MaxRequestBytes
-	if maxBytes <= 0 {
-		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
-		return
-	}
-	if command.MinimumBytes > 0 && maxBytes < command.MinimumBytes {
-		setPrerequisiteMagicError(result, fmt.Errorf("provider %q request ceiling %d is below required minimum %d", providerID, maxBytes, command.MinimumBytes))
 		return
 	}
 	result.Set(orchestratorevents.AcquireProviderCeilingResult{
 		PrerequisiteID: command.PrerequisiteID,
-		Ceiling: runtimecontract.ProviderCeiling{
-			ProviderID: providerID,
-			MaxBytes:   maxBytes,
-			Revision:   fmt.Sprintf("config-%d", m.providerConfigRevision()),
-		},
+		Ceiling:        ceiling,
 	}, nil)
 }
 
@@ -190,6 +399,53 @@ func setPrerequisiteMagicError(result magicevent.Result, err error) {
 }
 
 func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
+	switch ev.ID() {
+	case llmevents.TopicLLMCommandGetProviderModelCatalog:
+		cmd, ok := ev.Data().(llmevents.GetProviderModelCatalogCommand)
+		if !ok {
+			setLLMMagicError(result, common.ErrInvalidArgument)
+			return
+		}
+		catalog, err := m.getCatalog(ev.Context(), cmd.ProviderID, false)
+		if err != nil {
+			setLLMMagicError(result, err)
+			return
+		}
+		result.Set(llmevents.GetProviderModelCatalogResult{Catalog: catalog}, nil)
+		return
+	case llmevents.TopicLLMCommandRefreshProviderModelCatalog:
+		cmd, ok := ev.Data().(llmevents.RefreshProviderModelCatalogCommand)
+		if !ok {
+			setLLMMagicError(result, common.ErrInvalidArgument)
+			return
+		}
+		catalog, err := m.getCatalog(ev.Context(), cmd.ProviderID, true)
+		if err != nil {
+			setLLMMagicError(result, err)
+			return
+		}
+		result.Set(llmevents.RefreshProviderModelCatalogResult{Catalog: catalog}, nil)
+		return
+	case llmevents.TopicLLMCommandResolveProviderModelTarget:
+		cmd, ok := ev.Data().(llmevents.ResolveProviderModelTargetCommand)
+		if !ok {
+			setLLMMagicError(result, common.ErrInvalidArgument)
+			return
+		}
+		profile, err := m.resolveTarget(ev.Context(), cmd.Target, cmd.Operation)
+		if err != nil {
+			setLLMMagicError(result, err)
+			return
+		}
+		// Response target must match request target identity.
+		if !profile.Target.Same(cmd.Target.Normalized()) {
+			setLLMMagicError(result, fmt.Errorf("%w: resolved target mismatch", common.ErrInvalidArgument))
+			return
+		}
+		result.Set(llmevents.ResolveProviderModelTargetResult{Profile: profile}, nil)
+		return
+	}
+
 	response, err := m.executeCommand(ev)
 	setLLMMagicResult(result, response, err)
 }
@@ -205,21 +461,21 @@ func (m *Module) executeCommand(ev magicevent.Event) (llmevents.LLMCommandResult
 		if !ok {
 			return llmevents.LLMCommandResult{}, common.ErrInvalidArgument
 		}
-		completion, providerID, model, err := m.completeProvider(ctx, cmd.ProviderID, cmd.Request)
+		completion, target, err := m.completeProvider(ctx, cmd.Target, cmd.Request)
 		if err != nil {
 			return llmevents.LLMCommandResult{}, err
 		}
-		return llmevents.LLMCommandResult{ProviderID: providerID, Model: model, Completion: llmCompletionEventData(completion)}, nil
+		return llmevents.LLMCommandResult{Target: target, Completion: llmCompletionEventData(completion)}, nil
 	case llmevents.TopicLLMCommandGenerateEmbedding:
 		cmd, ok := ev.Data().(llmevents.GenerateEmbeddingCommand)
-		if !ok || strings.TrimSpace(cmd.ProviderID) == "" || strings.TrimSpace(cmd.Input) == "" {
+		if !ok || strings.TrimSpace(cmd.Input) == "" {
 			return llmevents.LLMCommandResult{}, common.ErrInvalidArgument
 		}
-		embedding, err := m.generateEmbedding(ctx, cmd.ProviderID, cmd.Input)
+		embedding, err := m.generateEmbedding(ctx, cmd.Target, cmd.Input)
 		if err != nil {
 			return llmevents.LLMCommandResult{}, err
 		}
-		return llmevents.LLMCommandResult{ProviderID: embedding.ProviderID, Model: embedding.Model, Embedding: &embedding}, nil
+		return llmevents.LLMCommandResult{Target: cmd.Target.Normalized(), Embedding: &embedding}, nil
 	default:
 		return llmevents.LLMCommandResult{}, common.ErrInvalidArgument
 	}
@@ -243,84 +499,157 @@ func setLLMMagicResult(result magicevent.Result, data llmevents.LLMCommandResult
 		return
 	}
 	if err != nil {
-		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		setLLMMagicError(result, err)
 		return
 	}
 	result.Set(data, nil)
 }
 
-func (m *Module) completeProvider(ctx context.Context, requestedProviderID string, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, string, string, error) {
-	if m == nil || m.providerConfigLoader == nil {
-		return llmmodels.ProviderCompletionResult{}, "", "", common.ErrInvalidArgument
+func setLLMMagicError(result magicevent.Result, err error) {
+	if result == nil {
+		return
 	}
-	defaultProviderID, configs, err := m.providerConfigLoader()
-	if err != nil {
-		return llmmodels.ProviderCompletionResult{}, "", "", err
+	result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+}
+
+func (m *Module) completeProvider(ctx context.Context, target runtimecontract.ProviderModelTarget, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, runtimecontract.ProviderModelTarget, error) {
+	if m == nil {
+		return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, common.ErrInvalidArgument
 	}
-	runtime, providerID, err := selectProviderConfig(strings.TrimSpace(requestedProviderID), defaultProviderID, configs)
+	target = target.Normalized()
+	if err := target.Validate(); err != nil {
+		return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, err
+	}
+	if model := strings.TrimSpace(request.Model); model != "" && model != target.ModelID {
+		return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, fmt.Errorf("%w: provider request model %q conflicts with target model %q", common.ErrInvalidArgument, model, target.ModelID)
+	}
+	profile, err := m.resolveTarget(ctx, target, "chat_completions")
 	if err != nil {
-		return llmmodels.ProviderCompletionResult{}, "", "", err
+		return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, err
+	}
+	cfg, err := workorchconfig.Current()
+	if err != nil {
+		return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, err
+	}
+	runtime, err := llmbiz.ResolveProviderClient(cfg.LLM, target, profile)
+	if err != nil {
+		return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, err
 	}
 	provider := llmbiz.NewProviderFromConfig(runtime)
 	if provider == nil {
-		return llmmodels.ProviderCompletionResult{}, "", "", fmt.Errorf("%w: llm provider client is not configured", common.ErrInvalidArgument)
+		return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, fmt.Errorf("%w: llm provider client is not configured", common.ErrInvalidArgument)
 	}
-	if strings.TrimSpace(request.Model) == "" {
-		request.Model = runtime.Model
-	}
+	request.Model = target.ModelID
 	request.Config = llmproviderconfig.RedactedProviderConfig(runtime)
 	completion, err := provider.Complete(ctx, request)
 	if err != nil {
-		return llmmodels.ProviderCompletionResult{}, "", "", err
+		return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, err
 	}
-	return completion, providerID, runtime.Model, nil
+	return completion, target, nil
 }
 
-func selectProviderConfig(requestedProviderID string, defaultProviderID string, configs map[string]llmmodels.ProviderConfig) (llmmodels.ProviderConfig, string, error) {
-	for _, providerID := range []string{requestedProviderID, strings.TrimSpace(defaultProviderID)} {
-		if providerID == "" {
-			continue
-		}
-		if cfg, ok := configs[providerID]; ok {
-			if cfg.Unavailable {
-				return llmmodels.ProviderConfig{}, "", fmt.Errorf("%w: %s", common.ErrInvalidArgument, cfg.UnavailableReason)
-			}
-			return cfg, providerID, nil
-		}
+func (m *Module) completeProviderWithSealedCeiling(ctx context.Context, ceiling runtimecontract.ProviderCeiling, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, error) {
+	if m == nil {
+		return llmmodels.ProviderCompletionResult{}, common.ErrInvalidArgument
 	}
-	for id, cfg := range configs {
-		if cfg.Unavailable {
-			continue
-		}
-		return cfg, id, nil
+	ceiling = ceiling.Normalized()
+	if err := ceiling.Validate(); err != nil {
+		return llmmodels.ProviderCompletionResult{}, err
 	}
-	return llmmodels.ProviderConfig{}, "", fmt.Errorf("%w: no available llm provider is configured", common.ErrInvalidArgument)
-}
-
-func (m *Module) generateEmbedding(ctx context.Context, providerID string, input string) (llmmodels.ProviderEmbeddingResult, error) {
-	providerID = strings.TrimSpace(providerID)
-	input = strings.TrimSpace(input)
-	if providerID == "" || input == "" {
-		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument
+	if model := strings.TrimSpace(request.Model); model != "" && model != ceiling.Target.ModelID {
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: provider request model %q conflicts with sealed ceiling model %q", common.ErrInvalidArgument, model, ceiling.Target.ModelID)
 	}
-	if m == nil || m.providerConfigLoader == nil {
-		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument
-	}
-	defaultProviderID, configs, err := m.providerConfigLoader()
-	if err != nil {
-		return llmmodels.ProviderEmbeddingResult{}, err
-	}
-	config, selectedProviderID, err := selectProviderConfig(providerID, defaultProviderID, configs)
-	if err != nil {
-		return llmmodels.ProviderEmbeddingResult{}, err
-	}
-	return llmbiz.GenerateEmbedding(ctx, selectedProviderID, config, input)
-}
-
-func loadProviderConfigsFromWorkorchConfig() (string, map[string]llmmodels.ProviderConfig, error) {
 	cfg, err := workorchconfig.Current()
 	if err != nil {
-		return "", nil, err
+		return llmmodels.ProviderCompletionResult{}, err
 	}
-	return llmproviderconfig.LoadProviderConfigs(cfg.LLM.DefaultProvider, cfg.LLMProviderValueSets())
+	runtime, profile, err := llmbiz.ResolveProviderClientForSealedCeiling(cfg.LLM, ceiling)
+	if err != nil {
+		return llmmodels.ProviderCompletionResult{}, err
+	}
+	_ = profile
+	provider := llmbiz.NewProviderFromConfig(runtime)
+	if provider == nil {
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider client is not configured", common.ErrInvalidArgument)
+	}
+	request.Model = ceiling.Target.ModelID
+	request.Config = llmproviderconfig.RedactedProviderConfig(runtime)
+	if request.ContextBudget == nil {
+		request.ContextBudget = &llmmodels.ProviderContextBudget{}
+	}
+	// Ensure sealed identity is present on the request audit surface before dispatch.
+	request.ContextBudget.ProviderID = ceiling.Target.ProviderID
+	request.ContextBudget.ModelID = ceiling.Target.ModelID
+	request.ContextBudget.CapabilityRevision = ceiling.CapabilityRevision
+	request.ContextBudget.ConfigurationRevision = ceiling.ConfigurationRevision
+	request.ContextBudget.CapabilitySource = "sealed_ceiling"
+	request.ContextBudget.ProfileMode = "runtime_v2_sealed_ceiling"
+	completion, err := provider.Complete(ctx, request)
+	if err != nil {
+		return llmmodels.ProviderCompletionResult{}, err
+	}
+	request.ContextBudget.ProviderSubmitted = true
+	if completion.Usage != nil {
+		request.ContextBudget.ActualTokens = completion.Usage.TotalTokens
+	}
+	return completion, nil
+}
+
+func (m *Module) generateEmbedding(ctx context.Context, target runtimecontract.ProviderModelTarget, input string) (llmmodels.ProviderEmbeddingResult, error) {
+	target = target.Normalized()
+	input = strings.TrimSpace(input)
+	if err := target.Validate(); err != nil || input == "" {
+		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument
+	}
+	if m == nil {
+		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument
+	}
+	profile, err := m.resolveTarget(ctx, target, "embeddings")
+	if err != nil {
+		return llmmodels.ProviderEmbeddingResult{}, err
+	}
+	cfg, err := workorchconfig.Current()
+	if err != nil {
+		return llmmodels.ProviderEmbeddingResult{}, err
+	}
+	runtime, err := llmbiz.ResolveProviderClient(cfg.LLM, target, profile)
+	if err != nil {
+		return llmmodels.ProviderEmbeddingResult{}, err
+	}
+	return llmbiz.GenerateEmbedding(ctx, target.ProviderID, runtime, input)
+}
+
+func (m *Module) resolveTarget(ctx context.Context, target runtimecontract.ProviderModelTarget, operation string) (llmmodels.ResolvedProviderModelProfile, error) {
+	cfg, err := workorchconfig.Current()
+	if err != nil {
+		return llmmodels.ResolvedProviderModelProfile{}, err
+	}
+	target = target.Normalized()
+	var catalog *llmmodels.ProviderModelCatalog
+	if target.ProviderID == runtimecontract.BuiltinAIProxyProviderID {
+		current, catalogErr := m.getCatalog(ctx, target.ProviderID, false)
+		if catalogErr != nil && current.State == llmmodels.ProviderCatalogStateUnavailable {
+			return llmmodels.ResolvedProviderModelProfile{}, catalogErr
+		}
+		catalog = &current
+	}
+	return llmbiz.ResolveProviderModelTarget(cfg.LLM, catalog, target, operation)
+}
+
+func (m *Module) getCatalog(ctx context.Context, providerID string, forceRefresh bool) (llmmodels.ProviderModelCatalog, error) {
+	providerID = strings.TrimSpace(providerID)
+	if providerID == "" {
+		providerID = runtimecontract.BuiltinAIProxyProviderID
+	}
+	if providerID != runtimecontract.BuiltinAIProxyProviderID {
+		return llmmodels.ProviderModelCatalog{}, fmt.Errorf("%w: catalog is only available for built-in ai-proxy", common.ErrInvalidArgument)
+	}
+	if m == nil || m.catalogService == nil {
+		return llmmodels.ProviderModelCatalog{}, common.ErrInvalidArgument
+	}
+	cfg, err := workorchconfig.Current()
+	if err != nil {
+		return llmmodels.ProviderModelCatalog{}, err
+	}
+	return m.catalogService.GetCatalog(ctx, cfg.LLM, forceRefresh)
 }

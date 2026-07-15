@@ -8,9 +8,11 @@ import (
 )
 
 func llmUsageCacheEstimatedEntry(item readmodelcore.LLMUsageTrace) bool {
-	return readModelBoolValue(item.CacheUsage["estimated"])
+	value, _ := item.CacheUsage.Bool("estimated")
+	return value
 }
 
 func llmUsageCacheProviderNativeEntry(item readmodelcore.LLMUsageTrace) bool {
-	return strings.TrimSpace(readModelStringValue(item.CacheUsage["source"])) == llmcommon.UsageSourceProviderNative
+	value, _ := item.CacheUsage.String("source")
+	return strings.TrimSpace(value) == llmcommon.UsageSourceProviderNative
 }

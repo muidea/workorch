@@ -14,6 +14,7 @@ import (
 	client "github.com/muidea/workorch/internal/pkg/workorchclient"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchpayloadmapper"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 // remoteBackend implements Backend using an HTTP client to a running workorch --server.
@@ -1210,7 +1211,7 @@ func (b *remoteRunBackend) runCommandViaResume(ctx context.Context, req Workspac
 		RunID:              string(req.ExpectedRunID),
 		GoalID:             string(activation.GoalID),
 		DoDID:              string(activation.DoDID),
-		LLMProviderID:      activation.LLMProviderID,
+		LLMTarget:          clientProviderModelTarget(activation.LLMTarget),
 		SoulID:             string(activation.SoulID),
 		SoulBindings:       commonSoulBindingStrings(activation.SoulBindings),
 		SkillIDs:           skillIDStrings(activation.SkillIDs),
@@ -1239,7 +1240,7 @@ func (b *remoteRunBackend) resumeWorkspaceExecution(ctx context.Context, wsID co
 	act, err := b.cl.ResumeWorkspaceExecution(ctx, string(wsID), &client.ActivationRequest{
 		GoalID:             string(req.GoalID),
 		DoDID:              string(req.DoDID),
-		LLMProviderID:      req.LLMProviderID,
+		LLMTarget:          clientProviderModelTarget(req.LLMTarget),
 		SoulID:             string(req.SoulID),
 		SoulBindings:       commonSoulBindingStrings(req.SoulBindings),
 		SkillIDs:           skillIDStrings(req.SkillIDs),
@@ -1278,7 +1279,7 @@ func (b *remoteRunBackend) restart(ctx context.Context, wsID common.WorkspaceID,
 	act, err := b.cl.ResumeWorkspaceExecution(ctx, string(wsID), &client.ActivationRequest{
 		GoalID:             string(req.GoalID),
 		DoDID:              string(req.DoDID),
-		LLMProviderID:      req.LLMProviderID,
+		LLMTarget:          clientProviderModelTarget(req.LLMTarget),
 		DialogLanguage:     req.DialogLanguage,
 		SoulID:             string(req.SoulID),
 		SoulBindings:       commonSoulBindingStrings(req.SoulBindings),
@@ -1908,6 +1909,14 @@ func templateInfoFromClient(item *client.WorkspaceTemplate) *TemplateInfo {
 	}
 }
 
+func clientProviderModelTarget(target *runtimecontract.ProviderModelTarget) *client.ProviderModelTarget {
+	if target == nil {
+		return nil
+	}
+	value := target.Normalized()
+	return &client.ProviderModelTarget{ProviderID: value.ProviderID, ModelID: value.ModelID}
+}
+
 type remoteConfigBackend struct{ cl *client.Client }
 
 func (b *remoteConfigBackend) Get(ctx context.Context) (*ServiceConfig, error) {
@@ -1918,26 +1927,16 @@ func (b *remoteConfigBackend) Get(ctx context.Context) (*ServiceConfig, error) {
 	if cfg == nil {
 		return &ServiceConfig{}, nil
 	}
-	providers := make([]LLMProvider, 0, len(cfg.LLM.Providers))
-	for _, item := range cfg.LLM.Providers {
-		providers = append(providers, LLMProvider{
-			ID:         item.ID,
-			Provider:   item.Provider,
-			APISurface: item.APISurface,
-			BaseURL:    item.BaseURL,
-			Model:      item.Model,
-			Timeout:    item.Timeout,
-			Disabled:   item.Disabled,
-			Streaming:  item.Streaming,
-		})
-	}
 	return &ServiceConfig{
-		ServerAddr:        cfg.Server.Addr,
-		Backend:           cfg.Repository.Backend,
-		DataDir:           cfg.Repository.DataDir,
-		DefaultProvider:   cfg.LLM.DefaultProviderID,
+		ServerAddr: cfg.Server.Addr,
+		Backend:    cfg.Repository.Backend,
+		DataDir:    cfg.Repository.DataDir,
+		DefaultChat: ProviderModelTarget{
+			ProviderID: cfg.LLM.DefaultChat.ProviderID,
+			ModelID:    cfg.LLM.DefaultChat.ModelID,
+		},
 		MaxConcurrentRuns: cfg.Server.MaxConcurrentRuns,
-		Providers:         providers,
+		AIProxyBaseURL:    cfg.LLM.AIProxy.BaseURL,
 		LLMOutput: LLMOutputConfig{
 			MaxPatchContentBytes:               cfg.Runtime.LLMOutput.MaxPatchContentBytes,
 			MaxGraphBytes:                      cfg.Runtime.LLMOutput.MaxGraphBytes,

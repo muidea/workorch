@@ -526,83 +526,194 @@ def wait_run_status(
     raise RuntimeError(f"run {run_id} status={last_status}, want {description}")
 
 
-def clean_provider(item: dict[str, Any]) -> dict[str, Any]:
-    ret = {
-        "id": item.get("id", ""),
-        "provider": item.get("provider", ""),
-        "baseUrl": item.get("baseUrl", ""),
-        "model": item.get("model", ""),
-        "timeout": item.get("timeout", ""),
-        "disabled": bool(item.get("disabled", False)),
-        "chatCompletions": bool(item.get("chatCompletions", True)),
-        "streaming": bool(item.get("streaming", False)),
-        "nonChatOperations": item.get("nonChatOperations") or [],
-    }
-    if item.get("failoverEnabled") is not None:
-        ret["failoverEnabled"] = bool(item.get("failoverEnabled"))
-    if item.get("failoverProviders") is not None:
-        ret["failoverProviders"] = item.get("failoverProviders") or []
-    if isinstance(item.get("inferenceProfile"), dict):
-        ret["inferenceProfile"] = clean_inference_profile(item["inferenceProfile"])
-    if isinstance(item.get("contextProfile"), dict):
-        ret["contextProfile"] = clean_context_profile(item["contextProfile"])
-    return ret
+LOADTEST_MODEL_ID = "verify-model"
 
 
-def clean_inference_profile(profile: dict[str, Any]) -> dict[str, Any]:
-    return {
-        key: profile[key]
-        for key in ("temperature", "maxOutputTokens", "reasoningEffort", "thinkingBudgetTokens")
-        if key in profile and profile[key] is not None
-    }
-
-
-def clean_context_profile(profile: dict[str, Any]) -> dict[str, Any]:
-    return {
-        key: profile[key]
-        for key in (
-            "profileMode",
-            "contextWindowTokens",
-            "maxInputTokens",
-            "reservedOutputTokens",
-            "safetyRatio",
-            "contextUtilizationRatio",
-            "bytesHardLimit",
-            "maxRequestBytes",
-            "estimatedTokensPerByte",
+def custom_providers_payload(
+    items: list[dict[str, Any]] | dict[str, Any],
+    *,
+    include_api_key: bool = False,
+    mock_base_url: str = "",
+    timeout_override: str | None = None,
+) -> dict[str, Any]:
+    """Build the new customProviders update map from configuration read model."""
+    payload: dict[str, Any] = {}
+    if isinstance(items, dict):
+        iterable = items.items()
+        for provider_id, item in iterable:
+            provider_id = str(provider_id or "").strip()
+            if not provider_id:
+                continue
+            payload[provider_id] = _custom_provider_entry(
+                item if isinstance(item, dict) else {},
+                include_api_key=include_api_key,
+                mock_base_url=mock_base_url,
+                timeout_override=timeout_override,
+            )
+        return payload
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        provider_id = str(item.get("id") or "").strip()
+        if not provider_id:
+            continue
+        payload[provider_id] = _custom_provider_entry(
+            item,
+            include_api_key=include_api_key,
+            mock_base_url=mock_base_url,
+            timeout_override=timeout_override,
         )
-        if key in profile and profile[key] is not None
+    return payload
+
+
+def _custom_provider_entry(
+    item: dict[str, Any],
+    *,
+    include_api_key: bool,
+    mock_base_url: str,
+    timeout_override: str | None,
+) -> dict[str, Any]:
+    models: dict[str, Any] = {}
+    raw_models = item.get("models") or {}
+    if isinstance(raw_models, dict):
+        model_iter = raw_models.items()
+        for model_id, model in model_iter:
+            model_id = str(model_id or "").strip()
+            if not model_id or not isinstance(model, dict):
+                continue
+            models[model_id] = {
+                "contextWindowTokens": int(model.get("contextWindowTokens") or 128000),
+                "maxOutputTokens": int(model.get("maxOutputTokens") or 8192),
+                "operations": list(model.get("operations") or ["chat_completions"]),
+            }
+    else:
+        for model in raw_models if isinstance(raw_models, list) else []:
+            if not isinstance(model, dict):
+                continue
+            model_id = str(model.get("id") or "").strip()
+            if not model_id:
+                continue
+            models[model_id] = {
+                "contextWindowTokens": int(model.get("contextWindowTokens") or 128000),
+                "maxOutputTokens": int(model.get("maxOutputTokens") or 8192),
+                "operations": list(model.get("operations") or ["chat_completions"]),
+            }
+    if not models:
+        models[LOADTEST_MODEL_ID] = {
+            "contextWindowTokens": 128000,
+            "maxOutputTokens": 8192,
+            "operations": ["chat_completions", "embeddings"],
+        }
+    entry: dict[str, Any] = {
+        "provider": item.get("provider") or "compatible",
+        "apiSurface": item.get("apiSurface") or "openai_compatible_http",
+        "baseURL": item.get("baseUrl") or item.get("baseURL") or mock_base_url,
+        "timeout": timeout_override or item.get("timeout") or "60s",
+        "models": models,
     }
+    if include_api_key:
+        entry["apiKey"] = item.get("apiKey") or "loadtest-secret"
+    return entry
+
+
+def snapshot_llm_update_payload(llm: dict[str, Any], *, mock_base_url: str = "") -> dict[str, Any]:
+    """Capture a restore-safe LLM update payload using the new contract only."""
+    ai_proxy = llm.get("aiProxy") or {}
+    default_chat = llm.get("defaultChat") or {}
+    default_embedding = llm.get("defaultEmbedding") or {}
+    budget = llm.get("budget") or {}
+    custom_providers = llm.get("customProviders") or []
+    payload: dict[str, Any] = {
+        "aiProxy": {
+            "baseURL": ai_proxy.get("baseUrl") or ai_proxy.get("baseURL") or mock_base_url or "http://127.0.0.1:8080",
+            "timeout": ai_proxy.get("timeout") or "180s",
+            "catalogRequestTimeout": ai_proxy.get("catalogRequestTimeout") or "5s",
+            "catalogTTL": ai_proxy.get("catalogTTL") or "5m",
+            "catalogMaxStaleAge": ai_proxy.get("catalogMaxStaleAge") or "24h",
+            "maxCatalogResponseBytes": int(ai_proxy.get("maxCatalogResponseBytes") or 1048576),
+            "maxCatalogModels": int(ai_proxy.get("maxCatalogModels") or 1000),
+        },
+        "defaultChat": {
+            "providerID": default_chat.get("providerId") or default_chat.get("providerID") or "ai-proxy",
+            "modelID": default_chat.get("modelId") or default_chat.get("modelID") or "gpt-4o",
+        },
+        "budget": {
+            "contextUtilizationRatio": float(budget.get("contextUtilizationRatio") or 0.75),
+            "estimatedTokensPerByte": float(budget.get("estimatedTokensPerByte") or 0.25),
+            "defaultMaxOutputTokens": int(budget.get("defaultMaxOutputTokens") or 4096),
+            "maxRequestBytes": int(budget.get("maxRequestBytes") or 4194304),
+        },
+        "customProviders": custom_providers_payload(custom_providers, include_api_key=False, mock_base_url=mock_base_url),
+    }
+    emb_model = default_embedding.get("modelId") or default_embedding.get("modelID")
+    if emb_model:
+        payload["defaultEmbedding"] = {
+            "providerID": default_embedding.get("providerId") or default_embedding.get("providerID") or "ai-proxy",
+            "modelID": emb_model,
+        }
+    return payload
 
 
 def configure_mock_provider(provider_id: str) -> dict[str, Any]:
     config = run_curl("GET", "/api/v1/workorch/configuration")
     llm = nested(config, "configuration.llm", {})
-    providers = llm.get("providers") or []
-    original = {
-        "defaultProviderId": llm.get("defaultProviderId") or provider_id,
-        "defaultEmbeddingProviderId": llm.get("defaultEmbeddingProviderId") or "",
-        "providers": [clean_provider(item) for item in providers if item.get("id")],
-    }
-    updated_providers = [item for item in original["providers"] if item["id"] != provider_id]
-    updated_providers.append(
-        {
-            "id": provider_id,
+    mock_base_url = f"http://{MOCK_ADDR}/v1"
+    original = snapshot_llm_update_payload(llm, mock_base_url=mock_base_url)
+    # Ensure restore has the loadtest custom provider shell without secret.
+    if provider_id not in original["customProviders"]:
+        original["customProviders"][provider_id] = {
             "provider": "compatible",
-            "baseUrl": f"http://{MOCK_ADDR}/v1",
-            "apiKey": "loadtest-secret",
-            "model": "governed-loadtest-model",
+            "apiSurface": "openai_compatible_http",
+            "baseURL": mock_base_url,
             "timeout": "60s",
-            "disabled": False,
-            "chatCompletions": True,
-            "streaming": False,
-            "nonChatOperations": [],
+            "models": {
+                LOADTEST_MODEL_ID: {
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                    "operations": ["chat_completions", "embeddings"],
+                }
+            },
         }
-    )
+        original["defaultChat"] = {"providerID": provider_id, "modelID": LOADTEST_MODEL_ID}
+        original["defaultEmbedding"] = {"providerID": provider_id, "modelID": LOADTEST_MODEL_ID}
+
     update = {
-        "defaultProviderId": provider_id,
-        "defaultEmbeddingProviderId": original.get("defaultEmbeddingProviderId", ""),
-        "providers": updated_providers,
+        "aiProxy": {
+            "baseURL": mock_base_url,
+            "apiKey": "loadtest-secret",
+            "timeout": "180s",
+            "catalogRequestTimeout": "5s",
+            "catalogTTL": "5m",
+            "catalogMaxStaleAge": "24h",
+            "maxCatalogResponseBytes": 1048576,
+            "maxCatalogModels": 1000,
+            "modelOverrides": {
+                LOADTEST_MODEL_ID: {
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                    "operations": ["chat_completions", "embeddings"],
+                }
+            },
+        },
+        "defaultChat": {"providerID": provider_id, "modelID": LOADTEST_MODEL_ID},
+        "defaultEmbedding": {"providerID": provider_id, "modelID": LOADTEST_MODEL_ID},
+        "budget": original["budget"],
+        "customProviders": {
+            provider_id: {
+                "provider": "compatible",
+                "apiSurface": "openai_compatible_http",
+                "baseURL": mock_base_url,
+                "apiKey": "loadtest-secret",
+                "timeout": "60s",
+                "models": {
+                    LOADTEST_MODEL_ID: {
+                        "contextWindowTokens": 128000,
+                        "maxOutputTokens": 8192,
+                        "operations": ["chat_completions", "embeddings"],
+                    }
+                },
+            }
+        },
     }
     write_json(ARTIFACT_DIR / "configuration-original-llm.json", original)
     write_json(ARTIFACT_DIR / "configuration-loadtest-llm.json", update)
@@ -624,17 +735,32 @@ def select_real_provider() -> str:
     write_json(ARTIFACT_DIR / "configuration-real.json", config)
     requested = PROVIDER_ID.strip()
     llm = nested(config, "configuration.llm", {})
-    provider_id = requested or llm.get("defaultProviderId", "")
-    providers = {item.get("id"): item for item in llm.get("providers") or []}
-    provider = providers.get(provider_id)
+    default_chat = llm.get("defaultChat") or {}
+    provider_id = requested or default_chat.get("providerId") or default_chat.get("providerID") or ""
+    if not provider_id:
+        raise RuntimeError("no defaultChat provider configured")
+    if provider_id == "ai-proxy":
+        ai_proxy = llm.get("aiProxy") or {}
+        if not ai_proxy.get("apiKeyConfigured") and not (ai_proxy.get("baseUrl") or ai_proxy.get("baseURL")):
+            raise RuntimeError("ai-proxy is not configured")
+        return provider_id
+    customs = {item.get("id"): item for item in (llm.get("customProviders") or []) if isinstance(item, dict)}
+    provider = customs.get(provider_id)
     if not provider:
-        raise RuntimeError(f"provider {provider_id!r} is not configured")
-    if not provider.get("ready"):
-        raise RuntimeError(f"provider {provider_id!r} is not ready: {provider.get('reason', '')}")
+        raise RuntimeError(f"custom provider {provider_id!r} is not configured")
     if not provider.get("apiKeyConfigured"):
-        raise RuntimeError(f"provider {provider_id!r} has no configured API key")
-    if provider.get("chatCompletions") is False:
-        raise RuntimeError(f"provider {provider_id!r} does not support chatCompletions")
+        raise RuntimeError(f"custom provider {provider_id!r} has no configured API key")
+    models = provider.get("models") or []
+    has_chat = False
+    for model in models:
+        if not isinstance(model, dict):
+            continue
+        ops = model.get("operations") or []
+        if "chat_completions" in ops or not ops:
+            has_chat = True
+            break
+    if not has_chat:
+        raise RuntimeError(f"custom provider {provider_id!r} has no chat_completions model")
     return provider_id
 
 
@@ -643,21 +769,16 @@ def configure_real_provider_timeout(provider_id: str) -> dict[str, Any] | None:
         return None
     config = run_curl("GET", "/api/v1/workorch/configuration")
     llm = nested(config, "configuration.llm", {})
-    providers = [clean_provider(item) for item in llm.get("providers") or [] if item.get("id")]
-    original = {
-        "defaultProviderId": llm.get("defaultProviderId") or provider_id,
-        "defaultEmbeddingProviderId": llm.get("defaultEmbeddingProviderId") or "",
-        "providers": providers,
-    }
+    original = snapshot_llm_update_payload(llm)
     updated = json.loads(json.dumps(original, ensure_ascii=False))
-    matched = False
-    for provider in updated["providers"]:
-        if provider.get("id") == provider_id:
-            provider["timeout"] = REAL_PROVIDER_TIMEOUT
-            matched = True
-            break
-    if not matched:
-        raise RuntimeError(f"provider {provider_id!r} is not present while applying real provider timeout")
+    if provider_id == "ai-proxy":
+        updated["aiProxy"]["timeout"] = REAL_PROVIDER_TIMEOUT
+    else:
+        customs = updated.get("customProviders") or {}
+        if provider_id not in customs:
+            raise RuntimeError(f"provider {provider_id!r} is not present while applying real provider timeout")
+        customs[provider_id]["timeout"] = REAL_PROVIDER_TIMEOUT
+        updated["customProviders"] = customs
     write_json(ARTIFACT_DIR / "configuration-original-llm.json", original)
     write_json(ARTIFACT_DIR / "configuration-real-timeout-llm.json", updated)
     run_curl("PUT", "/api/v1/workorch/configuration/llm", updated)
@@ -1158,7 +1279,7 @@ def execute_workspace(seq: int, provider_id: str, mcp_server_id: str) -> Workspa
             activation = run_curl(
                 "POST",
                 f"/api/v1/workorch/workspaces/{url_quote(result.workspace_id)}/execution-activations",
-                {"goalId": goal_id, "doDId": dod_id, "llmProviderId": provider_id, "mcpServerIds": [mcp_server_id], "priority": seq % 10},
+                {"goalId": goal_id, "doDId": dod_id, "llmTarget": {"providerId": provider_id, "modelId": LOADTEST_MODEL_ID}, "mcpServerIds": [mcp_server_id], "priority": seq % 10},
             )
         write_json(case_dir / "activation.json", activation)
         run = wait_activation_run(result.workspace_id, activation, case_dir)

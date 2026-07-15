@@ -691,7 +691,7 @@ func workspaceExecutionCommandSchedulerCommand(workspaceID string, req workspace
 		RunID:              common.RunID(strings.TrimSpace(req.RunID)),
 		GoalID:             common.GoalID(req.GoalID),
 		DoDID:              common.DoDID(req.DoDID),
-		LLMProviderID:      req.LLMProviderID,
+		LLMTarget:          req.LLMTarget,
 		SoulID:             common.SoulID(req.SoulID),
 		SoulBindings:       req.SoulBindings,
 		SkillIDs:           schedulerIDs[common.SkillID](req.SkillIDs),

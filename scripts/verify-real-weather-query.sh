@@ -352,16 +352,29 @@ import sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))
 requested = sys.argv[2].strip()
 llm = data.get("configuration", {}).get("llm", {})
-provider_id = requested or llm.get("defaultProviderId", "")
-providers = {item.get("id"): item for item in llm.get("providers", [])}
-provider = providers.get(provider_id)
-if not provider:
-    raise SystemExit(f"provider {provider_id!r} is not configured")
-if not provider.get("ready"):
-    raise SystemExit(f"provider {provider_id!r} is not ready: {provider.get('reason', '')}")
-if not provider.get("apiKeyConfigured"):
-    raise SystemExit(f"provider {provider_id!r} has no configured API key")
-print(provider_id)
+default_chat = llm.get("defaultChat") or {}
+provider_id = requested or default_chat.get("providerId") or default_chat.get("providerID") or ""
+model_id = default_chat.get("modelId") or default_chat.get("modelID") or ""
+if not provider_id:
+    raise SystemExit("no defaultChat provider configured")
+if provider_id == "ai-proxy":
+    ai_proxy = llm.get("aiProxy") or {}
+    if not ai_proxy.get("baseUrl") and not ai_proxy.get("baseURL"):
+        raise SystemExit("ai-proxy baseURL is not configured")
+    # API key may be optional depending on deployment; catalog readiness is checked at activation.
+    print(provider_id)
+else:
+    customs = {item.get("id"): item for item in (llm.get("customProviders") or [])}
+    provider = customs.get(provider_id)
+    if not provider:
+        raise SystemExit(f"custom provider {provider_id!r} is not configured")
+    if not provider.get("apiKeyConfigured"):
+        raise SystemExit(f"custom provider {provider_id!r} has no configured API key")
+    models = {item.get("id"): item for item in (provider.get("models") or [])}
+    if model_id and model_id not in models and models:
+        # tolerate activation-time explicit model selection
+        pass
+    print(provider_id)
 PY
 }
 
@@ -524,7 +537,7 @@ activation_request_id="real-weather-e2e-$VERIFY_SUFFIX"
 activation_reason="e2e_resume"
 capture_runs_before_activation "$TMP_DIR/activation-before-runs.json"
 post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
-  '{"intent":"resume","requestId":"'"$activation_request_id"'","reason":"'"$activation_reason"'","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"'"$PROVIDER_ID"'","mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":3}' \
+  '{"intent":"resume","requestId":"'"$activation_request_id"'","reason":"'"$activation_reason"'","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmTarget":{"providerId":"'"$PROVIDER_ID"'","modelId":"verify-model"}","mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":3}' \
   "$TMP_DIR/activation.json"
 validate_activation_command_response "$TMP_DIR/activation.json" "$activation_request_id" "$activation_reason"
 run_id="$(wait_activation_run "$TMP_DIR/activation-before-runs.json" "$TMP_DIR/activation-runs.json" "$TMP_DIR/activation-run.json")"

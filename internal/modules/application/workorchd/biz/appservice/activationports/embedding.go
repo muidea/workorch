@@ -12,17 +12,19 @@ import (
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func GenerateEmbedding(ctx context.Context, hub magicevent.Hub, providerID string, input string) (llmmodels.ProviderEmbeddingResult, error) {
-	if hub == nil || strings.TrimSpace(providerID) == "" || strings.TrimSpace(input) == "" {
+func GenerateEmbedding(ctx context.Context, hub magicevent.Hub, target runtimecontract.ProviderModelTarget, input string) (llmmodels.ProviderEmbeddingResult, error) {
+	target = target.Normalized()
+	if hub == nil || target.Validate() != nil || strings.TrimSpace(input) == "" {
 		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument
 	}
 	ev := magicevent.NewEventWithContext(llmevents.TopicLLMCommandGenerateEmbedding, modulecommon.ModuleID, llmevents.CommandDestination, magicevent.NewHeader(), ctx, llmevents.GenerateEmbeddingCommand{
-		ProviderID: strings.TrimSpace(providerID),
-		Input:      strings.TrimSpace(input),
+		Target: target,
+		Input:  strings.TrimSpace(input),
 	})
-	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.TopicLLMCommandGenerateEmbedding, events.EventHubLaneScope{SubjectType: "llm_embedding", SubjectID: strings.TrimSpace(providerID)}))
+	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.TopicLLMCommandGenerateEmbedding, events.EventHubLaneScope{SubjectType: "llm_embedding", SubjectID: target.ProviderID + "/" + target.ModelID}))
 	result := hub.Send(ev)
 	if result == nil {
 		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument

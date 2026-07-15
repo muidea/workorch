@@ -226,17 +226,25 @@ maxRuntimeRepairAttempts = 10
 maxProviderRetryAttempts = 10
 shellCommandTimeout = "60s"
 
-[llm]
-defaultProvider = "local"
-defaultEmbeddingProvider = ""
-
-[llm.providers.local]
-provider = ""
-baseURL = ""
+[llm.aiProxy]
+baseURL = "http://127.0.0.1:8080"
 apiKey = ""
-model = ""
-timeout = "60s"
-disabled = false
+timeout = "180s"
+catalogRequestTimeout = "5s"
+catalogTTL = "5m"
+catalogMaxStaleAge = "24h"
+maxCatalogResponseBytes = 1048576
+maxCatalogModels = 1000
+
+[llm.defaultChat]
+providerID = "ai-proxy"
+modelID = "gpt-4o"
+
+[llm.budget]
+contextUtilizationRatio = 0.75
+estimatedTokensPerByte = 0.25
+defaultMaxOutputTokens = 4096
+maxRequestBytes = 4194304
 
 [governance.autoTicket]
 enabled = true
@@ -430,7 +438,7 @@ curl -f "http://127.0.0.1:8080/api/v1/workorch/runs?workspaceId=${WORKSPACE_ID}"
 curl -f http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}
 ```
 
-The workspace create endpoint creates one formal `workorch` workspace instance, accepts an optional `description`, and defaults `deliverableDirectory` to `.workorch-workspaces/<generated-workspace-id>` for the file backend when the client omits it. Runtime state is stored under `repository.dataDir/internal/workspaces/<workspace-id>`. The workspace snapshot endpoint aggregates one workspace together with its related runs and blocking items. The run create, list, single-run, snapshot, status, and observability endpoints provide formal `workorch` run instance management. The run start endpoint synchronously advances a created `run` and returns the updated state, which may already be `completed`, `failed`, `blocked_on_decision`, or `blocked_on_approval`. The run resume endpoint returns `409 conflict` with `blocked` when the required decision or approval has not yet been resolved. The decision and approval endpoints provide formal query and processing paths for blocked runs. All run execution entrypoints share one in-process priority-aware wait queue behind `server.maxConcurrentRuns`. If `[llm].defaultEmbeddingProvider` references a provider declaring `nonChatOperations = ["embeddings"]`, workspace execution activation uses `/embeddings` for vector Memory recall and records `memoryRetrieval` evidence on the Run execution context.
+The workspace create endpoint creates one formal `workorch` workspace instance, accepts an optional `description`, and defaults `deliverableDirectory` to `.workorch-workspaces/<generated-workspace-id>` for the file backend when the client omits it. Runtime state is stored under `repository.dataDir/internal/workspaces/<workspace-id>`. The workspace snapshot endpoint aggregates one workspace together with its related runs and blocking items. The run create, list, single-run, snapshot, status, and observability endpoints provide formal `workorch` run instance management. The run start endpoint synchronously advances a created `run` and returns the updated state, which may already be `completed`, `failed`, `blocked_on_decision`, or `blocked_on_approval`. The run resume endpoint returns `409 conflict` with `blocked` when the required decision or approval has not yet been resolved. The decision and approval endpoints provide formal query and processing paths for blocked runs. All run execution entrypoints share one in-process priority-aware wait queue behind `server.maxConcurrentRuns`. If `[llm].defaultEmbedding` is configured with an explicit provider/model target that supports the `embeddings` operation, workspace execution activation uses `/embeddings` for vector Memory recall and records `memoryRetrieval` evidence on the Run execution context. When defaultEmbedding is unset or embedding fails, activation falls back to workspace memory list baseline selection.
 
 Container-oriented deployment details are in `docs/deployment.md`, and `config/application.toml` provides the baseline runtime configuration template.
 

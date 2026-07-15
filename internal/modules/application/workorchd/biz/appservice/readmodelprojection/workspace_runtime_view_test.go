@@ -377,7 +377,7 @@ func TestDiffWorkspaceProjectionSectionsDetectsFullDisplayFieldMutations(t *test
 		LLMUsageTraces: []readmodelcore.LLMUsageTrace{{
 			ID: "llm-1", WorkspaceID: "ws-diff-full", RunID: "run-1", Status: "ok",
 			Model: "m1", Provider: "p1", ProviderID: "pid-1", TotalTokens: 10, InputTokens: 6, OutputTokens: 4,
-			CacheUsage: map[string]any{"read": 1},
+			CacheUsage: mustPayload(map[string]any{"read": 1}),
 		}},
 		LLMUsageSummary: readmodelcore.LLMUsageSummary{
 			EntryTotal: 1, TotalTokens: 10, CacheReadTokens: 1,
@@ -411,7 +411,7 @@ func TestDiffWorkspaceProjectionSectionsDetectsFullDisplayFieldMutations(t *test
 	candidate.MemoryRecallTraces[0].RetrievedMemoryHits = []readmodelcore.MemoryRecallHit{{ID: "m2", Summary: "hit"}}
 	candidate.LLMUsageTraces = append([]readmodelcore.LLMUsageTrace(nil), previous.LLMUsageTraces...)
 	candidate.LLMUsageTraces[0].Provider = "p2"
-	candidate.LLMUsageTraces[0].CacheUsage = map[string]any{"read": 3}
+	candidate.LLMUsageTraces[0].CacheUsage = mustPayload(map[string]any{"read": 3})
 	candidate.LLMUsageSummary = previous.LLMUsageSummary
 	candidate.LLMUsageSummary.CacheReadTokens = 3
 	candidate.LLMUsageSummary.ProviderModelBreakdown = []readmodelcore.LLMUsageProviderModelBreakdown{{

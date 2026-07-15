@@ -222,6 +222,9 @@ func (b *fakeBackend) Memory() backend.MemoryBackend       { return fakeMemory{}
 func (b *fakeBackend) Template() backend.TemplateBackend   { return fakeTemplate{} }
 func (b *fakeBackend) Config() backend.ConfigBackend       { return fakeConfig{} }
 func (b *fakeBackend) Events() backend.EventsBackend       { return fakeEvents{b: b} }
+func (b *fakeBackend) ProjectionEvents() backend.WorkspaceProjectionEventsBackend {
+	return nil
+}
 
 func (b *fakeBackend) emit(evt backend.Event) {
 	for _, handler := range b.handlers {
@@ -241,6 +244,11 @@ func (fakeWorkspace) List(context.Context) ([]backend.WorkspaceInfo, error) { re
 func (fakeWorkspace) Snapshot(context.Context, common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
 	return &backend.WorkspaceSnapshotInfo{Workspace: backend.WorkspaceInfo{ID: "ws-1"}}, nil
 }
+
+func (fakeWorkspace) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
+	return nil, nil
+}
+
 func (fakeWorkspace) Delete(context.Context, common.WorkspaceID, bool) error { return nil }
 
 type fakeGoal struct{}

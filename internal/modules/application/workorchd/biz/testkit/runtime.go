@@ -3,6 +3,8 @@ package testkit
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -27,6 +29,7 @@ import (
 	orchestratormodule "github.com/muidea/workorch/internal/modules/kernel/orchestrator"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	systemmodule "github.com/muidea/workorch/internal/modules/kernel/system"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 type lifecycle interface {
@@ -65,6 +68,9 @@ func newRuntimeHub(commandHub magicevent.Hub) *runtimeHub {
 
 func (h *runtimeHub) Terminate(ctx context.Context) {
 	h.once.Do(func() {
+		// Module Stop unsubscribes observers. That must happen while the hub is
+		// still accepting control-plane actions, but after background work has
+		// been drained by bootstrap.Runtime.Shutdown (background-first).
 		for idx := len(h.modules) - 1; idx >= 0; idx-- {
 			_ = h.modules[idx].Stop(ctx)
 		}
@@ -96,6 +102,7 @@ func TryNewRuntime(backend string, dataRoot string, commandHub magicevent.Hub) (
 }
 
 func newRuntime(backend string, dataRoot string, commandHub magicevent.Hub) *bootstrap.Runtime {
+	ensureTestLLMConfig()
 	hub := newRuntimeHub(commandHub)
 	hub.repos = buildRepositories(backend, dataRoot)
 	runtime := bootstrap.NewWithBackendAndCommandHub(backend, dataRoot, hub)
@@ -220,4 +227,61 @@ func startOwnerModules(exports Exports, rawHub magicevent.Hub) ([]lifecycle, err
 		started = append(started, module)
 	}
 	return started, nil
+}
+
+func ensureTestLLMConfig() {
+	if cfg, err := workorchconfig.Current(); err == nil && cfg.LLM.AIProxy.BaseURL != "" && cfg.LLM.DefaultChat.ModelID != "" && (cfg.LLM.DefaultChat.ProviderID != "ai-proxy" || len(cfg.LLM.CustomProviders) > 0 || true) {
+		return
+	}
+	configDir, err := os.MkdirTemp("", "workorch-testkit-config-*")
+	if err != nil {
+		panic(fmt.Errorf("create testkit config dir: %w", err))
+	}
+	content := `endpointName = "workorch"
+
+[server]
+addr = ":8080"
+
+[repository]
+backend = "file"
+dataDir = ".workorch-data"
+
+[llm.aiProxy]
+baseURL = "http://127.0.0.1:9"
+timeout = "180s"
+catalogRequestTimeout = "1s"
+catalogTTL = "5m"
+catalogMaxStaleAge = "24h"
+maxCatalogResponseBytes = 1048576
+maxCatalogModels = 1000
+
+[llm.defaultChat]
+providerID = "custom-test"
+modelID = "model-1"
+
+[llm.budget]
+contextUtilizationRatio = 0.75
+estimatedTokensPerByte = 0.25
+defaultMaxOutputTokens = 4096
+maxRequestBytes = 4194304
+
+[llm.customProviders.custom-test]
+provider = "compatible"
+apiSurface = "openai_compatible_http"
+baseURL = "http://127.0.0.1:9"
+timeout = "30s"
+
+[llm.customProviders.custom-test.models.model-1]
+contextWindowTokens = 128000
+maxOutputTokens = 8192
+operations = ["chat_completions"]
+`
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
+		panic(fmt.Errorf("write testkit config: %w", err))
+	}
+	_ = workorchconfig.Close()
+	workorchconfig.ConfigureDirectory(configDir)
+	if _, err := workorchconfig.Current(); err != nil {
+		panic(fmt.Errorf("load testkit config: %w", err))
+	}
 }

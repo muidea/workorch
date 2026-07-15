@@ -499,7 +499,7 @@ func (b *eventHubRunBackend) Command(ctx context.Context, req WorkspaceRunComman
 		Priority:           req.Priority,
 		GoalID:             activation.GoalID,
 		DoDID:              activation.DoDID,
-		LLMProviderID:      activation.LLMProviderID,
+		LLMTarget:          activation.LLMTarget,
 		SoulID:             activation.SoulID,
 		SoulBindings:       commonSoulBindingStrings(activation.SoulBindings),
 		SkillIDs:           append([]common.SkillID(nil), activation.SkillIDs...),

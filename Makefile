@@ -18,7 +18,7 @@ CONSOLE_DEPS_STAMP := $(CONSOLE_NODE_MODULES)/.workorch-deps-stamp
 NPM_CI_FLAGS ?=
 NPM_INSTALL_FLAGS ?=
 
-.PHONY: help deps go-deps console-deps fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-incremental-artifact-e2e verify-contract-violation-recovery-e2e verify-service-restart-recoverable-e2e verify-runtime-profile-software-dev verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration verify-software-requirement-orchestration-deployed verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-auto-governance-ticket-approval verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-workspace-projection-switch verify-run-resume-gap-confirmation-e2e verify-dual-workspace-resume-replan-e2e verify-approval-decision-resolution-e2e observe-runtime-closure verify-convergence-authority-dispatch-live verify-authority-live-e2e-closure verify-runtime-idle-baseline verify-cpu-io-observation-e2e verify-web-console-projection-visual verify-tui-web-projection-e2e verify-e2e-template-contract verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-runtime-closure verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file verify-e2e-full verify-managed-full verify-managed-service-smoke loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file cli-build cli-test cli-clean verify-tui-agent verify-tui-workspace-switch-visual verify-tui-terminal-render verify-tui-long-output release release-check install-latest ci
+.PHONY: help deps go-deps console-deps fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-incremental-artifact-e2e verify-contract-violation-recovery-e2e verify-service-restart-recoverable-e2e verify-runtime-profile-software-dev verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration verify-software-requirement-orchestration-deployed verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-auto-governance-ticket-approval verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-workspace-projection-switch verify-run-resume-gap-confirmation-e2e verify-dual-workspace-resume-replan-e2e verify-approval-decision-resolution-e2e observe-runtime-closure verify-convergence-authority-dispatch-live verify-authority-live-e2e-closure verify-runtime-idle-baseline verify-cpu-io-observation-e2e verify-web-console-projection-visual verify-tui-web-projection-e2e verify-e2e-template-contract verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-runtime-closure verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file verify-e2e-full verify-managed-full verify-managed-service-smoke loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file cli-build cli-test cli-clean verify-tui-agent verify-tui-workspace-switch-visual verify-tui-runtime-refresh-history-live verify-tui-terminal-render verify-tui-long-output release release-check install-latest ci
 
 help:
 	@echo "Targets:"
@@ -98,6 +98,7 @@ help:
 	@echo "  cli-clean  - remove CLI build artifact"
 	@echo "  verify-tui-agent - run TUI agent acceptance checks"
 	@echo "  verify-tui-workspace-switch-visual - record and verify TUI workspace switch view snapshots"
+	@echo "  verify-tui-runtime-refresh-history-live - TC10 live: server restart/SSE reconnect/runtime-view history artifacts"
 	@echo "  verify-tui-terminal-render - verify real PTY TUI render against deployed service"
 	@echo "  release     - build cross-platform release binaries into $(RELEASE_OUT)/"
 	@echo "  release-check - fmt-check + vet + test + verify-boundary-contract + release"
@@ -413,6 +414,9 @@ verify-tui-agent:
 
 verify-tui-workspace-switch-visual:
 	./scripts/verify-tui-workspace-switch-visual.sh
+
+verify-tui-runtime-refresh-history-live:
+	./scripts/verify-tui-runtime-refresh-history-live.sh
 
 verify-tui-terminal-render: cli-build
 	python3 ./scripts/verify-tui-terminal-render-smoke.py

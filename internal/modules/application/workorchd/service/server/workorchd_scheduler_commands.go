@@ -391,7 +391,7 @@ func workspaceRunRequestFromCommand(command workorchdevents.WorkspaceRunRequeste
 	cmd := appservice.ActivateWorkspaceExecutionCommand{
 		GoalID:         string(command.GoalID),
 		DoDID:          string(command.DoDID),
-		LLMProviderID:  command.LLMProviderID,
+		LLMTarget:      command.LLMTarget,
 		SoulID:         string(command.SoulID),
 		SoulBindings:   cloneSchedulerStringMap(command.SoulBindings),
 		SkillIDs:       schedulerIDStrings(command.SkillIDs),

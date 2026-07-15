@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -82,20 +83,226 @@ type runtimeCandidateRetryProjection struct {
 	Instruction     string                                  `json:"instruction"`
 }
 
-func (m *Module) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCandidateRequest) ([]byte, error) {
-	if m == nil || m.providerConfigLoader == nil {
-		return nil, fmt.Errorf("runtime candidate provider is not configured")
+func (m *Module) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+	if m == nil {
+		return llmmodels.RuntimeCandidateGenerationResult{
+			Status: llmmodels.RuntimeCandidateStatusFailed, FailureClass: "internal", FailureReason: "runtime candidate provider is not configured",
+		}, fmt.Errorf("runtime candidate provider is not configured")
 	}
+	startedAt := time.Now().UTC()
+	requestID := newProviderRequestID(request)
 	providerRequest, err := runtimeV2ProviderRequest(request)
 	if err != nil {
-		return nil, err
+		audit := sealedAuditFromRequest(request, requestID, nil, startedAt, time.Now().UTC(), false, llmmodels.RuntimeCandidateStatusFailed, "internal", 0)
+		return llmmodels.RuntimeCandidateGenerationResult{
+			RequestID: requestID, Audit: audit, Status: llmmodels.RuntimeCandidateStatusFailed,
+			FailureClass: "internal", FailureReason: err.Error(),
+		}, err
 	}
-	providerID := request.CandidateContext.Resources.ProviderCeiling.ProviderID
-	completion, _, _, err := m.completeProvider(ctx, providerID, providerRequest)
+	ceiling := request.CandidateContext.Resources.ProviderCeiling
+	if ceiling == nil {
+		err := fmt.Errorf("runtime candidate provider ceiling is missing")
+		audit := sealedAuditFromRequest(request, requestID, providerRequest.ContextBudget, startedAt, time.Now().UTC(), false, llmmodels.RuntimeCandidateStatusFailed, "internal", 0)
+		return llmmodels.RuntimeCandidateGenerationResult{
+			RequestID: requestID, Audit: audit, Status: llmmodels.RuntimeCandidateStatusFailed,
+			FailureClass: "internal", FailureReason: err.Error(),
+		}, err
+	}
+	if err := ceiling.Validate(); err != nil {
+		err = fmt.Errorf("runtime candidate provider ceiling invalid: %w", err)
+		audit := sealedAuditFromRequest(request, requestID, providerRequest.ContextBudget, startedAt, time.Now().UTC(), false, llmmodels.RuntimeCandidateStatusFailed, "internal", 0)
+		return llmmodels.RuntimeCandidateGenerationResult{
+			RequestID: requestID, Audit: audit, Status: llmmodels.RuntimeCandidateStatusFailed,
+			FailureClass: "internal", FailureReason: err.Error(),
+		}, err
+	}
+	providerRequest.Model = ceiling.Target.ModelID
+	if providerRequest.ContextBudget == nil {
+		providerRequest.ContextBudget = &llmmodels.ProviderContextBudget{}
+	}
+	providerRequest.ContextBudget.ProviderID = ceiling.Target.ProviderID
+	providerRequest.ContextBudget.ModelID = ceiling.Target.ModelID
+	providerRequest.ContextBudget.CapabilityRevision = ceiling.CapabilityRevision
+	providerRequest.ContextBudget.ConfigurationRevision = ceiling.ConfigurationRevision
+	providerRequest.ContextBudget.ContextWindowTokens = ceiling.ContextWindowTokens
+	providerRequest.ContextBudget.ProviderMaxOutputTokens = ceiling.ProviderMaxOutputTokens
+	providerRequest.ContextBudget.EffectiveMaxOutputTokens = ceiling.EffectiveMaxOutputTokens
+	providerRequest.ContextBudget.MaxBytes = ceiling.MaxBytes
+	providerRequest.ContextBudget.MaxRequestBytes = ceiling.MaxBytes
+	providerRequest.ContextBudget.MaxTokens = ceiling.MaxInputTokens
+	providerRequest.ContextBudget.EstimatedOutputTokens = ceiling.EffectiveMaxOutputTokens
+	providerRequest.ContextBudget.CapabilitySource = "sealed_ceiling"
+	providerRequest.ContextBudget.ProfileMode = "runtime_v2_sealed_ceiling"
+
+	// Sealed path: never re-resolve catalog/current profile.
+	// Capture a pre-submit audit snapshot; completeProviderWithSealedCeiling mutates a local copy.
+	budgetSnapshot := cloneProviderContextBudget(providerRequest.ContextBudget)
+	completion, err := m.completeProviderWithSealedCeiling(ctx, *ceiling, providerRequest)
+	completedAt := time.Now().UTC()
 	if err != nil {
-		return nil, err
+		// Provider may have been contacted; mark submitted when the sealed path reached Complete.
+		// completeProviderWithSealedCeiling only returns after client construction; treat as submitted
+		// once we leave that call with a non-config error. For pre-dispatch errors ProviderSubmitted stays false.
+		submitted := isProviderDispatchAttempted(err)
+		if budgetSnapshot != nil {
+			budgetSnapshot.ProviderSubmitted = submitted
+		}
+		audit := sealedAuditFromRequest(request, requestID, budgetSnapshot, startedAt, completedAt, submitted, llmmodels.RuntimeCandidateStatusFailed, "provider", len(providerRequest.Schema))
+		if budgetSnapshot != nil {
+			audit.RequestBytes = budgetSnapshot.ActualBytes
+		}
+		return llmmodels.RuntimeCandidateGenerationResult{
+			RequestID: requestID, Audit: audit, Status: llmmodels.RuntimeCandidateStatusFailed,
+			FailureClass: "provider", FailureReason: err.Error(),
+		}, err
 	}
-	return append([]byte(nil), completion.Payload...), nil
+	if budgetSnapshot != nil {
+		budgetSnapshot.ProviderSubmitted = true
+		if completion.Usage != nil {
+			budgetSnapshot.ActualTokens = completion.Usage.TotalTokens
+		}
+	}
+	responseBytes := len(completion.Payload)
+	audit := sealedAuditFromRequest(request, requestID, budgetSnapshot, startedAt, completedAt, true, llmmodels.RuntimeCandidateStatusCompleted, "", responseBytes)
+	if budgetSnapshot != nil {
+		audit.RequestBytes = budgetSnapshot.ActualBytes
+	}
+	var usage *llmmodels.ProviderUsage
+	if completion.Usage != nil {
+		cloned := *completion.Usage
+		usage = &cloned
+	}
+	return llmmodels.RuntimeCandidateGenerationResult{
+		RequestID: requestID,
+		Payload:   append([]byte(nil), completion.Payload...),
+		Usage:     usage,
+		Audit:     audit,
+		Status:    llmmodels.RuntimeCandidateStatusCompleted,
+	}, nil
+}
+
+func newProviderRequestID(request llmmodels.RuntimeCandidateRequest) string {
+	workspaceID := string(request.CandidateContext.WorkspaceID)
+	runID := string(request.CandidateContext.RunID)
+	stepID := request.Transaction.AuthoritySnapshotID
+	attempt := request.CandidateAttempt
+	return fmt.Sprintf("llm-req-%s-%s-%s-%d-%d", workspaceID, runID, stepID, attempt, time.Now().UTC().UnixNano())
+}
+
+func sealedAuditFromRequest(
+	request llmmodels.RuntimeCandidateRequest,
+	requestID string,
+	budget *llmmodels.ProviderContextBudget,
+	startedAt, completedAt time.Time,
+	submitted bool,
+	status, failureClass string,
+	responseBytes int,
+) *llmmodels.ProviderRequestAudit {
+	ceiling := request.CandidateContext.Resources.ProviderCeiling
+	target := runtimecontract.ProviderModelTarget{}
+	capabilityRevision := ""
+	configurationRevision := ""
+	if ceiling != nil {
+		target = ceiling.Target
+		capabilityRevision = ceiling.CapabilityRevision
+		configurationRevision = ceiling.ConfigurationRevision
+	}
+	if budget != nil {
+		if budget.ProviderID != "" {
+			target.ProviderID = budget.ProviderID
+		}
+		if budget.ModelID != "" {
+			target.ModelID = budget.ModelID
+		}
+		if budget.CapabilityRevision != "" {
+			capabilityRevision = budget.CapabilityRevision
+		}
+		if budget.ConfigurationRevision != "" {
+			configurationRevision = budget.ConfigurationRevision
+		}
+	}
+	durationMs := int(completedAt.Sub(startedAt).Milliseconds())
+	if durationMs < 0 {
+		durationMs = 0
+	}
+	requestBytes := 0
+	if budget != nil {
+		requestBytes = budget.ActualBytes
+	}
+	return &llmmodels.ProviderRequestAudit{
+		RequestID:             requestID,
+		WorkspaceID:           string(request.CandidateContext.WorkspaceID),
+		RunID:                 string(request.CandidateContext.RunID),
+		StepID:                request.Transaction.AuthoritySnapshotID,
+		Target:                target,
+		Operation:             "chat_completions",
+		CapabilityRevision:    capabilityRevision,
+		ConfigurationRevision: configurationRevision,
+		StablePrefixHash:      request.StablePrefixHash,
+		Kind:                  "runtime_v2_candidate",
+		ContextBudget:         cloneProviderContextBudget(budget),
+		ProviderSubmitted:     submitted,
+		Status:                status,
+		FailureClass:          failureClass,
+		StartedAt:             startedAt.Format(time.RFC3339Nano),
+		CompletedAt:           completedAt.Format(time.RFC3339Nano),
+		DurationMs:            durationMs,
+		RequestBytes:          requestBytes,
+		ResponseBytes:         responseBytes,
+	}
+}
+
+func cloneProviderContextBudget(budget *llmmodels.ProviderContextBudget) *llmmodels.ProviderContextBudget {
+	if budget == nil {
+		return nil
+	}
+	cloned := *budget
+	if budget.CachePlan != nil {
+		plan := *budget.CachePlan
+		plan.SectionHashes = append([]llmmodels.ProviderCacheSectionHash(nil), budget.CachePlan.SectionHashes...)
+		plan.CacheBreakers = append([]llmmodels.ProviderCacheBreaker(nil), budget.CachePlan.CacheBreakers...)
+		plan.Canonicalization.SectionOrder = append([]string(nil), budget.CachePlan.Canonicalization.SectionOrder...)
+		plan.AdapterHint.CacheablePrefix = append([]string(nil), budget.CachePlan.AdapterHint.CacheablePrefix...)
+		plan.AdapterHint.VolatileSections = append([]string(nil), budget.CachePlan.AdapterHint.VolatileSections...)
+		plan.AdapterHint.CacheBreakers = append([]string(nil), budget.CachePlan.AdapterHint.CacheBreakers...)
+		cloned.CachePlan = &plan
+	}
+	cloned.Rules = append([]string(nil), budget.Rules...)
+	cloned.SourceRefs = append([]string(nil), budget.SourceRefs...)
+	cloned.IncludedSections = append([]string(nil), budget.IncludedSections...)
+	cloned.NormalizedSections = append([]string(nil), budget.NormalizedSections...)
+	cloned.CompressedSections = append([]string(nil), budget.CompressedSections...)
+	cloned.OmittedSections = append([]string(nil), budget.OmittedSections...)
+	cloned.RedactedPaths = append([]string(nil), budget.RedactedPaths...)
+	cloned.ProtectedFields = append([]string(nil), budget.ProtectedFields...)
+	cloned.IntegrityWarnings = append([]string(nil), budget.IntegrityWarnings...)
+	return &cloned
+}
+
+// isProviderDispatchAttempted reports whether a sealed completion error likely occurred after
+// the HTTP/SDK client was invoked. Pre-dispatch configuration/client errors stay unsubmitted.
+func isProviderDispatchAttempted(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	// Configuration / client construction failures never reach the network.
+	for _, marker := range []string{
+		"provider client is not configured",
+		"configuration revision",
+		"provider_configuration_drift",
+		"sealed ceiling",
+		"llm config",
+		"resolve provider",
+		"api key",
+		"baseurl",
+		"base url",
+	} {
+		if strings.Contains(message, marker) {
+			return false
+		}
+	}
+	return true
 }
 
 func runtimeV2ProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmodels.ProviderRequest, error) {
@@ -106,8 +313,11 @@ func runtimeV2ProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmod
 		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate stable prefix mismatch")
 	}
 	ceiling := candidateContext.Resources.ProviderCeiling
-	if ceiling == nil || strings.TrimSpace(ceiling.ProviderID) == "" || ceiling.MaxBytes <= 0 {
+	if ceiling == nil || ceiling.MaxBytes <= 0 {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate provider ceiling is missing")
+	}
+	if err := ceiling.Target.Validate(); err != nil {
+		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate provider ceiling target invalid: %w", err)
 	}
 	definitionJSON, err := json.Marshal(runtimeCandidateDefinitionProjection{
 		Revision: definitionContext.Revision, GoalID: definitionContext.GoalID,
@@ -152,10 +362,19 @@ func runtimeV2ProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmod
 			{ID: "C2.capability-contract", Name: "Capability contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 2, Content: string(capabilityJSON)},
 			{ID: "C3.runtime-authority", Name: "Current runtime authority", Role: "user", Cacheability: "volatile", Protected: true, DisplayOrder: 3, Content: string(dynamicJSON)},
 		}},
-		ContextBudget: &llmmodels.ProviderContextBudget{MaxBytes: ceiling.MaxBytes, MaxRequestBytes: ceiling.MaxBytes, ProfileMode: "runtime_v2_typed_ceiling", CachePlan: &llmmodels.ProviderCachePlan{
-			SchemaVersion: "workorch.provider_cache_plan.v1", Strategy: "stable_prefix_dynamic_tail",
-			StablePrefixHash: wantPrefix, RenderedStablePrefixHash: wantPrefix,
-		}},
+		ContextBudget: &llmmodels.ProviderContextBudget{
+			ProviderID: ceiling.Target.ProviderID, ModelID: ceiling.Target.ModelID,
+			CapabilityRevision: ceiling.CapabilityRevision, ConfigurationRevision: ceiling.ConfigurationRevision,
+			ContextWindowTokens: ceiling.ContextWindowTokens, ProviderMaxOutputTokens: ceiling.ProviderMaxOutputTokens,
+			EffectiveMaxOutputTokens: ceiling.EffectiveMaxOutputTokens,
+			MaxBytes:                 ceiling.MaxBytes, MaxRequestBytes: ceiling.MaxBytes, MaxTokens: ceiling.MaxInputTokens,
+			EstimatedOutputTokens: ceiling.EffectiveMaxOutputTokens,
+			CapabilitySource:      "sealed_ceiling", ProfileMode: "runtime_v2_typed_ceiling",
+			CachePlan: &llmmodels.ProviderCachePlan{
+				SchemaVersion: "workorch.provider_cache_plan.v1", Strategy: "stable_prefix_dynamic_tail",
+				StablePrefixHash: wantPrefix, RenderedStablePrefixHash: wantPrefix,
+			},
+		},
 	}
 	payload, err := json.Marshal(providerRequest)
 	if err != nil {

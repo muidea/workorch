@@ -1,6 +1,9 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
 type llmUsageCacheMetrics struct {
 	cacheReadTokens          int
@@ -12,15 +15,25 @@ type llmUsageCacheMetrics struct {
 	cacheProviderNativeEntry bool
 }
 
+func llmUsagePayloadInt(payload workorcheventpayload.Payload, key string) int {
+	value, _ := payload.Int64(key)
+	return int(value)
+}
+
+func llmUsagePayloadBool(payload workorcheventpayload.Payload, key string) bool {
+	value, _ := payload.Bool(key)
+	return value
+}
+
 func llmUsageCacheMetricsFromTrace(item readmodelcore.LLMUsageTrace) llmUsageCacheMetrics {
 	ret := llmUsageCacheMetrics{
-		cacheReadTokens:         readModelIntValue(item.CacheUsage["cacheReadTokens"]),
-		cacheWriteTokens:        readModelIntValue(item.CacheUsage["cacheWriteTokens"]),
-		cacheCreationTokens:     readModelIntValue(item.CacheUsage["cacheCreationTokens"]),
-		cacheableInputTokens:    readModelIntValue(item.CacheUsage["cacheableInputTokens"]),
-		nonCacheableInputTokens: readModelIntValue(item.CacheUsage["nonCacheableInputTokens"]),
+		cacheReadTokens:         llmUsagePayloadInt(item.CacheUsage, "cacheReadTokens"),
+		cacheWriteTokens:        llmUsagePayloadInt(item.CacheUsage, "cacheWriteTokens"),
+		cacheCreationTokens:     llmUsagePayloadInt(item.CacheUsage, "cacheCreationTokens"),
+		cacheableInputTokens:    llmUsagePayloadInt(item.CacheUsage, "cacheableInputTokens"),
+		nonCacheableInputTokens: llmUsagePayloadInt(item.CacheUsage, "nonCacheableInputTokens"),
 	}
-	if len(item.CacheUsage) == 0 {
+	if len(item.CacheUsage.Fields) == 0 {
 		return ret
 	}
 	ret.cacheEstimatedEntry = llmUsageCacheEstimatedEntry(item)

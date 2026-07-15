@@ -249,10 +249,58 @@ type ValidationScratch struct {
 	Revision  string
 }
 
+// ProviderCeiling seals the provider/model capability budget for one Runtime V2 Run.
+// Runtime core only checks identity, positive ceilings, and revision presence.
+// Budget derivation remains owned by blocks/llm.
 type ProviderCeiling struct {
-	ProviderID string
-	MaxBytes   int
-	Revision   string
+	Target                   ProviderModelTarget
+	ContextWindowTokens      int
+	ProviderMaxOutputTokens  int
+	EffectiveMaxOutputTokens int
+	MaxInputTokens           int
+	MaxBytes                 int
+	CapabilityRevision       string
+	ConfigurationRevision    string
+}
+
+func (c ProviderCeiling) Normalized() ProviderCeiling {
+	c.Target = c.Target.Normalized()
+	c.CapabilityRevision = strings.TrimSpace(c.CapabilityRevision)
+	c.ConfigurationRevision = strings.TrimSpace(c.ConfigurationRevision)
+	return c
+}
+
+func (c ProviderCeiling) Validate() error {
+	c = c.Normalized()
+	if err := c.Target.Validate(); err != nil {
+		return fmt.Errorf("provider ceiling target: %w", err)
+	}
+	if c.ContextWindowTokens <= 0 || c.ProviderMaxOutputTokens <= 0 || c.EffectiveMaxOutputTokens <= 0 || c.MaxInputTokens <= 0 || c.MaxBytes <= 0 {
+		return fmt.Errorf("provider ceiling requires positive token and byte ceilings")
+	}
+	if c.MaxInputTokens+c.EffectiveMaxOutputTokens > c.ContextWindowTokens {
+		return fmt.Errorf("provider ceiling max input plus effective max output exceeds context window")
+	}
+	if c.CapabilityRevision == "" || c.ConfigurationRevision == "" {
+		return fmt.Errorf("provider ceiling requires capability and configuration revision")
+	}
+	return nil
+}
+
+func SameProviderCeiling(left *ProviderCeiling, right *ProviderCeiling) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	l := left.Normalized()
+	r := right.Normalized()
+	return l.Target.Same(r.Target) &&
+		l.ContextWindowTokens == r.ContextWindowTokens &&
+		l.ProviderMaxOutputTokens == r.ProviderMaxOutputTokens &&
+		l.EffectiveMaxOutputTokens == r.EffectiveMaxOutputTokens &&
+		l.MaxInputTokens == r.MaxInputTokens &&
+		l.MaxBytes == r.MaxBytes &&
+		l.CapabilityRevision == r.CapabilityRevision &&
+		l.ConfigurationRevision == r.ConfigurationRevision
 }
 
 type RequiredOutputContract struct {
@@ -394,9 +442,7 @@ func (r RuntimeResourceFacts) Normalized() RuntimeResourceFacts {
 		r.ValidationScratch = &scratch
 	}
 	if r.ProviderCeiling != nil {
-		ceiling := *r.ProviderCeiling
-		ceiling.ProviderID = strings.TrimSpace(ceiling.ProviderID)
-		ceiling.Revision = strings.TrimSpace(ceiling.Revision)
+		ceiling := r.ProviderCeiling.Normalized()
 		r.ProviderCeiling = &ceiling
 	}
 	return r

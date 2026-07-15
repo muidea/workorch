@@ -61,6 +61,9 @@ func (b *fakeBackend) Memory() backend.MemoryBackend       { return &fakeMem{} }
 func (b *fakeBackend) Template() backend.TemplateBackend   { return &fakeTmpl{b} }
 func (b *fakeBackend) Config() backend.ConfigBackend       { return &fakeCfg{} }
 func (b *fakeBackend) Events() backend.EventsBackend       { return &fakeEvents{b} }
+func (b *fakeBackend) ProjectionEvents() backend.WorkspaceProjectionEventsBackend {
+	return nil
+}
 
 // Emit sends a backend event to all subscribers.
 func (b *fakeBackend) Emit(ctx context.Context, evt backend.Event) {
@@ -119,6 +122,11 @@ func (f *fakeWS) Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.
 		Approvals: append([]backend.ApprovalInfo(nil), f.b.approvals...),
 	}, nil
 }
+
+func (f *fakeWS) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
+	return nil, nil
+}
+
 func (f *fakeWS) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error { return nil }
 
 // ── Goal ──

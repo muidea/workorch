@@ -101,6 +101,7 @@ func TestApplyRuntimeV2ProgressHealthyRunDoesNotMarkRepairActive(t *testing.T) {
 			},
 			CompletedDispatches: []runtimecontract.RuntimeDispatchRecord{{ID: "dispatch-1"}},
 			Facts: runtimecontract.RuntimeFacts{
+				Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 				WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def", EvidenceRevision: "ev",
 				Focus: runtimecontract.CoverageFocus{ID: "focus-1", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}},
 			},
@@ -185,6 +186,7 @@ func TestApplyRuntimeV2ProgressCompletedRunRepairResolved(t *testing.T) {
 			},
 			CompletedDispatches: []runtimecontract.RuntimeDispatchRecord{{ID: "dispatch-1"}},
 			Facts: runtimecontract.RuntimeFacts{
+				Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 				WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def", EvidenceRevision: "ev",
 				Focus: runtimecontract.CoverageFocus{ID: "focus-1"},
 			},

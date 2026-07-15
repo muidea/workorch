@@ -1,0 +1,37 @@
+endpointName = "workorch-live-ai-proxy"
+
+[server]
+addr = "127.0.0.1:18080"
+readHeaderTimeout = "5s"
+readTimeout = "15s"
+writeTimeout = "30s"
+idleTimeout = "30s"
+shutdownTimeout = "5s"
+maxConcurrentRuns = 1
+
+[repository]
+backend = "file"
+dataDir = "/home/rangh/aispace/workorch/docs/60-verification/artifacts/ai-proxy-primary-llm-live-runtime-20260715T150944Z/data"
+
+[llm.aiProxy]
+baseURL = "http://127.0.0.1:18183"
+timeout = "30s"
+catalogRequestTimeout = "5s"
+catalogTTL = "5m"
+catalogMaxStaleAge = "24h"
+maxCatalogResponseBytes = 1048576
+maxCatalogModels = 32
+
+[llm.defaultChat]
+providerID = "ai-proxy"
+modelID = "live-chat-a"
+
+[llm.defaultEmbedding]
+providerID = "ai-proxy"
+modelID = "live-embedding"
+
+[llm.budget]
+contextUtilizationRatio = 0.75
+estimatedTokensPerByte = 0.25
+defaultMaxOutputTokens = 4096
+maxRequestBytes = 4194304

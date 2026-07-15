@@ -2,7 +2,6 @@ package activationports
 
 import (
 	"context"
-	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
@@ -11,34 +10,35 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
-func semanticMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*memorymodel.MemoryItem, map[string]any, bool) {
+func semanticMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*memorymodel.MemoryItem, *MemorySelectionEvidence, bool) {
 	if opts.EmbeddingProviderConfig != nil {
-		return nil, map[string]any{
-			"policy": "semantic_vector_search",
-			"status": "degraded",
-			"reason": opts.EmbeddingProviderConfig.Error(),
+		return nil, &MemorySelectionEvidence{
+			Policy: "semantic_vector_search",
+			Status: "degraded",
+			Reason: opts.EmbeddingProviderConfig.Error(),
 		}, true
 	}
-	providerID := strings.TrimSpace(opts.EmbeddingProviderID)
-	if providerID == "" {
+	target := opts.EmbeddingTarget.Normalized()
+	if target.Validate() != nil {
 		return nil, nil, false
 	}
 	queryText := activationcore.MemoryRetrievalQueryText(opts.Goal, opts.DoD)
-	evidence := map[string]any{
-		"policy":              "semantic_vector_search",
-		"providerId":          providerID,
-		"operation":           llmcommon.ProviderOperationEmbeddings,
-		"queryTextPreview":    activationcore.PreviewRetrievalQuery(queryText),
-		"queryTextSha256":     activationcore.SHA256Hex(queryText),
-		"minScore":            0.1,
-		"limit":               8,
-		"retrievedMemoryIds":  []string{},
-		"retrievedMemoryHits": []map[string]any{},
+	evidence := &MemorySelectionEvidence{
+		Policy:              "semantic_vector_search",
+		ProviderID:          target.ProviderID,
+		ModelID:             target.ModelID,
+		Operation:           llmcommon.ProviderOperationEmbeddings,
+		QueryTextPreview:    activationcore.PreviewRetrievalQuery(queryText),
+		QueryTextSHA256:     activationcore.SHA256Hex(queryText),
+		MinScore:            0.1,
+		Limit:               8,
+		RetrievedMemoryIDs:  []string{},
+		RetrievedMemoryHits: []MemorySelectionHit{},
 	}
-	embedding, err := GenerateEmbedding(ctx, opts.Hub, providerID, queryText)
+	embedding, err := GenerateEmbedding(ctx, opts.Hub, target, queryText)
 	if err != nil {
-		evidence["status"] = "degraded"
-		evidence["reason"] = err.Error()
+		evidence.Status = "degraded"
+		evidence.Reason = err.Error()
 		return nil, evidence, true
 	}
 	items, err := ownerreadports.SearchMemoryByOwnerCommand(ctx, opts.Hub, repository.MemorySearchQuery{
@@ -48,14 +48,25 @@ func semanticMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*m
 		Limit:       8,
 	})
 	if err != nil {
-		evidence["status"] = "degraded"
-		evidence["reason"] = err.Error()
+		evidence.Status = "degraded"
+		evidence.Reason = err.Error()
 		return nil, evidence, true
 	}
-	evidence["status"] = "selected"
-	evidence["embeddingModel"] = embedding.Model
-	evidence["vectorDimension"] = len(embedding.Vector)
-	evidence["retrievedMemoryIds"] = activationcore.MemoryItemIDs(items)
-	evidence["retrievedMemoryHits"] = activationcore.MemoryRetrievalHits(items)
+	evidence.Status = "selected"
+	evidence.EmbeddingModel = embedding.Model
+	evidence.VectorDimension = len(embedding.Vector)
+	evidence.RetrievedMemoryIDs = activationcore.MemoryItemIDs(items)
+	evidence.RetrievedMemoryHits = memorySelectionHits(items)
 	return items, evidence, true
+}
+
+func memorySelectionHits(items []*memorymodel.MemoryItem) []MemorySelectionHit {
+	ret := make([]MemorySelectionHit, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		ret = append(ret, MemorySelectionHit{ID: string(item.ID), Score: item.VectorScore})
+	}
+	return ret
 }

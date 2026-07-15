@@ -9,6 +9,7 @@ import (
 
 func TestDeriveRuntimeRepairHintsPreferValidation(t *testing.T) {
 	facts := RuntimeFacts{
+		Activation:  RuntimeActivationContext{ProviderTarget: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def-1", EvidenceRevision: "ev-1",
 		Focus: CoverageFocus{
 			ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},

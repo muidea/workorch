@@ -1,0 +1,3 @@
+# Durable server data/deliverables are not evidence; keep report/summary/views/sse/logs only.
+**/data/
+**/deliverables/

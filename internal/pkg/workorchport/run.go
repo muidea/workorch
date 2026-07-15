@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type RunInfo struct {
@@ -23,7 +24,7 @@ type RunInfo struct {
 type ActivateRunRequest struct {
 	GoalID             common.GoalID
 	DoDID              common.DoDID
-	LLMProviderID      string
+	LLMTarget          *runtimecontract.ProviderModelTarget
 	DialogLanguage     string
 	SoulID             common.SoulID
 	SoulBindings       map[string]common.SoulID

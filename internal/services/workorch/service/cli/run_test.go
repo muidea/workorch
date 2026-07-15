@@ -141,7 +141,7 @@ func TestRunActivateUsesUnifiedWorkspaceRunCommand(t *testing.T) {
 		got.Activation.GoalID != "goal-cli-activate" ||
 		got.Activation.DoDID != "dod-cli-activate" ||
 		got.Activation.SoulID != "soul-cli-activate" ||
-		got.Activation.LLMProviderID != "provider-cli-activate" ||
+		got.Activation.LLMTarget == nil || got.Activation.LLMTarget.ProviderID != "provider-cli-activate" ||
 		got.Activation.DialogLanguage != "zh-CN" ||
 		got.Activation.Priority != 3 {
 		t.Fatalf("command = %+v, want scoped activation resume command from cli", got)

@@ -7,7 +7,17 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
+
+func mustSnapshotDetailPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
+	t.Helper()
+	payload, err := workorcheventpayload.FromMap(input)
+	if err != nil {
+		t.Fatalf("payload: %v", err)
+	}
+	return payload
+}
 
 func TestProjectWorkspaceSnapshotDetailCompactsHeavyFields(t *testing.T) {
 	t.Parallel()
@@ -25,10 +35,10 @@ func TestProjectWorkspaceSnapshotDetailCompactsHeavyFields(t *testing.T) {
 		traces = append(traces, readmodelcore.LLMUsageTrace{
 			ID:    "usage-" + strconv.Itoa(idx),
 			RunID: "run-11",
-			ContextBudget: map[string]any{
+			ContextBudget: mustSnapshotDetailPayload(t, map[string]any{
 				"failureSignature": "prefix-" + strconv.Itoa(idx) + "-" + strings.Repeat("x", workspaceSnapshotTraceStringLimit+200),
 				"recentFailures":   []any{"one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen"},
-			},
+			}),
 		})
 	}
 
@@ -63,11 +73,11 @@ func TestProjectWorkspaceSnapshotDetailCompactsHeavyFields(t *testing.T) {
 	if got.LLMUsageTraces[0].ID != "usage-3" {
 		t.Fatalf("first trace = %q, want latest traces retained", got.LLMUsageTraces[0].ID)
 	}
-	if signature := got.LLMUsageTraces[0].ContextBudget["failureSignature"].(string); len(signature) > workspaceSnapshotTraceStringLimit+len("...[truncated]") {
+	if signature, ok := got.LLMUsageTraces[0].ContextBudget.String("failureSignature"); !ok || len(signature) > workspaceSnapshotTraceStringLimit+len("...[truncated]") {
 		t.Fatalf("context budget failureSignature length = %d, want bounded", len(signature))
 	}
-	if recent := got.LLMUsageTraces[0].ContextBudget["recentFailures"].([]any); len(recent) != workspaceSnapshotTraceSliceLimit {
-		t.Fatalf("context budget recentFailures = %d, want %d", len(recent), workspaceSnapshotTraceSliceLimit)
+	if recent, ok := got.LLMUsageTraces[0].ContextBudget.Field("recentFailures"); !ok || len(recent.Array) != workspaceSnapshotTraceSliceLimit {
+		t.Fatalf("context budget recentFailures = %d, want %d", len(recent.Array), workspaceSnapshotTraceSliceLimit)
 	}
 	if got.LLMUsageSummary.EntryTotal != len(traces) {
 		t.Fatalf("summary entry total = %d, want full total %d", got.LLMUsageSummary.EntryTotal, len(traces))
@@ -104,9 +114,9 @@ func TestProjectWorkspaceSnapshotSummaryOmitsPollingHeavyRuntimeFields(t *testin
 		ExecutionSections: repeatedExecutionSectionsForSummary(3),
 		LLMUsageTraces: []readmodelcore.LLMUsageTrace{{
 			ID: "usage-summary-compact",
-			ContextBudget: map[string]any{
+			ContextBudget: mustSnapshotDetailPayload(t, map[string]any{
 				"large": strings.Repeat("budget", 2000),
-			},
+			}),
 		}},
 		EventRecords: []readmodelcore.EventRecord{{
 			ID: "evt-summary-compact",
@@ -404,9 +414,9 @@ func TestProjectWorkspaceSnapshotDetailCompactsContextAndRunDerivedCollections(t
 			StepID:     "step-" + strconv.Itoa(idx),
 			Rules:      repeatedStrings("rule", workspaceSnapshotTraceSliceLimit+3),
 			SourceRefs: repeatedStrings("source", workspaceSnapshotTraceSliceLimit+3),
-			Profile: map[string]any{
+			Profile: mustSnapshotDetailPayload(t, map[string]any{
 				"long": strings.Repeat("p", workspaceSnapshotTraceStringLimit+200),
-			},
+			}),
 		})
 	}
 

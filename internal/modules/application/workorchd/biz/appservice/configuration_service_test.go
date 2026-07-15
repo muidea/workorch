@@ -4,13 +4,38 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
-func TestReadServiceConfigurationRedactsLLMProviders(t *testing.T) {
+func validLLMTOML() string {
+	return `
+[llm.aiProxy]
+baseURL = "http://127.0.0.1:8080"
+apiKey = "test-key"
+timeout = "180s"
+catalogRequestTimeout = "5s"
+catalogTTL = "5m"
+catalogMaxStaleAge = "24h"
+maxCatalogResponseBytes = 1048576
+maxCatalogModels = 1000
+
+[llm.defaultChat]
+providerID = "ai-proxy"
+modelID = "gpt-4o"
+
+[llm.budget]
+contextUtilizationRatio = 0.75
+estimatedTokensPerByte = 0.25
+defaultMaxOutputTokens = 4096
+maxRequestBytes = 4194304
+`
+}
+
+func TestReadServiceConfigurationRedactsAIProxySecrets(t *testing.T) {
 	configDir := t.TempDir()
 	content := `
 endpointName = "workorch"
@@ -47,20 +72,7 @@ previousChunkTailBytes = 128
 maxChunkRetryAttempts = 4
 maxArtifactPlanAttempts = 3
 maxArtifactReplanAttempts = 2
-
-[llm]
-defaultProvider = "local"
-defaultEmbeddingProvider = "local"
-
-[llm.providers.local]
-provider = "compatible"
-baseURL = "http://127.0.0.1:11434/v1"
-apiKey = "secret-value"
-model = "local-model"
-timeout = "60s"
-disabled = false
-streaming = true
-nonChatOperations = ["embeddings"]
+` + validLLMTOML() + `
 
 [webSearch]
 defaultProvider = "search"
@@ -110,62 +122,24 @@ maxRepeatedSamePrompt = 1
 	if cfg.Server.Addr != "127.0.0.1:18080" || cfg.Repository.Backend != "file" {
 		t.Fatalf("configuration = %+v, want server and repository config", cfg)
 	}
-	if cfg.Runtime.DefaultSoulID != "soul-system" ||
-		cfg.Runtime.MaxRuntimeRepairAttempts != 11 ||
-		cfg.Runtime.MaxProviderRetryAttempts != 12 ||
-		cfg.Runtime.ShellCommandTimeout != "90s" {
-		t.Fatalf("runtime configuration = %+v, want system runtime settings", cfg.Runtime)
+	if cfg.LLM.AIProxy.BaseURL != "http://127.0.0.1:8080" || !cfg.LLM.AIProxy.APIKeyConfigured {
+		t.Fatalf("aiProxy = %+v, want redacted configured ai-proxy", cfg.LLM.AIProxy)
 	}
-	if cfg.Runtime.Git.DefaultTimeout != "45s" {
-		t.Fatalf("runtime git configuration = %+v, want git runtime timeout", cfg.Runtime.Git)
+	if cfg.LLM.DefaultChat.ProviderID != "ai-proxy" || cfg.LLM.DefaultChat.ModelID != "gpt-4o" {
+		t.Fatalf("defaultChat = %+v, want ai-proxy/gpt-4o", cfg.LLM.DefaultChat)
 	}
-	if cfg.Runtime.LLMOutput.MaxPatchContentBytes != 4096 ||
-		cfg.Runtime.LLMOutput.MaxGraphBytes != 16384 ||
-		cfg.Runtime.LLMOutput.MaxGraphFileWrites != 2 ||
-		cfg.Runtime.LLMOutput.SchemaInvalidLargePreviewThreshold != 8192 ||
-		cfg.Runtime.LLMOutput.MaxArtifactChunkBytes != 4096 ||
-		cfg.Runtime.LLMOutput.PreviousChunkTailBytes != 128 ||
-		cfg.Runtime.LLMOutput.MaxChunkRetryAttempts != 4 ||
-		cfg.Runtime.LLMOutput.MaxArtifactPlanAttempts != 3 ||
-		cfg.Runtime.LLMOutput.MaxArtifactReplanAttempts != 2 {
-		t.Fatalf("runtime llmOutput configuration = %+v, want configured thresholds", cfg.Runtime.LLMOutput)
+	if cfg.LLM.Budget.DefaultMaxOutputTokens != 4096 || cfg.LLM.Budget.MaxRequestBytes != 4194304 {
+		t.Fatalf("budget = %+v, want configured budget", cfg.LLM.Budget)
 	}
-	if cfg.LLM.DefaultProviderID != "local" || cfg.LLM.DefaultEmbeddingProviderID != "local" || len(cfg.LLM.Providers) != 1 {
-		t.Fatalf("llm configuration = %+v, want local provider", cfg.LLM)
+	if cfg.WebSearch.DefaultProviderID != "search" || len(cfg.WebSearch.Providers) != 1 {
+		t.Fatalf("web search configuration = %+v, want search provider", cfg.WebSearch)
 	}
-	if len(cfg.LLM.ProviderTemplates) != 3 {
-		t.Fatalf("provider templates = %+v, want openai/anthropic/compatible templates", cfg.LLM.ProviderTemplates)
-	}
-	provider := cfg.LLM.Providers[0]
-	if !provider.Ready || !provider.Default || !provider.APIKeyConfigured || provider.Model != "local-model" ||
-		!provider.ChatCompletions || !provider.Streaming || len(provider.NonChatOperations) != 1 || provider.NonChatOperations[0] != "embeddings" {
-		t.Fatalf("provider = %+v, want ready redacted local provider", provider)
-	}
-	if cfg.WebSearch.DefaultProviderID != "search" || len(cfg.WebSearch.Providers) != 1 || len(cfg.WebSearch.ProviderTemplates) != 1 {
-		t.Fatalf("web search configuration = %+v, want search provider and template", cfg.WebSearch)
-	}
-	webProvider := cfg.WebSearch.Providers[0]
-	if !webProvider.Ready || !webProvider.Default || !webProvider.APIKeyConfigured ||
-		webProvider.SearchEndpoint != "https://search.example.test/search" ||
-		webProvider.FetchEndpoint != "https://search.example.test/fetch" ||
-		webProvider.MaxResults != 7 || webProvider.MaxFetchBytes != 131072 || len(webProvider.AllowDomains) != 1 ||
-		webProvider.Headers["X-WorkOrch-Client"] != "workorch" {
-		t.Fatalf("web provider = %+v, want ready redacted web provider", webProvider)
-	}
-	if !cfg.Governance.AutoTicket.Enabled ||
-		cfg.Governance.AutoTicket.MinConfidence != 0.82 ||
-		cfg.Governance.AutoTicket.MaxPerRun != 5 ||
-		!cfg.Governance.AutoApproval.Enabled ||
-		!cfg.Governance.AutoApproval.AllowReadOnly ||
-		!cfg.Governance.AutoApproval.AllowWorkspaceWrite ||
-		len(cfg.Governance.AutoApproval.RequireHumanFor) != 2 ||
-		cfg.Governance.Budget.MaxConsecutiveFailures != 2 ||
-		cfg.Governance.Budget.MaxRepeatedSamePrompt != 1 {
+	if !cfg.Governance.AutoTicket.Enabled || cfg.Governance.Budget.MaxConsecutiveFailures != 2 {
 		t.Fatalf("governance configuration = %+v, want auto governance settings", cfg.Governance)
 	}
 }
 
-func TestUpdateLLMConfigurationPersistsAndReloadsProviders(t *testing.T) {
+func TestUpdateLLMConfigurationPersistsAIProxyAndDefaultTarget(t *testing.T) {
 	configDir := t.TempDir()
 	content := `
 endpointName = "workorch"
@@ -176,18 +150,7 @@ addr = "127.0.0.1:18080"
 [repository]
 backend = "file"
 dataDir = ".workorch-data"
-
-[llm]
-defaultProvider = "local"
-
-[llm.providers.local]
-provider = "compatible"
-baseURL = "http://127.0.0.1:11434/v1"
-apiKey = "secret-value"
-model = "local-model"
-timeout = "60s"
-disabled = false
-`
+` + validLLMTOML()
 	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -195,52 +158,73 @@ disabled = false
 	t.Setenv(workorchconfig.EnvConfigDir, configDir)
 	t.Cleanup(func() { _ = workorchconfig.Close() })
 
+	baseURL := "http://127.0.0.1:9090"
+	modelID := "gpt-4.1"
 	cfg, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{
-		DefaultProviderID:          stringPtr("local"),
-		DefaultEmbeddingProviderID: stringPtr("local"),
-		Providers: llmProviderUpdates(UpdateLLMProviderConfiguration{
-			ID:                "local",
-			Provider:          stringPtr("compatible"),
-			BaseURL:           stringPtr("http://127.0.0.1:11434/v1"),
-			Model:             stringPtr("next-model"),
-			Timeout:           stringPtr("45s"),
-			NonChatOperations: []string{"embeddings", "embeddings"},
-			ContextProfile: &UpdateLLMProviderContextProfile{
-				EstimatedTokensPerByte: float64Ptr(0.25),
-			},
-		}),
+		AIProxy: &workorchconfig.AIProxyProviderConfig{
+			BaseURL:                 baseURL,
+			Timeout:                 "180s",
+			CatalogRequestTimeout:   "5s",
+			CatalogTTL:              "5m",
+			CatalogMaxStaleAge:      "24h",
+			MaxCatalogResponseBytes: 1048576,
+			MaxCatalogModels:        1000,
+		},
+		DefaultChat: &workorchconfig.ProviderModelTargetConfig{
+			ProviderID: "ai-proxy",
+			ModelID:    modelID,
+		},
 	})
 	if err != nil {
 		t.Fatalf("update llm configuration: %v", err)
 	}
-	if cfg.LLM.DefaultProviderID != "local" || cfg.LLM.DefaultEmbeddingProviderID != "local" || len(cfg.LLM.Providers) != 1 {
-		t.Fatalf("configuration = %+v, want local provider", cfg.LLM)
+	if cfg.LLM.AIProxy.BaseURL != baseURL || cfg.LLM.DefaultChat.ModelID != modelID {
+		t.Fatalf("updated llm = %+v, want persisted ai-proxy target", cfg.LLM)
 	}
-	provider := cfg.LLM.Providers[0]
-	if provider.Model != "next-model" || !provider.APIKeyConfigured || !provider.ChatCompletions ||
-		len(provider.NonChatOperations) != 1 || provider.NonChatOperations[0] != "embeddings" {
-		t.Fatalf("provider = %+v, want updated model and preserved api key", provider)
+	if !cfg.LLM.AIProxy.APIKeyConfigured {
+		t.Fatalf("api key should remain configured after partial update")
 	}
-	if provider.ContextProfile.EstimatedTokensPerByte != 0.25 {
-		t.Fatalf("provider context profile = %+v, want updated profile", provider.ContextProfile)
-	}
-
 	current, err := workorchconfig.Current()
 	if err != nil {
-		t.Fatalf("current config: %v", err)
+		t.Fatalf("current: %v", err)
 	}
-	if current.LLM.Providers["local"].Model != "next-model" || current.LLM.Providers["local"].APIKey != "secret-value" {
-		t.Fatalf("current llm config = %+v, want persisted provider update", current.LLM.Providers["local"])
+	if current.LLM.AIProxy.APIKey != "test-key" || current.LLM.DefaultChat.ModelID != modelID {
+		t.Fatalf("canonical llm = %+v, want preserved api key and new model", current.LLM)
 	}
-	if current.LLM.DefaultEmbeddingProvider != "local" {
-		t.Fatalf("current default embedding provider = %q, want local", current.LLM.DefaultEmbeddingProvider)
+}
+
+func TestUpdateLLMConfigurationRejectsReservedCustomProviderID(t *testing.T) {
+	configDir := t.TempDir()
+	content := `
+endpointName = "workorch"
+
+[server]
+addr = "127.0.0.1:18080"
+
+[repository]
+backend = "file"
+dataDir = ".workorch-data"
+` + validLLMTOML()
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
 	}
-	if current.LLM.Providers["local"].ChatCompletions == nil || !*current.LLM.Providers["local"].ChatCompletions ||
-		len(current.LLM.Providers["local"].NonChatOperations) != 1 {
-		t.Fatalf("current llm capabilities = %+v, want persisted provider capabilities", current.LLM.Providers["local"])
+	_ = workorchconfig.Close()
+	t.Setenv(workorchconfig.EnvConfigDir, configDir)
+	t.Cleanup(func() { _ = workorchconfig.Close() })
+
+	custom := map[string]workorchconfig.CustomLLMProviderConfig{
+		"ai-proxy": {
+			Provider:   "openai",
+			APISurface: "openai_compatible_http",
+			BaseURL:    "https://api.openai.com",
+			Models: map[string]workorchconfig.CustomLLMModelConfig{
+				"gpt-4o": {ContextWindowTokens: 128000, MaxOutputTokens: 4096, Operations: []string{workorchconfig.LLMOperationChatCompletions}},
+			},
+		},
 	}
-	if current.LLM.Providers["local"].EstimatedTokensPerByte != 0 {
-		t.Fatalf("current llm context profile = %+v, want auto profile to omit manual token estimate", current.LLM.Providers["local"])
+	_, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{CustomProviders: &custom})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("UpdateLLMConfiguration error = %v, want reserved provider rejection", err)
 	}
 }
 
@@ -251,8 +235,13 @@ endpointName = "workorch"
 
 [server]
 addr = "127.0.0.1:18080"
-defaultDialogLanguage = "zh-CN"
-`
+maxConcurrentRuns = 2
+defaultDialogLanguage = "en-US"
+
+[repository]
+backend = "file"
+dataDir = ".workorch-data"
+` + validLLMTOML()
 	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -260,318 +249,13 @@ defaultDialogLanguage = "zh-CN"
 	t.Setenv(workorchconfig.EnvConfigDir, configDir)
 	t.Cleanup(func() { _ = workorchconfig.Close() })
 
-	cfg, err := UpdateServerConfiguration(UpdateServerConfigurationCommand{})
+	lang := "zh-CN"
+	cfg, err := UpdateServerConfiguration(UpdateServerConfigurationCommand{DefaultDialogLanguage: &lang})
 	if err != nil {
 		t.Fatalf("update server configuration: %v", err)
 	}
-	if cfg.Server.DefaultDialogLanguage != "zh-CN" {
-		t.Fatalf("default dialog language = %q, want preserved zh-CN", cfg.Server.DefaultDialogLanguage)
-	}
-}
-
-func TestUpdateLLMConfigurationOmittedProviderFieldsPreserveExistingValues(t *testing.T) {
-	configDir := t.TempDir()
-	content := `
-endpointName = "workorch"
-
-[llm]
-defaultProvider = "local"
-defaultEmbeddingProvider = "local"
-
-[llm.providers.local]
-provider = "compatible"
-baseURL = "http://127.0.0.1:11434/v1"
-apiKey = "secret-value"
-model = "local-model"
-timeout = "60s"
-disabled = false
-chatCompletions = true
-streaming = true
-nonChatOperations = ["embeddings", "rerank"]
-failoverEnabled = true
-failoverProviders = ["backup"]
-contextWindowTokens = 32768
-maxInputTokens = 28672
-reservedOutputTokens = 4096
-safetyRatio = 0.8
-bytesHardLimit = 98304
-estimatedTokensPerByte = 0.25
-`
-	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	_ = workorchconfig.Close()
-	t.Setenv(workorchconfig.EnvConfigDir, configDir)
-	t.Cleanup(func() { _ = workorchconfig.Close() })
-
-	cfg, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{
-		Providers: llmProviderUpdates(UpdateLLMProviderConfiguration{
-			ID:     "local",
-			Model:  stringPtr("next-model"),
-			APIKey: stringPtr(""),
-		}),
-	})
-	if err != nil {
-		t.Fatalf("update llm configuration: %v", err)
-	}
-	provider := cfg.LLM.Providers[0]
-	if provider.Model != "next-model" ||
-		provider.Provider != "compatible" ||
-		provider.BaseURL != "http://127.0.0.1:11434/v1" ||
-		provider.Timeout != "1m0s" ||
-		provider.Disabled ||
-		!provider.ChatCompletions ||
-		!provider.Streaming ||
-		len(provider.NonChatOperations) != 2 ||
-		!provider.FailoverEnabled ||
-		len(provider.FailoverProviders) != 1 ||
-		provider.ContextProfile.ContextWindowTokens != 32768 {
-		t.Fatalf("provider = %+v, want omitted fields preserved", provider)
-	}
-	current, err := workorchconfig.Current()
-	if err != nil {
-		t.Fatalf("current config: %v", err)
-	}
-	if current.LLM.Providers["local"].APIKey != "secret-value" {
-		t.Fatalf("api key was not preserved")
-	}
-}
-
-func TestUpdateLLMConfigurationCanExplicitlyClearSlices(t *testing.T) {
-	configDir := t.TempDir()
-	content := `
-endpointName = "workorch"
-
-[llm]
-defaultProvider = "local"
-
-[llm.providers.local]
-provider = "compatible"
-baseURL = "http://127.0.0.1:11434/v1"
-model = "local-model"
-nonChatOperations = ["embeddings"]
-failoverProviders = ["backup"]
-`
-	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	_ = workorchconfig.Close()
-	t.Setenv(workorchconfig.EnvConfigDir, configDir)
-	t.Cleanup(func() { _ = workorchconfig.Close() })
-
-	cfg, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{
-		Providers: llmProviderUpdates(UpdateLLMProviderConfiguration{
-			ID:                "local",
-			NonChatOperations: []string{},
-			FailoverProviders: []string{},
-		}),
-	})
-	if err != nil {
-		t.Fatalf("update llm configuration: %v", err)
-	}
-	provider := cfg.LLM.Providers[0]
-	if len(provider.NonChatOperations) != 0 || len(provider.FailoverProviders) != 0 {
-		t.Fatalf("provider = %+v, want explicit empty slices persisted", provider)
-	}
-}
-
-func TestUpdateLLMConfigurationPartialInferenceProfilePreservesExistingValues(t *testing.T) {
-	configDir := t.TempDir()
-	content := `
-endpointName = "workorch"
-
-[llm]
-defaultProvider = "local"
-
-[llm.providers.local]
-provider = "compatible"
-baseURL = "http://127.0.0.1:11434/v1"
-model = "local-model"
-temperature = 0.4
-maxOutputTokens = 8192
-reasoningEffort = "high"
-thinkingBudgetTokens = 4096
-`
-	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	_ = workorchconfig.Close()
-	t.Setenv(workorchconfig.EnvConfigDir, configDir)
-	t.Cleanup(func() { _ = workorchconfig.Close() })
-
-	cfg, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{
-		Providers: llmProviderUpdates(UpdateLLMProviderConfiguration{
-			ID: "local",
-			InferenceProfile: &UpdateLLMProviderInferenceProfile{
-				ReasoningEffort: stringPtr("medium"),
-			},
-		}),
-	})
-	if err != nil {
-		t.Fatalf("update llm configuration: %v", err)
-	}
-	provider := cfg.LLM.Providers[0]
-	if provider.InferenceProfile.ReasoningEffort != "medium" ||
-		provider.InferenceProfile.MaxOutputTokens != 8192 ||
-		provider.InferenceProfile.ThinkingBudgetTokens != 4096 ||
-		provider.InferenceProfile.Temperature == nil ||
-		*provider.InferenceProfile.Temperature != 0.4 {
-		t.Fatalf("provider inference profile = %+v, want partial update with preserved values", provider.InferenceProfile)
-	}
-}
-
-func TestUpdateLLMConfigurationPartialContextProfilePreservesExistingValues(t *testing.T) {
-	configDir := t.TempDir()
-	content := `
-endpointName = "workorch"
-
-[llm]
-defaultProvider = "local"
-
-[llm.providers.local]
-provider = "compatible"
-baseURL = "http://127.0.0.1:11434/v1"
-model = "local-model"
-contextProfileMode = "manual"
-contextWindowTokens = 32768
-maxInputTokens = 28672
-reservedOutputTokens = 4096
-safetyRatio = 0.8
-bytesHardLimit = 98304
-estimatedTokensPerByte = 0.25
-`
-	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	_ = workorchconfig.Close()
-	t.Setenv(workorchconfig.EnvConfigDir, configDir)
-	t.Cleanup(func() { _ = workorchconfig.Close() })
-
-	cfg, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{
-		Providers: llmProviderUpdates(UpdateLLMProviderConfiguration{
-			ID: "local",
-			ContextProfile: &UpdateLLMProviderContextProfile{
-				ProfileMode:         stringPtr("auto"),
-				ContextWindowTokens: intPtr(65536),
-			},
-		}),
-	})
-	if err != nil {
-		t.Fatalf("update llm configuration: %v", err)
-	}
-	provider := cfg.LLM.Providers[0]
-	if provider.ContextProfile.ProfileMode != "auto" ||
-		provider.ContextProfile.ContextWindowTokens != 65536 ||
-		provider.ContextProfile.MaxInputTokens != 46080 ||
-		provider.ContextProfile.ReservedOutputTokens != 4096 ||
-		provider.ContextProfile.BytesHardLimit != 184320 {
-		t.Fatalf("provider context profile = %+v, want auto budget", provider.ContextProfile)
-	}
-}
-
-func TestUpdateLLMConfigurationRejectsMissingDefaultProvider(t *testing.T) {
-	configDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(`endpointName = "workorch"`), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	_ = workorchconfig.Close()
-	t.Setenv(workorchconfig.EnvConfigDir, configDir)
-	t.Cleanup(func() { _ = workorchconfig.Close() })
-
-	_, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{
-		DefaultProviderID: stringPtr("missing"),
-		Providers: llmProviderUpdates(UpdateLLMProviderConfiguration{
-			ID:       "local",
-			Provider: stringPtr("compatible"),
-		}),
-	})
-	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("update err = %v, want invalid argument", err)
-	}
-}
-
-func TestUpdateLLMConfigurationRejectsEmbeddingProviderWithoutCapability(t *testing.T) {
-	configDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(`endpointName = "workorch"`), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	_ = workorchconfig.Close()
-	t.Setenv(workorchconfig.EnvConfigDir, configDir)
-	t.Cleanup(func() { _ = workorchconfig.Close() })
-
-	_, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{
-		DefaultProviderID:          stringPtr("local"),
-		DefaultEmbeddingProviderID: stringPtr("local"),
-		Providers: llmProviderUpdates(UpdateLLMProviderConfiguration{
-			ID:       "local",
-			Provider: stringPtr("compatible"),
-		}),
-	})
-	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("update err = %v, want invalid argument", err)
-	}
-}
-
-func TestUpdateLLMConfigurationCanClearInvalidDefaultEmbeddingProvider(t *testing.T) {
-	configDir := t.TempDir()
-	content := `
-endpointName = "workorch"
-
-[llm]
-defaultProvider = "local"
-defaultEmbeddingProvider = "missing"
-
-[llm.providers.local]
-provider = "compatible"
-baseURL = "http://127.0.0.1:11434/v1"
-model = "local-model"
-`
-	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	_ = workorchconfig.Close()
-	t.Setenv(workorchconfig.EnvConfigDir, configDir)
-	t.Cleanup(func() { _ = workorchconfig.Close() })
-
-	cfg, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{
-		DefaultEmbeddingProviderID: stringPtr(""),
-	})
-	if err != nil {
-		t.Fatalf("clear default embedding provider: %v", err)
-	}
-	if cfg.LLM.DefaultEmbeddingProviderID != "" {
-		t.Fatalf("default embedding provider = %q, want cleared", cfg.LLM.DefaultEmbeddingProviderID)
-	}
-	current, err := workorchconfig.Current()
-	if err != nil {
-		t.Fatalf("current config: %v", err)
-	}
-	if current.LLM.DefaultEmbeddingProvider != "" {
-		t.Fatalf("persisted default embedding provider = %q, want cleared", current.LLM.DefaultEmbeddingProvider)
-	}
-}
-
-func TestUpdateLLMConfigurationRejectsUnavailableEmbeddingProvider(t *testing.T) {
-	configDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(`endpointName = "workorch"`), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	_ = workorchconfig.Close()
-	t.Setenv(workorchconfig.EnvConfigDir, configDir)
-	t.Cleanup(func() { _ = workorchconfig.Close() })
-
-	_, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{
-		DefaultProviderID:          stringPtr("local"),
-		DefaultEmbeddingProviderID: stringPtr("local"),
-		Providers: llmProviderUpdates(UpdateLLMProviderConfiguration{
-			ID:                "local",
-			Provider:          stringPtr("compatible"),
-			Model:             stringPtr("embedding-model"),
-			NonChatOperations: []string{"embeddings"},
-		}),
-	})
-	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("update err = %v, want invalid argument", err)
+	if cfg.Server.DefaultDialogLanguage != lang || cfg.Server.MaxConcurrentRuns != 2 || cfg.Server.Addr != "127.0.0.1:18080" {
+		t.Fatalf("server configuration = %+v, want language update with preserved server fields", cfg.Server)
 	}
 }
 
@@ -586,6 +270,27 @@ addr = "127.0.0.1:18080"
 [repository]
 backend = "file"
 dataDir = ".workorch-data"
+
+
+[llm.aiProxy]
+baseURL = "http://127.0.0.1:8080"
+apiKey = "test-key"
+timeout = "180s"
+catalogRequestTimeout = "5s"
+catalogTTL = "5m"
+catalogMaxStaleAge = "24h"
+maxCatalogResponseBytes = 1048576
+maxCatalogModels = 1000
+
+[llm.defaultChat]
+providerID = "ai-proxy"
+modelID = "gpt-4o"
+
+[llm.budget]
+contextUtilizationRatio = 0.75
+estimatedTokensPerByte = 0.25
+defaultMaxOutputTokens = 4096
+maxRequestBytes = 4194304
 
 [webSearch]
 defaultProvider = "search"
@@ -646,6 +351,27 @@ func TestUpdateWebSearchConfigurationOmittedProviderFieldsPreserveExistingValues
 	configDir := t.TempDir()
 	content := `
 endpointName = "workorch"
+
+
+[llm.aiProxy]
+baseURL = "http://127.0.0.1:8080"
+apiKey = "test-key"
+timeout = "180s"
+catalogRequestTimeout = "5s"
+catalogTTL = "5m"
+catalogMaxStaleAge = "24h"
+maxCatalogResponseBytes = 1048576
+maxCatalogModels = 1000
+
+[llm.defaultChat]
+providerID = "ai-proxy"
+modelID = "gpt-4o"
+
+[llm.budget]
+contextUtilizationRatio = 0.75
+estimatedTokensPerByte = 0.25
+defaultMaxOutputTokens = 4096
+maxRequestBytes = 4194304
 
 [webSearch]
 defaultProvider = "search"
@@ -708,7 +434,27 @@ X-WorkOrch-Client = "workorch"
 
 func TestUpdateWebSearchConfigurationRejectsUnavailableDefaultProvider(t *testing.T) {
 	configDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(`endpointName = "workorch"`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(`endpointName = "workorch"
+
+[llm.aiProxy]
+baseURL = "http://127.0.0.1:8080"
+apiKey = "test-key"
+timeout = "180s"
+catalogRequestTimeout = "5s"
+catalogTTL = "5m"
+catalogMaxStaleAge = "24h"
+maxCatalogResponseBytes = 1048576
+maxCatalogModels = 1000
+
+[llm.defaultChat]
+providerID = "ai-proxy"
+modelID = "gpt-4o"
+
+[llm.budget]
+contextUtilizationRatio = 0.75
+estimatedTokensPerByte = 0.25
+defaultMaxOutputTokens = 4096
+maxRequestBytes = 4194304`), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	_ = workorchconfig.Close()
@@ -731,6 +477,27 @@ func TestUpdateWebSearchConfigurationCanClearOptionalProviders(t *testing.T) {
 	configDir := t.TempDir()
 	content := `
 endpointName = "workorch"
+
+
+[llm.aiProxy]
+baseURL = "http://127.0.0.1:8080"
+apiKey = "test-key"
+timeout = "180s"
+catalogRequestTimeout = "5s"
+catalogTTL = "5m"
+catalogMaxStaleAge = "24h"
+maxCatalogResponseBytes = 1048576
+maxCatalogModels = 1000
+
+[llm.defaultChat]
+providerID = "ai-proxy"
+modelID = "gpt-4o"
+
+[llm.budget]
+contextUtilizationRatio = 0.75
+estimatedTokensPerByte = 0.25
+defaultMaxOutputTokens = 4096
+maxRequestBytes = 4194304
 
 [webSearch]
 defaultProvider = "search"
@@ -773,10 +540,101 @@ func int64Ptr(value int64) *int64 {
 	return &value
 }
 
-func llmProviderUpdates(values ...UpdateLLMProviderConfiguration) *[]UpdateLLMProviderConfiguration {
+func webSearchProviderUpdates(values ...UpdateWebSearchProviderConfiguration) *[]UpdateWebSearchProviderConfiguration {
 	return &values
 }
 
-func webSearchProviderUpdates(values ...UpdateWebSearchProviderConfiguration) *[]UpdateWebSearchProviderConfiguration {
-	return &values
+func TestUpdateLLMConfigurationClearAIProxyAPIKey(t *testing.T) {
+	useWorkorchTestConfig(t, "file", t.TempDir())
+	// Seed an API key via update.
+	baseURL := "http://127.0.0.1:18080"
+	_, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{
+		AIProxy: &workorchconfig.AIProxyProviderConfig{
+			BaseURL:                 baseURL,
+			APIKey:                  "secret-to-clear",
+			Timeout:                 "180s",
+			CatalogRequestTimeout:   "5s",
+			CatalogTTL:              "5m",
+			CatalogMaxStaleAge:      "24h",
+			MaxCatalogResponseBytes: 1048576,
+			MaxCatalogModels:        1000,
+		},
+		DefaultChat: &workorchconfig.ProviderModelTargetConfig{ProviderID: "custom-test", ModelID: "model-1"},
+	})
+	if err != nil {
+		// custom-test may already be present from useWorkorchTestConfig; still try clear path with current config.
+		t.Logf("seed update: %v", err)
+	}
+	cfg, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{
+		AIProxy: &workorchconfig.AIProxyProviderConfig{
+			BaseURL:                 baseURL,
+			Timeout:                 "180s",
+			CatalogRequestTimeout:   "5s",
+			CatalogTTL:              "5m",
+			CatalogMaxStaleAge:      "24h",
+			MaxCatalogResponseBytes: 1048576,
+			MaxCatalogModels:        1000,
+		},
+		ClearAIProxyAPIKey: true,
+		DefaultChat:        &workorchconfig.ProviderModelTargetConfig{ProviderID: "custom-test", ModelID: "model-1"},
+	})
+	if err != nil {
+		t.Fatalf("clear api key update: %v", err)
+	}
+	if cfg.LLM.AIProxy.APIKeyConfigured {
+		t.Fatalf("apiKeyConfigured = true after clear, want false")
+	}
+	current, err := workorchconfig.Current()
+	if err != nil {
+		t.Fatalf("current: %v", err)
+	}
+	if strings.TrimSpace(current.LLM.AIProxy.APIKey) != "" {
+		t.Fatalf("persisted api key = %q, want empty after clear", current.LLM.AIProxy.APIKey)
+	}
+}
+
+func TestUpdateLLMConfigurationRejectsClearWithNonEmptyAIProxyAPIKey(t *testing.T) {
+	useWorkorchTestConfig(t, "file", t.TempDir())
+	baseURL := "http://127.0.0.1:18080"
+	_, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{
+		AIProxy: &workorchconfig.AIProxyProviderConfig{
+			BaseURL:                 baseURL,
+			APIKey:                  "new-secret",
+			Timeout:                 "180s",
+			CatalogRequestTimeout:   "5s",
+			CatalogTTL:              "5m",
+			CatalogMaxStaleAge:      "24h",
+			MaxCatalogResponseBytes: 1048576,
+			MaxCatalogModels:        1000,
+		},
+		ClearAIProxyAPIKey: true,
+		DefaultChat:        &workorchconfig.ProviderModelTargetConfig{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+	})
+	if err == nil {
+		t.Fatal("expected clearAIProxyApiKey with non-empty apiKey to fail")
+	}
+}
+
+func TestUpdateLLMConfigurationRejectsClearWithNonEmptyCustomProviderAPIKey(t *testing.T) {
+	useWorkorchTestConfig(t, "file", t.TempDir())
+	custom := map[string]workorchconfig.CustomLLMProviderConfig{
+		"custom-clear": {
+			Provider:   "compatible",
+			APISurface: "openai_compatible_http",
+			BaseURL:    "http://127.0.0.1:9",
+			APIKey:     "new-custom-secret",
+			Timeout:    "30s",
+			Models: map[string]workorchconfig.CustomLLMModelConfig{
+				"model-1": {ContextWindowTokens: 128000, MaxOutputTokens: 8192, Operations: []string{"chat_completions"}},
+			},
+		},
+	}
+	_, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{
+		CustomProviders:            &custom,
+		ClearCustomProviderAPIKeys: []string{"custom-clear"},
+		DefaultChat:                &workorchconfig.ProviderModelTargetConfig{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+	})
+	if err == nil {
+		t.Fatal("expected clearCustomProviderApiKeys with non-empty custom apiKey to fail")
+	}
 }

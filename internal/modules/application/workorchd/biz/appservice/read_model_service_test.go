@@ -1961,6 +1961,8 @@ func TestMapLLMContextBudgetTracesProjectsStructuredBudgets(t *testing.T) {
 	if len(traces) != 1 {
 		t.Fatalf("traces = %+v, want one llm context budget trace", traces)
 	}
+	cachePrefix, _ := traces[0].CachePlan.String("stablePrefixHash")
+	contextWindowTokens, _ := traces[0].Profile.Int64("contextWindowTokens")
 	if traces[0].StepID != "run-ctx/step-1" ||
 		traces[0].ProviderID != "reasoning" ||
 		traces[0].Model != "gpt-5" ||
@@ -1973,8 +1975,8 @@ func TestMapLLMContextBudgetTracesProjectsStructuredBudgets(t *testing.T) {
 		!traces[0].P0Overflow ||
 		traces[0].TracePolicy != "summary_refs_only" ||
 		traces[0].PromptCaptured ||
-		readModelStringValue(traces[0].CachePlan["stablePrefixHash"]) != "sha256:c0" ||
-		readModelIntValue(traces[0].Profile["contextWindowTokens"]) != 200000 {
+		cachePrefix != "sha256:c0" ||
+		contextWindowTokens != 200000 {
 		t.Fatalf("trace = %+v, want projected context budget fields", traces[0])
 	}
 	observability := readmodelprojection.MapRunObservability(RunSnapshot{
@@ -2503,7 +2505,8 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 		traces[1].Estimated {
 		t.Fatalf("trace[1] = %+v, want normalized provider_native usage semantics", traces[1])
 	}
-	if readModelIntValue(traces[1].CacheUsage["cacheReadTokens"]) != 20 {
+	cacheReadTokens, _ := traces[1].CacheUsage.Int64("cacheReadTokens")
+	if cacheReadTokens != 20 {
 		t.Fatalf("trace[1].CacheUsage = %+v, want provider cache usage", traces[1].CacheUsage)
 	}
 
@@ -2639,11 +2642,11 @@ func TestSummarizeLLMUsageMergesProviderModelBreakdownWithoutCost(t *testing.T) 
 			Status:       "completed",
 			UsageSource:  llmcommon.UsageSourceEstimated,
 			Estimated:    true,
-			CacheMarkers: map[string]any{
+			CacheMarkers: mustReadModelEventPayload(t, map[string]any{
 				"providerMode":              llmcommon.ProviderCacheModeAutoPrefix,
 				"autoPrefixCacheExpected":   true,
 				"renderedStablePrefixBytes": 1024,
-			},
+			}),
 		},
 		{
 			ProviderID:   "provider-a",
@@ -2655,12 +2658,12 @@ func TestSummarizeLLMUsageMergesProviderModelBreakdownWithoutCost(t *testing.T) 
 			TotalTokens:  220,
 			Status:       "completed",
 			UsageSource:  llmcommon.UsageSourceProviderNative,
-			CacheUsage:   map[string]any{"cacheReadTokens": 20, "cacheCreationTokens": 8},
-			CacheMarkers: map[string]any{
+			CacheUsage:   mustReadModelEventPayload(t, map[string]any{"cacheReadTokens": 20, "cacheCreationTokens": 8}),
+			CacheMarkers: mustReadModelEventPayload(t, map[string]any{
 				"providerMode":              llmcommon.ProviderCacheModeAutoPrefix,
 				"autoPrefixCacheExpected":   true,
 				"renderedStablePrefixBytes": 1024,
-			},
+			}),
 		},
 	})
 
@@ -2692,18 +2695,18 @@ func TestSummarizeLLMUsageDoesNotMergeDifferentSurfacesOrProviderModes(t *testin
 			Provider:   "compatible",
 			APISurface: llmcommon.ProviderSurfaceOpenAICompatibleHTTP,
 			Model:      "model-a",
-			CacheMarkers: map[string]any{
+			CacheMarkers: mustReadModelEventPayload(t, map[string]any{
 				"providerMode": llmcommon.ProviderCacheModeAutoPrefix,
-			},
+			}),
 		},
 		{
 			ProviderID: "provider-a",
 			Provider:   "compatible",
 			APISurface: llmcommon.ProviderSurfaceAnthropicCompatibleHTTP,
 			Model:      "model-a",
-			CacheMarkers: map[string]any{
+			CacheMarkers: mustReadModelEventPayload(t, map[string]any{
 				"providerMode": llmcommon.ProviderCacheModeNone,
-			},
+			}),
 		},
 	})
 

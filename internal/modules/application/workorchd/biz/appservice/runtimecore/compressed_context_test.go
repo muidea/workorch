@@ -33,7 +33,7 @@ func TestBlockedRunResumeCompressedContext(t *testing.T) {
 
 func TestRunDialogLanguageUsesRuntimeBootstrap(t *testing.T) {
 	item := &runmodel.Run{
-		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{Activation: runtimecontract.RuntimeActivationContext{DialogLanguage: "zh-CN"}},
+		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{Activation: runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, DialogLanguage: "zh-CN"}},
 	}
 	if got := RunDialogLanguage(item, "en-US"); got != "zh-CN" {
 		t.Fatalf("language = %q, want zh-CN", got)

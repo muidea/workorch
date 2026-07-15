@@ -3,6 +3,7 @@ package events
 import (
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
@@ -68,6 +69,7 @@ var (
 		memoryevents.TopicMemoryUpdated,
 		memoryevents.TopicMemoryDeleted,
 		memoryevents.TopicMemoryRecallRecorded,
+		llmevents.TopicLLMUsageRecorded,
 		governanceevents.TopicGovernanceAutoEvaluated,
 		governanceevents.TopicGovernanceAutoResolved,
 		governanceevents.TopicGovernanceAutoEscalated,

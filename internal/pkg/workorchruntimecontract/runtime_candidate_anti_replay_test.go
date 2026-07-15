@@ -124,6 +124,7 @@ func TestValidateCandidateAgainstRejectedShapesDoesNotClearOnUnboundEvidenceBefo
 		Parameters:          []OperationParameter{{Name: "targetRef", String: &path}, {Name: "patchType", String: &patchType}, {Name: "content", String: &content}},
 	}
 	facts := RuntimeFacts{
+		Activation:  RuntimeActivationContext{ProviderTarget: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def-1", EvidenceRevision: "ev-2",
 		Focus:            CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}},
 		RemainingFocuses: []CoverageFocus{{ID: "focus-2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-2"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}}},
@@ -170,6 +171,7 @@ func TestValidateCandidateAgainstMissingValidationGap(t *testing.T) {
 	oldText := "package main"
 	newText := "package proxy"
 	facts := RuntimeFacts{
+		Activation:  RuntimeActivationContext{ProviderTarget: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def-1", EvidenceRevision: "ev-3",
 		Focus: CoverageFocus{
 			ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},

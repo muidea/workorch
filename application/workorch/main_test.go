@@ -98,18 +98,19 @@ type startupFakeBackend struct {
 func (b *startupFakeBackend) Workspace() backend.WorkspaceBackend {
 	return &startupFakeWorkspace{parent: b}
 }
-func (b *startupFakeBackend) Goal() backend.GoalBackend         { return nil }
-func (b *startupFakeBackend) DoD() backend.DoDBackend           { return nil }
-func (b *startupFakeBackend) Run() backend.RunBackend           { return nil }
-func (b *startupFakeBackend) Decision() backend.DecisionBackend { return nil }
-func (b *startupFakeBackend) Approval() backend.ApprovalBackend { return nil }
-func (b *startupFakeBackend) Soul() backend.SoulBackend         { return nil }
-func (b *startupFakeBackend) Skill() backend.SkillBackend       { return nil }
-func (b *startupFakeBackend) MCP() backend.MCPBackend           { return nil }
-func (b *startupFakeBackend) Memory() backend.MemoryBackend     { return nil }
-func (b *startupFakeBackend) Template() backend.TemplateBackend { return nil }
-func (b *startupFakeBackend) Config() backend.ConfigBackend     { return nil }
-func (b *startupFakeBackend) Events() backend.EventsBackend     { return nil }
+func (b *startupFakeBackend) Goal() backend.GoalBackend                                  { return nil }
+func (b *startupFakeBackend) DoD() backend.DoDBackend                                    { return nil }
+func (b *startupFakeBackend) Run() backend.RunBackend                                    { return nil }
+func (b *startupFakeBackend) Decision() backend.DecisionBackend                          { return nil }
+func (b *startupFakeBackend) Approval() backend.ApprovalBackend                          { return nil }
+func (b *startupFakeBackend) Soul() backend.SoulBackend                                  { return nil }
+func (b *startupFakeBackend) Skill() backend.SkillBackend                                { return nil }
+func (b *startupFakeBackend) MCP() backend.MCPBackend                                    { return nil }
+func (b *startupFakeBackend) Memory() backend.MemoryBackend                              { return nil }
+func (b *startupFakeBackend) Template() backend.TemplateBackend                          { return nil }
+func (b *startupFakeBackend) Config() backend.ConfigBackend                              { return nil }
+func (b *startupFakeBackend) Events() backend.EventsBackend                              { return nil }
+func (b *startupFakeBackend) ProjectionEvents() backend.WorkspaceProjectionEventsBackend { return nil }
 
 type startupFakeWorkspace struct{ parent *startupFakeBackend }
 
@@ -138,6 +139,11 @@ func (b *startupFakeWorkspace) Snapshot(ctx context.Context, id common.Workspace
 	}
 	return &backend.WorkspaceSnapshotInfo{Workspace: *workspace}, nil
 }
+
+func (b *startupFakeWorkspace) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
+	return nil, nil
+}
+
 func (b *startupFakeWorkspace) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error {
 	return nil
 }

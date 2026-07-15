@@ -181,6 +181,80 @@ def decision_payload(run_id, step_id):
     }
 
 class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        if path in ("/v1/models", "/models"):
+            # WorkOrch catalog expects explicit capacity + operations; without these models stay not-ready.
+            models = [
+                {
+                    "id": "verify-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "gpt-4o",
+                    "object": "model",
+                    "owned_by": "openai",
+                    "operations": ["chat_completions"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "text-embedding-3-small",
+                    "object": "model",
+                    "owned_by": "openai",
+                    "operations": ["embeddings"],
+                    "contextWindowTokens": 8192,
+                    "maxOutputTokens": 1024,
+                },
+
+                {
+                    "id": "verify-stream-native-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "verify-stream-estimated-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "web-search-e2e-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "container-verify-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+            ]
+            response = {"object": "list", "data": models}
+            encoded = json.dumps(response).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+            return
+        self.send_response(404)
+        self.end_headers()
+
     def do_POST(self):
         if self.path == "/v1/embeddings":
             response = {"data": [{"embedding": [0.11, 0.22, 0.33]}]}
@@ -227,6 +301,80 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 source_url = "https://93.184.216.34/workorch-web-search-source"
 
 class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        if path in ("/v1/models", "/models"):
+            # WorkOrch catalog expects explicit capacity + operations; without these models stay not-ready.
+            models = [
+                {
+                    "id": "verify-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "gpt-4o",
+                    "object": "model",
+                    "owned_by": "openai",
+                    "operations": ["chat_completions"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "text-embedding-3-small",
+                    "object": "model",
+                    "owned_by": "openai",
+                    "operations": ["embeddings"],
+                    "contextWindowTokens": 8192,
+                    "maxOutputTokens": 1024,
+                },
+
+                {
+                    "id": "verify-stream-native-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "verify-stream-estimated-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "web-search-e2e-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "container-verify-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+            ]
+            response = {"object": "list", "data": models}
+            encoded = json.dumps(response).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+            return
+        self.send_response(404)
+        self.end_headers()
+
     def do_POST(self):
         size = int(self.headers.get("Content-Length", "0"))
         payload = json.loads(self.rfile.read(size) or b"{}")
@@ -343,43 +491,81 @@ def clean_web(item):
     }
 
 original_llm = {
-    "defaultProviderId": llm.get("defaultProviderId") or "",
-    "defaultEmbeddingProviderId": llm.get("defaultEmbeddingProviderId") or "",
-    "providers": [clean_llm(item) for item in llm.get("providers") or [] if item.get("id")],
+    "aiProxy": {
+        "baseURL": (llm.get("aiProxy") or {}).get("baseUrl") or (llm.get("aiProxy") or {}).get("baseURL") or llm_base_url,
+        "timeout": (llm.get("aiProxy") or {}).get("timeout") or "180s",
+        "catalogRequestTimeout": (llm.get("aiProxy") or {}).get("catalogRequestTimeout") or "5s",
+        "catalogTTL": (llm.get("aiProxy") or {}).get("catalogTTL") or "5m",
+        "catalogMaxStaleAge": (llm.get("aiProxy") or {}).get("catalogMaxStaleAge") or "24h",
+        "maxCatalogResponseBytes": int((llm.get("aiProxy") or {}).get("maxCatalogResponseBytes") or 1048576),
+        "maxCatalogModels": int((llm.get("aiProxy") or {}).get("maxCatalogModels") or 1000),
+    },
+    "defaultChat": {
+        "providerID": (llm.get("defaultChat") or {}).get("providerId") or (llm.get("defaultChat") or {}).get("providerID") or llm_provider_id,
+        "modelID": (llm.get("defaultChat") or {}).get("modelId") or (llm.get("defaultChat") or {}).get("modelID") or "web-search-e2e-model",
+    },
+    "budget": {
+        "contextUtilizationRatio": float((llm.get("budget") or {}).get("contextUtilizationRatio") or 0.75),
+        "estimatedTokensPerByte": float((llm.get("budget") or {}).get("estimatedTokensPerByte") or 0.25),
+        "defaultMaxOutputTokens": int((llm.get("budget") or {}).get("defaultMaxOutputTokens") or 4096),
+        "maxRequestBytes": int((llm.get("budget") or {}).get("maxRequestBytes") or 4194304),
+    },
+    "customProviders": {},
 }
-if not original_llm["providers"]:
-    original_llm = {
-        "defaultProviderId": llm_provider_id,
-        "defaultEmbeddingProviderId": "",
-        "providers": [{
-            "id": llm_provider_id,
-            "provider": "compatible",
-            "baseUrl": llm_base_url,
-            "model": "web-search-e2e-model",
-            "timeout": "60s",
-            "disabled": False,
-            "chatCompletions": True,
-            "streaming": False,
-            "nonChatOperations": [],
-        }],
+for item in llm.get("customProviders") or []:
+    pid = (item.get("id") or "").strip()
+    if not pid:
+        continue
+    models = {}
+    for model in item.get("models") or []:
+        mid = (model.get("id") or "").strip()
+        if not mid:
+            continue
+        models[mid] = {
+            "contextWindowTokens": int(model.get("contextWindowTokens") or 128000),
+            "maxOutputTokens": int(model.get("maxOutputTokens") or 8192),
+            "operations": list(model.get("operations") or ["chat_completions"]),
+        }
+    original_llm["customProviders"][pid] = {
+        "provider": item.get("provider") or "compatible",
+        "apiSurface": item.get("apiSurface") or "openai_compatible_http",
+        "baseURL": item.get("baseUrl") or item.get("baseURL") or llm_base_url,
+        "timeout": item.get("timeout") or "60s",
+        "models": models or {"web-search-e2e-model": {"contextWindowTokens": 128000, "maxOutputTokens": 8192, "operations": ["chat_completions", "embeddings"]}},
     }
-updated_llm_providers = [item for item in original_llm["providers"] if item["id"] != llm_provider_id]
-updated_llm_providers.append({
-    "id": llm_provider_id,
-    "provider": "compatible",
-    "baseUrl": llm_base_url,
-    "apiKey": "web-search-e2e-secret",
-    "model": "web-search-e2e-model",
-    "timeout": "60s",
-    "disabled": False,
-    "chatCompletions": True,
-    "streaming": False,
-    "nonChatOperations": ["embeddings"],
-})
 updated_llm = {
-    "defaultProviderId": llm_provider_id,
-    "defaultEmbeddingProviderId": llm_provider_id,
-    "providers": updated_llm_providers,
+    "aiProxy": {
+        "baseURL": llm_base_url,
+        "apiKey": "web-search-e2e-secret",
+        "timeout": "180s",
+        "catalogRequestTimeout": "5s",
+        "catalogTTL": "5m",
+        "catalogMaxStaleAge": "24h",
+        "maxCatalogResponseBytes": 1048576,
+        "maxCatalogModels": 1000,
+        "modelOverrides": {
+            "web-search-e2e-model": {"contextWindowTokens": 128000, "maxOutputTokens": 8192, "operations": ["chat_completions", "embeddings"]},
+        },
+    },
+    "defaultChat": {"providerID": llm_provider_id, "modelID": "web-search-e2e-model"},
+    "defaultEmbedding": {"providerID": llm_provider_id, "modelID": "web-search-e2e-model"},
+    "budget": original_llm["budget"],
+    "customProviders": {
+        llm_provider_id: {
+            "provider": "compatible",
+            "apiSurface": "openai_compatible_http",
+            "baseURL": llm_base_url,
+            "apiKey": "web-search-e2e-secret",
+            "timeout": "60s",
+            "models": {
+                "web-search-e2e-model": {
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                    "operations": ["chat_completions", "embeddings"],
+                }
+            },
+        }
+    },
 }
 
 original_web = {
@@ -614,7 +800,7 @@ activation_reason="e2e_resume"
 capture_runs_before_activation "$TMP_DIR/activation-before-runs.json"
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
   -H 'Content-Type: application/json' \
-  -d '{"intent":"resume","requestId":"'"$activation_request_id"'","reason":"'"$activation_reason"'","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"'"$LLM_PROVIDER_ID"'","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"priority":2}' >"$TMP_DIR/activation.json"
+  -d '{"intent":"resume","requestId":"'"$activation_request_id"'","reason":"'"$activation_reason"'","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmTarget":{"providerId":"'"$LLM_PROVIDER_ID"'","modelId":"web-search-e2e-model"}","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"priority":2}' >"$TMP_DIR/activation.json"
 validate_activation_command_response "$TMP_DIR/activation.json" "$activation_request_id" "$activation_reason"
 run_id="$(wait_activation_run "$TMP_DIR/activation-before-runs.json" "$TMP_DIR/activation-runs.json" "$TMP_DIR/activation-run.json")"
 [[ -n "$run_id" ]]

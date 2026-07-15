@@ -128,7 +128,7 @@ func TestModuleStartRunCommandAcceptsStateAndSchedulesBackgroundDispatch(t *test
 		"test",
 		orchestratorevents.CommandDestination,
 		magicevent.NewHeader(),
-		common.ContextWithRuntimeWorkspaceID(common.ContextWithRuntimeLLMProviderID(ctx, "provider-test"), workspaceID),
+		common.ContextWithRuntimeWorkspaceID(ctx, workspaceID),
 		orchestratorevents.StartRunCommand{RunID: runID},
 	))
 	if err != nil {
@@ -185,7 +185,7 @@ func TestModuleResumeRunCommandSchedulesRuntimeV2Drive(t *testing.T) {
 		"test",
 		orchestratorevents.CommandDestination,
 		magicevent.NewHeader(),
-		common.ContextWithRuntimeLLMProviderID(ctx, "provider-test"),
+		ctx,
 		orchestratorevents.ResumeRunCommand{
 			WorkspaceID: workspaceID,
 			RunID:       runID,

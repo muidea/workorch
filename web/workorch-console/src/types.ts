@@ -48,121 +48,166 @@ export type RuntimeLLMOutputConfiguration = {
   maxArtifactReplanAttempts?: number;
 };
 
-export type LLMConfiguration = {
-  defaultProviderId?: string;
-  defaultEmbeddingProviderId?: string;
-  modelCapabilities?: LLMModelCapabilityConfiguration[];
-  providers?: LLMProviderConfiguration[];
-  providerTemplates?: LLMProviderTemplate[];
+export type ProviderModelTarget = {
+  providerId: string;
+  modelId: string;
 };
 
-export type LLMModelCapabilityConfiguration = {
-  id: string;
-  provider?: string;
-  modelPattern: string;
-  contextWindowTokens: number;
-};
-
-export type LLMProviderConfiguration = {
-  id: string;
-  provider?: string;
+export type AIProxyConfigurationView = {
   baseUrl?: string;
-  model?: string;
-  timeout?: string;
-  disabled: boolean;
-  ready: boolean;
-  reason?: string;
-  default: boolean;
   apiKeyConfigured: boolean;
-  chatCompletions: boolean;
-  streaming: boolean;
-  nonChatOperations?: string[];
-  failoverEnabled: boolean;
-  failoverProviders?: string[];
-  inferenceProfile?: ProviderInferenceProfile;
-  contextProfile?: ProviderContextProfile;
+  timeout?: string;
+  catalogRequestTimeout?: string;
+  catalogTTL?: string;
+  catalogMaxStaleAge?: string;
+  maxCatalogResponseBytes?: number;
+  maxCatalogModels?: number;
 };
 
-export type ProviderInferenceProfile = {
+export type LLMContextBudgetPolicyView = {
+  contextUtilizationRatio?: number;
+  estimatedTokensPerByte?: number;
+  defaultMaxOutputTokens?: number;
+  maxRequestBytes?: number;
+};
+
+export type CustomProviderModelView = {
+  id: string;
+  contextWindowTokens: number;
+  maxOutputTokens: number;
+  operations: string[];
   temperature?: number;
-  maxOutputTokens?: number;
   reasoningEffort?: string;
   thinkingBudgetTokens?: number;
+  cacheMode?: string;
+  promptCacheKey?: boolean;
+  messageCacheControl?: boolean;
+  cacheUsageFields?: string[];
 };
 
-export type ProviderContextProfile = {
-  profileMode?: string;
-  capabilitySource?: string;
-  contextWindowTokens?: number;
-  maxInputTokens?: number;
-  reservedOutputTokens?: number;
-  safetyRatio?: number;
-  contextUtilizationRatio?: number;
-  bytesHardLimit?: number;
-  maxRequestBytes?: number;
-  estimatedTokensPerByte?: number;
-};
-
-export type LLMProviderTemplate = {
-  templateId: string;
-  name: string;
-  description?: string;
+export type CustomProviderConfigurationView = {
   id: string;
   provider: string;
+  apiSurface?: string;
   baseUrl?: string;
-  model?: string;
   timeout?: string;
-  disabled: boolean;
-  chatCompletions: boolean;
-  streaming: boolean;
-  nonChatOperations?: string[];
+  apiKeyConfigured: boolean;
+  models: CustomProviderModelView[];
+};
+
+export type CustomProviderModelDraft = {
+  id: string;
+  contextWindowTokens?: number;
+  maxOutputTokens?: number;
+  operations?: string[];
+  temperature?: number;
+  reasoningEffort?: string;
+  thinkingBudgetTokens?: number;
+  cacheMode?: string;
+  promptCacheKey?: boolean;
+  messageCacheControl?: boolean;
+  cacheUsageFields?: string[];
+};
+
+export type CustomProviderDraft = {
+  id: string;
+  provider: string;
+  apiSurface?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  /** When true, explicitly clear the saved API key for this provider. */
+  clearApiKey?: boolean;
+  timeout?: string;
+  models: CustomProviderModelDraft[];
+};
+
+export type ProviderModelDescriptorView = {
+  providerId: string;
+  modelId: string;
+  routeOwner?: string;
+  contextWindowTokens?: number;
+  maxOutputTokens?: number;
+  operations?: string[];
+  capabilityReady: boolean;
+  unavailableReason?: string;
+  capabilityRevision?: string;
+};
+
+export type ProviderCatalogSummary = {
+  providerId: string;
+  state?: string;
+  revision?: string;
+  fetchedAt?: string;
+  expiresAt?: string;
+  stale?: boolean;
+  source?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  models?: ProviderModelDescriptorView[];
+};
+
+export type LLMConfiguration = {
+  aiProxy: AIProxyConfigurationView;
+  defaultChat: ProviderModelTarget;
+  defaultEmbedding?: ProviderModelTarget;
+  budget: LLMContextBudgetPolicyView;
+  customProviders?: CustomProviderConfigurationView[];
+  catalog?: ProviderCatalogSummary;
 };
 
 export type UpdateLLMConfigurationRequest = {
-  defaultProviderId?: string;
-  defaultEmbeddingProviderId?: string;
-  modelCapabilities?: LLMModelCapabilityConfiguration[];
-  providers: UpdateLLMProviderConfiguration[];
+  aiProxy?: {
+    baseURL?: string;
+    apiKey?: string;
+    timeout?: string;
+    catalogRequestTimeout?: string;
+    catalogTTL?: string;
+    catalogMaxStaleAge?: string;
+    maxCatalogResponseBytes?: number;
+    maxCatalogModels?: number;
+  };
+  defaultChat?: {
+    providerID?: string;
+    modelID?: string;
+  };
+  defaultEmbedding?: {
+    providerID?: string;
+    modelID?: string;
+  };
+  clearDefaultEmbedding?: boolean;
+  clearAIProxyApiKey?: boolean;
+  clearCustomProviderApiKeys?: string[];
+  budget?: {
+    contextUtilizationRatio?: number;
+    estimatedTokensPerByte?: number;
+    defaultMaxOutputTokens?: number;
+    maxRequestBytes?: number;
+  };
+  customProviders?: Record<string, {
+    provider?: string;
+    apiSurface?: string;
+    baseURL?: string;
+    apiKey?: string;
+    timeout?: string;
+    models?: Record<string, {
+      contextWindowTokens?: number;
+      maxOutputTokens?: number;
+      operations?: string[];
+      temperature?: number;
+      reasoningEffort?: string;
+      thinkingBudgetTokens?: number;
+      cache?: {
+        mode?: string;
+        promptCacheKey?: boolean;
+        messageCacheControl?: boolean;
+        usageFields?: string[];
+      };
+    }>;
+  }>;
 };
 
 export type UpdateServerConfigurationRequest = {
   defaultDialogLanguage?: string;
-};
-
-export type UpdateLLMProviderConfiguration = {
-  id: string;
-  provider?: string;
-  baseUrl?: string;
-  apiKey?: string;
-  model?: string;
-  timeout?: string;
-  disabled?: boolean;
-  chatCompletions?: boolean;
-  streaming?: boolean;
-  nonChatOperations?: string[];
-  failoverEnabled?: boolean;
-  failoverProviders?: string[];
-  inferenceProfile?: UpdateLLMProviderInferenceProfile;
-  contextProfile?: UpdateLLMProviderContextProfile;
-};
-
-export type UpdateLLMProviderInferenceProfile = {
-  temperature?: number;
-  maxOutputTokens?: number;
-  reasoningEffort?: string;
-  thinkingBudgetTokens?: number;
-};
-
-export type UpdateLLMProviderContextProfile = {
-  profileMode?: string;
-  contextWindowTokens?: number;
-  maxInputTokens?: number;
-  reservedOutputTokens?: number;
-  safetyRatio?: number;
-  contextUtilizationRatio?: number;
-  bytesHardLimit?: number;
-  maxRequestBytes?: number;
-  estimatedTokensPerByte?: number;
 };
 
 export type WebSearchConfiguration = {
@@ -464,7 +509,7 @@ export type WorkspaceExecutionActivationRequest = {
   runId?: string;
   goalId?: string;
   doDId?: string;
-  llmProviderId?: string;
+  llmTarget?: ProviderModelTarget;
   soulId?: string;
   soulBindings?: Record<string, string>;
   skillIds?: string[];
@@ -939,6 +984,8 @@ export type LLMContextBudgetTrace = {
   stepId: string;
   providerId?: string;
   model?: string;
+  capabilityRevision?: string;
+  configurationRevision?: string;
   maxBytes: number;
   actualBytes: number;
   maxTokens?: number;

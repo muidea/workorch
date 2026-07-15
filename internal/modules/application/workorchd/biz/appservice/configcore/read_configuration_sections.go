@@ -51,10 +51,6 @@ func runtimeConfiguration(cfg workorchconfig.Config) RuntimeConfiguration {
 	}
 }
 
-func defaultEmbeddingProviderID(cfg workorchconfig.Config) string {
-	return strings.TrimSpace(cfg.LLM.DefaultEmbeddingProvider)
-}
-
 func governanceConfiguration(cfg workorchconfig.Config) GovernanceConfiguration {
 	return GovernanceConfiguration{
 		AutoTicket: GovernanceAutoTicketConfiguration{

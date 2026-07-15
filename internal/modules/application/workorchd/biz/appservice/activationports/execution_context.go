@@ -3,10 +3,12 @@ package activationports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -88,12 +90,18 @@ func BuildWorkspaceRuntimeActivation(ctx context.Context, request WorkspaceRunti
 		return WorkspaceRuntimeActivationBuild{}, err
 	}
 
+	providerTarget, err := resolveActivationProviderTarget(ctx, request.Hub, command.LLMTarget)
+	if err != nil {
+		return WorkspaceRuntimeActivationBuild{}, err
+	}
+
 	return WorkspaceRuntimeActivationBuild{
 		EffectiveGoal:          effectiveGoal,
 		EffectiveDoD:           effectiveDoD,
 		DefinitionRevision:     activationcore.DefinitionRevisionID(string(effectiveGoal.ID), string(effectiveDoD.ID)),
 		DefinitionChangeImpact: RuntimeV2DefinitionChangeImpact(definitionChangeImpact),
 		RuntimeActivation: RuntimeV2ActivationContext(
+			providerTarget,
 			dialogLanguage,
 			defaultSoul,
 			bindings.stageSouls,
@@ -107,4 +115,27 @@ func BuildWorkspaceRuntimeActivation(ctx context.Context, request WorkspaceRunti
 			continuation,
 		),
 	}, nil
+}
+
+func resolveActivationProviderTarget(ctx context.Context, hub magicevent.Hub, requested *runtimecontract.ProviderModelTarget) (runtimecontract.ProviderModelTarget, error) {
+	var target runtimecontract.ProviderModelTarget
+	if requested != nil {
+		target = requested.Normalized()
+	} else {
+		cfg, err := workorchconfig.Current()
+		if err != nil {
+			return runtimecontract.ProviderModelTarget{}, err
+		}
+		target = cfg.LLM.DefaultChat.ToRuntimeTarget()
+	}
+	if err := target.Validate(); err != nil {
+		return runtimecontract.ProviderModelTarget{}, err
+	}
+	// Optional readiness check through LLM block when hub is available.
+	if hub != nil {
+		if err := ensureProviderTargetReady(ctx, hub, target); err != nil {
+			return runtimecontract.ProviderModelTarget{}, err
+		}
+	}
+	return target, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,7 +30,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/skillselectcore"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
-	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	mcpmodule "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/service"
 	memorycommon "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/common"
@@ -284,8 +284,11 @@ func buildWorkspaceRuntimeActivationWithDefinitions(ctx context.Context, session
 		Command:               cmd,
 		SystemDefaultSoulID:   common.SoulID(strings.TrimSpace(cfg.Runtime.DefaultSoulID)),
 		DefaultDialogLanguage: localizationcore.DefaultDialogLanguageFromContext(ctx),
-		DefaultEmbeddingProviderLoader: func(context.Context) (string, error) {
-			return cfg.LLM.DefaultEmbeddingProvider, nil
+		DefaultEmbeddingProviderLoader: func(context.Context) (runtimecontract.ProviderModelTarget, error) {
+			if cfg.LLM.DefaultEmbedding == nil {
+				return runtimecontract.ProviderModelTarget{}, common.ErrInvalidArgument
+			}
+			return cfg.LLM.DefaultEmbedding.ToRuntimeTarget(), nil
 		},
 		SkillHubCatalog: skillHubCatalogForEventHub(hub),
 	})
@@ -1239,7 +1242,7 @@ func TestBuildWorkspaceRuntimeActivationInjectsLatestRejectedResultContinuation(
 	}
 
 	build, err := buildWorkspaceRuntimeActivationWithDefinitions(ctx, session, workspace, goal, dod, ActivateWorkspaceExecutionCommand{
-		LLMProviderID: "runtime-only-provider",
+		LLMTarget: nil,
 	})
 	if err != nil {
 		t.Fatalf("buildWorkspaceRuntimeActivationWithDefinitions: %v", err)
@@ -3120,10 +3123,12 @@ func TestSelectedMemoryItemsFiltersProviderRetryProcessMemory(t *testing.T) {
 	if len(items) != 1 || items[0].ID != "memory-accepted-tool" {
 		t.Fatalf("items = %+v, want only accepted tool memory", items)
 	}
-	if evidence["status"] != "selected" ||
-		!contextStringSliceContains(evidence["candidateMemoryIds"], "memory-provider-retry-process") ||
-		!contextStringSliceContains(evidence["excludedMemoryIds"], "memory-provider-retry-process") ||
-		contextStringSliceContains(evidence["retrievedMemoryIds"], "memory-provider-retry-process") {
+	if evidence == nil || evidence.Status != "selected" {
+		t.Fatalf("evidence = %+v, want selected status", evidence)
+	}
+	if !contextStringSliceContains(evidence.CandidateMemoryIDs, "memory-provider-retry-process") ||
+		!contextStringSliceContains(evidence.ExcludedMemoryIDs, "memory-provider-retry-process") ||
+		contextStringSliceContains(evidence.RetrievedMemoryIDs, "memory-provider-retry-process") {
 		t.Fatalf("evidence = %+v, want provider retry candidate excluded from retrieval", evidence)
 	}
 	contexts := activationcore.MemoryContexts(items)
@@ -3261,14 +3266,15 @@ func TestActivateWorkspaceExecutionWithBackendStartsCreatedActiveRun(t *testing.
 	if created.State != string(common.RunStatePending) {
 		t.Fatalf("created run = %+v, want pending", created)
 	}
-	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := testRuntimeExports(session.Bootstrap)
-	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
+	// Seed ActiveRunID via file repositories only — avoid a second RuntimeSession.
+	ctx := context.Background()
+	repos := openFileRepositories(t, dataRoot)
+	workspaceItem, err := repos.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
 	workspaceItem.ActiveRunID = common.RunID(created.ID)
-	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
+	if err := repos.Workspaces.Update(ctx, workspaceItem); err != nil {
 		t.Fatalf("update workspace active run: %v", err)
 	}
 
@@ -3315,13 +3321,14 @@ func TestActivateWorkspaceExecutionWithBackendRestartReplacesCreatedActiveRun(t 
 	if err != nil {
 		t.Fatalf("UpdateDoDWithBackend: %v", err)
 	}
-	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := testRuntimeExports(session.Bootstrap)
-	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
+	// Seed stale ActiveRun via file repositories only — avoid a second RuntimeSession.
+	ctx := context.Background()
+	repos := openFileRepositories(t, dataRoot)
+	workspaceItem, err := repos.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
-	createdRun, err := exports.Repositories.Runs.Get(ctx, common.RunID(created.ID))
+	createdRun, err := repos.Runs.Get(ctx, common.RunID(created.ID))
 	if err != nil {
 		t.Fatalf("get created run: %v", err)
 	}
@@ -3329,11 +3336,11 @@ func TestActivateWorkspaceExecutionWithBackendRestartReplacesCreatedActiveRun(t 
 	if createdRun.RuntimeBootstrap != nil {
 		createdRun.RuntimeBootstrap.Definition.Revision = "stale-restart-definition"
 	}
-	if err := exports.Repositories.Runs.Update(ctx, createdRun); err != nil {
+	if err := repos.Runs.Update(ctx, createdRun); err != nil {
 		t.Fatalf("update created run stale context: %v", err)
 	}
 	workspaceItem.ActiveRunID = common.RunID(created.ID)
-	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
+	if err := repos.Workspaces.Update(ctx, workspaceItem); err != nil {
 		t.Fatalf("update workspace active run: %v", err)
 	}
 
@@ -3362,7 +3369,7 @@ func TestActivateWorkspaceExecutionWithBackendRestartReplacesCreatedActiveRun(t 
 	if item.Run.State == "created" {
 		t.Fatalf("replacement run = %+v, want started observable run", item.Run)
 	}
-	oldRun, err := exports.Repositories.Runs.Get(ctx, common.RunID(created.ID))
+	oldRun, err := repos.Runs.Get(ctx, common.RunID(created.ID))
 	if err != nil {
 		t.Fatalf("get old run: %v", err)
 	}
@@ -3391,10 +3398,11 @@ func TestActivateWorkspaceExecutionWithBackendIgnoresTerminalActiveRun(t *testin
 		t.Fatalf("DefineDoDWithBackend: %v", err)
 	}
 
-	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := testRuntimeExports(session.Bootstrap)
+	// Seed terminal ActiveRun via file repositories only — avoid a second RuntimeSession.
+	ctx := context.Background()
+	repos := openFileRepositories(t, dataRoot)
 	oldRunID := common.RunID("run-activation-terminal-active-old")
-	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+	if err := repos.Runs.Create(ctx, &runmodel.Run{
 		ID:          oldRunID,
 		WorkspaceID: common.WorkspaceID(workspace.ID),
 		GoalID:      common.GoalID(goal.ID),
@@ -3403,21 +3411,21 @@ func TestActivateWorkspaceExecutionWithBackendIgnoresTerminalActiveRun(t *testin
 	}); err != nil {
 		t.Fatalf("CreateRun old active: %v", err)
 	}
-	oldRun, err := exports.Repositories.Runs.Get(ctx, oldRunID)
+	oldRun, err := repos.Runs.Get(ctx, oldRunID)
 	if err != nil {
 		t.Fatalf("get old run: %v", err)
 	}
 	oldRun.State = common.RunStateSuperseded
-	if err := exports.Repositories.Runs.Update(ctx, oldRun); err != nil {
+	if err := repos.Runs.Update(ctx, oldRun); err != nil {
 		t.Fatalf("mark old run superseded: %v", err)
 	}
-	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
+	workspaceItem, err := repos.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
 	workspaceItem.ActiveRunID = oldRunID
 	workspaceItem.State = common.WorkspaceStateActive
-	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
+	if err := repos.Workspaces.Update(ctx, workspaceItem); err != nil {
 		t.Fatalf("update workspace terminal active run: %v", err)
 	}
 
@@ -3450,10 +3458,11 @@ func TestActivateWorkspaceExecutionWithBackendContinuesRejectedTerminalResult(t 
 		t.Fatalf("DefineDoDWithBackend: %v", err)
 	}
 
-	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := testRuntimeExports(session.Bootstrap)
+	// Seed rejected terminal predecessor via file repositories only — avoid a second RuntimeSession.
+	ctx := context.Background()
+	repos := openFileRepositories(t, dataRoot)
 	oldRunID := common.RunID("run-activation-rejected-terminal-old")
-	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+	if err := repos.Runs.Create(ctx, &runmodel.Run{
 		ID:          oldRunID,
 		WorkspaceID: common.WorkspaceID(workspace.ID),
 		GoalID:      common.GoalID(goal.ID),
@@ -3462,25 +3471,25 @@ func TestActivateWorkspaceExecutionWithBackendContinuesRejectedTerminalResult(t 
 	}); err != nil {
 		t.Fatalf("CreateRun old terminal: %v", err)
 	}
-	oldRun, err := exports.Repositories.Runs.Get(ctx, oldRunID)
+	oldRun, err := repos.Runs.Get(ctx, oldRunID)
 	if err != nil {
 		t.Fatalf("get old run: %v", err)
 	}
 	oldRun.State = common.RunStateFailed
 	oldRun.FailureReason = "terminal rejected result"
-	if err := exports.Repositories.Runs.Update(ctx, oldRun); err != nil {
+	if err := repos.Runs.Update(ctx, oldRun); err != nil {
 		t.Fatalf("mark old run failed: %v", err)
 	}
-	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
+	workspaceItem, err := repos.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
 	workspaceItem.ActiveRunID = ""
 	workspaceItem.State = common.WorkspaceStateActive
-	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
+	if err := repos.Workspaces.Update(ctx, workspaceItem); err != nil {
 		t.Fatalf("update workspace terminal state: %v", err)
 	}
-	if err := exports.Repositories.Results.Create(ctx, &resultmodel.Result{
+	if err := repos.Results.Create(ctx, &resultmodel.Result{
 		ID:           common.ResultID(string(oldRunID) + "/result/dod-assessment"),
 		WorkspaceID:  common.WorkspaceID(workspace.ID),
 		RunID:        oldRunID,
@@ -3509,7 +3518,7 @@ func TestActivateWorkspaceExecutionWithBackendContinuesRejectedTerminalResult(t 
 	if item.Run.ID == string(oldRunID) || item.Run.GoalID != goal.ID || item.Run.DoDID != dod.ID {
 		t.Fatalf("activation run = %+v, want successor run using current definitions", item.Run)
 	}
-	createdRun, err := testRuntimeExports(session.Bootstrap).Repositories.Runs.Get(ctx, common.RunID(item.Run.ID))
+	createdRun, err := repos.Runs.Get(ctx, common.RunID(item.Run.ID))
 	if err != nil {
 		t.Fatalf("get successor run: %v", err)
 	}
@@ -3547,10 +3556,11 @@ func TestActivateWorkspaceExecutionWithBackendReplacesActiveRunWhenExplicitDefin
 		t.Fatalf("DefineDoDWithBackend old: %v", err)
 	}
 
-	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := testRuntimeExports(session.Bootstrap)
+	// Seed active run via file repositories only — avoid a second RuntimeSession.
+	ctx := context.Background()
+	repos := openFileRepositories(t, dataRoot)
 	oldRunID := common.RunID("run-activation-replace-active-old")
-	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+	if err := repos.Runs.Create(ctx, &runmodel.Run{
 		ID:          oldRunID,
 		WorkspaceID: common.WorkspaceID(workspace.ID),
 		GoalID:      common.GoalID(oldGoal.ID),
@@ -3559,21 +3569,21 @@ func TestActivateWorkspaceExecutionWithBackendReplacesActiveRunWhenExplicitDefin
 	}); err != nil {
 		t.Fatalf("CreateRun old active: %v", err)
 	}
-	oldRun, err := exports.Repositories.Runs.Get(ctx, oldRunID)
+	oldRun, err := repos.Runs.Get(ctx, oldRunID)
 	if err != nil {
 		t.Fatalf("get old run: %v", err)
 	}
 	oldRun.State = common.RunStateActive
-	if err := exports.Repositories.Runs.Update(ctx, oldRun); err != nil {
+	if err := repos.Runs.Update(ctx, oldRun); err != nil {
 		t.Fatalf("mark old run running: %v", err)
 	}
-	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
+	workspaceItem, err := repos.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
 	workspaceItem.ActiveRunID = oldRunID
 	workspaceItem.State = common.WorkspaceStateActive
-	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
+	if err := repos.Workspaces.Update(ctx, workspaceItem); err != nil {
 		t.Fatalf("update workspace active run: %v", err)
 	}
 	newGoal, err := UpdateGoalWithBackend(context.Background(), "file", dataRoot, oldGoal.ID, "new activation goal")
@@ -3599,7 +3609,7 @@ func TestActivateWorkspaceExecutionWithBackendReplacesActiveRunWhenExplicitDefin
 	if !strings.Contains(definition.DoDDefinition, "new activation dod") {
 		t.Fatalf("replacement dod definition = %q, want updated canonical dod", definition.DoDDefinition)
 	}
-	replaced, err := exports.Repositories.Runs.Get(ctx, oldRunID)
+	replaced, err := repos.Runs.Get(ctx, oldRunID)
 	if err != nil {
 		t.Fatalf("get replaced run: %v", err)
 	}
@@ -3719,74 +3729,133 @@ func skillSelectionPolicyAndStatus(value any) (string, string) {
 
 func useUnavailableLLMProvider(t *testing.T) {
 	t.Helper()
-	t.Setenv(llmcommon.EnvProvider, "")
-	t.Setenv(llmcommon.EnvBaseURL, "")
-	t.Setenv(llmcommon.EnvAPIKey, "")
-	t.Setenv(llmcommon.EnvModel, "")
-	t.Setenv(llmcommon.EnvDisabled, "")
-	t.Setenv(llmcommon.EnvTimeout, "")
+	// Intentionally no-op for most activation unit tests.
+	// createWorkspaceWithIDWithBackend / useWorkorchTestConfig already install an offline
+	// custom provider target so activation does not require a live ai-proxy catalog.
+	// Tests that need an explicit offline LLM config should call useActivationLLMConfig.
+	_ = t
 }
 
 func useActivationLLMConfig(t *testing.T, baseURL string, embeddingProviderID string) {
 	t.Helper()
 	configDir := t.TempDir()
-	content := strings.ReplaceAll(`
+	if strings.TrimSpace(baseURL) == "" {
+		baseURL = "http://127.0.0.1:9"
+	}
+	embeddingBlock := ""
+	if strings.TrimSpace(embeddingProviderID) != "" {
+		// Optional embedding target for semantic memory tests; empty means disabled.
+		embeddingBlock = `
+[llm.defaultEmbedding]
+providerID = "custom-test"
+modelID = "embed-1"
+`
+	}
+	content := fmt.Sprintf(`
 endpointName = "workorch"
 
 [repository]
 backend = "file"
 
-[llm]
-defaultProvider = "local"
-defaultEmbeddingProvider = "__EMBEDDING_PROVIDER__"
+[llm.aiProxy]
+baseURL = %q
+apiKey = "test-key"
+timeout = "180s"
+catalogRequestTimeout = "5s"
+catalogTTL = "5m"
+catalogMaxStaleAge = "24h"
+maxCatalogResponseBytes = 1048576
+maxCatalogModels = 1000
 
-[llm.providers.local]
+[llm.defaultChat]
+providerID = "custom-test"
+modelID = "model-1"
+%s
+[llm.budget]
+contextUtilizationRatio = 0.75
+estimatedTokensPerByte = 0.25
+defaultMaxOutputTokens = 4096
+maxRequestBytes = 4194304
+
+[llm.customProviders.custom-test]
 provider = "compatible"
-baseURL = "__BASE_URL__"
+apiSurface = "openai_compatible_http"
+baseURL = %q
 apiKey = "secret-value"
-model = "test-model"
 timeout = "5s"
-disabled = false
-chatCompletions = true
-streaming = false
-nonChatOperations = ["embeddings"]
-`, "__BASE_URL__", baseURL)
-	content = strings.ReplaceAll(content, "__EMBEDDING_PROVIDER__", embeddingProviderID)
+
+[llm.customProviders.custom-test.models.model-1]
+contextWindowTokens = 128000
+maxOutputTokens = 8192
+operations = ["chat_completions"]
+
+[llm.customProviders.custom-test.models.embed-1]
+contextWindowTokens = 8192
+maxOutputTokens = 1024
+operations = ["embeddings"]
+`, baseURL, embeddingBlock, baseURL)
 	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
 		t.Fatalf("write application config: %v", err)
 	}
 	_ = workorchconfig.Close()
 	t.Setenv(workorchconfig.EnvConfigDir, configDir)
 	t.Cleanup(func() { _ = workorchconfig.Close() })
+	if _, err := workorchconfig.Current(); err != nil {
+		t.Fatalf("current activation llm config: %v", err)
+	}
 }
 
 func useSystemDefaultSoulConfig(t *testing.T, defaultSoulID string) {
 	t.Helper()
 	configDir := t.TempDir()
-	content := strings.ReplaceAll(`
+	content := fmt.Sprintf(`
 endpointName = "workorch"
 
 [repository]
 backend = "file"
 
 [runtime]
-defaultSoulId = "__DEFAULT_SOUL_ID__"
+defaultSoulId = %q
 
-[llm]
-defaultProvider = "local"
+[llm.aiProxy]
+baseURL = "http://127.0.0.1:9"
+apiKey = "test-key"
+timeout = "180s"
+catalogRequestTimeout = "5s"
+catalogTTL = "5m"
+catalogMaxStaleAge = "24h"
+maxCatalogResponseBytes = 1048576
+maxCatalogModels = 1000
 
-[llm.providers.local]
+[llm.defaultChat]
+providerID = "custom-test"
+modelID = "model-1"
+
+[llm.budget]
+contextUtilizationRatio = 0.75
+estimatedTokensPerByte = 0.25
+defaultMaxOutputTokens = 4096
+maxRequestBytes = 4194304
+
+[llm.customProviders.custom-test]
 provider = "compatible"
-baseURL = ""
-apiKey = ""
-model = ""
+apiSurface = "openai_compatible_http"
+baseURL = "http://127.0.0.1:9"
+apiKey = "secret-value"
 timeout = "5s"
-disabled = false
-`, "__DEFAULT_SOUL_ID__", defaultSoulID)
+
+[llm.customProviders.custom-test.models.model-1]
+contextWindowTokens = 128000
+maxOutputTokens = 8192
+operations = ["chat_completions"]
+`, defaultSoulID)
 	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
 		t.Fatalf("write application config: %v", err)
 	}
 	_ = workorchconfig.Close()
 	t.Setenv(workorchconfig.EnvConfigDir, configDir)
 	t.Cleanup(func() { _ = workorchconfig.Close() })
+	if _, err := workorchconfig.Current(); err != nil {
+		t.Fatalf("current system default soul config: %v", err)
+	}
 }

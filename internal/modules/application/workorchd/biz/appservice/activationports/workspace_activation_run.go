@@ -69,7 +69,6 @@ func startWorkspaceExecutionRun(ctx context.Context, request ActivateWorkspaceEx
 		DoDID:              dod.ID,
 		DefinitionRevision: bootstrap.Definition.Revision,
 		Priority:           request.Command.Priority,
-		LLMProviderID:      request.Command.LLMProviderID,
 		RuntimeBootstrap:   bootstrap,
 	})
 }

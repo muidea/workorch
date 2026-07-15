@@ -12,7 +12,7 @@ func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 			Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod",
 			CapabilityContract: []string{"file/edit", "shell/command"},
 		},
-		Activation:   RuntimeActivationContext{DialogLanguage: "zh-CN", Skills: []RuntimeSkillContext{{ID: "skill-1", Instruction: "typed instruction"}}},
+		Activation:   RuntimeActivationContext{ProviderTarget: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, DialogLanguage: "zh-CN", Skills: []RuntimeSkillContext{{ID: "skill-1", Instruction: "typed instruction"}}},
 		Focuses:      []CoverageFocus{{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}}},
 		Requirements: []RuntimeRequirement{{Kind: PrerequisiteKindCapability, OwnerModuleID: RuntimeModuleFile, CapabilityClass: RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{"file/edit"}}},
 	}

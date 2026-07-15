@@ -26,15 +26,9 @@ type TemplateBackend interface {
 	Delete(ctx context.Context, id string) error
 }
 
-type LLMProvider struct {
-	ID         string
-	Provider   string
-	APISurface string
-	BaseURL    string
-	Model      string
-	Timeout    string
-	Disabled   bool
-	Streaming  bool
+type ProviderModelTarget struct {
+	ProviderID string
+	ModelID    string
 }
 
 type LLMOutputConfig struct {
@@ -53,9 +47,9 @@ type ServiceConfig struct {
 	ServerAddr        string
 	Backend           string
 	DataDir           string
-	DefaultProvider   string
+	DefaultChat       ProviderModelTarget
 	MaxConcurrentRuns int64
-	Providers         []LLMProvider
+	AIProxyBaseURL    string
 	LLMOutput         LLMOutputConfig
 }
 

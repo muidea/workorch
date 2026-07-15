@@ -32,7 +32,6 @@ func TestCreateAndStartWorkspaceExecutionRunUsesEventHubOwnerCommands(t *testing
 		DoDID:              dodID,
 		DefinitionRevision: "goal:" + string(goalID) + "|dod:" + string(dodID),
 		Priority:           7,
-		LLMProviderID:      "verify-provider",
 		RuntimeBootstrap:   activationRunTestBootstrap(goalID, dodID),
 	})
 	if err != nil {
@@ -99,7 +98,7 @@ func activationRunTestBootstrap(goalID common.GoalID, dodID common.DoDID) *runti
 			Revision: "goal:" + string(goalID) + "|dod:" + string(dodID), GoalID: goalID, GoalDefinition: "goal",
 			DoDID: dodID, DoDDefinition: "1. dod", CapabilityContract: []string{runtimecontract.StepKindShellCommand},
 		},
-		Activation: runtimecontract.RuntimeActivationContext{ExecutionContract: runtimecontract.RuntimeExecutionContract{StateChangePolicy: runtimecontract.RuntimeStateChangeAllowedButNotRequired}},
+		Activation: runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{StateChangePolicy: runtimecontract.RuntimeStateChangeAllowedButNotRequired}},
 		Focuses: []runtimecontract.CoverageFocus{{
 			ID: "focus-001", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
 		}},

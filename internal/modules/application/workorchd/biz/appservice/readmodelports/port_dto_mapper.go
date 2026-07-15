@@ -400,26 +400,16 @@ func PortTemplateInfos(items []workspacecore.WorkspaceTemplate) []port.TemplateI
 }
 
 func PortServiceConfig(item configcore.ServiceConfiguration) port.ServiceConfig {
-	providers := make([]port.LLMProvider, 0, len(item.LLM.Providers))
-	for _, provider := range item.LLM.Providers {
-		providers = append(providers, port.LLMProvider{
-			ID:         provider.ID,
-			Provider:   provider.Provider,
-			APISurface: provider.APISurface,
-			BaseURL:    provider.BaseURL,
-			Model:      provider.Model,
-			Timeout:    provider.Timeout,
-			Disabled:   provider.Disabled,
-			Streaming:  provider.Streaming,
-		})
-	}
 	return port.ServiceConfig{
-		ServerAddr:        item.Server.Addr,
-		Backend:           item.Repository.Backend,
-		DataDir:           item.Repository.DataDir,
-		DefaultProvider:   item.LLM.DefaultProviderID,
+		ServerAddr: item.Server.Addr,
+		Backend:    item.Repository.Backend,
+		DataDir:    item.Repository.DataDir,
+		DefaultChat: port.ProviderModelTarget{
+			ProviderID: item.LLM.DefaultChat.ProviderID,
+			ModelID:    item.LLM.DefaultChat.ModelID,
+		},
 		MaxConcurrentRuns: item.Server.MaxConcurrentRuns,
-		Providers:         providers,
+		AIProxyBaseURL:    item.LLM.AIProxy.BaseURL,
 		LLMOutput: port.LLMOutputConfig{
 			MaxPatchContentBytes:               item.Runtime.LLMOutput.MaxPatchContentBytes,
 			MaxGraphBytes:                      item.Runtime.LLMOutput.MaxGraphBytes,
@@ -1098,8 +1088,8 @@ func portLLMContextBudgetTraceInfos(items []readmodelcore.LLMContextBudgetTrace)
 			TracePolicy:           item.TracePolicy,
 			PromptCaptured:        item.PromptCaptured,
 			Estimator:             item.Estimator,
-			Profile:               portPayload(item.Profile),
-			CachePlan:             portPayload(item.CachePlan),
+			Profile:               item.Profile.Clone(),
+			CachePlan:             item.CachePlan.Clone(),
 		})
 	}
 	return ret
@@ -1149,8 +1139,8 @@ func portLLMUsageTraceInfos(items []readmodelcore.LLMUsageTrace) []port.LLMUsage
 			RequestBytes:  item.RequestBytes,
 			ResponseBytes: item.ResponseBytes,
 			Streaming:     item.Streaming,
-			ContextBudget: portPayload(item.ContextBudget),
-			CacheUsage:    portPayload(item.CacheUsage),
+			ContextBudget: item.ContextBudget.Clone(),
+			CacheUsage:    item.CacheUsage.Clone(),
 			Status:        item.Status,
 			FailureClass:  item.FailureClass,
 			OccurredAt:    item.OccurredAt,

@@ -11,6 +11,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 var runCmd = &cobra.Command{
@@ -93,7 +94,13 @@ var runActivateCmd = &cobra.Command{
 		req.GoalID = common.GoalID(goalID)
 		req.DoDID = common.DoDID(dodID)
 		req.SoulID = common.SoulID(soulID)
-		req.LLMProviderID, _ = cmd.Flags().GetString("llm-provider")
+		providerID, _ := cmd.Flags().GetString("llm-provider")
+		modelID, _ := cmd.Flags().GetString("llm-model")
+		providerID = strings.TrimSpace(providerID)
+		modelID = strings.TrimSpace(modelID)
+		if providerID != "" || modelID != "" {
+			req.LLMTarget = &runtimecontract.ProviderModelTarget{ProviderID: providerID, ModelID: modelID}
+		}
 		req.DialogLanguage, _ = cmd.Flags().GetString("lang")
 		skillIDs, _ := cmd.Flags().GetStringArray("skill")
 		mcpIDs, _ := cmd.Flags().GetStringArray("mcp-server")

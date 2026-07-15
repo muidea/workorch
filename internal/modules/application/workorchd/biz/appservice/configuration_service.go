@@ -1,6 +1,11 @@
 package appservice
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
+import (
+	"context"
+
+	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
+)
 
 type ServiceConfiguration = configcore.ServiceConfiguration
 type ServerConfiguration = configcore.ServerConfiguration
@@ -8,9 +13,12 @@ type RepositoryConfiguration = configcore.RepositoryConfiguration
 type RuntimeConfiguration = configcore.RuntimeConfiguration
 type RuntimeLLMOutputConfiguration = configcore.RuntimeLLMOutputConfiguration
 type LLMConfiguration = configcore.LLMConfiguration
-type LLMModelCapabilityConfiguration = configcore.LLMModelCapabilityConfiguration
-type LLMProviderConfiguration = configcore.LLMProviderConfiguration
-type LLMProviderTemplate = configcore.LLMProviderTemplate
+type AIProxyConfigurationView = configcore.AIProxyConfigurationView
+type LLMContextBudgetPolicyView = configcore.LLMContextBudgetPolicyView
+type CustomProviderConfigurationView = configcore.CustomProviderConfigurationView
+type CustomProviderModelView = configcore.CustomProviderModelView
+type ProviderCatalogSummary = configcore.ProviderCatalogSummary
+type ProviderModelDescriptorView = configcore.ProviderModelDescriptorView
 type WebSearchConfiguration = configcore.WebSearchConfiguration
 type WebSearchProviderConfiguration = configcore.WebSearchProviderConfiguration
 type WebSearchProviderTemplate = configcore.WebSearchProviderTemplate
@@ -22,18 +30,11 @@ type UpdateLLMConfigurationCommand = configcore.UpdateLLMConfigurationCommand
 type UpdateServerConfigurationCommand = configcore.UpdateServerConfigurationCommand
 type UpdateRuntimeConfigurationCommand = configcore.UpdateRuntimeConfigurationCommand
 type UpdateRuntimeLLMOutputConfiguration = configcore.UpdateRuntimeLLMOutputConfiguration
-type UpdateLLMProviderConfiguration = configcore.UpdateLLMProviderConfiguration
-type UpdateLLMProviderInferenceProfile = configcore.UpdateLLMProviderInferenceProfile
-type UpdateLLMProviderContextProfile = configcore.UpdateLLMProviderContextProfile
 type UpdateWebSearchConfigurationCommand = configcore.UpdateWebSearchConfigurationCommand
 type UpdateWebSearchProviderConfiguration = configcore.UpdateWebSearchProviderConfiguration
 
 func ReadServiceConfiguration() (ServiceConfiguration, error) {
 	return configcore.ReadServiceConfiguration()
-}
-
-func DefaultLLMProviderTemplates() []LLMProviderTemplate {
-	return configcore.DefaultLLMProviderTemplates()
 }
 
 func DefaultWebSearchProviderTemplates() []WebSearchProviderTemplate {
@@ -54,4 +55,19 @@ func UpdateLLMConfiguration(cmd UpdateLLMConfigurationCommand) (ServiceConfigura
 
 func UpdateWebSearchConfiguration(cmd UpdateWebSearchConfigurationCommand) (ServiceConfiguration, error) {
 	return configcore.UpdateWebSearchConfiguration(cmd)
+}
+
+type GetLLMModelCatalogCommand = configcore.GetLLMModelCatalogCommand
+type RefreshLLMModelCatalogCommand = configcore.RefreshLLMModelCatalogCommand
+
+func GetLLMModelCatalog(ctx context.Context, hub magicevent.Hub, cmd GetLLMModelCatalogCommand) (ProviderCatalogSummary, error) {
+	return configcore.GetLLMModelCatalog(ctx, hub, cmd)
+}
+
+func RefreshLLMModelCatalog(ctx context.Context, hub magicevent.Hub, cmd RefreshLLMModelCatalogCommand) (ProviderCatalogSummary, error) {
+	return configcore.RefreshLLMModelCatalog(ctx, hub, cmd)
+}
+
+func ReadServiceConfigurationWithCatalog(ctx context.Context, hub magicevent.Hub) (ServiceConfiguration, error) {
+	return configcore.ReadServiceConfigurationWithCatalog(ctx, hub)
 }

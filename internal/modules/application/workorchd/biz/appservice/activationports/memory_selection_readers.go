@@ -10,7 +10,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func selectedExplicitMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*memorymodel.MemoryItem, map[string]any, error) {
+func selectedExplicitMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*memorymodel.MemoryItem, *MemorySelectionEvidence, error) {
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, opts.WorkspaceID)
 	type memResult struct {
 		item *memorymodel.MemoryItem
@@ -42,14 +42,14 @@ func selectedExplicitMemoryItems(ctx context.Context, opts MemorySelectionOption
 	if len(ret) == 0 && len(results) > 0 {
 		status = "none_selected"
 	}
-	return ret, map[string]any{
-		"policy":             "explicit_memory_selection",
-		"status":             status,
-		"retrievedMemoryIds": activationcore.MemoryItemIDs(ret),
+	return ret, &MemorySelectionEvidence{
+		Policy:             "explicit_memory_selection",
+		Status:             status,
+		RetrievedMemoryIDs: activationcore.MemoryItemIDs(ret),
 	}, nil
 }
 
-func selectedWorkspaceListMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*memorymodel.MemoryItem, map[string]any, error) {
+func selectedWorkspaceListMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*memorymodel.MemoryItem, *MemorySelectionEvidence, error) {
 	items, err := ownerreadports.ListMemoryItemsByWorkspaceOwnerCommand(ctx, opts.Hub, opts.WorkspaceID)
 	if err != nil {
 		return nil, nil, err
@@ -59,11 +59,11 @@ func selectedWorkspaceListMemoryItems(ctx context.Context, opts MemorySelectionO
 	if len(selected) == 0 && len(items) > 0 {
 		status = "none_selected"
 	}
-	return selected, map[string]any{
-		"policy":             "deterministic_workspace_list",
-		"status":             status,
-		"candidateMemoryIds": activationcore.MemoryItemIDs(items),
-		"excludedMemoryIds":  activationcore.MemoryItemIDs(activationcore.ExcludedMemoryItems(items, selected)),
-		"retrievedMemoryIds": activationcore.MemoryItemIDs(selected),
+	return selected, &MemorySelectionEvidence{
+		Policy:             "deterministic_workspace_list",
+		Status:             status,
+		CandidateMemoryIDs: activationcore.MemoryItemIDs(items),
+		ExcludedMemoryIDs:  activationcore.MemoryItemIDs(activationcore.ExcludedMemoryItems(items, selected)),
+		RetrievedMemoryIDs: activationcore.MemoryItemIDs(selected),
 	}, nil
 }

@@ -1,28 +1,29 @@
-import { useEffect, useState } from 'react';
-import { App as AntApp, Button, Descriptions, Empty, Form, Input, InputNumber, Select, Space, Tabs, Tag, Typography } from 'antd';
+import { useEffect, useMemo, useState } from 'react';
+import { App as AntApp, Button, Checkbox, Descriptions, Empty, Form, Input, InputNumber, Select, Space, Table, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, PageContainer, ProCard } from '../components/proCompat';
 import type {
-  LLMModelCapabilityConfiguration,
+  CustomProviderDraft,
+  CustomProviderModelDraft,
+  ProviderModelDescriptorView,
   ServiceConfiguration,
   Soul,
-  UpdateLLMProviderConfiguration,
+  UpdateLLMConfigurationRequest,
   UpdateServerConfigurationRequest,
   UpdateWebSearchProviderConfiguration,
   WorkspaceTemplate
 } from '../types';
 import { workorchApi } from '../api';
 import {
-  cleanedContextProfile,
-  cleanedInferenceProfile,
+  customProviderDraftsFromConfiguration,
+  customProvidersUpdatePayload,
   errorMessage,
   llmConfigurationFormValues,
-  nextModelCapabilityDraft,
-  nextProviderDraft,
+  nextCustomProviderDraft,
+  nextCustomProviderModelDraft,
   nextWebSearchProviderDraft,
-  providerDraftFromTemplate,
+  readyCatalogModels,
   splitHeaderLines,
   SoulDefinitionManager,
-  splitLines,
   validateHeaderLines,
   webSearchConfigurationFormValues,
   webSearchProviderDraftFromTemplate,
@@ -38,17 +39,11 @@ function configNumberText(value: number | undefined) {
 export function ConfigurationPage() {
   const { message } = AntApp.useApp();
   const [serverForm] = Form.useForm<UpdateServerConfigurationRequest>();
-  const [providerEditorForm] = Form.useForm<UpdateLLMProviderConfiguration>();
+  const [llmForm] = Form.useForm<UpdateLLMConfigurationRequest>();
   const [webSearchProviderEditorForm] = Form.useForm<WebSearchProviderFormValues>();
   const [configuration, setConfiguration] = useState<ServiceConfiguration | undefined>(undefined);
   const [souls, setSouls] = useState<Soul[]>([]);
   const [workspaceTemplates, setWorkspaceTemplates] = useState<WorkspaceTemplate[]>([]);
-  const [defaultProviderId, setDefaultProviderId] = useState<string | undefined>(undefined);
-  const [defaultEmbeddingProviderId, setDefaultEmbeddingProviderId] = useState<string | undefined>(undefined);
-  const [modelCapabilityDrafts, setModelCapabilityDrafts] = useState<LLMModelCapabilityConfiguration[]>([]);
-  const [providerDrafts, setProviderDrafts] = useState<UpdateLLMProviderConfiguration[]>([]);
-  const [selectedProviderIndex, setSelectedProviderIndex] = useState(0);
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | undefined>(undefined);
   const [defaultWebSearchProviderId, setDefaultWebSearchProviderId] = useState<string | undefined>(undefined);
   const [webSearchProviderDrafts, setWebSearchProviderDrafts] = useState<UpdateWebSearchProviderConfiguration[]>([]);
   const [selectedWebSearchProviderIndex, setSelectedWebSearchProviderIndex] = useState(0);
@@ -56,7 +51,29 @@ export function ConfigurationPage() {
   const [loading, setLoading] = useState(false);
   const [serverSaving, setServerSaving] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [catalogRefreshing, setCatalogRefreshing] = useState(false);
   const [webSearchSaving, setWebSearchSaving] = useState(false);
+  const [customProviderDrafts, setCustomProviderDrafts] = useState<CustomProviderDraft[]>([]);
+  const [selectedCustomProviderIndex, setSelectedCustomProviderIndex] = useState(0);
+  const [selectedCustomModelIndex, setSelectedCustomModelIndex] = useState(0);
+  const [showAdvancedLLM, setShowAdvancedLLM] = useState(false);
+
+  const applyConfiguration = (nextConfiguration: ServiceConfiguration) => {
+    const nextFormValues = llmConfigurationFormValues(nextConfiguration);
+    const nextWebSearchFormValues = webSearchConfigurationFormValues(nextConfiguration);
+    const nextCustomProviders = customProviderDraftsFromConfiguration(nextConfiguration);
+    setConfiguration(nextConfiguration);
+    setDefaultWebSearchProviderId(nextWebSearchFormValues.defaultProviderId);
+    setWebSearchProviderDrafts(nextWebSearchFormValues.providers);
+    setSelectedWebSearchProviderIndex(0);
+    setSelectedWebSearchTemplateId(nextConfiguration.webSearch.providerTemplates?.[0]?.templateId);
+    setCustomProviderDrafts(nextCustomProviders);
+    setSelectedCustomProviderIndex(0);
+    setSelectedCustomModelIndex(0);
+    serverForm.setFieldsValue({ defaultDialogLanguage: nextConfiguration.server.defaultDialogLanguage || '' });
+    llmForm.setFieldsValue(nextFormValues);
+    webSearchProviderEditorForm.setFieldsValue(webSearchProviderFormValues(nextWebSearchFormValues.providers[0] ?? nextWebSearchProviderDraft([])));
+  };
 
   const loadConfiguration = async () => {
     setLoading(true);
@@ -66,24 +83,9 @@ export function ConfigurationPage() {
         workorchApi.listSouls(),
         workorchApi.listWorkspaceTemplates()
       ]);
-      const nextFormValues = llmConfigurationFormValues(nextConfiguration);
-      const nextWebSearchFormValues = webSearchConfigurationFormValues(nextConfiguration);
-      setConfiguration(nextConfiguration);
       setSouls(nextSouls);
       setWorkspaceTemplates(nextWorkspaceTemplates);
-      setDefaultProviderId(nextFormValues.defaultProviderId);
-      setDefaultEmbeddingProviderId(nextFormValues.defaultEmbeddingProviderId);
-      setModelCapabilityDrafts(nextFormValues.modelCapabilities ?? []);
-      setProviderDrafts(nextFormValues.providers);
-      setSelectedProviderIndex(0);
-      setSelectedTemplateId(nextConfiguration.llm.providerTemplates?.[0]?.templateId);
-      setDefaultWebSearchProviderId(nextWebSearchFormValues.defaultProviderId);
-      setWebSearchProviderDrafts(nextWebSearchFormValues.providers);
-      setSelectedWebSearchProviderIndex(0);
-      setSelectedWebSearchTemplateId(nextConfiguration.webSearch.providerTemplates?.[0]?.templateId);
-      serverForm.setFieldsValue({ defaultDialogLanguage: nextConfiguration.server.defaultDialogLanguage || '' });
-      providerEditorForm.setFieldsValue(nextFormValues.providers[0] ?? nextProviderDraft([]));
-      webSearchProviderEditorForm.setFieldsValue(webSearchProviderFormValues(nextWebSearchFormValues.providers[0] ?? nextWebSearchProviderDraft([])));
+      applyConfiguration(nextConfiguration);
     } catch (error) {
       message.error(errorMessage(error));
     } finally {
@@ -94,59 +96,12 @@ export function ConfigurationPage() {
   useEffect(() => {
     void loadConfiguration();
   }, []);
-  const saveLLMConfiguration = async () => {
-    setSaving(true);
-    try {
-      const nextConfiguration = await workorchApi.updateLLMConfiguration({
-        defaultProviderId,
-        defaultEmbeddingProviderId: defaultEmbeddingProviderId?.trim() || '',
-        modelCapabilities: modelCapabilityDrafts.map((item) => ({
-          id: item.id.trim(),
-          provider: item.provider?.trim() || undefined,
-          modelPattern: item.modelPattern.trim(),
-          contextWindowTokens: item.contextWindowTokens
-        })),
-        providers: providerDrafts.map((item) => ({
-          id: item.id?.trim(),
-          provider: item.provider?.trim(),
-          baseUrl: item.baseUrl?.trim(),
-          apiKey: item.apiKey?.trim(),
-          model: item.model?.trim(),
-          timeout: item.timeout?.trim(),
-          disabled: item.disabled === true,
-          chatCompletions: item.chatCompletions !== false,
-          streaming: item.streaming === true,
-          nonChatOperations: item.nonChatOperations ?? [],
-          failoverEnabled: item.failoverEnabled === true,
-          failoverProviders: item.failoverProviders ?? [],
-          inferenceProfile: cleanedInferenceProfile(item),
-          contextProfile: cleanedContextProfile(item)
-        }))
-      });
-      const nextFormValues = llmConfigurationFormValues(nextConfiguration);
-      setConfiguration(nextConfiguration);
-      setDefaultProviderId(nextFormValues.defaultProviderId);
-      setDefaultEmbeddingProviderId(nextFormValues.defaultEmbeddingProviderId);
-      setModelCapabilityDrafts(nextFormValues.modelCapabilities ?? []);
-      setProviderDrafts(nextFormValues.providers);
-      setSelectedProviderIndex(0);
-      providerEditorForm.setFieldsValue(nextFormValues.providers[0] ?? nextProviderDraft([]));
-      message.success('LLM 配置已更新');
-    } catch (error) {
-      message.error(errorMessage(error));
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const saveServerConfiguration = async (values: UpdateServerConfigurationRequest) => {
     setServerSaving(true);
     try {
-      const nextConfiguration = await workorchApi.updateServerConfiguration({
-        defaultDialogLanguage: values.defaultDialogLanguage || ''
-      });
-      setConfiguration(nextConfiguration);
-      serverForm.setFieldsValue({ defaultDialogLanguage: nextConfiguration.server.defaultDialogLanguage || '' });
+      const nextConfiguration = await workorchApi.updateServerConfiguration(values);
+      applyConfiguration(nextConfiguration);
       message.success('服务配置已更新');
     } catch (error) {
       message.error(errorMessage(error));
@@ -155,33 +110,95 @@ export function ConfigurationPage() {
     }
   };
 
+  const saveLLMConfiguration = async (values: UpdateLLMConfigurationRequest) => {
+    setSaving(true);
+    try {
+      const payload: UpdateLLMConfigurationRequest = {
+        aiProxy: {
+          baseURL: values.aiProxy?.baseURL?.trim(),
+          apiKey: values.aiProxy?.apiKey?.trim() || undefined,
+          timeout: values.aiProxy?.timeout?.trim(),
+          catalogRequestTimeout: values.aiProxy?.catalogRequestTimeout?.trim(),
+          catalogTTL: values.aiProxy?.catalogTTL?.trim(),
+          catalogMaxStaleAge: values.aiProxy?.catalogMaxStaleAge?.trim(),
+          maxCatalogResponseBytes: values.aiProxy?.maxCatalogResponseBytes,
+          maxCatalogModels: values.aiProxy?.maxCatalogModels
+        },
+        defaultChat: {
+          providerID: values.defaultChat?.providerID?.trim() || 'ai-proxy',
+          modelID: values.defaultChat?.modelID?.trim()
+        },
+        defaultEmbedding: values.defaultEmbedding?.modelID?.trim() ? {
+          providerID: values.defaultEmbedding.providerID?.trim() || 'ai-proxy',
+          modelID: values.defaultEmbedding.modelID.trim()
+        } : undefined,
+        clearDefaultEmbedding: !values.defaultEmbedding?.modelID?.trim(),
+        clearAIProxyApiKey: Boolean((values as UpdateLLMConfigurationRequest).clearAIProxyApiKey),
+        budget: values.budget
+      };
+      if (payload.clearAIProxyApiKey) {
+        if (payload.aiProxy) {
+          // Frontend fail-fast: clear and non-empty new secret cannot both be present.
+          if (payload.aiProxy.apiKey) {
+            message.error('清空 ai-proxy API 密钥时不能同时填写新密钥');
+            return;
+          }
+          payload.aiProxy.apiKey = undefined;
+        }
+      }
+      // Always submit customProviders when advanced editor is open, including empty map to clear.
+      if (showAdvancedLLM) {
+        const clearCustomProviderApiKeys = customProviderDrafts
+          .filter((item) => item.clearApiKey && item.id?.trim())
+          .map((item) => item.id.trim());
+        for (const draft of customProviderDrafts) {
+          if (draft.clearApiKey && draft.apiKey?.trim()) {
+            message.error(`清空自定义 Provider「${draft.id}」API 密钥时不能同时填写新密钥`);
+            return;
+          }
+        }
+        payload.customProviders = customProvidersUpdatePayload(customProviderDrafts);
+        if (clearCustomProviderApiKeys.length > 0) {
+          payload.clearCustomProviderApiKeys = clearCustomProviderApiKeys;
+        }
+      }
+      const nextConfiguration = await workorchApi.updateLLMConfiguration(payload);
+      applyConfiguration(nextConfiguration);
+      message.success('LLM 配置已更新');
+    } catch (error) {
+      message.error(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const refreshCatalog = async () => {
+    setCatalogRefreshing(true);
+    try {
+      const catalog = await workorchApi.refreshLLMModelCatalog('ai-proxy');
+      setConfiguration((current) => current ? {
+        ...current,
+        llm: {
+          ...current.llm,
+          catalog
+        }
+      } : current);
+      message.success('模型目录已刷新');
+    } catch (error) {
+      message.error(errorMessage(error));
+    } finally {
+      setCatalogRefreshing(false);
+    }
+  };
+
   const saveWebSearchConfiguration = async () => {
     setWebSearchSaving(true);
     try {
       const nextConfiguration = await workorchApi.updateWebSearchConfiguration({
         defaultProviderId: defaultWebSearchProviderId,
-        providers: webSearchProviderDrafts.map((item) => ({
-          id: item.id?.trim(),
-          provider: item.provider?.trim(),
-          searchEndpoint: item.searchEndpoint?.trim(),
-          fetchEndpoint: item.fetchEndpoint?.trim(),
-          headers: item.headers ?? {},
-          apiKey: item.apiKey?.trim(),
-          timeout: item.timeout?.trim(),
-          maxResults: item.maxResults,
-          maxFetchBytes: item.maxFetchBytes,
-          maxRedirects: item.maxRedirects,
-          allowDomains: item.allowDomains ?? [],
-          denyDomains: item.denyDomains ?? [],
-          disabled: item.disabled === true
-        }))
+        providers: webSearchProviderDrafts
       });
-      const nextFormValues = webSearchConfigurationFormValues(nextConfiguration);
-      setConfiguration(nextConfiguration);
-      setDefaultWebSearchProviderId(nextFormValues.defaultProviderId);
-      setWebSearchProviderDrafts(nextFormValues.providers);
-      setSelectedWebSearchProviderIndex(0);
-      webSearchProviderEditorForm.setFieldsValue(webSearchProviderFormValues(nextFormValues.providers[0] ?? nextWebSearchProviderDraft([])));
+      applyConfiguration(nextConfiguration);
       message.success('Web Search 配置已更新');
     } catch (error) {
       message.error(errorMessage(error));
@@ -190,124 +207,109 @@ export function ConfigurationPage() {
     }
   };
 
-  const selectProvider = (index: number) => {
-    const item = providerDrafts[index];
-    if (!item) {
-      return;
-    }
-    setSelectedProviderIndex(index);
-    providerEditorForm.setFieldsValue(item);
-  };
-
-  const providerTemplates = configuration?.llm.providerTemplates ?? [];
-  const providerTemplateByID = new Map(providerTemplates.map((item) => [item.templateId, item]));
-
-  const addProvider = () => {
-    const draft = nextProviderDraft(providerDrafts, selectedTemplateId ? providerTemplateByID.get(selectedTemplateId) : undefined);
-    setProviderDrafts((items) => [...items, draft]);
-    setSelectedProviderIndex(providerDrafts.length);
-    providerEditorForm.setFieldsValue(draft);
-    if (!defaultProviderId) {
-      setDefaultProviderId(draft.id);
-    }
-  };
-
-  const removeSelectedProvider = () => {
-    if (providerDrafts.length <= 1) {
-      return;
-    }
-    const nextDrafts = providerDrafts.filter((_, index) => index !== selectedProviderIndex);
-    const nextIndex = Math.min(selectedProviderIndex, nextDrafts.length - 1);
-    setProviderDrafts(nextDrafts);
-    setSelectedProviderIndex(nextIndex);
-    providerEditorForm.setFieldsValue(nextDrafts[nextIndex]);
-    if (!nextDrafts.some((item) => item.id === defaultProviderId)) {
-      setDefaultProviderId(nextDrafts[0]?.id);
-    }
-    if (!nextDrafts.some((item) => item.id === defaultEmbeddingProviderId)) {
-      setDefaultEmbeddingProviderId(undefined);
-    }
-  };
-
-  const updateSelectedProvider = (changedValues: Partial<UpdateLLMProviderConfiguration>, values: UpdateLLMProviderConfiguration) => {
-    if (changedValues.provider) {
-      const template = providerTemplates.find((item) => item.provider === changedValues.provider);
-      if (template) {
-        const templated = providerDraftFromTemplate(template, providerDrafts, { ...values, id: values.id, apiKey: values.apiKey });
-        providerEditorForm.setFieldsValue(templated);
-        setProviderDrafts((items) => {
-          const nextItems = [...items];
-          nextItems[selectedProviderIndex] = templated;
-          return nextItems;
-        });
-        return;
-      }
-    }
-    setProviderDrafts((items) => {
-      const previousID = items[selectedProviderIndex]?.id;
-      const nextItems = [...items];
-      nextItems[selectedProviderIndex] = {
-        ...nextItems[selectedProviderIndex],
-        ...values
-      };
-      const nextID = values.id?.trim();
-      if (defaultProviderId === previousID && nextID && nextID !== previousID) {
-        setDefaultProviderId(nextID);
-      }
-      if (defaultEmbeddingProviderId === previousID && nextID && nextID !== previousID) {
-        setDefaultEmbeddingProviderId(nextID);
-      }
-      return nextItems;
-    });
-  };
-
-  const updateModelCapabilityDraft = (index: number, patch: Partial<LLMModelCapabilityConfiguration>) => {
-    setModelCapabilityDrafts((items) => {
-      const nextItems = [...items];
-      nextItems[index] = {
-        ...nextItems[index],
-        ...patch
-      };
-      return nextItems;
-    });
-  };
-
-  const addModelCapability = () => {
-    setModelCapabilityDrafts((items) => [...items, nextModelCapabilityDraft(items)]);
-  };
-
-  const removeModelCapability = (index: number) => {
-    setModelCapabilityDrafts((items) => items.filter((_, itemIndex) => itemIndex !== index));
-  };
-
-  const statusByProviderID = new Map((configuration?.llm.providers ?? []).map((item) => [item.id, item]));
-  const selectedProvider = providerDrafts[selectedProviderIndex];
-  const selectedProviderStatus = selectedProvider ? statusByProviderID.get(selectedProvider.id) : undefined;
   const webSearchProviderTemplates = configuration?.webSearch.providerTemplates ?? [];
-  const webSearchProviderTemplateByID = new Map(webSearchProviderTemplates.map((item) => [item.templateId, item]));
   const webSearchStatusByProviderID = new Map((configuration?.webSearch.providers ?? []).map((item) => [item.id, item]));
   const selectedWebSearchProvider = webSearchProviderDrafts[selectedWebSearchProviderIndex];
   const selectedWebSearchProviderStatus = selectedWebSearchProvider ? webSearchStatusByProviderID.get(selectedWebSearchProvider.id) : undefined;
-  const llmOutput = configuration?.runtime.llmOutput;
   const runtimeGit = configuration?.runtime.git;
+  const llmOutput = configuration?.runtime.llmOutput;
+  const catalog = configuration?.llm.catalog;
+  const readyChatModels = useMemo(() => readyCatalogModels(configuration, 'chat_completions'), [configuration]);
+  const readyEmbeddingModels = useMemo(() => readyCatalogModels(configuration, 'embeddings'), [configuration]);
+  const chatModelOptions = readyChatModels.map((item) => ({
+    value: item.modelId,
+    label: `${item.modelId}${item.routeOwner ? ` (${item.routeOwner})` : ''}`
+  }));
+  const embeddingModelOptions = readyEmbeddingModels.map((item) => ({
+    value: item.modelId,
+    label: `${item.modelId}${item.routeOwner ? ` (${item.routeOwner})` : ''}`
+  }));
+  const selectedCustomProvider = customProviderDrafts[selectedCustomProviderIndex];
+  const selectedCustomModel = selectedCustomProvider?.models?.[selectedCustomModelIndex];
 
-  const selectWebSearchProvider = (index: number) => {
-    const item = webSearchProviderDrafts[index];
-    if (!item) {
+  const selectCustomProvider = (index: number) => {
+    setSelectedCustomProviderIndex(index);
+    setSelectedCustomModelIndex(0);
+  };
+
+  const addCustomProvider = () => {
+    const next = nextCustomProviderDraft(customProviderDrafts);
+    const nextDrafts = [...customProviderDrafts, next];
+    setCustomProviderDrafts(nextDrafts);
+    setSelectedCustomProviderIndex(nextDrafts.length - 1);
+    setSelectedCustomModelIndex(0);
+    setShowAdvancedLLM(true);
+  };
+
+  const removeSelectedCustomProvider = () => {
+    if (!selectedCustomProvider) {
       return;
     }
+    const nextDrafts = customProviderDrafts.filter((_, index) => index !== selectedCustomProviderIndex);
+    const nextIndex = Math.max(0, Math.min(selectedCustomProviderIndex, nextDrafts.length - 1));
+    setCustomProviderDrafts(nextDrafts);
+    setSelectedCustomProviderIndex(nextIndex);
+    setSelectedCustomModelIndex(0);
+  };
+
+  const updateSelectedCustomProvider = (patch: Partial<CustomProviderDraft>) => {
+    setCustomProviderDrafts((current) => current.map((item, index) => (
+      index === selectedCustomProviderIndex ? { ...item, ...patch } : item
+    )));
+  };
+
+  const addCustomModel = () => {
+    if (!selectedCustomProvider) {
+      return;
+    }
+    setCustomProviderDrafts((current) => current.map((item, index) => {
+      if (index !== selectedCustomProviderIndex) {
+        return item;
+      }
+      const models = [...(item.models ?? []), nextCustomProviderModelDraft(item.models ?? [])];
+      setSelectedCustomModelIndex(models.length - 1);
+      return { ...item, models };
+    }));
+  };
+
+  const removeSelectedCustomModel = () => {
+    if (!selectedCustomProvider || (selectedCustomProvider.models?.length ?? 0) <= 1) {
+      return;
+    }
+    setCustomProviderDrafts((current) => current.map((item, index) => {
+      if (index !== selectedCustomProviderIndex) {
+        return item;
+      }
+      const models = (item.models ?? []).filter((_, modelIndex) => modelIndex !== selectedCustomModelIndex);
+      setSelectedCustomModelIndex(Math.max(0, Math.min(selectedCustomModelIndex, models.length - 1)));
+      return { ...item, models };
+    }));
+  };
+
+  const updateSelectedCustomModel = (patch: Partial<CustomProviderModelDraft>) => {
+    setCustomProviderDrafts((current) => current.map((item, index) => {
+      if (index !== selectedCustomProviderIndex) {
+        return item;
+      }
+      const models = (item.models ?? []).map((model, modelIndex) => (
+        modelIndex === selectedCustomModelIndex ? { ...model, ...patch } : model
+      ));
+      return { ...item, models };
+    }));
+  };
+
+  const selectWebSearchProvider = (index: number) => {
     setSelectedWebSearchProviderIndex(index);
-    webSearchProviderEditorForm.setFieldsValue(webSearchProviderFormValues(item));
+    webSearchProviderEditorForm.setFieldsValue(webSearchProviderFormValues(webSearchProviderDrafts[index] ?? nextWebSearchProviderDraft(webSearchProviderDrafts)));
   };
 
   const addWebSearchProvider = () => {
-    const draft = nextWebSearchProviderDraft(webSearchProviderDrafts, selectedWebSearchTemplateId ? webSearchProviderTemplateByID.get(selectedWebSearchTemplateId) : undefined);
-    setWebSearchProviderDrafts((items) => [...items, draft]);
-    setSelectedWebSearchProviderIndex(webSearchProviderDrafts.length);
-    webSearchProviderEditorForm.setFieldsValue(webSearchProviderFormValues(draft));
-    if (!defaultWebSearchProviderId) {
-      setDefaultWebSearchProviderId(draft.id);
-    }
+    const template = webSearchProviderTemplates.find((item) => item.templateId === selectedWebSearchTemplateId) ?? webSearchProviderTemplates[0];
+    const next = template ? webSearchProviderDraftFromTemplate(template, webSearchProviderDrafts) : nextWebSearchProviderDraft(webSearchProviderDrafts);
+    const nextDrafts = [...webSearchProviderDrafts, next];
+    setWebSearchProviderDrafts(nextDrafts);
+    setSelectedWebSearchProviderIndex(nextDrafts.length - 1);
+    webSearchProviderEditorForm.setFieldsValue(webSearchProviderFormValues(next));
   };
 
   const removeSelectedWebSearchProvider = () => {
@@ -315,58 +317,72 @@ export function ConfigurationPage() {
       return;
     }
     const nextDrafts = webSearchProviderDrafts.filter((_, index) => index !== selectedWebSearchProviderIndex);
-    const nextIndex = Math.min(selectedWebSearchProviderIndex, nextDrafts.length - 1);
+    const nextIndex = Math.max(0, Math.min(selectedWebSearchProviderIndex, nextDrafts.length - 1));
     setWebSearchProviderDrafts(nextDrafts);
     setSelectedWebSearchProviderIndex(nextIndex);
-    webSearchProviderEditorForm.setFieldsValue(webSearchProviderFormValues(nextDrafts[nextIndex]));
-    if (!nextDrafts.some((item) => item.id === defaultWebSearchProviderId)) {
+    if (defaultWebSearchProviderId && !nextDrafts.some((item) => item.id === defaultWebSearchProviderId)) {
       setDefaultWebSearchProviderId(nextDrafts[0]?.id);
     }
+    webSearchProviderEditorForm.setFieldsValue(webSearchProviderFormValues(nextDrafts[nextIndex] ?? nextWebSearchProviderDraft([])));
   };
 
-  const updateSelectedWebSearchProvider = (changedValues: Partial<WebSearchProviderFormValues>, values: WebSearchProviderFormValues) => {
-    const currentDraft = webSearchProviderDrafts[selectedWebSearchProviderIndex];
-    if (changedValues.provider) {
-      const template = webSearchProviderTemplates.find((item) => item.provider === changedValues.provider);
-      if (template) {
-        const templated = webSearchProviderDraftFromTemplate(template, webSearchProviderDrafts, {
-          ...currentDraft,
-          ...values,
-          allowDomains: splitLines(values.allowDomains),
-          denyDomains: splitLines(values.denyDomains),
+  const updateSelectedWebSearchProvider = (_: Partial<WebSearchProviderFormValues>, values: WebSearchProviderFormValues) => {
+    setWebSearchProviderDrafts((current) => {
+      const nextItems = current.map((item, index) => {
+        if (index !== selectedWebSearchProviderIndex) {
+          return item;
+        }
+        const previousID = item.id;
+        const nextID = values.id?.trim() || previousID;
+        if (defaultWebSearchProviderId === previousID && nextID && nextID !== previousID) {
+          setDefaultWebSearchProviderId(nextID);
+        }
+        return {
+          ...item,
+          id: nextID,
+          provider: values.provider,
+          searchEndpoint: values.searchEndpoint,
+          fetchEndpoint: values.fetchEndpoint,
           headers: splitHeaderLines(values.headers),
-          apiKey: values.apiKey
-        });
-        webSearchProviderEditorForm.setFieldsValue(webSearchProviderFormValues(templated));
-        setWebSearchProviderDrafts((items) => {
-          const nextItems = [...items];
-          nextItems[selectedWebSearchProviderIndex] = templated;
-          return nextItems;
-        });
-        return;
-      }
-    }
-    setWebSearchProviderDrafts((items) => {
-      const previousID = items[selectedWebSearchProviderIndex]?.id;
-      const nextItems = [...items];
-      nextItems[selectedWebSearchProviderIndex] = {
-        ...nextItems[selectedWebSearchProviderIndex],
-        ...values,
-        allowDomains: splitLines(values.allowDomains),
-        denyDomains: splitLines(values.denyDomains),
-        headers: splitHeaderLines(values.headers)
-      };
-      const nextID = values.id?.trim();
-      if (defaultWebSearchProviderId === previousID && nextID && nextID !== previousID) {
-        setDefaultWebSearchProviderId(nextID);
-      }
+          apiKey: values.apiKey,
+          timeout: values.timeout,
+          maxResults: values.maxResults,
+          maxFetchBytes: values.maxFetchBytes,
+          maxRedirects: values.maxRedirects,
+          allowDomains: Array.isArray(values.allowDomains) ? values.allowDomains : item.allowDomains,
+          denyDomains: Array.isArray(values.denyDomains) ? values.denyDomains : item.denyDomains,
+          disabled: values.disabled
+        } as UpdateWebSearchProviderConfiguration;
+      });
       return nextItems;
     });
   };
+
+  const catalogColumns = [
+    { title: '模型 ID', dataIndex: 'modelId', key: 'modelId' },
+    { title: 'Route Owner', dataIndex: 'routeOwner', key: 'routeOwner', render: (value?: string) => value || '-' },
+    { title: 'Context Window', dataIndex: 'contextWindowTokens', key: 'contextWindowTokens', render: (value?: number) => configNumberText(value) },
+    { title: 'Max Output', dataIndex: 'maxOutputTokens', key: 'maxOutputTokens', render: (value?: number) => configNumberText(value) },
+    {
+      title: 'Operations',
+      dataIndex: 'operations',
+      key: 'operations',
+      render: (ops?: string[]) => (ops?.length ? ops.join(', ') : '-')
+    },
+    {
+      title: 'Readiness',
+      dataIndex: 'capabilityReady',
+      key: 'capabilityReady',
+      render: (ready: boolean, record: ProviderModelDescriptorView) => ready
+        ? <Tag color="green">ready</Tag>
+        : <Tag color="red">{record.unavailableReason || 'incomplete'}</Tag>
+    }
+  ];
+
   return (
     <PageContainer
       title="系统配置"
-      subTitle="管理服务配置、执行人格（Soul）、工作空间模板（Workspace Template）、LLM 服务商和 Web Search Provider"
+      subTitle="管理服务配置、执行人格（Soul）、工作空间模板（Workspace Template）、ai-proxy 模型与 Web Search Provider"
       extra={<Button onClick={() => void loadConfiguration()} loading={loading}>刷新</Button>}
     >
       <Tabs
@@ -378,74 +394,396 @@ export function ConfigurationPage() {
             label: '基础服务',
             children: (
               <CardGrid loading={loading}>
-        <ProCard title="服务参数" colSpan="50%">
-          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-            <Descriptions
-              column={1}
-              items={[
-                { key: 'addr', label: '监听地址', children: configuration?.server.addr || '-' },
-                { key: 'readHeaderTimeout', label: '读 Header 超时', children: configuration?.server.readHeaderTimeout || '-' },
-                { key: 'readTimeout', label: '读超时', children: configuration?.server.readTimeout || '-' },
-                { key: 'writeTimeout', label: '写超时', children: configuration?.server.writeTimeout || '-' },
-                { key: 'idleTimeout', label: '空闲超时', children: configuration?.server.idleTimeout || '-' },
-                { key: 'shutdownTimeout', label: '关闭超时', children: configuration?.server.shutdownTimeout || '-' },
-                { key: 'maxConcurrentRuns', label: '最大并发运行（Run）', children: configuration?.server.maxConcurrentRuns ?? '-' },
-                { key: 'defaultSoulId', label: '系统默认执行人格（Soul）', children: configuration?.runtime.defaultSoulId || '-' }
-              ]}
-            />
-            <Form form={serverForm} layout="inline" onFinish={(values) => void saveServerConfiguration(values)}>
-              <Form.Item name="defaultDialogLanguage" label="默认交互语言">
-                <Select
-                  style={{ width: 180 }}
-                  options={[
-                    { value: '', label: '跟随系统语言' },
-                    { value: 'zh-CN', label: '中文' },
-                    { value: 'en', label: 'English' }
-                  ]}
-                />
-              </Form.Item>
-              <Form.Item>
-                <Button type="primary" htmlType="submit" loading={serverSaving}>保存服务配置</Button>
-              </Form.Item>
-            </Form>
-          </Space>
-        </ProCard>
-        <ProCard title="仓储" colSpan="50%">
-          <Descriptions
-            column={1}
-            items={[
-              { key: 'backend', label: '后端', children: configuration?.repository.backend || '-' },
-              { key: 'dataDir', label: '数据目录', children: configuration?.repository.dataDir || '-' }
-            ]}
-          />
-        </ProCard>
-        <ProCard title="运行期 Git 能力" colSpan="50%">
-          <Descriptions
-            column={1}
-            items={[
-              { key: 'readCapability', label: 'Git 读取能力', children: '核心能力默认启用' },
-              { key: 'writeCapability', label: 'Git 写入能力', children: '核心能力默认启用' },
-              { key: 'defaultTimeout', label: '默认超时', children: runtimeGit?.defaultTimeout || '-' }
-            ]}
-          />
-        </ProCard>
-        <ProCard title="LLM 输出预算" colSpan="100%">
-          <Descriptions
-            column={{ xs: 1, md: 2, xl: 3 }}
-            items={[
-              { key: 'maxPatchContentBytes', label: '单个补丁内嵌字节', children: configNumberText(llmOutput?.maxPatchContentBytes) },
-              { key: 'maxGraphBytes', label: '单次 Graph 字节', children: configNumberText(llmOutput?.maxGraphBytes) },
-              { key: 'maxGraphFileWrites', label: 'Graph 写入节点数', children: configNumberText(llmOutput?.maxGraphFileWrites) },
-              { key: 'schemaInvalidLargePreviewThreshold', label: '大预览降级阈值', children: configNumberText(llmOutput?.schemaInvalidLargePreviewThreshold) },
-              { key: 'maxArtifactChunkBytes', label: 'Artifact Chunk 字节', children: configNumberText(llmOutput?.maxArtifactChunkBytes) },
-              { key: 'previousChunkTailBytes', label: '上一 Chunk 尾部字节', children: configNumberText(llmOutput?.previousChunkTailBytes) },
-              { key: 'maxChunkRetryAttempts', label: 'Chunk 重试次数', children: configNumberText(llmOutput?.maxChunkRetryAttempts) },
-              { key: 'maxArtifactPlanAttempts', label: 'Artifact Plan 尝试次数', children: configNumberText(llmOutput?.maxArtifactPlanAttempts) },
-              { key: 'maxArtifactReplanAttempts', label: 'Artifact Replan 次数', children: configNumberText(llmOutput?.maxArtifactReplanAttempts) }
-            ]}
-          />
-        </ProCard>
+                <ProCard title="服务参数" colSpan="50%">
+                  <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                    <Descriptions
+                      column={1}
+                      items={[
+                        { key: 'addr', label: '监听地址', children: configuration?.server.addr || '-' },
+                        { key: 'readHeaderTimeout', label: '读 Header 超时', children: configuration?.server.readHeaderTimeout || '-' },
+                        { key: 'readTimeout', label: '读超时', children: configuration?.server.readTimeout || '-' },
+                        { key: 'writeTimeout', label: '写超时', children: configuration?.server.writeTimeout || '-' },
+                        { key: 'idleTimeout', label: '空闲超时', children: configuration?.server.idleTimeout || '-' },
+                        { key: 'shutdownTimeout', label: '关闭超时', children: configuration?.server.shutdownTimeout || '-' },
+                        { key: 'maxConcurrentRuns', label: '最大并发运行（Run）', children: configuration?.server.maxConcurrentRuns ?? '-' },
+                        { key: 'defaultSoulId', label: '系统默认执行人格（Soul）', children: configuration?.runtime.defaultSoulId || '-' }
+                      ]}
+                    />
+                    <Form form={serverForm} layout="inline" onFinish={(values) => void saveServerConfiguration(values)}>
+                      <Form.Item name="defaultDialogLanguage" label="默认交互语言">
+                        <Select
+                          style={{ width: 180 }}
+                          options={[
+                            { value: '', label: '跟随系统语言' },
+                            { value: 'zh-CN', label: '中文' },
+                            { value: 'en', label: 'English' }
+                          ]}
+                        />
+                      </Form.Item>
+                      <Form.Item>
+                        <Button type="primary" htmlType="submit" loading={serverSaving}>保存服务配置</Button>
+                      </Form.Item>
+                    </Form>
+                  </Space>
+                </ProCard>
+                <ProCard title="仓储" colSpan="50%">
+                  <Descriptions
+                    column={1}
+                    items={[
+                      { key: 'backend', label: '后端', children: configuration?.repository.backend || '-' },
+                      { key: 'dataDir', label: '数据目录', children: configuration?.repository.dataDir || '-' }
+                    ]}
+                  />
+                </ProCard>
+                <ProCard title="运行期 Git 能力" colSpan="50%">
+                  <Descriptions
+                    column={1}
+                    items={[
+                      { key: 'readCapability', label: 'Git 读取能力', children: '核心能力默认启用' },
+                      { key: 'writeCapability', label: 'Git 写入能力', children: '核心能力默认启用' },
+                      { key: 'defaultTimeout', label: '默认超时', children: runtimeGit?.defaultTimeout || '-' }
+                    ]}
+                  />
+                </ProCard>
+                <ProCard title="LLM 输出预算" colSpan="100%">
+                  <Descriptions
+                    column={{ xs: 1, md: 2, xl: 3 }}
+                    items={[
+                      { key: 'maxPatchContentBytes', label: '单个补丁内嵌字节', children: configNumberText(llmOutput?.maxPatchContentBytes) },
+                      { key: 'maxGraphBytes', label: '单次 Graph 字节', children: configNumberText(llmOutput?.maxGraphBytes) },
+                      { key: 'maxGraphFileWrites', label: 'Graph 写入节点数', children: configNumberText(llmOutput?.maxGraphFileWrites) },
+                      { key: 'schemaInvalidLargePreviewThreshold', label: '大预览降级阈值', children: configNumberText(llmOutput?.schemaInvalidLargePreviewThreshold) },
+                      { key: 'maxArtifactChunkBytes', label: 'Artifact Chunk 字节', children: configNumberText(llmOutput?.maxArtifactChunkBytes) },
+                      { key: 'previousChunkTailBytes', label: '上一 Chunk 尾部字节', children: configNumberText(llmOutput?.previousChunkTailBytes) },
+                      { key: 'maxChunkRetryAttempts', label: 'Chunk 重试次数', children: configNumberText(llmOutput?.maxChunkRetryAttempts) },
+                      { key: 'maxArtifactPlanAttempts', label: 'Artifact Plan 尝试次数', children: configNumberText(llmOutput?.maxArtifactPlanAttempts) },
+                      { key: 'maxArtifactReplanAttempts', label: 'Artifact Replan 次数', children: configNumberText(llmOutput?.maxArtifactReplanAttempts) }
+                    ]}
+                  />
+                </ProCard>
               </CardGrid>
+            )
+          },
+          {
+            key: 'llm',
+            label: 'LLM / ai-proxy',
+            children: (
+              <ProCard
+                title="ai-proxy 首选 LLM"
+                className="workorch-section"
+                extra={(
+                  <Space>
+                    <Button onClick={() => void refreshCatalog()} loading={catalogRefreshing}>刷新模型</Button>
+                    <Button type="primary" onClick={() => void llmForm.validateFields().then((values) => saveLLMConfiguration(values))} loading={saving}>保存 LLM 配置</Button>
+                  </Space>
+                )}
+              >
+                <Typography.Paragraph type="secondary">
+                  WorkOrch 默认连接内置 ai-proxy。模型列表来自 `/v1/models` 精确目录；默认对话/embedding 模型必须显式选择，不会静默挑第一个。
+                </Typography.Paragraph>
+                <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                  <ProCard title="连接与默认模型">
+                    <Form form={llmForm} layout="vertical" onFinish={(values) => void saveLLMConfiguration(values)}>
+                      <Form.Item name={['aiProxy', 'baseURL']} label="ai-proxy BaseURL" rules={[{ required: true, message: '请填写 ai-proxy BaseURL' }]}>
+                        <Input placeholder="http://127.0.0.1:8080" />
+                      </Form.Item>
+                      <Form.Item name={['aiProxy', 'apiKey']} label="API 密钥">
+                        <Input.Password placeholder={configuration?.llm.aiProxy?.apiKeyConfigured ? '已配置，留空表示保留' : '可选'} autoComplete="new-password" />
+                      </Form.Item>
+                      <Form.Item name="clearAIProxyApiKey" valuePropName="checked">
+                        <Checkbox>显式清空 ai-proxy API 密钥</Checkbox>
+                      </Form.Item>
+                      <Form.Item name={['aiProxy', 'timeout']} label="请求超时">
+                        <Input placeholder="180s" />
+                      </Form.Item>
+                      <Form.Item name={['defaultChat', 'providerID']} hidden initialValue="ai-proxy">
+                        <Input />
+                      </Form.Item>
+                      <Form.Item name={['defaultChat', 'modelID']} label="默认对话模型" rules={[{ required: true, message: '请选择默认对话模型' }]}>
+                        <Select
+                          showSearch
+                          placeholder={readyChatModels.length ? '选择 ready chat 模型' : '请先刷新模型目录'}
+                          options={chatModelOptions}
+                        />
+                      </Form.Item>
+                      <Form.Item name={['defaultEmbedding', 'providerID']} hidden initialValue="ai-proxy">
+                        <Input />
+                      </Form.Item>
+                      <Form.Item name={['defaultEmbedding', 'modelID']} label="默认 Embedding 模型">
+                        <Select
+                          allowClear
+                          showSearch
+                          placeholder="可选，仅展示 embeddings 能力模型"
+                          options={embeddingModelOptions}
+                        />
+                      </Form.Item>
+                      <Form.Item name={['budget', 'contextUtilizationRatio']} label="上下文利用率">
+                        <InputNumber min={0.05} max={1} step={0.05} style={{ width: '100%' }} />
+                      </Form.Item>
+                      <Form.Item name={['budget', 'defaultMaxOutputTokens']} label="默认最大输出 Tokens">
+                        <InputNumber min={1} style={{ width: '100%' }} />
+                      </Form.Item>
+                      <Form.Item name={['budget', 'maxRequestBytes']} label="最大请求字节">
+                        <InputNumber min={1024} style={{ width: '100%' }} />
+                      </Form.Item>
+                      <Form.Item name={['budget', 'estimatedTokensPerByte']} label="Token/Byte 估算">
+                        <InputNumber min={0.01} step={0.01} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Form>
+                  </ProCard>
+                  <ProCard title="模型目录">
+                    <Descriptions
+                      column={{ xs: 1, md: 2, xl: 3 }}
+                      items={[
+                        { key: 'state', label: '目录状态', children: catalog?.state || '-' },
+                        { key: 'revision', label: '目录 Revision', children: catalog?.revision || '-' },
+                        { key: 'fetchedAt', label: '最近刷新', children: catalog?.fetchedAt || '-' },
+                        { key: 'stale', label: 'Stale', children: catalog?.stale ? <Tag color="orange">stale</Tag> : <Tag color="green">fresh</Tag> },
+                        { key: 'apiKey', label: 'API 密钥', children: configuration?.llm.aiProxy?.apiKeyConfigured ? <Tag color="green">已配置</Tag> : <Tag>未配置</Tag> },
+                        { key: 'error', label: '刷新错误', children: catalog?.errorMessage || '-' }
+                      ]}
+                    />
+                    <Table
+                      style={{ marginTop: 16 }}
+                      size="small"
+                      rowKey={(row) => `${row.providerId}/${row.modelId}`}
+                      pagination={{ pageSize: 10 }}
+                      dataSource={catalog?.models ?? []}
+                      columns={catalogColumns}
+                      locale={{ emptyText: <Empty description="暂无模型，请点击刷新模型" /> }}
+                    />
+                  </ProCard>
+                  <ProCard
+                    title="高级：自定义 Provider"
+                    extra={(
+                      <Space>
+                        <Button onClick={() => setShowAdvancedLLM((value) => !value)}>
+                          {showAdvancedLLM ? '收起高级配置' : '展开高级配置'}
+                        </Button>
+                        <Button onClick={addCustomProvider}>新增 Provider</Button>
+                      </Space>
+                    )}
+                  >
+                    <Typography.Paragraph type="secondary">
+                      普通模式只使用 ai-proxy 目录中的 ready 模型。自定义 Provider 为显式高级能力，需声明精确 context/output/operations；API 密钥留空表示保留已有密钥。
+                    </Typography.Paragraph>
+                    {showAdvancedLLM ? (
+                      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                        <Space direction="vertical" size="small" className="llm-provider-list" style={{ width: '100%' }}>
+                          {customProviderDrafts.length === 0 ? (
+                            <Empty description="尚未配置自定义 Provider" />
+                          ) : customProviderDrafts.map((item, index) => {
+                            const selected = index === selectedCustomProviderIndex;
+                            return (
+                              <button
+                                key={`${item.id || 'custom-provider'}-${index}`}
+                                type="button"
+                                className={`llm-provider-list-item${selected ? ' llm-provider-list-item-selected' : ''}`}
+                                onClick={() => selectCustomProvider(index)}
+                              >
+                                <span className="llm-provider-list-main">
+                                  <Typography.Text strong>{item.id || '新 Provider'}</Typography.Text>
+                                  <Typography.Text type="secondary">{item.baseUrl || item.provider || 'endpoint 未配置'}</Typography.Text>
+                                </span>
+                                <span className="llm-provider-list-tags">
+                                  <Tag>{(item.models ?? []).length} models</Tag>
+                                  {configuration?.llm.customProviders?.find((provider) => provider.id === item.id)?.apiKeyConfigured ? <Tag color="green">密钥</Tag> : null}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </Space>
+                        {selectedCustomProvider ? (
+                          <ProCard
+                            title={`编辑 Provider：${selectedCustomProvider.id || '新 Provider'}`}
+                            extra={<Button danger onClick={removeSelectedCustomProvider}>移除 Provider</Button>}
+                          >
+                            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                              <Form layout="vertical">
+                                <Form.Item label="Provider 标识" required>
+                                  <Input
+                                    value={selectedCustomProvider.id}
+                                    onChange={(event) => updateSelectedCustomProvider({ id: event.target.value })}
+                                    placeholder="openai-direct"
+                                  />
+                                </Form.Item>
+                                <Form.Item label="Provider 类型" required>
+                                  <Select
+                                    value={selectedCustomProvider.provider}
+                                    onChange={(value) => updateSelectedCustomProvider({ provider: value })}
+                                    options={[
+                                      { value: 'openai-compatible', label: 'openai-compatible' },
+                                      { value: 'anthropic', label: 'anthropic' },
+                                      { value: 'custom', label: 'custom' }
+                                    ]}
+                                  />
+                                </Form.Item>
+                                <Form.Item label="API Surface">
+                                  <Select
+                                    value={selectedCustomProvider.apiSurface || 'openai_compatible_http'}
+                                    onChange={(value) => updateSelectedCustomProvider({ apiSurface: value })}
+                                    options={[
+                                      { value: 'openai_compatible_http', label: 'openai_compatible_http' },
+                                      { value: 'anthropic_messages_http', label: 'anthropic_messages_http' }
+                                    ]}
+                                  />
+                                </Form.Item>
+                                <Form.Item label="BaseURL" required>
+                                  <Input
+                                    value={selectedCustomProvider.baseUrl}
+                                    onChange={(event) => updateSelectedCustomProvider({ baseUrl: event.target.value })}
+                                    placeholder="https://api.openai.com/v1"
+                                  />
+                                </Form.Item>
+                                <Form.Item label="API 密钥">
+                                  <Input.Password
+                                    value={selectedCustomProvider.apiKey}
+                                    onChange={(event) => updateSelectedCustomProvider({ apiKey: event.target.value })}
+                                    placeholder={configuration?.llm.customProviders?.find((provider) => provider.id === selectedCustomProvider.id)?.apiKeyConfigured ? '已配置，留空表示保留' : '可选'}
+                                    autoComplete="new-password"
+                                    disabled={Boolean(selectedCustomProvider.clearApiKey)}
+                                  />
+                                </Form.Item>
+                                <Form.Item>
+                                  <Checkbox
+                                    checked={Boolean(selectedCustomProvider.clearApiKey)}
+                                    onChange={(event) => updateSelectedCustomProvider({
+                                      clearApiKey: event.target.checked,
+                                      apiKey: event.target.checked ? '' : selectedCustomProvider.apiKey
+                                    })}
+                                  >
+                                    显式清空此 Provider 的 API 密钥
+                                  </Checkbox>
+                                </Form.Item>
+                                <Form.Item label="超时">
+                                  <Input
+                                    value={selectedCustomProvider.timeout}
+                                    onChange={(event) => updateSelectedCustomProvider({ timeout: event.target.value })}
+                                    placeholder="60s"
+                                  />
+                                </Form.Item>
+                              </Form>
+                              <ProCard
+                                title="模型声明"
+                                extra={(
+                                  <Space>
+                                    <Button onClick={addCustomModel}>新增模型</Button>
+                                    <Button danger onClick={removeSelectedCustomModel} disabled={(selectedCustomProvider.models?.length ?? 0) <= 1}>移除模型</Button>
+                                  </Space>
+                                )}
+                              >
+                                <Space wrap>
+                                  {(selectedCustomProvider.models ?? []).map((model, modelIndex) => (
+                                    <Button
+                                      key={`${model.id || 'model'}-${modelIndex}`}
+                                      type={modelIndex === selectedCustomModelIndex ? 'primary' : 'default'}
+                                      onClick={() => setSelectedCustomModelIndex(modelIndex)}
+                                    >
+                                      {model.id || `模型 ${modelIndex + 1}`}
+                                    </Button>
+                                  ))}
+                                </Space>
+                                {selectedCustomModel ? (
+                                  <Form layout="vertical" style={{ marginTop: 16 }}>
+                                    <Form.Item label="模型 ID" required>
+                                      <Input
+                                        value={selectedCustomModel.id}
+                                        onChange={(event) => updateSelectedCustomModel({ id: event.target.value })}
+                                        placeholder="gpt-4o"
+                                      />
+                                    </Form.Item>
+                                    <Form.Item label="Context Window Tokens" required>
+                                      <InputNumber
+                                        min={1}
+                                        style={{ width: '100%' }}
+                                        value={selectedCustomModel.contextWindowTokens}
+                                        onChange={(value) => updateSelectedCustomModel({ contextWindowTokens: typeof value === 'number' ? value : undefined })}
+                                      />
+                                    </Form.Item>
+                                    <Form.Item label="Max Output Tokens" required>
+                                      <InputNumber
+                                        min={1}
+                                        style={{ width: '100%' }}
+                                        value={selectedCustomModel.maxOutputTokens}
+                                        onChange={(value) => updateSelectedCustomModel({ maxOutputTokens: typeof value === 'number' ? value : undefined })}
+                                      />
+                                    </Form.Item>
+                                    <Form.Item label="Operations" required>
+                                      <Select
+                                        mode="multiple"
+                                        value={selectedCustomModel.operations}
+                                        onChange={(value) => updateSelectedCustomModel({ operations: value })}
+                                        options={[
+                                          { value: 'chat_completions', label: 'chat_completions' },
+                                          { value: 'embeddings', label: 'embeddings' }
+                                        ]}
+                                      />
+                                    </Form.Item>
+                                    <Form.Item label="Temperature">
+                                      <InputNumber
+                                        min={0}
+                                        max={2}
+                                        step={0.1}
+                                        style={{ width: '100%' }}
+                                        value={selectedCustomModel.temperature}
+                                        onChange={(value) => updateSelectedCustomModel({ temperature: typeof value === 'number' ? value : undefined })}
+                                      />
+                                    </Form.Item>
+                                    <Form.Item label="Reasoning Effort">
+                                      <Select
+                                        allowClear
+                                        value={selectedCustomModel.reasoningEffort || undefined}
+                                        onChange={(value) => updateSelectedCustomModel({ reasoningEffort: value })}
+                                        options={[
+                                          { value: 'low', label: 'low' },
+                                          { value: 'medium', label: 'medium' },
+                                          { value: 'high', label: 'high' }
+                                        ]}
+                                      />
+                                    </Form.Item>
+                                    <Form.Item label="Thinking Budget Tokens">
+                                      <InputNumber
+                                        min={0}
+                                        style={{ width: '100%' }}
+                                        value={selectedCustomModel.thinkingBudgetTokens}
+                                        onChange={(value) => updateSelectedCustomModel({ thinkingBudgetTokens: typeof value === 'number' ? value : undefined })}
+                                      />
+                                    </Form.Item>
+                                    <Form.Item label="Cache Mode">
+                                      <Select
+                                        allowClear
+                                        value={selectedCustomModel.cacheMode || undefined}
+                                        onChange={(value) => updateSelectedCustomModel({ cacheMode: value })}
+                                        options={[
+                                          { value: 'none', label: 'none' },
+                                          { value: 'prompt_cache', label: 'prompt_cache' },
+                                          { value: 'message_cache_control', label: 'message_cache_control' }
+                                        ]}
+                                      />
+                                    </Form.Item>
+                                    <Form.Item label="Cache Usage Fields">
+                                      <Select
+                                        mode="tags"
+                                        value={selectedCustomModel.cacheUsageFields}
+                                        onChange={(value) => updateSelectedCustomModel({ cacheUsageFields: value })}
+                                        placeholder="cache_read_input_tokens"
+                                      />
+                                    </Form.Item>
+                                  </Form>
+                                ) : <Empty description="请新增模型声明" />}
+                              </ProCard>
+                            </Space>
+                          </ProCard>
+                        ) : null}
+                      </Space>
+                    ) : (
+                      <Typography.Text type="secondary">
+                        已配置 {customProviderDrafts.length} 个自定义 Provider。展开后可编辑 model/operation/inference/cache。
+                      </Typography.Text>
+                    )}
+                  </ProCard>
+                </Space>
+              </ProCard>
             )
           },
           {
@@ -453,145 +791,145 @@ export function ConfigurationPage() {
             label: 'Web Search',
             children: (
               <ProCard
-        title="Web Search Provider"
-        className="workorch-section"
-        extra={<Button type="primary" onClick={() => void webSearchProviderEditorForm.validateFields().then(() => saveWebSearchConfiguration())} loading={webSearchSaving}>保存 Web Search Provider</Button>}
-      >
-        <Typography.Paragraph type="secondary">
-          Web Search Provider 由 workorch 运行期统一治理，提供 web/search 与 web/fetch；API 密钥读取时隐藏，编辑时留空表示保留已有密钥。
-        </Typography.Paragraph>
-        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-          <ProCard
-            title="Provider 列表"
-            extra={(
-              <Space>
-                <Select
-                  style={{ width: 240 }}
-                  value={selectedWebSearchTemplateId}
-                  onChange={setSelectedWebSearchTemplateId}
-                  placeholder="选择配置模板"
-                  options={webSearchProviderTemplates.map((item) => ({ value: item.templateId, label: item.name }))}
-                />
-                <Button onClick={addWebSearchProvider}>按模板新增</Button>
-              </Space>
-            )}
-          >
-            <Form.Item label="默认 Web Search Provider">
-              <Select
-                value={defaultWebSearchProviderId}
-                onChange={setDefaultWebSearchProviderId}
-                placeholder="选择默认 Web Search Provider"
-                options={webSearchProviderDrafts
-                  .map((item) => item.id?.trim())
-                  .filter(Boolean)
-                  .map((id) => ({ value: id, label: id }))}
-              />
-            </Form.Item>
-            <Space direction="vertical" size="small" className="llm-provider-list">
-              {webSearchProviderDrafts.map((item, index) => {
-                const status = webSearchStatusByProviderID.get(item.id);
-                const selected = index === selectedWebSearchProviderIndex;
-                return (
-                  <button
-                    key={`${item.id || 'web-provider'}-${index}`}
-                    type="button"
-                    className={`llm-provider-list-item${selected ? ' llm-provider-list-item-selected' : ''}`}
-                    onClick={() => selectWebSearchProvider(index)}
-                  >
-                    <span className="llm-provider-list-main">
-                      <Typography.Text strong>{item.id || '新 Provider'}</Typography.Text>
-                      <Typography.Text type="secondary">{item.searchEndpoint || item.provider || '搜索端点未配置'}</Typography.Text>
-                    </span>
-                    <span className="llm-provider-list-tags">
-                      {item.id === defaultWebSearchProviderId ? <Tag color="blue">默认</Tag> : null}
-                      {status?.apiKeyConfigured ? <Tag color="green">密钥</Tag> : null}
-                      {status?.ready ? <Tag color="green">就绪</Tag> : <Tag color="red">{status?.reason || '未保存'}</Tag>}
-                    </span>
-                  </button>
-                );
-              })}
-            </Space>
-          </ProCard>
-          <ProCard
-            title={selectedWebSearchProvider ? `编辑 Provider：${selectedWebSearchProvider.id || '新 Provider'}` : '编辑 Provider'}
-            extra={<Button danger onClick={removeSelectedWebSearchProvider} disabled={webSearchProviderDrafts.length <= 1}>移除</Button>}
-          >
-            {selectedWebSearchProvider ? (
-              <Form
-                form={webSearchProviderEditorForm}
-                layout="vertical"
-                onValuesChange={updateSelectedWebSearchProvider}
+                title="Web Search Provider"
+                className="workorch-section"
+                extra={<Button type="primary" onClick={() => void webSearchProviderEditorForm.validateFields().then(() => saveWebSearchConfiguration())} loading={webSearchSaving}>保存 Web Search Provider</Button>}
               >
-                <Form.Item name="id" label="Provider 标识" rules={[{ required: true }]}>
-                  <Input placeholder="web-http-main" />
-                </Form.Item>
-                <Form.Item name="provider" label="Provider 类型" rules={[{ required: true }]}>
-                  <Select
-                    options={webSearchProviderTemplates.map((item) => ({ value: item.provider, label: `${item.provider} / ${item.name}` }))}
-                  />
-                </Form.Item>
-                <Form.Item name="searchEndpoint" label="Search Endpoint" rules={[{ required: true }]}>
-                  <Input placeholder="https://search-gateway.example/api/search" />
-                </Form.Item>
-                <Form.Item name="fetchEndpoint" label="Fetch Endpoint">
-                  <Input placeholder="https://search-gateway.example/api/fetch" />
-                </Form.Item>
-                <Form.Item
-                  name="headers"
-                  label="请求头"
-                  rules={[
-                    {
-                      validator: async (_, value?: string) => {
-                        validateHeaderLines(value);
-                      }
-                    }
-                  ]}
-                >
-                  <Input.TextArea rows={3} placeholder="Authorization: Bearer token&#10;X-Request-Source: workorch" />
-                </Form.Item>
-                <Form.Item name="timeout" label="超时">
-                  <Input placeholder="20s" />
-                </Form.Item>
-                <Form.Item name="maxResults" label="最大搜索结果">
-                  <InputNumber min={1} max={20} style={{ width: '100%' }} />
-                </Form.Item>
-                <Form.Item name="maxFetchBytes" label="最大读取字节数">
-                  <InputNumber min={1024} max={1048576} style={{ width: '100%' }} />
-                </Form.Item>
-                <Form.Item name="maxRedirects" label="最大重定向次数">
-                  <InputNumber min={0} max={5} style={{ width: '100%' }} />
-                </Form.Item>
-                <Form.Item name="allowDomains" label="允许域名">
-                  <Input.TextArea rows={2} placeholder="每行一个域名，留空表示不限制" />
-                </Form.Item>
-                <Form.Item name="denyDomains" label="拒绝域名">
-                  <Input.TextArea rows={2} placeholder="每行一个域名" />
-                </Form.Item>
-                <Form.Item name="disabled" label="是否禁用">
-                  <Select
-                    options={[
-                      { value: false, label: '否' },
-                      { value: true, label: '是' }
-                    ]}
-                  />
-                </Form.Item>
-                <Form.Item name="apiKey" label="API 密钥">
-                  <Input.Password placeholder="留空表示保留已有 API 密钥" autoComplete="new-password" />
-                </Form.Item>
-                <Descriptions
-                  column={1}
-                  items={[
-                    { key: 'apiKey', label: '已保存 API 密钥', children: selectedWebSearchProviderStatus?.apiKeyConfigured ? <Tag color="green">已配置</Tag> : <Tag>未配置</Tag> },
-                    { key: 'status', label: '已保存状态', children: selectedWebSearchProviderStatus?.ready ? <Tag color="green">就绪</Tag> : <Tag color="red">{selectedWebSearchProviderStatus?.reason || '未保存'}</Tag> },
-                    { key: 'fetch', label: '读取端点', children: selectedWebSearchProviderStatus?.fetchEndpoint || '-' }
-                  ]}
-                />
-              </Form>
-            ) : (
-              <Empty description="请选择或新增 Web Search Provider" />
-            )}
-          </ProCard>
-        </Space>
+                <Typography.Paragraph type="secondary">
+                  Web Search Provider 由 workorch 运行期统一治理，提供 web/search 与 web/fetch；API 密钥读取时隐藏，编辑时留空表示保留已有密钥。
+                </Typography.Paragraph>
+                <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                  <ProCard
+                    title="Provider 列表"
+                    extra={(
+                      <Space>
+                        <Select
+                          style={{ width: 240 }}
+                          value={selectedWebSearchTemplateId}
+                          onChange={setSelectedWebSearchTemplateId}
+                          placeholder="选择配置模板"
+                          options={webSearchProviderTemplates.map((item) => ({ value: item.templateId, label: item.name }))}
+                        />
+                        <Button onClick={addWebSearchProvider}>按模板新增</Button>
+                      </Space>
+                    )}
+                  >
+                    <Form.Item label="默认 Web Search Provider">
+                      <Select
+                        value={defaultWebSearchProviderId}
+                        onChange={setDefaultWebSearchProviderId}
+                        placeholder="选择默认 Web Search Provider"
+                        options={webSearchProviderDrafts
+                          .map((item) => item.id?.trim())
+                          .filter(Boolean)
+                          .map((id) => ({ value: id, label: id }))}
+                      />
+                    </Form.Item>
+                    <Space direction="vertical" size="small" className="llm-provider-list">
+                      {webSearchProviderDrafts.map((item, index) => {
+                        const status = webSearchStatusByProviderID.get(item.id);
+                        const selected = index === selectedWebSearchProviderIndex;
+                        return (
+                          <button
+                            key={`${item.id || 'web-provider'}-${index}`}
+                            type="button"
+                            className={`llm-provider-list-item${selected ? ' llm-provider-list-item-selected' : ''}`}
+                            onClick={() => selectWebSearchProvider(index)}
+                          >
+                            <span className="llm-provider-list-main">
+                              <Typography.Text strong>{item.id || '新 Provider'}</Typography.Text>
+                              <Typography.Text type="secondary">{item.searchEndpoint || item.provider || '搜索端点未配置'}</Typography.Text>
+                            </span>
+                            <span className="llm-provider-list-tags">
+                              {item.id === defaultWebSearchProviderId ? <Tag color="blue">默认</Tag> : null}
+                              {status?.apiKeyConfigured ? <Tag color="green">密钥</Tag> : null}
+                              {status?.ready ? <Tag color="green">就绪</Tag> : <Tag color="red">{status?.reason || '未保存'}</Tag>}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </Space>
+                  </ProCard>
+                  <ProCard
+                    title={selectedWebSearchProvider ? `编辑 Provider：${selectedWebSearchProvider.id || '新 Provider'}` : '编辑 Provider'}
+                    extra={<Button danger onClick={removeSelectedWebSearchProvider} disabled={webSearchProviderDrafts.length <= 1}>移除</Button>}
+                  >
+                    {selectedWebSearchProvider ? (
+                      <Form
+                        form={webSearchProviderEditorForm}
+                        layout="vertical"
+                        onValuesChange={updateSelectedWebSearchProvider}
+                      >
+                        <Form.Item name="id" label="Provider 标识" rules={[{ required: true }]}>
+                          <Input placeholder="web-http-main" />
+                        </Form.Item>
+                        <Form.Item name="provider" label="Provider 类型" rules={[{ required: true }]}>
+                          <Select
+                            options={webSearchProviderTemplates.map((item) => ({ value: item.provider, label: `${item.provider} / ${item.name}` }))}
+                          />
+                        </Form.Item>
+                        <Form.Item name="searchEndpoint" label="Search Endpoint" rules={[{ required: true }]}>
+                          <Input placeholder="https://search-gateway.example/api/search" />
+                        </Form.Item>
+                        <Form.Item name="fetchEndpoint" label="Fetch Endpoint">
+                          <Input placeholder="https://search-gateway.example/api/fetch" />
+                        </Form.Item>
+                        <Form.Item
+                          name="headers"
+                          label="请求头"
+                          rules={[
+                            {
+                              validator: async (_, value?: string) => {
+                                validateHeaderLines(value);
+                              }
+                            }
+                          ]}
+                        >
+                          <Input.TextArea rows={3} placeholder={'Authorization: Bearer token\nX-Request-Source: workorch'} />
+                        </Form.Item>
+                        <Form.Item name="timeout" label="超时">
+                          <Input placeholder="20s" />
+                        </Form.Item>
+                        <Form.Item name="maxResults" label="最大搜索结果">
+                          <InputNumber min={1} max={20} style={{ width: '100%' }} />
+                        </Form.Item>
+                        <Form.Item name="maxFetchBytes" label="最大读取字节数">
+                          <InputNumber min={1024} style={{ width: '100%' }} />
+                        </Form.Item>
+                        <Form.Item name="maxRedirects" label="最大重定向次数">
+                          <InputNumber min={0} max={10} style={{ width: '100%' }} />
+                        </Form.Item>
+                        <Form.Item name="allowDomains" label="允许域名">
+                          <Select mode="tags" placeholder="example.test" />
+                        </Form.Item>
+                        <Form.Item name="denyDomains" label="拒绝域名">
+                          <Select mode="tags" placeholder="blocked.example.test" />
+                        </Form.Item>
+                        <Form.Item name="disabled" label="是否禁用">
+                          <Select
+                            options={[
+                              { value: false, label: '否' },
+                              { value: true, label: '是' }
+                            ]}
+                          />
+                        </Form.Item>
+                        <Form.Item name="apiKey" label="API 密钥">
+                          <Input.Password placeholder="留空表示保留已有 API 密钥" autoComplete="new-password" />
+                        </Form.Item>
+                        <Descriptions
+                          column={1}
+                          items={[
+                            { key: 'apiKey', label: '已保存 API 密钥', children: selectedWebSearchProviderStatus?.apiKeyConfigured ? <Tag color="green">已配置</Tag> : <Tag>未配置</Tag> },
+                            { key: 'status', label: '已保存状态', children: selectedWebSearchProviderStatus?.ready ? <Tag color="green">就绪</Tag> : <Tag color="red">{selectedWebSearchProviderStatus?.reason || '未保存'}</Tag> },
+                            { key: 'fetch', label: '读取端点', children: selectedWebSearchProviderStatus?.fetchEndpoint || '-' }
+                          ]}
+                        />
+                      </Form>
+                    ) : (
+                      <Empty description="请选择或新增 Web Search Provider" />
+                    )}
+                  </ProCard>
+                </Space>
               </ProCard>
             )
           },
@@ -604,275 +942,6 @@ export function ConfigurationPage() {
             key: 'workspace-template',
             label: '工作空间模板',
             children: <WorkspaceTemplateManager souls={souls} templates={workspaceTemplates} onTemplatesChange={setWorkspaceTemplates} />
-          },
-          {
-            key: 'llm',
-            label: 'LLM 服务商',
-            children: (
-              <ProCard
-        title="LLM 服务商"
-        className="workorch-section"
-        extra={<Button type="primary" onClick={() => void providerEditorForm.validateFields().then(() => saveLLMConfiguration())} loading={saving}>保存 LLM 服务商</Button>}
-      >
-        <Typography.Paragraph type="secondary">
-          API 密钥读取时会被隐藏。编辑时留空表示保留已有密钥；保存后的服务商配置会由 workorch 运行期重新加载，并用于后续 LLM 步骤。
-        </Typography.Paragraph>
-        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-          <ProCard
-            title="模型能力表"
-            extra={<Button onClick={addModelCapability}>新增能力</Button>}
-          >
-            <Space direction="vertical" size="small" style={{ width: '100%' }}>
-              {modelCapabilityDrafts.length ? modelCapabilityDrafts.map((item, index) => (
-                <Space key={`${item.id || 'model-capability'}-${index}`} wrap align="start" style={{ width: '100%' }}>
-                  <Input
-                    style={{ width: 220 }}
-                    value={item.id}
-                    onChange={(event) => updateModelCapabilityDraft(index, { id: event.target.value })}
-                    placeholder="能力标识"
-                  />
-                  <Select
-                    allowClear
-                    style={{ width: 180 }}
-                    value={item.provider || undefined}
-                    onChange={(value) => updateModelCapabilityDraft(index, { provider: value })}
-                    placeholder="Provider 类型"
-                    options={Array.from(new Set(providerTemplates.map((template) => template.provider).filter(Boolean))).map((provider) => ({ value: provider, label: provider }))}
-                  />
-                  <Input
-                    style={{ width: 260 }}
-                    value={item.modelPattern}
-                    onChange={(event) => updateModelCapabilityDraft(index, { modelPattern: event.target.value })}
-                    placeholder="模型匹配表达式"
-                  />
-                  <InputNumber
-                    style={{ width: 180 }}
-                    min={1}
-                    value={item.contextWindowTokens}
-                    onChange={(value) => updateModelCapabilityDraft(index, { contextWindowTokens: Number(value ?? 0) })}
-                    placeholder="上下文 Tokens"
-                  />
-                  <Button danger onClick={() => removeModelCapability(index)}>移除</Button>
-                </Space>
-              )) : (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无模型能力配置" />
-              )}
-            </Space>
-          </ProCard>
-          <ProCard
-            title="服务商列表"
-            extra={(
-              <Space>
-                <Select
-                  style={{ width: 220 }}
-                  value={selectedTemplateId}
-                  onChange={setSelectedTemplateId}
-                  placeholder="选择配置模板"
-                  options={providerTemplates.map((item) => ({ value: item.templateId, label: item.name }))}
-                />
-                <Button onClick={addProvider}>按模板新增</Button>
-              </Space>
-            )}
-          >
-            <Typography.Paragraph type="secondary">
-              配置模板按 provider 模式生成草稿：OpenAI 与 Anthropic 使用官方 SDK；DeepSeek、MiniMax 等支持 OpenAI SDK 的服务请选择 OpenAI 并配置 baseURL，compatible 仅用于轻量 HTTP 兼容端点。
-            </Typography.Paragraph>
-            <Form.Item label="默认 LLM 服务商">
-              <Select
-                value={defaultProviderId}
-                onChange={setDefaultProviderId}
-                placeholder="选择默认 LLM 服务商"
-                options={providerDrafts
-                  .map((item) => item.id?.trim())
-                  .filter(Boolean)
-                  .map((id) => ({ value: id, label: id }))}
-              />
-            </Form.Item>
-            <Form.Item label="默认 Embedding 服务商">
-              <Select
-                allowClear
-                value={defaultEmbeddingProviderId}
-                onChange={setDefaultEmbeddingProviderId}
-                placeholder="选择用于向量记忆召回的服务商"
-                options={providerDrafts
-                  .filter((item) => (item.nonChatOperations ?? []).includes('embeddings'))
-                  .map((item) => item.id?.trim())
-                  .filter(Boolean)
-                  .map((id) => ({ value: id, label: id }))}
-              />
-            </Form.Item>
-            <Space direction="vertical" size="small" className="llm-provider-list">
-              {providerDrafts.map((item, index) => {
-                const status = statusByProviderID.get(item.id);
-                const selected = index === selectedProviderIndex;
-                return (
-                  <button
-                    key={`${item.id || 'provider'}-${index}`}
-                    type="button"
-                    className={`llm-provider-list-item${selected ? ' llm-provider-list-item-selected' : ''}`}
-                    onClick={() => selectProvider(index)}
-                  >
-                    <span className="llm-provider-list-main">
-                      <Typography.Text strong>{item.id || '新服务商'}</Typography.Text>
-                      <Typography.Text type="secondary">{item.model || item.provider || '模型未配置'}</Typography.Text>
-                    </span>
-                    <span className="llm-provider-list-tags">
-                      {item.id === defaultProviderId ? <Tag color="blue">默认</Tag> : null}
-                      {item.id === defaultEmbeddingProviderId ? <Tag color="cyan">embedding</Tag> : null}
-                      {status?.apiKeyConfigured ? <Tag color="green">密钥</Tag> : <Tag color="red">密钥</Tag>}
-                      {status?.ready ? <Tag color="green">就绪</Tag> : <Tag color="red">{status?.reason || '未保存'}</Tag>}
-                    </span>
-                  </button>
-                );
-              })}
-            </Space>
-          </ProCard>
-          <ProCard
-            title={selectedProvider ? `编辑服务商：${selectedProvider.id || '新服务商'}` : '编辑服务商'}
-            extra={<Button danger onClick={removeSelectedProvider} disabled={providerDrafts.length <= 1}>移除</Button>}
-          >
-            {selectedProvider ? (
-              <Form
-                form={providerEditorForm}
-                layout="vertical"
-                onValuesChange={updateSelectedProvider}
-              >
-                <Form.Item name="id" label="服务商标识" rules={[{ required: true }]}>
-                  <Input placeholder="local" />
-                </Form.Item>
-                <Form.Item name="provider" label="服务商类型" rules={[{ required: true }]}>
-                  <Select
-                    options={providerTemplates.map((item) => ({ value: item.provider, label: `${item.provider} / ${item.name}` }))}
-                  />
-                </Form.Item>
-                <Form.Item name="model" label="模型" rules={[{ required: true }]}>
-                  <Input placeholder="gpt-4.1-mini" />
-                </Form.Item>
-                <Form.Item name="baseUrl" label="基础 URL">
-                  <Input placeholder="https://api.openai.com/v1 或本地兼容端点" />
-                </Form.Item>
-                <Form.Item name="timeout" label="超时">
-                  <Input placeholder="60s" />
-                </Form.Item>
-                <Form.Item name="disabled" label="是否禁用">
-                  <Select
-                    options={[
-                      { value: false, label: '否' },
-                      { value: true, label: '是' }
-                    ]}
-                  />
-                </Form.Item>
-                <Form.Item name="chatCompletions" label="对话补全">
-                  <Select
-                    options={[
-                      { value: true, label: '启用' },
-                      { value: false, label: '禁用' }
-                    ]}
-                  />
-                </Form.Item>
-                <Form.Item name="streaming" label="流式输出">
-                  <Select
-                    options={[
-                      { value: false, label: '禁用' },
-                      { value: true, label: '启用' }
-                    ]}
-                  />
-                </Form.Item>
-                <Form.Item name="nonChatOperations" label="非对话能力">
-                  <Select mode="tags" placeholder="embeddings, responses" options={[]} />
-                </Form.Item>
-                <Form.Item name="failoverEnabled" label="故障转移">
-                  <Select
-                    options={[
-                      { value: false, label: '禁用' },
-                      { value: true, label: '启用' }
-                    ]}
-                  />
-                </Form.Item>
-                <Form.Item name="failoverProviders" label="故障转移服务商">
-                  <Select mode="tags" placeholder="按顺序填写备用 provider id" options={providerDrafts.map((item) => ({ value: item.id, label: item.id }))} />
-                </Form.Item>
-                <Form.Item name={['inferenceProfile', 'temperature']} label="Temperature">
-                  <InputNumber min={0} max={2} step={0.1} style={{ width: '100%' }} />
-                </Form.Item>
-                <Form.Item name={['inferenceProfile', 'maxOutputTokens']} label="最大输出 Tokens">
-                  <InputNumber min={0} style={{ width: '100%' }} />
-                </Form.Item>
-                <Form.Item name={['inferenceProfile', 'reasoningEffort']} label="推理强度">
-                  <Select
-                    allowClear
-                    options={[
-                      { value: 'low', label: 'low' },
-                      { value: 'medium', label: 'medium' },
-                      { value: 'high', label: 'high' },
-                      { value: 'xhigh', label: 'xhigh' }
-                    ]}
-                  />
-                </Form.Item>
-                <Form.Item name={['inferenceProfile', 'thinkingBudgetTokens']} label="Thinking Budget Tokens">
-                  <InputNumber min={0} style={{ width: '100%' }} />
-                </Form.Item>
-                <Form.Item name={['contextProfile', 'profileMode']} label="上下文配置模式">
-                  <Select
-                    allowClear
-                    options={[
-                      { value: 'auto', label: 'auto' },
-                      { value: 'manual', label: 'manual' }
-                    ]}
-                  />
-                </Form.Item>
-                <Form.Item name={['contextProfile', 'contextWindowTokens']} label="上下文窗口 Tokens">
-                  <InputNumber min={0} style={{ width: '100%' }} />
-                </Form.Item>
-                <Form.Item noStyle shouldUpdate={(previous, current) => previous.contextProfile?.profileMode !== current.contextProfile?.profileMode}>
-                  {({ getFieldValue }) => getFieldValue(['contextProfile', 'profileMode']) === 'manual' ? (
-                    <>
-                      <Form.Item name={['contextProfile', 'maxInputTokens']} label="最大输入 Tokens">
-                        <InputNumber min={0} style={{ width: '100%' }} />
-                      </Form.Item>
-                      <Form.Item name={['contextProfile', 'reservedOutputTokens']} label="保留输出 Tokens">
-                        <InputNumber min={0} style={{ width: '100%' }} />
-                      </Form.Item>
-                      <Form.Item name={['contextProfile', 'safetyRatio']} label="安全比例">
-                        <InputNumber min={0} max={1} step={0.05} style={{ width: '100%' }} />
-                      </Form.Item>
-                      <Form.Item name={['contextProfile', 'contextUtilizationRatio']} label="上下文利用比例">
-                        <InputNumber min={0} max={1} step={0.05} style={{ width: '100%' }} />
-                      </Form.Item>
-                      <Form.Item name={['contextProfile', 'bytesHardLimit']} label="请求字节硬限制">
-                        <InputNumber min={0} style={{ width: '100%' }} />
-                      </Form.Item>
-                      <Form.Item name={['contextProfile', 'maxRequestBytes']} label="最大请求字节数">
-                        <InputNumber min={0} style={{ width: '100%' }} />
-                      </Form.Item>
-                      <Form.Item name={['contextProfile', 'estimatedTokensPerByte']} label="Token/Byte 估算">
-                        <InputNumber min={0} step={0.01} style={{ width: '100%' }} />
-                      </Form.Item>
-                    </>
-                  ) : null}
-                </Form.Item>
-                <Form.Item name="apiKey" label="API 密钥">
-                  <Input.Password placeholder="留空表示保留已有 API 密钥" autoComplete="new-password" />
-                </Form.Item>
-                <Descriptions
-                  column={1}
-                  items={[
-                    { key: 'apiKey', label: '已保存 API 密钥', children: selectedProviderStatus?.apiKeyConfigured ? <Tag color="green">已配置</Tag> : <Tag color="red">缺失</Tag> },
-                    { key: 'status', label: '已保存状态', children: selectedProviderStatus?.ready ? <Tag color="green">就绪</Tag> : <Tag color="red">{selectedProviderStatus?.reason || '未保存'}</Tag> },
-                    { key: 'capabilities', label: '已保存能力', children: <Space wrap>{selectedProviderStatus?.chatCompletions ? <Tag color="blue">chat</Tag> : null}{selectedProviderStatus?.streaming ? <Tag color="cyan">streaming</Tag> : null}{(selectedProviderStatus?.nonChatOperations ?? []).map((item) => <Tag key={item}>{item}</Tag>)}</Space> },
-                    { key: 'contextProfileMode', label: '已保存上下文模式', children: selectedProviderStatus?.contextProfile?.profileMode || '-' },
-                    { key: 'contextWindowTokens', label: '已保存上下文窗口', children: selectedProviderStatus?.contextProfile?.contextWindowTokens || '-' },
-                    { key: 'contextCapabilitySource', label: '已保存能力来源', children: selectedProviderStatus?.contextProfile?.capabilitySource || '-' }
-                  ]}
-                />
-              </Form>
-            ) : (
-              <Empty description="请选择或新增 LLM 服务商" />
-            )}
-          </ProCard>
-        </Space>
-              </ProCard>
-            )
           }
         ]}
       />

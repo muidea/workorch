@@ -13,10 +13,20 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 	facts := runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: runtimecontract.InitialRuntimeEvidenceRevision,
 		Focus: runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
-		Resources: runtimecontract.RuntimeResourceFacts{ProviderCeiling: &runtimecontract.ProviderCeiling{ProviderID: "provider-1", MaxBytes: 96 * 1024, Revision: "config-1"}, TargetSnapshots: []runtimecontract.TargetSnapshot{{
+		Resources: runtimecontract.RuntimeResourceFacts{ProviderCeiling: &runtimecontract.ProviderCeiling{
+			Target:                   runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+			ContextWindowTokens:      128000,
+			ProviderMaxOutputTokens:  16384,
+			EffectiveMaxOutputTokens: 4096,
+			MaxInputTokens:           92928,
+			MaxBytes:                 96 * 1024,
+			CapabilityRevision:       "capability-1",
+			ConfigurationRevision:    "config-1",
+		}, TargetSnapshots: []runtimecontract.TargetSnapshot{{
 			TargetRef: "main.go", Content: "package main", ContentHash: "hash-1", ContentState: runtimecontract.SnapshotContentStateComplete,
 		}}},
 		Activation: runtimecontract.RuntimeActivationContext{
+			ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 			DialogLanguage: "zh-CN",
 			DefaultSoul:    &runtimecontract.RuntimeSoulContext{ID: "soul-default", Instructions: "default-only-soul" + strings.Repeat("d", 22*1024)},
 			StageSoulBindings: []runtimecontract.RuntimeStageSoulBinding{
@@ -133,7 +143,16 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 		t.Fatalf("retry changed stable provider contract: initial=%+v retry=%+v", request.ContextBudget.CachePlan, retryRequest.ContextBudget.CachePlan)
 	}
 	limitedContext := runtimecontract.RuntimeCandidateContextFromFacts(facts)
-	limitedContext.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{ProviderID: "provider-1", MaxBytes: 1, Revision: "config-1"}
+	limitedContext.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
+		Target:                   runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ContextWindowTokens:      128000,
+		ProviderMaxOutputTokens:  16384,
+		EffectiveMaxOutputTokens: 4096,
+		MaxInputTokens:           92928,
+		MaxBytes:                 1,
+		CapabilityRevision:       "capability-1",
+		ConfigurationRevision:    "config-1",
+	}
 	if _, err := runtimeV2ProviderRequest(llmmodels.RuntimeCandidateRequest{
 		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix,
 		DefinitionContext: definition, CandidateContext: limitedContext,

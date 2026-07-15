@@ -701,6 +701,30 @@ func TestChatCompletionsURLAcceptsFullEndpoint(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleURLsNormalizeHostOnlyBase(t *testing.T) {
+	chat, err := chatCompletionsURL("http://127.0.0.1:8080")
+	if err != nil {
+		t.Fatalf("chat completions url: %v", err)
+	}
+	if chat != "http://127.0.0.1:8080/v1/chat/completions" {
+		t.Fatalf("chat url = %q, want host-only base normalized with /v1", chat)
+	}
+	embed, err := embeddingsURL("http://127.0.0.1:8080")
+	if err != nil {
+		t.Fatalf("embeddings url: %v", err)
+	}
+	if embed != "http://127.0.0.1:8080/v1/embeddings" {
+		t.Fatalf("embeddings url = %q, want host-only base normalized with /v1", embed)
+	}
+	chatV1, err := chatCompletionsURL("http://127.0.0.1:18181/v1")
+	if err != nil {
+		t.Fatalf("chat completions /v1 url: %v", err)
+	}
+	if chatV1 != "http://127.0.0.1:18181/v1/chat/completions" {
+		t.Fatalf("chat /v1 url = %q, want unchanged /v1 root", chatV1)
+	}
+}
+
 func llmProviderRequest() llmmodels.ProviderRequest {
 	return llmmodels.ProviderRequest{
 		WorkspaceID:    "workspace-1",

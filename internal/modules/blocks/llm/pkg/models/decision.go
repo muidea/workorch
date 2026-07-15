@@ -51,6 +51,15 @@ type NormalizationManifest struct {
 }
 
 type ProviderContextBudget struct {
+	// Sealed provider/model identity and revisions for request audit.
+	ProviderID               string `json:"providerId,omitempty"`
+	ModelID                  string `json:"modelId,omitempty"`
+	CapabilityRevision       string `json:"capabilityRevision,omitempty"`
+	ConfigurationRevision    string `json:"configurationRevision,omitempty"`
+	ContextWindowTokens      int    `json:"contextWindowTokens,omitempty"`
+	ProviderMaxOutputTokens  int    `json:"providerMaxOutputTokens,omitempty"`
+	EffectiveMaxOutputTokens int    `json:"effectiveMaxOutputTokens,omitempty"`
+
 	MaxBytes              int                    `json:"maxBytes"`
 	ActualBytes           int                    `json:"actualBytes"`
 	MaxTokens             int                    `json:"maxTokens,omitempty"`

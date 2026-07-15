@@ -1,9 +1,13 @@
 package readmodelprojection
 
-func llmContextBudgetProfile(budget map[string]any) map[string]any {
-	return readModelMapValue(budget["profile"])
+import "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+
+func llmContextBudgetProfile(budget workorcheventpayload.Payload) workorcheventpayload.Payload {
+	value, _ := budget.Object("profile")
+	return value
 }
 
-func llmContextBudgetCachePlan(budget map[string]any) map[string]any {
-	return readModelMapValue(budget["cachePlan"])
+func llmContextBudgetCachePlan(budget workorcheventpayload.Payload) workorcheventpayload.Payload {
+	value, _ := budget.Object("cachePlan")
+	return value
 }

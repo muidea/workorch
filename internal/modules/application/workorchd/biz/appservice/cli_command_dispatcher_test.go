@@ -61,7 +61,7 @@ func TestCLIWorkspaceSnapshotCommandProjectsDetailView(t *testing.T) {
 	dispatcher := NewCLICommandDispatcher(&RuntimeSession{}, hub, &staticCLIWorkspaceViewReader{snapshot: WorkspaceSnapshot{
 		Workspace:      Workspace{ID: "ws-cli-detail", ActiveRunID: "run-cli-active", ContextHints: map[string]any{"large": "profile"}, EvidencePolicies: []map[string]any{{"large": "policy"}}},
 		Runs:           []Run{{ID: "run-cli-active", WorkspaceID: "ws-cli-detail", State: "running"}},
-		LLMUsageTraces: []LLMUsageTrace{{ID: "usage-cli", RunID: "run-cli-active", ContextBudget: map[string]any{"failureSignature": strings.Repeat("x", 2048)}}},
+		LLMUsageTraces: []LLMUsageTrace{{ID: "usage-cli", RunID: "run-cli-active", ContextBudget: mustReadModelEventPayload(t, map[string]any{"failureSignature": strings.Repeat("x", 2048)})}},
 	}})
 	if err := dispatcher.Run(); err != nil {
 		t.Fatalf("run dispatcher: %v", err)
@@ -221,4 +221,8 @@ func (r *staticCLIWorkspaceViewReader) ReadWorkspaceViewSnapshot(_ context.Conte
 	r.snapshotCalls++
 	r.lastSnapshotWorkspaceID = workspaceID
 	return r.snapshot, nil
+}
+
+func (r *staticCLIWorkspaceViewReader) ReadWorkspaceActivity(context.Context, string) (WorkspaceActivityFeed, bool, error) {
+	return WorkspaceActivityFeed{}, false, nil
 }

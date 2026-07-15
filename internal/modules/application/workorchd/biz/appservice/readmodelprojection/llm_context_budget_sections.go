@@ -1,25 +1,27 @@
 package readmodelprojection
 
-func llmContextBudgetRules(budget map[string]any) []string {
-	return readModelStringSliceValue(budget["rules"])
+import "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+
+func llmContextBudgetStrings(budget workorcheventpayload.Payload, key string) []string {
+	value, _ := budget.StringSlice(key)
+	return value
 }
 
-func llmContextBudgetSourceRefs(budget map[string]any) []string {
-	return readModelStringSliceValue(budget["sourceRefs"])
+func llmContextBudgetRules(budget workorcheventpayload.Payload) []string {
+	return llmContextBudgetStrings(budget, "rules")
 }
-
-func llmContextBudgetIncludedSections(budget map[string]any) []string {
-	return readModelStringSliceValue(budget["includedSections"])
+func llmContextBudgetSourceRefs(budget workorcheventpayload.Payload) []string {
+	return llmContextBudgetStrings(budget, "sourceRefs")
 }
-
-func llmContextBudgetNormalizedSections(budget map[string]any) []string {
-	return readModelStringSliceValue(budget["normalizedSections"])
+func llmContextBudgetIncludedSections(budget workorcheventpayload.Payload) []string {
+	return llmContextBudgetStrings(budget, "includedSections")
 }
-
-func llmContextBudgetCompressedSections(budget map[string]any) []string {
-	return readModelStringSliceValue(budget["compressedSections"])
+func llmContextBudgetNormalizedSections(budget workorcheventpayload.Payload) []string {
+	return llmContextBudgetStrings(budget, "normalizedSections")
 }
-
-func llmContextBudgetOmittedSections(budget map[string]any) []string {
-	return readModelStringSliceValue(budget["omittedSections"])
+func llmContextBudgetCompressedSections(budget workorcheventpayload.Payload) []string {
+	return llmContextBudgetStrings(budget, "compressedSections")
+}
+func llmContextBudgetOmittedSections(budget workorcheventpayload.Payload) []string {
+	return llmContextBudgetStrings(budget, "omittedSections")
 }

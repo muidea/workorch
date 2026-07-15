@@ -1,0 +1,42 @@
+package workorchruntimecontract
+
+// ProviderUsageView is the secret-free token usage surface carried across EventHub
+// candidate results and persisted LLM usage audit records.
+type ProviderUsageView struct {
+	InputTokens             int `json:"inputTokens,omitempty"`
+	OutputTokens            int `json:"outputTokens,omitempty"`
+	TotalTokens             int `json:"totalTokens,omitempty"`
+	CacheReadTokens         int `json:"cacheReadTokens,omitempty"`
+	CacheWriteTokens        int `json:"cacheWriteTokens,omitempty"`
+	CacheCreationTokens     int `json:"cacheCreationTokens,omitempty"`
+	CacheableInputTokens    int `json:"cacheableInputTokens,omitempty"`
+	NonCacheableInputTokens int `json:"nonCacheableInputTokens,omitempty"`
+}
+
+// ProviderRequestAuditView is the sealed, secret-free audit surface for one provider
+// request. It is safe to persist and transport across EventHub boundaries.
+type ProviderRequestAuditView struct {
+	RequestID             string              `json:"requestId,omitempty"`
+	WorkspaceID           string              `json:"workspaceId,omitempty"`
+	RunID                 string              `json:"runId,omitempty"`
+	StepID                string              `json:"stepId,omitempty"`
+	Target                ProviderModelTarget `json:"target"`
+	Operation             string              `json:"operation,omitempty"`
+	CapabilityRevision    string              `json:"capabilityRevision,omitempty"`
+	ConfigurationRevision string              `json:"configurationRevision,omitempty"`
+	StablePrefixHash      string              `json:"stablePrefixHash,omitempty"`
+	Kind                  string              `json:"kind,omitempty"`
+	APISurface            string              `json:"apiSurface,omitempty"`
+	Provider              string              `json:"provider,omitempty"`
+	// ContextBudget is the sealed budget snapshot as a stable key/value map for
+	// event payload encoding. Values are limited to scalar JSON-safe types.
+	ContextBudget     map[string]any `json:"contextBudget,omitempty"`
+	ProviderSubmitted bool           `json:"providerSubmitted"`
+	Status            string         `json:"status,omitempty"`
+	FailureClass      string         `json:"failureClass,omitempty"`
+	StartedAt         string         `json:"startedAt,omitempty"`
+	CompletedAt       string         `json:"completedAt,omitempty"`
+	DurationMs        int            `json:"durationMs,omitempty"`
+	RequestBytes      int            `json:"requestBytes,omitempty"`
+	ResponseBytes     int            `json:"responseBytes,omitempty"`
+}

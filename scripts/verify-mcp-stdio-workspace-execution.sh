@@ -396,6 +396,80 @@ def decision_payload(user_content):
     }
 
 class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        if path in ("/v1/models", "/models"):
+            # WorkOrch catalog expects explicit capacity + operations; without these models stay not-ready.
+            models = [
+                {
+                    "id": "verify-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "gpt-4o",
+                    "object": "model",
+                    "owned_by": "openai",
+                    "operations": ["chat_completions"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "text-embedding-3-small",
+                    "object": "model",
+                    "owned_by": "openai",
+                    "operations": ["embeddings"],
+                    "contextWindowTokens": 8192,
+                    "maxOutputTokens": 1024,
+                },
+
+                {
+                    "id": "verify-stream-native-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "verify-stream-estimated-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "web-search-e2e-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "container-verify-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+            ]
+            response = {"object": "list", "data": models}
+            encoded = json.dumps(response).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+            return
+        self.send_response(404)
+        self.end_headers()
+
     def do_POST(self):
         if self.path == "/v1/embeddings":
             response = {"data": [{"embedding": [0.1, 0.2, 0.3]}]}
@@ -521,61 +595,137 @@ import sys
 config_path, original_path, update_path, mock_base_url = sys.argv[1:]
 data = json.load(open(config_path, encoding="utf-8"))
 llm = data.get("configuration", {}).get("llm", {})
-providers = llm.get("providers") or []
-default_provider = llm.get("defaultProviderId") or "verify"
-default_embedding_provider = llm.get("defaultEmbeddingProviderId") or ""
+ai_proxy = llm.get("aiProxy") or {}
+default_chat = llm.get("defaultChat") or {}
+default_embedding = llm.get("defaultEmbedding") or {}
+budget = llm.get("budget") or {}
+custom_providers = llm.get("customProviders") or []
 
-def clean_provider(item):
-    return {
-        "id": item.get("id", ""),
-        "provider": item.get("provider", ""),
-        "baseUrl": item.get("baseUrl", ""),
-        "model": item.get("model", ""),
-        "timeout": item.get("timeout", ""),
-        "disabled": bool(item.get("disabled", False)),
-        "chatCompletions": bool(item.get("chatCompletions", True)),
-        "streaming": bool(item.get("streaming", False)),
-        "nonChatOperations": item.get("nonChatOperations") or [],
-    }
+def custom_providers_payload(items, include_api_key=False, mock_base_url=""):
+    payload = {}
+    for item in items:
+        provider_id = (item.get("id") or "").strip()
+        if not provider_id:
+            continue
+        models = {}
+        for model in item.get("models") or []:
+            model_id = (model.get("id") or "").strip()
+            if not model_id:
+                continue
+            models[model_id] = {
+                "contextWindowTokens": int(model.get("contextWindowTokens") or 128000),
+                "maxOutputTokens": int(model.get("maxOutputTokens") or 8192),
+                "operations": list(model.get("operations") or ["chat_completions"]),
+            }
+        if not models:
+            models["verify-model"] = {
+                "contextWindowTokens": 128000,
+                "maxOutputTokens": 8192,
+                "operations": ["chat_completions", "embeddings"],
+            }
+        entry = {
+            "provider": item.get("provider") or "compatible",
+            "apiSurface": item.get("apiSurface") or "openai_compatible_http",
+            "baseURL": item.get("baseUrl") or item.get("baseURL") or mock_base_url,
+            "timeout": item.get("timeout") or "60s",
+            "models": models,
+        }
+        if include_api_key:
+            entry["apiKey"] = "verify-secret"
+        payload[provider_id] = entry
+    return payload
 
 original = {
-    "defaultProviderId": default_provider,
-    "defaultEmbeddingProviderId": default_embedding_provider,
-    "providers": [clean_provider(item) for item in providers if item.get("id")],
+    "aiProxy": {
+        "baseURL": ai_proxy.get("baseUrl") or ai_proxy.get("baseURL") or mock_base_url,
+        "timeout": ai_proxy.get("timeout") or "180s",
+        "catalogRequestTimeout": ai_proxy.get("catalogRequestTimeout") or "5s",
+        "catalogTTL": ai_proxy.get("catalogTTL") or "5m",
+        "catalogMaxStaleAge": ai_proxy.get("catalogMaxStaleAge") or "24h",
+        "maxCatalogResponseBytes": int(ai_proxy.get("maxCatalogResponseBytes") or 1048576),
+        "maxCatalogModels": int(ai_proxy.get("maxCatalogModels") or 1000),
+    },
+    "defaultChat": {
+        "providerID": default_chat.get("providerId") or default_chat.get("providerID") or "verify",
+        "modelID": default_chat.get("modelId") or default_chat.get("modelID") or "verify-model",
+    },
+    "budget": {
+        "contextUtilizationRatio": float(budget.get("contextUtilizationRatio") or 0.75),
+        "estimatedTokensPerByte": float(budget.get("estimatedTokensPerByte") or 0.25),
+        "defaultMaxOutputTokens": int(budget.get("defaultMaxOutputTokens") or 4096),
+        "maxRequestBytes": int(budget.get("maxRequestBytes") or 4194304),
+    },
+    "customProviders": custom_providers_payload(custom_providers, include_api_key=False, mock_base_url=mock_base_url),
 }
-if not original["providers"]:
-    original["providers"].append({
-        "id": "verify",
-        "provider": "compatible",
-        "baseUrl": mock_base_url,
-        "model": "verify-model",
-        "timeout": "60s",
-        "disabled": False,
-        "chatCompletions": True,
-        "streaming": False,
-        "nonChatOperations": [],
-    })
-    original["defaultProviderId"] = "verify"
+if default_embedding.get("modelId") or default_embedding.get("modelID"):
+    original["defaultEmbedding"] = {
+        "providerID": default_embedding.get("providerId") or default_embedding.get("providerID") or "verify",
+        "modelID": default_embedding.get("modelId") or default_embedding.get("modelID"),
+    }
+if not original["customProviders"]:
+    original["customProviders"] = {
+        "verify": {
+            "provider": "compatible",
+            "apiSurface": "openai_compatible_http",
+            "baseURL": mock_base_url,
+            "timeout": "60s",
+            "models": {
+                "verify-model": {
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                    "operations": ["chat_completions", "embeddings"],
+                }
+            },
+        }
+    }
+    original["defaultChat"] = {"providerID": "verify", "modelID": "verify-model"}
 with open(original_path, "w", encoding="utf-8") as handle:
     json.dump(original, handle, separators=(",", ":"))
 
-updated_providers = [item for item in original["providers"] if item["id"] != "verify"]
-updated_providers.append({
-    "id": "verify",
-    "provider": "compatible",
-    "baseUrl": mock_base_url,
-    "apiKey": "verify-secret",
-    "model": "verify-model",
-    "timeout": "60s",
-    "disabled": False,
-    "chatCompletions": True,
-    "streaming": False,
-    "nonChatOperations": ["embeddings"] if default_embedding_provider == "verify" else [],
-})
 update = {
-    "defaultProviderId": "verify",
-    "defaultEmbeddingProviderId": "verify" if default_embedding_provider == "verify" else default_embedding_provider,
-    "providers": updated_providers,
+    "aiProxy": {
+        "baseURL": mock_base_url,
+        "apiKey": "verify-secret",
+        "timeout": "180s",
+        "catalogRequestTimeout": "5s",
+        "catalogTTL": "5m",
+        "catalogMaxStaleAge": "24h",
+        "maxCatalogResponseBytes": 1048576,
+        "maxCatalogModels": 1000,
+        "modelOverrides": {
+            "verify-model": {"contextWindowTokens": 128000, "maxOutputTokens": 8192, "operations": ["chat_completions", "embeddings"]},
+            "gpt-4o": {"contextWindowTokens": 128000, "maxOutputTokens": 8192, "operations": ["chat_completions", "embeddings"]},
+        },
+    },
+    "defaultChat": {"providerID": "verify", "modelID": "verify-model"},
+    "defaultEmbedding": {"providerID": "verify", "modelID": "verify-model"},
+    "budget": original["budget"],
+    "customProviders": {
+        "verify": {
+            "provider": "compatible",
+            "apiSurface": "openai_compatible_http",
+            "baseURL": mock_base_url,
+            "apiKey": "verify-secret",
+            "timeout": "60s",
+            "models": {
+                "verify-model": {
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                    "operations": ["chat_completions", "embeddings"],
+                },
+                "verify-stream-native-model": {
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                    "operations": ["chat_completions", "embeddings"],
+                },
+                "verify-stream-estimated-model": {
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                    "operations": ["chat_completions", "embeddings"],
+                },
+            },
+        }
+    },
 }
 with open(update_path, "w", encoding="utf-8") as handle:
     json.dump(update, handle, separators=(",", ":"))
@@ -710,7 +860,7 @@ dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 
 get_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" "$TMP_DIR/activation-before-runs.json"
 post_activation_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
-  '{"intent":"resume","requestId":"mcp-stdio-e2e-'"$VERIFY_SUFFIX"'","reason":"e2e_resume","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","mcpServerIds":["'"$MCP_SERVER_ID"'"],"capabilityIds":["'"$MCP_CAPABILITY_ID"'"]}' \
+  '{"intent":"resume","requestId":"mcp-stdio-e2e-'"$VERIFY_SUFFIX"'","reason":"e2e_resume","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmTarget":{"providerId":"verify","modelId":"verify-model"},"mcpServerIds":["'"$MCP_SERVER_ID"'"],"capabilityIds":["'"$MCP_CAPABILITY_ID"'"]}' \
   "$TMP_DIR/activation.json"
 run_id="$(wait_activation_run "$workspace_id" "$TMP_DIR/activation.json" "$TMP_DIR/activation-before-runs.json" "$TMP_DIR/activation-runs.json" "$TMP_DIR/activation-run.json")"
 [[ -n "$run_id" ]]

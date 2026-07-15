@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 const (
@@ -329,9 +330,9 @@ func compactWorkspaceSnapshotRun(item readmodelcore.Run) readmodelcore.Run {
 }
 
 func ProjectLLMUsageTraceView(item readmodelcore.LLMUsageTrace) readmodelcore.LLMUsageTrace {
-	item.ContextBudget = compactTraceValueMap(item.ContextBudget, 0)
-	item.CacheUsage = compactTraceValueMap(item.CacheUsage, 0)
-	item.CacheMarkers = compactTraceValueMap(item.CacheMarkers, 0)
+	item.ContextBudget = compactTracePayload(item.ContextBudget)
+	item.CacheUsage = compactTracePayload(item.CacheUsage)
+	item.CacheMarkers = compactTracePayload(item.CacheMarkers)
 	return item
 }
 
@@ -342,9 +343,20 @@ func projectLLMContextBudgetTraceView(item readmodelcore.LLMContextBudgetTrace) 
 	item.NormalizedSections = compactStringSlice(item.NormalizedSections, workspaceSnapshotTraceSliceLimit)
 	item.CompressedSections = compactStringSlice(item.CompressedSections, workspaceSnapshotTraceSliceLimit)
 	item.OmittedSections = compactStringSlice(item.OmittedSections, workspaceSnapshotTraceSliceLimit)
-	item.Profile = compactTraceValueMap(item.Profile, 0)
-	item.CachePlan = compactTraceValueMap(item.CachePlan, 0)
+	item.Profile = compactTracePayload(item.Profile)
+	item.CachePlan = compactTracePayload(item.CachePlan)
 	return item
+}
+
+func compactTracePayload(input workorcheventpayload.Payload) workorcheventpayload.Payload {
+	if len(input.Fields) == 0 {
+		return workorcheventpayload.Payload{}
+	}
+	output, err := workorcheventpayload.FromMap(compactTraceValueMap(input.Map(), 0))
+	if err != nil {
+		return workorcheventpayload.Payload{}
+	}
+	return output
 }
 
 func projectMemoryRecallTraceView(item readmodelcore.MemoryRecallTrace) readmodelcore.MemoryRecallTrace {

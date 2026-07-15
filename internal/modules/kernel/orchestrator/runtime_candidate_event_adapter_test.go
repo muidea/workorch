@@ -15,10 +15,35 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-type eventCandidateProviderFunc func(context.Context, llmmodels.RuntimeCandidateRequest) ([]byte, error)
+type eventCandidateProviderFunc func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error)
 
-func (f eventCandidateProviderFunc) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCandidateRequest) ([]byte, error) {
+func (f eventCandidateProviderFunc) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 	return f(ctx, request)
+}
+
+func eventGenerationResult(payload []byte, err error) (llmmodels.RuntimeCandidateGenerationResult, error) {
+	if err != nil {
+		return llmmodels.RuntimeCandidateGenerationResult{
+			Status:        llmmodels.RuntimeCandidateStatusFailed,
+			FailureReason: err.Error(),
+			Audit: &llmmodels.ProviderRequestAudit{
+				Status:            llmmodels.RuntimeCandidateStatusFailed,
+				ProviderSubmitted: true,
+				FailureClass:      "provider",
+			},
+		}, err
+	}
+	return llmmodels.RuntimeCandidateGenerationResult{
+		Payload: payload,
+		Status:  llmmodels.RuntimeCandidateStatusCompleted,
+		Usage:   &llmmodels.ProviderUsage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15},
+		Audit: &llmmodels.ProviderRequestAudit{
+			Status:            llmmodels.RuntimeCandidateStatusCompleted,
+			ProviderSubmitted: true,
+			Target:            runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+			Operation:         "chat_completions",
+		},
+	}, nil
 }
 
 func TestRequestRuntimeCandidateReturnsTypedProviderFailure(t *testing.T) {
@@ -30,8 +55,8 @@ func TestRequestRuntimeCandidateReturnsTypedProviderFailure(t *testing.T) {
 	llm := llmmodule.New()
 	if err := llm.Configure(llmmodule.Dependencies{
 		EventHub: hub,
-		CandidateProvider: eventCandidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) ([]byte, error) {
-			return nil, errors.New("provider unavailable")
+		CandidateProvider: eventCandidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+			return eventGenerationResult(nil, errors.New("provider unavailable"))
 		}),
 	}); err != nil {
 		t.Fatal(err)
@@ -66,9 +91,9 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 	llm := llmmodule.New()
 	if err := llm.Configure(llmmodule.Dependencies{
 		EventHub: hub,
-		CandidateProvider: eventCandidateProviderFunc(func(_ context.Context, request llmmodels.RuntimeCandidateRequest) ([]byte, error) {
+		CandidateProvider: eventCandidateProviderFunc(func(_ context.Context, request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			captured = append(captured, request)
-			return []byte(`{"operations":[{"id":"op-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"targetRef","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`), nil
+			return eventGenerationResult([]byte(`{"operations":[{"id":"op-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"targetRef","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`), nil)
 		}),
 	}); err != nil {
 		t.Fatal(err)
@@ -136,6 +161,7 @@ func TestRequestRuntimeCandidateRejectsRetryWithoutPreviousFailure(t *testing.T)
 func sealedCandidateTestDecision(t *testing.T) runtimecontract.RuntimeDecision {
 	t.Helper()
 	facts := runtimecontract.RuntimeFacts{
+		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
 		Focus: runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
 	}
@@ -153,7 +179,8 @@ func candidateContextForDecision(decision runtimecontract.RuntimeDecision) runti
 	return runtimecontract.RuntimeCandidateContext{
 		WorkspaceID: decision.AuthoritySnapshot.WorkspaceID, RunID: decision.AuthoritySnapshot.RunID,
 		DefinitionRevision: decision.AuthoritySnapshot.DefinitionRevision, EvidenceRevision: decision.AuthoritySnapshot.EvidenceRevision,
-		Focus: decision.Focus,
+		Focus:      decision.Focus,
+		Activation: runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 	}
 }
 

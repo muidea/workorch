@@ -16,6 +16,7 @@ func TestReduceRuntimeStateLiveFailureFixtures(t *testing.T) {
 		{
 			name: "lsp validation failure requires another state change",
 			facts: runtimecontract.RuntimeFacts{
+				Activation:         runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 				WorkspaceID:        "ws-5cfc9874cebda0b8",
 				RunID:              "run-006",
 				DefinitionRevision: "definition-lsp",
@@ -39,6 +40,7 @@ func TestReduceRuntimeStateLiveFailureFixtures(t *testing.T) {
 		{
 			name: "gateway incomplete coverage requires state change",
 			facts: runtimecontract.RuntimeFacts{
+				Activation:         runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 				WorkspaceID:        "ws-609ce9149734ebb7",
 				RunID:              "run-007-replan-001",
 				DefinitionRevision: "definition-gateway",
@@ -240,6 +242,7 @@ func TestReduceRuntimeStateKeepsStateChangeAfterRejectedRepair(t *testing.T) {
 	// Validation rejected, then state-change repair also rejected: stay on produce_state_change.
 	// Re-opening produce_validation would anti-replay the same failed validation shape.
 	facts := runtimecontract.RuntimeFacts{
+		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		WorkspaceID: "ws-1", RunID: "run-2", DefinitionRevision: "def-1", EvidenceRevision: "ev-6",
 		Focus: runtimecontract.CoverageFocus{
 			ID: "focus-001", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
@@ -285,6 +288,7 @@ func TestReduceRuntimeStateKeepsStateChangeAfterRejectedRepair(t *testing.T) {
 
 func TestReduceRuntimeStateAllowsValidationAfterAcceptedRepair(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
+		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		WorkspaceID: "ws-1", RunID: "run-2", DefinitionRevision: "def-1", EvidenceRevision: "ev-4",
 		Focus: runtimecontract.CoverageFocus{
 			ID: "focus-001", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
@@ -323,6 +327,7 @@ func TestReduceRuntimeStateAllowsValidationAfterAcceptedRepair(t *testing.T) {
 
 func TestReduceRuntimeStateForcesStateChangeOnlyForUnresolvedValidationFailure(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
+		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		WorkspaceID: "ws-1", RunID: "run-2", DefinitionRevision: "def-1", EvidenceRevision: "ev-2",
 		Focus: runtimecontract.CoverageFocus{
 			ID: "focus-001", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
@@ -355,6 +360,7 @@ func TestReduceRuntimeStateForcesStateChangeOnlyForUnresolvedValidationFailure(t
 
 func validationFacts() runtimecontract.RuntimeFacts {
 	return runtimecontract.RuntimeFacts{
+		Activation:         runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		WorkspaceID:        "ws-1",
 		RunID:              "run-1",
 		DefinitionRevision: "definition-1",

@@ -11,10 +11,21 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-type candidateProviderFunc func(context.Context, llmmodels.RuntimeCandidateRequest) ([]byte, error)
+type candidateProviderFunc func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error)
 
-func (f candidateProviderFunc) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCandidateRequest) ([]byte, error) {
+func (f candidateProviderFunc) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 	return f(ctx, request)
+}
+
+func generationResult(payload []byte, err error) (llmmodels.RuntimeCandidateGenerationResult, error) {
+	if err != nil {
+		return llmmodels.RuntimeCandidateGenerationResult{Status: llmmodels.RuntimeCandidateStatusFailed, FailureReason: err.Error()}, err
+	}
+	return llmmodels.RuntimeCandidateGenerationResult{
+		Payload: payload,
+		Status:  llmmodels.RuntimeCandidateStatusCompleted,
+		Audit:   &llmmodels.ProviderRequestAudit{Status: llmmodels.RuntimeCandidateStatusCompleted, ProviderSubmitted: true},
+	}, nil
 }
 
 func TestDecodeCandidatePayloadRejectsAuthorityFields(t *testing.T) {
@@ -75,8 +86,8 @@ func TestValidateCandidateAttemptAcceptsOnlyCurrentActionCandidate(t *testing.T)
 
 func TestRequestCandidateRejectsFilePathAliasAsContractFailureBeforeDispatch(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
-	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) ([]byte, error) {
-		return []byte(`{"operations":[{"id":"patch-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"filePath","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`), nil
+	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+		return generationResult([]byte(`{"operations":[{"id":"patch-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"filePath","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`), nil)
 	})
 	_, err := RequestCandidate(context.Background(), provider, request)
 	if err == nil {
@@ -153,11 +164,11 @@ func TestCandidateRequestRejectsWeakenedGoalDoDContext(t *testing.T) {
 
 func TestRequestCandidateProviderReceivesOnlySealedTypedRequest(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedValidation)
-	provider := candidateProviderFunc(func(_ context.Context, got llmmodels.RuntimeCandidateRequest) ([]byte, error) {
+	provider := candidateProviderFunc(func(_ context.Context, got llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 		if got.Transaction != request.Transaction || got.Decision.AuthoritySnapshot.ID != request.Decision.AuthoritySnapshot.ID || got.Decision.RequiredOutput.Kind != runtimecontract.RequiredOutputKindValidation {
 			t.Fatalf("provider request changed sealed authority: %+v", got)
 		}
-		return []byte(`{"operations":[{"id":"validate-1","kind":"validation/managed_session","coverageWorkItemIds":["cwi-1"]}]}`), nil
+		return generationResult([]byte(`{"operations":[{"id":"validate-1","kind":"validation/managed_session","coverageWorkItemIds":["cwi-1"]}]}`), nil)
 	})
 	response, err := RequestCandidate(context.Background(), provider, request)
 	if err != nil {
@@ -192,7 +203,8 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 	t.Helper()
 	facts := runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
-		Focus: runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
+		Focus:      runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
+		Activation: runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 	}
 	decision := runtimecontract.RuntimeDecision{State: state, Focus: facts.Focus}
 	switch state {

@@ -1,16 +1,20 @@
 package workorchconfig
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/muidea/magicCommon/framework/configuration"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -76,49 +80,148 @@ type LLMOutputRuntimeConfig struct {
 	MaxArtifactReplanAttempts          int `json:"maxArtifactReplanAttempts" toml:"maxArtifactReplanAttempts"`
 }
 
+// BuiltinAIProxyProviderID is the reserved WorkOrch provider identity for the
+// built-in ai-proxy endpoint.
+const BuiltinAIProxyProviderID = runtimecontract.BuiltinAIProxyProviderID
+
+// Known LLM operations for custom provider model declarations.
+const (
+	LLMOperationChatCompletions = "chat_completions"
+	LLMOperationEmbeddings      = "embeddings"
+)
+
+// LLMConfig is the canonical ai-proxy-first configuration contract.
+// Old defaultProvider/providers/modelCapabilities fields are intentionally removed
+// and rejected by UnmarshalJSON during startup config loading.
 type LLMConfig struct {
-	DefaultProvider          string                              `json:"defaultProvider" toml:"defaultProvider"`
-	DefaultEmbeddingProvider string                              `json:"defaultEmbeddingProvider" toml:"defaultEmbeddingProvider"`
-	ModelCapabilities        map[string]LLMModelCapabilityConfig `json:"modelCapabilities" toml:"modelCapabilities"`
-	Providers                map[string]LLMProviderConfig        `json:"providers" toml:"providers"`
+	AIProxy          AIProxyProviderConfig              `json:"aiProxy" toml:"aiProxy"`
+	DefaultChat      ProviderModelTargetConfig          `json:"defaultChat" toml:"defaultChat"`
+	DefaultEmbedding *ProviderModelTargetConfig         `json:"defaultEmbedding,omitempty" toml:"defaultEmbedding,omitempty"`
+	Budget           LLMContextBudgetPolicyConfig       `json:"budget" toml:"budget"`
+	CustomProviders  map[string]CustomLLMProviderConfig `json:"customProviders,omitempty" toml:"customProviders,omitempty"`
 }
 
-type LLMModelCapabilityConfig struct {
-	Provider            string `json:"provider" toml:"provider"`
-	ModelPattern        string `json:"modelPattern" toml:"modelPattern"`
-	ContextWindowTokens int    `json:"contextWindowTokens" toml:"contextWindowTokens"`
+type AIProxyProviderConfig struct {
+	BaseURL                 string                                `json:"baseURL" toml:"baseURL"`
+	APIKey                  string                                `json:"apiKey" toml:"apiKey"`
+	Timeout                 string                                `json:"timeout" toml:"timeout"`
+	CatalogRequestTimeout   string                                `json:"catalogRequestTimeout" toml:"catalogRequestTimeout"`
+	CatalogTTL              string                                `json:"catalogTTL" toml:"catalogTTL"`
+	CatalogMaxStaleAge      string                                `json:"catalogMaxStaleAge" toml:"catalogMaxStaleAge"`
+	MaxCatalogResponseBytes int                                   `json:"maxCatalogResponseBytes" toml:"maxCatalogResponseBytes"`
+	MaxCatalogModels        int                                   `json:"maxCatalogModels" toml:"maxCatalogModels"`
+	ModelOverrides          map[string]AIProxyModelOverrideConfig `json:"modelOverrides,omitempty" toml:"modelOverrides,omitempty"`
 }
 
-type LLMProviderConfig struct {
-	Provider                string   `json:"provider" toml:"provider"`
-	APISurface              string   `json:"apiSurface" toml:"apiSurface,omitempty"`
-	BaseURL                 string   `json:"baseURL" toml:"baseURL"`
-	APIKey                  string   `json:"apiKey" toml:"apiKey"`
-	Model                   string   `json:"model" toml:"model"`
-	Timeout                 string   `json:"timeout" toml:"timeout,omitempty"`
-	Disabled                *bool    `json:"disabled" toml:"disabled,omitempty"`
-	ChatCompletions         *bool    `json:"chatCompletions" toml:"chatCompletions,omitempty"`
-	Streaming               *bool    `json:"streaming" toml:"streaming,omitempty"`
-	NonChatOperations       []string `json:"nonChatOperations" toml:"nonChatOperations,omitempty"`
-	Temperature             *float64 `json:"temperature" toml:"temperature,omitempty"`
-	MaxOutputTokens         int      `json:"maxOutputTokens" toml:"maxOutputTokens,omitempty"`
-	ReasoningEffort         string   `json:"reasoningEffort" toml:"reasoningEffort,omitempty"`
-	ThinkingBudgetTokens    int      `json:"thinkingBudgetTokens" toml:"thinkingBudgetTokens,omitempty"`
-	FailoverEnabled         *bool    `json:"failoverEnabled" toml:"failoverEnabled,omitempty"`
-	FailoverProviders       []string `json:"failoverProviders" toml:"failoverProviders,omitempty"`
-	CacheMode               string   `json:"cacheMode" toml:"cacheMode,omitempty"`
-	PromptCacheKey          *bool    `json:"promptCacheKey" toml:"promptCacheKey,omitempty"`
-	MessageCacheControl     *bool    `json:"messageCacheControl" toml:"messageCacheControl,omitempty"`
-	CacheUsageFields        []string `json:"cacheUsageFields" toml:"cacheUsageFields,omitempty"`
-	ContextProfileMode      string   `json:"contextProfileMode" toml:"contextProfileMode,omitempty"`
-	ContextWindowTokens     int      `json:"contextWindowTokens" toml:"contextWindowTokens,omitempty"`
-	MaxInputTokens          int      `json:"maxInputTokens" toml:"maxInputTokens,omitempty"`
-	ReservedOutputTokens    int      `json:"reservedOutputTokens" toml:"reservedOutputTokens,omitempty"`
-	SafetyRatio             float64  `json:"safetyRatio" toml:"safetyRatio,omitempty"`
-	ContextUtilizationRatio float64  `json:"contextUtilizationRatio" toml:"contextUtilizationRatio,omitempty"`
-	BytesHardLimit          int      `json:"bytesHardLimit" toml:"bytesHardLimit,omitempty"`
-	MaxRequestBytes         int      `json:"maxRequestBytes" toml:"maxRequestBytes,omitempty"`
-	EstimatedTokensPerByte  float64  `json:"estimatedTokensPerByte" toml:"estimatedTokensPerByte,omitempty"`
+type ProviderModelTargetConfig struct {
+	ProviderID string `json:"providerID" toml:"providerID"`
+	ModelID    string `json:"modelID" toml:"modelID"`
+}
+
+type LLMContextBudgetPolicyConfig struct {
+	ContextUtilizationRatio float64 `json:"contextUtilizationRatio" toml:"contextUtilizationRatio"`
+	EstimatedTokensPerByte  float64 `json:"estimatedTokensPerByte" toml:"estimatedTokensPerByte"`
+	DefaultMaxOutputTokens  int     `json:"defaultMaxOutputTokens" toml:"defaultMaxOutputTokens"`
+	MaxRequestBytes         int     `json:"maxRequestBytes" toml:"maxRequestBytes"`
+}
+
+type AIProxyModelOverrideConfig struct {
+	ContextWindowTokens int      `json:"contextWindowTokens" toml:"contextWindowTokens"`
+	MaxOutputTokens     int      `json:"maxOutputTokens" toml:"maxOutputTokens"`
+	Operations          []string `json:"operations" toml:"operations"`
+}
+
+type CustomLLMProviderConfig struct {
+	Provider   string                          `json:"provider" toml:"provider"`
+	APISurface string                          `json:"apiSurface" toml:"apiSurface"`
+	BaseURL    string                          `json:"baseURL" toml:"baseURL"`
+	APIKey     string                          `json:"apiKey" toml:"apiKey"`
+	Timeout    string                          `json:"timeout" toml:"timeout"`
+	Models     map[string]CustomLLMModelConfig `json:"models" toml:"models"`
+}
+
+type CustomLLMModelConfig struct {
+	ContextWindowTokens  int                 `json:"contextWindowTokens" toml:"contextWindowTokens"`
+	MaxOutputTokens      int                 `json:"maxOutputTokens" toml:"maxOutputTokens"`
+	Operations           []string            `json:"operations" toml:"operations"`
+	Temperature          *float64            `json:"temperature,omitempty" toml:"temperature,omitempty"`
+	ReasoningEffort      string              `json:"reasoningEffort,omitempty" toml:"reasoningEffort,omitempty"`
+	ThinkingBudgetTokens int                 `json:"thinkingBudgetTokens,omitempty" toml:"thinkingBudgetTokens,omitempty"`
+	Cache                ProviderCacheConfig `json:"cache,omitempty" toml:"cache,omitempty"`
+}
+
+type ProviderCacheConfig struct {
+	Mode                string   `json:"mode,omitempty" toml:"mode,omitempty"`
+	PromptCacheKey      *bool    `json:"promptCacheKey,omitempty" toml:"promptCacheKey,omitempty"`
+	MessageCacheControl *bool    `json:"messageCacheControl,omitempty" toml:"messageCacheControl,omitempty"`
+	UsageFields         []string `json:"usageFields,omitempty" toml:"usageFields,omitempty"`
+}
+
+// UnmarshalJSON rejects unknown LLM fields so old TOML/JSON contracts fail fast.
+func (c *LLMConfig) UnmarshalJSON(data []byte) error {
+	type llmConfigAlias LLMConfig
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var alias llmConfigAlias
+	if err := decoder.Decode(&alias); err != nil {
+		return fmt.Errorf("%w: llm configuration rejects legacy or unknown fields: %v", common.ErrInvalidArgument, err)
+	}
+	*c = LLMConfig(alias)
+	return nil
+}
+
+func (c ProviderModelTargetConfig) Normalized() ProviderModelTargetConfig {
+	c.ProviderID = strings.TrimSpace(c.ProviderID)
+	c.ModelID = strings.TrimSpace(c.ModelID)
+	return c
+}
+
+func (c ProviderModelTargetConfig) Validate() error {
+	c = c.Normalized()
+	if c.ProviderID == "" {
+		return fmt.Errorf("%w: llm target requires providerID", common.ErrInvalidArgument)
+	}
+	if c.ModelID == "" {
+		return fmt.Errorf("%w: llm target requires modelID", common.ErrInvalidArgument)
+	}
+	return nil
+}
+
+func (c ProviderModelTargetConfig) ToRuntimeTarget() runtimecontract.ProviderModelTarget {
+	c = c.Normalized()
+	return runtimecontract.ProviderModelTarget{
+		ProviderID: c.ProviderID,
+		ModelID:    c.ModelID,
+	}
+}
+
+func DefaultAIProxyProviderConfig() AIProxyProviderConfig {
+	return AIProxyProviderConfig{
+		Timeout:                 "180s",
+		CatalogRequestTimeout:   "5s",
+		CatalogTTL:              "5m",
+		CatalogMaxStaleAge:      "24h",
+		MaxCatalogResponseBytes: 1 << 20,
+		MaxCatalogModels:        1000,
+		ModelOverrides:          map[string]AIProxyModelOverrideConfig{},
+	}
+}
+
+func DefaultLLMContextBudgetPolicyConfig() LLMContextBudgetPolicyConfig {
+	return LLMContextBudgetPolicyConfig{
+		ContextUtilizationRatio: 0.75,
+		EstimatedTokensPerByte:  0.25,
+		DefaultMaxOutputTokens:  4096,
+		MaxRequestBytes:         4 << 20,
+	}
+}
+
+func DefaultLLMConfig() LLMConfig {
+	return LLMConfig{
+		AIProxy:         DefaultAIProxyProviderConfig(),
+		Budget:          DefaultLLMContextBudgetPolicyConfig(),
+		CustomProviders: map[string]CustomLLMProviderConfig{},
+	}
 }
 
 type WebSearchConfig struct {
@@ -231,11 +334,11 @@ func Save(next Config) error {
 	if err := normalizeConfig(&next); err != nil {
 		return err
 	}
-	if next.LLM.Providers == nil {
-		next.LLM.Providers = map[string]LLMProviderConfig{}
+	if next.LLM.CustomProviders == nil {
+		next.LLM.CustomProviders = map[string]CustomLLMProviderConfig{}
 	}
-	if next.LLM.ModelCapabilities == nil {
-		next.LLM.ModelCapabilities = map[string]LLMModelCapabilityConfig{}
+	if next.LLM.AIProxy.ModelOverrides == nil {
+		next.LLM.AIProxy.ModelOverrides = map[string]AIProxyModelOverrideConfig{}
 	}
 	if next.WebSearch.Providers == nil {
 		next.WebSearch.Providers = map[string]WebSearchProviderConfig{}
@@ -321,7 +424,404 @@ func normalizeConfig(cfg *Config) error {
 	}
 	applyRuntimeConfigDefaults(&cfg.Runtime)
 	cfg.Runtime.LLMOutput = normalized
+	llm, err := NormalizeLLMConfig(cfg.LLM)
+	if err != nil {
+		return err
+	}
+	cfg.LLM = llm
 	return nil
+}
+
+func NormalizeLLMConfig(cfg LLMConfig) (LLMConfig, error) {
+	defaults := DefaultLLMConfig()
+	if strings.TrimSpace(cfg.AIProxy.Timeout) == "" {
+		cfg.AIProxy.Timeout = defaults.AIProxy.Timeout
+	}
+	if strings.TrimSpace(cfg.AIProxy.CatalogRequestTimeout) == "" {
+		cfg.AIProxy.CatalogRequestTimeout = defaults.AIProxy.CatalogRequestTimeout
+	}
+	if strings.TrimSpace(cfg.AIProxy.CatalogTTL) == "" {
+		cfg.AIProxy.CatalogTTL = defaults.AIProxy.CatalogTTL
+	}
+	if strings.TrimSpace(cfg.AIProxy.CatalogMaxStaleAge) == "" {
+		cfg.AIProxy.CatalogMaxStaleAge = defaults.AIProxy.CatalogMaxStaleAge
+	}
+	if cfg.AIProxy.MaxCatalogResponseBytes <= 0 {
+		cfg.AIProxy.MaxCatalogResponseBytes = defaults.AIProxy.MaxCatalogResponseBytes
+	}
+	if cfg.AIProxy.MaxCatalogModels <= 0 {
+		cfg.AIProxy.MaxCatalogModels = defaults.AIProxy.MaxCatalogModels
+	}
+	if cfg.AIProxy.ModelOverrides == nil {
+		cfg.AIProxy.ModelOverrides = map[string]AIProxyModelOverrideConfig{}
+	}
+	if cfg.Budget.ContextUtilizationRatio <= 0 {
+		cfg.Budget.ContextUtilizationRatio = defaults.Budget.ContextUtilizationRatio
+	}
+	if cfg.Budget.EstimatedTokensPerByte <= 0 {
+		cfg.Budget.EstimatedTokensPerByte = defaults.Budget.EstimatedTokensPerByte
+	}
+	if cfg.Budget.DefaultMaxOutputTokens <= 0 {
+		cfg.Budget.DefaultMaxOutputTokens = defaults.Budget.DefaultMaxOutputTokens
+	}
+	if cfg.Budget.MaxRequestBytes <= 0 {
+		cfg.Budget.MaxRequestBytes = defaults.Budget.MaxRequestBytes
+	}
+	if cfg.CustomProviders == nil {
+		cfg.CustomProviders = map[string]CustomLLMProviderConfig{}
+	}
+	// Canonicalize map keys (trim) so readiness/revision/client lookup share one key space.
+	// Fail before overwrite when trim/case-fold collapses distinct keys.
+	var err error
+	cfg.AIProxy.ModelOverrides, err = canonicalizeAIProxyModelOverrides(cfg.AIProxy.ModelOverrides)
+	if err != nil {
+		return LLMConfig{}, err
+	}
+	cfg.CustomProviders, err = canonicalizeCustomProviders(cfg.CustomProviders)
+	if err != nil {
+		return LLMConfig{}, err
+	}
+	cfg.DefaultChat = cfg.DefaultChat.Normalized()
+	if cfg.DefaultEmbedding != nil {
+		normalized := cfg.DefaultEmbedding.Normalized()
+		if normalized.ProviderID == "" && normalized.ModelID == "" {
+			cfg.DefaultEmbedding = nil
+		} else {
+			cfg.DefaultEmbedding = &normalized
+		}
+	}
+	if err := ValidateLLMConfig(cfg); err != nil {
+		return LLMConfig{}, err
+	}
+	return cfg, nil
+}
+
+func canonicalizeAIProxyModelOverrides(source map[string]AIProxyModelOverrideConfig) (map[string]AIProxyModelOverrideConfig, error) {
+	if len(source) == 0 {
+		return map[string]AIProxyModelOverrideConfig{}, nil
+	}
+	ret := make(map[string]AIProxyModelOverrideConfig, len(source))
+	// fold -> first original key (after trim) that claimed this fold.
+	seenFold := map[string]string{}
+	for modelID, override := range source {
+		key := strings.TrimSpace(modelID)
+		if key == "" {
+			return nil, fmt.Errorf("%w: llm.aiProxy.modelOverrides requires non-empty model id", common.ErrInvalidArgument)
+		}
+		fold := strings.ToLower(key)
+		if prev, ok := seenFold[fold]; ok {
+			return nil, fmt.Errorf("%w: llm.aiProxy.modelOverrides has duplicate model id %q (conflicts with %q after trim/case-fold)", common.ErrInvalidArgument, key, prev)
+		}
+		if _, exists := ret[key]; exists {
+			return nil, fmt.Errorf("%w: llm.aiProxy.modelOverrides has duplicate model id %q after trim", common.ErrInvalidArgument, key)
+		}
+		seenFold[fold] = key
+		ops := make([]string, 0, len(override.Operations))
+		for _, op := range override.Operations {
+			op = strings.TrimSpace(op)
+			if op != "" {
+				ops = append(ops, op)
+			}
+		}
+		override.Operations = ops
+		ret[key] = override
+	}
+	return ret, nil
+}
+
+func canonicalizeCustomProviders(source map[string]CustomLLMProviderConfig) (map[string]CustomLLMProviderConfig, error) {
+	if len(source) == 0 {
+		return map[string]CustomLLMProviderConfig{}, nil
+	}
+	ret := make(map[string]CustomLLMProviderConfig, len(source))
+	// fold -> first original key (after trim) that claimed this fold.
+	seenProviders := map[string]string{}
+	for providerID, provider := range source {
+		key := strings.TrimSpace(providerID)
+		if key == "" {
+			return nil, fmt.Errorf("%w: llm.customProviders requires non-empty provider id", common.ErrInvalidArgument)
+		}
+		fold := strings.ToLower(key)
+		if prev, ok := seenProviders[fold]; ok {
+			return nil, fmt.Errorf("%w: llm.customProviders has duplicate provider id %q (conflicts with %q after trim/case-fold)", common.ErrInvalidArgument, key, prev)
+		}
+		if _, exists := ret[key]; exists {
+			return nil, fmt.Errorf("%w: llm.customProviders has duplicate provider id %q after trim", common.ErrInvalidArgument, key)
+		}
+		seenProviders[fold] = key
+		provider.Provider = strings.TrimSpace(provider.Provider)
+		provider.APISurface = strings.TrimSpace(provider.APISurface)
+		provider.BaseURL = strings.TrimSpace(provider.BaseURL)
+		provider.Timeout = strings.TrimSpace(provider.Timeout)
+		models, err := canonicalizeCustomProviderModels(key, provider.Models)
+		if err != nil {
+			return nil, err
+		}
+		provider.Models = models
+		ret[key] = provider
+	}
+	return ret, nil
+}
+
+func canonicalizeCustomProviderModels(providerID string, source map[string]CustomLLMModelConfig) (map[string]CustomLLMModelConfig, error) {
+	if len(source) == 0 {
+		return map[string]CustomLLMModelConfig{}, nil
+	}
+	ret := make(map[string]CustomLLMModelConfig, len(source))
+	seenModels := map[string]string{}
+	for modelID, model := range source {
+		mKey := strings.TrimSpace(modelID)
+		if mKey == "" {
+			return nil, fmt.Errorf("%w: llm.customProviders[%s].models requires non-empty model id", common.ErrInvalidArgument, providerID)
+		}
+		fold := strings.ToLower(mKey)
+		if prev, ok := seenModels[fold]; ok {
+			return nil, fmt.Errorf("%w: llm.customProviders[%s].models has duplicate model id %q (conflicts with %q after trim/case-fold)", common.ErrInvalidArgument, providerID, mKey, prev)
+		}
+		if _, exists := ret[mKey]; exists {
+			return nil, fmt.Errorf("%w: llm.customProviders[%s].models has duplicate model id %q after trim", common.ErrInvalidArgument, providerID, mKey)
+		}
+		seenModels[fold] = mKey
+		ops := make([]string, 0, len(model.Operations))
+		for _, op := range model.Operations {
+			op = strings.TrimSpace(op)
+			if op != "" {
+				ops = append(ops, op)
+			}
+		}
+		model.Operations = ops
+		ret[mKey] = model
+	}
+	return ret, nil
+}
+
+func ValidateLLMConfig(cfg LLMConfig) error {
+	if err := validateAIProxyProviderConfig(cfg.AIProxy); err != nil {
+		return err
+	}
+	if err := cfg.DefaultChat.Validate(); err != nil {
+		return fmt.Errorf("%w: llm.defaultChat: %v", common.ErrInvalidArgument, err)
+	}
+	if cfg.DefaultEmbedding != nil {
+		if err := cfg.DefaultEmbedding.Validate(); err != nil {
+			return fmt.Errorf("%w: llm.defaultEmbedding: %v", common.ErrInvalidArgument, err)
+		}
+	}
+	if err := validateLLMContextBudgetPolicyConfig(cfg.Budget); err != nil {
+		return err
+	}
+	seenProviders := map[string]string{}
+	for id, provider := range cfg.CustomProviders {
+		trimmed := strings.TrimSpace(id)
+		if trimmed == "" {
+			return fmt.Errorf("%w: llm.customProviders requires non-empty provider id", common.ErrInvalidArgument)
+		}
+		fold := strings.ToLower(trimmed)
+		if prev, ok := seenProviders[fold]; ok {
+			return fmt.Errorf("%w: llm.customProviders has duplicate provider id %q (conflicts with %q after trim/case-fold)", common.ErrInvalidArgument, trimmed, prev)
+		}
+		seenProviders[fold] = trimmed
+		if strings.EqualFold(trimmed, BuiltinAIProxyProviderID) {
+			return fmt.Errorf("%w: llm.customProviders id %q is reserved for built-in ai-proxy", common.ErrInvalidArgument, trimmed)
+		}
+		if err := validateCustomLLMProviderConfig(trimmed, provider); err != nil {
+			return err
+		}
+		// model key trim duplicates
+		seenModels := map[string]string{}
+		for modelID := range provider.Models {
+			modelTrim := strings.TrimSpace(modelID)
+			if modelTrim == "" {
+				return fmt.Errorf("%w: llm.customProviders[%s].models requires non-empty model id", common.ErrInvalidArgument, trimmed)
+			}
+			modelFold := strings.ToLower(modelTrim)
+			if prev, ok := seenModels[modelFold]; ok {
+				return fmt.Errorf("%w: llm.customProviders[%s].models has duplicate model id %q (conflicts with %q)", common.ErrInvalidArgument, trimmed, modelTrim, prev)
+			}
+			seenModels[modelFold] = modelTrim
+		}
+	}
+	return nil
+}
+
+func validateAIProxyProviderConfig(cfg AIProxyProviderConfig) error {
+	baseURL := strings.TrimSpace(cfg.BaseURL)
+	if baseURL == "" {
+		return fmt.Errorf("%w: llm.aiProxy.baseURL is required", common.ErrInvalidArgument)
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return fmt.Errorf("%w: llm.aiProxy.baseURL is invalid: %v", common.ErrInvalidArgument, err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("%w: llm.aiProxy.baseURL must use http or https", common.ErrInvalidArgument)
+	}
+	if parsed.Host == "" {
+		return fmt.Errorf("%w: llm.aiProxy.baseURL requires host", common.ErrInvalidArgument)
+	}
+	if parsed.User != nil {
+		return fmt.Errorf("%w: llm.aiProxy.baseURL must not include userinfo", common.ErrInvalidArgument)
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("%w: llm.aiProxy.baseURL must not include query or fragment", common.ErrInvalidArgument)
+	}
+	timeout, err := parsePositiveDuration("llm.aiProxy.timeout", cfg.Timeout)
+	if err != nil {
+		return err
+	}
+	catalogTimeout, err := parsePositiveDuration("llm.aiProxy.catalogRequestTimeout", cfg.CatalogRequestTimeout)
+	if err != nil {
+		return err
+	}
+	catalogTTL, err := parsePositiveDuration("llm.aiProxy.catalogTTL", cfg.CatalogTTL)
+	if err != nil {
+		return err
+	}
+	catalogMaxStaleAge, err := parsePositiveDuration("llm.aiProxy.catalogMaxStaleAge", cfg.CatalogMaxStaleAge)
+	if err != nil {
+		return err
+	}
+	if catalogMaxStaleAge < catalogTTL {
+		return fmt.Errorf("%w: llm.aiProxy.catalogMaxStaleAge must be >= catalogTTL", common.ErrInvalidArgument)
+	}
+	if catalogTimeout > timeout {
+		// catalog timeout is independent; allow shorter only, no hard relation required beyond positive.
+	}
+	if cfg.MaxCatalogResponseBytes <= 0 {
+		return fmt.Errorf("%w: llm.aiProxy.maxCatalogResponseBytes must be positive", common.ErrInvalidArgument)
+	}
+	if cfg.MaxCatalogModels <= 0 {
+		return fmt.Errorf("%w: llm.aiProxy.maxCatalogModels must be positive", common.ErrInvalidArgument)
+	}
+	seenOverrides := map[string]string{}
+	for modelID, override := range cfg.ModelOverrides {
+		modelID = strings.TrimSpace(modelID)
+		if modelID == "" {
+			return fmt.Errorf("%w: llm.aiProxy.modelOverrides requires non-empty model id", common.ErrInvalidArgument)
+		}
+		fold := strings.ToLower(modelID)
+		if prev, ok := seenOverrides[fold]; ok {
+			return fmt.Errorf("%w: llm.aiProxy.modelOverrides has duplicate model id %q (conflicts with %q)", common.ErrInvalidArgument, modelID, prev)
+		}
+		seenOverrides[fold] = modelID
+		if override.ContextWindowTokens <= 0 || override.MaxOutputTokens <= 0 {
+			return fmt.Errorf("%w: llm.aiProxy.modelOverrides[%s] requires positive contextWindowTokens and maxOutputTokens", common.ErrInvalidArgument, modelID)
+		}
+		if override.MaxOutputTokens >= override.ContextWindowTokens {
+			return fmt.Errorf("%w: llm.aiProxy.modelOverrides[%s] maxOutputTokens must be less than contextWindowTokens", common.ErrInvalidArgument, modelID)
+		}
+		if len(override.Operations) == 0 {
+			return fmt.Errorf("%w: llm.aiProxy.modelOverrides[%s].operations is required", common.ErrInvalidArgument, modelID)
+		}
+		seenOps := map[string]struct{}{}
+		for _, operation := range override.Operations {
+			operation = strings.TrimSpace(operation)
+			switch operation {
+			case LLMOperationChatCompletions, LLMOperationEmbeddings:
+			default:
+				return fmt.Errorf("%w: llm.aiProxy.modelOverrides[%s].operations has unknown operation %q", common.ErrInvalidArgument, modelID, operation)
+			}
+			if _, ok := seenOps[operation]; ok {
+				return fmt.Errorf("%w: llm.aiProxy.modelOverrides[%s].operations has duplicate operation %q", common.ErrInvalidArgument, modelID, operation)
+			}
+			seenOps[operation] = struct{}{}
+		}
+	}
+	return nil
+}
+
+func validateLLMContextBudgetPolicyConfig(cfg LLMContextBudgetPolicyConfig) error {
+	if cfg.ContextUtilizationRatio <= 0 || cfg.ContextUtilizationRatio > 1 {
+		return fmt.Errorf("%w: llm.budget.contextUtilizationRatio must be in (0, 1]", common.ErrInvalidArgument)
+	}
+	if cfg.EstimatedTokensPerByte <= 0 {
+		return fmt.Errorf("%w: llm.budget.estimatedTokensPerByte must be positive", common.ErrInvalidArgument)
+	}
+	if cfg.DefaultMaxOutputTokens <= 0 {
+		return fmt.Errorf("%w: llm.budget.defaultMaxOutputTokens must be positive", common.ErrInvalidArgument)
+	}
+	if cfg.MaxRequestBytes <= 0 {
+		return fmt.Errorf("%w: llm.budget.maxRequestBytes must be positive", common.ErrInvalidArgument)
+	}
+	return nil
+}
+
+func validateCustomLLMProviderConfig(id string, cfg CustomLLMProviderConfig) error {
+	if strings.TrimSpace(cfg.Provider) == "" {
+		return fmt.Errorf("%w: llm.customProviders[%s].provider is required", common.ErrInvalidArgument, id)
+	}
+	if strings.TrimSpace(cfg.APISurface) == "" {
+		return fmt.Errorf("%w: llm.customProviders[%s].apiSurface is required", common.ErrInvalidArgument, id)
+	}
+	baseURL := strings.TrimSpace(cfg.BaseURL)
+	if baseURL == "" {
+		return fmt.Errorf("%w: llm.customProviders[%s].baseURL is required", common.ErrInvalidArgument, id)
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return fmt.Errorf("%w: llm.customProviders[%s].baseURL is invalid: %v", common.ErrInvalidArgument, id, err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("%w: llm.customProviders[%s].baseURL must use http or https", common.ErrInvalidArgument, id)
+	}
+	if parsed.Host == "" {
+		return fmt.Errorf("%w: llm.customProviders[%s].baseURL requires host", common.ErrInvalidArgument, id)
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("%w: llm.customProviders[%s].baseURL must not include userinfo, query or fragment", common.ErrInvalidArgument, id)
+	}
+	if strings.TrimSpace(cfg.Timeout) != "" {
+		if _, err := parsePositiveDuration(fmt.Sprintf("llm.customProviders[%s].timeout", id), cfg.Timeout); err != nil {
+			return err
+		}
+	}
+	if len(cfg.Models) == 0 {
+		return fmt.Errorf("%w: llm.customProviders[%s].models must declare at least one model", common.ErrInvalidArgument, id)
+	}
+	for modelID, model := range cfg.Models {
+		modelID = strings.TrimSpace(modelID)
+		if modelID == "" {
+			return fmt.Errorf("%w: llm.customProviders[%s].models requires non-empty model id", common.ErrInvalidArgument, id)
+		}
+		if model.ContextWindowTokens <= 0 || model.MaxOutputTokens <= 0 {
+			return fmt.Errorf("%w: llm.customProviders[%s].models[%s] requires positive contextWindowTokens and maxOutputTokens", common.ErrInvalidArgument, id, modelID)
+		}
+		if model.MaxOutputTokens >= model.ContextWindowTokens {
+			return fmt.Errorf("%w: llm.customProviders[%s].models[%s] maxOutputTokens must be less than contextWindowTokens", common.ErrInvalidArgument, id, modelID)
+		}
+		if len(model.Operations) == 0 {
+			return fmt.Errorf("%w: llm.customProviders[%s].models[%s].operations is required", common.ErrInvalidArgument, id, modelID)
+		}
+		seenOps := map[string]struct{}{}
+		for _, operation := range model.Operations {
+			operation = strings.TrimSpace(operation)
+			switch operation {
+			case LLMOperationChatCompletions, LLMOperationEmbeddings:
+			default:
+				return fmt.Errorf("%w: llm.customProviders[%s].models[%s].operations has unknown operation %q", common.ErrInvalidArgument, id, modelID, operation)
+			}
+			if _, ok := seenOps[operation]; ok {
+				return fmt.Errorf("%w: llm.customProviders[%s].models[%s].operations has duplicate operation %q", common.ErrInvalidArgument, id, modelID, operation)
+			}
+			seenOps[operation] = struct{}{}
+		}
+	}
+	return nil
+}
+
+func parsePositiveDuration(field string, raw string) (time.Duration, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, fmt.Errorf("%w: %s is required", common.ErrInvalidArgument, field)
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %s is invalid: %v", common.ErrInvalidArgument, field, err)
+	}
+	if value <= 0 {
+		return 0, fmt.Errorf("%w: %s must be positive", common.ErrInvalidArgument, field)
+	}
+	return value, nil
 }
 
 func applyRuntimeConfigDefaults(cfg *RuntimeConfig) {
@@ -398,73 +898,6 @@ func Revision() uint64 {
 	return configRevision.Load()
 }
 
-func (c Config) LLMProviderValues() map[string]string {
-	valuesByID := c.LLMProviderValueSets()
-	return valuesByID[strings.TrimSpace(c.LLM.DefaultProvider)]
-}
-
-func (c Config) LLMProviderValueSets() map[string]map[string]string {
-	ret := map[string]map[string]string{}
-	for id, provider := range c.LLM.Providers {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-		values := llmProviderValues(provider)
-		if provider.ContextWindowTokens <= 0 {
-			if capability, ok := c.LLM.ResolveModelCapability(provider.Provider, provider.Model); ok && capability.ContextWindowTokens > 0 {
-				values["contextWindowTokens"] = intString(capability.ContextWindowTokens)
-				values["contextCapabilitySource"] = "model_registry"
-			}
-		}
-		ret[id] = values
-	}
-	return ret
-}
-
-func (c LLMConfig) ResolveModelCapability(provider string, model string) (LLMModelCapabilityConfig, bool) {
-	provider = normalizeCapabilityMatchValue(provider)
-	model = normalizeCapabilityMatchValue(model)
-	if model == "" {
-		return LLMModelCapabilityConfig{}, false
-	}
-	for _, capability := range c.ModelCapabilities {
-		if capability.ContextWindowTokens <= 0 {
-			continue
-		}
-		if capability.Provider != "" && normalizeCapabilityMatchValue(capability.Provider) != provider {
-			continue
-		}
-		if modelPatternMatches(capability.ModelPattern, model) {
-			return capability, true
-		}
-	}
-	return LLMModelCapabilityConfig{}, false
-}
-
-func modelPatternMatches(patternValue string, model string) bool {
-	patternValue = normalizeCapabilityMatchValue(patternValue)
-	if patternValue == "" {
-		return false
-	}
-	if patternValue == "*" {
-		return true
-	}
-	if strings.ContainsAny(patternValue, "*?[") {
-		if matched, err := path.Match(patternValue, model); err == nil && matched {
-			return true
-		}
-	}
-	return patternValue == model || strings.Contains(model, patternValue)
-}
-
-func normalizeCapabilityMatchValue(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	value = strings.ReplaceAll(value, "_", "-")
-	value = strings.ReplaceAll(value, " ", "-")
-	return value
-}
-
 func (c Config) WebSearchProviderValues() map[string]string {
 	valuesByID := c.WebSearchProviderValueSets()
 	return valuesByID[strings.TrimSpace(c.WebSearch.DefaultProvider)]
@@ -480,92 +913,6 @@ func (c Config) WebSearchProviderValueSets() map[string]map[string]string {
 		ret[id] = webSearchProviderValues(provider)
 	}
 	return ret
-}
-
-func llmProviderValues(provider LLMProviderConfig) map[string]string {
-	values := map[string]string{}
-	set(values, "provider", provider.Provider)
-	set(values, "apiSurface", provider.APISurface)
-	set(values, "baseURL", provider.BaseURL)
-	set(values, "apiKey", provider.APIKey)
-	set(values, "model", provider.Model)
-	set(values, "timeout", provider.Timeout)
-	if strings.TrimSpace(provider.ContextProfileMode) != "" {
-		values["contextProfileMode"] = strings.TrimSpace(provider.ContextProfileMode)
-	}
-	if provider.ContextWindowTokens > 0 {
-		values["contextWindowTokens"] = intString(provider.ContextWindowTokens)
-	}
-	if isManualContextProfile(provider.ContextProfileMode) {
-		if provider.MaxInputTokens > 0 {
-			values["maxInputTokens"] = intString(provider.MaxInputTokens)
-		}
-		if provider.ReservedOutputTokens > 0 {
-			values["reservedOutputTokens"] = intString(provider.ReservedOutputTokens)
-		}
-		if provider.SafetyRatio > 0 {
-			values["safetyRatio"] = formatFloat(provider.SafetyRatio)
-		}
-		if provider.ContextUtilizationRatio > 0 {
-			values["contextUtilizationRatio"] = formatFloat(provider.ContextUtilizationRatio)
-		}
-		if provider.BytesHardLimit > 0 {
-			values["bytesHardLimit"] = intString(provider.BytesHardLimit)
-		}
-		if provider.MaxRequestBytes > 0 {
-			values["maxRequestBytes"] = intString(provider.MaxRequestBytes)
-		}
-		if provider.EstimatedTokensPerByte > 0 {
-			values["estimatedTokensPerByte"] = formatFloat(provider.EstimatedTokensPerByte)
-		}
-	}
-	if provider.Disabled != nil {
-		if *provider.Disabled {
-			values["disabled"] = "true"
-		} else {
-			values["disabled"] = "false"
-		}
-	}
-	if provider.ChatCompletions != nil {
-		values["chatCompletions"] = boolString(*provider.ChatCompletions)
-	}
-	if provider.Streaming != nil {
-		values["streaming"] = boolString(*provider.Streaming)
-	}
-	if len(provider.NonChatOperations) > 0 {
-		values["nonChatOperations"] = strings.Join(provider.NonChatOperations, ",")
-	}
-	if provider.Temperature != nil {
-		values["temperature"] = formatFloat(*provider.Temperature)
-	}
-	if provider.MaxOutputTokens > 0 {
-		values["maxOutputTokens"] = intString(provider.MaxOutputTokens)
-	}
-	set(values, "reasoningEffort", provider.ReasoningEffort)
-	if provider.ThinkingBudgetTokens > 0 {
-		values["thinkingBudgetTokens"] = intString(provider.ThinkingBudgetTokens)
-	}
-	if provider.FailoverEnabled != nil {
-		values["failoverEnabled"] = boolString(*provider.FailoverEnabled)
-	}
-	if len(provider.FailoverProviders) > 0 {
-		values["failoverProviders"] = strings.Join(provider.FailoverProviders, ",")
-	}
-	set(values, "cacheMode", provider.CacheMode)
-	if provider.PromptCacheKey != nil {
-		values["promptCacheKey"] = boolString(*provider.PromptCacheKey)
-	}
-	if provider.MessageCacheControl != nil {
-		values["messageCacheControl"] = boolString(*provider.MessageCacheControl)
-	}
-	if len(provider.CacheUsageFields) > 0 {
-		values["cacheUsageFields"] = strings.Join(provider.CacheUsageFields, ",")
-	}
-	return values
-}
-
-func isManualContextProfile(value string) bool {
-	return strings.EqualFold(strings.TrimSpace(value), "manual")
 }
 
 func webSearchProviderValues(provider WebSearchProviderConfig) map[string]string {

@@ -1,0 +1,50 @@
+{
+  "service": "workorch",
+  "catalog": {
+    "providerId": "ai-proxy",
+    "state": "fresh",
+    "revision": "catalog-sha256:186dd324753c4d9e20986443b2fe1ba68ed222ce322c25d424da023472785874",
+    "fetchedAt": "2026-07-15T15:09:48.564584805Z",
+    "expiresAt": "2026-07-15T15:14:48.564584805Z",
+    "stale": false,
+    "source": "ai_proxy",
+    "models": [
+      {
+        "providerId": "ai-proxy",
+        "modelId": "live-chat-a",
+        "routeOwner": "ai-proxy",
+        "contextWindowTokens": 65536,
+        "maxOutputTokens": 4096,
+        "operations": [
+          "chat_completions"
+        ],
+        "capabilityReady": true,
+        "capabilityRevision": "capability-sha256:093125f87870d06c066bdf3790b640c04f1748831698a654f02683cfff3c959a"
+      },
+      {
+        "providerId": "ai-proxy",
+        "modelId": "live-chat-b",
+        "routeOwner": "ai-proxy",
+        "contextWindowTokens": 131072,
+        "maxOutputTokens": 8192,
+        "operations": [
+          "chat_completions"
+        ],
+        "capabilityReady": true,
+        "capabilityRevision": "capability-sha256:1437ae644f3d7c18f4d8de91ca49c72ba77283f7f1a0bc42292f060b86aea64d"
+      },
+      {
+        "providerId": "ai-proxy",
+        "modelId": "live-embedding",
+        "routeOwner": "ai-proxy",
+        "contextWindowTokens": 8192,
+        "maxOutputTokens": 1024,
+        "operations": [
+          "embeddings"
+        ],
+        "capabilityReady": true,
+        "capabilityRevision": "capability-sha256:7e7e3046a272d4e79b2f44115234a80bf122787a5c58a53e287c263ac9ba78f6"
+      }
+    ]
+  }
+}

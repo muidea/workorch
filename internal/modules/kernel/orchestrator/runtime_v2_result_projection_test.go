@@ -11,10 +11,11 @@ import (
 func TestRuntimeV2ResultProjectionBuildsAcceptedDoDAssessment(t *testing.T) {
 	aggregate := runtimev2.RuntimeAggregate{
 		Definition: runtimecontract.RuntimeDefinitionContext{GoalID: "goal-1", DoDID: "dod-1"},
-		Facts: runtimecontract.RuntimeFacts{WorkspaceID: "ws-1", RunID: "run-1", Assessments: []runtimecontract.RuntimeAssessmentFact{{
-			FocusID: "focus-1", Scope: "dodItem", RequirementID: "dod-001", RequirementText: "行为已验证",
-			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Satisfied: true, EvidenceRefs: []string{"event-1"},
-		}}},
+		Facts: runtimecontract.RuntimeFacts{
+			Activation: runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}, WorkspaceID: "ws-1", RunID: "run-1", Assessments: []runtimecontract.RuntimeAssessmentFact{{
+				FocusID: "focus-1", Scope: "dodItem", RequirementID: "dod-001", RequirementText: "行为已验证",
+				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Satisfied: true, EvidenceRefs: []string{"event-1"},
+			}}},
 		Decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionComplete, AuthoritySnapshot: runtimecontract.AuthoritySnapshot{ID: "authority-1"}, Terminal: &runtimecontract.TerminalOutcome{Summary: "coverage satisfied"}},
 	}
 	item := runtimeV2ResultFromAggregate(aggregate)

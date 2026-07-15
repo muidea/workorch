@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -38,6 +39,11 @@ type statusResponse struct {
 type configurationResponse struct {
 	Service       string                          `json:"service"`
 	Configuration appservice.ServiceConfiguration `json:"configuration"`
+}
+
+type llmModelCatalogResponse struct {
+	Service string                            `json:"service"`
+	Catalog appservice.ProviderCatalogSummary `json:"catalog"`
 }
 
 type workspaceResponse struct {
@@ -410,25 +416,25 @@ type createRunRequest struct {
 }
 
 type workspaceExecutionCommandRequest struct {
-	RunID              string            `json:"runId,omitempty"`
-	GoalID             string            `json:"goalId,omitempty"`
-	DoDID              string            `json:"doDId,omitempty"`
-	LLMProviderID      string            `json:"llmProviderId,omitempty"`
-	SoulID             string            `json:"soulId,omitempty"`
-	SoulBindings       map[string]string `json:"soulBindings,omitempty"`
-	SkillIDs           []string          `json:"skillIds,omitempty"`
-	MCPServerIDs       []string          `json:"mcpServerIds,omitempty"`
-	CapabilityIDs      []string          `json:"capabilityIds,omitempty"`
-	MemoryIDs          []string          `json:"memoryIds,omitempty"`
-	DialogLanguage     string            `json:"dialogLanguage,omitempty"`
-	Priority           int               `json:"priority,omitempty"`
-	RequestID          string            `json:"requestId,omitempty"`
-	Reason             string            `json:"reason,omitempty"`
-	Source             string            `json:"source,omitempty"`
-	Intent             string            `json:"intent,omitempty"`
-	DefinitionRevision string            `json:"definitionRevision,omitempty"`
-	DecisionID         string            `json:"decisionId,omitempty"`
-	Restart            bool              `json:"restart,omitempty"`
+	RunID              string                               `json:"runId,omitempty"`
+	GoalID             string                               `json:"goalId,omitempty"`
+	DoDID              string                               `json:"doDId,omitempty"`
+	LLMTarget          *runtimecontract.ProviderModelTarget `json:"llmTarget,omitempty"`
+	SoulID             string                               `json:"soulId,omitempty"`
+	SoulBindings       map[string]string                    `json:"soulBindings,omitempty"`
+	SkillIDs           []string                             `json:"skillIds,omitempty"`
+	MCPServerIDs       []string                             `json:"mcpServerIds,omitempty"`
+	CapabilityIDs      []string                             `json:"capabilityIds,omitempty"`
+	MemoryIDs          []string                             `json:"memoryIds,omitempty"`
+	DialogLanguage     string                               `json:"dialogLanguage,omitempty"`
+	Priority           int                                  `json:"priority,omitempty"`
+	RequestID          string                               `json:"requestId,omitempty"`
+	Reason             string                               `json:"reason,omitempty"`
+	Source             string                               `json:"source,omitempty"`
+	Intent             string                               `json:"intent,omitempty"`
+	DefinitionRevision string                               `json:"definitionRevision,omitempty"`
+	DecisionID         string                               `json:"decisionId,omitempty"`
+	Restart            bool                                 `json:"restart,omitempty"`
 }
 
 type createSoulRequest = appservice.CreateSoulCommand
@@ -585,6 +591,10 @@ type updateRuntimeConfigurationFunc func(appservice.UpdateRuntimeConfigurationCo
 type updateLLMConfigurationFunc func(appservice.UpdateLLMConfigurationCommand) (appservice.ServiceConfiguration, error)
 type updateWebSearchConfigurationFunc func(appservice.UpdateWebSearchConfigurationCommand) (appservice.ServiceConfiguration, error)
 
+type getLLMModelCatalogFunc func(ctx context.Context, hub magicevent.Hub, cmd appservice.GetLLMModelCatalogCommand) (appservice.ProviderCatalogSummary, error)
+type refreshLLMModelCatalogFunc func(ctx context.Context, hub magicevent.Hub, cmd appservice.RefreshLLMModelCatalogCommand) (appservice.ProviderCatalogSummary, error)
+type readConfigurationWithCatalogFunc func(ctx context.Context, hub magicevent.Hub) (appservice.ServiceConfiguration, error)
+
 type serverState struct {
 	config                       Config
 	commandHub                   magicevent.Hub
@@ -678,6 +688,9 @@ type serverState struct {
 	updateServerConfiguration    updateServerConfigurationFunc
 	updateRuntimeConfiguration   updateRuntimeConfigurationFunc
 	updateLLMConfiguration       updateLLMConfigurationFunc
+	getLLMModelCatalog           getLLMModelCatalogFunc
+	refreshLLMModelCatalog       refreshLLMModelCatalogFunc
+	readConfigurationWithCatalog readConfigurationWithCatalogFunc
 	updateWebSearchConfiguration updateWebSearchConfigurationFunc
 	runQueueMu                   sync.Mutex
 	runQueueWaiters              []*runQueueWaiter
@@ -1121,6 +1134,9 @@ func newServerStateWithCommandHubAndBackground(config Config, commandHub magicev
 		updateServerConfiguration:    appservice.UpdateServerConfiguration,
 		updateRuntimeConfiguration:   appservice.UpdateRuntimeConfiguration,
 		updateLLMConfiguration:       appservice.UpdateLLMConfiguration,
+		getLLMModelCatalog:           appservice.GetLLMModelCatalog,
+		refreshLLMModelCatalog:       appservice.RefreshLLMModelCatalog,
+		readConfigurationWithCatalog: appservice.ReadServiceConfigurationWithCatalog,
 		updateWebSearchConfiguration: appservice.UpdateWebSearchConfiguration,
 		backgroundRoutine:            backgroundRoutine,
 		backgroundCtx:                backgroundCtx,

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { App as AntApp, Button, Descriptions, Empty, Form, Input, List, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, ProCard, ProTable } from './components/proCompat';
-import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, ConvergenceStatus, Decision, DoD, EventPayload, EventPayloadValue, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMModelCapabilityConfiguration, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, ConvergenceStatus, CustomProviderDraft, CustomProviderModelDraft, Decision, DoD, EventPayload, EventPayloadValue, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import { modelLabels, progressKindLabels, recoveryActionLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels } from './utils/constants';
 import { stateLabel as canonicalStateLabel } from './utils/format';
@@ -2306,133 +2306,195 @@ export function runPriority(item: Run) {
 
 export function llmConfigurationFormValues(configuration: ServiceConfiguration): UpdateLLMConfigurationRequest {
   return {
-    defaultProviderId: configuration.llm.defaultProviderId,
-    defaultEmbeddingProviderId: configuration.llm.defaultEmbeddingProviderId,
-    modelCapabilities: configuration.llm.modelCapabilities ?? [],
-    providers: (configuration.llm.providers ?? []).map((item) => ({
-      id: item.id,
-      provider: item.provider,
-      baseUrl: item.baseUrl,
-      apiKey: '',
-      model: item.model,
-      timeout: item.timeout,
-      disabled: item.disabled,
-      chatCompletions: item.chatCompletions,
-      streaming: item.streaming,
-      nonChatOperations: item.nonChatOperations ?? [],
-      failoverEnabled: item.failoverEnabled,
-      failoverProviders: item.failoverProviders ?? [],
-      inferenceProfile: item.inferenceProfile,
-      contextProfile: item.contextProfile
-    }))
+    aiProxy: {
+      baseURL: configuration.llm.aiProxy?.baseUrl,
+      timeout: configuration.llm.aiProxy?.timeout,
+      catalogRequestTimeout: configuration.llm.aiProxy?.catalogRequestTimeout,
+      catalogTTL: configuration.llm.aiProxy?.catalogTTL,
+      catalogMaxStaleAge: configuration.llm.aiProxy?.catalogMaxStaleAge,
+      maxCatalogResponseBytes: configuration.llm.aiProxy?.maxCatalogResponseBytes,
+      maxCatalogModels: configuration.llm.aiProxy?.maxCatalogModels
+    },
+    defaultChat: {
+      providerID: configuration.llm.defaultChat?.providerId,
+      modelID: configuration.llm.defaultChat?.modelId
+    },
+    defaultEmbedding: configuration.llm.defaultEmbedding ? {
+      providerID: configuration.llm.defaultEmbedding.providerId,
+      modelID: configuration.llm.defaultEmbedding.modelId
+    } : undefined,
+    budget: {
+      contextUtilizationRatio: configuration.llm.budget?.contextUtilizationRatio,
+      estimatedTokensPerByte: configuration.llm.budget?.estimatedTokensPerByte,
+      defaultMaxOutputTokens: configuration.llm.budget?.defaultMaxOutputTokens,
+      maxRequestBytes: configuration.llm.budget?.maxRequestBytes
+    }
   };
 }
 
-export function providerDraftFromTemplate(template: LLMProviderTemplate, existing: UpdateLLMProviderConfiguration[], current?: UpdateLLMProviderConfiguration): UpdateLLMProviderConfiguration {
-  let id = current?.id?.trim() || template.id;
-  const currentID = current?.id?.trim();
-  const existingIDs = new Set(existing.map((item) => item.id?.trim()).filter((item) => item && item !== currentID));
-  if (existingIDs.has(id)) {
-    let index = existing.length + 1;
-    id = `${template.provider}-${index}`;
-    while (existingIDs.has(id)) {
-      index += 1;
-      id = `${template.provider}-${index}`;
+export function readyCatalogModels(configuration?: ServiceConfiguration, operation?: string) {
+  // Strict: capabilityReady alone is not enough; operations must be present and include the requested op.
+  const models = (configuration?.llm.catalog?.models ?? []).filter((item) => {
+    if (!item.capabilityReady) {
+      return false;
+    }
+    const ops = item.operations ?? [];
+    if (ops.length === 0) {
+      return false;
+    }
+    if (!operation) {
+      return true;
+    }
+    return ops.includes(operation);
+  });
+  return models;
+}
+
+export function customProviderTargetOptions(configuration?: ServiceConfiguration, operation?: string) {
+  const providers = configuration?.llm.customProviders ?? [];
+  const options: Array<{ value: string; label: string; providerId: string; modelId: string }> = [];
+  for (const provider of providers) {
+    for (const model of provider.models ?? []) {
+      const ops = model.operations ?? [];
+      // Strict: no empty-operations fallback and no auto chat_completions.
+      if (ops.length === 0) {
+        continue;
+      }
+      if (operation && !ops.includes(operation)) {
+        continue;
+      }
+      options.push({
+        value: `${provider.id}/${model.id}`,
+        label: `[custom] ${provider.id} / ${model.id}`,
+        providerId: provider.id,
+        modelId: model.id
+      });
     }
   }
-  return {
-    ...current,
-    id,
-    provider: template.provider,
-    baseUrl: template.baseUrl,
-    model: template.model,
-    timeout: template.timeout || '60s',
-    disabled: template.disabled,
-    chatCompletions: template.chatCompletions,
-    streaming: template.streaming,
-    nonChatOperations: template.nonChatOperations ?? [],
-    apiKey: current?.apiKey ?? ''
-  };
+  return options;
 }
 
-export function nextProviderDraft(existing: UpdateLLMProviderConfiguration[], template?: LLMProviderTemplate): UpdateLLMProviderConfiguration {
-  if (template) {
-    return providerDraftFromTemplate(template, existing);
-  }
+export function customProviderDraftsFromConfiguration(configuration?: ServiceConfiguration): CustomProviderDraft[] {
+  return (configuration?.llm.customProviders ?? []).map((provider) => ({
+    id: provider.id,
+    provider: provider.provider || 'openai-compatible',
+    apiSurface: provider.apiSurface || 'openai_compatible_http',
+    baseUrl: provider.baseUrl,
+    apiKey: '',
+    timeout: provider.timeout,
+    models: (provider.models ?? []).map((model) => ({
+      id: model.id,
+      contextWindowTokens: model.contextWindowTokens,
+      maxOutputTokens: model.maxOutputTokens,
+      operations: [...(model.operations ?? [])],
+      temperature: model.temperature,
+      reasoningEffort: model.reasoningEffort,
+      thinkingBudgetTokens: model.thinkingBudgetTokens,
+      cacheMode: model.cacheMode,
+      promptCacheKey: model.promptCacheKey,
+      messageCacheControl: model.messageCacheControl,
+      cacheUsageFields: [...(model.cacheUsageFields ?? [])]
+    }))
+  }));
+}
+
+export function nextCustomProviderDraft(existing: CustomProviderDraft[]): CustomProviderDraft {
+  const used = new Set(existing.map((item) => item.id));
   let index = existing.length + 1;
-  let id = `provider-${index}`;
-  const existingIDs = new Set(existing.map((item) => item.id));
-  while (existingIDs.has(id)) {
+  let id = `custom-${index}`;
+  while (used.has(id)) {
     index += 1;
-    id = `provider-${index}`;
+    id = `custom-${index}`;
   }
   return {
     id,
-    provider: 'compatible',
+    provider: 'openai-compatible',
+    apiSurface: 'openai_compatible_http',
+    baseUrl: '',
+    apiKey: '',
     timeout: '60s',
-    disabled: false,
-    chatCompletions: true,
-    streaming: false,
-    nonChatOperations: []
+    models: [nextCustomProviderModelDraft([])]
   };
 }
 
-export function nextModelCapabilityDraft(existing: LLMModelCapabilityConfiguration[]): LLMModelCapabilityConfiguration {
+export function nextCustomProviderModelDraft(existing: CustomProviderModelDraft[]): CustomProviderModelDraft {
+  const used = new Set(existing.map((item) => item.id));
   let index = existing.length + 1;
-  let id = `model-capability-${index}`;
-  const existingIDs = new Set(existing.map((item) => item.id));
-  while (existingIDs.has(id)) {
+  let id = `model-${index}`;
+  while (used.has(id)) {
     index += 1;
-    id = `model-capability-${index}`;
+    id = `model-${index}`;
   }
   return {
     id,
-    modelPattern: '',
-    contextWindowTokens: 128000
+    contextWindowTokens: 128000,
+    maxOutputTokens: 8192,
+    // Strict: operations must be declared by the admin; never auto-fill chat_completions.
+    operations: [],
+    cacheMode: 'none'
   };
 }
 
-export function cleanedInferenceProfile(item: UpdateLLMProviderConfiguration) {
-  const profile = item.inferenceProfile;
-  if (!profile) {
-    return undefined;
+export function customProvidersUpdatePayload(drafts: CustomProviderDraft[]): NonNullable<UpdateLLMConfigurationRequest['customProviders']> {
+  const payload: NonNullable<UpdateLLMConfigurationRequest['customProviders']> = {};
+  for (const provider of drafts) {
+    const providerID = provider.id?.trim();
+    if (!providerID) {
+      continue;
+    }
+    const models: NonNullable<NonNullable<UpdateLLMConfigurationRequest['customProviders']>[string]['models']> = {};
+    for (const model of provider.models ?? []) {
+      const modelID = model.id?.trim();
+      if (!modelID) {
+        continue;
+      }
+      models[modelID] = {
+        contextWindowTokens: model.contextWindowTokens,
+        maxOutputTokens: model.maxOutputTokens,
+        operations: model.operations ?? [],
+        temperature: model.temperature,
+        reasoningEffort: model.reasoningEffort?.trim() || undefined,
+        thinkingBudgetTokens: model.thinkingBudgetTokens,
+        cache: (model.cacheMode || model.promptCacheKey !== undefined || model.messageCacheControl !== undefined || (model.cacheUsageFields?.length ?? 0) > 0) ? {
+          mode: model.cacheMode?.trim() || undefined,
+          promptCacheKey: model.promptCacheKey,
+          messageCacheControl: model.messageCacheControl,
+          usageFields: model.cacheUsageFields?.length ? model.cacheUsageFields : undefined
+        } : undefined
+      };
+    }
+    payload[providerID] = {
+      provider: provider.provider?.trim() || 'openai-compatible',
+      apiSurface: provider.apiSurface?.trim() || 'openai_compatible_http',
+      baseURL: provider.baseUrl?.trim(),
+      apiKey: provider.apiKey?.trim() || undefined,
+      timeout: provider.timeout?.trim(),
+      models
+    };
   }
-  const cleaned = {
-    temperature: profile.temperature,
-    maxOutputTokens: profile.maxOutputTokens,
-    reasoningEffort: profile.reasoningEffort?.trim(),
-    thinkingBudgetTokens: profile.thinkingBudgetTokens
-  };
-  return hasDefinedValue(cleaned) ? cleaned : undefined;
+  return payload;
 }
 
-export function cleanedContextProfile(item: UpdateLLMProviderConfiguration) {
-  const profile = item.contextProfile;
-  if (!profile) {
-    return undefined;
+export function chatTargetOptions(configuration?: ServiceConfiguration, includeCustom = false) {
+  const catalog = readyCatalogModels(configuration, 'chat_completions').map((item) => ({
+    value: `ai-proxy/${item.modelId}`,
+    label: `${item.modelId}${item.routeOwner ? ` / ${item.routeOwner}` : ''}`,
+    providerId: item.providerId || 'ai-proxy',
+    modelId: item.modelId,
+    source: 'catalog' as const
+  }));
+  if (!includeCustom) {
+    return catalog;
   }
-  const profileMode = profile.profileMode?.trim();
-  const cleaned = {
-    profileMode,
-    contextWindowTokens: profile.contextWindowTokens,
-    ...(profileMode === 'manual'
-      ? {
-          maxInputTokens: profile.maxInputTokens,
-          reservedOutputTokens: profile.reservedOutputTokens,
-          safetyRatio: profile.safetyRatio,
-          contextUtilizationRatio: profile.contextUtilizationRatio,
-          bytesHardLimit: profile.bytesHardLimit,
-          maxRequestBytes: profile.maxRequestBytes,
-          estimatedTokensPerByte: profile.estimatedTokensPerByte
-        }
-      : {})
-  };
-  return hasDefinedValue(cleaned) ? cleaned : undefined;
+  return [...catalog, ...customProviderTargetOptions(configuration, 'chat_completions').map((item) => ({
+    ...item,
+    source: 'custom' as const
+  }))];
 }
 
-function hasDefinedValue(input: Record<string, unknown>) {
-  return Object.values(input).some((value) => value !== undefined && value !== '');
-}
+
+
+
 
 export type WebSearchProviderFormValues = Omit<Partial<UpdateWebSearchProviderConfiguration>, 'allowDomains' | 'denyDomains' | 'headers'> & {
   allowDomains?: string;

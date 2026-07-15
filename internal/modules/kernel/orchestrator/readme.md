@@ -4,6 +4,14 @@
 
 `kernel/orchestrator` 是 Runtime V2 convergence authority，负责 typed facts、authority transaction、prerequisite、candidate、sealed dispatch、operation evidence、governance wait 与 terminal projection。它组合多个 owner 和技术 block 完成同一 Run 的确定性收敛闭环。
 
+## Provider / model ceiling（2026-07-15）
+
+- activation 持久化 `RuntimeActivationContext.ProviderTarget`
+- provider ceiling prerequisite 请求与封存完整 `ProviderCeiling{Target, token/byte ceilings, revisions}`
+- candidate 强制使用 ceiling target；Restart/Resume 不携带 provider/model patch
+- Orchestrator 只校验 identity/revision/ceiling 完整性，不解释 ai-proxy 或模型品牌
+
+
 ## 组件交互及合同
 
 - 通过 EventHub 读取 `blocks/workspace` 和 `kernel/run` 的权威快照，并通过 Run owner command 推进 Run/Step/Checkpoint。

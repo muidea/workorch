@@ -35,6 +35,7 @@ func (s *Session) Close(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+	// Collector unsubscribes while hub is still live, before module Stop/hub Terminate.
 	if s.Runtime != nil {
 		s.Runtime.Close()
 		s.Runtime = nil
@@ -49,6 +50,8 @@ func (s *Session) Close(ctx context.Context) error {
 		s.Bootstrap = nil
 		return nil
 	}
+	// Bootstrap.Shutdown: hub Terminate (testkit stops modules first → cancel workers)
+	// then DrainBackground. Do not drain background before module Stop.
 	err := s.Bootstrap.Shutdown(ctx)
 	s.Bootstrap = nil
 	return err

@@ -1,3 +1,35 @@
+# LLM Provider Assembly
+
+Status: active
+
+Type: module-architecture
+
+Last Updated: 2026-07-15
+
+## 当前生产合同（2026-07-15 cutover）
+
+WorkOrch 以内置 `ai-proxy` 为唯一默认 LLM endpoint：
+
+1. canonical config 使用 `llm.aiProxy` + `llm.defaultChat` + `llm.budget` + 可选 `llm.customProviders`。
+2. `blocks/llm` 通过 `GET /v1/models` 获取精确模型容量，并维护进程内 TTL/LKG catalog cache。
+3. application activation 解析完整 `ProviderModelTarget`，写入 typed `RuntimeBootstrap.Activation.ProviderTarget`。
+4. Runtime V2 prerequisite 封存完整 `ProviderCeiling`（target + token/byte ceiling + capability/configuration revision）。
+5. candidate/completion/embedding 强制使用已封存 target；不存在 provider map fallback 或 provider context 传递。
+
+已删除：
+
+- `defaultProvider` / `providers` / `modelCapabilities`
+- model pattern registry / auto-manual context profile / conservative default
+- `selectProviderConfig` 与 map 遍历回退
+- activation `llmProviderId` 与 provider-only context value
+
+设计执行依据：`docs/70-roadmap/active/ai-proxy-primary-llm-provider-cutover-design-2026-07-15.md`。
+
+---
+
+
+## 历史正文（cutover 前参考，不再作为实现 SoT）
+
 # LLM Provider Assembly Architecture
 
 Status: active

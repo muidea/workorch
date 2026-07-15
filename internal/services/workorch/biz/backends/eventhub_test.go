@@ -24,6 +24,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/testkit"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestEventHubBackendRoutesWorkspaceCreateThroughCLICommand(t *testing.T) {
@@ -239,7 +240,7 @@ func TestEventHubRunRestartPublishesUnifiedWorkspaceRunCommand(t *testing.T) {
 		Activation: ActivateRunRequest{
 			GoalID:    "goal-restart-unified",
 			DoDID:     "dod-restart-unified",
-			LLMProviderID: "provider-restart-unified",
+			LLMTarget: &runtimecontract.ProviderModelTarget{ProviderID: "provider-restart-unified", ModelID: "gpt-4o"},
 			SoulID:    "soul-restart-unified",
 			SoulBindings: map[string]common.SoulID{
 				"validation": "soul-validation-restart-unified",
@@ -253,7 +254,7 @@ func TestEventHubRunRestartPublishesUnifiedWorkspaceRunCommand(t *testing.T) {
 		t.Fatalf("restart: %v", err)
 	}
 
-	if captured.WorkspaceID != "ws-restart-unified" || captured.Intent != string(RunCommandIntentRestart) || captured.RequestID != "request-restart-unified" || captured.Reason != "test_restart_unified" || captured.Source != "test" || captured.DefinitionRevision != "rev-restart-unified" || captured.DecisionID != "ticket-restart-unified" || captured.Priority != 7 || captured.GoalID != "goal-restart-unified" || captured.DoDID != "dod-restart-unified" || captured.LLMProviderID != "provider-restart-unified" || captured.SoulID != "soul-restart-unified" {
+	if captured.WorkspaceID != "ws-restart-unified" || captured.Intent != string(RunCommandIntentRestart) || captured.RequestID != "request-restart-unified" || captured.Reason != "test_restart_unified" || captured.Source != "test" || captured.DefinitionRevision != "rev-restart-unified" || captured.DecisionID != "ticket-restart-unified" || captured.Priority != 7 || captured.GoalID != "goal-restart-unified" || captured.DoDID != "dod-restart-unified" || captured.LLMTarget == nil || captured.LLMTarget.ProviderID != "provider-restart-unified" || captured.SoulID != "soul-restart-unified" {
 		t.Fatalf("workspace run restart command = %+v", captured)
 	}
 	if captured.SoulBindings["validation"] != "soul-validation-restart-unified" || len(captured.SkillIDs) != 1 || len(captured.MCPServerIDs) != 1 || len(captured.CapabilityIDs) != 1 || len(captured.MemoryIDs) != 1 {

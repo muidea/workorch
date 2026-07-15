@@ -6,6 +6,15 @@ Type: overview
 
 Last Updated: 2026-07-14
 
+
+## LLM Provider（2026-07-15）
+
+- 首选 provider：内置 `ai-proxy`
+- 模型发现：`blocks/llm` 读取 `/v1/models` catalog
+- activation：提交/持久化 `llmTarget` / `ProviderModelTarget`
+- Runtime V2：`ProviderCeiling` 封存 target + token/byte ceiling + revision
+- 旧 `defaultProvider` / provider list / model pattern / provider context 路径已删除
+
 ## Purpose
 
 本文件是仓库「现在怎样」的唯一事实入口。它只描述当前已落地的生产主链、文档权威分层与剩余未关项，不承载历史 MVP/P1 记录或已归档 roadmap 正文。

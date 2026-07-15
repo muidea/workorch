@@ -18,7 +18,9 @@ func applyRuntimeV2Progress(progress *readmodelcore.TaskProgress, run *runmodel.
 	applyRuntimeV2ProgressToMilestones(progress, summary, string(common.CanonicalRunState(run.State)))
 	applyRuntimeV2ProgressToRepairLoop(progress, summary, *run.RuntimeState)
 	applyRuntimeV2ProgressToCurrentStep(progress, summary, *run.RuntimeState)
-	if progress.Summary == "" && strings.TrimSpace(summary.FailureMessage) != "" {
+	if runtimeSummary := RuntimeV2ProgressSummary(&summary); runtimeSummary != "" {
+		progress.Summary = runtimeSummary
+	} else if progress.Summary == "" && strings.TrimSpace(summary.FailureMessage) != "" {
 		progress.Summary = strings.TrimSpace(summary.FailureMessage)
 	}
 }

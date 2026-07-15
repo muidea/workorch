@@ -18,6 +18,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	client "github.com/muidea/workorch/internal/pkg/workorchclient"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestRemoteEventsBackendSubscribesToSSEStream(t *testing.T) {
@@ -412,7 +413,7 @@ func TestRemoteRunCommandFirstResumeSendsWorkspaceCommandMetadata(t *testing.T) 
 		Activation: ActivateRunRequest{
 			GoalID:        "goal-remote",
 			DoDID:         "dod-remote",
-			LLMProviderID: "provider-remote",
+			LLMTarget:     &runtimecontract.ProviderModelTarget{ProviderID: "provider-remote", ModelID: "gpt-4o"},
 			SoulID:        "soul-remote",
 			SoulBindings:  map[string]common.SoulID{"validation": "soul-remote-validation"},
 			SkillIDs:      []common.SkillID{"skill-remote"},
@@ -438,7 +439,7 @@ func TestRemoteRunCommandFirstResumeSendsWorkspaceCommandMetadata(t *testing.T) 
 		}
 		if body["goalId"] != "goal-remote" ||
 			body["doDId"] != "dod-remote" ||
-			body["llmProviderId"] != "provider-remote" ||
+			!llmTargetMatches(body["llmTarget"], "provider-remote", "gpt-4o") ||
 			body["soulId"] != "soul-remote" {
 			t.Fatalf("request body = %+v, want activation goal/dod payload preserved", body)
 		}
@@ -598,7 +599,7 @@ func TestRemoteRunCommandRestartSendsWorkspaceRestartCommandMetadata(t *testing.
 		Activation: ActivateRunRequest{
 			GoalID:        "goal-remote-restart",
 			DoDID:         "dod-remote-restart",
-			LLMProviderID: "provider-remote-restart",
+			LLMTarget:     &runtimecontract.ProviderModelTarget{ProviderID: "provider-remote-restart", ModelID: "gpt-4o"},
 			SoulID:        "soul-remote-restart",
 			SoulBindings:  map[string]common.SoulID{"validation": "soul-remote-restart-validation"},
 			SkillIDs:      []common.SkillID{"skill-remote-restart"},
@@ -627,7 +628,7 @@ func TestRemoteRunCommandRestartSendsWorkspaceRestartCommandMetadata(t *testing.
 		}
 		if body["goalId"] != "goal-remote-restart" ||
 			body["doDId"] != "dod-remote-restart" ||
-			body["llmProviderId"] != "provider-remote-restart" ||
+			!llmTargetMatches(body["llmTarget"], "provider-remote-restart", "gpt-4o") ||
 			body["soulId"] != "soul-remote-restart" {
 			t.Fatalf("request body = %+v, want restart activation payload preserved", body)
 		}
@@ -791,6 +792,16 @@ func TestRemoteRunStatusUsesWorkspaceScopedPathWhenContextCarriesWorkspace(t *te
 	if status.WorkspaceID != "ws-remote" || status.ID != "run-001" {
 		t.Fatalf("status = %+v, want scoped workspace/run", status)
 	}
+}
+
+func llmTargetMatches(raw any, providerID string, modelID string) bool {
+	target, ok := raw.(map[string]any)
+	if !ok {
+		return false
+	}
+	gotProvider, _ := target["providerId"].(string)
+	gotModel, _ := target["modelId"].(string)
+	return gotProvider == providerID && gotModel == modelID
 }
 
 // TC10: typed projection SSE publishes connecting → live only after HTTP 2xx,

@@ -24,7 +24,7 @@ func TestLLMModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Configure(Dependencies{EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if module.providerConfigLoader == nil || module.rawEventHub == nil {
+	if module.catalogService == nil || module.rawEventHub == nil {
 		t.Fatalf("module not fully configured: %+v", module)
 	}
 	if err := module.Start(); err != nil {
