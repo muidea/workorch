@@ -1,0 +1,218 @@
+{
+  "service": "workorch",
+  "backend": "file",
+  "dataRoot": "/home/rangh/aispace/workorch/docs/60-verification/artifacts/tui-runtime-refresh-live-20260715T132455Z/data",
+  "projection": {
+    "state": "ready",
+    "streamGeneration": "6e5e6203c98bee1620407e63fb169deb",
+    "globalRevision": 1784121903426890077,
+    "workspaceRevision": 1784121903426890076,
+    "sourceEventRevision": 0,
+    "projectedSourceRevision": 0,
+    "workspaceTotal": 3,
+    "updatedAt": "2026-07-15T13:25:03.649676043Z",
+    "rebuiltAt": "2026-07-15T13:25:03.649676043Z"
+  },
+  "runtimeView": {
+    "workspaceId": "ws-0af29aa3ef2ca8b0",
+    "activeRunId": "run-live-b-493077",
+    "displayRunId": "run-live-b-493077",
+    "projection": {
+      "workspaceId": "ws-0af29aa3ef2ca8b0",
+      "state": "ready",
+      "promptMode": "running",
+      "revision": 1784121903426890076,
+      "globalRevision": 1784121903426890077,
+      "workspaceRevision": 1784121903426890076,
+      "updatedAt": "2026-07-15T13:25:03.649676043Z",
+      "rebuiltAt": "2026-07-15T13:25:03.649676043Z",
+      "sections": {
+        "activeWorkspace": {
+          "name": "activeWorkspace",
+          "revision": 1784121903426890076,
+          "workspaceRevision": 1784121903426890076,
+          "state": "ready"
+        },
+        "commands": {
+          "name": "commands",
+          "revision": 1784121903426890076,
+          "workspaceRevision": 1784121903426890076,
+          "state": "ready"
+        },
+        "coverage": {
+          "name": "coverage",
+          "revision": 1784121903426890076,
+          "workspaceRevision": 1784121903426890076,
+          "state": "ready"
+        },
+        "currentFocus": {
+          "name": "currentFocus",
+          "revision": 1784121903426890076,
+          "workspaceRevision": 1784121903426890076,
+          "state": "ready"
+        },
+        "latestDiagnostic": {
+          "name": "latestDiagnostic",
+          "revision": 1784121903426890076,
+          "workspaceRevision": 1784121903426890076,
+          "state": "ready"
+        },
+        "list": {
+          "name": "list",
+          "revision": 1784121903426890076,
+          "workspaceRevision": 1784121903426890076,
+          "state": "ready"
+        },
+        "promptMode": {
+          "name": "promptMode",
+          "revision": 1784121903426890076,
+          "workspaceRevision": 1784121903426890076,
+          "state": "ready"
+        },
+        "runState": {
+          "name": "runState",
+          "revision": 1784121903426890076,
+          "workspaceRevision": 1784121903426890076,
+          "state": "ready"
+        }
+      }
+    },
+    "revision": {
+      "streamGeneration": "6e5e6203c98bee1620407e63fb169deb",
+      "workspaceRevision": 1784121903426890076,
+      "runtimeStateRevision": 3,
+      "evidenceSequence": 3,
+      "activityRevision": 1784121903426890076
+    },
+    "promptMode": "running",
+    "runState": "active",
+    "taskProgress": {
+      "workspaceId": "ws-0af29aa3ef2ca8b0",
+      "runId": "run-live-b-493077",
+      "state": "active",
+      "summary": "revision 3 | evidence 3 | focus focus-live-b | action produce_validation | dispatch 1 | attempts 1 | accepted 1 rejected 0",
+      "currentStepId": "dispatch-3",
+      "currentStepKind": "runtime_v2/produce_validation",
+      "currentStepState": "running",
+      "currentActionLabel": "produce_validation",
+      "diagnosticLineage": "dispatch-3",
+      "currentMilestone": "execution_steps",
+      "milestones": [
+        {
+          "id": "run_created",
+          "title": "Run created",
+          "state": "completed",
+          "evidenceRefs": [
+            "run-live-b-493077"
+          ]
+        },
+        {
+          "id": "execution_steps",
+          "title": "Execution steps",
+          "state": "running",
+          "evidenceRefs": [
+            "runtime-v2/accepted-evidence"
+          ]
+        },
+        {
+          "id": "governance",
+          "title": "Decision and approval governance",
+          "state": "pending"
+        },
+        {
+          "id": "validation",
+          "title": "Validation",
+          "state": "completed",
+          "evidenceRefs": [
+            "runtime-v2/validation-evidence"
+          ]
+        },
+        {
+          "id": "formal_result",
+          "title": "Result / Artifact",
+          "state": "pending"
+        }
+      ],
+      "recovery": {
+        "mode": "resume",
+        "nextAction": "resume_run",
+        "runId": "run-live-b-493077",
+        "reason": "run is not terminal"
+      },
+      "repairLoop": {
+        "state": "inactive",
+        "attemptCount": 0,
+        "nextAction": "resume_run",
+        "escalated": false
+      },
+      "assessmentOutcome": {},
+      "evidenceRefs": [
+        "run-live-b-493077"
+      ],
+      "runtimeV2": {
+        "stateRevision": 3,
+        "evidenceSequence": 3,
+        "completedDispatchCount": 1,
+        "candidateAttemptCount": 1,
+        "acceptedEvidenceCount": 1,
+        "rejectedEvidenceCount": 0,
+        "currentFocusId": "focus-live-b",
+        "currentAction": "produce_validation"
+      }
+    },
+    "runHeartbeat": {
+      "workspaceId": "ws-0af29aa3ef2ca8b0",
+      "runId": "run-live-b-493077",
+      "state": "active",
+      "activityState": "running",
+      "latestStepId": "dispatch-3",
+      "latestStepKind": "runtime_v2/produce_validation",
+      "latestStepState": "running",
+      "latestEvidenceRef": "run-live-b-493077",
+      "latestEventTopic": "/workspace/state/changed",
+      "latestEventRevision": 2,
+      "latestEventAt": "2026-07-15T13:25:02.301301022Z",
+      "latestEffectiveProgressAt": "2026-07-15T13:25:02.301301022Z",
+      "summary": "latest step dispatch-3"
+    },
+    "convergenceStatus": {
+      "workspaceId": "ws-0af29aa3ef2ca8b0",
+      "runId": "run-live-b-493077",
+      "runState": "active",
+      "latestEffectiveProgressAt": "2026-07-15T13:25:02.301301022Z"
+    },
+    "acceptance": {
+      "summary": {
+        "acceptedSlices": 0,
+        "activeSlices": 0,
+        "openSlices": 0,
+        "failedSlices": 0
+      }
+    },
+    "outcome": {
+      "workspaceId": "ws-0af29aa3ef2ca8b0",
+      "state": "active",
+      "rawWorkspaceState": "active",
+      "runId": "run-live-b-493077",
+      "accepted": false,
+      "terminal": false
+    },
+    "activity": {
+      "streamGeneration": "6e5e6203c98bee1620407e63fb169deb",
+      "workspaceId": "ws-0af29aa3ef2ca8b0",
+      "displayRunId": "run-live-b-493077",
+      "activityRevision": 1784121903426890076,
+      "items": [
+        {
+          "id": "outcome:run-live-b-493077:active",
+          "workspaceId": "ws-0af29aa3ef2ca8b0",
+          "runId": "run-live-b-493077",
+          "kind": "result",
+          "state": "active",
+          "title": "outcome",
+          "summary": "active"
+        }
+      ]
+    }
+  }
+}

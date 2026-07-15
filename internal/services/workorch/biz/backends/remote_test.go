@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -789,5 +790,211 @@ func TestRemoteRunStatusUsesWorkspaceScopedPathWhenContextCarriesWorkspace(t *te
 	}
 	if status.WorkspaceID != "ws-remote" || status.ID != "run-001" {
 		t.Fatalf("status = %+v, want scoped workspace/run", status)
+	}
+}
+
+// TC10: typed projection SSE publishes connecting → live only after HTTP 2xx,
+// then reconnecting on disconnect, and restores live with Last-Event-ID.
+func TestRemoteProjectionEventsHealthAndReconnectWithLastEventID(t *testing.T) {
+	var requests atomic.Int32
+	seenLastEventID := make(chan string, 4)
+	firstDTO := map[string]any{
+		"id":             "proj-evt-1",
+		"streamRevision": int64(11),
+		"workspaceId":    "ws-proj-reconnect",
+		"runId":          "run-1",
+		"revision": map[string]any{
+			"streamRevision":       int64(11),
+			"workspaceRevision":    int64(5),
+			"runtimeStateRevision": uint64(42),
+			"evidenceSequence":     uint64(7),
+			"activityRevision":     int64(9),
+		},
+		"changedSections": []string{"runtime_progress", "activity"},
+		"projectionState": "ready",
+		"updatedAt":       "2026-07-15T14:30:00Z",
+	}
+	secondDTO := map[string]any{
+		"id":             "proj-evt-2",
+		"streamRevision": int64(12),
+		"workspaceId":    "ws-proj-reconnect",
+		"runId":          "run-1",
+		"revision": map[string]any{
+			"streamRevision":       int64(12),
+			"workspaceRevision":    int64(6),
+			"runtimeStateRevision": uint64(43),
+			"evidenceSequence":     uint64(8),
+			"activityRevision":     int64(10),
+		},
+		"changedSections": []string{"activity"},
+		"projectionState": "ready",
+		"updatedAt":       "2026-07-15T14:31:00Z",
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/workorch/events/stream" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Query().Get("view") != "projection" {
+			http.Error(w, "want projection view", http.StatusBadRequest)
+			return
+		}
+		lastID := r.Header.Get("Last-Event-ID")
+		if lastID == "" {
+			lastID = r.URL.Query().Get("lastEventId")
+		}
+		seenLastEventID <- lastID
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		dto := firstDTO
+		reqN := requests.Add(1)
+		if reqN > 1 {
+			dto = secondDTO
+		}
+		data, err := json.Marshal(dto)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_, _ = fmt.Fprint(w, ": connected\n\n")
+		_, _ = fmt.Fprintf(w, "id: %s\n", dto["id"])
+		_, _ = fmt.Fprintf(w, "event: workorch\n")
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+		// First connection ends immediately to force reconnect.
+	}))
+	defer server.Close()
+
+	statuses := make(chan SubscriptionStatusInfo, 16)
+	changed := make(chan WorkspaceProjectionChangedInfo, 8)
+	be := NewRemoteProjectionEvents(server.URL)
+	unsub, err := be.ProjectionEvents().SubscribeWorkspaceProjection(
+		context.Background(),
+		func(_ context.Context, info WorkspaceProjectionChangedInfo) {
+			changed <- info
+		},
+		func(_ context.Context, status SubscriptionStatusInfo) {
+			statuses <- status
+		},
+	)
+	if err != nil {
+		t.Fatalf("subscribe projection events: %v", err)
+	}
+	defer unsub()
+
+	// Subscribe returns before live; first status must not skip connecting.
+	sawConnecting := false
+	sawLive := false
+	sawReconnecting := false
+	sawSecondLive := false
+	var firstInfo, secondInfo WorkspaceProjectionChangedInfo
+	deadline := time.After(5 * time.Second)
+	for !(sawSecondLive && secondInfo.ID == "proj-evt-2") {
+		select {
+		case status := <-statuses:
+			switch status.State {
+			case SubscriptionConnecting:
+				sawConnecting = true
+			case SubscriptionLive:
+				if !sawLive {
+					sawLive = true
+				} else if sawReconnecting {
+					sawSecondLive = true
+				}
+			case SubscriptionReconnecting:
+				sawReconnecting = true
+			}
+		case info := <-changed:
+			if info.ID == "proj-evt-1" {
+				firstInfo = info
+			}
+			if info.ID == "proj-evt-2" {
+				secondInfo = info
+			}
+		case <-deadline:
+			t.Fatalf("timed out: connecting=%v live=%v reconnecting=%v secondLive=%v first=%+v second=%+v requests=%d",
+				sawConnecting, sawLive, sawReconnecting, sawSecondLive, firstInfo, secondInfo, requests.Load())
+		}
+	}
+	if !sawConnecting {
+		t.Fatal("expected connecting status before live")
+	}
+	if !sawLive {
+		t.Fatal("expected live after SSE connected")
+	}
+	if !sawReconnecting {
+		t.Fatal("expected reconnecting after first stream ends")
+	}
+	if firstInfo.Revision.RuntimeStateRevision != 42 || firstInfo.Revision.ActivityRevision != 9 {
+		t.Fatalf("first typed notification = %+v, want runtime/activity revisions", firstInfo)
+	}
+	if len(firstInfo.ChangedSections) != 2 {
+		t.Fatalf("first ChangedSections = %v, want runtime_progress+activity", firstInfo.ChangedSections)
+	}
+	if secondInfo.Revision.RuntimeStateRevision != 43 || secondInfo.Revision.ActivityRevision != 10 {
+		t.Fatalf("second typed notification = %+v, want advanced revisions", secondInfo)
+	}
+	if requests.Load() < 2 {
+		t.Fatalf("requests = %d, want reconnect", requests.Load())
+	}
+	firstLastID := <-seenLastEventID
+	secondLastID := <-seenLastEventID
+	if firstLastID != "" {
+		t.Fatalf("first stream Last-Event-ID = %q, want empty", firstLastID)
+	}
+	if secondLastID != "proj-evt-1" {
+		t.Fatalf("reconnect Last-Event-ID = %q, want proj-evt-1", secondLastID)
+	}
+}
+
+// TC10: degraded status on connection failure; Subscribe itself does not report live.
+func TestRemoteProjectionEventsDegradedOnConnectFailure(t *testing.T) {
+	// Closed listener forces dial error.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	addr := server.URL
+	server.Close()
+
+	statuses := make(chan SubscriptionStatusInfo, 8)
+	be := NewRemoteProjectionEvents(addr)
+	unsub, err := be.ProjectionEvents().SubscribeWorkspaceProjection(
+		context.Background(),
+		func(context.Context, WorkspaceProjectionChangedInfo) {},
+		func(_ context.Context, status SubscriptionStatusInfo) {
+			statuses <- status
+		},
+	)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer unsub()
+
+	deadline := time.After(2 * time.Second)
+	sawConnecting := false
+	for {
+		select {
+		case status := <-statuses:
+			if status.State == SubscriptionConnecting {
+				sawConnecting = true
+				continue
+			}
+			if status.State == SubscriptionLive {
+				t.Fatal("must not report live when SSE cannot connect")
+			}
+			if status.State == SubscriptionDegraded || status.State == SubscriptionReconnecting {
+				if !sawConnecting {
+					t.Fatal("expected connecting before degraded/reconnecting")
+				}
+				if strings.TrimSpace(status.LastError) == "" {
+					t.Fatalf("status = %+v, want LastError", status)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for degraded/reconnecting status")
+		}
 	}
 }

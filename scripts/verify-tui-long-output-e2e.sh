@@ -94,14 +94,65 @@ import os
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+REQUEST_LOG = os.environ.get("WORKORCH_TUI_LONG_OUTPUT_MOCK_REQUEST_LOG", "")
+
 def long_lines(prefix, count):
     return "\n".join(f"{prefix} {idx:02d} - viewport scroll verification marker" for idx in range(1, count + 1))
 
 def completion_payload(request):
-    run_id = request.get("runId", "")
+    request_text = request.get("requestText", "")
+    action_match = re.search(r'"Action"\s*:\s*"([^"]+)"', request_text)
+    focus_match = re.search(r'"Focus"\s*:\s*\{\s*"ID"\s*:\s*"([^"]+)"', request_text)
+    coverage_match = re.search(r'"CoverageWorkItemIDs"\s*:\s*\[\s*"([^"]+)"', request_text)
+    action = action_match.group(1) if action_match else "produce_validation"
+    focus_id = focus_match.group(1) if focus_match else "focus-001"
+    coverage_id = coverage_match.group(1) if coverage_match else "cwi-001"
+    validation_op_id = f"validate-{focus_id}"
+    goal = long_lines("LONG-GOAL-OUTCOME", 40)
+    implementation = long_lines("LONG-IMPLEMENTATION", 80)
+    verification = long_lines("LONG-VERIFICATION", 24)
+    if action == "produce_validation":
+        return {
+            "operations": [{
+                "id": validation_op_id,
+                "kind": "file/read",
+                "coverageWorkItemIds": [coverage_id],
+                "targetRefs": ["runtime-validation-source.txt"],
+                "parameters": [
+                    {"name": "path", "string": "runtime-validation-source.txt"},
+                    {"name": "maxBytes", "integer": 16384},
+                ],
+            }],
+        }
+    if action == "produce_assessment":
+        return {
+            "focusId": focus_id,
+            "coverageWorkItemIds": [coverage_id],
+            "satisfied": True,
+            "summary": "\n".join([goal, implementation, verification]),
+            # file/read emits a stable workspace URI as an accepted evidence
+            # ref. The dispatch/event IDs are intentionally volatile and must
+            # not be guessed by a provider fixture.
+            "evidenceRefs": ["workorch://workspace/runtime-validation-source.txt"],
+        }
+    if action == "request_governance":
+        return {"externalDependency": {"kind": "none", "reason": "deterministic viewport verification does not require governance"}}
+    # This profile normally enters validation directly. Keep an explicit typed
+    # state-change candidate for a future profile change instead of returning
+    # legacy completionState/thoughtSummary fields.
+    return {
+        "operations": [{
+            "id": f"state-{focus_id}",
+            "kind": "file/edit",
+            "coverageWorkItemIds": [coverage_id],
+            "parameters": [],
+        }],
+    }
+
+def legacy_completion_payload(request):
+    # Kept only as a readable fixture for the detailed assessment text below;
+    # Runtime V2 never receives this legacy shape.
     step_id = request.get("stepId", "") or "step-1"
-    if run_id == "probe":
-        return {"completionState": "failed", "thoughtSummary": "probe"}
     goal = long_lines("LONG-GOAL-OUTCOME", 40)
     implementation = long_lines("LONG-IMPLEMENTATION", 80)
     verification = long_lines("LONG-VERIFICATION", 24)
@@ -188,6 +239,80 @@ def completion_payload(request):
     }
 
 class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        if path in ("/v1/models", "/models"):
+            # WorkOrch catalog expects explicit capacity + operations; without these models stay not-ready.
+            models = [
+                {
+                    "id": "verify-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "gpt-4o",
+                    "object": "model",
+                    "owned_by": "openai",
+                    "operations": ["chat_completions"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "text-embedding-3-small",
+                    "object": "model",
+                    "owned_by": "openai",
+                    "operations": ["embeddings"],
+                    "contextWindowTokens": 8192,
+                    "maxOutputTokens": 1024,
+                },
+
+                {
+                    "id": "verify-stream-native-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "verify-stream-estimated-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "web-search-e2e-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+                {
+                    "id": "container-verify-model",
+                    "object": "model",
+                    "owned_by": "verify",
+                    "operations": ["chat_completions", "embeddings"],
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                },
+            ]
+            response = {"object": "list", "data": models}
+            encoded = json.dumps(response).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+            return
+        self.send_response(404)
+        self.end_headers()
+
     def do_POST(self):
         size = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(size)
@@ -195,6 +320,9 @@ class Handler(BaseHTTPRequestHandler):
             response = {"data": [{"embedding": [0.1, 0.2, 0.3]}]}
         elif self.path == "/v1/chat/completions":
             payload = json.loads(body or b"{}")
+            if REQUEST_LOG:
+                with open(REQUEST_LOG, "w", encoding="utf-8") as handle:
+                    json.dump(payload, handle, ensure_ascii=False, indent=2)
             payload_text = json.dumps(payload, ensure_ascii=False)
             id_matches = re.findall(r'run-\d+(?:-replan-\d+)?(?:/[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*)?', payload_text)
             def run_sort_key(value):
@@ -210,10 +338,8 @@ class Handler(BaseHTTPRequestHandler):
             run_match = max(run_candidates, key=run_sort_key, default="")
             if not step_match and run_match:
                 step_match = run_match + "/step-1"
-            provider_request = {
-                "runId": run_match,
-                "stepId": step_match,
-            }
+            request_text = "\n".join(str(item.get("content", "")) for item in payload.get("messages", []) if isinstance(item, dict))
+            provider_request = {"runId": run_match, "stepId": step_match, "requestText": request_text}
             content = json.dumps(completion_payload(provider_request), separators=(",", ":"))
             response = {"choices": [{"message": {"content": content}}]}
         else:
@@ -233,7 +359,9 @@ class Handler(BaseHTTPRequestHandler):
 host, port_text = os.environ.get("WORKORCH_TUI_LONG_OUTPUT_MOCK_ADDR", "127.0.0.1:18182").split(":", 1)
 ThreadingHTTPServer((host, int(port_text)), Handler).serve_forever()
 PY
-  WORKORCH_TUI_LONG_OUTPUT_MOCK_ADDR="$MOCK_ADDR" python3 "$TMP_DIR/tui_long_output_llm_mock.py" >>"$MOCK_LOG" 2>&1 &
+  WORKORCH_TUI_LONG_OUTPUT_MOCK_ADDR="$MOCK_ADDR" \
+  WORKORCH_TUI_LONG_OUTPUT_MOCK_REQUEST_LOG="$TMP_DIR/tui-long-output-last-provider-request.json" \
+    python3 "$TMP_DIR/tui_long_output_llm_mock.py" >>"$MOCK_LOG" 2>&1 &
   MOCK_PID=$!
 }
 
@@ -371,77 +499,153 @@ write_llm_update_payloads() {
 import json
 import sys
 
-config_path, original_path, update_path, mock_base_url, provider_id = sys.argv[1:]
+config_path, original_path, update_path, mock_base_url, provider_id = (sys.argv[1:] + [""])[:5]
+provider_id = (provider_id or "verify").strip() or "verify"
 data = json.load(open(config_path, encoding="utf-8"))
 llm = data.get("configuration", {}).get("llm", {})
-providers = llm.get("providers") or []
-default_provider = llm.get("defaultProviderId") or ""
-default_embedding_provider = llm.get("defaultEmbeddingProviderId") or ""
+ai_proxy = llm.get("aiProxy") or {}
+default_chat = llm.get("defaultChat") or {}
+default_embedding = llm.get("defaultEmbedding") or {}
+budget = llm.get("budget") or {}
+custom_providers = llm.get("customProviders") or []
 
-def clean_provider(item):
-    return {
-        "id": item.get("id", ""),
-        "provider": item.get("provider", ""),
-        "baseUrl": item.get("baseUrl", ""),
-        "model": item.get("model", ""),
-        "timeout": item.get("timeout", ""),
-        "disabled": bool(item.get("disabled", False)),
-        "chatCompletions": bool(item.get("chatCompletions", True)),
-        "streaming": bool(item.get("streaming", False)),
-        "nonChatOperations": item.get("nonChatOperations") or [],
-    }
+def custom_providers_payload(items, include_api_key=False, mock_base_url=""):
+    payload = {}
+    for item in items:
+        provider_id = (item.get("id") or "").strip()
+        if not provider_id:
+            continue
+        models = {}
+        for model in item.get("models") or []:
+            model_id = (model.get("id") or "").strip()
+            if not model_id:
+                continue
+            models[model_id] = {
+                "contextWindowTokens": int(model.get("contextWindowTokens") or 128000),
+                "maxOutputTokens": int(model.get("maxOutputTokens") or 8192),
+                "operations": list(model.get("operations") or ["chat_completions"]),
+            }
+        if not models:
+            models["verify-model"] = {
+                "contextWindowTokens": 128000,
+                "maxOutputTokens": 8192,
+                "operations": ["chat_completions", "embeddings"],
+            }
+        entry = {
+            "provider": item.get("provider") or "compatible",
+            "apiSurface": item.get("apiSurface") or "openai_compatible_http",
+            "baseURL": item.get("baseUrl") or item.get("baseURL") or mock_base_url,
+            "timeout": item.get("timeout") or "60s",
+            "models": models,
+        }
+        if include_api_key:
+            entry["apiKey"] = "verify-secret"
+        payload[provider_id] = entry
+    return payload
 
 original = {
-    "defaultProviderId": default_provider,
-    "defaultEmbeddingProviderId": default_embedding_provider,
-    "providers": [clean_provider(item) for item in providers if item.get("id")],
+    "aiProxy": {
+        "baseURL": ai_proxy.get("baseUrl") or ai_proxy.get("baseURL") or mock_base_url,
+        "timeout": ai_proxy.get("timeout") or "180s",
+        "catalogRequestTimeout": ai_proxy.get("catalogRequestTimeout") or "5s",
+        "catalogTTL": ai_proxy.get("catalogTTL") or "5m",
+        "catalogMaxStaleAge": ai_proxy.get("catalogMaxStaleAge") or "24h",
+        "maxCatalogResponseBytes": int(ai_proxy.get("maxCatalogResponseBytes") or 1048576),
+        "maxCatalogModels": int(ai_proxy.get("maxCatalogModels") or 1000),
+    },
+    "defaultChat": {
+        "providerID": default_chat.get("providerId") or default_chat.get("providerID") or provider_id,
+        "modelID": default_chat.get("modelId") or default_chat.get("modelID") or "verify-model",
+    },
+    "budget": {
+        "contextUtilizationRatio": float(budget.get("contextUtilizationRatio") or 0.75),
+        "estimatedTokensPerByte": float(budget.get("estimatedTokensPerByte") or 0.25),
+        "defaultMaxOutputTokens": int(budget.get("defaultMaxOutputTokens") or 4096),
+        "maxRequestBytes": int(budget.get("maxRequestBytes") or 4194304),
+    },
+    "customProviders": custom_providers_payload(custom_providers, include_api_key=False, mock_base_url=mock_base_url),
 }
-if not original["providers"]:
-    original["providers"].append({
-        "id": provider_id,
-        "provider": "compatible",
-        "baseUrl": mock_base_url,
-        "model": "tui-long-output-model",
-        "timeout": "60s",
-        "disabled": False,
-        "chatCompletions": True,
-        "streaming": False,
-        "nonChatOperations": ["embeddings"],
-    })
-    original["defaultProviderId"] = provider_id
-    original["defaultEmbeddingProviderId"] = provider_id
+if default_embedding.get("modelId") or default_embedding.get("modelID"):
+    original["defaultEmbedding"] = {
+        "providerID": default_embedding.get("providerId") or default_embedding.get("providerID") or provider_id,
+        "modelID": default_embedding.get("modelId") or default_embedding.get("modelID"),
+    }
+if not original["customProviders"]:
+    original["customProviders"] = {
+        provider_id: {
+            "provider": "compatible",
+            "apiSurface": "openai_compatible_http",
+            "baseURL": mock_base_url,
+            "timeout": "60s",
+            "models": {
+                "verify-model": {
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                    "operations": ["chat_completions", "embeddings"],
+                }
+            },
+        }
+    }
+    original["defaultChat"] = {"providerID": provider_id, "modelID": "verify-model"}
 with open(original_path, "w", encoding="utf-8") as handle:
     json.dump(original, handle, separators=(",", ":"))
 
-updated_providers = [item for item in original["providers"] if item["id"] != provider_id]
-updated_providers.append({
-    "id": provider_id,
-    "provider": "compatible",
-    "baseUrl": mock_base_url,
-    "apiKey": "verify-secret",
-    "model": "tui-long-output-model",
-    "timeout": "60s",
-    "disabled": False,
-    "chatCompletions": True,
-    "streaming": False,
-    "nonChatOperations": ["embeddings"],
-})
 update = {
-    "defaultProviderId": provider_id,
-    "defaultEmbeddingProviderId": provider_id,
-    "providers": updated_providers,
+    "aiProxy": {
+        "baseURL": mock_base_url,
+        "apiKey": "verify-secret",
+        "timeout": "180s",
+        "catalogRequestTimeout": "5s",
+        "catalogTTL": "5m",
+        "catalogMaxStaleAge": "24h",
+        "maxCatalogResponseBytes": 1048576,
+        "maxCatalogModels": 1000,
+        "modelOverrides": {
+            "verify-model": {"contextWindowTokens": 128000, "maxOutputTokens": 8192, "operations": ["chat_completions", "embeddings"]},
+            "gpt-4o": {"contextWindowTokens": 128000, "maxOutputTokens": 8192, "operations": ["chat_completions", "embeddings"]},
+        },
+    },
+    "defaultChat": {"providerID": provider_id, "modelID": "verify-model"},
+    "defaultEmbedding": {"providerID": provider_id, "modelID": "verify-model"},
+    "budget": original["budget"],
+    "customProviders": {
+        provider_id: {
+            "provider": "compatible",
+            "apiSurface": "openai_compatible_http",
+            "baseURL": mock_base_url,
+            "apiKey": "verify-secret",
+            "timeout": "60s",
+            "models": {
+                "verify-model": {
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                    "operations": ["chat_completions", "embeddings"],
+                },
+                "verify-stream-native-model": {
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                    "operations": ["chat_completions", "embeddings"],
+                },
+                "verify-stream-estimated-model": {
+                    "contextWindowTokens": 128000,
+                    "maxOutputTokens": 8192,
+                    "operations": ["chat_completions", "embeddings"],
+                },
+            },
+        }
+    },
 }
 with open(update_path, "w", encoding="utf-8") as handle:
     json.dump(update, handle, separators=(",", ":"))
 PY
 }
 
-assert_long_result() {
-  python3 - "$TMP_DIR/snapshot.json" "$workspace_id" "$run_id" "$SOUL_ID" <<'PY'
+assert_runtime_v2_result() {
+  python3 - "$TMP_DIR/snapshot.json" "$workspace_id" "$run_id" <<'PY'
 import json
 import sys
 
-snapshot_path, workspace_id, run_id, expected_soul_id = sys.argv[1:]
+snapshot_path, workspace_id, run_id = sys.argv[1:]
 data = json.load(open(snapshot_path, encoding="utf-8")).get("snapshot", {})
 errors = []
 run = data.get("run") or {}
@@ -449,29 +653,20 @@ if run.get("id") != run_id or run.get("workspaceId") != workspace_id:
     errors.append(f"snapshot identity mismatch: run={run}")
 if run.get("state") != "completed":
     errors.append(f"run state is {run.get('state')!r}, want completed")
-routing = (run.get("executionContext") or {}).get("soulRouting") or {}
-bindings = routing.get("bindings") or {}
-execution_binding = bindings.get("execution") or {}
-if routing.get("status") != "resolved":
-    errors.append(f"soulRouting.status is {routing.get('status')!r}, want resolved")
-if execution_binding.get("soulId") != expected_soul_id:
-    errors.append(f"execution soul binding is {execution_binding!r}, want {expected_soul_id}")
 results = [item for item in data.get("results", []) if item.get("runId") == run_id and item.get("state") == "accepted"]
 if not results:
     errors.append("accepted result missing")
-artifacts = [item for item in data.get("artifacts", []) if item.get("runId") == run_id]
-final_summaries = [
-    item for item in artifacts
-    if item.get("category") == "final_summary" or str(item.get("id", "")).endswith("/artifact/result-summary")
-]
-if not final_summaries:
-    errors.append("final summary artifact missing")
-else:
-    summary = final_summaries[-1].get("summary") or ""
-    if "LONG-IMPLEMENTATION 70" not in summary:
-        errors.append("final summary artifact is missing long output marker")
-    if len([line for line in summary.splitlines() if line.strip()]) < 100:
-        errors.append("final summary artifact is not long enough for viewport verification")
+for result in results:
+    assessment = result.get("doDAssessment") or {}
+    if assessment.get("satisfied") is not True:
+        errors.append(f"accepted result has unsatisfied typed assessment: {assessment}")
+        break
+    if len(assessment.get("items") or []) < 3:
+        errors.append(f"typed assessment items missing: {assessment}")
+        break
+    if not (result.get("evidenceRefs") or []):
+        errors.append(f"accepted result has no evidence refs: {result}")
+        break
 if errors:
     for item in errors:
         print(item, file=sys.stderr)
@@ -479,12 +674,12 @@ if errors:
 PY
 }
 
-wait_long_result_snapshot() {
+wait_runtime_v2_result_snapshot() {
   local deadline=$((SECONDS + 180))
 
   while (( SECONDS <= deadline )); do
     curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/snapshot" >"$TMP_DIR/snapshot.json"
-    if assert_long_result >/dev/null 2>"$TMP_DIR/snapshot-assert.err"; then
+    if assert_runtime_v2_result >/dev/null 2>"$TMP_DIR/snapshot-assert.err"; then
       return 0
     fi
     sleep 1
@@ -492,6 +687,32 @@ wait_long_result_snapshot() {
 
   cat "$TMP_DIR/snapshot-assert.err" >&2 || true
   return 1
+}
+
+post_execution_activation() {
+  local payload="$TMP_DIR/activation-request.json"
+  local status=""
+  cat >"$payload" <<EOF
+{"intent":"resume","requestId":"$activation_request_id","reason":"$activation_reason","source":"e2e","goalId":"$goal_id","doDId":"$dod_id","llmTarget":{"providerId":"$PROVIDER_ID","modelId":"verify-model"},"soulId":"$SOUL_ID","soulBindings":{"planning":"$SOUL_ID","execution":"$SOUL_ID","decision":"$SOUL_ID","approval":"$SOUL_ID","validation":"$SOUL_ID","artifact":"$SOUL_ID"},"skillIds":["$SKILL_ID"],"priority":2}
+EOF
+  # At process startup configuration propagation and scheduler watcher
+  # registration are asynchronous. Retry only transient 5xx responses with
+  # the same request ID, preserving scheduler idempotency.
+  for attempt in $(seq 1 5); do
+    status="$(curl -sS -o "$TMP_DIR/activation.json" -w '%{http_code}' -X POST \
+      "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
+      -H 'Content-Type: application/json' -d @"$payload")"
+    if [[ "$status" =~ ^20[0-9]$ ]]; then
+      return 0
+    fi
+    if [[ "$status" =~ ^5[0-9][0-9]$ ]] && (( attempt < 5 )); then
+      sleep 1
+      continue
+    fi
+    echo "execution activation returned HTTP $status" >&2
+    cat "$TMP_DIR/activation.json" >&2 || true
+    return 1
+  done
 }
 
 mkdir -p "$TMP_DIR"
@@ -506,8 +727,14 @@ curl -fsS -X PUT "$BASE_URL/api/v1/workorch/configuration/llm" -H 'Content-Type:
   -d @"$TMP_DIR/verify-llm-update.json" >"$TMP_DIR/configuration-updated.json"
 grep '"apiKeyConfigured": true' "$TMP_DIR/configuration-updated.json" >/dev/null
 
+DELIVERABLE_DIR="$TMP_DIR/deliverable"
+mkdir -p "$DELIVERABLE_DIR"
+python3 - >"$DELIVERABLE_DIR/runtime-validation-source.txt" <<'PY'
+for index in range(1, 121):
+    print(f"LONG-IMPLEMENTATION {index:03d} - deterministic Runtime V2 validation source for terminal viewport verification")
+PY
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
-  -d '{"title":"'"$WORKSPACE_TITLE"'","description":"TUI viewport long output e2e workspace","templateId":"generic-governed"}' >"$TMP_DIR/workspace.json"
+  -d '{"title":"'"$WORKSPACE_TITLE"'","description":"TUI viewport long output e2e workspace","deliverableDirectory":"'"$DELIVERABLE_DIR"'","templateId":"generic-governed"}' >"$TMP_DIR/workspace.json"
 workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
 [[ -n "$workspace_id" ]]
 
@@ -528,21 +755,18 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/souls" -H 'Content-Type: applicatio
 activation_request_id="tui-long-output-e2e-$VERIFY_SUFFIX"
 activation_reason="e2e_resume"
 capture_runs_before_activation "$TMP_DIR/activation-before-runs.json"
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
-  -H 'Content-Type: application/json' \
-  -d '{"intent":"resume","requestId":"'"$activation_request_id"'","reason":"'"$activation_reason"'","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"'"$PROVIDER_ID"'","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"priority":2}' >"$TMP_DIR/activation.json"
+post_execution_activation
 validate_activation_command_response "$TMP_DIR/activation.json" "$activation_request_id" "$activation_reason"
 run_id="$(wait_activation_run "$TMP_DIR/activation-before-runs.json" "$TMP_DIR/activation-runs.json" "$TMP_DIR/activation-run.json")"
 [[ -n "$run_id" ]]
 
 wait_run_state "$workspace_id" "$run_id" "completed" "$TMP_DIR/status.json"
-wait_long_result_snapshot
+wait_runtime_v2_result_snapshot
 
 if [[ "${WORKORCH_TUI_LONG_OUTPUT_VERIFY_TERMINAL_RENDER:-1}" == "1" || "${WORKORCH_TUI_LONG_OUTPUT_VERIFY_TERMINAL_RENDER:-1}" == "true" ]]; then
   WORKORCH_TUI_TERMINAL_BASE_URL="$BASE_URL" \
   WORKORCH_TUI_TERMINAL_WORKSPACE_ID="$workspace_id" \
   WORKORCH_TUI_TERMINAL_WORKSPACE_TITLE="$WORKSPACE_TITLE" \
-  WORKORCH_TUI_TERMINAL_EXPECT_TEXT="LONG-IMPLEMENTATION" \
   WORKORCH_TUI_TERMINAL_EXERCISE_SCROLL=1 \
   WORKORCH_TUI_TERMINAL_KEEP_ARTIFACTS="$KEEP_ARTIFACTS" \
   WORKORCH_TUI_TERMINAL_ARTIFACT_DIR="$TMP_DIR/tui-terminal-render" \

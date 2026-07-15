@@ -19,6 +19,7 @@ type WorkspaceContextMsg struct {
 	Workspace         *backend.WorkspaceInfo
 	Projection        backend.ProjectionInfo
 	Snapshot          *backend.WorkspaceSnapshotInfo
+	RuntimeView       *backend.WorkspaceRuntimeViewInfo
 	Runs              []backend.RunInfo
 	ActiveRun         *backend.RunInfo
 	DisplayRun        *backend.RunInfo
@@ -28,6 +29,16 @@ type WorkspaceContextMsg struct {
 	Decisions         []backend.DecisionInfo
 	Approvals         []backend.ApprovalInfo
 	WorkspaceHasLive  bool
+	Error             error
+}
+
+// WorkspaceRuntimeViewMsg carries the lightweight runtime projection used for
+// active refresh and history recovery after switch/reconnect.
+type WorkspaceRuntimeViewMsg struct {
+	RequestSeq        int64
+	WorkspaceID       string
+	ResetMainViewport bool
+	View              *backend.WorkspaceRuntimeViewInfo
 	Error             error
 }
 
@@ -67,8 +78,12 @@ type ApprovalDetailMsg struct {
 
 type ErrorMsg struct{ Error error }
 
-type BackendEventMsg struct {
-	Event backend.Event
+type WorkspaceProjectionChangedMsg struct {
+	Info backend.WorkspaceProjectionChangedInfo
+}
+
+type SubscriptionStatusMsg struct {
+	Status backend.SubscriptionStatusInfo
 }
 
 type RunStartedMsg struct {

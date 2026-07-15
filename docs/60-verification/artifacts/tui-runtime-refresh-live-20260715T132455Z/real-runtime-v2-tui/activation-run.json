@@ -1,0 +1,13 @@
+{
+  "run": {
+    "id": "run-001",
+    "workspaceId": "ws-7d57c4753f148d96",
+    "goalId": "goal-4828734be868a15f",
+    "doDId": "dod-e2ac65b0d0bbd879",
+    "lineage": {},
+    "definitionRevision": "goal:goal-4828734be868a15f|dod:dod-e2ac65b0d0bbd879",
+    "initialStepKind": "llm/workspace_execution",
+    "state": "completed",
+    "priority": 2
+  }
+}

@@ -13,6 +13,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
@@ -123,9 +124,10 @@ func TestStoreReplaceAllListSnapshotAndDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list workspaces: %v", err)
 	}
-	if status.State != StateReady || status.GlobalRevision != 1 || status.WorkspaceTotal != 2 {
-		t.Fatalf("status = %+v, want ready revision 1 total 2", status)
+	if status.State != StateReady || status.GlobalRevision <= 0 || status.WorkspaceTotal != 2 {
+		t.Fatalf("status = %+v, want ready positive global revision total 2", status)
 	}
+	firstGlobal := status.GlobalRevision
 	if len(items) != 2 || items[0].ID != "ws-a" || items[0].Title != "A+" || items[1].ID != "ws-b" {
 		t.Fatalf("items = %+v, want sorted snapshot-backed workspaces", items)
 	}
@@ -184,8 +186,8 @@ func TestStoreReplaceAllListSnapshotAndDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list after delete: %v", err)
 	}
-	if status.GlobalRevision != 2 || status.WorkspaceTotal != 1 {
-		t.Fatalf("status after delete = %+v, want revision 2 total 1", status)
+	if status.GlobalRevision <= firstGlobal || status.WorkspaceTotal != 1 {
+		t.Fatalf("status after delete = %+v, want global revision > %d total 1", status, firstGlobal)
 	}
 	if len(items) != 1 || items[0].ID != "ws-b" {
 		t.Fatalf("items after delete = %+v, want only ws-b", items)
@@ -1644,4 +1646,331 @@ func (f *blockingProjectionLoader) ReadWorkspaceSnapshot(context.Context, string
 	return readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{ID: "ws-a", Title: fmt.Sprintf("snapshot-%d", call)},
 	}, nil
+}
+
+func TestStoreUpsertSnapshotPersistsActivityRevisionTransactionally(t *testing.T) {
+	store := NewStore()
+	snapshot := readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-activity-store", Title: "activity store", State: "active", ActiveRunID: "run-1"},
+		TaskProgress: readmodelcore.TaskProgress{
+			WorkspaceID: "ws-activity-store",
+			RunID:       "run-1",
+			State:       "running",
+			Summary:     "revision 1 | focus f1",
+			RuntimeV2: &readmodelcore.RuntimeV2Progress{
+				StateRevision:    1,
+				EvidenceSequence: 1,
+				CurrentFocusID:   "focus-1",
+				CurrentAction:    "produce",
+			},
+		},
+		ViewModel: readmodelcore.WorkspaceViewModel{WorkspaceID: "ws-activity-store", WorkspaceRevision: 1},
+	}
+	store.UpsertSnapshot(snapshot)
+	feed1, ok := store.GetActivity("ws-activity-store")
+	if !ok {
+		t.Fatal("expected store-owned activity after first upsert")
+	}
+	if feed1.ActivityRevision == 0 {
+		t.Fatalf("activity revision = 0, want transaction revision")
+	}
+	firstRevision := feed1.ActivityRevision
+	if len(feed1.Items) == 0 {
+		t.Fatal("expected activity items from runtime progress")
+	}
+
+	// Same content: ActivityRevision must stay.
+	store.UpsertSnapshot(snapshot)
+	feed2, ok := store.GetActivity("ws-activity-store")
+	if !ok {
+		t.Fatal("expected activity after second upsert")
+	}
+	if feed2.ActivityRevision != firstRevision {
+		t.Fatalf("unchanged activity revision = %d, want keep %d", feed2.ActivityRevision, firstRevision)
+	}
+
+	// Content change: ActivityRevision advances to new entry revision.
+	snapshot.TaskProgress.RuntimeV2.StateRevision = 2
+	snapshot.TaskProgress.RuntimeV2.CurrentFocusID = "focus-2"
+	snapshot.TaskProgress.Summary = "revision 2 | focus f2"
+	store.UpsertSnapshot(snapshot)
+	feed3, ok := store.GetActivity("ws-activity-store")
+	if !ok {
+		t.Fatal("expected activity after content change")
+	}
+	if feed3.ActivityRevision <= firstRevision {
+		t.Fatalf("changed activity revision = %d, want > %d", feed3.ActivityRevision, firstRevision)
+	}
+	// Read path must only page, not regenerate revision.
+	paged := readmodelprojection.PageWorkspaceActivityFeed(feed3, 1, "")
+	if paged.ActivityRevision != feed3.ActivityRevision {
+		t.Fatalf("paged revision = %d, want store revision %d", paged.ActivityRevision, feed3.ActivityRevision)
+	}
+	if len(paged.Items) != 1 {
+		t.Fatalf("paged items = %d, want 1", len(paged.Items))
+	}
+}
+
+// CR01: server/store restart must not produce Workspace/Activity revisions that a
+// long-lived TUI with a larger pre-restart AppliedRevision would permanently reject.
+func TestStoreRestartRevisionEpochAcceptableByPriorAppliedRevision(t *testing.T) {
+	oldStore := NewStore()
+	// Simulate a pre-epoch plain counter process that advanced far.
+	oldStore.revisionEpoch = 0
+	snapshot := readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-restart", Title: "restart", State: "active", ActiveRunID: "run-1"},
+		TaskProgress: readmodelcore.TaskProgress{
+			WorkspaceID: "ws-restart",
+			RunID:       "run-1",
+			State:       "running",
+			Summary:     "revision 1 | focus f1",
+			RuntimeV2: &readmodelcore.RuntimeV2Progress{
+				StateRevision:    1,
+				EvidenceSequence: 1,
+				CurrentFocusID:   "focus-1",
+				CurrentAction:    "produce",
+			},
+		},
+		ViewModel: readmodelcore.WorkspaceViewModel{WorkspaceID: "ws-restart", WorkspaceRevision: 1},
+	}
+	// Force many advances so AppliedRevision looks large to a remote TUI.
+	for i := 0; i < 50; i++ {
+		snapshot.TaskProgress.RuntimeV2.StateRevision = uint64(i + 1)
+		snapshot.TaskProgress.RuntimeV2.CurrentFocusID = fmt.Sprintf("focus-%d", i+1)
+		snapshot.TaskProgress.Summary = fmt.Sprintf("revision %d", i+1)
+		oldStore.UpsertSnapshot(snapshot)
+	}
+	oldFeed, ok := oldStore.GetActivity("ws-restart")
+	if !ok {
+		t.Fatal("expected activity from pre-restart store")
+	}
+	oldStatus := oldStore.StatusForWorkspace("ws-restart")
+	if oldStatus.WorkspaceRevision == 0 || oldFeed.ActivityRevision == 0 {
+		t.Fatalf("pre-restart revisions zero: workspace=%d activity=%d", oldStatus.WorkspaceRevision, oldFeed.ActivityRevision)
+	}
+	priorAppliedWorkspace := oldStatus.WorkspaceRevision
+	priorAppliedActivity := oldFeed.ActivityRevision
+
+	// New process: NewStore assigns a wall-clock epoch floor.
+	newStore := NewStore()
+	if newStore.revisionEpoch <= priorAppliedWorkspace || newStore.revisionEpoch <= priorAppliedActivity {
+		// Extremely unlikely with UnixNano, but assert the contract explicitly.
+		t.Fatalf("new epoch %d not above prior applied workspace=%d activity=%d", newStore.revisionEpoch, priorAppliedWorkspace, priorAppliedActivity)
+	}
+	// Rebuild same durable content after restart.
+	rebuild := snapshot
+	rebuild.TaskProgress.RuntimeV2.StateRevision = 50
+	rebuild.TaskProgress.RuntimeV2.CurrentFocusID = "focus-50"
+	rebuild.TaskProgress.Summary = "revision 50"
+	newStore.UpsertSnapshot(rebuild)
+	newFeed, ok := newStore.GetActivity("ws-restart")
+	if !ok {
+		t.Fatal("expected activity after restart rebuild")
+	}
+	newStatus := newStore.StatusForWorkspace("ws-restart")
+	if newStatus.WorkspaceRevision <= priorAppliedWorkspace {
+		t.Fatalf("post-restart workspace revision %d <= prior applied %d", newStatus.WorkspaceRevision, priorAppliedWorkspace)
+	}
+	if newFeed.ActivityRevision <= priorAppliedActivity {
+		t.Fatalf("post-restart activity revision %d <= prior applied %d", newFeed.ActivityRevision, priorAppliedActivity)
+	}
+	// Simulate TUI runtimeViewRevisionAcceptable gate: non-zero applied rejects lower.
+	if newStatus.WorkspaceRevision < priorAppliedWorkspace || newFeed.ActivityRevision < priorAppliedActivity {
+		t.Fatalf("restart revisions not acceptable: workspace %d/%d activity %d/%d", newStatus.WorkspaceRevision, priorAppliedWorkspace, newFeed.ActivityRevision, priorAppliedActivity)
+	}
+	// Activity content recovered (not lost).
+	if len(newFeed.Items) == 0 {
+		t.Fatal("expected activity items after restart rebuild")
+	}
+}
+
+// FR03/CR05: store cap must persist Truncated=true with empty NextCursor (dropped
+// history is not pageable). Read paging of retained items still terminates, and
+// Truncated/NextCursor participate in content equality so cap transitions advance
+// ActivityRevision.
+func TestStoreActivityCapPreservesTruncationFacts(t *testing.T) {
+	store := NewStore()
+	const overCap = 250
+	records := make([]readmodelcore.EventRecord, 0, overCap)
+	for i := 0; i < overCap; i++ {
+		records = append(records, readmodelcore.EventRecord{
+			ID:          fmt.Sprintf("evt-%04d", i),
+			Topic:       "run.state_changed",
+			SubjectType: "run",
+			WorkspaceID: "ws-cap",
+			RunID:       "run-1",
+			Revision:    int64(i + 1),
+			OccurredAt:  fmt.Sprintf("2026-07-15T00:00:%02dZ", i%60),
+		})
+	}
+	snapshot := readmodelcore.WorkspaceSnapshot{
+		Workspace:    readmodelcore.Workspace{ID: "ws-cap", Title: "cap", State: "active", ActiveRunID: "run-1"},
+		EventRecords: records,
+		ViewModel:    readmodelcore.WorkspaceViewModel{WorkspaceID: "ws-cap", WorkspaceRevision: 1},
+	}
+	store.UpsertSnapshot(snapshot)
+	feed, ok := store.GetActivity("ws-cap")
+	if !ok {
+		t.Fatal("expected store-owned activity")
+	}
+	if !feed.Truncated {
+		t.Fatal("expected store-level Truncated=true when items exceed cap")
+	}
+	if strings.TrimSpace(feed.NextCursor) != "" {
+		t.Fatalf("store-cap NextCursor = %q, want empty (not pageable)", feed.NextCursor)
+	}
+	if len(feed.Items) > 200 {
+		t.Fatalf("stored items = %d, want <= 200", len(feed.Items))
+	}
+	firstRev := feed.ActivityRevision
+
+	// Final page of retained items still reports Truncated; NextCursor empty terminates.
+	fullPage := readmodelprojection.PageWorkspaceActivityFeed(feed, 200, "")
+	if !fullPage.Truncated {
+		t.Fatal("final page of store-truncated feed must keep Truncated=true")
+	}
+	if strings.TrimSpace(fullPage.NextCursor) != "" {
+		t.Fatalf("final page NextCursor = %q, want empty termination", fullPage.NextCursor)
+	}
+
+	// Read-limit paging of retained items advances then terminates.
+	page1 := readmodelprojection.PageWorkspaceActivityFeed(feed, 10, "")
+	if !page1.Truncated || page1.NextCursor == "" || len(page1.Items) != 10 {
+		t.Fatalf("page1 truncated=%v cursor=%q items=%d", page1.Truncated, page1.NextCursor, len(page1.Items))
+	}
+	cursor := page1.NextCursor
+	seenEmpty := false
+	for hops := 0; hops < 40; hops++ {
+		last := readmodelprojection.PageWorkspaceActivityFeed(feed, 10, cursor)
+		if last.NextCursor == "" {
+			// Terminal page: either empty (unknown/stale cursor) or last retained page.
+			if last.Truncated != true && len(last.Items) > 0 {
+				// retained last page under store-cap must keep Truncated
+				t.Fatalf("terminal retained page Truncated=false items=%d", len(last.Items))
+			}
+			seenEmpty = true
+			break
+		}
+		cursor = last.NextCursor
+	}
+	if !seenEmpty {
+		t.Fatal("paging did not terminate with empty NextCursor")
+	}
+	// Unknown cursor terminates with empty page (no full-feed replay).
+	unknown := readmodelprojection.PageWorkspaceActivityFeed(feed, 10, "not-a-real-cursor")
+	if len(unknown.Items) != 0 {
+		t.Fatalf("unknown cursor items = %d, want 0", len(unknown.Items))
+	}
+
+	// Cap transition 200→201 with identical retained window still advances revision
+	// because Truncated/NextCursor participate in content equality.
+	under := snapshot
+	under.EventRecords = records[:200]
+	store2 := NewStore()
+	store2.UpsertSnapshot(under)
+	feedUnder, _ := store2.GetActivity("ws-cap")
+	if feedUnder.Truncated {
+		t.Fatal("200 items must not set store Truncated")
+	}
+	revUnder := feedUnder.ActivityRevision
+	store2.UpsertSnapshot(snapshot) // 250 items → cap
+	feedOver, _ := store2.GetActivity("ws-cap")
+	if !feedOver.Truncated {
+		t.Fatal("expected Truncated after cap transition")
+	}
+	if feedOver.ActivityRevision <= revUnder {
+		t.Fatalf("cap transition activity revision %d, want > %d", feedOver.ActivityRevision, revUnder)
+	}
+	_ = firstRev
+}
+
+// FR07: NewStoreWithRevisionFloor and highWaterMark keep revisions monotonic
+// under clock skew / future epoch / in-process reassignment.
+func TestStoreRevisionFloorAndHighWaterMarkMonotonic(t *testing.T) {
+	// Simulate old process with high wall-clock epoch.
+	old := NewStoreWithRevisionFloor(1_000_000)
+	snap := readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-floor", Title: "floor", State: "active", ActiveRunID: "run-1"},
+		TaskProgress: readmodelcore.TaskProgress{
+			WorkspaceID: "ws-floor", RunID: "run-1", State: "running", Summary: "r1",
+			RuntimeV2: &readmodelcore.RuntimeV2Progress{StateRevision: 1, CurrentFocusID: "f1", CurrentAction: "produce"},
+		},
+		ViewModel: readmodelcore.WorkspaceViewModel{WorkspaceID: "ws-floor", WorkspaceRevision: 1},
+	}
+	old.UpsertSnapshot(snap)
+	oldFeed, _ := old.GetActivity("ws-floor")
+	oldStatus := old.StatusForWorkspace("ws-floor")
+	if oldFeed.ActivityRevision < 1_000_000 || oldStatus.WorkspaceRevision < 1_000_000 {
+		t.Fatalf("old revisions too small: activity=%d workspace=%d", oldFeed.ActivityRevision, oldStatus.WorkspaceRevision)
+	}
+
+	// Clock skew: new process epoch lower than old high-water. Seed floor from
+	// durable observation (previous applied activity/workspace revision).
+	newStore := NewStoreWithRevisionFloor(500) // skewed clock
+	newStore.SeedRevisionFloor(oldStatus.WorkspaceRevision + 1)
+	snap.TaskProgress.RuntimeV2.StateRevision = 2
+	snap.TaskProgress.RuntimeV2.CurrentFocusID = "f2"
+	snap.TaskProgress.Summary = "r2"
+	newStore.UpsertSnapshot(snap)
+	newFeed, _ := newStore.GetActivity("ws-floor")
+	newStatus := newStore.StatusForWorkspace("ws-floor")
+	if newStatus.WorkspaceRevision <= oldStatus.WorkspaceRevision {
+		t.Fatalf("seeded floor workspace revision %d <= old %d", newStatus.WorkspaceRevision, oldStatus.WorkspaceRevision)
+	}
+	if newFeed.ActivityRevision <= oldFeed.ActivityRevision {
+		t.Fatalf("seeded floor activity revision %d <= old %d", newFeed.ActivityRevision, oldFeed.ActivityRevision)
+	}
+
+	// In-process highWaterMark: successive assigns never decrease.
+	prev := newStatus.WorkspaceRevision
+	for i := 0; i < 5; i++ {
+		snap.TaskProgress.RuntimeV2.StateRevision = uint64(3 + i)
+		snap.TaskProgress.RuntimeV2.CurrentFocusID = fmt.Sprintf("f-%d", i)
+		snap.TaskProgress.Summary = fmt.Sprintf("r-%d", i)
+		newStore.UpsertSnapshot(snap)
+		st := newStore.StatusForWorkspace("ws-floor")
+		if st.WorkspaceRevision <= prev {
+			t.Fatalf("highWaterMark violated: %d <= %d", st.WorkspaceRevision, prev)
+		}
+		prev = st.WorkspaceRevision
+	}
+}
+
+// FR05: GlobalRevision/stream sequence is seeded from process floor so SSE
+// Last-Event-ID values do not restart at small counters after process restart.
+func TestStoreGlobalRevisionSharesProcessFloor(t *testing.T) {
+	old := NewStoreWithRevisionFloor(5_000_000)
+	snap := readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-stream", Title: "stream", State: "active"},
+		ViewModel: readmodelcore.WorkspaceViewModel{WorkspaceID: "ws-stream"},
+	}
+	old.UpsertSnapshot(snap)
+	oldStatus := old.Status()
+	if oldStatus.GlobalRevision < 5_000_000 {
+		t.Fatalf("old global revision %d, want >= floor", oldStatus.GlobalRevision)
+	}
+	// New process with lower wall clock, then seed floor from observed stream.
+	neu := NewStoreWithRevisionFloor(100)
+	neu.SeedRevisionFloor(oldStatus.GlobalRevision + 1)
+	neu.UpsertSnapshot(snap)
+	newStatus := neu.Status()
+	if newStatus.GlobalRevision <= oldStatus.GlobalRevision {
+		t.Fatalf("post-restart global revision %d <= old %d", newStatus.GlobalRevision, oldStatus.GlobalRevision)
+	}
+}
+
+// FR05: generations, unlike sequence counters, are explicitly incomparable
+// across store processes. Every Store must publish a non-empty fresh token so
+// clients can safely accept a post-restart RuntimeView after clock rollback.
+func TestStoreRestartCreatesDistinctNonEmptyStreamGeneration(t *testing.T) {
+	old := NewStoreWithRevisionFloor(10_000)
+	neu := NewStoreWithRevisionFloor(1) // intentionally models a rolled-back clock
+	oldGeneration := old.Status().StreamGeneration
+	newGeneration := neu.Status().StreamGeneration
+	if oldGeneration == "" || newGeneration == "" {
+		t.Fatalf("stream generation must be non-empty: old=%q new=%q", oldGeneration, newGeneration)
+	}
+	if oldGeneration == newGeneration {
+		t.Fatalf("store restart reused stream generation %q", oldGeneration)
+	}
 }

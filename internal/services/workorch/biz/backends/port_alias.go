@@ -25,6 +25,16 @@ type LLMUsageProviderModelBreakdownInfo = port.LLMUsageProviderModelBreakdownInf
 type WebSourceInfo = port.WebSourceInfo
 type FetchedWebSourceInfo = port.FetchedWebSourceInfo
 type WorkspaceSnapshotInfo = port.WorkspaceSnapshotInfo
+type WorkspaceProjectionSection = port.WorkspaceProjectionSection
+type WorkspaceRefreshRevision = port.WorkspaceRefreshRevision
+type WorkspaceProjectionChangedInfo = port.WorkspaceProjectionChangedInfo
+type WorkspaceActivityKind = port.WorkspaceActivityKind
+type WorkspaceActivityItemInfo = port.WorkspaceActivityItemInfo
+type WorkspaceActivityFeedInfo = port.WorkspaceActivityFeedInfo
+type WorkspaceRuntimeViewInfo = port.WorkspaceRuntimeViewInfo
+type ReadWorkspaceRuntimeViewRequest = port.ReadWorkspaceRuntimeViewRequest
+type SubscriptionState = port.SubscriptionState
+type SubscriptionStatusInfo = port.SubscriptionStatusInfo
 type AcceptanceSliceInfo = port.AcceptanceSliceInfo
 type CoverageFocusInfo = port.CoverageFocusInfo
 type ConvergenceBudgetInfo = port.ConvergenceBudgetInfo
@@ -108,8 +118,26 @@ type EventType = port.EventType
 type Event = port.Event
 type EventHandler = port.EventHandler
 type EventsBackend = port.EventsBackend
+type WorkspaceProjectionEventsBackend = port.WorkspaceProjectionEventsBackend
+type WorkspaceProjectionChangedHandler = port.WorkspaceProjectionChangedHandler
+type SubscriptionStatusHandler = port.SubscriptionStatusHandler
 
 const (
+	WorkspaceProjectionSectionOverview        = port.WorkspaceProjectionSectionOverview
+	WorkspaceProjectionSectionRuntimeProgress = port.WorkspaceProjectionSectionRuntimeProgress
+	WorkspaceProjectionSectionActivity        = port.WorkspaceProjectionSectionActivity
+	WorkspaceProjectionSectionGovernance      = port.WorkspaceProjectionSectionGovernance
+	WorkspaceProjectionSectionEvidence        = port.WorkspaceProjectionSectionEvidence
+	WorkspaceProjectionSectionResult          = port.WorkspaceProjectionSectionResult
+	WorkspaceProjectionSectionArtifacts       = port.WorkspaceProjectionSectionArtifacts
+	WorkspaceProjectionSectionMemory          = port.WorkspaceProjectionSectionMemory
+	WorkspaceProjectionSectionLLMUsage        = port.WorkspaceProjectionSectionLLMUsage
+
+	SubscriptionConnecting   = port.SubscriptionConnecting
+	SubscriptionLive         = port.SubscriptionLive
+	SubscriptionReconnecting = port.SubscriptionReconnecting
+	SubscriptionDegraded     = port.SubscriptionDegraded
+
 	EventWorkspaceCreated            = port.EventWorkspaceCreated
 	EventWorkspaceListChanged        = port.EventWorkspaceListChanged
 	EventWorkspaceProjectionChanged  = port.EventWorkspaceProjectionChanged

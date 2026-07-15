@@ -20,6 +20,7 @@ const (
 
 type Status struct {
 	State                   string `json:"state"`
+	StreamGeneration        string `json:"streamGeneration,omitempty"`
 	GlobalRevision          int64  `json:"globalRevision"`
 	WorkspaceRevision       int64  `json:"workspaceRevision,omitempty"`
 	SourceEventRevision     int64  `json:"sourceEventRevision"`

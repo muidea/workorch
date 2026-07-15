@@ -228,6 +228,15 @@ type workspaceSnapshotResponse struct {
 	Error      string                       `json:"error,omitempty"`
 }
 
+type workspaceRuntimeViewResponse struct {
+	Service     string                          `json:"service"`
+	Backend     string                          `json:"backend,omitempty"`
+	DataRoot    string                          `json:"dataRoot,omitempty"`
+	Projection  workspaceProjectionStatus       `json:"projection"`
+	RuntimeView appservice.WorkspaceRuntimeView `json:"runtimeView"`
+	Error       string                          `json:"error,omitempty"`
+}
+
 type workspaceExecutionActivationResponse struct {
 	Service    string                                  `json:"service"`
 	Backend    string                                  `json:"backend,omitempty"`
@@ -1967,6 +1976,12 @@ func isEventStreamCriticalTopic(topic string) bool {
 }
 
 func writeSSEEnvelope(w http.ResponseWriter, flusher http.Flusher, envelope streamEvent) bool {
+	// Projection notifications must serialize as the concrete top-level DTO so
+	// remote decodeProjectionSSE can consume live and replay frames identically.
+	// streamEvent.Revision is a scalar and would conflict with nested revision.
+	if dto, ok := workspaceProjectionChangedSSEFromStreamEvent(envelope); ok {
+		return writeProjectionSSE(w, flusher, dto)
+	}
 	data, err := json.Marshal(enrichSSEEnvelope(envelope))
 	if err != nil {
 		return true

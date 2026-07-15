@@ -195,3 +195,14 @@ func (s *serverState) rebuildProjectedWorkspacesForApprovals(ctx context.Context
 		s.rebuildProjectedWorkspace(ctx, item.WorkspaceID)
 	}
 }
+
+func (s *HTTPServer) ReadWorkspaceActivity(ctx context.Context, workspaceID string) (appservice.WorkspaceActivityFeed, bool, error) {
+	if s == nil || s.state == nil {
+		return appservice.WorkspaceActivityFeed{}, false, common.ErrInvalidArgument
+	}
+	if s.state.workspaceProjection == nil {
+		return appservice.WorkspaceActivityFeed{}, false, common.ErrConflict
+	}
+	feed, ok := s.state.workspaceProjection.ReadWorkspaceActivity(workspaceID)
+	return feed, ok, nil
+}

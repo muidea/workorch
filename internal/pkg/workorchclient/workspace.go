@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strings"
 )
 
 // ListWorkspaces returns all workspaces.
@@ -90,6 +91,30 @@ func (c *Client) GetWorkspaceSnapshotProjection(ctx context.Context, id string) 
 	var result WorkspaceSnapshotProjection
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode workspace snapshot projection envelope: %w", err)
+	}
+	return &result, nil
+}
+
+// GetWorkspaceRuntimeView returns the lightweight runtime main-view projection.
+func (c *Client) GetWorkspaceRuntimeView(ctx context.Context, id string, activityLimit int, beforeCursor string) (*WorkspaceRuntimeViewProjection, error) {
+	values := url.Values{}
+	if activityLimit > 0 {
+		values.Set("activityLimit", fmt.Sprintf("%d", activityLimit))
+	}
+	if strings.TrimSpace(beforeCursor) != "" {
+		values.Set("beforeCursor", beforeCursor)
+	}
+	resp, err := c.do(ctx, "GET", joinQuery(fmt.Sprintf("/api/v1/workorch/workspaces/%s/runtime-view", escapePath(id)), values), nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var result WorkspaceRuntimeViewProjection
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode workspace runtime view envelope: %w", err)
+	}
+	if strings.TrimSpace(result.Error) != "" {
+		return nil, fmt.Errorf("workspace runtime view: %s", result.Error)
 	}
 	return &result, nil
 }

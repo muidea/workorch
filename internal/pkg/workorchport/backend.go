@@ -19,5 +19,10 @@ type Backend interface {
 	Memory() MemoryBackend
 	Template() TemplateBackend
 	Config() ConfigBackend
+	// Events is the generic/full event stream surface for specialized CLI/agent
+	// tooling. TUI main-view refresh must use ProjectionEvents instead.
 	Events() EventsBackend
+	// ProjectionEvents is the typed projection-invalidation + subscription
+	// health surface for TUI runtime refresh and history readback.
+	ProjectionEvents() WorkspaceProjectionEventsBackend
 }

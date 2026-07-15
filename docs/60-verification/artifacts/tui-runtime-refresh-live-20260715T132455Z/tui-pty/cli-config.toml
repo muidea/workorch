@@ -1,0 +1,14 @@
+[remote]
+defaultAddr = 'http://127.0.0.1:40093'
+
+[local]
+binaryPath = ''
+configDir = ''
+dataDir = '.workorch-data'
+port = 0
+autoStart = false
+
+[defaults]
+pollInterval = '1s'
+defaultSoulId = ''
+lastActiveWorkspaceId = 'ws-8c31db3fcee13ffc'

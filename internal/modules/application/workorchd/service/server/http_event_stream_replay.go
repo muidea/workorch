@@ -28,8 +28,14 @@ func (s *serverState) replayEventStreamEnvelopes(ctx context.Context, lastEventI
 		}
 		ret = append(ret, envelope)
 	}
-	for _, envelope := range s.persistedReplayEnvelopes(ctx, lastEventID, workspaceID, runID, eventStreamReplayTopic(view)) {
-		appendEnvelope(envelope)
+	// Projection notifications are not owner EventRecords. Live and reconnect
+	// replay must share the concrete projection DTO path via the in-memory
+	// buffer (writeSSEEnvelope → writeProjectionSSE). Do not reconstruct
+	// projection frames from generic event-record envelopes.
+	if !isProjectionEventStreamView(view) {
+		for _, envelope := range s.persistedReplayEnvelopes(ctx, lastEventID, workspaceID, runID, eventStreamReplayTopic(view)) {
+			appendEnvelope(envelope)
+		}
 	}
 	if s.eventReplay != nil {
 		for _, envelope := range s.eventReplay.After(lastEventID, filter) {
@@ -41,6 +47,7 @@ func (s *serverState) replayEventStreamEnvelopes(ctx context.Context, lastEventI
 
 func eventStreamReplayTopic(view string) string {
 	if isProjectionEventStreamView(view) {
+		// Intentionally unused for projection view replay (see above).
 		return workorchdevents.TopicWorkspaceProjectionChanged
 	}
 	return ""

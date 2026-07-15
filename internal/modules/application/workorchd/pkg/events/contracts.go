@@ -9,6 +9,9 @@ func Contracts() []eventcontract.Contract {
 	ret = append(ret, eventcontract.Build("workorchd.scheduler", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
 		TopicWorkorchDCommandWorkspaceRunRequested,
 	)...)
+	ret = append(ret, eventcontract.Build("workorchd.workspace_runtime_view", eventcontract.CommandClassRead, eventcontract.LanePolicyQuery,
+		TopicWorkorchDCommandReadWorkspaceRuntimeView,
+	)...)
 	ret = append(ret, eventcontract.Build("workorchd.workspace_projection", eventcontract.CommandClassNotify, eventcontract.LanePolicyState,
 		TopicWorkspaceProjectionChanged,
 	)...)

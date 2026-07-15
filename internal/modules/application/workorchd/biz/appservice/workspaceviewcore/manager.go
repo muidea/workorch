@@ -13,10 +13,12 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
 type Manager struct {
@@ -213,6 +215,15 @@ func (m *Manager) ReadWorkspaceSnapshot(workspaceID string) (readmodelcore.Works
 	return m.store.GetSnapshot(workspaceID)
 }
 
+// ReadWorkspaceActivity returns the store-owned activity feed for a workspace.
+// RuntimeView must page this feed and must not regenerate ActivityRevision.
+func (m *Manager) ReadWorkspaceActivity(workspaceID string) (readmodelcore.WorkspaceActivityFeed, bool) {
+	if m == nil || m.store == nil {
+		return readmodelcore.WorkspaceActivityFeed{}, false
+	}
+	return m.store.GetActivity(workspaceID)
+}
+
 func (m *Manager) ReadWorkspaceSummarySnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshot, Status, error) {
 	if m == nil || m.store == nil {
 		return readmodelcore.WorkspaceSnapshot{}, Status{State: StateFailed}, common.ErrConflict
@@ -250,8 +261,9 @@ func (m *Manager) UpsertSnapshot(snapshot readmodelcore.WorkspaceSnapshot) {
 	if m == nil || m.store == nil {
 		return
 	}
+	previous, _, _ := m.store.GetSnapshot(snapshot.Workspace.ID)
 	m.store.UpsertSnapshot(snapshot)
-	m.publishProjectionChanged(context.Background(), snapshot.Workspace.ID, "detail")
+	m.publishProjectionChangedWithDiff(context.Background(), snapshot.Workspace.ID, "detail", previous, snapshot)
 }
 
 func (m *Manager) ApplyRunCommandAccepted(update RunCommandAcceptedUpdate) bool {
@@ -350,8 +362,9 @@ func (m *Manager) RebuildWorkspace(ctx context.Context, workspaceID string) (err
 		m.publishProjectionChanged(ctx, workspaceID, "detail_failed")
 		return err
 	}
+	previous, _, _ := m.store.GetSnapshot(workspaceID)
 	m.store.UpsertSnapshot(snapshot)
-	m.publishProjectionChanged(ctx, workspaceID, "detail")
+	m.publishProjectionChangedWithDiff(ctx, workspaceID, "detail", previous, snapshot)
 	return nil
 }
 
@@ -653,18 +666,60 @@ func (m *Manager) isRebuildAllInFlight() bool {
 }
 
 func (m *Manager) publishProjectionChanged(ctx context.Context, workspaceID string, changeKind string) {
+	var previous, candidate readmodelcore.WorkspaceSnapshot
+	if m != nil && m.store != nil && strings.TrimSpace(workspaceID) != "" {
+		if projected, _, err := m.store.GetSnapshot(workspaceID); err == nil {
+			candidate = projected
+			previous = projected
+		}
+	}
+	m.publishProjectionChangedWithDiff(ctx, workspaceID, changeKind, previous, candidate)
+}
+
+func (m *Manager) publishProjectionChangedWithDiff(ctx context.Context, workspaceID string, changeKind string, previous, candidate readmodelcore.WorkspaceSnapshot) {
 	if m == nil || m.commandHub == nil || m.store == nil {
 		return
 	}
 	status := m.store.StatusForWorkspace(workspaceID)
+	if strings.TrimSpace(workspaceID) != "" && strings.TrimSpace(candidate.Workspace.ID) == "" {
+		if projected, _, err := m.store.GetSnapshot(workspaceID); err == nil {
+			candidate = projected
+		}
+	}
+	runID := common.RunID(readmodelprojection.SelectDisplayRunID(candidate))
+	var runtimeStateRevision uint64
+	var evidenceSequence uint64
+	activityRevision := int64(0)
+	if runtime := candidate.TaskProgress.RuntimeV2; runtime != nil {
+		runtimeStateRevision = runtime.StateRevision
+		evidenceSequence = runtime.EvidenceSequence
+	}
+	// ActivityRevision authority is the store-owned transaction revision.
+	if feed, ok := m.store.GetActivity(workspaceID); ok {
+		activityRevision = feed.ActivityRevision
+	} else {
+		// Snapshot may not yet have activity committed (overview-only path).
+		activityRevision = 0
+	}
+	changedSections := readmodelprojection.DiffWorkspaceProjectionSections(previous, candidate, changeKind)
+	portSections := make([]workorchport.WorkspaceProjectionSection, 0, len(changedSections))
+	for _, section := range changedSections {
+		portSections = append(portSections, workorchport.WorkspaceProjectionSection(section))
+	}
 	data := workorchdevents.WorkspaceProjectionChangedData{
 		WorkspaceID:             common.WorkspaceID(workspaceID),
+		RunID:                   runID,
+		StreamGeneration:        status.StreamGeneration,
 		GlobalRevision:          status.GlobalRevision,
 		WorkspaceRevision:       status.WorkspaceRevision,
 		SourceEventRevision:     status.SourceEventRevision,
 		ProjectedSourceRevision: status.ProjectedSourceRevision,
+		RuntimeStateRevision:    runtimeStateRevision,
+		EvidenceSequence:        evidenceSequence,
+		ActivityRevision:        activityRevision,
 		WorkspaceTotal:          status.WorkspaceTotal,
 		ChangeKind:              changeKind,
+		ChangedSections:         portSections,
 		ProjectionState:         status.State,
 		UpdatedAt:               status.UpdatedAt,
 		RebuiltAt:               status.RebuiltAt,

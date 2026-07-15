@@ -300,6 +300,45 @@ func renderInspectTimeline(items []string) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
+func renderInspectActivityFeed(feed backend.WorkspaceActivityFeedInfo, limit int) string {
+	if len(feed.Items) == 0 {
+		return "No projected activity recorded for the current workspace."
+	}
+	if limit <= 0 {
+		limit = 30
+	}
+	start := len(feed.Items) - limit
+	if start < 0 {
+		start = 0
+	}
+	var b strings.Builder
+	b.WriteString("Timeline\n")
+	if feed.DisplayRunID != "" {
+		b.WriteString("display run: ")
+		b.WriteString(string(feed.DisplayRunID))
+		b.WriteString("\n")
+	}
+	for _, item := range feed.Items[start:] {
+		line := strings.TrimSpace(item.Summary)
+		if line == "" {
+			line = strings.TrimSpace(item.Title)
+		}
+		if line == "" {
+			line = string(item.Kind)
+		}
+		if ts := strings.TrimSpace(item.OccurredAt); ts != "" {
+			line = ts + " " + line
+		}
+		b.WriteString("- ")
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+	if feed.Truncated {
+		b.WriteString("(truncated; earlier history available via activity cursor)\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 func renderInspectPatches(items []backend.PatchInfo) string {
 	if len(items) == 0 {
 		return "No patches recorded for the current workspace."

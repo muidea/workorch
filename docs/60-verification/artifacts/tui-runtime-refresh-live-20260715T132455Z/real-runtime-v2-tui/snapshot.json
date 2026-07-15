@@ -1,0 +1,1446 @@
+{
+  "service": "workorch",
+  "backend": "file",
+  "dataRoot": "/home/rangh/aispace/workorch/docs/60-verification/artifacts/tui-runtime-refresh-live-20260715T132455Z/data",
+  "snapshot": {
+    "workspace": {
+      "id": "ws-7d57c4753f148d96",
+      "title": "TUI long output e2e 493234",
+      "description": "TUI viewport long output e2e workspace",
+      "deliverableDirectory": "/home/rangh/aispace/workorch/docs/60-verification/artifacts/tui-runtime-refresh-live-20260715T132455Z/real-runtime-v2-tui/deliverable",
+      "state": "active",
+      "templateId": "generic-governed",
+      "profileId": "generic-governed",
+      "defaultSoulId": "soul-generic-governed-execution",
+      "soulBindings": {
+        "approval": "soul-generic-governed-approval",
+        "artifact": "soul-generic-governed-artifact",
+        "decision": "soul-generic-governed-decision",
+        "execution": "soul-generic-governed-execution",
+        "planning": "soul-generic-governed-planning",
+        "validation": "soul-generic-governed-validation"
+      },
+      "contextHints": {
+        "templateStagePolicies": {
+          "schemaVersion": "workorch.template_stage_policy.v1",
+          "stages": [
+            {
+              "completion": {
+                "policy": "required_outputs_accepted"
+              },
+              "entry": {
+                "nextAction": "assess_gap",
+                "requiresDefinitionRevision": true,
+                "requiresGapBaseline": true
+              },
+              "governance": {
+                "approvalMode": "when_required",
+                "decisionMode": "when_required"
+              },
+              "id": "planning",
+              "policyRefs": {
+                "capabilityUsagePolicies": [],
+                "evidencePolicies": []
+              },
+              "requiredOutputs": [
+                {
+                  "evidenceKinds": [
+                    "assessment"
+                  ],
+                  "kind": "gap_baseline"
+                }
+              ],
+              "soulBinding": "planning"
+            },
+            {
+              "completion": {
+                "policy": "required_outputs_accepted"
+              },
+              "entry": {
+                "nextAction": "state_change",
+                "requiresDefinitionRevision": true,
+                "requiresGapBaseline": true
+              },
+              "governance": {
+                "approvalMode": "when_required",
+                "decisionMode": "when_required"
+              },
+              "id": "execution",
+              "policyRefs": {
+                "capabilityUsagePolicies": [],
+                "evidencePolicies": []
+              },
+              "requiredOutputs": [
+                {
+                  "evidenceKinds": [
+                    "state_change"
+                  ],
+                  "kind": "state_change"
+                }
+              ],
+              "soulBinding": "execution"
+            },
+            {
+              "completion": {
+                "policy": "required_outputs_accepted"
+              },
+              "entry": {
+                "nextAction": "validate",
+                "requiresDefinitionRevision": true,
+                "requiresGapBaseline": true
+              },
+              "governance": {
+                "approvalMode": "when_required",
+                "decisionMode": "when_required"
+              },
+              "id": "validation",
+              "policyRefs": {
+                "capabilityUsagePolicies": [],
+                "evidencePolicies": []
+              },
+              "requiredOutputs": [
+                {
+                  "evidenceKinds": [
+                    "validation"
+                  ],
+                  "kind": "validation"
+                }
+              ],
+              "soulBinding": "validation"
+            }
+          ]
+        }
+      },
+      "viewModel": {}
+    },
+    "run": {
+      "id": "run-001",
+      "workspaceId": "ws-7d57c4753f148d96",
+      "goalId": "goal-4828734be868a15f",
+      "doDId": "dod-e2ac65b0d0bbd879",
+      "lineage": {},
+      "definitionRevision": "goal:goal-4828734be868a15f|dod:dod-e2ac65b0d0bbd879",
+      "initialStepKind": "llm/workspace_execution",
+      "state": "completed",
+      "priority": 2
+    },
+    "outcome": {
+      "runId": "run-001",
+      "state": "accepted",
+      "rawState": "completed",
+      "accepted": true,
+      "terminal": true,
+      "resultId": "ws-7d57c4753f148d96/run-001/result/dod-assessment",
+      "summary": "current coverage focus is satisfied",
+      "evidenceRefs": [
+        "workorch://workspace/runtime-validation-source.txt"
+      ]
+    },
+    "taskProgress": {
+      "workspaceId": "ws-7d57c4753f148d96",
+      "runId": "run-001",
+      "state": "completed",
+      "summary": "revision 26 | evidence 6 | focus focus-003 | action complete | dispatch 6 | attempts 6 | accepted 1 rejected 0",
+      "currentStepId": "authority-cf9dd6f339f448315382",
+      "currentStepKind": "result/dod_assessment",
+      "currentStepState": "accepted",
+      "currentActionLabel": "complete",
+      "diagnosticLineage": "authority-cf9dd6f339f448315382",
+      "currentMilestone": "formal_result",
+      "milestones": [
+        {
+          "id": "run_created",
+          "title": "Run created",
+          "state": "completed",
+          "evidenceRefs": [
+            "run-001"
+          ]
+        },
+        {
+          "id": "execution_steps",
+          "title": "Execution steps",
+          "state": "completed",
+          "evidenceRefs": [
+            "runtime-v2/accepted-evidence"
+          ]
+        },
+        {
+          "id": "governance",
+          "title": "Decision and approval governance",
+          "state": "completed"
+        },
+        {
+          "id": "validation",
+          "title": "Validation",
+          "state": "completed",
+          "evidenceRefs": [
+            "runtime-v2/validation-evidence"
+          ]
+        },
+        {
+          "id": "formal_result",
+          "title": "Result / Artifact",
+          "state": "completed",
+          "evidenceRefs": [
+            "ws-7d57c4753f148d96/run-001/result/dod-assessment",
+            "workorch://workspace/runtime-validation-source.txt"
+          ]
+        }
+      ],
+      "items": [
+        {
+          "id": "ws-7d57c4753f148d96/run-001/result/dod-assessment",
+          "kind": "result",
+          "title": "Runtime V2 acceptance result",
+          "state": "accepted",
+          "evidenceRefs": [
+            "ws-7d57c4753f148d96/run-001/result/dod-assessment",
+            "authority-cf9dd6f339f448315382",
+            "workorch://workspace/runtime-validation-source.txt"
+          ]
+        }
+      ],
+      "recovery": {
+        "mode": "none",
+        "nextAction": "inspect_result",
+        "runId": "run-001",
+        "stepId": "authority-cf9dd6f339f448315382",
+        "reason": "run completed"
+      },
+      "repairLoop": {
+        "state": "inactive",
+        "attemptCount": 0,
+        "nextAction": "inspect_result",
+        "escalated": false
+      },
+      "assessmentOutcome": {
+        "state": "accepted",
+        "acceptedResultCount": 1,
+        "latestAcceptedResultId": "ws-7d57c4753f148d96/run-001/result/dod-assessment"
+      },
+      "evidenceRefs": [
+        "run-001",
+        "ws-7d57c4753f148d96/run-001/result/dod-assessment",
+        "workorch://workspace/runtime-validation-source.txt"
+      ],
+      "runtimeV2": {
+        "stateRevision": 26,
+        "evidenceSequence": 6,
+        "completedDispatchCount": 6,
+        "candidateAttemptCount": 6,
+        "acceptedEvidenceCount": 1,
+        "rejectedEvidenceCount": 0,
+        "currentFocusId": "focus-003",
+        "currentAction": "complete"
+      }
+    },
+    "repairLoop": {
+      "state": "inactive",
+      "attemptCount": 0,
+      "nextAction": "inspect_result",
+      "escalated": false
+    },
+    "convergenceStatus": {
+      "workspaceId": "ws-7d57c4753f148d96",
+      "runId": "run-001",
+      "runState": "completed"
+    },
+    "results": [
+      {
+        "id": "ws-7d57c4753f148d96/run-001/result/dod-assessment",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "goalId": "goal-4828734be868a15f",
+        "doDId": "dod-e2ac65b0d0bbd879",
+        "state": "accepted",
+        "title": "Runtime V2 acceptance result",
+        "summary": "current coverage focus is satisfied",
+        "sourceType": "dod_assessment",
+        "sourceRef": "authority-cf9dd6f339f448315382",
+        "evidenceRefs": [
+          "workorch://workspace/runtime-validation-source.txt",
+          "workorch://workspace/runtime-validation-source.txt",
+          "workorch://workspace/runtime-validation-source.txt"
+        ],
+        "doDAssessment": {
+          "satisfied": true,
+          "items": [
+            {
+              "item": "Final Result contains LONG-IMPLEMENTATION 70",
+              "state": "satisfied",
+              "evidenceRefs": [
+                "workorch://workspace/runtime-validation-source.txt"
+              ]
+            },
+            {
+              "item": "Final Result is long enough to require PgDown/PgUp viewport scrolling",
+              "state": "satisfied",
+              "evidenceRefs": [
+                "workorch://workspace/runtime-validation-source.txt"
+              ]
+            },
+            {
+              "item": "Workspace monitor remains visible while main display scrolls",
+              "state": "satisfied",
+              "evidenceRefs": [
+                "workorch://workspace/runtime-validation-source.txt"
+              ]
+            }
+          ],
+          "summary": "current coverage focus is satisfied"
+        },
+        "summaryDetail": {
+          "goalOutcome": "current coverage focus is satisfied",
+          "evidenceRefs": [
+            "workorch://workspace/runtime-validation-source.txt",
+            "workorch://workspace/runtime-validation-source.txt",
+            "workorch://workspace/runtime-validation-source.txt"
+          ]
+        },
+        "createdAt": "2026-07-15T13:25:01.103082639Z",
+        "updatedAt": "2026-07-15T13:25:01.103082639Z"
+      }
+    ],
+    "doDEvidence": [
+      {
+        "resultId": "ws-7d57c4753f148d96/run-001/result/dod-assessment",
+        "doDId": "dod-e2ac65b0d0bbd879",
+        "satisfied": true,
+        "summary": "current coverage focus is satisfied",
+        "items": [
+          {
+            "item": "Final Result contains LONG-IMPLEMENTATION 70",
+            "state": "satisfied",
+            "evidenceRefs": [
+              "workorch://workspace/runtime-validation-source.txt"
+            ],
+            "evidenceStatus": "linked"
+          },
+          {
+            "item": "Final Result is long enough to require PgDown/PgUp viewport scrolling",
+            "state": "satisfied",
+            "evidenceRefs": [
+              "workorch://workspace/runtime-validation-source.txt"
+            ],
+            "evidenceStatus": "linked"
+          },
+          {
+            "item": "Workspace monitor remains visible while main display scrolls",
+            "state": "satisfied",
+            "evidenceRefs": [
+              "workorch://workspace/runtime-validation-source.txt"
+            ],
+            "evidenceStatus": "linked"
+          }
+        ]
+      }
+    ],
+    "resultQuality": [
+      {
+        "resultId": "ws-7d57c4753f148d96/run-001/result/dod-assessment",
+        "doDId": "dod-e2ac65b0d0bbd879",
+        "state": "failed",
+        "summary": "current coverage focus is satisfied",
+        "evidenceRefs": [
+          "workorch://workspace/runtime-validation-source.txt"
+        ],
+        "issues": [
+          {
+            "code": "missing_verification_summary",
+            "severity": "error",
+            "message": "result is missing verification summary",
+            "suggestion": "populate summaryDetail.verificationSummary with verification scope and conclusions",
+            "evidenceRefs": [
+              "workorch://workspace/runtime-validation-source.txt"
+            ]
+          },
+          {
+            "code": "missing_risk_disclosure",
+            "severity": "error",
+            "message": "result is missing known limitations and residual risks",
+            "suggestion": "populate summaryDetail.knownLimitations or summaryDetail.residualRisks",
+            "evidenceRefs": [
+              "workorch://workspace/runtime-validation-source.txt"
+            ]
+          },
+          {
+            "code": "missing_next_actions",
+            "severity": "warning",
+            "message": "result is missing next actions",
+            "suggestion": "populate summaryDetail.nextActions for follow-up guidance",
+            "evidenceRefs": [
+              "workorch://workspace/runtime-validation-source.txt"
+            ]
+          }
+        ]
+      }
+    ],
+    "llmContextBudgetSummary": {
+      "traceTotal": 0
+    },
+    "llmUsageSummary": {
+      "entryTotal": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "totalTokens": 0,
+      "estimatedEntries": 0,
+      "providerNativeEntries": 0,
+      "failedEntries": 0
+    },
+    "acceptance": {
+      "summary": {
+        "acceptedSlices": 0,
+        "activeSlices": 0,
+        "openSlices": 0,
+        "failedSlices": 0
+      }
+    },
+    "eventRecords": [
+      {
+        "id": "evt-1784121901042438547-5",
+        "version": "workorch.event.v1",
+        "topic": "/run/created",
+        "occurredAt": "2026-07-15T13:25:01.042440021Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 5,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 5,
+          "fields": [
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901043942274-7",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.043943615Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 7,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 5,
+          "fields": [
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901046273848-8",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.04627609Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 8,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901048048379-9",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.048049652Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 9,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901049183463-10",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.049184715Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 10,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901049914777-11",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.049915935Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 11,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901051023781-12",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.051024767Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 12,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901051939006-13",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.0519398Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 13,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901053253329-14",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.053261528Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 14,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901056121650-15",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.056122559Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 15,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901056771136-16",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.056771938Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 16,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901060368690-17",
+        "version": "workorch.event.v1",
+        "topic": "/run/llm_usage/recorded",
+        "occurredAt": "2026-07-15T13:25:01.060113567Z",
+        "sourceModule": "blocks/llm",
+        "subjectType": "llm_usage",
+        "subjectId": "llm-req-ws-7d57c4753f148d96-run-001-authority-25daac149cd8ce3330b4-0-1784121901057067632",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "stepId": "authority-25daac149cd8ce3330b4",
+        "revision": 17,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 25,
+          "fields": [
+            "capabilityRevision",
+            "completedAt",
+            "configurationRevision",
+            "contextBudget",
+            "durationMs",
+            "estimated",
+            "inputTokens",
+            "kind",
+            "model",
+            "operation",
+            "outputTokens",
+            "providerId",
+            "providerSubmitted",
+            "requestBytes",
+            "requestId",
+            "responseBytes"
+          ],
+          "truncated": true
+        }
+      },
+      {
+        "id": "evt-1784121901061011078-18",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.06101247Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 18,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901063112980-19",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.063116957Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 19,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901064555149-20",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.064556977Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 20,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901067862559-21",
+        "version": "workorch.event.v1",
+        "topic": "/run/llm_usage/recorded",
+        "occurredAt": "2026-07-15T13:25:01.067662267Z",
+        "sourceModule": "blocks/llm",
+        "subjectType": "llm_usage",
+        "subjectId": "llm-req-ws-7d57c4753f148d96-run-001-authority-d514ea7b4f7984b54137-0-1784121901065095050",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "stepId": "authority-d514ea7b4f7984b54137",
+        "revision": 21,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 25,
+          "fields": [
+            "capabilityRevision",
+            "completedAt",
+            "configurationRevision",
+            "contextBudget",
+            "durationMs",
+            "estimated",
+            "inputTokens",
+            "kind",
+            "model",
+            "operation",
+            "outputTokens",
+            "providerId",
+            "providerSubmitted",
+            "requestBytes",
+            "requestId",
+            "responseBytes"
+          ],
+          "truncated": true
+        }
+      },
+      {
+        "id": "evt-1784121901068775751-22",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.06877741Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 22,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901069848246-23",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.069849269Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 23,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901070900379-24",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.070901375Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 24,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901074925301-25",
+        "version": "workorch.event.v1",
+        "topic": "/run/llm_usage/recorded",
+        "occurredAt": "2026-07-15T13:25:01.074766078Z",
+        "sourceModule": "blocks/llm",
+        "subjectType": "llm_usage",
+        "subjectId": "llm-req-ws-7d57c4753f148d96-run-001-authority-9421abf388f0cb7ee6a4-0-1784121901071085275",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "stepId": "authority-9421abf388f0cb7ee6a4",
+        "revision": 25,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 25,
+          "fields": [
+            "capabilityRevision",
+            "completedAt",
+            "configurationRevision",
+            "contextBudget",
+            "durationMs",
+            "estimated",
+            "inputTokens",
+            "kind",
+            "model",
+            "operation",
+            "outputTokens",
+            "providerId",
+            "providerSubmitted",
+            "requestBytes",
+            "requestId",
+            "responseBytes"
+          ],
+          "truncated": true
+        }
+      },
+      {
+        "id": "evt-1784121901075704706-26",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.07570586Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 26,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901077107966-27",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.077109223Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 27,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901077864673-28",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.07786557Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 28,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901081622525-29",
+        "version": "workorch.event.v1",
+        "topic": "/run/llm_usage/recorded",
+        "occurredAt": "2026-07-15T13:25:01.08119402Z",
+        "sourceModule": "blocks/llm",
+        "subjectType": "llm_usage",
+        "subjectId": "llm-req-ws-7d57c4753f148d96-run-001-authority-e511f5ae174524e83b60-0-1784121901078072745",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "stepId": "authority-e511f5ae174524e83b60",
+        "revision": 29,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 25,
+          "fields": [
+            "capabilityRevision",
+            "completedAt",
+            "configurationRevision",
+            "contextBudget",
+            "durationMs",
+            "estimated",
+            "inputTokens",
+            "kind",
+            "model",
+            "operation",
+            "outputTokens",
+            "providerId",
+            "providerSubmitted",
+            "requestBytes",
+            "requestId",
+            "responseBytes"
+          ],
+          "truncated": true
+        }
+      },
+      {
+        "id": "evt-1784121901082839941-30",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.082841627Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 30,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901083804140-31",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.083805455Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 31,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901084768197-32",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.084769372Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 32,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901089206957-33",
+        "version": "workorch.event.v1",
+        "topic": "/run/llm_usage/recorded",
+        "occurredAt": "2026-07-15T13:25:01.088700849Z",
+        "sourceModule": "blocks/llm",
+        "subjectType": "llm_usage",
+        "subjectId": "llm-req-ws-7d57c4753f148d96-run-001-authority-5bc3d5e5dcf161af326b-0-1784121901085215564",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "stepId": "authority-5bc3d5e5dcf161af326b",
+        "revision": 33,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 25,
+          "fields": [
+            "capabilityRevision",
+            "completedAt",
+            "configurationRevision",
+            "contextBudget",
+            "durationMs",
+            "estimated",
+            "inputTokens",
+            "kind",
+            "model",
+            "operation",
+            "outputTokens",
+            "providerId",
+            "providerSubmitted",
+            "requestBytes",
+            "requestId",
+            "responseBytes"
+          ],
+          "truncated": true
+        }
+      },
+      {
+        "id": "evt-1784121901091872212-34",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.091873551Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 34,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901093711758-35",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.093713579Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 35,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901094939515-36",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.094941679Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 36,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901099252192-37",
+        "version": "workorch.event.v1",
+        "topic": "/run/llm_usage/recorded",
+        "occurredAt": "2026-07-15T13:25:01.098760783Z",
+        "sourceModule": "blocks/llm",
+        "subjectType": "llm_usage",
+        "subjectId": "llm-req-ws-7d57c4753f148d96-run-001-authority-93e1b6d2ce9dbdc5d45f-0-1784121901095174646",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "stepId": "authority-93e1b6d2ce9dbdc5d45f",
+        "revision": 37,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 25,
+          "fields": [
+            "capabilityRevision",
+            "completedAt",
+            "configurationRevision",
+            "contextBudget",
+            "durationMs",
+            "estimated",
+            "inputTokens",
+            "kind",
+            "model",
+            "operation",
+            "outputTokens",
+            "providerId",
+            "providerSubmitted",
+            "requestBytes",
+            "requestId",
+            "responseBytes"
+          ],
+          "truncated": true
+        }
+      },
+      {
+        "id": "evt-1784121901100950932-38",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.100952249Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 38,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901102310666-39",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.10231183Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 39,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901106596261-40",
+        "version": "workorch.event.v1",
+        "topic": "/result/accepted",
+        "occurredAt": "2026-07-15T13:25:01.106599208Z",
+        "sourceModule": "blocks/result",
+        "subjectType": "result",
+        "subjectId": "ws-7d57c4753f148d96/run-001/result/dod-assessment",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 40,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 9,
+          "fields": [
+            "artifactRefs",
+            "doDId",
+            "evidenceRefs",
+            "goalId",
+            "sourceRef",
+            "sourceType",
+            "state",
+            "summary",
+            "title"
+          ]
+        }
+      },
+      {
+        "id": "evt-1784121901107332618-41",
+        "version": "workorch.event.v1",
+        "topic": "/run/state/changed",
+        "occurredAt": "2026-07-15T13:25:01.107333976Z",
+        "sourceModule": "kernel/run",
+        "subjectType": "run",
+        "subjectId": "run-001",
+        "workspaceId": "ws-7d57c4753f148d96",
+        "runId": "run-001",
+        "revision": 41,
+        "payload": {},
+        "payloadSummary": {
+          "fieldCount": 10,
+          "fields": [
+            "authoritySnapshotId",
+            "blockingApprovalId",
+            "blockingTicketId",
+            "doDId",
+            "goalId",
+            "runtimeAction",
+            "runtimeFocusId",
+            "runtimeState",
+            "runtimeStateRevision",
+            "state"
+          ]
+        }
+      }
+    ]
+  }
+}

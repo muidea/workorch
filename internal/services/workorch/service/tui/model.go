@@ -46,9 +46,8 @@ type transcriptItem struct {
 }
 
 const (
-	maxInputHistory  = 100
-	maxResultLines   = 1000
-	maxRuntimeEvents = 80
+	maxInputHistory = 100
+	maxResultLines  = 1000
 )
 
 type AppModel struct {
@@ -91,7 +90,8 @@ type AppModel struct {
 	convergenceStatus      *backend.ConvergenceStatusInfo
 	runCommand             *backend.RunCommandStatusInfo
 	schedulerDiagnostics   *backend.SchedulerDiagnosticsInfo
-	runtimeEvents          []string
+	runtimeV2              *backend.RuntimeV2ProgressInfo
+	activityFeed           backend.WorkspaceActivityFeedInfo
 	progress               progressState
 	progressText           string
 	repairLoop             string
@@ -106,13 +106,16 @@ type AppModel struct {
 	mainViewport              *viewport.Model
 	mainViewportUserScrolled  bool
 	mainViewportPendingUpdate bool
+	mainViewportUnreadCount   int
 
 	workspaceListRefreshInFlight bool
 	workspaceListRefreshPending  bool
 	workspaceListRequestSeq      int64
 
-	eventCh                 chan backend.Event
+	projectionCh            chan backend.WorkspaceProjectionChangedInfo
+	subscriptionStatusCh    chan backend.SubscriptionStatusInfo
 	eventSubscriptionActive bool
+	subscriptionStatus      backend.SubscriptionStatusInfo
 	unsubscribe             func()
 	initialGoal             string
 	options                 Options
@@ -128,21 +131,36 @@ func NewAppModel(be backend.Backend, defaultWorkspaceID string, initialGoal stri
 }
 
 func NewAppModelWithOptions(be backend.Backend, defaultWorkspaceID string, initialGoal string, options Options) AppModel {
-	eventCh := make(chan backend.Event, 256)
+	projectionCh := make(chan backend.WorkspaceProjectionChangedInfo, 256)
+	statusCh := make(chan backend.SubscriptionStatusInfo, 64)
 	unsubscribe := func() {}
 	eventSubscriptionActive := false
+	subscriptionStatus := backend.SubscriptionStatusInfo{State: backend.SubscriptionConnecting}
 	if be != nil {
-		if eventsBackend := be.Events(); eventsBackend != nil {
-			if unsub, err := eventsBackend.Subscribe(context.Background(), func(_ context.Context, evt backend.Event) {
-				if !shouldConsumeBackendSubscriptionEvent(evt.Type) {
-					return
-				}
-				enqueueBackendEvent(eventCh, evt)
-			}); err == nil {
+		if projectionBackend := be.ProjectionEvents(); projectionBackend != nil {
+			if unsub, err := projectionBackend.SubscribeWorkspaceProjection(
+				context.Background(),
+				func(_ context.Context, info backend.WorkspaceProjectionChangedInfo) {
+					enqueueProjectionChanged(projectionCh, info)
+				},
+				func(_ context.Context, status backend.SubscriptionStatusInfo) {
+					enqueueSubscriptionStatus(statusCh, status)
+				},
+			); err == nil {
 				unsubscribe = unsub
 				eventSubscriptionActive = true
+				// Subscribe return does not imply live; wait for status callback.
+			} else {
+				subscriptionStatus = backend.SubscriptionStatusInfo{
+					State:     backend.SubscriptionDegraded,
+					LastError: err.Error(),
+				}
 			}
+		} else {
+			subscriptionStatus = backend.SubscriptionStatusInfo{State: backend.SubscriptionDegraded, LastError: "projection events backend unavailable"}
 		}
+	} else {
+		subscriptionStatus = backend.SubscriptionStatusInfo{State: backend.SubscriptionDegraded, LastError: "backend unavailable"}
 	}
 	return AppModel{
 		be:                      be,
@@ -150,8 +168,10 @@ func NewAppModelWithOptions(be backend.Backend, defaultWorkspaceID string, initi
 		defaultWorkspaceID:      defaultWorkspaceID,
 		activeWorkspaceID:       defaultWorkspaceID,
 		selectedWorkspaceID:     defaultWorkspaceID,
-		eventCh:                 eventCh,
+		projectionCh:            projectionCh,
+		subscriptionStatusCh:    statusCh,
 		eventSubscriptionActive: eventSubscriptionActive,
+		subscriptionStatus:      subscriptionStatus,
 		unsubscribe:             unsubscribe,
 		initialGoal:             strings.TrimSpace(initialGoal),
 		currentTask:             strings.TrimSpace(initialGoal),
@@ -164,70 +184,47 @@ func NewAppModelWithOptions(be backend.Backend, defaultWorkspaceID string, initi
 	}
 }
 
-func enqueueBackendEvent(ch chan backend.Event, evt backend.Event) {
+func enqueueProjectionChanged(ch chan backend.WorkspaceProjectionChangedInfo, info backend.WorkspaceProjectionChangedInfo) {
 	if ch == nil {
 		return
 	}
 	select {
-	case ch <- evt:
-		return
+	case ch <- info:
 	default:
-	}
-	if !isBackendEventQueueCritical(evt.Type) {
-		return
-	}
-	select {
-	case <-ch:
-	default:
-	}
-	select {
-	case ch <- evt:
-	default:
+		// drop oldest then enqueue latest projection invalidation
+		select {
+		case <-ch:
+		default:
+		}
+		select {
+		case ch <- info:
+		default:
+		}
 	}
 }
 
-func shouldConsumeBackendSubscriptionEvent(eventType backend.EventType) bool {
-	switch eventType {
-	case backend.EventWorkspaceCreated,
-		backend.EventWorkspaceListChanged,
-		backend.EventWorkspaceProjectionChanged,
-		backend.EventWorkspaceStateChanged,
-		backend.EventWorkspaceDeleted,
-		backend.EventGoalDefined,
-		backend.EventDoDDefined,
-		backend.EventRunStateChanged,
-		backend.EventDecisionCreated,
-		backend.EventDecisionResolved,
-		backend.EventApprovalCreated,
-		backend.EventApprovalResolved,
-		backend.EventResultAccepted,
-		backend.EventMemoryCreated,
-		backend.EventMemoryUpdated,
-		backend.EventMemoryDeleted,
-		backend.EventMemoryRecallRecorded,
-		backend.EventPatchPreviewed,
-		backend.EventPatchApplied,
-		backend.EventPatchFailed,
-		backend.EventPatchReverted,
-		backend.EventArtifactContinuationChanged,
-		backend.EventGovernanceEvaluated,
-		backend.EventGovernanceResolved,
-		backend.EventGovernanceEscalated,
-		backend.EventGovernanceBlocked:
-		return true
-	default:
-		return false
+func enqueueSubscriptionStatus(ch chan backend.SubscriptionStatusInfo, status backend.SubscriptionStatusInfo) {
+	if ch == nil {
+		return
 	}
-}
-
-func isBackendEventQueueCritical(eventType backend.EventType) bool {
-	return shouldConsumeBackendSubscriptionEvent(eventType)
+	select {
+	case ch <- status:
+	default:
+		select {
+		case <-ch:
+		default:
+		}
+		select {
+		case ch <- status:
+		default:
+		}
+	}
 }
 
 func (m AppModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{FetchAll(m.be)}
 	if m.eventSubscriptionActive {
-		cmds = append(cmds, WaitForBackendEvent(m.eventCh))
+		cmds = append(cmds, WaitForProjectionSignal(m.projectionCh, m.subscriptionStatusCh))
 	}
 	if m.initialGoal != "" && m.activeWorkspaceID != "" {
 		if isRunControlIntent(m.initialGoal) {
@@ -320,6 +317,72 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.requestWorkspaceContextFor(msg.WorkspaceID, msg.ResetMainViewport)
+	case WorkspaceRuntimeViewMsg:
+		requestWorkspaceID := strings.TrimSpace(msg.WorkspaceID)
+		if msg.RequestSeq > 0 && msg.RequestSeq != m.workspaceContextRequestSeqFor(requestWorkspaceID) {
+			// Stale request sequence: do not touch in-flight/pending for the
+			// current sequence, and never write cache from an obsolete response.
+			return m, nil
+		}
+		// CR03: scope/nil validation must complete BEFORE clearing
+		// ContextInFlight/ContextPending. Mismatch or nil view must keep dirty
+		// and preserve any already-merged pending readback.
+		if msg.Error == nil && msg.View != nil {
+			viewWorkspaceID := strings.TrimSpace(string(msg.View.WorkspaceID))
+			if requestWorkspaceID == "" || viewWorkspaceID == "" || requestWorkspaceID != viewWorkspaceID {
+				return m, nil
+			}
+		}
+		if msg.Error == nil && msg.View == nil {
+			// Nil view with no error: do not clear pending/in-flight/dirty.
+			return m, nil
+		}
+		contextPendingRefresh := false
+		if entry := m.workspaceRuntimeState(requestWorkspaceID); entry != nil {
+			contextPendingRefresh = entry.ContextPending
+			entry.ContextInFlight = false
+			entry.ContextPending = false
+		}
+		if msg.Error != nil {
+			if isTransientProjectionError(msg.Error) {
+				m.lastError = nil
+				m.progressText = "Workspace runtime view is refreshing; retrying state load"
+				return m, RetryWorkspaceContext(requestWorkspaceID, msg.ResetMainViewport)
+			}
+			// Keep active view; surface degraded status without wiping history.
+			m.setLastError(msg.Error)
+			return m, nil
+		}
+		// Zero revision while DirtyRevision is non-zero: do not apply, keep dirty,
+		// and schedule exactly one pending readback.
+		if entry := m.workspaceRuntimeState(requestWorkspaceID); entry != nil {
+			if refreshRevisionBelow(msg.View.Revision, entry.DirtyRevision) &&
+				msg.View.Revision.WorkspaceRevision == 0 &&
+				msg.View.Revision.RuntimeStateRevision == 0 &&
+				msg.View.Revision.ActivityRevision == 0 {
+				if !entry.ContextInFlight {
+					return m, m.requestWorkspaceContextFor(requestWorkspaceID, false)
+				}
+				entry.ContextPending = true
+				return m, nil
+			}
+		}
+		m.applyWorkspaceRuntimeView(*msg.View, msg.ResetMainViewport)
+		m.lastError = nil
+		cmds := []tea.Cmd{}
+		if m.workspaceMessageBelongsToActiveWorkspace(requestWorkspaceID) {
+			cmds = append(cmds, m.fetchActiveBlockerDetails())
+		}
+		if entry := m.workspaceRuntimeState(requestWorkspaceID); entry != nil {
+			if refreshRevisionBelow(msg.View.Revision, entry.DirtyRevision) {
+				// response still below dirty notification; schedule one more readback
+				contextPendingRefresh = true
+			}
+		}
+		if contextPendingRefresh {
+			cmds = append(cmds, m.requestWorkspaceContextFor(requestWorkspaceID, false))
+		}
+		return m, tea.Batch(cmds...)
 	case WorkspaceCreatedMsg:
 		if msg.Error != nil {
 			m.setLastError(msg.Error)
@@ -393,10 +456,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
-	case BackendEventMsg:
-		cmd := m.applyBackendEvent(msg.Event)
+	case SubscriptionStatusMsg:
+		cmd := m.applySubscriptionStatus(msg.Status)
 		if m.eventSubscriptionActive {
-			return m, tea.Batch(WaitForBackendEvent(m.eventCh), cmd)
+			return m, tea.Batch(WaitForProjectionSignal(m.projectionCh, m.subscriptionStatusCh), cmd)
+		}
+		return m, cmd
+	case WorkspaceProjectionChangedMsg:
+		cmd := m.applyWorkspaceProjectionChanged(msg.Info)
+		if m.eventSubscriptionActive {
+			return m, tea.Batch(WaitForProjectionSignal(m.projectionCh, m.subscriptionStatusCh), cmd)
 		}
 		return m, cmd
 	case RunStartedMsg:
@@ -779,7 +848,6 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		m.llmContextSummary = backend.LLMContextBudgetSummaryInfo{}
 		m.llmContext = nil
 		m.acceptance = backend.AcceptanceProjectionInfo{}
-		m.runtimeEvents = nil
 		m.failureReason = ""
 		m.lastError = nil
 		m.resetMainViewport()
@@ -1001,7 +1069,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 	case "timeline":
 		m.addInputHistory(text)
 		m.clearInput()
-		m.result = renderInspectTimeline(m.runtimeEvents)
+		m.result = renderInspectActivityFeed(m.activityFeed, 30)
 		m.resetMainViewport()
 		m.progressText = "Showing runtime timeline"
 		m.lastError = nil
@@ -1196,20 +1264,6 @@ func (m *AppModel) appendTranscript(kind string, text string) {
 	}
 }
 
-func (m *AppModel) appendRuntimeEvent(text string) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return
-	}
-	if len(m.runtimeEvents) > 0 && m.runtimeEvents[len(m.runtimeEvents)-1] == text {
-		return
-	}
-	m.runtimeEvents = append(m.runtimeEvents, text)
-	if len(m.runtimeEvents) > maxRuntimeEvents {
-		m.runtimeEvents = append([]string(nil), m.runtimeEvents[len(m.runtimeEvents)-maxRuntimeEvents:]...)
-	}
-}
-
 func renderTranscript(items []transcriptItem, width int, limit int) string {
 	if len(items) == 0 || width <= 0 || limit <= 0 {
 		return ""
@@ -1255,7 +1309,7 @@ func renderConfigResult(cfg *backend.ServiceConfig) string {
 	b.WriteString("System Configuration\n")
 	b.WriteString(fmt.Sprintf("- Server: %s\n", nonEmpty(cfg.ServerAddr, "-")))
 	b.WriteString(fmt.Sprintf("- Repository: %s %s\n", nonEmpty(cfg.Backend, "-"), nonEmpty(cfg.DataDir, "-")))
-	b.WriteString(fmt.Sprintf("- Default LLM provider: %s\n", nonEmpty(cfg.DefaultProvider, "-")))
+	b.WriteString(fmt.Sprintf("- Default LLM provider: %s\n", nonEmpty(cfg.DefaultChat.ProviderID, "-")))
 	b.WriteString(fmt.Sprintf("- Max concurrent runs: %d\n", cfg.MaxConcurrentRuns))
 	b.WriteString("\nLLM Output Budget\n")
 	b.WriteString(fmt.Sprintf("- maxPatchContentBytes: %d\n", output.MaxPatchContentBytes))
@@ -1315,23 +1369,6 @@ func memoryRecallHitSummary(items []backend.MemoryRecallHitInfo, memoryID common
 	return ""
 }
 
-func patchInfoFromEvent(evt backend.Event) backend.PatchInfo {
-	return backend.PatchInfo{
-		ID:           common.PatchID(firstPayloadString(evt.Payload, "patchId", "ID", "id", backend.PayloadKeyPatchID)),
-		WorkspaceID:  evt.WorkspaceID,
-		RunID:        evt.RunID,
-		StepID:       common.StepID(firstPayloadString(evt.Payload, "stepId", "StepID", backend.PayloadKeyStepID)),
-		ToolCallID:   common.ToolCallID(firstPayloadString(evt.Payload, "toolCallId", "ToolCallID", backend.PayloadKeyToolCallID)),
-		ApprovalID:   common.ApprovalID(firstPayloadString(evt.Payload, "approvalId", "ApprovalID", backend.PayloadKeyApprovalID)),
-		PatchType:    firstPayloadString(evt.Payload, "patchType", "PatchType", backend.PayloadKeyPatchType),
-		TargetRef:    firstPayloadString(evt.Payload, "targetRef", "TargetRef", backend.PayloadKeyTargetRef),
-		Summary:      firstPayloadString(evt.Payload, "summary", "Summary", backend.PayloadKeySummary),
-		State:        common.PatchState(firstPayloadString(evt.Payload, "state", "State", backend.PayloadKeyState)),
-		AddedLines:   payloadIntValue(evt.Payload, "addedLines", "AddedLines", backend.PayloadKeyAddedLines),
-		DeletedLines: payloadIntValue(evt.Payload, "deletedLines", "DeletedLines", backend.PayloadKeyDeletedLines),
-	}
-}
-
 func (m *AppModel) upsertPatch(next backend.PatchInfo) {
 	if next.ID == "" && next.TargetRef == "" && next.State == "" {
 		return
@@ -1380,25 +1417,6 @@ func mergePatchInfo(existing backend.PatchInfo, next backend.PatchInfo) backend.
 		existing.DeletedLines = next.DeletedLines
 	}
 	return existing
-}
-
-func artifactContinuationInfoFromEvent(evt backend.Event) backend.ArtifactContinuationInfo {
-	return backend.ArtifactContinuationInfo{
-		ID:                common.ArtifactContinuationID(firstPayloadString(evt.Payload, "artifactContinuationId", "ID", "id")),
-		WorkspaceID:       evt.WorkspaceID,
-		RunID:             evt.RunID,
-		RootStepID:        common.StepID(firstPayloadString(evt.Payload, "rootStepId", "RootStepID")),
-		ArtifactID:        firstPayloadString(evt.Payload, "artifactId", "ArtifactID"),
-		TargetRef:         firstPayloadString(evt.Payload, "targetRef", "TargetRef", backend.PayloadKeyTargetRef),
-		Operation:         firstPayloadString(evt.Payload, "operation", "Operation", backend.PayloadKeyOperation),
-		State:             common.ArtifactContinuationState(firstPayloadString(evt.Payload, "state", "State", backend.PayloadKeyState)),
-		ExpectedSequence:  payloadIntValue(evt.Payload, "expectedSequence", "ExpectedSequence"),
-		ReceivedSequences: payloadIntSliceValue(evt.Payload, "receivedSequences", "ReceivedSequences"),
-		FinalReceived:     payloadBoolValue(evt.Payload, "finalReceived", "FinalReceived"),
-		BytesWritten:      int64(payloadIntValue(evt.Payload, "bytesWritten", "BytesWritten", backend.PayloadKeyReceivedBytes)),
-		FailureReason:     firstPayloadString(evt.Payload, "failureReason", "FailureReason", "error", "Error", backend.PayloadKeyError),
-		Progress:          eventPayloadFromMap(payloadMapValue(evt.Payload, "progress", "Progress")),
-	}
 }
 
 func (m *AppModel) upsertArtifactContinuation(next backend.ArtifactContinuationInfo) {
@@ -1460,23 +1478,6 @@ func mergeArtifactContinuationInfo(existing backend.ArtifactContinuationInfo, ne
 func eventPayloadFromMap(input map[string]any) workorcheventpayload.Payload {
 	payload, _ := workorcheventpayload.FromMap(input)
 	return payload
-}
-
-func memoryRecallInfoFromEvent(evt backend.Event) backend.MemoryRecallTraceInfo {
-	return backend.MemoryRecallTraceInfo{
-		ID:                 common.MemoryRecallTraceID(firstPayloadString(evt.Payload, "traceId", "ID", "id", backend.PayloadKeyTraceID)),
-		WorkspaceID:        evt.WorkspaceID,
-		RunID:              evt.RunID,
-		StepID:             common.StepID(firstPayloadString(evt.Payload, "stepId", "StepID", backend.PayloadKeyStepID)),
-		Stage:              firstPayloadString(evt.Payload, "stage", "Stage", backend.PayloadKeyStage),
-		Source:             firstPayloadString(evt.Payload, "source", "Source", "sourceType", "SourceType", backend.PayloadKeySourceType),
-		Policy:             firstPayloadString(evt.Payload, "policy", "Policy", backend.PayloadKeyPolicy),
-		Status:             firstPayloadString(evt.Payload, "status", "Status", backend.PayloadKeyStatus),
-		ProviderID:         firstPayloadString(evt.Payload, "providerId", "ProviderID", backend.PayloadKeyProviderID),
-		Operation:          firstPayloadString(evt.Payload, "operation", "Operation", backend.PayloadKeyOperation),
-		RetrievedMemoryIDs: memoryIDsFromStrings(payloadStringSliceValue(evt.Payload, "retrievedMemoryIds", "RetrievedMemoryIDs", backend.PayloadKeyRetrievedMemoryIDs)),
-		Reason:             firstPayloadString(evt.Payload, "reason", "Reason", backend.PayloadKeyReason),
-	}
 }
 
 func memoryIDsFromStrings(items []string) []common.MemoryID {
@@ -1977,317 +1978,97 @@ func approvalScopeMatches(item backend.ApprovalInfo, workspaceID common.Workspac
 	return true
 }
 
-func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
-	if cmd := m.recordWorkspaceEventRevision(evt); cmd != nil {
-		return cmd
-	}
-	switch evt.Type {
-	case backend.EventWorkspaceListChanged:
-		return m.requestWorkspaceListRefresh()
-	case backend.EventWorkspaceProjectionChanged:
-		if evt.WorkspaceID == "" {
-			return m.requestWorkspaceListRefresh()
-		}
-		if m.activeWorkspaceID != "" && string(evt.WorkspaceID) == m.activeWorkspaceID {
-			return tea.Batch(m.requestWorkspaceListRefresh(), m.requestWorkspaceContextRefresh(false))
-		}
-		return m.requestWorkspaceListRefresh()
-	case backend.EventWorkspaceCreated:
-		m.upsertWorkspaceFromEvent(evt)
-		return m.requestWorkspaceListRefresh()
-	case backend.EventWorkspaceDeleted:
-		m.removeWorkspace(evt.WorkspaceID)
-		if string(evt.WorkspaceID) == m.activeWorkspaceID {
-			m.activeWorkspaceID = ""
-			m.selectedWorkspaceID = ""
-			m.cursor = 0
-			m.resetWorkspaceView()
-			m.ensureActiveWorkspace()
-			m.progressText = "Workspace removed; refreshing state"
-		}
-		return m.requestWorkspaceListRefresh()
-	}
-	knownWorkspace := evt.WorkspaceID == "" || workspaceIndex(m.workspaces, string(evt.WorkspaceID)) >= 0
-	if m.backendEventYieldsToPromptModeProjection(evt) {
-		if !knownWorkspace {
-			return m.requestWorkspaceListRefresh()
-		}
-		return nil
-	}
-	if evt.WorkspaceID != "" {
-		m.upsertWorkspaceFromEvent(evt)
-	}
-	if !m.backendEventBelongsToActiveWorkspace(evt) {
-		if !knownWorkspace {
-			return m.requestWorkspaceListRefresh()
-		}
-		return nil
-	}
-	switch evt.Type {
-	case backend.EventWorkspaceStateChanged:
-		state := common.WorkspaceState(firstPayloadString(evt.Payload, "state", "State", backend.PayloadKeyState))
-		activeRunID := firstPayloadString(evt.Payload, "activeRunId", "ActiveRunID", backend.PayloadKeyActiveRunID)
-		if activeRunID != "" {
-			if activeRunID != m.activeRunID && state == common.WorkspaceStateActive {
-				m.clearRunDisplayState()
-			}
-			m.activeRunID = activeRunID
-		}
-		m.applyWorkspaceProgress(state)
-		if state == common.WorkspaceStateActive && activeRunID != "" {
-			m.clearBlockingInputState()
-			m.running = true
-			m.progress = progressRunning
-			m.progressText = "Running"
-		}
-		if !knownWorkspace {
-			return m.requestWorkspaceListRefresh()
-		}
-		switch state {
-		case common.WorkspaceStateActive:
-			if activeRunID != "" {
-				return nil
-			}
-			return m.requestWorkspaceContextRefresh(false)
-		case common.WorkspaceStateBlockedOnApproval:
-			return m.requestWorkspaceContextRefresh(false)
-		default:
-			return nil
-		}
-	case backend.EventGoalDefined, backend.EventDoDDefined:
-		m.progressText = "Workspace definitions changed; refreshing context"
-		return m.requestWorkspaceContextRefresh(false)
-	case backend.EventRunStateChanged:
-		state := firstPayloadString(evt.Payload, "state", "State", backend.PayloadKeyState)
-		if evt.RunID != "" {
-			m.activeRunID = string(evt.RunID)
-		}
-		m.applyRunState(common.RunState(state), evt.Payload)
-		return m.fetchActiveBlockerDetails()
-	case backend.EventDecisionCreated:
-		decision := backend.DecisionInfo{
-			ID:          common.TicketID(firstPayloadString(evt.Payload, "ticketId", "ID", "id", backend.PayloadKeyBlockingTicketID)),
-			WorkspaceID: evt.WorkspaceID,
-			RunID:       evt.RunID,
-			Reason:      firstPayloadString(evt.Payload, "reason", "Reason", backend.PayloadKeyReason),
-			Question:    firstPayloadString(evt.Payload, "question", "Question"),
-			State:       "open",
-		}
-		m.blockingDecision = &decision
-		m.upsertDecision(decision)
-		m.running = false
-		m.progress = progressWaitingDecision
-		m.progressText = nonEmpty(m.blockingDecision.Question, m.blockingDecision.Reason, string(m.blockingDecision.ID))
-		return m.fetchActiveBlockerDetails()
-	case backend.EventApprovalCreated:
-		approvalContext, err := workorcheventpayload.FromMap(payloadMapValue(evt.Payload, "context", "Context", backend.PayloadKeyContext))
-		if err != nil {
-			return nil
-		}
-		approval := backend.ApprovalInfo{
-			ID:          common.ApprovalID(firstPayloadString(evt.Payload, "approvalId", "ID", "id", backend.PayloadKeyBlockingApprovalID)),
-			WorkspaceID: evt.WorkspaceID,
-			RunID:       evt.RunID,
-			Reason:      firstPayloadString(evt.Payload, "reason", "Reason", backend.PayloadKeyReason),
-			Action:      firstPayloadString(evt.Payload, "action", "Action", backend.PayloadKeyAction),
-			Context:     approvalContext,
-			State:       "pending",
-		}
-		m.blockingApproval = &approval
-		m.upsertApproval(approval)
-		m.running = false
-		m.progress = progressWaitingApproval
-		m.progressText = nonEmpty(blockingApprovalLabel(m.blockingApproval), string(m.blockingApproval.ID))
-		return m.fetchActiveBlockerDetails()
-	case backend.EventDecisionResolved:
-		ticketID := common.TicketID(firstPayloadString(evt.Payload, "ticketId", "ID", "id", backend.PayloadKeyBlockingTicketID))
-		m.markDecisionResolvedForWorkspace(evt.WorkspaceID, ticketID, evt.RunID)
-		m.markDecisionResolved(ticketID, evt.WorkspaceID, evt.RunID)
-		if string(evt.WorkspaceID) == m.activeWorkspaceID {
-			m.blockingDecision = nil
-			m.progress = progressSubmitting
-			m.progressText = "Decision resolved; waiting for server continuation"
-		}
-		return m.refreshActiveWorkspaceState()
-	case backend.EventApprovalResolved:
-		approvalID := common.ApprovalID(firstPayloadString(evt.Payload, "approvalId", "ID", "id", backend.PayloadKeyBlockingApprovalID))
-		m.markApprovalResolvedForWorkspace(evt.WorkspaceID, approvalID, evt.RunID)
-		m.markApprovalResolved(approvalID, evt.WorkspaceID, evt.RunID)
-		if string(evt.WorkspaceID) == m.activeWorkspaceID {
-			m.blockingApproval = nil
-			m.progress = progressSubmitting
-			m.progressText = "Approval resolved; waiting for server continuation"
-		}
-		return m.refreshActiveWorkspaceState()
-	case backend.EventGovernanceResolved:
-		m.progressText = governanceProgressText("resolved", evt.Payload)
-	case backend.EventGovernanceEscalated:
-		m.progressText = governanceProgressText("escalated", evt.Payload)
-		return m.fetchActiveBlockerDetails()
-	case backend.EventGovernanceBlocked:
-		m.progressText = governanceProgressText("blocked", evt.Payload)
-		return m.fetchActiveBlockerDetails()
-	case backend.EventGovernanceEvaluated:
-		m.progressText = governanceProgressText("evaluated", evt.Payload)
-	case backend.EventResultAccepted:
-		m.result = firstPayloadString(evt.Payload, "summary", "Summary", backend.PayloadKeySummary)
-		m.artifacts = artifactPayloadStrings(evt.Payload)
-		m.sources = nil
-		m.followMainViewportTail()
-		return m.requestWorkspaceContextRefresh(false)
-	case backend.EventPatchPreviewed, backend.EventPatchApplied, backend.EventPatchFailed, backend.EventPatchReverted:
-		m.upsertPatch(patchInfoFromEvent(evt))
-		targetRef := firstPayloadString(evt.Payload, "targetRef", "TargetRef", backend.PayloadKeyTargetRef)
-		state := firstPayloadString(evt.Payload, "state", "State", backend.PayloadKeyState)
-		if targetRef != "" || state != "" {
-			m.progressText = strings.TrimSpace("Patch " + nonEmpty(state, string(evt.Type)) + " " + targetRef)
-		} else {
-			m.progressText = string(evt.Type)
-		}
-		m.appendRuntimeEvent(m.progressText)
-		m.followMainViewportTailUnlessUserScrolled()
-		return nil
-	case backend.EventArtifactContinuationChanged:
-		m.upsertArtifactContinuation(artifactContinuationInfoFromEvent(evt))
-		m.progressText = artifactContinuationProgressText(evt.Payload)
-		m.appendRuntimeEvent(m.progressText)
-		m.followMainViewportTailUnlessUserScrolled()
-		return nil
-	case backend.EventMemoryRecallRecorded:
-		m.upsertMemoryRecall(memoryRecallInfoFromEvent(evt))
-		status := firstPayloadString(evt.Payload, "status", "Status", backend.PayloadKeyStatus)
-		ids := payloadStringSliceValue(evt.Payload, "retrievedMemoryIds", "RetrievedMemoryIDs", backend.PayloadKeyRetrievedMemoryIDs)
-		if status == "degraded" {
-			m.progressText = "Memory recall: degraded"
-		} else {
-			m.progressText = fmt.Sprintf("Memory recall: %s %d", nonEmpty(status, "selected"), len(ids))
-		}
-		m.appendRuntimeEvent(m.progressText)
-		m.followMainViewportTailUnlessUserScrolled()
-		return m.requestWorkspaceContextRefresh(false)
-	case backend.EventMemoryCreated, backend.EventMemoryUpdated, backend.EventMemoryDeleted:
-		m.progressText = "Workspace memory changed; refreshing context"
-		return m.requestWorkspaceContextRefresh(false)
+func (m *AppModel) applySubscriptionStatus(status backend.SubscriptionStatusInfo) tea.Cmd {
+	previous := m.subscriptionStatus.State
+	m.subscriptionStatus = status
+	if status.State == backend.SubscriptionLive && previous != backend.SubscriptionLive {
+		// reconnect / first live: list + active RuntimeView readback
+		return tea.Batch(m.requestWorkspaceListRefresh(), m.requestWorkspaceContextRefresh(false))
 	}
 	return nil
 }
 
-func (m *AppModel) backendEventBelongsToActiveWorkspace(evt backend.Event) bool {
-	if strings.TrimSpace(m.activeWorkspaceID) == "" {
+func (m *AppModel) applyWorkspaceProjectionChanged(info backend.WorkspaceProjectionChangedInfo) tea.Cmd {
+	workspaceID := strings.TrimSpace(string(info.WorkspaceID))
+	if workspaceID == "" {
+		return m.requestWorkspaceListRefresh()
+	}
+	entry := m.ensureWorkspaceRuntimeState(workspaceID)
+	if entry == nil {
+		return m.requestWorkspaceListRefresh()
+	}
+	// notification only advances DirtyRevision, never AppliedRevision.
+	generationChanged := revisionGenerationChanged(entry.DirtyRevision, info.Revision)
+	entry.DirtyRevision = mergeRefreshRevisionMax(entry.DirtyRevision, info.Revision)
+	if generationChanged || info.Revision.ActivityRevision > entry.ActivityDirtyRevision {
+		entry.ActivityDirtyRevision = info.Revision.ActivityRevision
+	}
+	if strings.TrimSpace(info.Revision.StreamGeneration) != "" &&
+		strings.TrimSpace(info.Revision.StreamGeneration) != strings.TrimSpace(m.subscriptionStatus.StreamGeneration) {
+		m.subscriptionStatus.StreamGeneration = info.Revision.StreamGeneration
+		m.subscriptionStatus.StreamRevision = info.Revision.StreamRevision
+		m.subscriptionStatus.LastEventAt = info.UpdatedAt
+		m.subscriptionStatus.State = backend.SubscriptionLive
+	} else if info.Revision.StreamRevision > m.subscriptionStatus.StreamRevision {
+		m.subscriptionStatus.StreamRevision = info.Revision.StreamRevision
+		m.subscriptionStatus.LastEventAt = info.UpdatedAt
+		if m.subscriptionStatus.State == "" || m.subscriptionStatus.State == backend.SubscriptionConnecting {
+			m.subscriptionStatus.State = backend.SubscriptionLive
+		}
+	}
+	if m.activeWorkspaceID != "" && workspaceID == m.activeWorkspaceID {
+		if projectionSectionsNeedRuntimeView(info.ChangedSections) {
+			return tea.Batch(m.requestWorkspaceListRefresh(), m.requestWorkspaceContextRefresh(false))
+		}
+		return m.requestWorkspaceListRefresh()
+	}
+	return m.requestWorkspaceListRefresh()
+}
+
+func projectionSectionsNeedRuntimeView(sections []backend.WorkspaceProjectionSection) bool {
+	if len(sections) == 0 {
+		// empty sections may represent health/state-only changes; still readback once.
 		return true
 	}
-	if evt.WorkspaceID != "" {
-		return string(evt.WorkspaceID) == m.activeWorkspaceID
-	}
-	if evt.RunID != "" {
-		return strings.TrimSpace(m.activeRunID) != "" && string(evt.RunID) == m.activeRunID
+	for _, section := range sections {
+		switch section {
+		case backend.WorkspaceProjectionSectionRuntimeProgress,
+			backend.WorkspaceProjectionSectionActivity,
+			backend.WorkspaceProjectionSectionGovernance,
+			backend.WorkspaceProjectionSectionEvidence,
+			backend.WorkspaceProjectionSectionResult:
+			return true
+		}
 	}
 	return false
 }
 
-func (m *AppModel) recordWorkspaceEventRevision(evt backend.Event) tea.Cmd {
-	if evt.Revision <= 0 || evt.WorkspaceID == "" {
-		return nil
+func mergeRefreshRevisionMax(current, incoming backend.WorkspaceRefreshRevision) backend.WorkspaceRefreshRevision {
+	if revisionGenerationChanged(current, incoming) {
+		return incoming
 	}
-	workspaceID := string(evt.WorkspaceID)
-	entry := m.ensureWorkspaceRuntimeState(workspaceID)
-	if entry == nil {
-		return nil
+	if strings.TrimSpace(current.StreamGeneration) == "" {
+		current.StreamGeneration = strings.TrimSpace(incoming.StreamGeneration)
 	}
-	previous := entry.LastRevision
-	if previous > 0 && evt.Revision > previous+1 {
-		entry.RevisionGapCount++
-		entry.LastRevisionGap = evt.Revision - previous - 1
-		entry.LastRevision = evt.Revision
-		if workspaceID == m.activeWorkspaceID {
-			m.progressText = fmt.Sprintf("Event stream revision gap detected (%d); refreshing context", evt.Revision)
-			return m.requestWorkspaceContextRefresh(false)
-		}
-		return nil
+	if incoming.StreamRevision > current.StreamRevision {
+		current.StreamRevision = incoming.StreamRevision
 	}
-	if evt.Revision > previous {
-		entry.LastRevision = evt.Revision
+	if incoming.WorkspaceRevision > current.WorkspaceRevision {
+		current.WorkspaceRevision = incoming.WorkspaceRevision
 	}
-	return nil
-}
-
-func (m *AppModel) backendEventYieldsToPromptModeProjection(evt backend.Event) bool {
-	if evt.Revision <= 0 || evt.WorkspaceID == "" {
-		return false
+	if incoming.ProjectedSourceRevision > current.ProjectedSourceRevision {
+		current.ProjectedSourceRevision = incoming.ProjectedSourceRevision
 	}
-	eventMode := backendEventPromptMode(evt)
-	if eventMode == "" {
-		return false
+	if incoming.RuntimeStateRevision > current.RuntimeStateRevision {
+		current.RuntimeStateRevision = incoming.RuntimeStateRevision
 	}
-	entry := m.workspaceRuntimeState(string(evt.WorkspaceID))
-	if entry == nil || entry.PromptMode == "" || entry.PromptModeRevision == 0 || evt.Revision > entry.PromptModeRevision {
-		return false
+	if incoming.EvidenceSequence > current.EvidenceSequence {
+		current.EvidenceSequence = incoming.EvidenceSequence
 	}
-	projectedMode := normalizePromptMode(entry.PromptMode)
-	if projectedMode != eventMode {
-		return true
+	if incoming.ActivityRevision > current.ActivityRevision {
+		current.ActivityRevision = incoming.ActivityRevision
 	}
-	expectedBlockerID := projectedPromptBlockerID(entry, projectedMode)
-	eventBlockerID := backendEventPromptBlockerID(evt, eventMode)
-	return expectedBlockerID != "" && eventBlockerID != expectedBlockerID
-}
-
-func backendEventPromptMode(evt backend.Event) string {
-	switch evt.Type {
-	case backend.EventWorkspaceStateChanged:
-		switch common.WorkspaceState(firstPayloadString(evt.Payload, "state", "State", backend.PayloadKeyState)) {
-		case common.WorkspaceStateBlockedOnApproval:
-			return workspacePromptModeApproval
-		case common.WorkspaceStateActive, common.WorkspaceStateSuperseded:
-			return workspacePromptModeWorkspace
-		default:
-			return ""
-		}
-	case backend.EventRunStateChanged:
-		switch common.RunState(firstPayloadString(evt.Payload, "state", "State", backend.PayloadKeyState)) {
-		case common.RunStateBlockedOnDecision:
-			return workspacePromptModeDecision
-		case common.RunStateBlockedOnApproval:
-			return workspacePromptModeApproval
-		case common.RunStateActive:
-			return workspacePromptModeRunning
-		case common.RunStatePending:
-			return workspacePromptModeWorkspace
-		default:
-			return ""
-		}
-	case backend.EventDecisionCreated:
-		return workspacePromptModeDecision
-	case backend.EventApprovalCreated:
-		return workspacePromptModeApproval
-	default:
-		return ""
-	}
-}
-
-func projectedPromptBlockerID(entry *workspaceRuntimeState, mode string) string {
-	if entry == nil || !entry.HasOverview {
-		return ""
-	}
-	switch mode {
-	case workspacePromptModeDecision:
-		return strings.TrimSpace(string(entry.Overview.BlockingTicketID))
-	case workspacePromptModeApproval:
-		return strings.TrimSpace(string(entry.Overview.BlockingApprovalID))
-	default:
-		return ""
-	}
-}
-
-func backendEventPromptBlockerID(evt backend.Event, mode string) string {
-	switch mode {
-	case workspacePromptModeDecision:
-		return strings.TrimSpace(firstPayloadString(evt.Payload, "ticketId", "ID", "id", backend.PayloadKeyBlockingTicketID))
-	case workspacePromptModeApproval:
-		return strings.TrimSpace(firstPayloadString(evt.Payload, "approvalId", "ID", "id", backend.PayloadKeyBlockingApprovalID))
-	default:
-		return ""
-	}
+	return current
 }
 
 func (m *AppModel) requestWorkspaceListRefresh() tea.Cmd {
@@ -2525,7 +2306,8 @@ func (m *AppModel) clearRunDisplayState() {
 	m.llmContext = nil
 	m.acceptance = backend.AcceptanceProjectionInfo{}
 	m.runCommand = nil
-	m.runtimeEvents = nil
+	m.runtimeV2 = nil
+	m.activityFeed = backend.WorkspaceActivityFeedInfo{}
 	m.repairLoop = ""
 	m.failureReason = ""
 	m.failureHint = ""
@@ -3703,4 +3485,44 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func payloadInt64(payload map[string]any, keys ...string) int64 {
+	for _, key := range keys {
+		switch value := payload[key].(type) {
+		case int64:
+			return value
+		case int:
+			return int64(value)
+		case float64:
+			return int64(value)
+		case float32:
+			return int64(value)
+		}
+	}
+	return 0
+}
+
+func payloadUint64(payload map[string]any, keys ...string) uint64 {
+	for _, key := range keys {
+		switch value := payload[key].(type) {
+		case uint64:
+			return value
+		case uint:
+			return uint64(value)
+		case int64:
+			if value >= 0 {
+				return uint64(value)
+			}
+		case int:
+			if value >= 0 {
+				return uint64(value)
+			}
+		case float64:
+			if value >= 0 {
+				return uint64(value)
+			}
+		}
+	}
+	return 0
 }

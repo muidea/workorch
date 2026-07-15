@@ -1,0 +1,34 @@
+WorkOrch Agent                                                                            Workspaces
+Workspace: tui-refresh-ws-a-493077 (ws-8c31db3)  /home/rangh/aispace/workorch/docs/...      tui-refresh-ws-b...  active
+default soul: soul-generic-governed-execution | bindings: planning,execution,decisi...      TUI long output ...  active
+Recent Activity                                                                           > tui-refresh-ws-a...  active
+- workspace definitions changed; execution must be rerun
+                                                                                          current ws: 0 decisions
+                                                                                          current ws: 0 approvals
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Idle | ws ws-8c31db3 | progress 2026-07-15T13:25:06.726664698Z
+ws-8c31db3 > |
+enter: submit | /goal | /run resume | /dod | /status | /coverage | /timeline | /memory | /config | /exit

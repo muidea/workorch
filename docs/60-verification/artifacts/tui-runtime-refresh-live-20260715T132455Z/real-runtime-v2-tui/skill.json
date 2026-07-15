@@ -1,0 +1,25 @@
+{
+  "service": "workorch",
+  "backend": "file",
+  "dataRoot": "/home/rangh/aispace/workorch/docs/60-verification/artifacts/tui-runtime-refresh-live-20260715T132455Z/data",
+  "skill": {
+    "id": "skill-tui-long-output-493234",
+    "name": "TUI long output e2e skill",
+    "version": "v1",
+    "description": "Creates deterministic long final output for TUI viewport verification.",
+    "triggerRules": [
+      "tui long output"
+    ],
+    "instruction": "Return a completed dodAssessment with long user-facing result details.",
+    "requiredToolKinds": [
+      "llm/chat"
+    ],
+    "constraints": [
+      "do not call external tools"
+    ],
+    "source": "repository",
+    "scope": "repository",
+    "managedBy": "workorch",
+    "sourceSkillId": "skill-tui-long-output-493234"
+  }
+}

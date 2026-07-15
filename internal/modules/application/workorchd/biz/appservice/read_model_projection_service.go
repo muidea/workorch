@@ -14,6 +14,16 @@ func ProjectWorkspaceSnapshotSummary(snapshot WorkspaceSnapshot) WorkspaceSnapsh
 	return readmodelports.ProjectWorkspaceSnapshotSummary(snapshot)
 }
 
+func ProjectWorkspaceRuntimeView(snapshot WorkspaceSnapshot, activityLimit int, beforeCursor string) WorkspaceRuntimeView {
+	return readmodelports.ProjectWorkspaceRuntimeView(snapshot, activityLimit, beforeCursor)
+}
+
+// ProjectWorkspaceRuntimeViewWithActivity builds RuntimeView using the store-owned
+// activity feed so ActivityRevision is never regenerated on the HTTP/read path.
+func ProjectWorkspaceRuntimeViewWithActivity(snapshot WorkspaceSnapshot, storedActivity WorkspaceActivityFeed, hasStoredActivity bool, activityLimit int, beforeCursor string) WorkspaceRuntimeView {
+	return readmodelports.ProjectWorkspaceRuntimeViewWithActivity(snapshot, storedActivity, hasStoredActivity, activityLimit, beforeCursor)
+}
+
 func ProjectDecisionView(item Decision) Decision {
 	return readmodelports.ProjectDecisionView(item)
 }

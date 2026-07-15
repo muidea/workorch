@@ -1,0 +1,17 @@
+{
+  "service": "workorch",
+  "backend": "file",
+  "dataRoot": "/home/rangh/aispace/workorch/docs/60-verification/artifacts/tui-runtime-refresh-live-20260715T132455Z/data",
+  "dod": {
+    "id": "dod-e2ac65b0d0bbd879",
+    "workspaceId": "ws-7d57c4753f148d96",
+    "items": [
+      "Final Result contains LONG-IMPLEMENTATION 70",
+      "Final Result is long enough to require PgDown/PgUp viewport scrolling",
+      "Workspace monitor remains visible while main display scrolls"
+    ],
+    "state": "ready",
+    "definitionRevision": "dod:3374e5cfa046af59ed828607f6b92aaae251c6b88aae869b165c2e6ae50ce63d",
+    "lineageState": "active"
+  }
+}

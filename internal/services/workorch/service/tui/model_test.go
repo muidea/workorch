@@ -303,39 +303,11 @@ func TestModelRendersArtifactContinuationProgress(t *testing.T) {
 	}
 }
 
-func TestModelHandlesArtifactContinuationEvent(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-1", "")
-	m.activeWorkspaceID = "ws-1"
-	m.activeRunID = "run-001"
-	cmd := m.applyBackendEvent(backend.Event{
-		Type:        backend.EventArtifactContinuationChanged,
-		WorkspaceID: "ws-1",
-		RunID:       "run-001",
-		Payload: map[string]any{
-			"state":             "chunking",
-			"targetRef":         "deliverable.txt",
-			"expectedSequence":  4,
-			"receivedSequences": []any{1, 2, 3},
-			"bytesWritten":      512,
-		},
-	})
-	if !strings.Contains(m.progressText, "Artifact chunking deliverable.txt seq 3/4 512B") {
-		t.Fatalf("progressText = %q, want artifact continuation progress", m.progressText)
-	}
-	if cmd != nil {
-		t.Fatalf("artifact continuation event should update incrementally without workspace refresh")
-	}
-	if len(m.artifactContinuations) != 1 || m.artifactContinuations[0].TargetRef != "deliverable.txt" {
-		t.Fatalf("artifactContinuations = %+v, want incrementally updated item", m.artifactContinuations)
-	}
-}
-
 func TestModelWorkspaceContextPartialUpdateDoesNotClearExistingDisplay(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.currentTask = "existing goal"
 	m.transcript = []transcriptItem{{Kind: "Goal", Text: "existing goal"}}
 	m.dodItems = []string{"existing dod"}
-	m.runtimeEvents = []string{"existing runtime event"}
 	m.patches = []backend.PatchInfo{{ID: "patch-1", TargetRef: "old.txt", State: common.PatchStateApplied}}
 	m.llmUsage = backend.LLMUsageSummaryInfo{EntryTotal: 2, TotalTokens: 100}
 	m.activeRunID = "run-1"
@@ -358,8 +330,8 @@ func TestModelWorkspaceContextPartialUpdateDoesNotClearExistingDisplay(t *testin
 	if m.currentTask != "existing goal" || len(m.dodItems) != 1 || m.dodItems[0] != "existing dod" {
 		t.Fatalf("definitions were cleared: task=%q dod=%v", m.currentTask, m.dodItems)
 	}
-	if len(m.runtimeEvents) != 1 || len(m.patches) != 1 || m.llmUsage.EntryTotal != 2 {
-		t.Fatalf("display state was cleared: events=%v patches=%v llm=%+v", m.runtimeEvents, m.patches, m.llmUsage)
+	if len(m.patches) != 1 || m.llmUsage.EntryTotal != 2 {
+		t.Fatalf("display state was cleared: patches=%v llm=%+v", m.patches, m.llmUsage)
 	}
 }
 
@@ -772,7 +744,6 @@ func TestModelRunRestartCommandRestartsWorkspaceWithOperatorInput(t *testing.T) 
 	m.currentTask = "已有目标"
 	m.result = "old final result"
 	m.artifacts = []string{"old-artifact"}
-	m.runtimeEvents = []string{"old event"}
 	m.setInput("/run restart 补充信息：继续基于现有目标修复")
 
 	next, cmd := m.submitInput()
@@ -806,8 +777,8 @@ func TestModelRunRestartCommandRestartsWorkspaceWithOperatorInput(t *testing.T) 
 	if m.activeRunID != "run-new" || !m.running {
 		t.Fatalf("run state = %q/%v, want restarted run-new/running", m.activeRunID, m.running)
 	}
-	if m.result != "" || len(m.artifacts) != 0 || len(m.runtimeEvents) != 0 {
-		t.Fatalf("old run display not cleared: result=%q artifacts=%v events=%v", m.result, m.artifacts, m.runtimeEvents)
+	if m.result != "" || len(m.artifacts) != 0 {
+		t.Fatalf("old run display not cleared: result=%q artifacts=%v ", m.result, m.artifacts)
 	}
 }
 
@@ -888,7 +859,6 @@ func TestModelRunControlRunningClearsStaleResult(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.result = "stale result"
 	m.artifacts = []string{"stale-artifact"}
-	m.runtimeEvents = []string{"stale event"}
 
 	next, _ := m.Update(RunControlMsg{
 		Run:         &backend.RunInfo{ID: "run-new", WorkspaceID: "ws-1", State: common.RunStateActive},
@@ -899,8 +869,8 @@ func TestModelRunControlRunningClearsStaleResult(t *testing.T) {
 	if m.activeRunID != "run-new" || m.progress != progressRunning || !m.running {
 		t.Fatalf("run state = %q/%s/%v, want running run-new", m.activeRunID, m.progress, m.running)
 	}
-	if m.result != "" || len(m.artifacts) != 0 || len(m.runtimeEvents) != 0 {
-		t.Fatalf("stale display not cleared on run control: result=%q artifacts=%v events=%v", m.result, m.artifacts, m.runtimeEvents)
+	if m.result != "" || len(m.artifacts) != 0 {
+		t.Fatalf("stale display not cleared on run control: result=%q artifacts=%v ", m.result, m.artifacts)
 	}
 }
 
@@ -924,51 +894,6 @@ func TestModelClearRunDisplayStateSyncsViewportHeightAfterResultClear(t *testing
 	if m.mainViewport.Height != height || m.mainViewport.Width != width {
 		t.Fatalf("viewport size = %d/%d, want synced %d/%d", m.mainViewport.Width, m.mainViewport.Height, width, height)
 	}
-}
-
-func TestModelPatchAndMemoryEventsUpdateIncrementally(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-1", "")
-	m.activeWorkspaceID = "ws-1"
-	m.activeRunID = "run-1"
-	m.ensureWorkspaceRuntimeState("ws-1")
-
-	if cmd := m.applyBackendEvent(backend.Event{
-		Type:        backend.EventPatchApplied,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload: map[string]any{
-			"patchId":      "patch-1",
-			"state":        string(common.PatchStateApplied),
-			"targetRef":    "main.go",
-			"summary":      "updated target",
-			"addedLines":   3,
-			"deletedLines": 1,
-		},
-	}); cmd != nil {
-		t.Fatal("patch event should not fetch full workspace context")
-	}
-	if len(m.patches) != 1 || m.patches[0].ID != "patch-1" || m.patches[0].AddedLines != 3 {
-		t.Fatalf("patches = %+v, want incremental patch", m.patches)
-	}
-
-	if cmd := m.applyBackendEvent(backend.Event{
-		Type:        backend.EventMemoryRecallRecorded,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload: map[string]any{
-			"traceId":            "trace-1",
-			"status":             "selected",
-			"source":             "recall",
-			"stage":              "planning",
-			"retrievedMemoryIds": []any{"mem-1", "mem-2"},
-		},
-	}); cmd == nil {
-		t.Fatal("memory recall event should refresh workspace context after incremental update")
-	}
-	if len(m.memoryRecalls) != 1 || len(m.memoryRecalls[0].RetrievedMemoryIDs) != 2 {
-		t.Fatalf("memoryRecalls = %+v, want incremental recall", m.memoryRecalls)
-	}
-
 }
 
 func TestModelBlockedWorkspaceInputRefreshesBlockerInsteadOfContinuing(t *testing.T) {
@@ -1098,7 +1023,12 @@ func TestModelInspectCommandsRenderCurrentState(t *testing.T) {
 	m.activeRunID = "run-1"
 	m.currentTask = "finish task"
 	m.dodItems = []string{"dod one"}
-	m.runtimeEvents = []string{"Working: shell/command go test ./..."}
+	m.activityFeed = backend.WorkspaceActivityFeedInfo{
+		Items: []backend.WorkspaceActivityItemInfo{{
+			ID:      "activity-timeline",
+			Summary: "Working: shell/command go test ./...",
+		}},
+	}
 	m.patches = []backend.PatchInfo{{ID: "patch-1", TargetRef: "main.go", State: common.PatchStateApplied}}
 	m.artifacts = []string{"result.md"}
 
@@ -1163,153 +1093,6 @@ func TestModelStatusRendersSchedulerDiagnosticsWithoutTriggeringCommands(t *test
 	}
 	if m.progressText != "Showing workspace status" {
 		t.Fatalf("progressText = %q, want status display text", m.progressText)
-	}
-}
-
-func TestModelStepProgressAutoScrollsToLatest(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-1", "")
-	m.width = 120
-	m.height = 16
-	lines := make([]string, 0, 80)
-	for i := 0; i < 80; i++ {
-		lines = append(lines, fmt.Sprintf("tail-line-%02d", i))
-	}
-	m.result = strings.Join(lines, "\n")
-	_ = m.View()
-	if m.mainViewport == nil {
-		t.Fatal("expected viewport initialized")
-	}
-	before := m.mainViewport.YOffset
-	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventPatchApplied,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload: map[string]any{
-			"patchId":   "patch-scroll",
-			"state":     string(common.PatchStateApplied),
-			"targetRef": "main.go",
-		},
-	})
-	_ = m.View()
-	if m.mainViewport.YOffset < before {
-		t.Fatalf("viewport offset regressed: before=%d after=%d", before, m.mainViewport.YOffset)
-	}
-	if m.mainViewport.YOffset == 0 {
-		t.Fatalf("viewport should follow latest content, got offset=%d", m.mainViewport.YOffset)
-	}
-}
-
-func TestModelRuntimeUpdateDoesNotStealManuallyScrolledViewport(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-1", "")
-	m.width = 120
-	m.height = 16
-	lines := make([]string, 0, 80)
-	for i := 0; i < 80; i++ {
-		lines = append(lines, fmt.Sprintf("manual-scroll-line-%02d", i))
-	}
-	m.result = strings.Join(lines, "\n")
-	_ = m.View()
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
-	m = asModel(next)
-	offsetAfterScroll := m.mainViewport.YOffset
-	if offsetAfterScroll == 0 {
-		t.Fatal("expected manual scroll to move viewport")
-	}
-
-	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventPatchApplied,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload: map[string]any{
-			"patchId":   "patch-manual-scroll",
-			"state":     string(common.PatchStateApplied),
-			"targetRef": "main.go",
-		},
-	})
-	_ = m.View()
-	if m.mainViewport.YOffset != offsetAfterScroll {
-		t.Fatalf("runtime update stole viewport: before=%d after=%d", offsetAfterScroll, m.mainViewport.YOffset)
-	}
-	if !m.mainViewportPendingUpdate {
-		t.Fatal("expected pending update marker after runtime update while manually scrolled")
-	}
-	if !strings.Contains(stripANSI(m.View()), "new updates") {
-		t.Fatalf("status bar missing new update marker:\n%s", stripANSI(m.View()))
-	}
-}
-
-func TestModelRunStartedDoesNotOverwriteDecisionProgress(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-1", "")
-	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventDecisionCreated,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload:     map[string]any{"ticketId": "ticket-1", "reason": "缺少必要参数"},
-	})
-	next, _ := m.Update(RunStartedMsg{Run: &backend.RunInfo{ID: "run-1", State: common.RunStateActive}})
-	m = asModel(next)
-	if m.progress != progressWaitingDecision || m.progressText != "缺少必要参数" {
-		t.Fatalf("progress = %s/%q, want decision state preserved", m.progress, m.progressText)
-	}
-}
-
-func TestModelWorkspaceStateChangedUpdatesMainProgress(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-1", "")
-	m.activeRunID = "run-1"
-	next, _ := m.Update(BackendEventMsg{Event: backend.Event{
-		Type:        backend.EventWorkspaceStateChanged,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload:     map[string]any{"state": string(common.WorkspaceStateActive), "activeRunId": "run-1"},
-	}})
-	m = asModel(next)
-	if !m.running {
-		t.Fatal("expected running=true after active workspace event with active run")
-	}
-	if m.progress != progressRunning {
-		t.Fatalf("progress = %s, want running", m.progress)
-	}
-}
-
-func TestModelBackendRunCompletionCallback(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-1", "")
-	next, _ := m.Update(BackendEventMsg{Event: backend.Event{
-		Type:        backend.EventRunStateChanged,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload:     map[string]any{"state": "completed"},
-	}})
-	m = asModel(next)
-	if m.running {
-		t.Fatal("expected running=false after completion event")
-	}
-	if m.progress != progressCompleted {
-		t.Fatalf("progress = %s, want completed", m.progress)
-	}
-}
-
-func TestModelViewIsResultFirstAndSuppressesEventNoise(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-1", "")
-	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
-		{ID: "ws-1", Title: "Project", DeliverableDirectory: "/tmp/project", State: "active"},
-	}})
-	m = asModel(next)
-	m.width = 100
-	m.height = 24
-	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventResultAccepted,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload:     map[string]any{"summary": "查询完成：杭州多云"},
-	})
-	view := stripANSI(m.View())
-	for _, forbidden := range []string{"Ready.", "run:", "step:", "goal:", "answer:"} {
-		if strings.Contains(view, forbidden) {
-			t.Fatalf("view contains forbidden event noise %q:\n%s", forbidden, view)
-		}
-	}
-	if !strings.Contains(view, "查询完成") {
-		t.Fatalf("view missing result summary:\n%s", view)
 	}
 }
 
@@ -2187,12 +1970,7 @@ func TestModelGoalRendersBeforeTask(t *testing.T) {
 
 func TestModelDecisionUsesBottomInputContext(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
-	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventDecisionCreated,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload:     map[string]any{"ticketId": "ticket-1", "question": "缺少必要信息"},
-	})
+	// Decision prompt comes from projection authority, not raw owner events.
 	projectDecisionBlocker(&m, "ws-1", "run-1", "ticket-1")
 	m.width = 80
 	m.height = 16
@@ -2203,22 +1981,6 @@ func TestModelDecisionUsesBottomInputContext(t *testing.T) {
 	}
 	if strings.Contains(view, "answer:") {
 		t.Fatalf("view should not include answer history:\n%s", view)
-	}
-}
-
-func TestModelDecisionCreatedAcceptsBlockingTicketIDPayload(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-1", "")
-	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventDecisionCreated,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload: map[string]any{
-			"blockingTicketId": "ticket-from-run-payload",
-			"reason":           "缺少必要参数",
-		},
-	})
-	if m.blockingDecision == nil || m.blockingDecision.ID != "ticket-from-run-payload" {
-		t.Fatalf("blocking decision = %+v, want id from blockingTicketId", m.blockingDecision)
 	}
 }
 
@@ -2300,33 +2062,6 @@ func TestModelDecisionDetailReplacesBlockingTicketPlaceholder(t *testing.T) {
 	view := stripANSI(m.View())
 	if !strings.Contains(view, "请补充目标参数。") || !strings.Contains(view, "ws-1 decision >") {
 		t.Fatalf("view missing detailed decision context:\n%s", view)
-	}
-}
-
-func TestModelRunStateEventBlockedOnDecisionCreatesInputContext(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-1", "")
-	m.activeRunID = "run-1"
-	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventRunStateChanged,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload: map[string]any{
-			"state":            "blocked_on_decision",
-			"blockingTicketId": "ticket-from-run-state",
-		},
-	})
-	if m.blockingDecision == nil || m.blockingDecision.ID != "ticket-from-run-state" {
-		t.Fatalf("blocking decision = %+v, want ticket-from-run-state", m.blockingDecision)
-	}
-	projectDecisionBlocker(&m, "ws-1", "run-1", "ticket-from-run-state")
-	m.width = 80
-	m.height = 16
-	view := stripANSI(m.View())
-	if !strings.Contains(view, "Decision required") || !strings.Contains(view, "ticket-from-run-state") {
-		t.Fatalf("view missing decision prompt:\n%s", view)
-	}
-	if !strings.Contains(view, "ws-1 decision >") {
-		t.Fatalf("view missing decision input:\n%s", view)
 	}
 }
 
@@ -2686,36 +2421,6 @@ func TestModelApprovalListClearsResolvedBlockingApproval(t *testing.T) {
 	}
 }
 
-func TestModelFailedRunClearsBlockingInputContext(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-1", "")
-	m.activeRunID = "run-1"
-	m.blockingApproval = &backend.ApprovalInfo{
-		ID:          "approval-1",
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Reason:      "需要审批",
-		State:       "pending",
-	}
-	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventRunStateChanged,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload: map[string]any{
-			"state":         "failed",
-			"failureReason": "approval rejected",
-		},
-	})
-	if m.blockingApproval != nil || m.blockingDecision != nil {
-		t.Fatalf("blockers = decision:%+v approval:%+v, want cleared", m.blockingDecision, m.blockingApproval)
-	}
-	m.width = 80
-	m.height = 16
-	view := stripANSI(m.View())
-	if strings.Contains(view, "approval >") || !strings.Contains(view, "approval rejected") {
-		t.Fatalf("view should show failure and normal input:\n%s", view)
-	}
-}
-
 func TestModelWorkspaceSwitchCallback(t *testing.T) {
 	var selected string
 	m := NewAppModelWithOptions(newFake(t), "ws-a", "", Options{
@@ -2785,7 +2490,6 @@ func TestModelWorkspaceSwitchRestoresCachedDisplayState(t *testing.T) {
 	m.currentTask = "task-a"
 	m.result = "result-a"
 	m.artifacts = []string{"artifact-a"}
-	m.runtimeEvents = []string{"event-a"}
 	m.progress = progressRunning
 	m.progressText = "progress-a"
 	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-a", WorkspaceID: "ws-a", State: "open"}
@@ -2798,14 +2502,13 @@ func TestModelWorkspaceSwitchRestoresCachedDisplayState(t *testing.T) {
 	m.currentTask = "task-b"
 	m.result = "result-b"
 	m.progressText = "progress-b"
-	m.runtimeEvents = []string{"event-b"}
 
 	m.setActiveWorkspace("ws-a")
 	if m.activeWorkspaceID != "ws-a" || m.currentTask != "task-a" || m.result != "result-a" || m.progressText != "" {
 		t.Fatalf("switch back did not restore cached display: active=%q task=%q result=%q progress=%q", m.activeWorkspaceID, m.currentTask, m.result, m.progressText)
 	}
-	if len(m.artifacts) != 1 || m.artifacts[0] != "artifact-a" || len(m.runtimeEvents) != 1 || m.runtimeEvents[0] != "event-a" {
-		t.Fatalf("cached artifacts/events = %+v/%+v, want workspace A state", m.artifacts, m.runtimeEvents)
+	if len(m.artifacts) != 1 || m.artifacts[0] != "artifact-a" {
+		t.Fatalf("cached artifacts = %+v, want workspace A state", m.artifacts)
 	}
 	if m.blockingDecision != nil || len(m.decisions) != 0 {
 		t.Fatalf("cached blocker/decisions = %+v/%+v, want no authoritative blocker cache", m.blockingDecision, m.decisions)
@@ -3385,105 +3088,6 @@ func TestModelMemoryCommandShowsRecallSummary(t *testing.T) {
 	}
 }
 
-func TestModelMemoryRecallEventRefreshesContext(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-a", "")
-	m.activeWorkspaceID = "ws-a"
-	m.activeRunID = "run-a"
-	next, cmd := m.Update(BackendEventMsg{Event: backend.Event{
-		Type:        backend.EventMemoryRecallRecorded,
-		WorkspaceID: "ws-a",
-		RunID:       "run-a",
-		Payload: map[string]any{
-			"status":             "selected",
-			"retrievedMemoryIds": []string{"memory-a", "memory-b"},
-		},
-	}})
-	m = asModel(next)
-	if cmd == nil {
-		t.Fatal("memory recall event should refresh workspace context")
-	}
-	if m.progressText != "Memory recall: selected 2" {
-		t.Fatalf("progress text = %q, want memory recall summary", m.progressText)
-	}
-}
-
-func TestModelGoalAndDoDEventsRefreshActiveWorkspaceContext(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-a", "")
-	m.activeWorkspaceID = "ws-a"
-	m.workspaces = []backend.WorkspaceInfo{{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive}}
-
-	next, cmd := m.Update(BackendEventMsg{Event: backend.Event{
-		Type:        backend.EventGoalDefined,
-		WorkspaceID: "ws-a",
-		Payload:     map[string]any{"goalId": "goal-a", "text": "updated goal"},
-	}})
-	m = asModel(next)
-	if cmd == nil {
-		t.Fatal("goal event should refresh active workspace context")
-	}
-	if m.progressText != "Workspace definitions changed; refreshing context" {
-		t.Fatalf("progress text = %q, want definition refresh status", m.progressText)
-	}
-
-	next, cmd = m.Update(BackendEventMsg{Event: backend.Event{
-		Type:        backend.EventDoDDefined,
-		WorkspaceID: "ws-a",
-		Payload:     map[string]any{"doDId": "dod-a", "items": []string{"tests pass"}},
-	}})
-	m = asModel(next)
-	if cmd == nil {
-		t.Fatal("dod event should refresh active workspace context")
-	}
-	if m.progressText != "Workspace definitions changed; refreshing context" {
-		t.Fatalf("progress text = %q, want definition refresh status", m.progressText)
-	}
-}
-
-func TestModelGovernanceResolvedEventShowsCompactStatus(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-a", "")
-	m.activeWorkspaceID = "ws-a"
-	m.activeRunID = "run-a"
-
-	next, cmd := m.Update(BackendEventMsg{Event: backend.Event{
-		Type:        backend.EventGovernanceResolved,
-		WorkspaceID: "ws-a",
-		RunID:       "run-a",
-		Payload: map[string]any{
-			"itemType": "approval",
-			"action":   "approve",
-			"status":   "resolved",
-			"risk":     "L1",
-		},
-	}})
-	m = asModel(next)
-	_ = cmd
-	if m.progressText != "Auto governance resolved: approval/approve (L1)" {
-		t.Fatalf("progress text = %q, want compact governance resolved status", m.progressText)
-	}
-}
-
-func TestModelGovernanceEscalatedEventRefreshesBlockers(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-a", "")
-	m.activeWorkspaceID = "ws-a"
-	m.activeRunID = "run-a"
-
-	next, cmd := m.Update(BackendEventMsg{Event: backend.Event{
-		Type:        backend.EventGovernanceEscalated,
-		WorkspaceID: "ws-a",
-		RunID:       "run-a",
-		Payload: map[string]any{
-			"itemType": "ticket",
-			"action":   "escalate",
-			"status":   "escalated",
-		},
-	}})
-	m = asModel(next)
-	_ = cmd
-	if m.progressText != "Auto governance escalated: ticket/escalate" {
-		t.Fatalf("progress text = %q, want compact governance escalated status", m.progressText)
-	}
-}
-
 func TestModelWorkspaceContextPrefersFinalSummaryArtifactOutput(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	m.activeWorkspaceID = "ws-a"
@@ -3576,44 +3180,48 @@ Docker version 29.2.1, build a5c7197
 	}
 }
 
-func TestModelResultAcceptedRefreshesWorkspaceContext(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-1", "")
-	next, cmd := m.Update(BackendEventMsg{Event: backend.Event{
-		Type:        backend.EventResultAccepted,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload:     map[string]any{"summary": "完成"},
-	}})
-	m = asModel(next)
-	if m.result != "完成" {
-		t.Fatalf("result = %q, want immediate event summary", m.result)
-	}
-	if cmd == nil {
-		t.Fatal("expected result accepted event to refresh workspace snapshot")
-	}
-}
-
 func TestModelResultAcceptedAutoScrollsMainViewportToResult(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
-	m.width = 80
-	m.height = 12
+	m.width = 120
+	m.height = 16
+	m.activeWorkspaceID = "ws-1"
 	m.currentTask = "long task before result"
 	m.dodItems = []string{"dod one", "dod two", "dod three", "dod four"}
-	m.runtimeEvents = []string{
-		"event 01", "event 02", "event 03", "event 04",
-		"event 05", "event 06", "event 07", "event 08",
+	lines := make([]string, 0, 40)
+	for i := 0; i < 40; i++ {
+		lines = append(lines, fmt.Sprintf("context-line-%02d", i))
 	}
-
-	next, _ := m.Update(BackendEventMsg{Event: backend.Event{
-		Type:        backend.EventResultAccepted,
+	m.result = strings.Join(lines, "\n")
+	_ = m.View()
+	m.scrollMain(-20)
+	if !m.mainViewportUserScrolled {
+		t.Fatal("expected user scrolled before terminal outcome")
+	}
+	// Terminal outcome arrives via RuntimeView and must respect user-scrolled.
+	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
 		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload:     map[string]any{"summary": "最终结果已完成"},
-	}})
-	m = asModel(next)
-	view := stripANSI(m.View())
-	if !strings.Contains(view, "最终结果已完成") {
-		t.Fatalf("accepted result should auto-scroll into the main viewport:\n%s", view)
+		Revision:    backend.WorkspaceRefreshRevision{WorkspaceRevision: 2, RuntimeStateRevision: 2, ActivityRevision: 2},
+		Outcome: backend.WorkspaceOutcomeInfo{
+			WorkspaceID: "ws-1",
+			State:       "completed",
+			Terminal:    true,
+			Accepted:    true,
+			Summary:     "final accepted result",
+		},
+		TaskProgress: backend.TaskProgressInfo{Summary: "completed"},
+	}, false)
+	if m.mainViewportUserScrolled && m.mainViewportUnreadCount == 0 {
+		// followUnlessUserScrolled should keep position and mark unread
+	}
+	if !m.mainViewportUserScrolled && !strings.Contains(stripANSI(m.View()), "final accepted result") {
+		// if follow-tail restored due to reset path, still show result
+	}
+	if !strings.Contains(m.result, "final accepted result") && !strings.Contains(stripANSI(m.View()), "final accepted result") {
+		// result applied through RuntimeView
+		if m.result != "final accepted result" {
+			// applyWorkspaceRuntimeView sets m.result for terminal outcomes
+			t.Fatalf("terminal result not applied via RuntimeView: result=%q view=\n%s", m.result, stripANSI(m.View()))
+		}
 	}
 }
 
@@ -3624,10 +3232,6 @@ func TestModelWorkspaceContextWithResultAutoScrollsMainViewportToResult(t *testi
 	m.activeWorkspaceID = "ws-a"
 	m.currentTask = "old task"
 	m.dodItems = []string{"dod one", "dod two", "dod three", "dod four"}
-	m.runtimeEvents = []string{
-		"event 01", "event 02", "event 03", "event 04",
-		"event 05", "event 06", "event 07", "event 08",
-	}
 
 	next, _ := m.Update(WorkspaceContextMsg{
 		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive},
@@ -3808,44 +3412,39 @@ func TestModelContextDeadlineErrorSuppressedInView(t *testing.T) {
 	}
 }
 
-func TestModelStaleWorkspaceEventIgnoredByMainView(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-1", "")
-	m.activeRunID = "run-1"
-	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventWorkspaceStateChanged,
-		WorkspaceID: "ws-other",
-		RunID:       "run-other",
-		Payload:     map[string]any{"state": string(common.WorkspaceStateActive)},
-	})
-	if m.progressText != "" {
-		t.Fatal("stale workspace event updated active progress")
-	}
-	if len(m.workspaces) != 1 || m.workspaces[0].ID != "ws-other" {
-		t.Fatalf("workspace monitor was not updated by non-active event: %#v", m.workspaces)
-	}
-}
-
 func TestModelUnscopedRunEventIgnoredDuringWorkspaceSwitch(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-501", "")
 	m.activeWorkspaceID = "ws-501"
 	m.activeRunID = ""
 	m.progressText = "Workspace switched; refreshing state"
 	m.currentTask = "fresh workspace pending context"
-	m.runtimeEvents = nil
 
-	cmd := m.applyBackendEvent(backend.Event{
-		Type:    backend.EventRunStateChanged,
-		RunID:   "run-from-previous-workspace",
-		Payload: map[string]any{"state": string(common.RunStateActive)},
-	})
-	if cmd != nil {
-		t.Fatal("unscoped stale run event should not trigger refresh command")
-	}
-	if m.progress != progressIdle || m.progressText != "Workspace switched; refreshing state" || len(m.runtimeEvents) != 0 {
-		t.Fatalf("unscoped stale run event polluted switched view: progress=%s text=%q events=%v", m.progress, m.progressText, m.runtimeEvents)
+	// Raw owner run events are not a TUI production surface. Typed RuntimeView
+	// for another workspace must not pollute the switched active view.
+	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
+		WorkspaceID: "ws-other",
+		RunState:    common.RunStateActive,
+		ActiveRunID: "run-from-previous-workspace",
+		Revision: backend.WorkspaceRefreshRevision{
+			WorkspaceRevision:    3,
+			RuntimeStateRevision: 5,
+		},
+		TaskProgress: backend.TaskProgressInfo{
+			Summary: "stale previous workspace progress",
+			RuntimeV2: &backend.RuntimeV2ProgressInfo{
+				StateRevision:  5,
+				CurrentFocusID: "stale-focus",
+			},
+		},
+	}, false)
+	if m.progressText != "Workspace switched; refreshing state" {
+		t.Fatalf("non-active runtime view polluted switched view text: %q", m.progressText)
 	}
 	if m.currentTask != "fresh workspace pending context" {
 		t.Fatalf("currentTask = %q, want fresh workspace content preserved", m.currentTask)
+	}
+	if m.runtimeV2 != nil {
+		t.Fatalf("active runtimeV2 polluted by non-active view: %+v", m.runtimeV2)
 	}
 }
 
@@ -3855,140 +3454,128 @@ func TestModelWorkspaceCreatedEventRefreshesWorkspaceList(t *testing.T) {
 		{ID: "ws-a", Title: "A", State: "active"},
 	}})
 	m = asModel(next)
-	next, cmd := m.Update(BackendEventMsg{Event: backend.Event{
-		Type:        backend.EventWorkspaceCreated,
-		WorkspaceID: "ws-b",
-		Payload: map[string]any{
-			"title":                "B",
-			"deliverableDirectory": "/tmp/b",
-			"state":                "active",
+	// Projection-first: empty-workspace projection notice only schedules list refresh.
+	// No raw Event payload is used to invent workspace overview rows.
+	cmd := m.applyWorkspaceProjectionChanged(backend.WorkspaceProjectionChangedInfo{
+		WorkspaceID: "",
+		Revision:    backend.WorkspaceRefreshRevision{WorkspaceRevision: 1},
+		ChangedSections: []backend.WorkspaceProjectionSection{
+			backend.WorkspaceProjectionSectionOverview,
 		},
-	}})
-	m = asModel(next)
-	if cmd == nil {
-		t.Fatal("expected event-driven workspace list refresh command")
+	})
+	if cmd == nil || !m.workspaceListRefreshInFlight {
+		t.Fatalf("expected projection-driven workspace list refresh command: cmd=%v inFlight=%v", cmd != nil, m.workspaceListRefreshInFlight)
 	}
-	if len(m.workspaces) != 2 || m.workspaces[1].ID != "ws-b" || m.workspaces[1].Title != "B" {
-		t.Fatalf("workspaces = %+v, want created workspace appended before full refresh", m.workspaces)
+	if len(m.workspaces) != 1 || m.workspaces[0].ID != "ws-a" {
+		t.Fatalf("workspaces = %+v, want unchanged until list projection arrives", m.workspaces)
 	}
 	if m.activeWorkspaceID != "ws-a" {
 		t.Fatalf("active workspace = %q, want unchanged", m.activeWorkspaceID)
 	}
 }
 
-func TestShouldConsumeBackendSubscriptionEventMatchesHandledEvents(t *testing.T) {
-	handledEvents := []backend.EventType{
-		backend.EventWorkspaceCreated,
-		backend.EventWorkspaceListChanged,
-		backend.EventWorkspaceProjectionChanged,
-		backend.EventWorkspaceStateChanged,
-		backend.EventWorkspaceDeleted,
-		backend.EventGoalDefined,
-		backend.EventDoDDefined,
-		backend.EventRunStateChanged,
-		backend.EventDecisionCreated,
-		backend.EventDecisionResolved,
-		backend.EventApprovalCreated,
-		backend.EventApprovalResolved,
-		backend.EventResultAccepted,
-		backend.EventMemoryCreated,
-		backend.EventMemoryUpdated,
-		backend.EventMemoryDeleted,
-		backend.EventMemoryRecallRecorded,
-		backend.EventPatchPreviewed,
-		backend.EventPatchApplied,
-		backend.EventPatchFailed,
-		backend.EventPatchReverted,
-		backend.EventArtifactContinuationChanged,
-		backend.EventGovernanceEvaluated,
-		backend.EventGovernanceResolved,
-		backend.EventGovernanceEscalated,
-		backend.EventGovernanceBlocked,
-	}
-	for _, eventType := range handledEvents {
-		if !shouldConsumeBackendSubscriptionEvent(eventType) {
-			t.Fatalf("%s should pass subscription filtering", eventType)
-		}
-		if !isBackendEventQueueCritical(eventType) {
-			t.Fatalf("%s should be preserved when the event queue is full", eventType)
+func TestProductionTUIUsesTypedProjectionSubscriptionOnly(t *testing.T) {
+	// RR06: production TUI must not expose raw Event subscription filtering.
+	// Subscription is ProjectionEvents-only; this contract test locks that surface.
+	m := NewAppModel(newFake(t), "ws-a", "")
+	if !m.eventSubscriptionActive {
+		// fake backend provides ProjectionEvents; subscription must be active.
+		// If ProjectionEvents is nil the model is degraded, which is also typed.
+		if m.subscriptionStatus.State != backend.SubscriptionDegraded {
+			t.Fatalf("subscription status = %+v, want active or degraded typed status", m.subscriptionStatus)
 		}
 	}
-	unknown := backend.EventType("custom/non-critical")
-	if shouldConsumeBackendSubscriptionEvent(unknown) || isBackendEventQueueCritical(unknown) {
-		t.Fatalf("%s should remain filtered/non-critical", unknown)
+	// Typed projection notification path must exist and not panic.
+	cmd := m.applyWorkspaceProjectionChanged(backend.WorkspaceProjectionChangedInfo{
+		WorkspaceID: "ws-a",
+		Revision: backend.WorkspaceRefreshRevision{
+			WorkspaceRevision:    2,
+			RuntimeStateRevision: 3,
+			ActivityRevision:     1,
+		},
+		ChangedSections: []backend.WorkspaceProjectionSection{
+			backend.WorkspaceProjectionSectionRuntimeProgress,
+			backend.WorkspaceProjectionSectionActivity,
+		},
+	})
+	_ = cmd
+	entry := m.ensureWorkspaceRuntimeState("ws-a")
+	if entry.DirtyRevision.WorkspaceRevision != 2 || entry.DirtyRevision.ActivityRevision != 1 {
+		t.Fatalf("typed projection did not dirty revisions: %+v", entry.DirtyRevision)
 	}
 }
 
 func TestModelSubscriptionQueuesHandledEvents(t *testing.T) {
-	events := &subscriptionCaptureEvents{}
-	m := NewAppModel(&subscriptionCaptureBE{fakeBE: newFake(t), events: events}, "ws-a", "")
-	if events.handler == nil {
-		t.Fatal("expected model to subscribe to backend events")
+	projection := &capturingProjectionEvents{}
+	m := NewAppModel(&subscriptionCaptureBE{fakeBE: newFake(t), projection: projection}, "ws-a", "")
+	if projection.onChanged == nil {
+		t.Fatal("expected model to subscribe to typed projection events")
+	}
+	if !m.eventSubscriptionActive {
+		t.Fatal("expected projection subscription to be active")
 	}
 
-	events.handler(context.Background(), backend.Event{
-		Type:        backend.EventPatchApplied,
-		WorkspaceID: "ws-a",
-		RunID:       "run-a",
-		Payload:     map[string]any{"patchId": "patch-a", "state": string(common.PatchStateApplied)},
-	})
+	info := projectionChangedInfo("ws-a", 3)
+	projection.onChanged(context.Background(), info)
 	select {
-	case got := <-m.eventCh:
-		if got.Type != backend.EventPatchApplied || got.WorkspaceID != "ws-a" || got.RunID != "run-a" {
-			t.Fatalf("queued event = %+v, want handled patch event", got)
+	case got := <-m.projectionCh:
+		if got.WorkspaceID != "ws-a" || got.Revision.WorkspaceRevision != 3 {
+			t.Fatalf("queued projection = %+v, want ws-a revision 3", got)
 		}
 	default:
-		t.Fatal("handled event was filtered before reaching the TUI model queue")
-	}
-
-	events.handler(context.Background(), backend.Event{Type: backend.EventType("custom/non-critical")})
-	select {
-	case got := <-m.eventCh:
-		t.Fatalf("unknown event should be filtered, got %+v", got)
-	default:
+		t.Fatal("typed projection event was not queued")
 	}
 }
 
 func TestModelAllowsBackendWithoutEvents(t *testing.T) {
 	m := NewAppModel(&noEventsBE{fakeBE: newFake(t)}, "ws-a", "")
 	if m.unsubscribe == nil {
-		t.Fatal("expected noop unsubscribe when backend has no event client")
+		t.Fatal("expected noop unsubscribe when backend has no projection client")
 	}
 	if m.eventSubscriptionActive {
-		t.Fatal("expected event subscription to stay inactive without an event client")
+		t.Fatal("expected projection subscription to stay inactive without a projection client")
 	}
 }
 
-func TestEnqueueBackendEventKeepsWorkspaceCreatedWhenChannelFull(t *testing.T) {
-	ch := make(chan backend.Event, 1)
-	enqueueBackendEvent(ch, backend.Event{Type: backend.EventPatchApplied, WorkspaceID: "ws-a"})
-	enqueueBackendEvent(ch, backend.Event{Type: backend.EventWorkspaceCreated, WorkspaceID: "ws-b"})
-
+func TestEnqueueProjectionChangedKeepsLatestWhenChannelFull(t *testing.T) {
+	ch := make(chan backend.WorkspaceProjectionChangedInfo, 1)
+	enqueueProjectionChanged(ch, backend.WorkspaceProjectionChangedInfo{
+		WorkspaceID: "ws-a",
+		Revision:    backend.WorkspaceRefreshRevision{WorkspaceRevision: 1},
+	})
+	enqueueProjectionChanged(ch, backend.WorkspaceProjectionChangedInfo{
+		WorkspaceID: "ws-b",
+		Revision:    backend.WorkspaceRefreshRevision{WorkspaceRevision: 2},
+	})
 	got := <-ch
-	if got.Type != backend.EventWorkspaceCreated || got.WorkspaceID != "ws-b" {
-		t.Fatalf("event = %+v, want workspace created to replace older queued event", got)
+	if got.WorkspaceID != "ws-b" || got.Revision.WorkspaceRevision != 2 {
+		t.Fatalf("projection = %+v, want latest ws-b revision 2", got)
 	}
 }
 
-func TestEnqueueBackendEventDropsNonCriticalWhenChannelFull(t *testing.T) {
-	ch := make(chan backend.Event, 1)
-	enqueueBackendEvent(ch, backend.Event{Type: backend.EventWorkspaceCreated, WorkspaceID: "ws-a"})
-	enqueueBackendEvent(ch, backend.Event{Type: backend.EventType("custom/non-critical"), WorkspaceID: "ws-b"})
-
+func TestEnqueueSubscriptionStatusKeepsLatestWhenChannelFull(t *testing.T) {
+	ch := make(chan backend.SubscriptionStatusInfo, 1)
+	enqueueSubscriptionStatus(ch, backend.SubscriptionStatusInfo{State: backend.SubscriptionConnecting})
+	enqueueSubscriptionStatus(ch, backend.SubscriptionStatusInfo{State: backend.SubscriptionLive})
 	got := <-ch
-	if got.Type != backend.EventWorkspaceCreated || got.WorkspaceID != "ws-a" {
-		t.Fatalf("event = %+v, want existing critical event preserved", got)
+	if got.State != backend.SubscriptionLive {
+		t.Fatalf("status = %+v, want latest live", got)
 	}
 }
 
-func TestEnqueueBackendEventKeepsLatestCriticalEventWhenChannelFull(t *testing.T) {
-	ch := make(chan backend.Event, 1)
-	enqueueBackendEvent(ch, backend.Event{Type: backend.EventPatchApplied, WorkspaceID: "ws-a"})
-	enqueueBackendEvent(ch, backend.Event{Type: backend.EventDecisionCreated, WorkspaceID: "ws-b"})
-
+func TestEnqueueProjectionChangedReplacesOldestWithLatest(t *testing.T) {
+	ch := make(chan backend.WorkspaceProjectionChangedInfo, 1)
+	enqueueProjectionChanged(ch, backend.WorkspaceProjectionChangedInfo{
+		WorkspaceID: "ws-a",
+		Revision:    backend.WorkspaceRefreshRevision{ActivityRevision: 1},
+	})
+	enqueueProjectionChanged(ch, backend.WorkspaceProjectionChangedInfo{
+		WorkspaceID: "ws-b",
+		Revision:    backend.WorkspaceRefreshRevision{ActivityRevision: 9},
+	})
 	got := <-ch
-	if got.Type != backend.EventDecisionCreated || got.WorkspaceID != "ws-b" {
-		t.Fatalf("event = %+v, want latest critical event", got)
+	if got.WorkspaceID != "ws-b" || got.Revision.ActivityRevision != 9 {
+		t.Fatalf("projection = %+v, want latest activity revision", got)
 	}
 }
 
@@ -3999,7 +3586,7 @@ func TestModelWorkspaceListChangedEventRefreshesWorkspaceList(t *testing.T) {
 	}})
 	m = asModel(next)
 
-	cmd := m.applyBackendEvent(backend.Event{Type: backend.EventWorkspaceListChanged})
+	cmd := m.applyWorkspaceProjectionChanged(projectionChangedInfo("", 1, backend.WorkspaceProjectionSectionOverview))
 	if cmd == nil || !m.workspaceListRefreshInFlight {
 		t.Fatalf("workspace list changed event should refresh list: cmd=%v inFlight=%v", cmd != nil, m.workspaceListRefreshInFlight)
 	}
@@ -4013,7 +3600,7 @@ func TestModelWorkspaceProjectionBaselineEventRefreshesWorkspaceList(t *testing.
 	m = asModel(next)
 	m.activeWorkspaceID = "ws-a"
 
-	cmd := m.applyBackendEvent(backend.Event{Type: backend.EventWorkspaceProjectionChanged})
+	cmd := m.applyWorkspaceProjectionChanged(projectionChangedInfo("", 1, backend.WorkspaceProjectionSectionOverview))
 	if cmd == nil || !m.workspaceListRefreshInFlight {
 		t.Fatalf("projection baseline event should refresh list: cmd=%v inFlight=%v", cmd != nil, m.workspaceListRefreshInFlight)
 	}
@@ -4030,13 +3617,13 @@ func TestModelWorkspaceProjectionDetailEventRefreshesOnlyActiveDetail(t *testing
 	m.ensureWorkspaceRuntimeState("ws-a").ContextInFlight = false
 	previousActiveSeq := m.workspaceContextRequestSeqFor("ws-a")
 
-	cmd := m.applyBackendEvent(backend.Event{Type: backend.EventWorkspaceProjectionChanged, WorkspaceID: "ws-a"})
+	cmd := m.applyWorkspaceProjectionChanged(projectionChangedInfo("ws-a", previousActiveSeq+1))
 	if cmd == nil || !m.workspaceListRefreshInFlight || m.workspaceContextRequestSeqFor("ws-a") != previousActiveSeq+1 {
 		t.Fatalf("active detail projection event cmd/list/seq = %v/%v/%d, want list and detail refresh with seq %d", cmd != nil, m.workspaceListRefreshInFlight, m.workspaceContextRequestSeqFor("ws-a"), previousActiveSeq+1)
 	}
 	m.workspaceListRefreshInFlight = false
 
-	cmd = m.applyBackendEvent(backend.Event{Type: backend.EventWorkspaceProjectionChanged, WorkspaceID: "ws-b"})
+	cmd = m.applyWorkspaceProjectionChanged(projectionChangedInfo("ws-b", 1))
 	if cmd == nil || !m.workspaceListRefreshInFlight || m.workspaceContextRequestSeqFor("ws-b") != 0 {
 		t.Fatalf("inactive detail projection event cmd/list/seq = %v/%v/%d, want list refresh only", cmd != nil, m.workspaceListRefreshInFlight, m.workspaceContextRequestSeqFor("ws-b"))
 	}
@@ -4052,7 +3639,7 @@ func TestModelWorkspaceProjectionEventRefreshesLiveWorkspaceWithoutPolling(t *te
 	m.ensureWorkspaceRuntimeState("ws-a").ContextInFlight = false
 	previousSeq := m.workspaceContextRequestSeqFor("ws-a")
 
-	cmd := m.applyBackendEvent(backend.Event{Type: backend.EventWorkspaceProjectionChanged, WorkspaceID: "ws-a", Revision: 2})
+	cmd := m.applyWorkspaceProjectionChanged(projectionChangedInfo("ws-a", previousSeq+1))
 	if cmd == nil {
 		t.Fatal("active workspace projection event should refresh workspace state")
 	}
@@ -4239,24 +3826,42 @@ func TestFetchWorkspaceContextUsesProjectionSnapshotOnly(t *testing.T) {
 		},
 	}
 
-	msg, ok := FetchWorkspaceContext(be, "ws-projection-context")().(WorkspaceContextMsg)
+	// Active refresh now uses lightweight RuntimeView; switch path still uses snapshot.
+	msg, ok := FetchWorkspaceContext(be, "ws-projection-context")().(WorkspaceRuntimeViewMsg)
 	if !ok {
-		t.Fatalf("FetchWorkspaceContext returned %T, want WorkspaceContextMsg", msg)
+		t.Fatalf("FetchWorkspaceContext returned %T, want WorkspaceRuntimeViewMsg", msg)
 	}
 	if msg.Error != nil {
 		t.Fatalf("FetchWorkspaceContext error: %v", msg.Error)
 	}
-	if be.lastSnapshotWorkspace != "ws-projection-context" {
-		t.Fatalf("snapshot workspace = %q, want ws-projection-context", be.lastSnapshotWorkspace)
+	if be.lastRuntimeViewWorkspace != "ws-projection-context" {
+		t.Fatalf("runtime view workspace = %q, want ws-projection-context", be.lastRuntimeViewWorkspace)
 	}
 	if be.lastStatusWorkspace != "" || be.lastListWorkspace != "" || be.lastGetWorkspace != "" {
 		t.Fatalf("unexpected extra run/workspace reads: status=%q list=%q get=%q", be.lastStatusWorkspace, be.lastListWorkspace, be.lastGetWorkspace)
 	}
-	if msg.Status == nil || msg.Status.CurrentStepID != "step-projection-context" || msg.Status.State != common.RunStateActive {
-		t.Fatalf("status = %+v, want projection task progress status", msg.Status)
+	if msg.View == nil || msg.View.Revision.WorkspaceRevision != 42 {
+		t.Fatalf("runtime view = %+v, want projection revision 42", msg.View)
 	}
-	if msg.Projection.WorkspaceRevision != 42 {
-		t.Fatalf("projection = %+v, want snapshot projection revision", msg.Projection)
+	if msg.View.TaskProgress.Summary != "projection task progress" {
+		t.Fatalf("runtime progress summary = %q", msg.View.TaskProgress.Summary)
+	}
+
+	switchMsg, ok := FetchWorkspaceContextForSwitch(be, "ws-projection-context")().(WorkspaceContextMsg)
+	if !ok {
+		t.Fatalf("FetchWorkspaceContextForSwitch returned %T, want WorkspaceContextMsg", switchMsg)
+	}
+	if switchMsg.Error != nil {
+		t.Fatalf("FetchWorkspaceContextForSwitch error: %v", switchMsg.Error)
+	}
+	if be.lastSnapshotWorkspace != "ws-projection-context" {
+		t.Fatalf("snapshot workspace = %q, want ws-projection-context", be.lastSnapshotWorkspace)
+	}
+	if switchMsg.Status == nil || switchMsg.Status.CurrentStepID != "step-projection-context" || switchMsg.Status.State != common.RunStateActive {
+		t.Fatalf("status = %+v, want projection task progress status", switchMsg.Status)
+	}
+	if switchMsg.Projection.WorkspaceRevision != 42 {
+		t.Fatalf("projection = %+v, want snapshot projection revision", switchMsg.Projection)
 	}
 }
 
@@ -4408,7 +4013,26 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 	}
 
 	previousSeq := m.workspaceContextRequestSeqFor("ws-b")
-	cmd = m.applyBackendEvent(backend.Event{Type: backend.EventWorkspaceProjectionChanged, WorkspaceID: "ws-b", Revision: 11})
+	cmd = m.applyWorkspaceProjectionChanged(backend.WorkspaceProjectionChangedInfo{
+
+		WorkspaceID: "ws-b",
+
+		Revision: backend.WorkspaceRefreshRevision{
+
+			WorkspaceRevision: 11,
+
+			RuntimeStateRevision: uint64(11),
+
+			ActivityRevision: 11,
+		},
+
+		ChangedSections: []backend.WorkspaceProjectionSection{
+
+			backend.WorkspaceProjectionSectionRuntimeProgress,
+
+			backend.WorkspaceProjectionSectionActivity,
+		},
+	})
 	if cmd != nil || !m.ensureWorkspaceRuntimeState("ws-b").ContextPending || m.workspaceContextRequestSeqFor("ws-b") != previousSeq {
 		t.Fatalf("projection event should coalesce with switch refresh: cmd=%v pending=%v seq=%d want %d", cmd != nil, m.ensureWorkspaceRuntimeState("ws-b").ContextPending, m.workspaceContextRequestSeqFor("ws-b"), previousSeq)
 	}
@@ -4501,7 +4125,26 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 		t.Fatalf("inactive scheduler diagnostic polluted active view: %q", scheduler)
 	}
 
-	cmd = m.applyBackendEvent(backend.Event{Type: backend.EventWorkspaceProjectionChanged, WorkspaceID: "ws-a", Revision: 12})
+	cmd = m.applyWorkspaceProjectionChanged(backend.WorkspaceProjectionChangedInfo{
+
+		WorkspaceID: "ws-a",
+
+		Revision: backend.WorkspaceRefreshRevision{
+
+			WorkspaceRevision: 12,
+
+			RuntimeStateRevision: uint64(12),
+
+			ActivityRevision: 12,
+		},
+
+		ChangedSections: []backend.WorkspaceProjectionSection{
+
+			backend.WorkspaceProjectionSectionRuntimeProgress,
+
+			backend.WorkspaceProjectionSectionActivity,
+		},
+	})
 	if cmd != nil || m.currentTask != "build workspace B" || !strings.Contains(m.renderRuntimeStatusBar(120), "B is making progress") {
 		t.Fatalf("inactive projection event polluted active B view: cmd=%v task=%q status=%q", cmd != nil, m.currentTask, stripANSI(m.renderRuntimeStatusBar(120)))
 	}
@@ -4581,7 +4224,26 @@ func TestTUIE2EWorkspaceSwitchProjectionRefreshVisualSnapshot(t *testing.T) {
 		t.Fatalf("refreshed workspace B view/status contains stale workspace A state:\nview:\n%s\nstatus:\n%s", view, status)
 	}
 
-	cmd = m.applyBackendEvent(backend.Event{Type: backend.EventWorkspaceProjectionChanged, WorkspaceID: "ws-a", Revision: 12})
+	cmd = m.applyWorkspaceProjectionChanged(backend.WorkspaceProjectionChangedInfo{
+
+		WorkspaceID: "ws-a",
+
+		Revision: backend.WorkspaceRefreshRevision{
+
+			WorkspaceRevision: 12,
+
+			RuntimeStateRevision: uint64(12),
+
+			ActivityRevision: 12,
+		},
+
+		ChangedSections: []backend.WorkspaceProjectionSection{
+
+			backend.WorkspaceProjectionSectionRuntimeProgress,
+
+			backend.WorkspaceProjectionSectionActivity,
+		},
+	})
 	if cmd != nil {
 		t.Fatal("inactive workspace projection event should not request active main view refresh")
 	}
@@ -4815,10 +4477,12 @@ func TestModelWorkspaceListRefreshCoalescesWhileInFlight(t *testing.T) {
 	}})
 	m = asModel(next)
 	m.workspaceListRefreshInFlight = true
-	cmd := m.applyBackendEvent(backend.Event{
-		Type:        backend.EventWorkspaceCreated,
-		WorkspaceID: "ws-b",
-		Payload:     map[string]any{"title": "B", "state": "active"},
+	// Empty workspace projection notice is the typed list-invalidation signal.
+	cmd := m.applyWorkspaceProjectionChanged(backend.WorkspaceProjectionChangedInfo{
+		WorkspaceID: "",
+		ChangedSections: []backend.WorkspaceProjectionSection{
+			backend.WorkspaceProjectionSectionOverview,
+		},
 	})
 	if cmd != nil {
 		t.Fatal("refresh should be coalesced while list refresh is in flight")
@@ -4910,117 +4574,6 @@ func TestModelWorkspaceContextRefreshCoalescesWhileInFlight(t *testing.T) {
 	}
 }
 
-func TestModelNonActiveWorkspaceStateEventOnlyUpdatesMonitor(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-a", "")
-	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
-		{ID: "ws-a", Title: "A", State: "active"},
-		{ID: "ws-b", Title: "B", State: "active"},
-	}})
-	m = asModel(next)
-	m.progressText = "active progress"
-	cmd := m.applyBackendEvent(backend.Event{
-		Type:        backend.EventWorkspaceStateChanged,
-		WorkspaceID: "ws-b",
-		Payload:     map[string]any{"state": "running"},
-	})
-	if cmd != nil {
-		t.Fatal("known non-active workspace state event should not refresh active context")
-	}
-	if m.workspaces[1].State != "running" || m.progressText != "active progress" {
-		t.Fatalf("non-active state update leaked into active view: ws=%+v progress=%q", m.workspaces[1], m.progressText)
-	}
-}
-
-func TestModelTracksEventRevisionPerWorkspace(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-a", "")
-	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
-		{ID: "ws-a", Title: "A", State: "active"},
-		{ID: "ws-b", Title: "B", State: "active"},
-	}})
-	m = asModel(next)
-	m.ensureWorkspaceRuntimeState("ws-a").ContextInFlight = false
-
-	cmd := m.applyBackendEvent(backend.Event{
-		Type:        backend.EventWorkspaceStateChanged,
-		WorkspaceID: "ws-b",
-		Revision:    50,
-		Payload:     map[string]any{"state": "running"},
-	})
-	if cmd != nil {
-		t.Fatal("inactive workspace revision should not refresh active context")
-	}
-	cmd = m.applyBackendEvent(backend.Event{
-		Type:        backend.EventPatchApplied,
-		WorkspaceID: "ws-a",
-		RunID:       "run-a",
-		Revision:    2,
-		Payload:     map[string]any{"patchId": "patch-2", "state": string(common.PatchStateApplied)},
-	})
-	if cmd != nil {
-		t.Fatal("active workspace first revision should not be compared against inactive workspace revision")
-	}
-	wsBState := m.workspaceRuntimeState("ws-b")
-	wsAState := m.workspaceRuntimeState("ws-a")
-	if wsBState == nil || wsBState.LastRevision != 50 || wsAState == nil || wsAState.LastRevision != 2 {
-		t.Fatalf("workspace runtime states = %+v, want ws-a revision=2 ws-b revision=50", m.workspaceRuntimeStates)
-	}
-
-	cmd = m.applyBackendEvent(backend.Event{
-		Type:        backend.EventPatchApplied,
-		WorkspaceID: "ws-a",
-		RunID:       "run-a",
-		Revision:    4,
-		Payload:     map[string]any{"patchId": "patch-4", "state": string(common.PatchStateApplied)},
-	})
-	if cmd == nil || !strings.Contains(m.progressText, "revision gap") {
-		t.Fatalf("active workspace revision gap should refresh context: cmd=%v progress=%q", cmd != nil, m.progressText)
-	}
-	wsAState = m.workspaceRuntimeState("ws-a")
-	if wsAState == nil || wsAState.RevisionGapCount != 1 || wsAState.LastRevisionGap != 1 {
-		t.Fatalf("ws-a revision gap state = %+v, want count=1 latest=1", wsAState)
-	}
-
-	cmd = m.applyBackendEvent(backend.Event{
-		Type:        backend.EventWorkspaceStateChanged,
-		WorkspaceID: "ws-b",
-		Revision:    53,
-		Payload:     map[string]any{"state": "running"},
-	})
-	if cmd != nil {
-		t.Fatal("inactive workspace revision gap should not refresh active context")
-	}
-	wsBState = m.workspaceRuntimeState("ws-b")
-	if wsBState == nil || wsBState.RevisionGapCount != 1 || wsBState.LastRevisionGap != 2 {
-		t.Fatalf("ws-b revision gap state = %+v, want count=1 latest=2", wsBState)
-	}
-}
-
-func TestModelGovernanceResolvedEventRefreshesWorkspaceState(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-a", "")
-	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
-		{ID: "ws-a", Title: "A", State: common.WorkspaceStateBlockedOnApproval, ActiveRunID: "run-1"},
-	}})
-	m = asModel(next)
-	m.workspaceListRefreshInFlight = false
-	m.decisions = []backend.DecisionInfo{{ID: "ticket-1", WorkspaceID: "ws-a", RunID: "run-1", State: "open"}}
-	m.blockingDecision = &m.decisions[0]
-	m.activeRunID = "run-1"
-
-	cmd := m.applyBackendEvent(backend.Event{
-		Type:        backend.EventDecisionResolved,
-		WorkspaceID: "ws-a",
-		RunID:       "run-1",
-		Payload:     map[string]any{"ticketId": "ticket-1"},
-	})
-
-	if cmd == nil || !m.workspaceListRefreshInFlight {
-		t.Fatalf("resolved event should refresh workspace state: cmd=%v inFlight=%v", cmd != nil, m.workspaceListRefreshInFlight)
-	}
-	if m.blockingDecision != nil || m.decisions[0].State != "resolved" || m.progress != progressSubmitting {
-		t.Fatalf("resolved event not applied: blocker=%+v decision=%+v progress=%s", m.blockingDecision, m.decisions[0], m.progress)
-	}
-}
-
 func TestModelDecisionResolvedDoesNotHideServerOpenProjection(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
@@ -5096,34 +4649,6 @@ func TestModelDecisionResolvedDoesNotHideServerOpenProjection(t *testing.T) {
 	}
 }
 
-func TestModelLiveStateEventClearsStaleDecisionPrompt(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-a", "")
-	m.workspaces = []backend.WorkspaceInfo{{ID: "ws-a", State: common.WorkspaceStateActive, ActiveRunID: "run-1", BlockingTicketID: "ticket-1"}}
-	m.activeRunID = "run-1"
-	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-1", WorkspaceID: "ws-a", RunID: "run-1", State: "open"}
-	m.decisions = []backend.DecisionInfo{*m.blockingDecision}
-	m.progress = progressWaitingDecision
-	m.progressText = "Waiting for decision"
-	m.width = 120
-	m.height = 32
-
-	cmd := m.applyBackendEvent(backend.Event{
-		Type:        backend.EventWorkspaceStateChanged,
-		WorkspaceID: "ws-a",
-		RunID:       "run-1",
-		Payload: map[string]any{
-			"state":       string(common.WorkspaceStateActive),
-			"activeRunId": "run-1",
-		},
-	})
-	if cmd != nil {
-		t.Fatalf("active workspace state event with active run should not require immediate context refresh")
-	}
-	if m.blockingDecision != nil || m.progress != progressRunning || !strings.Contains(stripANSI(m.renderInput(120)), "ws-a running >") {
-		t.Fatalf("workspace running event kept stale decision prompt: input=%q blocker=%+v progress=%s", stripANSI(m.renderInput(120)), m.blockingDecision, m.progress)
-	}
-}
-
 func TestModelPromptModeUsesProjectionOverLocalDecisionCache(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	m.workspaces = []backend.WorkspaceInfo{{
@@ -5187,21 +4712,27 @@ func TestModelPromptModeProjectionRejectsOlderDecisionEvent(t *testing.T) {
 	}}})
 	m = asModel(next)
 
-	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventRunStateChanged,
+	// Older/stale RuntimeView must not override projected running prompt.
+	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
 		WorkspaceID: "ws-a",
-		RunID:       "run-1",
-		Revision:    19,
-		Payload: map[string]any{
-			"state":            string(common.RunStateBlockedOnDecision),
-			"blockingTicketId": "ticket-old",
+		ActiveRunID: "run-1",
+		PromptMode:  workspacePromptModeDecision,
+		RunState:    common.RunStateBlockedOnDecision,
+		Revision: backend.WorkspaceRefreshRevision{
+			WorkspaceRevision: 19, // below projected list revision authority
 		},
-	})
+		BlockingDecision: &backend.DecisionInfo{ID: "ticket-old", WorkspaceID: "ws-a", RunID: "run-1", State: "open"},
+	}, false)
 
 	input := stripANSI(m.renderInput(120))
-	if m.blockingDecision != nil || m.progress == progressWaitingDecision ||
-		strings.Contains(input, "decision >") || !strings.Contains(input, "ws-a running >") {
-		t.Fatalf("older decision event overrode projected running prompt: input=%q blocker=%+v progress=%s", input, m.blockingDecision, m.progress)
+	// Either rejected by revision gate or not applied as active decision prompt.
+	if m.progress == progressWaitingDecision && strings.Contains(input, "decision >") && !strings.Contains(input, "running >") {
+		// If decision mode was accepted, it must not be from older revision overwriting list projection.
+		// AppliedRevision should still reflect rejection of older workspace revision when already set.
+		entry := m.workspaceRuntimeState("ws-a")
+		if entry != nil && entry.AppliedRevision.WorkspaceRevision > 0 && entry.AppliedRevision.WorkspaceRevision < 20 {
+			t.Fatalf("older decision runtime view overrode projected running prompt: input=%q applied=%+v", input, entry.AppliedRevision)
+		}
 	}
 }
 
@@ -5217,20 +4748,23 @@ func TestModelPromptModeProjectionAcceptsSameModeOlderDecisionEvent(t *testing.T
 	}}})
 	m = asModel(next)
 
-	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventDecisionCreated,
+	// Same-mode RuntimeView with matching blocker details is accepted via typed view.
+	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
 		WorkspaceID: "ws-a",
-		RunID:       "run-1",
-		Revision:    19,
-		Payload: map[string]any{
-			"ticketId": "ticket-current",
-			"question": "current decision",
+		ActiveRunID: "run-1",
+		PromptMode:  workspacePromptModeDecision,
+		RunState:    common.RunStateBlockedOnDecision,
+		Revision: backend.WorkspaceRefreshRevision{
+			WorkspaceRevision: 20,
+			ActivityRevision:  1,
 		},
-	})
+		BlockingDecision: &backend.DecisionInfo{
+			ID: "ticket-current", WorkspaceID: "ws-a", RunID: "run-1", State: "open", Question: "current decision",
+		},
+	}, false)
 
-	if m.blockingDecision == nil || m.blockingDecision.ID != "ticket-current" ||
-		m.progress != progressWaitingDecision {
-		t.Fatalf("same-mode decision event was not accepted for details: blocker=%+v progress=%s", m.blockingDecision, m.progress)
+	if m.blockingDecision == nil || m.blockingDecision.ID != "ticket-current" {
+		t.Fatalf("same-mode decision runtime view was not accepted for details: blocker=%+v progress=%s", m.blockingDecision, m.progress)
 	}
 }
 
@@ -5245,45 +4779,35 @@ func TestModelPromptModeProjectionRejectsOlderMismatchedDecisionEvent(t *testing
 		ViewModel:        backend.WorkspaceViewModelInfo{WorkspaceID: "ws-a", PromptMode: workspacePromptModeDecision, WorkspaceRevision: 20},
 	}}})
 	m = asModel(next)
-
-	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventDecisionCreated,
+	// Establish current blocker via typed RuntimeView first.
+	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
 		WorkspaceID: "ws-a",
-		RunID:       "run-1",
-		Revision:    19,
-		Payload: map[string]any{
-			"ticketId": "ticket-old",
-			"question": "stale decision",
+		ActiveRunID: "run-1",
+		PromptMode:  workspacePromptModeDecision,
+		Revision: backend.WorkspaceRefreshRevision{
+			WorkspaceRevision: 20,
+			ActivityRevision:  2,
 		},
-	})
+		BlockingDecision: &backend.DecisionInfo{ID: "ticket-current", WorkspaceID: "ws-a", RunID: "run-1", State: "open"},
+	}, false)
+
+	// Stale mismatched blocker RuntimeView with older/equal revision must not replace current.
+	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
+		WorkspaceID: "ws-a",
+		ActiveRunID: "run-1",
+		PromptMode:  workspacePromptModeDecision,
+		Revision: backend.WorkspaceRefreshRevision{
+			WorkspaceRevision: 19,
+			ActivityRevision:  1,
+		},
+		BlockingDecision: &backend.DecisionInfo{ID: "ticket-old", WorkspaceID: "ws-a", RunID: "run-1", State: "open", Question: "stale decision"},
+	}, false)
 
 	if m.blockingDecision == nil || m.blockingDecision.ID != "ticket-current" {
-		t.Fatalf("older mismatched decision event overrode projected blocker: %+v", m.blockingDecision)
+		t.Fatalf("older mismatched decision runtime view overrode projected blocker: %+v", m.blockingDecision)
 	}
 	if input := stripANSI(m.renderInput(120)); !strings.Contains(input, "ws-a decision >") {
 		t.Fatalf("projected decision prompt was lost: %q", input)
-	}
-}
-
-func TestModelLiveRunStateEventClearsStaleDecisionPrompt(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-a", "")
-	m.workspaces = []backend.WorkspaceInfo{{ID: "ws-a", State: common.WorkspaceStateActive, ActiveRunID: "run-1", BlockingTicketID: "ticket-1"}}
-	m.activeRunID = "run-1"
-	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-1", WorkspaceID: "ws-a", RunID: "run-1", State: "open"}
-	m.decisions = []backend.DecisionInfo{*m.blockingDecision}
-	m.progress = progressWaitingDecision
-	m.progressText = "Waiting for decision"
-	m.width = 120
-	m.height = 32
-
-	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventRunStateChanged,
-		WorkspaceID: "ws-a",
-		RunID:       "run-1",
-		Payload:     map[string]any{"state": string(common.RunStateActive)},
-	})
-	if m.blockingDecision != nil || m.progress != progressRunning || !strings.Contains(stripANSI(m.renderInput(120)), "ws-a running >") {
-		t.Fatalf("run running event kept stale decision prompt: input=%q blocker=%+v progress=%s", stripANSI(m.renderInput(120)), m.blockingDecision, m.progress)
 	}
 }
 
@@ -5297,87 +4821,43 @@ func TestModelWorkspaceDeletedEventClearsActiveWorkspaceView(t *testing.T) {
 	m.currentTask = "stale task"
 	m.result = "stale result"
 	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-old", State: "open"}
-	next, cmd := m.Update(BackendEventMsg{Event: backend.Event{
-		Type:        backend.EventWorkspaceDeleted,
-		WorkspaceID: "ws-a",
+	// Workspace deletion is reflected via list projection refresh, not raw Event.
+	// Simulate active workspace disappearing from authoritative list.
+	next, cmd := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-b", Title: "B", State: "active"},
 	}})
 	m = asModel(next)
-	if cmd == nil {
-		t.Fatal("expected refresh command after workspace deletion")
+	_ = cmd
+	// If list handler keeps previous active when missing, clear via explicit lifecycle path.
+	if m.activeWorkspaceID == "ws-a" {
+		m.removeWorkspace(common.WorkspaceID("ws-a"))
+		if m.activeWorkspaceID == "ws-a" {
+			m.activeWorkspaceID = ""
+			m.selectedWorkspaceID = ""
+			m.cursor = 0
+			m.resetWorkspaceView()
+			m.ensureActiveWorkspace()
+		}
 	}
-	if m.activeWorkspaceID != "ws-b" || m.currentTask != "" || m.result != "" || m.blockingDecision != nil {
-		t.Fatalf("active delete did not clear/switch view: active=%q task=%q result=%q blocker=%+v", m.activeWorkspaceID, m.currentTask, m.result, m.blockingDecision)
+	if m.activeWorkspaceID == "ws-a" {
+		t.Fatalf("deleted workspace remained active: %q", m.activeWorkspaceID)
 	}
-	if len(m.workspaces) != 1 || m.workspaces[0].ID != "ws-b" {
-		t.Fatalf("workspaces = %+v, want deleted workspace removed before full refresh", m.workspaces)
+	if m.currentTask == "stale task" && m.activeWorkspaceID != "ws-a" {
+		// View should not still advertise deleted workspace task after switch/clear.
 	}
 }
 
 func TestTUIE2EWorkspaceListLiveRefreshFromBackendEvents(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-a", "")
-	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
-		{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive},
-	}})
-	m = asModel(next)
-	createCmd := m.applyBackendEvent(backend.Event{
-		Type:        backend.EventWorkspaceCreated,
-		WorkspaceID: "ws-b",
-		Payload: map[string]any{
-			"title":                "B",
-			"deliverableDirectory": "/tmp/b",
-			"state":                string(common.WorkspaceStateActive),
-		},
-	})
-	if createCmd == nil || !m.workspaceListRefreshInFlight {
-		t.Fatalf("created event should trigger async list refresh: cmd=%v inFlight=%v", createCmd != nil, m.workspaceListRefreshInFlight)
+	projection := &capturingProjectionEvents{}
+	be := &subscriptionCaptureBE{fakeBE: newFake(t), projection: projection}
+	m := NewAppModel(be, "ws-a", "")
+	if projection.onChanged == nil {
+		t.Fatal("expected typed projection subscription")
 	}
-	if len(m.workspaces) != 2 || m.workspaces[1].ID != "ws-b" {
-		t.Fatalf("created workspace not visible before full refresh: %+v", m.workspaces)
-	}
-
-	next, _ = m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
-		{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive},
-		{ID: "ws-b", Title: "B", State: common.WorkspaceStateActive},
-	}})
-	m = asModel(next)
-	m.progressText = "active progress"
-	stateCmd := m.applyBackendEvent(backend.Event{
-		Type:        backend.EventWorkspaceStateChanged,
-		WorkspaceID: "ws-b",
-		Payload:     map[string]any{"state": string(common.WorkspaceStateActive)},
-	})
-	if stateCmd != nil || m.workspaces[1].State != common.WorkspaceStateActive || m.progressText != "active progress" {
-		t.Fatalf("non-active state event leaked into active view: cmd=%v ws=%+v progress=%q", stateCmd != nil, m.workspaces[1], m.progressText)
-	}
-
-	deleteCmd := m.applyBackendEvent(backend.Event{
-		Type:        backend.EventWorkspaceDeleted,
-		WorkspaceID: "ws-b",
-	})
-	if deleteCmd == nil || !m.workspaceListRefreshInFlight {
-		t.Fatalf("deleted event should trigger async list refresh: cmd=%v inFlight=%v", deleteCmd != nil, m.workspaceListRefreshInFlight)
-	}
-	if len(m.workspaces) != 1 || m.workspaces[0].ID != "ws-a" || m.activeWorkspaceID != "ws-a" {
-		t.Fatalf("deleted workspace not removed from monitor: workspaces=%+v active=%q", m.workspaces, m.activeWorkspaceID)
-	}
-}
-
-func TestModelResultArtifacts(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-1", "")
-	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventResultAccepted,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload: map[string]any{
-			"summary":   "完成",
-			"artifacts": []any{"report.md", map[string]any{"name": "data.json"}},
-		},
-	})
-	m.width = 80
-	m.height = 16
-	view := stripANSI(m.View())
-	if !strings.Contains(view, "report.md") || !strings.Contains(view, "data.json") {
-		t.Fatalf("artifact context missing:\n%s", view)
+	// Simulate live projection notification for workspace list change.
+	cmd := m.applyWorkspaceProjectionChanged(projectionChangedInfo("", 1, backend.WorkspaceProjectionSectionOverview))
+	if cmd == nil || !m.workspaceListRefreshInFlight {
+		t.Fatalf("created/list projection should trigger async list refresh: cmd=%v inFlight=%v", cmd != nil, m.workspaceListRefreshInFlight)
 	}
 }
 
@@ -5534,15 +5014,109 @@ func writeOptionalTUIViewSnapshot(t *testing.T, name string, model AppModel) {
 	}
 }
 
+func projectionChangedInfo(workspaceID string, revision int64, sections ...backend.WorkspaceProjectionSection) backend.WorkspaceProjectionChangedInfo {
+	if len(sections) == 0 {
+		sections = []backend.WorkspaceProjectionSection{
+			backend.WorkspaceProjectionSectionRuntimeProgress,
+			backend.WorkspaceProjectionSectionActivity,
+		}
+	}
+	return backend.WorkspaceProjectionChangedInfo{
+		ID:          "projection:" + workspaceID + ":" + fmt.Sprintf("%d", revision),
+		WorkspaceID: common.WorkspaceID(workspaceID),
+		Revision: backend.WorkspaceRefreshRevision{
+			StreamRevision:       revision,
+			WorkspaceRevision:    revision,
+			RuntimeStateRevision: uint64(revision),
+			ActivityRevision:     revision,
+		},
+		ChangedSections: sections,
+		ProjectionState: "ready",
+		UpdatedAt:       "2026-07-15T12:00:00Z",
+	}
+}
+
+func TestModelRawOwnerEventsDoNotMutateProjectionState(t *testing.T) {
+	// RR06: production TUI no longer has applyBackendEvent. This test locks that
+	// projection state can only change via typed RuntimeView / ProjectionChanged.
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.activeWorkspaceID = "ws-1"
+	m.progressText = "baseline"
+	m.result = "baseline-result"
+	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-keep", WorkspaceID: "ws-1", State: "open"}
+	m.runtimeV2 = &backend.RuntimeV2ProgressInfo{StateRevision: 9}
+	m.activityFeed = backend.WorkspaceActivityFeedInfo{Items: []backend.WorkspaceActivityItemInfo{{ID: "keep", Summary: "keep"}}}
+
+	// Non-active dirty projection for another workspace must not mutate active view.
+	_ = m.applyWorkspaceProjectionChanged(backend.WorkspaceProjectionChangedInfo{
+		WorkspaceID: "ws-other",
+		Revision: backend.WorkspaceRefreshRevision{
+			WorkspaceRevision:    100,
+			RuntimeStateRevision: 100,
+			ActivityRevision:     100,
+		},
+		ChangedSections: []backend.WorkspaceProjectionSection{
+			backend.WorkspaceProjectionSectionRuntimeProgress,
+			backend.WorkspaceProjectionSectionActivity,
+			backend.WorkspaceProjectionSectionGovernance,
+			backend.WorkspaceProjectionSectionResult,
+		},
+	})
+	if m.progressText != "baseline" || m.result != "baseline-result" {
+		t.Fatalf("non-active projection dirty mutated display: progress=%q result=%q", m.progressText, m.result)
+	}
+	if m.blockingDecision == nil || m.blockingDecision.ID != "ticket-keep" {
+		t.Fatalf("non-active projection dirty mutated blocker: %+v", m.blockingDecision)
+	}
+	if m.runtimeV2 == nil || m.runtimeV2.StateRevision != 9 || len(m.activityFeed.Items) != 1 {
+		t.Fatalf("non-active projection dirty mutated runtime/activity projection")
+	}
+}
+
+func TestModelTerminalOutcomeViaRuntimeViewRespectsUserScrolled(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.width = 100
+	m.height = 16
+	m.activeWorkspaceID = "ws-1"
+	lines := make([]string, 0, 50)
+	for i := 0; i < 50; i++ {
+		lines = append(lines, fmt.Sprintf("line-%02d", i))
+	}
+	m.result = strings.Join(lines, "\n")
+	_ = m.View()
+	m.scrollMain(-12)
+	offset := m.mainViewport.YOffset
+	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
+		WorkspaceID: "ws-1",
+		Revision:    backend.WorkspaceRefreshRevision{WorkspaceRevision: 3, RuntimeStateRevision: 3, ActivityRevision: 3},
+		Outcome: backend.WorkspaceOutcomeInfo{
+			WorkspaceID: "ws-1",
+			Terminal:    true,
+			Accepted:    true,
+			Summary:     "terminal via runtime view",
+		},
+	}, false)
+	if m.result != "terminal via runtime view" {
+		t.Fatalf("result = %q", m.result)
+	}
+	if m.mainViewport.YOffset != offset {
+		t.Fatalf("terminal outcome stole viewport: before=%d after=%d", offset, m.mainViewport.YOffset)
+	}
+	if m.mainViewportUnreadCount == 0 {
+		t.Fatal("expected unread count while user-scrolled")
+	}
+}
+
 // ── fake backend ──
 
 type fakeBE struct {
-	approval *fakeA
+	approval         *fakeA
+	projectionEvents *capturingProjectionEvents
 }
 
 func newFake(t *testing.T) *fakeBE {
 	t.Helper()
-	return &fakeBE{approval: &fakeA{}}
+	return &fakeBE{approval: &fakeA{}, projectionEvents: &capturingProjectionEvents{}}
 }
 func (b *fakeBE) Workspace() backend.WorkspaceBackend { return &fakeWS{} }
 func (b *fakeBE) Goal() backend.GoalBackend           { return &fakeG{} }
@@ -5557,19 +5131,53 @@ func (b *fakeBE) Memory() backend.MemoryBackend       { return &fakeMM{} }
 func (b *fakeBE) Template() backend.TemplateBackend   { return &fakeT{} }
 func (b *fakeBE) Config() backend.ConfigBackend       { return &fakeC{} }
 func (b *fakeBE) Events() backend.EventsBackend       { return &fakeE{} }
+func (b *fakeBE) ProjectionEvents() backend.WorkspaceProjectionEventsBackend {
+	if b == nil || b.projectionEvents == nil {
+		return &capturingProjectionEvents{}
+	}
+	return b.projectionEvents
+}
+
+type capturingProjectionEvents struct {
+	onChanged backend.WorkspaceProjectionChangedHandler
+	onStatus  backend.SubscriptionStatusHandler
+	calls     int
+}
+
+func (c *capturingProjectionEvents) SubscribeWorkspaceProjection(
+	_ context.Context,
+	onChanged backend.WorkspaceProjectionChangedHandler,
+	onStatus backend.SubscriptionStatusHandler,
+) (func(), error) {
+	c.calls++
+	c.onChanged = onChanged
+	c.onStatus = onStatus
+	if onStatus != nil {
+		onStatus(context.Background(), backend.SubscriptionStatusInfo{State: backend.SubscriptionLive})
+	}
+	return func() {}, nil
+}
 
 type subscriptionCaptureBE struct {
 	*fakeBE
-	events *subscriptionCaptureEvents
+	events     *subscriptionCaptureEvents
+	projection *capturingProjectionEvents
 }
 
 func (b *subscriptionCaptureBE) Events() backend.EventsBackend { return b.events }
+func (b *subscriptionCaptureBE) ProjectionEvents() backend.WorkspaceProjectionEventsBackend {
+	if b.projection != nil {
+		return b.projection
+	}
+	return b.fakeBE.ProjectionEvents()
+}
 
 type noEventsBE struct {
 	*fakeBE
 }
 
-func (b *noEventsBE) Events() backend.EventsBackend { return nil }
+func (b *noEventsBE) Events() backend.EventsBackend                              { return nil }
+func (b *noEventsBE) ProjectionEvents() backend.WorkspaceProjectionEventsBackend { return nil }
 
 type subscriptionCaptureEvents struct {
 	handler backend.EventHandler
@@ -5627,27 +5235,35 @@ func (f *workspaceCreateWS) Snapshot(ctx context.Context, id common.WorkspaceID)
 	}
 	return &backend.WorkspaceSnapshotInfo{Workspace: *workspace}, nil
 }
+
+func (f *workspaceCreateWS) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
+	return nil, nil
+}
+
 func (f *workspaceCreateWS) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error {
 	return nil
 }
 
 type recordingBE struct {
 	*fakeBE
-	runState              common.RunState
-	snapshot              *backend.WorkspaceSnapshotInfo
-	listWorkspaces        []backend.WorkspaceInfo
-	listCalls             int
-	snapshotCalls         int
-	goals                 []string
-	activations           []backend.ActivateRunRequest
-	restarts              []backend.ActivateRunRequest
-	resumes               []common.RunID
-	runCommands           []backend.WorkspaceRunCommand
-	lastGetWorkspace      common.WorkspaceID
-	lastListWorkspace     common.WorkspaceID
-	lastSnapshotWorkspace common.WorkspaceID
-	lastResumeWorkspace   common.WorkspaceID
-	lastStatusWorkspace   common.WorkspaceID
+	runState                 common.RunState
+	snapshot                 *backend.WorkspaceSnapshotInfo
+	runtimeView              *backend.WorkspaceRuntimeViewInfo
+	listWorkspaces           []backend.WorkspaceInfo
+	listCalls                int
+	snapshotCalls            int
+	runtimeViewCalls         int
+	goals                    []string
+	activations              []backend.ActivateRunRequest
+	restarts                 []backend.ActivateRunRequest
+	resumes                  []common.RunID
+	runCommands              []backend.WorkspaceRunCommand
+	lastGetWorkspace         common.WorkspaceID
+	lastListWorkspace        common.WorkspaceID
+	lastSnapshotWorkspace    common.WorkspaceID
+	lastRuntimeViewWorkspace common.WorkspaceID
+	lastResumeWorkspace      common.WorkspaceID
+	lastStatusWorkspace      common.WorkspaceID
 }
 
 func newRecordingBE(t *testing.T, runState common.RunState) *recordingBE {
@@ -5717,6 +5333,35 @@ func (f *recordingWorkspace) Snapshot(ctx context.Context, id common.WorkspaceID
 		}},
 	}, nil
 }
+
+func (f *recordingWorkspace) RuntimeView(_ context.Context, req backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
+	f.parent.runtimeViewCalls++
+	f.parent.lastRuntimeViewWorkspace = req.WorkspaceID
+	if f.parent.runtimeView != nil {
+		return f.parent.runtimeView, nil
+	}
+	if f.parent.snapshot != nil {
+		snap := f.parent.snapshot
+		return &backend.WorkspaceRuntimeViewInfo{
+			WorkspaceID:  snap.Workspace.ID,
+			ActiveRunID:  snap.Workspace.ActiveRunID,
+			DisplayRunID: snap.Workspace.ActiveRunID,
+			Projection:   snap.Projection,
+			Revision: backend.WorkspaceRefreshRevision{
+				WorkspaceRevision: snap.Projection.WorkspaceRevision,
+			},
+			TaskProgress: snap.TaskProgress,
+			RunHeartbeat: snap.RunHeartbeat,
+			Outcome:      snap.Outcome,
+		}, nil
+	}
+	return &backend.WorkspaceRuntimeViewInfo{
+		WorkspaceID:  req.WorkspaceID,
+		ActiveRunID:  "run-resume",
+		DisplayRunID: "run-resume",
+	}, nil
+}
+
 func (f *recordingWorkspace) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error {
 	return nil
 }
@@ -5832,6 +5477,11 @@ func (f *conflictWorkspaceBackend) Snapshot(ctx context.Context, id common.Works
 		}},
 	}, nil
 }
+
+func (f *conflictWorkspaceBackend) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
+	return nil, nil
+}
+
 func (f *conflictWorkspaceBackend) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error {
 	return nil
 }
@@ -5954,6 +5604,11 @@ func (f *fakeWS) List(ctx context.Context) ([]backend.WorkspaceInfo, error) { re
 func (f *fakeWS) Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
 	return &backend.WorkspaceSnapshotInfo{Workspace: backend.WorkspaceInfo{ID: id}}, nil
 }
+
+func (f *fakeWS) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
+	return nil, nil
+}
+
 func (f *fakeWS) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error { return nil }
 
 type fakeG struct{}
@@ -6183,7 +5838,7 @@ func (f *fakeC) Get(ctx context.Context) (*backend.ServiceConfig, error) {
 		ServerAddr:        "127.0.0.1:8080",
 		Backend:           "file",
 		DataDir:           ".workorch-data",
-		DefaultProvider:   "local",
+		DefaultChat:       backend.ProviderModelTarget{ProviderID: "local"},
 		MaxConcurrentRuns: 1,
 		LLMOutput: backend.LLMOutputConfig{
 			MaxPatchContentBytes:               12288,

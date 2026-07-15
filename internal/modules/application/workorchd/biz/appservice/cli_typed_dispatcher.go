@@ -24,6 +24,7 @@ func (d *CLICommandDispatcher) runTypedCLI() error {
 	} {
 		d.typed.Subscribe(topic, d.handleTypedCLIWorkspace)
 	}
+	d.typed.Subscribe(workorchdevents.TopicWorkorchDCommandReadWorkspaceRuntimeView, d.handleTypedWorkspaceRuntimeView)
 	for _, topic := range []string{
 		workorchdevents.TopicCLIGoalDefine,
 		workorchdevents.TopicCLIGoalList,
@@ -103,6 +104,7 @@ func (d *CLICommandDispatcher) closeTypedCLI() {
 	for _, topic := range workorchdevents.CLITopics() {
 		d.typed.Unsubscribe(topic)
 	}
+	d.typed.Unsubscribe(workorchdevents.TopicWorkorchDCommandReadWorkspaceRuntimeView)
 	d.typed = nil
 }
 

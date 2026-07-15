@@ -95,6 +95,9 @@ func (b *remoteBackend) Memory() MemoryBackend       { return b.mem }
 func (b *remoteBackend) Template() TemplateBackend   { return b.tmpl }
 func (b *remoteBackend) Config() ConfigBackend       { return b.cfg }
 func (b *remoteBackend) Events() EventsBackend       { return b.evt }
+func (b *remoteBackend) ProjectionEvents() WorkspaceProjectionEventsBackend {
+	return &remoteProjectionEventsBackend{cl: b.cl}
+}
 
 // ── Remote Workspace ──
 
@@ -210,6 +213,145 @@ func (b *remoteWorkspaceBackend) Snapshot(ctx context.Context, id common.Workspa
 	snapshot.Projection = projectionInfoFromClient(projection.Projection)
 	snapshot.Workspace.Projection = snapshot.Projection
 	return &snapshot, nil
+}
+
+func (b *remoteWorkspaceBackend) RuntimeView(ctx context.Context, req ReadWorkspaceRuntimeViewRequest) (*WorkspaceRuntimeViewInfo, error) {
+	if b == nil || b.cl == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	if strings.TrimSpace(string(req.WorkspaceID)) == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	projection, err := b.cl.GetWorkspaceRuntimeView(ctx, string(req.WorkspaceID), req.ActivityLimit, req.BeforeCursor)
+	if err != nil {
+		return nil, err
+	}
+	view := workspaceRuntimeViewInfoFromClient(projection.RuntimeView)
+	// Prefer envelope projection metadata when present.
+	if status := projectionInfoFromClient(projection.Projection); status.WorkspaceRevision != 0 || status.GlobalRevision != 0 || status.State != "" {
+		view.Projection = status
+	}
+	return &view, nil
+}
+
+func workspaceRuntimeViewInfoFromClient(input client.WorkspaceRuntimeView) WorkspaceRuntimeViewInfo {
+	view := WorkspaceRuntimeViewInfo{
+		WorkspaceID:       common.WorkspaceID(input.WorkspaceID),
+		ActiveRunID:       common.RunID(input.ActiveRunID),
+		DisplayRunID:      common.RunID(input.DisplayRunID),
+		Projection:        projectionInfoFromWorkspaceViewModel(input.Projection),
+		Revision:          workspaceRefreshRevisionFromClient(input.Revision),
+		PromptMode:        input.PromptMode,
+		RunState:          common.RunState(input.RunState),
+		TaskProgress:      taskProgressInfoFromClient(input.TaskProgress),
+		RunHeartbeat:      runHeartbeatInfoFromClient(input.RunHeartbeat),
+		ConvergenceStatus: convergenceStatusInfoFromClient(input.ConvergenceStatus),
+		Acceptance:        acceptanceProjectionInfoFromClient(input.Acceptance),
+		RunCommand:        runCommandStatusInfoFromClient(input.RunCommand),
+		Outcome:           workspaceOutcomeInfoFromClient(input.Outcome),
+		Activity:          workspaceActivityFeedInfoFromClient(input.Activity),
+	}
+	if input.BlockingDecision != nil {
+		decision := decisionInfoFromClient(*input.BlockingDecision)
+		view.BlockingDecision = &decision
+	}
+	if input.BlockingApproval != nil {
+		approval := approvalInfoFromClient(*input.BlockingApproval)
+		view.BlockingApproval = &approval
+	}
+	return view
+}
+
+func projectionInfoFromWorkspaceViewModel(input client.WorkspaceViewModel) ProjectionInfo {
+	return ProjectionInfo{
+		State:                   input.State,
+		GlobalRevision:          input.GlobalRevision,
+		WorkspaceRevision:       input.WorkspaceRevision,
+		SourceEventRevision:     input.SourceEventRevision,
+		ProjectedSourceRevision: input.ProjectedSourceRevision,
+		UpdatedAt:               input.UpdatedAt,
+		RebuiltAt:               input.RebuiltAt,
+		Degraded:                input.Degraded,
+		StaleReason:             input.StaleReason,
+		Error:                   input.Error,
+	}
+}
+
+func workspaceRefreshRevisionFromClient(input client.WorkspaceRefreshRevision) WorkspaceRefreshRevision {
+	return WorkspaceRefreshRevision{
+		StreamGeneration:        input.StreamGeneration,
+		StreamRevision:          input.StreamRevision,
+		WorkspaceRevision:       input.WorkspaceRevision,
+		ProjectedSourceRevision: input.ProjectedSourceRevision,
+		RuntimeStateRevision:    input.RuntimeStateRevision,
+		EvidenceSequence:        input.EvidenceSequence,
+		ActivityRevision:        input.ActivityRevision,
+	}
+}
+
+func workspaceActivityFeedInfoFromClient(input client.WorkspaceActivityFeed) WorkspaceActivityFeedInfo {
+	return WorkspaceActivityFeedInfo{
+		WorkspaceID:      common.WorkspaceID(input.WorkspaceID),
+		DisplayRunID:     common.RunID(input.DisplayRunID),
+		ActivityRevision: input.ActivityRevision,
+		Items:            workspaceActivityItemInfosFromClient(input.Items),
+		Truncated:        input.Truncated,
+		NextCursor:       input.NextCursor,
+	}
+}
+
+func workspaceActivityItemInfosFromClient(items []client.WorkspaceActivityItem) []WorkspaceActivityItemInfo {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]WorkspaceActivityItemInfo, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, WorkspaceActivityItemInfo{
+			ID:                   item.ID,
+			WorkspaceID:          common.WorkspaceID(item.WorkspaceID),
+			RunID:                common.RunID(item.RunID),
+			StepID:               common.StepID(item.StepID),
+			Kind:                 WorkspaceActivityKind(item.Kind),
+			State:                item.State,
+			Title:                item.Title,
+			Summary:              item.Summary,
+			OccurredAt:           item.OccurredAt,
+			SourceEventRevision:  item.SourceEventRevision,
+			RuntimeStateRevision: item.RuntimeStateRevision,
+			EvidenceSequence:     item.EvidenceSequence,
+		})
+	}
+	return ret
+}
+
+func decisionInfoFromClient(item client.Decision) DecisionInfo {
+	return DecisionInfo{
+		ID:                 common.TicketID(item.ID),
+		WorkspaceID:        common.WorkspaceID(item.WorkspaceID),
+		RunID:              common.RunID(item.RunID),
+		Reason:             item.Reason,
+		Question:           item.Question,
+		Context:            item.Context.Clone(),
+		State:              item.State,
+		ResolutionType:     item.ResolutionType,
+		ContinuationAction: item.ContinuationAction,
+		ResumeRunID:        common.RunID(item.ResumeRunID),
+		SuccessorRunID:     common.RunID(item.SuccessorRunID),
+		AutoGovernance:     mapRemoteAutoGovernanceSummary(item.AutoGovernance),
+	}
+}
+
+func approvalInfoFromClient(item client.Approval) ApprovalInfo {
+	return ApprovalInfo{
+		ID:             common.ApprovalID(item.ID),
+		WorkspaceID:    common.WorkspaceID(item.WorkspaceID),
+		RunID:          common.RunID(item.RunID),
+		Reason:         item.Reason,
+		Action:         item.Action,
+		Context:        item.Context.Clone(),
+		State:          item.State,
+		AutoGovernance: mapRemoteAutoGovernanceSummary(item.AutoGovernance),
+	}
 }
 
 func workspaceSnapshotInfoFromClient(input client.WorkspaceSnapshot) WorkspaceSnapshotInfo {
@@ -1938,6 +2080,249 @@ func (b *remoteEventsBackend) lastEventIDSnapshot() string {
 }
 
 func (b *remoteEventsBackend) rememberLastEventID(id string) {
+	if b == nil || strings.TrimSpace(id) == "" {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.lastEventID = strings.TrimSpace(id)
+}
+
+// ── Remote Projection Events Backend (typed SSE) ──
+
+type remoteProjectionEventsBackend struct {
+	cl          *client.Client
+	mu          sync.Mutex
+	lastEventID string
+}
+
+func (b *remoteProjectionEventsBackend) SubscribeWorkspaceProjection(
+	ctx context.Context,
+	onChanged WorkspaceProjectionChangedHandler,
+	onStatus SubscriptionStatusHandler,
+) (func(), error) {
+	if b == nil || b.cl == nil {
+		return func() {}, fmt.Errorf("%w: remote projection backend unavailable", common.ErrInvalidArgument)
+	}
+	if onChanged == nil {
+		return func() {}, fmt.Errorf("%w: projection changed handler required", common.ErrInvalidArgument)
+	}
+	streamCtx, cancel := context.WithCancel(ctx)
+	var once sync.Once
+	go b.streamProjectionEvents(streamCtx, onChanged, onStatus)
+	return func() {
+		once.Do(cancel)
+	}, nil
+}
+
+func (b *remoteProjectionEventsBackend) streamProjectionEvents(
+	ctx context.Context,
+	onChanged WorkspaceProjectionChangedHandler,
+	onStatus SubscriptionStatusHandler,
+) {
+	publishStatus := func(status SubscriptionStatusInfo) {
+		if onStatus != nil {
+			onStatus(ctx, status)
+		}
+	}
+	publishStatus(SubscriptionStatusInfo{State: SubscriptionConnecting})
+	backoff := 200 * time.Millisecond
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		connected, liveRevision := b.streamProjectionEventsOnce(ctx, onChanged, onStatus)
+		if ctx.Err() != nil {
+			return
+		}
+		if connected {
+			backoff = 200 * time.Millisecond
+			continue
+		}
+		publishStatus(SubscriptionStatusInfo{
+			State:          SubscriptionReconnecting,
+			StreamRevision: liveRevision,
+			LastError:      "projection sse disconnected",
+		})
+		if backoff < 2*time.Second {
+			backoff *= 2
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+			publishStatus(SubscriptionStatusInfo{State: SubscriptionConnecting, StreamRevision: liveRevision})
+		}
+	}
+}
+
+func (b *remoteProjectionEventsBackend) streamProjectionEventsOnce(
+	ctx context.Context,
+	onChanged WorkspaceProjectionChangedHandler,
+	onStatus SubscriptionStatusHandler,
+) (bool, int64) {
+	publishStatus := func(status SubscriptionStatusInfo) {
+		if onStatus != nil {
+			onStatus(ctx, status)
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.cl.BaseURL()+"/api/v1/workorch/events/stream", nil)
+	if err != nil {
+		publishStatus(SubscriptionStatusInfo{State: SubscriptionDegraded, LastError: err.Error()})
+		return false, 0
+	}
+	query := req.URL.Query()
+	query.Set("view", "projection")
+	if lastEventID := b.lastEventIDSnapshot(); lastEventID != "" {
+		req.Header.Set("Last-Event-ID", lastEventID)
+		query.Set("lastEventId", lastEventID)
+	}
+	req.URL.RawQuery = query.Encode()
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		publishStatus(SubscriptionStatusInfo{State: SubscriptionDegraded, LastError: err.Error()})
+		return false, 0
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		publishStatus(SubscriptionStatusInfo{State: SubscriptionDegraded, LastError: fmt.Sprintf("projection sse status %d", resp.StatusCode)})
+		return false, 0
+	}
+	// Connected: only now report live.
+	publishStatus(SubscriptionStatusInfo{State: SubscriptionLive})
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 4096), 1024*1024)
+	var dataLines []string
+	var eventID string
+	var lastRevision int64
+	for scanner.Scan() {
+		select {
+		case <-ctx.Done():
+			return true, lastRevision
+		default:
+		}
+		line := scanner.Text()
+		if line == "" {
+			info, ok := decodeProjectionSSE(dataLines, eventID)
+			dataLines = nil
+			eventID = ""
+			if !ok {
+				continue
+			}
+			b.rememberLastEventID(info.ID)
+			if info.Revision.StreamRevision > lastRevision {
+				lastRevision = info.Revision.StreamRevision
+			}
+			if onStatus != nil {
+				onStatus(ctx, SubscriptionStatusInfo{
+					State:            SubscriptionLive,
+					StreamGeneration: info.Revision.StreamGeneration,
+					StreamRevision:   info.Revision.StreamRevision,
+					LastEventAt:      info.UpdatedAt,
+				})
+			}
+			onChanged(ctx, info)
+			continue
+		}
+		if strings.HasPrefix(line, "id:") {
+			eventID = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		}
+	}
+	return false, lastRevision
+}
+
+type workspaceProjectionChangedSSE struct {
+	ID               string `json:"id"`
+	StreamGeneration string `json:"streamGeneration,omitempty"`
+	StreamRevision   int64  `json:"streamRevision"`
+	WorkspaceID      string `json:"workspaceId"`
+	RunID            string `json:"runId,omitempty"`
+	Revision         struct {
+		StreamGeneration        string `json:"streamGeneration,omitempty"`
+		StreamRevision          int64  `json:"streamRevision,omitempty"`
+		WorkspaceRevision       int64  `json:"workspaceRevision,omitempty"`
+		ProjectedSourceRevision int64  `json:"projectedSourceRevision,omitempty"`
+		RuntimeStateRevision    uint64 `json:"runtimeStateRevision,omitempty"`
+		EvidenceSequence        uint64 `json:"evidenceSequence,omitempty"`
+		ActivityRevision        int64  `json:"activityRevision,omitempty"`
+	} `json:"revision"`
+	ChangedSections []string `json:"changedSections"`
+	ProjectionState string   `json:"projectionState"`
+	UpdatedAt       string   `json:"updatedAt"`
+}
+
+// DecodeProjectionSSE is the production remote projection SSE decoder entry point.
+// Cross-boundary contract tests must call this (not a copied DTO + json.Unmarshal)
+// against frames produced by the server serializer (CR06).
+func DecodeProjectionSSE(lines []string, eventID string) (WorkspaceProjectionChangedInfo, bool) {
+	return decodeProjectionSSE(lines, eventID)
+}
+
+func decodeProjectionSSE(lines []string, eventID string) (WorkspaceProjectionChangedInfo, bool) {
+	if len(lines) == 0 {
+		return WorkspaceProjectionChangedInfo{}, false
+	}
+	var dto workspaceProjectionChangedSSE
+	if err := json.Unmarshal([]byte(strings.Join(lines, "\n")), &dto); err != nil {
+		return WorkspaceProjectionChangedInfo{}, false
+	}
+	// Accept both top-level concrete DTO and legacy envelope topic form.
+	if strings.TrimSpace(dto.WorkspaceID) == "" {
+		return WorkspaceProjectionChangedInfo{}, false
+	}
+	sections := make([]WorkspaceProjectionSection, 0, len(dto.ChangedSections))
+	for _, section := range dto.ChangedSections {
+		if strings.TrimSpace(section) == "" {
+			continue
+		}
+		sections = append(sections, WorkspaceProjectionSection(section))
+	}
+	streamRevision := dto.StreamRevision
+	if streamRevision == 0 {
+		streamRevision = dto.Revision.StreamRevision
+	}
+	id := strings.TrimSpace(dto.ID)
+	if id == "" {
+		id = strings.TrimSpace(eventID)
+	}
+	streamGeneration := strings.TrimSpace(dto.StreamGeneration)
+	if streamGeneration == "" {
+		streamGeneration = strings.TrimSpace(dto.Revision.StreamGeneration)
+	}
+	return WorkspaceProjectionChangedInfo{
+		ID:          id,
+		WorkspaceID: common.WorkspaceID(dto.WorkspaceID),
+		RunID:       common.RunID(dto.RunID),
+		Revision: WorkspaceRefreshRevision{
+			StreamGeneration:        streamGeneration,
+			StreamRevision:          streamRevision,
+			WorkspaceRevision:       dto.Revision.WorkspaceRevision,
+			ProjectedSourceRevision: dto.Revision.ProjectedSourceRevision,
+			RuntimeStateRevision:    dto.Revision.RuntimeStateRevision,
+			EvidenceSequence:        dto.Revision.EvidenceSequence,
+			ActivityRevision:        dto.Revision.ActivityRevision,
+		},
+		ChangedSections: sections,
+		ProjectionState: dto.ProjectionState,
+		UpdatedAt:       dto.UpdatedAt,
+	}, true
+}
+
+func (b *remoteProjectionEventsBackend) lastEventIDSnapshot() string {
+	if b == nil {
+		return ""
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.lastEventID
+}
+
+func (b *remoteProjectionEventsBackend) rememberLastEventID(id string) {
 	if b == nil || strings.TrimSpace(id) == "" {
 		return
 	}

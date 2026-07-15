@@ -91,6 +91,24 @@ func cliWorkspaceSnapshotResponse(response magicevent.Result) (workorchdevents.C
 	return result, nil
 }
 
+func cliWorkspaceRuntimeViewResponse(response magicevent.Result) (workorchdevents.ReadWorkspaceRuntimeViewResult, error) {
+	if response == nil {
+		return workorchdevents.ReadWorkspaceRuntimeViewResult{}, common.ErrInvalidArgument
+	}
+	if err := cd.ToStdError(response.Error()); err != nil {
+		return workorchdevents.ReadWorkspaceRuntimeViewResult{}, err
+	}
+	data, resultErr := response.Get()
+	if err := cd.ToStdError(resultErr); err != nil {
+		return workorchdevents.ReadWorkspaceRuntimeViewResult{}, err
+	}
+	result, ok := data.(workorchdevents.ReadWorkspaceRuntimeViewResult)
+	if !ok {
+		return workorchdevents.ReadWorkspaceRuntimeViewResult{}, fmt.Errorf("%w: workspace runtime view result type %T", common.ErrInvalidArgument, data)
+	}
+	return result, nil
+}
+
 func cliWorkspaceDeleteResponse(response magicevent.Result) (workorchdevents.CLIWorkspaceDeleteResult, error) {
 	if response == nil {
 		return workorchdevents.CLIWorkspaceDeleteResult{}, common.ErrInvalidArgument

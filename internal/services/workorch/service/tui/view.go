@@ -177,7 +177,10 @@ func (m AppModel) renderMain(width, height int) string {
 	if section := renderLLMContextCompact(m.llmContext, m.llmContextSummary, width-2); section != "" {
 		b.WriteString(section)
 	}
-	if section := renderRuntimeEventsCompact(m.runtimeEvents, width-2, 8); section != "" {
+	if section := renderRuntimeProgressCompact(m.runtimeV2, width-2); section != "" {
+		b.WriteString(section)
+	}
+	if section := renderRecentActivityCompact(m.activityFeed, width-2, 8); section != "" {
 		b.WriteString(section)
 	}
 	if section := renderGovernanceCompact(m.activeScopeDecisions(), m.activeScopeApprovals(), width-2, 2); section != "" {
@@ -570,26 +573,75 @@ func renderLLMContextCompact(budget map[string]any, summary backend.LLMContextBu
 	return b.String()
 }
 
-func renderRuntimeEventsCompact(items []string, width int, limit int) string {
-	if len(items) == 0 || width <= 0 || limit <= 0 {
+func renderRuntimeProgressCompact(runtime *backend.RuntimeV2ProgressInfo, width int) string {
+	if runtime == nil || width <= 0 {
 		return ""
 	}
-	start := len(items) - limit
+	var b strings.Builder
+	b.WriteString(Heading.Render("Runtime Progress"))
+	b.WriteString("\n")
+	b.WriteString(truncateDisplay(fmt.Sprintf("- revision %d | evidence %d", runtime.StateRevision, runtime.EvidenceSequence), width))
+	b.WriteString("\n")
+	if focus := strings.TrimSpace(runtime.CurrentFocusID); focus != "" || strings.TrimSpace(runtime.CurrentAction) != "" {
+		b.WriteString(truncateDisplay(fmt.Sprintf("- focus %s | action %s", nonEmpty(focus, "-"), nonEmpty(runtime.CurrentAction, "-")), width))
+		b.WriteString("\n")
+	}
+	b.WriteString(truncateDisplay(fmt.Sprintf("- dispatch %d completed | candidate attempts %d", runtime.CompletedDispatchCount, runtime.CandidateAttemptCount), width))
+	b.WriteString("\n")
+	missing := "none"
+	if len(runtime.MissingEvidenceKinds) > 0 {
+		missing = strings.Join(runtime.MissingEvidenceKinds, ",")
+	}
+	b.WriteString(truncateDisplay(fmt.Sprintf("- evidence accepted %d rejected %d | missing %s", runtime.AcceptedEvidenceCount, runtime.RejectedEvidenceCount, missing), width))
+	b.WriteString("\n")
+	if msg := strings.TrimSpace(runtime.FailureMessage); msg != "" {
+		b.WriteString(truncateDisplay("- failure "+msg, width))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func renderRecentActivityCompact(feed backend.WorkspaceActivityFeedInfo, width int, limit int) string {
+	if len(feed.Items) == 0 || width <= 0 || limit <= 0 {
+		return ""
+	}
+	start := len(feed.Items) - limit
 	if start < 0 {
 		start = 0
 	}
 	var b strings.Builder
-	b.WriteString(Heading.Render("Runtime Events"))
+	b.WriteString(Heading.Render("Recent Activity"))
 	b.WriteString("\n")
-	for _, item := range items[start:] {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
+	for _, item := range feed.Items[start:] {
+		line := strings.TrimSpace(item.Summary)
+		if line == "" {
+			line = strings.TrimSpace(item.Title)
 		}
-		b.WriteString(truncateDisplay("- "+item, width))
+		if line == "" {
+			line = string(item.Kind)
+		}
+		if ts := activityTimeLabel(item.OccurredAt); ts != "" {
+			line = ts + " " + line
+		}
+		b.WriteString(truncateDisplay("- "+line, width))
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+func activityTimeLabel(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	// Prefer clock portion when ISO timestamps are present.
+	if len(value) >= 19 && value[10] == 'T' {
+		return value[11:16]
+	}
+	if len(value) >= 5 && value[2] == ':' {
+		return value[:5]
+	}
+	return value
 }
 
 func convergenceStatusText(item *backend.ConvergenceStatusInfo) string {
@@ -806,8 +858,20 @@ func (m AppModel) renderRuntimeStatusBar(width int) string {
 	if approval := m.activeBlockingApproval(); approval != nil && approval.ID != "" {
 		parts = append(parts, "approval "+shortID(string(approval.ID)))
 	}
-	if m.mainViewportPendingUpdate {
+	if m.mainViewportUserScrolled && m.mainViewportUnreadCount > 0 {
+		parts = append(parts, fmt.Sprintf("new updates: %d · PgDn to follow", m.mainViewportUnreadCount))
+	} else if m.mainViewportPendingUpdate {
 		parts = append(parts, "new updates")
+	}
+	switch m.subscriptionStatus.State {
+	case backend.SubscriptionReconnecting, backend.SubscriptionDegraded, backend.SubscriptionConnecting:
+		label := string(m.subscriptionStatus.State)
+		if m.subscriptionStatus.StreamRevision > 0 {
+			label = fmt.Sprintf("events %s · showing projection revision %d", m.subscriptionStatus.State, m.subscriptionStatus.StreamRevision)
+		} else {
+			label = "events " + string(m.subscriptionStatus.State)
+		}
+		parts = append(parts, label)
 	}
 	return truncateDisplay(strings.Join(parts, " | "), width-2)
 }

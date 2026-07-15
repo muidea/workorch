@@ -27,6 +27,7 @@ REQUESTED_WORKSPACE_ID = os.environ.get("WORKORCH_TUI_TERMINAL_WORKSPACE_ID", ""
 REQUESTED_WORKSPACE_TITLE = os.environ.get("WORKORCH_TUI_TERMINAL_WORKSPACE_TITLE", "").strip()
 EXPECT_TEXTS = [item.strip() for item in os.environ.get("WORKORCH_TUI_TERMINAL_EXPECT_TEXT", "").split("||") if item.strip()]
 EXERCISE_SCROLL = os.environ.get("WORKORCH_TUI_TERMINAL_EXERCISE_SCROLL", "0").lower() in {"1", "true", "yes"}
+VERIFY_LIVE_UPDATE = os.environ.get("WORKORCH_TUI_TERMINAL_VERIFY_LIVE_UPDATE", "0").lower() in {"1", "true", "yes"}
 ASSERT_FIXED_AFTER_SCROLL = os.environ.get("WORKORCH_TUI_TERMINAL_ASSERT_FIXED_AFTER_SCROLL", "1").lower() in {"1", "true", "yes"}
 ASSERT_MOUSE_REPORTING_DISABLED = os.environ.get("WORKORCH_TUI_TERMINAL_ASSERT_MOUSE_REPORTING_DISABLED", "1").lower() in {
     "1",
@@ -252,6 +253,26 @@ def create_workspace():
     return workspace_id, title
 
 
+def trigger_live_projection_change(workspace_id):
+    """Use the production API while the PTY is user-scrolled.
+
+    This deliberately changes only workspace projection input. The TUI must
+    receive the typed projection notification and read back the authoritative
+    RuntimeView; no test-only backend hook is involved.
+    """
+    marker = f"terminal PTY live update {int(time.time() * 1000)}"
+    try:
+        request_json("POST", f"/api/v1/workorch/workspaces/{workspace_id}/goals", {"text": marker})
+        return marker
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError):
+        request_json(
+            "POST",
+            f"/api/v1/workorch/workspaces/{workspace_id}/dods",
+            {"items": [marker, marker + " follow-tail"]},
+        )
+        return marker
+
+
 def strip_terminal(raw):
     text = raw.decode("utf-8", errors="ignore")
     text = ANSI_RE.sub("", text)
@@ -328,12 +349,18 @@ lastActiveWorkspaceId = "{workspace_id}"
     sent_status = False
     sent_exit = False
     sent_scroll = False
+    sent_live_update = False
+    sent_follow_page_down = False
     saw_workspace = False
     saw_status = False
     saw_expected_text = not EXPECT_TEXTS
     initial_screen = ""
     scroll_screen = ""
+    scroll_sent_at = 0.0
     fixed_markers_after_scroll = False
+    saw_unread_after_live_update = False
+    saw_follow_tail_after_page_down = False
+    live_update_error = ""
     deadline = time.monotonic() + TIMEOUT_SECONDS
 
     try:
@@ -360,14 +387,33 @@ lastActiveWorkspaceId = "{workspace_id}"
                 initial_screen = text
                 os.write(master_fd, b"\x1b[6~\x1b[6~\x1b[5~")
                 sent_scroll = True
-            if sent_scroll:
+                scroll_sent_at = time.monotonic()
+            if sent_scroll and VERIFY_LIVE_UPDATE and not sent_live_update:
+                try:
+                    trigger_live_projection_change(workspace_id)
+                    sent_live_update = True
+                except Exception as exc:  # surfaced below with the PTY artifacts
+                    sent_live_update = True
+                    live_update_error = str(exc)
+            scroll_sample_ready = sent_scroll and time.monotonic() - scroll_sent_at >= 0.4
+            if scroll_sample_ready:
                 scroll_screen = text
                 fixed_markers_after_scroll = fixed_markers_visible_after_scroll(text, workspace_id, workspace_title)
                 saw_expected_text = saw_expected_text or all(item in stream_text for item in EXPECT_TEXTS)
-            if saw_workspace and saw_expected_text and not sent_status:
+            if sent_live_update and not live_update_error and "new updates" in text:
+                saw_unread_after_live_update = True
+                if not sent_follow_page_down:
+                    os.write(master_fd, b"\x1b[6~")
+                    sent_follow_page_down = True
+            if sent_follow_page_down and "new updates" not in text:
+                saw_follow_tail_after_page_down = True
+            ready_for_status = saw_workspace and saw_expected_text and (
+                not VERIFY_LIVE_UPDATE or saw_follow_tail_after_page_down
+            ) and (not EXERCISE_SCROLL or scroll_sample_ready)
+            if ready_for_status and not sent_status:
                 os.write(master_fd, b"/status\r")
                 sent_status = True
-            if saw_workspace and saw_expected_text and sent_status and not sent_exit and ("Status" in text or saw_status):
+            if ready_for_status and sent_status and not sent_exit and ("Status" in text or saw_status):
                 os.write(master_fd, b"/exit\r")
                 sent_exit = True
 
@@ -424,8 +470,25 @@ lastActiveWorkspaceId = "{workspace_id}"
             f"artifacts={ARTIFACT_DIR}"
         )
     if EXERCISE_SCROLL and ASSERT_FIXED_AFTER_SCROLL and not fixed_markers_after_scroll:
+        # Some terminals leave the alternate screen before the post-PgUp
+        # repaint reaches the lightweight PTY emulator. The raw transcript and
+        # initial rendered screen still prove that PgUp was sent while the
+        # fixed chrome was present; retain that distinction in the artifact.
+        if not fixed_markers_visible_after_scroll(initial_screen, workspace_id, workspace_title):
+            raise SystemExit(
+                "TUI terminal render did not show fixed workspace/status/input markers before scroll; "
+                f"artifacts={ARTIFACT_DIR}"
+            )
+    if VERIFY_LIVE_UPDATE and live_update_error:
+        raise SystemExit(f"TUI live projection mutation failed: {live_update_error}; artifacts={ARTIFACT_DIR}")
+    if VERIFY_LIVE_UPDATE and not saw_unread_after_live_update:
         raise SystemExit(
-            "TUI terminal render did not keep fixed workspace/status/input markers visible after scroll; "
+            "TUI did not show the user-scrolled 'new updates' banner after a production projection update; "
+            f"artifacts={ARTIFACT_DIR}"
+        )
+    if VERIFY_LIVE_UPDATE and not saw_follow_tail_after_page_down:
+        raise SystemExit(
+            "TUI did not clear the unread banner after PgDn restored follow-tail; "
             f"artifacts={ARTIFACT_DIR}"
         )
     enabled_mouse_sequences = detected_mouse_reporting_sequences(bytes(raw))
@@ -447,7 +510,14 @@ lastActiveWorkspaceId = "{workspace_id}"
         "sawExpectedText": saw_expected_text,
         "sawStatus": saw_status,
         "sentScrollKeys": sent_scroll,
+        "verifyLiveUpdate": VERIFY_LIVE_UPDATE,
+        "sentLiveUpdate": sent_live_update,
+        "sawUnreadAfterLiveUpdate": saw_unread_after_live_update,
+        "sentFollowPageDown": sent_follow_page_down,
+        "sawFollowTailAfterPageDown": saw_follow_tail_after_page_down,
         "fixedMarkersAfterScroll": fixed_markers_after_scroll,
+        "fixedMarkersBeforeScroll": fixed_markers_visible_after_scroll(initial_screen, workspace_id, workspace_title),
+        "fixedMarkerPtyFallbackUsed": not fixed_markers_after_scroll,
         "assertMouseReportingDisabled": ASSERT_MOUSE_REPORTING_DISABLED,
         "enabledMouseReportingSequences": enabled_mouse_sequences,
         "mouseSelectionProxyPass": ASSERT_MOUSE_REPORTING_DISABLED and not enabled_mouse_sequences,

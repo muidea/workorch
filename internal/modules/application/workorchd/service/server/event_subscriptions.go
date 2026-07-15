@@ -79,36 +79,67 @@ func subscribeWorkspaceProjectionChanged(commandHub magicevent.Hub, handler stre
 }
 
 func workspaceProjectionStreamEvent(data workorchdevents.WorkspaceProjectionChangedData) streamEvent {
+	// In-process envelope carries typed projection facts for filters/replay buffer.
+	// The HTTP/SSE wire frame is always the concrete workspaceProjectionChangedSSE
+	// DTO (see writeSSEEnvelope / writeProjectionSSE); Payload is never the wire body.
+	dto := workspaceProjectionChangedSSEFromData(data)
+	changedSections := append([]string(nil), dto.ChangedSections...)
 	payload := map[string]any{
-		"type":                    "workspace_projection_changed",
-		"workspaceId":             string(data.WorkspaceID),
-		"globalRevision":          data.GlobalRevision,
-		"workspaceRevision":       data.WorkspaceRevision,
-		"sourceEventRevision":     data.SourceEventRevision,
-		"projectedSourceRevision": data.ProjectedSourceRevision,
-		"workspaceTotal":          data.WorkspaceTotal,
-		"changeKind":              data.ChangeKind,
-		"projectionState":         data.ProjectionState,
-		"updatedAt":               data.UpdatedAt,
-		"rebuiltAt":               data.RebuiltAt,
-	}
-	if data.StaleReason != "" {
-		payload["staleReason"] = data.StaleReason
-	}
-	if data.Error != "" {
-		payload["error"] = data.Error
+		"id":               dto.ID,
+		"streamGeneration": dto.StreamGeneration,
+		"streamRevision":   dto.StreamRevision,
+		"workspaceId":      dto.WorkspaceID,
+		"runId":            dto.RunID,
+		"revision": map[string]any{
+			"streamGeneration":        dto.Revision.StreamGeneration,
+			"streamRevision":          dto.Revision.StreamRevision,
+			"workspaceRevision":       dto.Revision.WorkspaceRevision,
+			"projectedSourceRevision": dto.Revision.ProjectedSourceRevision,
+			"runtimeStateRevision":    dto.Revision.RuntimeStateRevision,
+			"evidenceSequence":        dto.Revision.EvidenceSequence,
+			"activityRevision":        dto.Revision.ActivityRevision,
+		},
+		"changedSections": changedSections,
+		"projectionState": dto.ProjectionState,
+		"updatedAt":       dto.UpdatedAt,
 	}
 	return streamEvent{
+		ID:           dto.ID,
 		Version:      events.WorkorchEventVersion,
 		Topic:        workorchdevents.TopicWorkspaceProjectionChanged,
-		OccurredAt:   data.UpdatedAt,
+		OccurredAt:   dto.UpdatedAt,
 		SourceModule: "workorchd.workspace_projection",
 		SubjectType:  "workspace_projection",
-		SubjectID:    string(data.WorkspaceID),
-		WorkspaceID:  string(data.WorkspaceID),
-		RunID:        string(data.RunID),
+		SubjectID:    dto.WorkspaceID,
+		WorkspaceID:  dto.WorkspaceID,
+		RunID:        dto.RunID,
+		Revision:     dto.StreamRevision,
 		Payload:      payload,
 	}
+}
+
+func projectionNotificationID(data workorchdevents.WorkspaceProjectionChangedData) string {
+	workspaceID := strings.TrimSpace(string(data.WorkspaceID))
+	if workspaceID == "" {
+		workspaceID = "workspace"
+	}
+	// FR05: ID uses the max durable-comparable stream key so restart-seeded
+	// GlobalRevision/WorkspaceRevision/ActivityRevision floors cannot silently
+	// collide with pre-restart Last-Event-ID values.
+	seq := data.GlobalRevision
+	if data.WorkspaceRevision > seq {
+		seq = data.WorkspaceRevision
+	}
+	if data.ActivityRevision > seq {
+		seq = data.ActivityRevision
+	}
+	generation := strings.TrimSpace(data.StreamGeneration)
+	if generation == "" {
+		// Keep the historical shape for explicit legacy fixtures/clients. Production
+		// projection stores always publish a non-empty generation.
+		return fmt.Sprintf("projection:%s:%d", workspaceID, seq)
+	}
+	return fmt.Sprintf("projection:%s:%s:%d", generation, workspaceID, seq)
 }
 
 func subscribeEventRecordAppended(commandHub magicevent.Hub, scope string, handler eventRecordHandler) func() {

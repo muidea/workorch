@@ -14,7 +14,7 @@ func TestRuntimeV2BootstrapBuildsOrderedDoDFocuses(t *testing.T) {
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"实现行为一", "验证行为二", "覆盖行为三"}},
 		"definition-1",
 		nil,
-		runtimecontract.RuntimeActivationContext{ExecutionContract: runtimecontract.RuntimeExecutionContract{StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce}},
+		runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce}},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -22,8 +22,11 @@ func TestRuntimeV2BootstrapBuildsOrderedDoDFocuses(t *testing.T) {
 	if len(bootstrap.Focuses) != 3 || bootstrap.Focuses[0].ID != "focus-001" || bootstrap.Focuses[2].CoverageWorkItemIDs[0] != "cwi-003" {
 		t.Fatalf("bootstrap focuses = %+v", bootstrap.Focuses)
 	}
-	if bootstrap.Definition.GoalDefinition != "交付完整能力" || bootstrap.Definition.DoDDefinition == "" || len(bootstrap.Requirements) != 6 {
+	if bootstrap.Definition.GoalDefinition != "交付完整能力" || bootstrap.Definition.DoDDefinition == "" || len(bootstrap.Requirements) != 7 {
 		t.Fatalf("bootstrap = %+v", bootstrap)
+	}
+	if !containsBootstrapCapability(bootstrap.Requirements, runtimecontract.RuntimeModuleFile, runtimecontract.RuntimeCapabilityClassValidation, runtimecontract.StepKindFileRead) {
+		t.Fatalf("bootstrap must provide a non-mutating file/read validation capability: %+v", bootstrap.Requirements)
 	}
 	facts, err := bootstrap.InitialFacts(common.WorkspaceID("ws-1"), common.RunID("run-1"))
 	if err != nil {
@@ -34,13 +37,23 @@ func TestRuntimeV2BootstrapBuildsOrderedDoDFocuses(t *testing.T) {
 	}
 }
 
+func containsBootstrapCapability(requirements []runtimecontract.RuntimeRequirement, owner string, class runtimecontract.RuntimeCapabilityClass, kind string) bool {
+	for _, requirement := range requirements {
+		if requirement.Kind == runtimecontract.PrerequisiteKindCapability && requirement.OwnerModuleID == owner && requirement.CapabilityClass == class &&
+			len(requirement.RequiredCapabilities) == 1 && requirement.RequiredCapabilities[0] == kind {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRuntimeV2BootstrapAllowsValidationOnlyFocusWhenStateChangeIsOptional(t *testing.T) {
 	bootstrap, err := RuntimeV2Bootstrap(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "完成只读核对"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"核对结果已验证"}},
 		"definition-1",
 		nil,
-		runtimecontract.RuntimeActivationContext{ExecutionContract: runtimecontract.RuntimeExecutionContract{StateChangePolicy: runtimecontract.RuntimeStateChangeAllowedButNotRequired}},
+		runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{StateChangePolicy: runtimecontract.RuntimeStateChangeAllowedButNotRequired}},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +65,7 @@ func TestRuntimeV2BootstrapAllowsValidationOnlyFocusWhenStateChangeIsOptional(t 
 }
 
 func TestRuntimeV2BootstrapAppendsRequiredProfileFocusesWithTypedRequirements(t *testing.T) {
-	activation := runtimecontract.RuntimeActivationContext{ExecutionContract: runtimecontract.RuntimeExecutionContract{
+	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{
 		StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
 		ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID:                   "software-dev",

@@ -68,3 +68,28 @@ func (d *CLICommandDispatcher) handleTypedCLIWorkspace(event magicevent.Event, r
 		setInvalidTypedCLICommand(result)
 	}
 }
+
+func (d *CLICommandDispatcher) handleTypedWorkspaceRuntimeView(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(workorchdevents.ReadWorkspaceRuntimeViewCommand)
+	if !ok {
+		setInvalidTypedCLICommand(result)
+		return
+	}
+	if command.WorkspaceID == "" || d.viewReader == nil {
+		setInvalidTypedCLICommand(result)
+		return
+	}
+	ctx := ContextWithCommandHub(event.Context(), d.commandHub)
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
+	item, err := d.viewReader.ReadWorkspaceViewSnapshot(ctx, string(command.WorkspaceID))
+	if setTypedCLIError(result, err) {
+		return
+	}
+	item = ProjectWorkspaceSnapshotDetail(item)
+	activity, hasActivity, activityErr := d.viewReader.ReadWorkspaceActivity(ctx, string(command.WorkspaceID))
+	if setTypedCLIError(result, activityErr) {
+		return
+	}
+	view := readmodelports.ProjectAndPortWorkspaceRuntimeViewWithActivity(item, activity, hasActivity, command.ActivityLimit, command.BeforeCursor)
+	result.Set(workorchdevents.ReadWorkspaceRuntimeViewResult{View: view}, nil)
+}

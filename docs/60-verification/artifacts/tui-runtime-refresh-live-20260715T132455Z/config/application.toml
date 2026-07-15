@@ -1,0 +1,111 @@
+endpointName = 'workorch'
+
+[server]
+addr = '127.0.0.1:40093'
+readHeaderTimeout = '5s'
+readTimeout = '15s'
+writeTimeout = '180s'
+idleTimeout = '60s'
+shutdownTimeout = '5s'
+maxConcurrentRuns = 1
+staleDispatchedStepMinAge = '10m'
+defaultDialogLanguage = ''
+
+[repository]
+backend = 'file'
+dataDir = '/home/rangh/aispace/workorch/docs/60-verification/artifacts/tui-runtime-refresh-live-20260715T132455Z/data'
+
+[runtime]
+defaultSoulId = ''
+maxRuntimeRepairAttempts = 10
+maxProviderRetryAttempts = 10
+maxContractViolationRetriesPerStep = 2
+maxContractViolationRetriesPerRun = 8
+maxRepeatedContractViolationSignature = 1
+maxConsecutiveContractViolationNoShapeChange = 1
+shellCommandTimeout = ''
+
+[runtime.git]
+defaultTimeout = '30s'
+
+[runtime.llmOutput]
+maxPatchContentBytes = 65536
+maxGraphBytes = 131072
+maxGraphFileWrites = 3
+schemaInvalidLargePreviewThreshold = 32768
+maxArtifactChunkBytes = 16384
+previousChunkTailBytes = 300
+maxChunkRetryAttempts = 3
+maxArtifactPlanAttempts = 2
+maxArtifactReplanAttempts = 2
+
+[llm]
+[llm.aiProxy]
+baseURL = 'http://127.0.0.1:9'
+apiKey = 'verify-secret'
+timeout = '5s'
+catalogRequestTimeout = '1s'
+catalogTTL = '5m'
+catalogMaxStaleAge = '24h'
+maxCatalogResponseBytes = 1048576
+maxCatalogModels = 1000
+
+[llm.aiProxy.modelOverrides]
+[llm.aiProxy.modelOverrides.gpt-4o]
+contextWindowTokens = 128000
+maxOutputTokens = 8192
+operations = ['chat_completions', 'embeddings']
+
+[llm.aiProxy.modelOverrides.verify-model]
+contextWindowTokens = 128000
+maxOutputTokens = 8192
+operations = ['chat_completions', 'embeddings']
+
+[llm.defaultChat]
+providerID = 'verify-tui-long-output-493234'
+modelID = 'verify-model'
+
+[llm.defaultEmbedding]
+providerID = 'verify-tui-long-output-493234'
+modelID = 'verify-model'
+
+[llm.budget]
+contextUtilizationRatio = 0.75
+estimatedTokensPerByte = 0.25
+defaultMaxOutputTokens = 4096
+maxRequestBytes = 4194304
+
+[llm.customProviders]
+[llm.customProviders.verify-tui-long-output-493234]
+provider = 'compatible'
+apiSurface = 'openai_compatible_http'
+baseURL = 'http://127.0.0.1:41225/v1'
+apiKey = 'verify-secret'
+timeout = '60s'
+
+[llm.customProviders.verify-tui-long-output-493234.models]
+[llm.customProviders.verify-tui-long-output-493234.models.verify-model]
+contextWindowTokens = 128000
+maxOutputTokens = 8192
+operations = ['chat_completions', 'embeddings']
+
+[webSearch]
+defaultProvider = ''
+
+[webSearch.providers]
+
+[governance]
+[governance.autoTicket]
+enabled = false
+minConfidence = 0.0
+maxPerRun = 0
+
+[governance.autoApproval]
+enabled = false
+minConfidence = 0.0
+maxPerRun = 0
+requireHumanFor = []
+
+[governance.budget]
+maxConsecutiveFailures = 0
+maxRepeatedSamePrompt = 0

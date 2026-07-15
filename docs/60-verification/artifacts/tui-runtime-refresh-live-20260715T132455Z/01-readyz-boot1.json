@@ -1,0 +1,17 @@
+{
+  "service": "workorch",
+  "status": "ready",
+  "projection": {
+    "state": "ready",
+    "streamGeneration": "7c7f59a26135fb61cceeb956588f5d5c",
+    "globalRevision": 1784121898674145381,
+    "sourceEventRevision": 0,
+    "projectedSourceRevision": 0,
+    "workspaceTotal": 0,
+    "updatedAt": "2026-07-15T13:24:58.706858679Z",
+    "rebuiltAt": "2026-07-15T13:24:58.706858679Z"
+  },
+  "diagnostics": {
+    "watchdog": {}
+  }
+}

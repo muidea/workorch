@@ -1016,6 +1016,68 @@ type WorkspaceSnapshotProjection struct {
 	Snapshot   WorkspaceSnapshot `json:"snapshot"`
 }
 
+type WorkspaceRefreshRevision struct {
+	StreamGeneration        string `json:"streamGeneration,omitempty"`
+	StreamRevision          int64  `json:"streamRevision,omitempty"`
+	WorkspaceRevision       int64  `json:"workspaceRevision,omitempty"`
+	ProjectedSourceRevision int64  `json:"projectedSourceRevision,omitempty"`
+	RuntimeStateRevision    uint64 `json:"runtimeStateRevision,omitempty"`
+	EvidenceSequence        uint64 `json:"evidenceSequence,omitempty"`
+	ActivityRevision        int64  `json:"activityRevision,omitempty"`
+}
+
+type WorkspaceActivityItem struct {
+	ID                   string `json:"id"`
+	WorkspaceID          string `json:"workspaceId"`
+	RunID                string `json:"runId,omitempty"`
+	StepID               string `json:"stepId,omitempty"`
+	Kind                 string `json:"kind"`
+	State                string `json:"state,omitempty"`
+	Title                string `json:"title,omitempty"`
+	Summary              string `json:"summary,omitempty"`
+	OccurredAt           string `json:"occurredAt,omitempty"`
+	SourceEventRevision  int64  `json:"sourceEventRevision,omitempty"`
+	RuntimeStateRevision uint64 `json:"runtimeStateRevision,omitempty"`
+	EvidenceSequence     uint64 `json:"evidenceSequence,omitempty"`
+}
+
+type WorkspaceActivityFeed struct {
+	WorkspaceID      string                  `json:"workspaceId"`
+	DisplayRunID     string                  `json:"displayRunId,omitempty"`
+	ActivityRevision int64                   `json:"activityRevision,omitempty"`
+	Items            []WorkspaceActivityItem `json:"items,omitempty"`
+	Truncated        bool                    `json:"truncated,omitempty"`
+	NextCursor       string                  `json:"nextCursor,omitempty"`
+}
+
+type WorkspaceRuntimeView struct {
+	WorkspaceID       string                   `json:"workspaceId"`
+	ActiveRunID       string                   `json:"activeRunId,omitempty"`
+	DisplayRunID      string                   `json:"displayRunId,omitempty"`
+	Projection        WorkspaceViewModel       `json:"projection"`
+	Revision          WorkspaceRefreshRevision `json:"revision"`
+	PromptMode        string                   `json:"promptMode,omitempty"`
+	RunState          string                   `json:"runState,omitempty"`
+	TaskProgress      TaskProgress             `json:"taskProgress"`
+	RunHeartbeat      RunHeartbeat             `json:"runHeartbeat"`
+	ConvergenceStatus *ConvergenceStatus       `json:"convergenceStatus,omitempty"`
+	Acceptance        AcceptanceProjection     `json:"acceptance"`
+	RunCommand        *RunCommandStatus        `json:"runCommand,omitempty"`
+	BlockingDecision  *Decision                `json:"blockingDecision,omitempty"`
+	BlockingApproval  *Approval                `json:"blockingApproval,omitempty"`
+	Outcome           RunOutcome               `json:"outcome"`
+	Activity          WorkspaceActivityFeed    `json:"activity"`
+}
+
+type WorkspaceRuntimeViewProjection struct {
+	Service     string               `json:"service"`
+	Backend     string               `json:"backend,omitempty"`
+	DataRoot    string               `json:"dataRoot,omitempty"`
+	Projection  ProjectionStatus     `json:"projection"`
+	RuntimeView WorkspaceRuntimeView `json:"runtimeView"`
+	Error       string               `json:"error,omitempty"`
+}
+
 type RunObservability struct {
 	Run                     Run                     `json:"run"`
 	Outcome                 RunOutcome              `json:"outcome"`

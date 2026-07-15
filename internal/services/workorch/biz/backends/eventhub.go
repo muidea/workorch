@@ -57,6 +57,11 @@ func (b *eventHubBackend) Config() ConfigBackend       { return &eventHubConfigB
 // Events overrides the stub to provide EventHub-driven subscriptions.
 func (b *eventHubBackend) Events() EventsBackend { return b.evtImpl }
 
+// ProjectionEvents is the typed projection-invalidation surface for TUI.
+func (b *eventHubBackend) ProjectionEvents() WorkspaceProjectionEventsBackend {
+	return &eventHubProjectionEventsBackend{parent: b}
+}
+
 // ── EventHub Events Backend ──
 
 type eventHubEventsBackend struct {
@@ -68,25 +73,13 @@ type eventHubEventsBackend struct {
 var eventHubObserverSequence atomic.Uint64
 
 func (b *eventHubEventsBackend) Subscribe(ctx context.Context, handler EventHandler) (func(), error) {
+	// Generic/full event stream for agent/CLI tooling only.
+	// TUI projection refresh must use ProjectionEvents, not this path.
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	unsubscribers := make([]func(), 0, 2)
+	unsubscribers := make([]func(), 0, 1)
 	if b.parent.commandHub != nil {
-		projectionObserverID := fmt.Sprintf("/workorchd/consumers/services/workorch/backend/%d", eventHubObserverSequence.Add(1))
-		projectionObserver := magicevent.NewSimpleObserverWithMatchID(projectionObserverID, projectionObserverID, b.parent.commandHub)
-		projectionObserver.Subscribe(workorchdevents.TopicWorkspaceProjectionChanged, func(event magicevent.Event, result magicevent.Result) {
-			if data, ok := event.Data().(workorchdevents.WorkspaceProjectionChangedData); ok {
-				handler(event.Context(), convertBackendEvent(workspaceProjectionBackendEvent(data)))
-			}
-			if result != nil {
-				result.Set(nil, nil)
-			}
-		})
-		unsubscribers = append(unsubscribers, func() {
-			projectionObserver.Unsubscribe(workorchdevents.TopicWorkspaceProjectionChanged)
-		})
-
 		observerID := fmt.Sprintf("/eventstream/consumers/services/workorch/backend/%d", eventHubObserverSequence.Add(1))
 		observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, b.parent.commandHub)
 		observer.Subscribe(eventstreamevents.TopicEventStreamRecordAppended, func(event magicevent.Event, result magicevent.Result) {
@@ -117,6 +110,79 @@ func (b *eventHubEventsBackend) Subscribe(ctx context.Context, handler EventHand
 	return unsub, nil
 }
 
+// ── EventHub Projection Events Backend (typed, TUI-facing) ──
+
+type eventHubProjectionEventsBackend struct {
+	parent *eventHubBackend
+	mu     sync.Mutex
+	subs   []func()
+}
+
+func (b *eventHubProjectionEventsBackend) SubscribeWorkspaceProjection(
+	ctx context.Context,
+	onChanged WorkspaceProjectionChangedHandler,
+	onStatus SubscriptionStatusHandler,
+) (func(), error) {
+	if b == nil || b.parent == nil {
+		return func() {}, fmt.Errorf("%w: eventhub projection backend unavailable", common.ErrInvalidArgument)
+	}
+	if onChanged == nil {
+		return func() {}, fmt.Errorf("%w: projection changed handler required", common.ErrInvalidArgument)
+	}
+	publishStatus := func(status SubscriptionStatusInfo) {
+		if onStatus != nil {
+			onStatus(ctx, status)
+		}
+	}
+	publishStatus(SubscriptionStatusInfo{State: SubscriptionConnecting})
+	if b.parent.commandHub == nil {
+		publishStatus(SubscriptionStatusInfo{State: SubscriptionDegraded, LastError: "command hub unavailable"})
+		return func() {}, fmt.Errorf("%w: command hub unavailable", common.ErrInvalidArgument)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	observerID := fmt.Sprintf("/workorchd/consumers/services/workorch/projection/%d", eventHubObserverSequence.Add(1))
+	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, b.parent.commandHub)
+	observer.Subscribe(workorchdevents.TopicWorkspaceProjectionChanged, func(event magicevent.Event, result magicevent.Result) {
+		if data, ok := event.Data().(workorchdevents.WorkspaceProjectionChangedData); ok {
+			info := workspaceProjectionChangedInfoFromData(data, event.ID())
+			onChanged(event.Context(), info)
+		}
+		if result != nil {
+			result.Set(nil, nil)
+		}
+	})
+	unsub := func() {
+		observer.Unsubscribe(workorchdevents.TopicWorkspaceProjectionChanged)
+	}
+	b.subs = append(b.subs, unsub)
+	// Subscription is established once the typed observer is attached.
+	publishStatus(SubscriptionStatusInfo{State: SubscriptionLive})
+	return unsub, nil
+}
+
+func workspaceProjectionChangedInfoFromData(data workorchdevents.WorkspaceProjectionChangedData, eventID string) WorkspaceProjectionChangedInfo {
+	return WorkspaceProjectionChangedInfo{
+		ID:          strings.TrimSpace(eventID),
+		WorkspaceID: data.WorkspaceID,
+		RunID:       data.RunID,
+		Revision: WorkspaceRefreshRevision{
+			StreamGeneration:        data.StreamGeneration,
+			StreamRevision:          data.GlobalRevision,
+			WorkspaceRevision:       data.WorkspaceRevision,
+			ProjectedSourceRevision: data.ProjectedSourceRevision,
+			RuntimeStateRevision:    data.RuntimeStateRevision,
+			EvidenceSequence:        data.EvidenceSequence,
+			ActivityRevision:        data.ActivityRevision,
+		},
+		ChangedSections: append([]WorkspaceProjectionSection(nil), data.ChangedSections...),
+		ProjectionState: data.ProjectionState,
+		UpdatedAt:       data.UpdatedAt,
+	}
+}
+
 type backendEventData struct {
 	ID          string         `json:"id"`
 	Topic       string         `json:"topic"`
@@ -136,30 +202,6 @@ func eventRecordBackendEvent(data eventstreamevents.EventRecordData) backendEven
 		RunID:       string(data.RunID),
 		Revision:    data.Revision,
 		Payload:     data.Payload.Map(),
-	}
-}
-
-func workspaceProjectionBackendEvent(data workorchdevents.WorkspaceProjectionChangedData) backendEventData {
-	return backendEventData{
-		Topic:       workorchdevents.TopicWorkspaceProjectionChanged,
-		WorkspaceID: string(data.WorkspaceID),
-		RunID:       string(data.RunID),
-		Revision:    data.GlobalRevision,
-		Payload: map[string]any{
-			"type":                    "workspace_projection_changed",
-			"workspaceId":             string(data.WorkspaceID),
-			"globalRevision":          data.GlobalRevision,
-			"workspaceRevision":       data.WorkspaceRevision,
-			"sourceEventRevision":     data.SourceEventRevision,
-			"projectedSourceRevision": data.ProjectedSourceRevision,
-			"workspaceTotal":          data.WorkspaceTotal,
-			"changeKind":              data.ChangeKind,
-			"projectionState":         data.ProjectionState,
-			"updatedAt":               data.UpdatedAt,
-			"rebuiltAt":               data.RebuiltAt,
-			"staleReason":             data.StaleReason,
-			"error":                   data.Error,
-		},
 	}
 }
 
@@ -295,6 +337,35 @@ func (b *eventHubWorkspaceBackend) Snapshot(ctx context.Context, id common.Works
 	}
 	return &result.Snapshot, nil
 }
+
+func (b *eventHubWorkspaceBackend) RuntimeView(ctx context.Context, req ReadWorkspaceRuntimeViewRequest) (*WorkspaceRuntimeViewInfo, error) {
+	if b == nil || b.parent == nil || b.parent.commandHub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	if strings.TrimSpace(string(req.WorkspaceID)) == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(
+		workorchdevents.TopicWorkorchDCommandReadWorkspaceRuntimeView,
+		"workorch-cli",
+		workorchdevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		workorchdevents.ReadWorkspaceRuntimeViewCommand{
+			WorkspaceID:   req.WorkspaceID,
+			ActivityLimit: req.ActivityLimit,
+			BeforeCursor:  req.BeforeCursor,
+		},
+	)
+	bindCLIEvent(event, workorchdevents.TopicWorkorchDCommandReadWorkspaceRuntimeView, "workspace", string(req.WorkspaceID), req.WorkspaceID, "")
+	result, err := cliWorkspaceRuntimeViewResponse(b.parent.commandHub.Send(event))
+	if err != nil {
+		return nil, err
+	}
+	view := result.View
+	return &view, nil
+}
+
 func (b *eventHubWorkspaceBackend) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return common.ErrInvalidArgument

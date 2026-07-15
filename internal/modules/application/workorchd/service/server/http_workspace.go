@@ -149,6 +149,52 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 			Snapshot:   appservice.ProjectWorkspaceSnapshotDetail(item),
 		})
 	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/runtime-view", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
+		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
+		if !ok || action != "runtime-view" {
+			http.NotFound(w, r)
+			return
+		}
+		activityLimit := 0
+		if raw := strings.TrimSpace(r.URL.Query().Get("activityLimit")); raw != "" {
+			if parsed, err := strconv.Atoi(raw); err == nil {
+				activityLimit = parsed
+			}
+		}
+		beforeCursor := strings.TrimSpace(r.URL.Query().Get("beforeCursor"))
+		projection := state.workspaceProjectionStatus()
+		item, err := state.readWorkspaceDetailSnapshotCached(r.Context(), workspaceID)
+		if err != nil {
+			writeJSON(w, projectionHTTPStatus(err), workspaceRuntimeViewResponse{
+				Service:    "workorch",
+				Backend:    state.config.Backend,
+				DataRoot:   state.config.DataRoot,
+				Projection: projection,
+				Error:      err.Error(),
+			})
+			return
+		}
+		if projected, projectedStatus, readErr := state.readProjectedWorkspaceSnapshot(workspaceID); readErr == nil {
+			item = mergeWorkspaceProjectionOverlay(item, projected)
+			projection = projectedStatus
+		}
+		item = appservice.ProjectWorkspaceSnapshotDetail(item)
+		// CR01/TC10: use store-owned activity so ActivityRevision is transactional
+		// authority and survives read path without fingerprint regeneration.
+		storedActivity, hasStoredActivity := appservice.WorkspaceActivityFeed{}, false
+		if state.workspaceProjection != nil {
+			storedActivity, hasStoredActivity = state.workspaceProjection.ReadWorkspaceActivity(workspaceID)
+		}
+		view := appservice.ProjectWorkspaceRuntimeViewWithActivity(item, storedActivity, hasStoredActivity, activityLimit, beforeCursor)
+		writeJSON(w, http.StatusOK, workspaceRuntimeViewResponse{
+			Service:     "workorch",
+			Backend:     state.config.Backend,
+			DataRoot:    state.config.DataRoot,
+			Projection:  projection,
+			RuntimeView: view,
+		})
+	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/memory-recalls", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)

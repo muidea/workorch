@@ -46,11 +46,18 @@ func FetchConfiguration(be backend.Backend) tea.Cmd {
 }
 
 func FetchWorkspaceContext(be backend.Backend, workspaceID string, requestSeq ...int64) tea.Cmd {
-	return fetchWorkspaceContext(be, workspaceID, false, optionalRequestSeq(requestSeq))
+	// Active refresh prefers lightweight RuntimeView projection.
+	return fetchWorkspaceRuntimeView(be, workspaceID, false, optionalRequestSeq(requestSeq))
 }
 
 func FetchWorkspaceContextForSwitch(be backend.Backend, workspaceID string, requestSeq ...int64) tea.Cmd {
+	// Workspace switch still reads full snapshot for goals/DoD/artifacts, then
+	// applies RuntimeView activity/progress as the authoritative runtime section.
 	return fetchWorkspaceContext(be, workspaceID, true, optionalRequestSeq(requestSeq))
+}
+
+func FetchWorkspaceRuntimeView(be backend.Backend, workspaceID string, requestSeq ...int64) tea.Cmd {
+	return fetchWorkspaceRuntimeView(be, workspaceID, false, optionalRequestSeq(requestSeq))
 }
 
 func RetryWorkspaceContext(workspaceID string, resetMainViewport bool) tea.Cmd {
@@ -86,6 +93,13 @@ func fetchWorkspaceContext(be backend.Backend, workspaceID string, resetMainView
 			if displayRun == nil && snapshot.Outcome.RunID != "" {
 				displayRun = selectWorkspaceRun(snapshot.Outcome.RunID, snapshot.Runs)
 			}
+			var runtimeView *backend.WorkspaceRuntimeViewInfo
+			if view, viewErr := be.Workspace().RuntimeView(ctx, backend.ReadWorkspaceRuntimeViewRequest{WorkspaceID: wsID, ActivityLimit: 50}); viewErr == nil {
+				runtimeView = view
+				if displayRun == nil && view != nil && view.DisplayRunID != "" {
+					displayRun = selectWorkspaceRun(view.DisplayRunID, snapshot.Runs)
+				}
+			}
 			status := runStatusFromWorkspaceSnapshot(snapshot, displayRun)
 			goal := resolveWorkspaceContextGoal(snapshot, displayRun, nil)
 			dod := resolveWorkspaceContextDoD(snapshot, displayRun, nil)
@@ -98,6 +112,7 @@ func fetchWorkspaceContext(be backend.Backend, workspaceID string, resetMainView
 				Workspace:         &snapshot.Workspace,
 				Projection:        snapshot.Projection,
 				Snapshot:          snapshot,
+				RuntimeView:       runtimeView,
 				Runs:              snapshot.Runs,
 				ActiveRun:         activeRun,
 				DisplayRun:        displayRun,
@@ -111,6 +126,26 @@ func fetchWorkspaceContext(be backend.Backend, workspaceID string, resetMainView
 		}
 
 		return WorkspaceContextMsg{RequestSeq: requestSeq, WorkspaceID: workspaceID, ResetMainViewport: resetMainViewport, Error: common.ErrInvalidArgument}
+	}
+}
+
+func fetchWorkspaceRuntimeView(be backend.Backend, workspaceID string, resetMainViewport bool, requestSeq int64) tea.Cmd {
+	if workspaceID == "" {
+		return nil
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		wsID := common.WorkspaceID(workspaceID)
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
+		view, err := be.Workspace().RuntimeView(ctx, backend.ReadWorkspaceRuntimeViewRequest{
+			WorkspaceID:   wsID,
+			ActivityLimit: 50,
+		})
+		if err != nil {
+			return WorkspaceRuntimeViewMsg{RequestSeq: requestSeq, WorkspaceID: workspaceID, ResetMainViewport: resetMainViewport, Error: err}
+		}
+		return WorkspaceRuntimeViewMsg{RequestSeq: requestSeq, WorkspaceID: workspaceID, ResetMainViewport: resetMainViewport, View: view}
 	}
 }
 
@@ -333,13 +368,23 @@ func FetchBlockers(be backend.Backend, workspaceID string) tea.Cmd {
 	return tea.Batch(FetchDecisions(be, workspaceID), FetchApprovals(be, workspaceID))
 }
 
-func WaitForBackendEvent(ch <-chan backend.Event) tea.Cmd {
+func WaitForProjectionSignal(
+	projectionCh <-chan backend.WorkspaceProjectionChangedInfo,
+	statusCh <-chan backend.SubscriptionStatusInfo,
+) tea.Cmd {
 	return func() tea.Msg {
-		evt, ok := <-ch
-		if !ok {
-			return ErrorMsg{Error: context.Canceled}
+		select {
+		case info, ok := <-projectionCh:
+			if !ok {
+				return ErrorMsg{Error: context.Canceled}
+			}
+			return WorkspaceProjectionChangedMsg{Info: info}
+		case status, ok := <-statusCh:
+			if !ok {
+				return ErrorMsg{Error: context.Canceled}
+			}
+			return SubscriptionStatusMsg{Status: status}
 		}
-		return BackendEventMsg{Event: evt}
 	}
 }
 

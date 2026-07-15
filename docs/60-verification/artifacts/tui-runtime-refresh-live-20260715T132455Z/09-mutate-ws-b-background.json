@@ -1,0 +1,12 @@
+{
+  "service": "workorch",
+  "backend": "file",
+  "dataRoot": "/home/rangh/aispace/workorch/docs/60-verification/artifacts/tui-runtime-refresh-live-20260715T132455Z/data",
+  "goal": {
+    "id": "goal-e798b05876033cd3",
+    "workspaceId": "ws-0af29aa3ef2ca8b0",
+    "text": "- live-goal-background: projection change trigger for tui refresh verification",
+    "definitionRevision": "goal:4165cafc50b02feabaeb27550aff19c9fd22b24b00fe75f4470008e478c41ffb",
+    "lineageState": "active"
+  }
+}

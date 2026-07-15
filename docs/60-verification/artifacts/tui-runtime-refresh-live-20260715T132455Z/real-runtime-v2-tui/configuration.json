@@ -1,0 +1,106 @@
+{
+  "service": "workorch",
+  "configuration": {
+    "server": {
+      "addr": "127.0.0.1:40093",
+      "readHeaderTimeout": "5s",
+      "readTimeout": "15s",
+      "writeTimeout": "180s",
+      "idleTimeout": "60s",
+      "shutdownTimeout": "5s",
+      "maxConcurrentRuns": 1,
+      "staleDispatchedStepMinAge": "10m"
+    },
+    "repository": {
+      "backend": "file",
+      "dataDir": "/home/rangh/aispace/workorch/docs/60-verification/artifacts/tui-runtime-refresh-live-20260715T132455Z/data"
+    },
+    "runtime": {
+      "maxRuntimeRepairAttempts": 10,
+      "maxProviderRetryAttempts": 10,
+      "maxContractViolationRetriesPerStep": 2,
+      "maxContractViolationRetriesPerRun": 8,
+      "maxRepeatedContractViolationSignature": 1,
+      "maxConsecutiveContractViolationNoShapeChange": 1,
+      "shellCommandTimeout": "60s",
+      "git": {
+        "defaultTimeout": "30s"
+      },
+      "llmOutput": {
+        "maxPatchContentBytes": 65536,
+        "maxGraphBytes": 131072,
+        "maxGraphFileWrites": 3,
+        "schemaInvalidLargePreviewThreshold": 32768,
+        "maxArtifactChunkBytes": 16384,
+        "previousChunkTailBytes": 300,
+        "maxChunkRetryAttempts": 3,
+        "maxArtifactPlanAttempts": 2,
+        "maxArtifactReplanAttempts": 2
+      }
+    },
+    "llm": {
+      "aiProxy": {
+        "baseUrl": "http://127.0.0.1:9",
+        "apiKeyConfigured": false,
+        "timeout": "5s",
+        "catalogRequestTimeout": "1s",
+        "catalogTTL": "5m",
+        "catalogMaxStaleAge": "24h",
+        "maxCatalogResponseBytes": 1048576,
+        "maxCatalogModels": 1000
+      },
+      "defaultChat": {
+        "providerId": "ai-proxy",
+        "modelId": "gpt-4o"
+      },
+      "budget": {
+        "contextUtilizationRatio": 0.75,
+        "estimatedTokensPerByte": 0.25,
+        "defaultMaxOutputTokens": 4096,
+        "maxRequestBytes": 4194304
+      },
+      "catalog": {
+        "providerId": "ai-proxy",
+        "state": "unavailable",
+        "stale": false,
+        "errorCode": "catalog_unavailable",
+        "errorMessage": "invalid argument: catalog request failed: Get \"http://127.0.0.1:9/v1/models\": context deadline exceeded"
+      }
+    },
+    "webSearch": {
+      "defaultProviderId": "",
+      "providers": [],
+      "providerTemplates": [
+        {
+          "templateId": "http",
+          "name": "HTTP Web Search Gateway",
+          "description": "通过受治理的 HTTP 搜索/读取网关执行 web/search 与 web/fetch；网关负责真实搜索源和网页正文抽取。",
+          "id": "web-http-main",
+          "provider": "http",
+          "timeout": "20s",
+          "maxResults": 8,
+          "maxFetchBytes": 262144,
+          "maxRedirects": 3
+        }
+      ]
+    },
+    "governance": {
+      "autoTicket": {
+        "enabled": false,
+        "minConfidence": 0,
+        "maxPerRun": 0
+      },
+      "autoApproval": {
+        "enabled": false,
+        "minConfidence": 0,
+        "maxPerRun": 0,
+        "allowReadOnly": false,
+        "allowWorkspaceWrite": false
+      },
+      "budget": {
+        "maxConsecutiveFailures": 0,
+        "maxRepeatedSamePrompt": 0
+      }
+    }
+  }
+}

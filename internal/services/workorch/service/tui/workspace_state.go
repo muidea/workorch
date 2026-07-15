@@ -11,6 +11,7 @@ import (
 
 type workspaceDisplayState struct {
 	ActiveRunID           string
+	DisplayRunID          string
 	CurrentTask           string
 	DoDItems              []string
 	Transcript            []transcriptItem
@@ -28,7 +29,8 @@ type workspaceDisplayState struct {
 	Acceptance            backend.AcceptanceProjectionInfo
 	RunHeartbeat          backend.RunHeartbeatInfo
 	ConvergenceStatus     *backend.ConvergenceStatusInfo
-	RuntimeEvents         []string
+	RuntimeV2             *backend.RuntimeV2ProgressInfo
+	Activity              backend.WorkspaceActivityFeedInfo
 	Progress              progressState
 	ProgressText          string
 	RepairLoop            string
@@ -46,23 +48,30 @@ type workspaceDisplayState struct {
 // Server projection remains authoritative; local fields only protect UI
 // command intent while projection refresh is catching up.
 type workspaceRuntimeState struct {
-	Overview           backend.WorkspaceInfo
-	HasOverview        bool
-	Projection         backend.ProjectionInfo
-	PromptMode         string
-	PromptModeRevision int64
-	Display            workspaceDisplayState
-	HasDisplay         bool
-	DisplayRevision    int64
-	LastRevision       int64
-	RevisionGapCount   int64
-	LastRevisionGap    int64
-	ContextRequestSeq  int64
-	ContextInFlight    bool
-	ContextPending     bool
-	ResolvedTickets    map[common.TicketID]struct{}
-	ResolvedApprovals  map[common.ApprovalID]struct{}
-	OptimisticRunID    common.RunID
+	Overview              backend.WorkspaceInfo
+	HasOverview           bool
+	Projection            backend.ProjectionInfo
+	RuntimeView           backend.WorkspaceRuntimeViewInfo
+	HasRuntimeView        bool
+	AppliedRevision       backend.WorkspaceRefreshRevision
+	DirtyRevision         backend.WorkspaceRefreshRevision
+	PromptMode            string
+	PromptModeRevision    int64
+	Display               workspaceDisplayState
+	HasDisplay            bool
+	DisplayRevision       int64
+	LastRevision          int64
+	RevisionGapCount      int64
+	LastRevisionGap       int64
+	ContextRequestSeq     int64
+	ContextInFlight       bool
+	ContextPending        bool
+	ActivityDirtyRevision int64
+	FollowTail            bool
+	UnreadUpdateCount     int
+	ResolvedTickets       map[common.TicketID]struct{}
+	ResolvedApprovals     map[common.ApprovalID]struct{}
+	OptimisticRunID       common.RunID
 }
 
 const (
@@ -82,7 +91,7 @@ func (m *AppModel) ensureWorkspaceRuntimeState(workspaceID string) *workspaceRun
 	}
 	entry := m.workspaceRuntimeStates[workspaceID]
 	if entry == nil {
-		entry = &workspaceRuntimeState{}
+		entry = &workspaceRuntimeState{FollowTail: true}
 		m.workspaceRuntimeStates[workspaceID] = entry
 	}
 	return entry
@@ -133,6 +142,14 @@ func viewModelRevision(input backend.WorkspaceViewModelInfo) int64 {
 }
 
 func workspaceContextRevision(msg WorkspaceContextMsg) int64 {
+	if msg.RuntimeView != nil {
+		if revision := msg.RuntimeView.Revision.WorkspaceRevision; revision > 0 {
+			return revision
+		}
+		if revision := projectionRevision(msg.RuntimeView.Projection); revision > 0 {
+			return revision
+		}
+	}
 	if msg.Snapshot != nil {
 		if revision := viewModelRevision(msg.Snapshot.ViewModel); revision > 0 {
 			return revision
@@ -336,60 +353,6 @@ func workspaceIndex(workspaces []backend.WorkspaceInfo, id string) int {
 		}
 	}
 	return -1
-}
-
-func (m *AppModel) upsertWorkspaceFromEvent(evt backend.Event) {
-	state := common.WorkspaceState(firstPayloadString(evt.Payload, "state", "State", backend.PayloadKeyState))
-	activeRunID := common.RunID(firstPayloadString(evt.Payload, "activeRunId", "ActiveRunID", backend.PayloadKeyActiveRunID))
-	blockingTicketID := common.TicketID(firstPayloadString(evt.Payload, "blockingTicketId", "BlockingTicketID", backend.PayloadKeyBlockingTicketID))
-	blockingApprovalID := common.ApprovalID(firstPayloadString(evt.Payload, "blockingApprovalId", "BlockingApprovalID", backend.PayloadKeyBlockingApprovalID))
-	title := firstPayloadString(evt.Payload, "title", "Title", backend.PayloadKeyTitle)
-	description := firstPayloadString(evt.Payload, "description", "Description", backend.PayloadKeyDescription)
-	deliverableDirectory := firstPayloadString(evt.Payload, "deliverableDirectory", "DeliverableDirectory", backend.PayloadKeyDeliverableDirectory)
-	for i := range m.workspaces {
-		if m.workspaces[i].ID == evt.WorkspaceID {
-			if title != "" {
-				m.workspaces[i].Title = title
-			}
-			if description != "" {
-				m.workspaces[i].Description = description
-			}
-			if deliverableDirectory != "" {
-				m.workspaces[i].DeliverableDirectory = deliverableDirectory
-			}
-			if state != "" {
-				m.workspaces[i].State = state
-			}
-			if activeRunID != "" || hasPayloadKey(evt.Payload, backend.PayloadKeyActiveRunID, "ActiveRunID", "activeRunId") {
-				m.workspaces[i].ActiveRunID = activeRunID
-			}
-			if blockingTicketID != "" || hasPayloadKey(evt.Payload, backend.PayloadKeyBlockingTicketID, "BlockingTicketID", "blockingTicketId") {
-				m.workspaces[i].BlockingTicketID = blockingTicketID
-			}
-			if blockingApprovalID != "" || hasPayloadKey(evt.Payload, backend.PayloadKeyBlockingApprovalID, "BlockingApprovalID", "blockingApprovalId") {
-				m.workspaces[i].BlockingApprovalID = blockingApprovalID
-			}
-			if evt.Revision > 0 {
-				m.workspaces[i].Projection.SourceEventRevision = evt.Revision
-			}
-			m.workspaces[i] = m.mergeWorkspaceOverview(m.workspaces[i])
-			return
-		}
-	}
-	ws := backend.WorkspaceInfo{
-		ID:                   evt.WorkspaceID,
-		Title:                title,
-		Description:          description,
-		DeliverableDirectory: deliverableDirectory,
-		State:                state,
-		ActiveRunID:          activeRunID,
-		BlockingTicketID:     blockingTicketID,
-		BlockingApprovalID:   blockingApprovalID,
-	}
-	if evt.Revision > 0 {
-		ws.Projection.SourceEventRevision = evt.Revision
-	}
-	m.workspaces = append(m.workspaces, m.mergeWorkspaceOverview(ws))
 }
 
 func (m *AppModel) removeWorkspace(id common.WorkspaceID) {
@@ -837,9 +800,530 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	}
 	m.syncBlockingDecisionFromList()
 	m.syncBlockingApprovalFromList()
-	if strings.TrimSpace(m.result) != "" {
-		m.followMainViewportTail()
+	if msg.RuntimeView != nil {
+		m.applyWorkspaceRuntimeView(*msg.RuntimeView, msg.ResetMainViewport)
+	} else if msg.Snapshot != nil && msg.Snapshot.TaskProgress.RuntimeV2 != nil {
+		m.runtimeV2 = msg.Snapshot.TaskProgress.RuntimeV2
+		if summary := strings.TrimSpace(msg.Snapshot.TaskProgress.Summary); summary != "" && m.progress == progressRunning {
+			m.progressText = summary
+		}
 	}
+	if msg.ResetMainViewport {
+		m.followMainViewportTail()
+	} else if strings.TrimSpace(m.result) != "" {
+		m.followMainViewportTailUnlessUserScrolled()
+	} else {
+		m.followMainViewportTailUnlessUserScrolled()
+	}
+}
+
+func (m *AppModel) applyWorkspaceRuntimeView(view backend.WorkspaceRuntimeViewInfo, resetMainViewport bool) {
+	// Scope must come from the typed RuntimeView response itself. Empty or
+	// mismatched WorkspaceID must never fall back to active workspace cache.
+	workspaceID := strings.TrimSpace(string(view.WorkspaceID))
+	if workspaceID == "" {
+		return
+	}
+	entry := m.ensureWorkspaceRuntimeState(workspaceID)
+	if entry == nil {
+		return
+	}
+	if !runtimeViewRevisionAcceptable(entry.AppliedRevision, view.Revision) {
+		return
+	}
+	// CR04: equal revision + equal effective display content is a full no-op.
+	// Do not update viewport, unread count, dirty state, or cache identity.
+	if entry.HasRuntimeView &&
+		runtimeRefreshRevisionEqual(entry.AppliedRevision, view.Revision) &&
+		runtimeViewDisplayContentEqual(entry.RuntimeView, view) {
+		return
+	}
+	entry.RuntimeView = view
+	entry.HasRuntimeView = true
+	entry.AppliedRevision = view.Revision
+	entry.DirtyRevision = clearDirtyAtOrBelow(entry.DirtyRevision, view.Revision)
+	entry.Projection = view.Projection
+	if view.PromptMode != "" {
+		entry.PromptMode = view.PromptMode
+		if view.Revision.WorkspaceRevision > 0 {
+			entry.PromptModeRevision = view.Revision.WorkspaceRevision
+		}
+	}
+	if workspaceID != m.activeWorkspaceID {
+		// non-active workspace: only update typed cache, not main view.
+		entry.Display.RuntimeV2 = cloneRuntimeV2(view.TaskProgress.RuntimeV2)
+		entry.Display.Activity = cloneActivityFeed(view.Activity)
+		entry.Display.Acceptance = view.Acceptance
+		entry.Display.RunHeartbeat = view.RunHeartbeat
+		entry.Display.ConvergenceStatus = cloneConvergenceStatusInfoPtr(view.ConvergenceStatus)
+		entry.Display.BlockingDecision = cloneDecisionPtr(view.BlockingDecision)
+		entry.Display.BlockingApproval = cloneApprovalPtr(view.BlockingApproval)
+		entry.Display.ActiveRunID = string(view.ActiveRunID)
+		entry.Display.DisplayRunID = string(view.DisplayRunID)
+		entry.HasDisplay = true
+		entry.ActivityDirtyRevision = 0
+		return
+	}
+
+	m.runtimeV2 = cloneRuntimeV2(view.TaskProgress.RuntimeV2)
+	m.activityFeed = cloneActivityFeed(view.Activity)
+	m.acceptance = view.Acceptance
+	m.runHeartbeat = view.RunHeartbeat
+	m.convergenceStatus = cloneConvergenceStatusInfoPtr(view.ConvergenceStatus)
+	m.runCommand = cloneRunCommandPtr(view.RunCommand)
+	if view.BlockingDecision != nil {
+		m.blockingDecision = cloneDecisionPtr(view.BlockingDecision)
+	}
+	if view.BlockingApproval != nil {
+		m.blockingApproval = cloneApprovalPtr(view.BlockingApproval)
+	}
+	if string(view.ActiveRunID) != "" {
+		m.activeRunID = string(view.ActiveRunID)
+		m.running = !runStateIsTerminal(view.RunState)
+	}
+	if summary := strings.TrimSpace(view.TaskProgress.Summary); summary != "" {
+		if m.progress == progressRunning || m.running {
+			m.progressText = summary
+		}
+	}
+	if view.Outcome.Terminal && strings.TrimSpace(view.Outcome.Summary) != "" {
+		m.result = strings.TrimSpace(view.Outcome.Summary)
+	}
+	if view.Outcome.Terminal && !view.Outcome.Accepted {
+		m.failureReason = nonEmpty(view.Outcome.Reason, view.Outcome.Summary)
+	}
+	m.repairLoop = repairLoopSummary(view.TaskProgress)
+
+	entry.Display.RuntimeV2 = cloneRuntimeV2(view.TaskProgress.RuntimeV2)
+	entry.Display.Activity = cloneActivityFeed(view.Activity)
+	entry.Display.Acceptance = view.Acceptance
+	entry.Display.RunHeartbeat = view.RunHeartbeat
+	entry.Display.ConvergenceStatus = cloneConvergenceStatusInfoPtr(view.ConvergenceStatus)
+	entry.Display.BlockingDecision = cloneDecisionPtr(view.BlockingDecision)
+	entry.Display.BlockingApproval = cloneApprovalPtr(view.BlockingApproval)
+	entry.Display.ActiveRunID = string(view.ActiveRunID)
+	entry.Display.DisplayRunID = string(view.DisplayRunID)
+	entry.Display.ProgressText = m.progressText
+	entry.Display.Running = m.running
+	entry.HasDisplay = true
+	entry.ActivityDirtyRevision = 0
+	if view.Revision.WorkspaceRevision > entry.DisplayRevision {
+		entry.DisplayRevision = view.Revision.WorkspaceRevision
+	}
+
+	if resetMainViewport {
+		m.followMainViewportTail()
+		return
+	}
+	m.followMainViewportTailUnlessUserScrolled()
+}
+
+func clearDirtyAtOrBelow(dirty, applied backend.WorkspaceRefreshRevision) backend.WorkspaceRefreshRevision {
+	if revisionGenerationChanged(dirty, applied) {
+		// A RuntimeView from a new server generation is the authority for a new
+		// comparison domain. Old-generation dirty counters cannot be compared.
+		return backend.WorkspaceRefreshRevision{}
+	}
+	if dirty.WorkspaceRevision > 0 && dirty.WorkspaceRevision <= applied.WorkspaceRevision {
+		dirty.WorkspaceRevision = 0
+	}
+	if dirty.RuntimeStateRevision > 0 && dirty.RuntimeStateRevision <= applied.RuntimeStateRevision {
+		dirty.RuntimeStateRevision = 0
+	}
+	if dirty.ActivityRevision > 0 && dirty.ActivityRevision <= applied.ActivityRevision {
+		dirty.ActivityRevision = 0
+	}
+	if dirty.ProjectedSourceRevision > 0 && dirty.ProjectedSourceRevision <= applied.ProjectedSourceRevision {
+		dirty.ProjectedSourceRevision = 0
+	}
+	if dirty.EvidenceSequence > 0 && dirty.EvidenceSequence <= applied.EvidenceSequence {
+		dirty.EvidenceSequence = 0
+	}
+	if dirty.StreamRevision > 0 && dirty.StreamRevision <= applied.StreamRevision {
+		dirty.StreamRevision = 0
+	}
+	return dirty
+}
+
+func runtimeRefreshRevisionEqual(a, b backend.WorkspaceRefreshRevision) bool {
+	return strings.TrimSpace(a.StreamGeneration) == strings.TrimSpace(b.StreamGeneration) &&
+		a.StreamRevision == b.StreamRevision &&
+		a.WorkspaceRevision == b.WorkspaceRevision &&
+		a.ProjectedSourceRevision == b.ProjectedSourceRevision &&
+		a.RuntimeStateRevision == b.RuntimeStateRevision &&
+		a.EvidenceSequence == b.EvidenceSequence &&
+		a.ActivityRevision == b.ActivityRevision
+}
+
+// runtimeViewDisplayContentEqual compares every field that applyWorkspaceRuntimeView
+// applies or that the main view can render. Equal revision responses that still
+// change any applied display field are accepted; fully identical content is a
+// no-op (CR04/FR02).
+func runtimeViewDisplayContentEqual(a, b backend.WorkspaceRuntimeViewInfo) bool {
+	if strings.TrimSpace(string(a.WorkspaceID)) != strings.TrimSpace(string(b.WorkspaceID)) ||
+		strings.TrimSpace(string(a.ActiveRunID)) != strings.TrimSpace(string(b.ActiveRunID)) ||
+		strings.TrimSpace(string(a.DisplayRunID)) != strings.TrimSpace(string(b.DisplayRunID)) ||
+		strings.TrimSpace(a.PromptMode) != strings.TrimSpace(b.PromptMode) ||
+		string(a.RunState) != string(b.RunState) ||
+		strings.TrimSpace(a.TaskProgress.Summary) != strings.TrimSpace(b.TaskProgress.Summary) ||
+		strings.TrimSpace(a.TaskProgress.State) != strings.TrimSpace(b.TaskProgress.State) ||
+		strings.TrimSpace(repairLoopSummary(a.TaskProgress)) != strings.TrimSpace(repairLoopSummary(b.TaskProgress)) ||
+		!projectionInfoDisplayEqual(a.Projection, b.Projection) {
+		return false
+	}
+	if !workspaceOutcomeEqual(a.Outcome, b.Outcome) {
+		return false
+	}
+	if !runtimeV2ProgressEqual(a.TaskProgress.RuntimeV2, b.TaskProgress.RuntimeV2) {
+		return false
+	}
+	if !activityFeedDisplayEqual(a.Activity, b.Activity) {
+		return false
+	}
+	if !decisionInfoEqual(a.BlockingDecision, b.BlockingDecision) {
+		return false
+	}
+	if !approvalInfoEqual(a.BlockingApproval, b.BlockingApproval) {
+		return false
+	}
+	if !acceptanceProjectionEqual(a.Acceptance, b.Acceptance) {
+		return false
+	}
+	if !runHeartbeatEqual(a.RunHeartbeat, b.RunHeartbeat) {
+		return false
+	}
+	if !convergenceStatusEqual(a.ConvergenceStatus, b.ConvergenceStatus) {
+		return false
+	}
+	if !runCommandStatusEqual(a.RunCommand, b.RunCommand) {
+		return false
+	}
+	return true
+}
+
+// projectionInfoDisplayEqual covers the projection state copied into the
+// workspace cache by applyWorkspaceRuntimeView. A same-revision transition to
+// stale/degraded must not be swallowed by the RuntimeView no-op gate.
+func projectionInfoDisplayEqual(a, b backend.ProjectionInfo) bool {
+	return strings.TrimSpace(a.State) == strings.TrimSpace(b.State) &&
+		a.GlobalRevision == b.GlobalRevision &&
+		a.WorkspaceRevision == b.WorkspaceRevision &&
+		a.SourceEventRevision == b.SourceEventRevision &&
+		a.ProjectedSourceRevision == b.ProjectedSourceRevision &&
+		strings.TrimSpace(a.UpdatedAt) == strings.TrimSpace(b.UpdatedAt) &&
+		strings.TrimSpace(a.RebuiltAt) == strings.TrimSpace(b.RebuiltAt) &&
+		a.Degraded == b.Degraded &&
+		strings.TrimSpace(a.StaleReason) == strings.TrimSpace(b.StaleReason) &&
+		strings.TrimSpace(a.Error) == strings.TrimSpace(b.Error)
+}
+
+func workspaceOutcomeEqual(a, b backend.WorkspaceOutcomeInfo) bool {
+	if strings.TrimSpace(string(a.WorkspaceID)) != strings.TrimSpace(string(b.WorkspaceID)) ||
+		strings.TrimSpace(a.State) != strings.TrimSpace(b.State) ||
+		strings.TrimSpace(string(a.RunID)) != strings.TrimSpace(string(b.RunID)) ||
+		strings.TrimSpace(string(a.ResultID)) != strings.TrimSpace(string(b.ResultID)) ||
+		a.Accepted != b.Accepted ||
+		a.Terminal != b.Terminal ||
+		strings.TrimSpace(a.Summary) != strings.TrimSpace(b.Summary) ||
+		strings.TrimSpace(a.Reason) != strings.TrimSpace(b.Reason) {
+		return false
+	}
+	return stringSliceEqualDisplay(a.EvidenceRefs, b.EvidenceRefs) &&
+		stringSliceEqualDisplay(a.ArtifactRefs, b.ArtifactRefs)
+}
+
+func acceptanceProjectionEqual(a, b backend.AcceptanceProjectionInfo) bool {
+	if strings.TrimSpace(a.ActiveSliceID) != strings.TrimSpace(b.ActiveSliceID) ||
+		a.Summary.AcceptedSlices != b.Summary.AcceptedSlices ||
+		a.Summary.ActiveSlices != b.Summary.ActiveSlices ||
+		a.Summary.OpenSlices != b.Summary.OpenSlices ||
+		a.Summary.FailedSlices != b.Summary.FailedSlices {
+		return false
+	}
+	if !coverageFocusEqual(a.CurrentFocus, b.CurrentFocus) {
+		return false
+	}
+	if !convergenceBudgetEqual(a.Budget, b.Budget) {
+		return false
+	}
+	if len(a.Slices) != len(b.Slices) {
+		return false
+	}
+	for i := range a.Slices {
+		left, right := a.Slices[i], b.Slices[i]
+		if strings.TrimSpace(left.ID) != strings.TrimSpace(right.ID) ||
+			strings.TrimSpace(left.Title) != strings.TrimSpace(right.Title) ||
+			strings.TrimSpace(left.State) != strings.TrimSpace(right.State) ||
+			left.Priority != right.Priority ||
+			strings.TrimSpace(left.Scope) != strings.TrimSpace(right.Scope) ||
+			strings.TrimSpace(left.CompletionPolicy) != strings.TrimSpace(right.CompletionPolicy) ||
+			strings.TrimSpace(left.ResultPolicy) != strings.TrimSpace(right.ResultPolicy) ||
+			!stringSliceEqualDisplay(left.CoverageWorkItemIDs, right.CoverageWorkItemIDs) ||
+			!stringSliceEqualDisplay(left.RequiredEvidenceKinds, right.RequiredEvidenceKinds) {
+			return false
+		}
+	}
+	return true
+}
+
+func coverageFocusEqual(a, b *backend.CoverageFocusInfo) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return strings.TrimSpace(a.ID) == strings.TrimSpace(b.ID) &&
+		strings.TrimSpace(a.SliceID) == strings.TrimSpace(b.SliceID) &&
+		strings.TrimSpace(a.FailureClass) == strings.TrimSpace(b.FailureClass) &&
+		strings.TrimSpace(a.FailureSignature) == strings.TrimSpace(b.FailureSignature) &&
+		strings.TrimSpace(a.State) == strings.TrimSpace(b.State) &&
+		a.Attempt == b.Attempt &&
+		stringSliceEqualDisplay(a.CoverageWorkItemIDs, b.CoverageWorkItemIDs) &&
+		stringSliceEqualDisplay(a.RequiredEvidenceKinds, b.RequiredEvidenceKinds) &&
+		stringSliceEqualDisplay(a.AcceptedEvidenceRefs, b.AcceptedEvidenceRefs) &&
+		stringSliceEqualDisplay(a.RejectedEvidenceRefs, b.RejectedEvidenceRefs) &&
+		stringSliceEqualDisplay(a.TargetRefs, b.TargetRefs)
+}
+
+func convergenceBudgetEqual(a, b *backend.ConvergenceBudgetInfo) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return strings.TrimSpace(a.State) == strings.TrimSpace(b.State) &&
+		strings.TrimSpace(a.Decision) == strings.TrimSpace(b.Decision) &&
+		a.MaxRepairAttemptsPerFocus == b.MaxRepairAttemptsPerFocus &&
+		a.MaxLLMRoundsPerSlice == b.MaxLLMRoundsPerSlice &&
+		a.MaxRepeatedFailureSignature == b.MaxRepeatedFailureSignature &&
+		a.MaxValidationOnlyRetries == b.MaxValidationOnlyRetries &&
+		a.MaxNoCoverageDeltaRounds == b.MaxNoCoverageDeltaRounds &&
+		a.MaxContextBytesPerRepair == b.MaxContextBytesPerRepair &&
+		a.RepairAttempts == b.RepairAttempts &&
+		a.LLMRounds == b.LLMRounds &&
+		a.RepeatedFailureSignatures == b.RepeatedFailureSignatures &&
+		a.ValidationOnlyRetries == b.ValidationOnlyRetries &&
+		a.NoCoverageDeltaRounds == b.NoCoverageDeltaRounds &&
+		strings.TrimSpace(a.LastDecisionReason) == strings.TrimSpace(b.LastDecisionReason)
+}
+
+func runHeartbeatEqual(a, b backend.RunHeartbeatInfo) bool {
+	return strings.TrimSpace(string(a.WorkspaceID)) == strings.TrimSpace(string(b.WorkspaceID)) &&
+		strings.TrimSpace(string(a.RunID)) == strings.TrimSpace(string(b.RunID)) &&
+		strings.TrimSpace(a.State) == strings.TrimSpace(b.State) &&
+		strings.TrimSpace(a.ActivityState) == strings.TrimSpace(b.ActivityState) &&
+		strings.TrimSpace(string(a.LatestStepID)) == strings.TrimSpace(string(b.LatestStepID)) &&
+		strings.TrimSpace(a.LatestStepKind) == strings.TrimSpace(b.LatestStepKind) &&
+		strings.TrimSpace(a.LatestStepState) == strings.TrimSpace(b.LatestStepState) &&
+		strings.TrimSpace(a.LatestEvidenceRef) == strings.TrimSpace(b.LatestEvidenceRef) &&
+		strings.TrimSpace(a.LatestEventTopic) == strings.TrimSpace(b.LatestEventTopic) &&
+		a.LatestEventRevision == b.LatestEventRevision &&
+		strings.TrimSpace(a.LatestEventAt) == strings.TrimSpace(b.LatestEventAt) &&
+		strings.TrimSpace(a.LatestLLMUsageAt) == strings.TrimSpace(b.LatestLLMUsageAt) &&
+		strings.TrimSpace(a.LatestResultAt) == strings.TrimSpace(b.LatestResultAt) &&
+		strings.TrimSpace(a.LatestArtifactAt) == strings.TrimSpace(b.LatestArtifactAt) &&
+		strings.TrimSpace(a.LatestPatchAt) == strings.TrimSpace(b.LatestPatchAt) &&
+		strings.TrimSpace(a.LatestEffectiveProgressAt) == strings.TrimSpace(b.LatestEffectiveProgressAt) &&
+		a.IneffectiveRetry == b.IneffectiveRetry &&
+		a.Stalled == b.Stalled &&
+		strings.TrimSpace(a.Summary) == strings.TrimSpace(b.Summary)
+}
+
+func convergenceStatusEqual(a, b *backend.ConvergenceStatusInfo) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return strings.TrimSpace(string(a.WorkspaceID)) == strings.TrimSpace(string(b.WorkspaceID)) &&
+		strings.TrimSpace(string(a.RunID)) == strings.TrimSpace(string(b.RunID)) &&
+		string(a.RunState) == string(b.RunState) &&
+		strings.TrimSpace(a.CurrentFocusID) == strings.TrimSpace(b.CurrentFocusID) &&
+		strings.TrimSpace(a.NextActionKind) == strings.TrimSpace(b.NextActionKind) &&
+		strings.TrimSpace(a.CurrentGap) == strings.TrimSpace(b.CurrentGap) &&
+		a.AcceptedEvidenceCount == b.AcceptedEvidenceCount &&
+		a.RejectedEvidenceCount == b.RejectedEvidenceCount &&
+		strings.TrimSpace(a.LatestEffectiveProgressAt) == strings.TrimSpace(b.LatestEffectiveProgressAt) &&
+		strings.TrimSpace(a.DecisionCause) == strings.TrimSpace(b.DecisionCause) &&
+		a.Stalled == b.Stalled &&
+		a.IneffectiveRetry == b.IneffectiveRetry &&
+		stringSliceEqualDisplay(a.MissingEvidenceKinds, b.MissingEvidenceKinds)
+}
+
+func runCommandStatusEqual(a, b *backend.RunCommandStatusInfo) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return strings.TrimSpace(string(a.WorkspaceID)) == strings.TrimSpace(string(b.WorkspaceID)) &&
+		strings.TrimSpace(string(a.RunID)) == strings.TrimSpace(string(b.RunID)) &&
+		strings.TrimSpace(a.State) == strings.TrimSpace(b.State) &&
+		strings.TrimSpace(a.Intent) == strings.TrimSpace(b.Intent) &&
+		strings.TrimSpace(a.Reason) == strings.TrimSpace(b.Reason) &&
+		strings.TrimSpace(a.RequestID) == strings.TrimSpace(b.RequestID) &&
+		strings.TrimSpace(a.IdempotencyKey) == strings.TrimSpace(b.IdempotencyKey) &&
+		strings.TrimSpace(a.Source) == strings.TrimSpace(b.Source) &&
+		strings.TrimSpace(a.DefinitionRevision) == strings.TrimSpace(b.DefinitionRevision) &&
+		strings.TrimSpace(string(a.DecisionID)) == strings.TrimSpace(string(b.DecisionID)) &&
+		strings.TrimSpace(a.AcceptedAt) == strings.TrimSpace(b.AcceptedAt) &&
+		strings.TrimSpace(a.RejectedAt) == strings.TrimSpace(b.RejectedAt) &&
+		strings.TrimSpace(a.Error) == strings.TrimSpace(b.Error) &&
+		a.Revision == b.Revision
+}
+
+func stringSliceEqualDisplay(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if strings.TrimSpace(a[i]) != strings.TrimSpace(b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func runtimeV2ProgressEqual(a, b *backend.RuntimeV2ProgressInfo) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	if a.StateRevision != b.StateRevision ||
+		a.EvidenceSequence != b.EvidenceSequence ||
+		strings.TrimSpace(a.CurrentFocusID) != strings.TrimSpace(b.CurrentFocusID) ||
+		strings.TrimSpace(a.CurrentAction) != strings.TrimSpace(b.CurrentAction) ||
+		strings.TrimSpace(a.ActiveDispatchID) != strings.TrimSpace(b.ActiveDispatchID) ||
+		a.CompletedDispatchCount != b.CompletedDispatchCount ||
+		a.CandidateAttemptCount != b.CandidateAttemptCount ||
+		a.AcceptedEvidenceCount != b.AcceptedEvidenceCount ||
+		a.RejectedEvidenceCount != b.RejectedEvidenceCount ||
+		strings.TrimSpace(a.FailureClass) != strings.TrimSpace(b.FailureClass) ||
+		strings.TrimSpace(a.FailureCode) != strings.TrimSpace(b.FailureCode) ||
+		strings.TrimSpace(a.FailureSignature) != strings.TrimSpace(b.FailureSignature) ||
+		strings.TrimSpace(a.FailureMessage) != strings.TrimSpace(b.FailureMessage) {
+		return false
+	}
+	if len(a.MissingEvidenceKinds) != len(b.MissingEvidenceKinds) {
+		return false
+	}
+	for i := range a.MissingEvidenceKinds {
+		if a.MissingEvidenceKinds[i] != b.MissingEvidenceKinds[i] {
+			return false
+		}
+	}
+	return stringSliceEqualDisplay(a.RepairHintCodes, b.RepairHintCodes)
+}
+
+func activityFeedDisplayEqual(a, b backend.WorkspaceActivityFeedInfo) bool {
+	if strings.TrimSpace(string(a.WorkspaceID)) != strings.TrimSpace(string(b.WorkspaceID)) ||
+		strings.TrimSpace(string(a.DisplayRunID)) != strings.TrimSpace(string(b.DisplayRunID)) ||
+		a.ActivityRevision != b.ActivityRevision ||
+		a.Truncated != b.Truncated ||
+		strings.TrimSpace(a.NextCursor) != strings.TrimSpace(b.NextCursor) ||
+		len(a.Items) != len(b.Items) {
+		return false
+	}
+	for i := range a.Items {
+		if strings.TrimSpace(a.Items[i].ID) != strings.TrimSpace(b.Items[i].ID) ||
+			strings.TrimSpace(a.Items[i].Summary) != strings.TrimSpace(b.Items[i].Summary) ||
+			strings.TrimSpace(a.Items[i].Title) != strings.TrimSpace(b.Items[i].Title) ||
+			strings.TrimSpace(a.Items[i].State) != strings.TrimSpace(b.Items[i].State) ||
+			string(a.Items[i].Kind) != string(b.Items[i].Kind) ||
+			strings.TrimSpace(a.Items[i].OccurredAt) != strings.TrimSpace(b.Items[i].OccurredAt) {
+			return false
+		}
+	}
+	return true
+}
+
+func decisionInfoEqual(a, b *backend.DecisionInfo) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return strings.TrimSpace(string(a.ID)) == strings.TrimSpace(string(b.ID)) &&
+		strings.TrimSpace(string(a.State)) == strings.TrimSpace(string(b.State)) &&
+		strings.TrimSpace(a.Question) == strings.TrimSpace(b.Question) &&
+		strings.TrimSpace(a.Reason) == strings.TrimSpace(b.Reason)
+}
+
+func approvalInfoEqual(a, b *backend.ApprovalInfo) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return strings.TrimSpace(string(a.ID)) == strings.TrimSpace(string(b.ID)) &&
+		strings.TrimSpace(string(a.State)) == strings.TrimSpace(string(b.State)) &&
+		strings.TrimSpace(a.Reason) == strings.TrimSpace(b.Reason) &&
+		strings.TrimSpace(a.Action) == strings.TrimSpace(b.Action)
+}
+
+func runtimeViewRevisionAcceptable(current, incoming backend.WorkspaceRefreshRevision) bool {
+	if revisionGenerationChanged(current, incoming) {
+		// Cross-generation RuntimeView readback is authoritative. Numeric
+		// revisions are intentionally incomparable across this boundary.
+		return true
+	}
+	// Non-zero applied revisions reject older responses.
+	if current.WorkspaceRevision > 0 {
+		if incoming.WorkspaceRevision == 0 || incoming.WorkspaceRevision < current.WorkspaceRevision {
+			return false
+		}
+	}
+	if current.RuntimeStateRevision > 0 {
+		if incoming.RuntimeStateRevision == 0 || incoming.RuntimeStateRevision < current.RuntimeStateRevision {
+			return false
+		}
+	}
+	if current.ActivityRevision > 0 {
+		if incoming.ActivityRevision == 0 || incoming.ActivityRevision < current.ActivityRevision {
+			return false
+		}
+	}
+	return true
+}
+
+func revisionGenerationChanged(current, incoming backend.WorkspaceRefreshRevision) bool {
+	left := strings.TrimSpace(current.StreamGeneration)
+	right := strings.TrimSpace(incoming.StreamGeneration)
+	return left != "" && right != "" && left != right
+}
+
+func cloneRuntimeV2(item *backend.RuntimeV2ProgressInfo) *backend.RuntimeV2ProgressInfo {
+	if item == nil {
+		return nil
+	}
+	ret := *item
+	ret.MissingEvidenceKinds = append([]string(nil), item.MissingEvidenceKinds...)
+	ret.RepairHintCodes = append([]string(nil), item.RepairHintCodes...)
+	return &ret
+}
+
+func cloneActivityFeed(item backend.WorkspaceActivityFeedInfo) backend.WorkspaceActivityFeedInfo {
+	ret := item
+	if len(item.Items) > 0 {
+		ret.Items = append([]backend.WorkspaceActivityItemInfo(nil), item.Items...)
+	}
+	return ret
+}
+
+func cloneRunCommandPtr(item *backend.RunCommandStatusInfo) *backend.RunCommandStatusInfo {
+	if item == nil {
+		return nil
+	}
+	ret := *item
+	return &ret
 }
 
 func (m *AppModel) markWorkspaceContextDisplayLoaded(workspaceID string, msg WorkspaceContextMsg) {
@@ -872,6 +1356,8 @@ func (m *AppModel) clearRunProjectionState() {
 	m.acceptance = backend.AcceptanceProjectionInfo{}
 	m.runHeartbeat = backend.RunHeartbeatInfo{}
 	m.runCommand = nil
+	m.runtimeV2 = nil
+	m.activityFeed = backend.WorkspaceActivityFeedInfo{}
 	m.repairLoop = ""
 	m.failureReason = ""
 	m.failureHint = ""
@@ -947,7 +1433,6 @@ func (m *AppModel) resetWorkspaceView() {
 	m.acceptance = backend.AcceptanceProjectionInfo{}
 	m.runHeartbeat = backend.RunHeartbeatInfo{}
 	m.schedulerDiagnostics = nil
-	m.runtimeEvents = nil
 	m.repairLoop = ""
 	m.failureReason = ""
 	m.failureHint = ""
@@ -972,6 +1457,8 @@ func (m *AppModel) saveActiveWorkspaceDisplayState() {
 		return
 	}
 	entry.Display = workspaceDisplayState{
+		ActiveRunID:           m.activeRunID,
+		DisplayRunID:          string(entry.RuntimeView.DisplayRunID),
 		CurrentTask:           m.currentTask,
 		DoDItems:              append([]string(nil), m.dodItems...),
 		Transcript:            append([]transcriptItem(nil), m.transcript...),
@@ -989,9 +1476,22 @@ func (m *AppModel) saveActiveWorkspaceDisplayState() {
 		Acceptance:            m.acceptance,
 		RunHeartbeat:          m.runHeartbeat,
 		ConvergenceStatus:     cloneConvergenceStatusInfoPtr(m.convergenceStatus),
-		RuntimeEvents:         append([]string(nil), m.runtimeEvents...),
+		RuntimeV2:             cloneRuntimeV2(m.runtimeV2),
+		Activity:              cloneActivityFeed(m.activityFeed),
+		Progress:              m.progress,
+		ProgressText:          m.progressText,
 		RepairLoop:            m.repairLoop,
+		FailureReason:         m.failureReason,
+		FailureHint:           m.failureHint,
+		Running:               m.running,
+		BlockingDecision:      cloneDecisionPtr(m.blockingDecision),
+		BlockingApproval:      cloneApprovalPtr(m.blockingApproval),
+		Decisions:             append([]backend.DecisionInfo(nil), m.decisions...),
+		Approvals:             append([]backend.ApprovalInfo(nil), m.approvals...),
+		LastError:             m.lastError,
 	}
+	entry.FollowTail = !m.mainViewportUserScrolled
+	entry.UnreadUpdateCount = m.mainViewportUnreadCount
 	entry.HasDisplay = true
 	if revision := projectionRevision(entry.Overview.Projection); revision > entry.DisplayRevision {
 		entry.DisplayRevision = revision
@@ -1003,7 +1503,7 @@ func (m *AppModel) restoreWorkspaceDisplayState(workspaceID string) bool {
 	if !ok {
 		return false
 	}
-	m.activeRunID = ""
+	m.activeRunID = cached.ActiveRunID
 	m.currentTask = cached.CurrentTask
 	m.dodItems = append([]string(nil), cached.DoDItems...)
 	m.transcript = append([]transcriptItem(nil), cached.Transcript...)
@@ -1022,8 +1522,11 @@ func (m *AppModel) restoreWorkspaceDisplayState(workspaceID string) bool {
 	m.runHeartbeat = cached.RunHeartbeat
 	m.convergenceStatus = cloneConvergenceStatusInfoPtr(cached.ConvergenceStatus)
 	m.schedulerDiagnostics = nil
-	m.runtimeEvents = append([]string(nil), cached.RuntimeEvents...)
+	m.runtimeV2 = cloneRuntimeV2(cached.RuntimeV2)
+	m.activityFeed = cloneActivityFeed(cached.Activity)
 	m.repairLoop = cached.RepairLoop
+	// Progress/running/blocker remain projection-authoritative after switch;
+	// cache restores historical content to avoid empty screen only.
 	m.failureReason = ""
 	m.failureHint = ""
 	m.running = false
@@ -1034,7 +1537,13 @@ func (m *AppModel) restoreWorkspaceDisplayState(workspaceID string) bool {
 	m.decisions = nil
 	m.approvals = nil
 	m.lastError = nil
-	m.resetMainViewport()
+	if entry := m.workspaceRuntimeState(workspaceID); entry != nil {
+		m.mainViewportUserScrolled = !entry.FollowTail
+		m.mainViewportUnreadCount = entry.UnreadUpdateCount
+		m.mainViewportPendingUpdate = entry.UnreadUpdateCount > 0 && !entry.FollowTail
+	} else {
+		m.resetMainViewport()
+	}
 	m.clearInput()
 	return true
 }
@@ -1323,4 +1832,29 @@ func (m *AppModel) markApprovalResolvedForWorkspace(workspaceID common.Workspace
 	if runID != "" {
 		entry.OptimisticRunID = runID
 	}
+}
+
+func refreshRevisionBelow(current, target backend.WorkspaceRefreshRevision) bool {
+	if revisionGenerationChanged(current, target) {
+		return false
+	}
+	// Response is still below DirtyRevision when any dirty domain is non-zero and
+	// the response is missing (zero) or lower than that dirty value. Zero response
+	// while dirty is set must keep dirty and schedule another pending readback.
+	if target.WorkspaceRevision > 0 && current.WorkspaceRevision < target.WorkspaceRevision {
+		return true
+	}
+	if target.RuntimeStateRevision > 0 && current.RuntimeStateRevision < target.RuntimeStateRevision {
+		return true
+	}
+	if target.ActivityRevision > 0 && current.ActivityRevision < target.ActivityRevision {
+		return true
+	}
+	if target.EvidenceSequence > 0 && current.EvidenceSequence < target.EvidenceSequence {
+		return true
+	}
+	if target.ProjectedSourceRevision > 0 && current.ProjectedSourceRevision < target.ProjectedSourceRevision {
+		return true
+	}
+	return false
 }

@@ -1,0 +1,19 @@
+{
+  "service": "workorch",
+  "backend": "file",
+  "dataRoot": "/home/rangh/aispace/workorch/docs/60-verification/artifacts/tui-runtime-refresh-live-20260715T132455Z/data",
+  "status": {
+    "id": "run-001",
+    "workspaceId": "ws-7d57c4753f148d96",
+    "state": "completed",
+    "stepCount": 6,
+    "decisionCount": 0,
+    "approvalCount": 0,
+    "convergenceStatus": {
+      "workspaceId": "ws-7d57c4753f148d96",
+      "runId": "run-001",
+      "runState": "completed"
+    }
+  },
+  "waitMatched": true
+}

@@ -81,33 +81,74 @@ func TestEventHubBackendCLICommandUsesSynchronousTypedResult(t *testing.T) {
 	}
 }
 
-func TestEventHubEventsBackendReceivesProjectionAcrossHubWrappers(t *testing.T) {
+func TestEventHubProjectionEventsBackendReceivesTypedProjection(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(32)
 	defer rawHub.Terminate(ctx)
 
 	be := NewEventHub(rawHub)
-	received := make(chan Event, 1)
-	unsubscribe, err := be.Events().Subscribe(ctx, func(_ context.Context, evt Event) {
-		if evt.Type == EventWorkspaceProjectionChanged {
-			received <- evt
-		}
-	})
+	received := make(chan WorkspaceProjectionChangedInfo, 1)
+	statuses := make(chan SubscriptionStatusInfo, 4)
+	unsubscribe, err := be.ProjectionEvents().SubscribeWorkspaceProjection(
+		ctx,
+		func(_ context.Context, info WorkspaceProjectionChangedInfo) {
+			received <- info
+		},
+		func(_ context.Context, status SubscriptionStatusInfo) {
+			statuses <- status
+		},
+	)
 	if err != nil {
-		t.Fatalf("subscribe events: %v", err)
+		t.Fatalf("subscribe projection events: %v", err)
 	}
 	defer unsubscribe()
 
-	projectionEvent := magicevent.NewEventWithContext(workorchdevents.TopicWorkspaceProjectionChanged, "workorchd/projection", workorchdevents.NotificationDestination, magicevent.NewHeader(), ctx, workorchdevents.WorkspaceProjectionChangedData{WorkspaceID: "ws-projection", ChangeKind: "detail"})
+	// Subscribe establishes live status before any projection data arrives.
+	select {
+	case status := <-statuses:
+		if status.State != SubscriptionLive && status.State != SubscriptionConnecting {
+			t.Fatalf("status = %+v, want connecting/live", status)
+		}
+	case <-time.After(200 * time.Millisecond):
+		// status callback is best-effort for this test
+	}
+
+	projectionEvent := magicevent.NewEventWithContext(
+		workorchdevents.TopicWorkspaceProjectionChanged,
+		"workorchd/projection",
+		workorchdevents.NotificationDestination,
+		magicevent.NewHeader(),
+		ctx,
+		workorchdevents.WorkspaceProjectionChangedData{
+			WorkspaceID:          "ws-projection",
+			ChangeKind:           "detail",
+			GlobalRevision:       7,
+			WorkspaceRevision:    3,
+			RuntimeStateRevision: 11,
+			ActivityRevision:     5,
+			ChangedSections: []WorkspaceProjectionSection{
+				WorkspaceProjectionSectionRuntimeProgress,
+				WorkspaceProjectionSectionActivity,
+			},
+			ProjectionState: "ready",
+			UpdatedAt:       "2026-07-15T12:00:00Z",
+		},
+	)
 	rawHub.Post(projectionEvent)
 
 	select {
-	case evt := <-received:
-		if evt.WorkspaceID != "ws-projection" || evt.Payload["changeKind"] != "detail" {
-			t.Fatalf("event = %+v, want projection detail for ws-projection", evt)
+	case info := <-received:
+		if info.WorkspaceID != "ws-projection" {
+			t.Fatalf("workspace = %q", info.WorkspaceID)
+		}
+		if info.Revision.WorkspaceRevision != 3 || info.Revision.RuntimeStateRevision != 11 || info.Revision.ActivityRevision != 5 {
+			t.Fatalf("revision = %+v", info.Revision)
+		}
+		if len(info.ChangedSections) != 2 {
+			t.Fatalf("changed sections = %+v", info.ChangedSections)
 		}
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("timed out waiting for projection event across hub wrappers")
+		t.Fatal("timed out waiting for typed projection event")
 	}
 }
 
@@ -196,10 +237,10 @@ func TestEventHubRunRestartPublishesUnifiedWorkspaceRunCommand(t *testing.T) {
 		DefinitionRevision: "rev-restart-unified",
 		DecisionID:         "ticket-restart-unified",
 		Activation: ActivateRunRequest{
-			GoalID:        "goal-restart-unified",
-			DoDID:         "dod-restart-unified",
+			GoalID:    "goal-restart-unified",
+			DoDID:     "dod-restart-unified",
 			LLMProviderID: "provider-restart-unified",
-			SoulID:        "soul-restart-unified",
+			SoulID:    "soul-restart-unified",
 			SoulBindings: map[string]common.SoulID{
 				"validation": "soul-validation-restart-unified",
 			},
@@ -869,6 +910,10 @@ func (r testWorkspaceViewReader) ReadWorkspaceViewSnapshot(ctx context.Context, 
 	return appservice.ReadWorkspaceSnapshotWithSession(ctx, r.session.Borrow(), workspaceID)
 }
 
+func (r testWorkspaceViewReader) ReadWorkspaceActivity(context.Context, string) (appservice.WorkspaceActivityFeed, bool, error) {
+	return appservice.WorkspaceActivityFeed{}, false, nil
+}
+
 type projectionOnlyWorkspaceViewReader struct {
 	workspaces []appservice.Workspace
 	listCalls  int
@@ -881,6 +926,10 @@ func (r *projectionOnlyWorkspaceViewReader) ListWorkspaceView(context.Context) (
 
 func (r *projectionOnlyWorkspaceViewReader) ReadWorkspaceViewSnapshot(context.Context, string) (appservice.WorkspaceSnapshot, error) {
 	return appservice.WorkspaceSnapshot{}, common.ErrInvalidArgument
+}
+
+func (r *projectionOnlyWorkspaceViewReader) ReadWorkspaceActivity(context.Context, string) (appservice.WorkspaceActivityFeed, bool, error) {
+	return appservice.WorkspaceActivityFeed{}, false, nil
 }
 
 func TestConvertBackendEventAddsBlockingSubjectIDs(t *testing.T) {

@@ -1,6 +1,8 @@
 package workspaceviewcore
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -14,9 +16,24 @@ import (
 )
 
 type Store struct {
-	mu                      sync.RWMutex
-	state                   string
-	errText                 string
+	mu      sync.RWMutex
+	state   string
+	errText string
+	// revisionEpoch is a process-local floor for WorkspaceRevision/ActivityRevision.
+	// It is assigned once at NewStore from a high-resolution wall-clock base so that
+	// after server/store restart, newly assigned revisions always compare greater than
+	// any pre-restart AppliedRevision held by a long-lived remote TUI (CR01).
+	// Within a single process, advanceEntryRevision still guarantees monotonic growth
+	// against the previous entry revision, source event revision, and activity revision.
+	revisionEpoch int64
+	// streamGeneration creates an explicit revision domain for this in-memory
+	// projection store. It prevents clients from interpreting a restarted
+	// process's sequence as an older sequence from the previous process.
+	streamGeneration string
+	// highWaterMark is the highest transaction revision assigned by this store
+	// process. advanceEntryRevision never returns below highWaterMark+1, so
+	// in-process counters stay monotonic even when wall-clock epoch is stagnant (FR07).
+	highWaterMark           int64
 	globalRevision          int64
 	sourceRevision          int64
 	projectedSourceRevision int64
@@ -29,10 +46,16 @@ type Store struct {
 }
 
 type workspaceProjectionEntry struct {
-	Workspace               appmodelcore.Workspace
-	HasWorkspace            bool
-	Snapshot                readmodelcore.WorkspaceSnapshot
-	HasSnapshot             bool
+	Workspace    appmodelcore.Workspace
+	HasWorkspace bool
+	Snapshot     readmodelcore.WorkspaceSnapshot
+	HasSnapshot  bool
+	// Activity is the store-owned bounded activity projection for this workspace.
+	// ActivityRevision is assigned in the snapshot transaction and is the only
+	// authority for activity dirty/stale gates. RuntimeView read only paginates.
+	Activity                readmodelcore.WorkspaceActivityFeed
+	HasActivity             bool
+	ActivityRevision        int64
 	Revision                int64
 	SourceRevision          int64
 	ProjectedSourceRevision int64
@@ -146,10 +169,145 @@ func firstNonEmptyViewString(values ...string) string {
 }
 
 func NewStore() *Store {
-	return &Store{
-		state:      StateBuilding,
-		workspaces: map[string]*workspaceProjectionEntry{},
+	return NewStoreWithRevisionFloor(newProjectionRevisionEpoch())
+}
+
+// NewStoreWithRevisionFloor constructs a store whose process-local revision
+// epoch is at least floor. Used by production NewStore (wall-clock) and by
+// tests/injection to model clock skew, future epochs, and durable floors (FR07).
+func NewStoreWithRevisionFloor(floor int64) *Store {
+	if floor < 1 {
+		floor = 1
 	}
+	return &Store{
+		state:            StateBuilding,
+		revisionEpoch:    floor,
+		streamGeneration: newProjectionStreamGeneration(),
+		highWaterMark:    floor - 1, // first assign yields >= floor
+		globalRevision:   floor - 1, // FR05: stream/GlobalRevision shares process floor so SSE IDs do not restart at 1
+		workspaces:       map[string]*workspaceProjectionEntry{},
+	}
+}
+
+func newProjectionStreamGeneration() string {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err == nil {
+		return hex.EncodeToString(bytes)
+	}
+	// crypto/rand failure is exceptionally rare. The timestamp is only a
+	// uniqueness fallback for the generation token; it is never used as a
+	// comparable revision authority.
+	return fmt.Sprintf("fallback-%d", time.Now().UTC().UnixNano())
+}
+
+// SeedRevisionFloor raises the process revision floor without resetting
+// highWaterMark downward. Call after observing durable source revisions or a
+// persisted checkpoint so restart cannot assign below known history (FR07).
+func (s *Store) SeedRevisionFloor(floor int64) {
+	if s == nil || floor < 1 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if floor > s.revisionEpoch {
+		s.revisionEpoch = floor
+	}
+	if floor-1 > s.highWaterMark {
+		s.highWaterMark = floor - 1
+	}
+	// FR05: keep stream/GlobalRevision at or above the seeded floor so SSE
+	// identities cannot restart below an observed pre-restart Last-Event-ID.
+	if floor-1 > s.globalRevision {
+		s.globalRevision = floor - 1
+	}
+}
+
+// newProjectionRevisionEpoch returns a process-local revision floor.
+// Wall-clock nanoseconds are a convenience seed only; advanceEntryRevision
+// also floors against highWaterMark, previous entry revisions, source event
+// revision, and RuntimeStateRevision so assignment does not rely solely on
+// wall-clock progression (FR07).
+func newProjectionRevisionEpoch() int64 {
+	epoch := time.Now().UTC().UnixNano()
+	if epoch < 1 {
+		return 1
+	}
+	return epoch
+}
+
+// advanceEntryRevision assigns the next workspace transaction revision for entry.
+// Floor sources (max of):
+//  1. process revisionEpoch (restart continuity seed)
+//  2. store highWaterMark + 1 (strict in-process monotonic, FR07)
+//  3. previous entry.Revision + 1
+//  4. previous ActivityRevision + 1
+//  5. SourceRevision / store sourceRevision (durable eventstream floor)
+//  6. RuntimeStateRevision from the current snapshot when present
+//
+// The result is always > 0, never lower than any floor, and updates highWaterMark.
+func (s *Store) advanceEntryRevision(entry *workspaceProjectionEntry) int64 {
+	if entry == nil {
+		return 0
+	}
+	next := int64(1)
+	if s != nil && s.revisionEpoch > 0 {
+		next = s.revisionEpoch
+	}
+	if s != nil && s.highWaterMark+1 > next {
+		next = s.highWaterMark + 1
+	}
+	if entry.Revision+1 > next {
+		next = entry.Revision + 1
+	}
+	if entry.ActivityRevision+1 > next {
+		next = entry.ActivityRevision + 1
+	}
+	if entry.SourceRevision > next {
+		next = entry.SourceRevision
+	}
+	if s != nil && s.sourceRevision > next {
+		next = s.sourceRevision
+	}
+	if entry.HasSnapshot {
+		if runtime := entry.Snapshot.TaskProgress.RuntimeV2; runtime != nil {
+			if r := int64(runtime.StateRevision); r > next {
+				next = r
+			}
+		}
+	}
+	if next < 1 {
+		next = 1
+	}
+	entry.Revision = next
+	if s != nil && next > s.highWaterMark {
+		s.highWaterMark = next
+	}
+	return next
+}
+
+// advanceGlobalRevision advances the projection stream/global revision using the
+// same process floor and high-water rules as entry transaction revisions (FR05).
+// This keeps SSE Last-Event-ID / streamRevision from silently restarting at small
+// counters after server restart.
+func (s *Store) advanceGlobalRevision() int64 {
+	if s == nil {
+		return 0
+	}
+	next := s.globalRevision + 1
+	if s.revisionEpoch > next {
+		next = s.revisionEpoch
+	}
+	if s.highWaterMark+1 > next {
+		next = s.highWaterMark + 1
+	}
+	if next < 1 {
+		next = 1
+	}
+	s.globalRevision = next
+	if next > s.highWaterMark {
+		s.highWaterMark = next
+	}
+	return next
 }
 
 func (s *Store) Status() Status {
@@ -180,6 +338,7 @@ func (s *Store) statusLocked() Status {
 	}
 	return Status{
 		State:                   state,
+		StreamGeneration:        s.streamGeneration,
 		GlobalRevision:          s.globalRevision,
 		SourceEventRevision:     s.sourceRevision,
 		ProjectedSourceRevision: s.projectedSourceRevision,
@@ -234,6 +393,7 @@ func (s *Store) statusForWorkspaceLocked(workspaceID string) Status {
 	}
 	return Status{
 		State:                   state,
+		StreamGeneration:        s.streamGeneration,
 		GlobalRevision:          s.globalRevision,
 		WorkspaceRevision:       workspaceRevision,
 		SourceEventRevision:     sourceRevision,
@@ -324,7 +484,7 @@ func (s *Store) ReplaceAll(workspaces []appmodelcore.Workspace, snapshots map[st
 		}
 		entry.Workspace = cloneWorkspace(item)
 		entry.HasWorkspace = true
-		entry.Revision++
+		s.advanceEntryRevision(entry)
 		nextWorkspaces[item.ID] = entry
 		nextOrder = append(nextOrder, item.ID)
 	}
@@ -334,7 +494,7 @@ func (s *Store) ReplaceAll(workspaces []appmodelcore.Workspace, snapshots map[st
 	defer s.mu.Unlock()
 	s.workspaces = nextWorkspaces
 	s.workspaceOrder = nextOrder
-	s.globalRevision++
+	s.advanceGlobalRevision()
 	s.refreshProjectedSourceRevisionLocked()
 	s.globalStale = false
 	s.globalStaleReason = ""
@@ -364,7 +524,7 @@ func (s *Store) ReplaceWorkspaceList(workspaces []appmodelcore.Workspace, degrad
 		entry.Workspace = cloneWorkspace(item)
 		entry.HasWorkspace = true
 		entry.syncSnapshotWorkspace()
-		entry.Revision++
+		s.advanceEntryRevision(entry)
 		nextWorkspaces[item.ID] = entry
 		nextOrder = append(nextOrder, item.ID)
 	}
@@ -374,7 +534,7 @@ func (s *Store) ReplaceWorkspaceList(workspaces []appmodelcore.Workspace, degrad
 	defer s.mu.Unlock()
 	s.workspaces = nextWorkspaces
 	s.workspaceOrder = nextOrder
-	s.globalRevision++
+	s.advanceGlobalRevision()
 	s.globalStale = false
 	s.globalStaleReason = ""
 	if degraded != nil {
@@ -415,6 +575,9 @@ func (s *Store) UpsertSnapshot(snapshot readmodelcore.WorkspaceSnapshot) {
 		command := *entry.Snapshot.RunCommand
 		snapshot.RunCommand = &command
 	}
+	// Capture previous activity before replacing snapshot so revision can stay stable
+	// when content is unchanged within this projection transaction.
+	previousActivity := entry.Activity
 	entry.Workspace = cloneWorkspace(snapshot.Workspace)
 	entry.HasWorkspace = true
 	if !stringSliceContains(s.workspaceOrder, workspaceID) {
@@ -423,8 +586,16 @@ func (s *Store) UpsertSnapshot(snapshot readmodelcore.WorkspaceSnapshot) {
 	}
 	entry.Snapshot = cloneWorkspaceSnapshot(snapshot)
 	entry.HasSnapshot = true
-	entry.Revision++
-	s.globalRevision++
+	s.advanceEntryRevision(entry)
+	s.advanceGlobalRevision()
+	// Commit activity feed in the same transaction as the snapshot revision.
+	// Content changes advance ActivityRevision to this entry.Revision; unchanged keeps previous.
+	candidateContent := readmodelprojection.BuildWorkspaceActivityFeedContent(entry.Snapshot)
+	committed := readmodelprojection.CommitActivityFeedTransaction(previousActivity, candidateContent, entry.Revision)
+	committed.StreamGeneration = s.streamGeneration
+	entry.Activity = cloneWorkspaceActivityFeed(committed)
+	entry.HasActivity = true
+	entry.ActivityRevision = committed.ActivityRevision
 	entry.ProjectedSourceRevision = entry.SourceRevision
 	entry.RebuiltAt = now
 	entry.Stale = false
@@ -436,6 +607,25 @@ func (s *Store) UpsertSnapshot(snapshot readmodelcore.WorkspaceSnapshot) {
 	s.state = StateReady
 	s.errText = ""
 	s.updatedAt = now
+}
+
+// GetActivity returns the store-owned activity feed for a workspace.
+// RuntimeView read must page this feed and must not regenerate ActivityRevision.
+func (s *Store) GetActivity(workspaceID string) (readmodelcore.WorkspaceActivityFeed, bool) {
+	if s == nil {
+		return readmodelcore.WorkspaceActivityFeed{}, false
+	}
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return readmodelcore.WorkspaceActivityFeed{}, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	entry := s.workspaces[workspaceID]
+	if entry == nil || !entry.HasActivity {
+		return readmodelcore.WorkspaceActivityFeed{}, false
+	}
+	return cloneWorkspaceActivityFeed(entry.Activity), true
 }
 
 func (s *Store) UpsertWorkspace(workspace appmodelcore.Workspace) {
@@ -453,8 +643,8 @@ func (s *Store) UpsertWorkspace(workspace appmodelcore.Workspace) {
 		s.workspaceOrder = append(s.workspaceOrder, workspace.ID)
 		sort.Strings(s.workspaceOrder)
 	}
-	entry.Revision++
-	s.globalRevision++
+	s.advanceEntryRevision(entry)
+	s.advanceGlobalRevision()
 	entry.ProjectedSourceRevision = entry.SourceRevision
 	entry.RebuiltAt = now
 	entry.Stale = false
@@ -505,8 +695,8 @@ func (s *Store) ApplyRunCommandAccepted(update RunCommandAcceptedUpdate) bool {
 	entry.Workspace = cloneWorkspace(snapshot.Workspace)
 	entry.HasWorkspace = true
 	entry.HasSnapshot = true
-	entry.Revision++
-	s.globalRevision++
+	s.advanceEntryRevision(entry)
+	s.advanceGlobalRevision()
 	if update.Revision > entry.SourceRevision {
 		entry.SourceRevision = update.Revision
 	}
@@ -562,8 +752,8 @@ func (s *Store) ApplyRunCommandRejected(update RunCommandRejectedUpdate) bool {
 	entry.Workspace = cloneWorkspace(snapshot.Workspace)
 	entry.HasWorkspace = true
 	entry.HasSnapshot = true
-	entry.Revision++
-	s.globalRevision++
+	s.advanceEntryRevision(entry)
+	s.advanceGlobalRevision()
 	if update.Revision > entry.SourceRevision {
 		entry.SourceRevision = update.Revision
 	}
@@ -593,7 +783,7 @@ func (s *Store) MarkWorkspaceDegraded(workspaceID string, err error) {
 	}
 	entry.Stale = true
 	entry.StaleReason = "rebuild_failed"
-	s.globalRevision++
+	s.advanceGlobalRevision()
 	s.state = StateReady
 	s.updatedAt = time.Now().UTC()
 }
@@ -612,7 +802,7 @@ func (s *Store) DeleteWorkspace(workspaceID string) {
 		}
 	}
 	s.workspaceOrder = nextOrder
-	s.globalRevision++
+	s.advanceGlobalRevision()
 	s.refreshProjectedSourceRevisionLocked()
 	s.globalStale = false
 	s.globalStaleReason = ""
@@ -1155,7 +1345,18 @@ func cloneWorkspaceProjectionEntry(item *workspaceProjectionEntry) *workspacePro
 	if item.HasSnapshot {
 		ret.Snapshot = cloneWorkspaceSnapshot(item.Snapshot)
 	}
+	if item.HasActivity {
+		ret.Activity = cloneWorkspaceActivityFeed(item.Activity)
+	}
 	return &ret
+}
+
+func cloneWorkspaceActivityFeed(feed readmodelcore.WorkspaceActivityFeed) readmodelcore.WorkspaceActivityFeed {
+	ret := feed
+	if feed.Items != nil {
+		ret.Items = append([]readmodelcore.WorkspaceActivityItem(nil), feed.Items...)
+	}
+	return ret
 }
 
 func cloneContextBundle(item readmodelcore.ContextBundle) readmodelcore.ContextBundle {

@@ -1,0 +1,208 @@
+{
+  "service": "workorch",
+  "backend": "file",
+  "dataRoot": "/home/rangh/aispace/workorch/docs/60-verification/artifacts/tui-runtime-refresh-live-20260715T132455Z/data",
+  "projection": {
+    "state": "ready",
+    "streamGeneration": "e8c66569a9525fd80eed3ee34f11cc46",
+    "globalRevision": 1784121906297584208,
+    "workspaceRevision": 1784121906297584207,
+    "sourceEventRevision": 6,
+    "projectedSourceRevision": 6,
+    "workspaceTotal": 3,
+    "updatedAt": "2026-07-15T13:25:06.828226149Z",
+    "rebuiltAt": "2026-07-15T13:25:06.828226149Z"
+  },
+  "runtimeView": {
+    "workspaceId": "ws-8c31db3fcee13ffc",
+    "displayRunId": "run-live-a-493077",
+    "projection": {
+      "workspaceId": "ws-8c31db3fcee13ffc",
+      "state": "ready",
+      "promptMode": "workspace",
+      "revision": 1784121906297584207,
+      "globalRevision": 1784121906297584208,
+      "workspaceRevision": 1784121906297584207,
+      "sourceEventRevision": 6,
+      "projectedSourceRevision": 6,
+      "updatedAt": "2026-07-15T13:25:06.828226149Z",
+      "rebuiltAt": "2026-07-15T13:25:06.828226149Z",
+      "sections": {
+        "activeWorkspace": {
+          "name": "activeWorkspace",
+          "revision": 1784121906297584207,
+          "workspaceRevision": 1784121906297584207,
+          "sourceEventRevision": 6,
+          "projectedSourceRevision": 6,
+          "state": "ready"
+        },
+        "commands": {
+          "name": "commands",
+          "revision": 1784121906297584207,
+          "workspaceRevision": 1784121906297584207,
+          "sourceEventRevision": 6,
+          "projectedSourceRevision": 6,
+          "state": "ready"
+        },
+        "coverage": {
+          "name": "coverage",
+          "revision": 1784121906297584207,
+          "workspaceRevision": 1784121906297584207,
+          "sourceEventRevision": 6,
+          "projectedSourceRevision": 6,
+          "state": "ready"
+        },
+        "currentFocus": {
+          "name": "currentFocus",
+          "revision": 1784121906297584207,
+          "workspaceRevision": 1784121906297584207,
+          "sourceEventRevision": 6,
+          "projectedSourceRevision": 6,
+          "state": "ready"
+        },
+        "latestDiagnostic": {
+          "name": "latestDiagnostic",
+          "revision": 1784121906297584207,
+          "workspaceRevision": 1784121906297584207,
+          "sourceEventRevision": 6,
+          "projectedSourceRevision": 6,
+          "state": "ready"
+        },
+        "list": {
+          "name": "list",
+          "revision": 1784121906297584207,
+          "workspaceRevision": 1784121906297584207,
+          "sourceEventRevision": 6,
+          "projectedSourceRevision": 6,
+          "state": "ready"
+        },
+        "promptMode": {
+          "name": "promptMode",
+          "revision": 1784121906297584207,
+          "workspaceRevision": 1784121906297584207,
+          "sourceEventRevision": 6,
+          "projectedSourceRevision": 6,
+          "state": "ready"
+        },
+        "runState": {
+          "name": "runState",
+          "revision": 1784121906297584207,
+          "workspaceRevision": 1784121906297584207,
+          "sourceEventRevision": 6,
+          "projectedSourceRevision": 6,
+          "state": "ready"
+        }
+      }
+    },
+    "revision": {
+      "streamGeneration": "e8c66569a9525fd80eed3ee34f11cc46",
+      "workspaceRevision": 1784121906297584207,
+      "projectedSourceRevision": 6,
+      "activityRevision": 1784121906297584205
+    },
+    "promptMode": "workspace",
+    "runState": "active",
+    "taskProgress": {
+      "workspaceId": "ws-8c31db3fcee13ffc",
+      "state": "active",
+      "summary": "workspace active with 0 open blockers",
+      "currentMilestone": "formal_result",
+      "milestones": [
+        {
+          "id": "workspace_defined",
+          "title": "Workspace defined",
+          "state": "completed",
+          "evidenceRefs": [
+            "ws-8c31db3fcee13ffc"
+          ]
+        },
+        {
+          "id": "formal_result",
+          "title": "Result / Artifact",
+          "state": "completed"
+        }
+      ],
+      "items": [
+        {
+          "id": "runs",
+          "kind": "run",
+          "title": "Runs",
+          "state": "completed"
+        },
+        {
+          "id": "results",
+          "kind": "result",
+          "title": "Results",
+          "state": "pending"
+        },
+        {
+          "id": "artifacts",
+          "kind": "artifact",
+          "title": "Artifacts",
+          "state": "pending"
+        }
+      ],
+      "recovery": {
+        "mode": "idle",
+        "nextAction": "start_workspace_execution",
+        "reason": "workspace has no active Run"
+      },
+      "repairLoop": {
+        "state": "inactive",
+        "attemptCount": 0,
+        "escalated": false
+      },
+      "assessmentOutcome": {}
+    },
+    "runHeartbeat": {
+      "workspaceId": "ws-8c31db3fcee13ffc",
+      "runId": "run-live-a-493077",
+      "state": "active",
+      "activityState": "running",
+      "latestEventTopic": "/goal/defined",
+      "latestEventRevision": 6,
+      "latestEventAt": "2026-07-15T13:25:06.726664698Z",
+      "latestEffectiveProgressAt": "2026-07-15T13:25:06.726664698Z",
+      "summary": "run activity tracked"
+    },
+    "convergenceStatus": {
+      "workspaceId": "ws-8c31db3fcee13ffc",
+      "runId": "run-live-a-493077",
+      "runState": "active",
+      "latestEffectiveProgressAt": "2026-07-15T13:25:06.726664698Z"
+    },
+    "acceptance": {
+      "summary": {
+        "acceptedSlices": 0,
+        "activeSlices": 0,
+        "openSlices": 0,
+        "failedSlices": 0
+      }
+    },
+    "outcome": {
+      "workspaceId": "ws-8c31db3fcee13ffc",
+      "state": "active",
+      "rawWorkspaceState": "active",
+      "accepted": false,
+      "terminal": false,
+      "summary": "workspace definitions changed; execution must be rerun",
+      "reason": "workspace definitions changed; execution must be rerun"
+    },
+    "activity": {
+      "streamGeneration": "e8c66569a9525fd80eed3ee34f11cc46",
+      "workspaceId": "ws-8c31db3fcee13ffc",
+      "displayRunId": "run-live-a-493077",
+      "activityRevision": 1784121906297584205,
+      "items": [
+        {
+          "id": "outcome:active",
+          "workspaceId": "ws-8c31db3fcee13ffc",
+          "kind": "result",
+          "state": "active",
+          "title": "outcome",
+          "summary": "workspace definitions changed; execution must be rerun"
+        }
+      ]
+    }
+  }
+}
