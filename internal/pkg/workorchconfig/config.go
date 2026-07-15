@@ -471,7 +471,7 @@ func NormalizeLLMConfig(cfg LLMConfig) (LLMConfig, error) {
 		cfg.CustomProviders = map[string]CustomLLMProviderConfig{}
 	}
 	// Canonicalize map keys (trim) so readiness/revision/client lookup share one key space.
-	// Fail before overwrite when trim/case-fold collapses distinct keys.
+	// Model IDs are exact provider protocol values; only trim collisions are invalid.
 	var err error
 	cfg.AIProxy.ModelOverrides, err = canonicalizeAIProxyModelOverrides(cfg.AIProxy.ModelOverrides)
 	if err != nil {
@@ -501,21 +501,14 @@ func canonicalizeAIProxyModelOverrides(source map[string]AIProxyModelOverrideCon
 		return map[string]AIProxyModelOverrideConfig{}, nil
 	}
 	ret := make(map[string]AIProxyModelOverrideConfig, len(source))
-	// fold -> first original key (after trim) that claimed this fold.
-	seenFold := map[string]string{}
 	for modelID, override := range source {
 		key := strings.TrimSpace(modelID)
 		if key == "" {
 			return nil, fmt.Errorf("%w: llm.aiProxy.modelOverrides requires non-empty model id", common.ErrInvalidArgument)
 		}
-		fold := strings.ToLower(key)
-		if prev, ok := seenFold[fold]; ok {
-			return nil, fmt.Errorf("%w: llm.aiProxy.modelOverrides has duplicate model id %q (conflicts with %q after trim/case-fold)", common.ErrInvalidArgument, key, prev)
-		}
 		if _, exists := ret[key]; exists {
 			return nil, fmt.Errorf("%w: llm.aiProxy.modelOverrides has duplicate model id %q after trim", common.ErrInvalidArgument, key)
 		}
-		seenFold[fold] = key
 		ops := make([]string, 0, len(override.Operations))
 		for _, op := range override.Operations {
 			op = strings.TrimSpace(op)
@@ -568,20 +561,14 @@ func canonicalizeCustomProviderModels(providerID string, source map[string]Custo
 		return map[string]CustomLLMModelConfig{}, nil
 	}
 	ret := make(map[string]CustomLLMModelConfig, len(source))
-	seenModels := map[string]string{}
 	for modelID, model := range source {
 		mKey := strings.TrimSpace(modelID)
 		if mKey == "" {
 			return nil, fmt.Errorf("%w: llm.customProviders[%s].models requires non-empty model id", common.ErrInvalidArgument, providerID)
 		}
-		fold := strings.ToLower(mKey)
-		if prev, ok := seenModels[fold]; ok {
-			return nil, fmt.Errorf("%w: llm.customProviders[%s].models has duplicate model id %q (conflicts with %q after trim/case-fold)", common.ErrInvalidArgument, providerID, mKey, prev)
-		}
 		if _, exists := ret[mKey]; exists {
 			return nil, fmt.Errorf("%w: llm.customProviders[%s].models has duplicate model id %q after trim", common.ErrInvalidArgument, providerID, mKey)
 		}
-		seenModels[fold] = mKey
 		ops := make([]string, 0, len(model.Operations))
 		for _, op := range model.Operations {
 			op = strings.TrimSpace(op)
@@ -627,18 +614,17 @@ func ValidateLLMConfig(cfg LLMConfig) error {
 		if err := validateCustomLLMProviderConfig(trimmed, provider); err != nil {
 			return err
 		}
-		// model key trim duplicates
+		// Model IDs are case-sensitive protocol values; reject only trim collisions.
 		seenModels := map[string]string{}
 		for modelID := range provider.Models {
 			modelTrim := strings.TrimSpace(modelID)
 			if modelTrim == "" {
 				return fmt.Errorf("%w: llm.customProviders[%s].models requires non-empty model id", common.ErrInvalidArgument, trimmed)
 			}
-			modelFold := strings.ToLower(modelTrim)
-			if prev, ok := seenModels[modelFold]; ok {
+			if prev, ok := seenModels[modelTrim]; ok {
 				return fmt.Errorf("%w: llm.customProviders[%s].models has duplicate model id %q (conflicts with %q)", common.ErrInvalidArgument, trimmed, modelTrim, prev)
 			}
-			seenModels[modelFold] = modelTrim
+			seenModels[modelTrim] = modelTrim
 		}
 	}
 	return nil
@@ -699,11 +685,10 @@ func validateAIProxyProviderConfig(cfg AIProxyProviderConfig) error {
 		if modelID == "" {
 			return fmt.Errorf("%w: llm.aiProxy.modelOverrides requires non-empty model id", common.ErrInvalidArgument)
 		}
-		fold := strings.ToLower(modelID)
-		if prev, ok := seenOverrides[fold]; ok {
+		if prev, ok := seenOverrides[modelID]; ok {
 			return fmt.Errorf("%w: llm.aiProxy.modelOverrides has duplicate model id %q (conflicts with %q)", common.ErrInvalidArgument, modelID, prev)
 		}
-		seenOverrides[fold] = modelID
+		seenOverrides[modelID] = modelID
 		if override.ContextWindowTokens <= 0 || override.MaxOutputTokens <= 0 {
 			return fmt.Errorf("%w: llm.aiProxy.modelOverrides[%s] requires positive contextWindowTokens and maxOutputTokens", common.ErrInvalidArgument, modelID)
 		}

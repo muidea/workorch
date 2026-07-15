@@ -651,3 +651,30 @@ func TestNormalizeLLMConfigRejectsTrimDuplicateCustomModelKeys(t *testing.T) {
 		t.Fatal("expected trim-duplicate custom model keys to fail before overwrite")
 	}
 }
+
+func TestNormalizeLLMConfigPreservesCaseDistinctModelIDs(t *testing.T) {
+	cfg := DefaultLLMConfig()
+	cfg.AIProxy.BaseURL = "http://127.0.0.1:8080"
+	cfg.DefaultChat = ProviderModelTargetConfig{ProviderID: BuiltinAIProxyProviderID, ModelID: "DeepSeek-V4-Flash"}
+	cfg.AIProxy.ModelOverrides = map[string]AIProxyModelOverrideConfig{
+		"DeepSeek-V4-Flash": {ContextWindowTokens: 1000000, MaxOutputTokens: 65536, Operations: []string{"chat_completions"}},
+		"deepseek-v4-flash": {ContextWindowTokens: 1000000, MaxOutputTokens: 65536, Operations: []string{"chat_completions"}},
+	}
+	cfg.CustomProviders = map[string]CustomLLMProviderConfig{
+		"custom-a": {
+			Provider: "compatible", APISurface: "openai_compatible_http", BaseURL: "http://127.0.0.1:9", Timeout: "30s",
+			Models: map[string]CustomLLMModelConfig{
+				"DeepSeek-V4-Flash": {ContextWindowTokens: 1000000, MaxOutputTokens: 65536, Operations: []string{"chat_completions"}},
+				"deepseek-v4-flash": {ContextWindowTokens: 1000000, MaxOutputTokens: 65536, Operations: []string{"chat_completions"}},
+			},
+		},
+	}
+
+	normalized, err := NormalizeLLMConfig(cfg)
+	if err != nil {
+		t.Fatalf("NormalizeLLMConfig: %v", err)
+	}
+	if len(normalized.AIProxy.ModelOverrides) != 2 || len(normalized.CustomProviders["custom-a"].Models) != 2 {
+		t.Fatalf("case-distinct model IDs were collapsed: %+v", normalized)
+	}
+}

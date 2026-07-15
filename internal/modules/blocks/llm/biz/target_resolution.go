@@ -106,8 +106,8 @@ func resolveAIProxyTarget(cfg workorchconfig.LLMConfig, catalog *llmmodels.Provi
 }
 
 func resolveCustomProviderTarget(cfg workorchconfig.LLMConfig, target runtimecontract.ProviderModelTarget, operation string, configRevision string) (llmmodels.ResolvedProviderModelProfile, error) {
-	// Exact map lookup only. NormalizeLLMConfig rejects trim/case-fold duplicates and
-	// rewrites keys to trimmed form; readiness/client must not reintroduce fuzzy lookup.
+	// Exact map lookup only. NormalizeLLMConfig rejects trim collisions and rewrites
+	// keys to trimmed form; model casing remains part of the provider contract.
 	provider, ok := cfg.CustomProviders[target.ProviderID]
 	if !ok {
 		return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{

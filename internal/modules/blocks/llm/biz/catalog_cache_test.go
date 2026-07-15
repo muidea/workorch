@@ -100,3 +100,23 @@ func TestCatalogServiceDoesNotMergeAcrossDifferentKeys(t *testing.T) {
 		t.Fatalf("upstream hits = %d, want 2 for different cache keys", hits.Load())
 	}
 }
+
+func TestBuildCatalogFromWirePreservesCaseDistinctModelIDs(t *testing.T) {
+	cfg := workorchconfig.DefaultLLMConfig()
+	cfg.AIProxy.BaseURL = "http://127.0.0.1:8080"
+	cfg.DefaultChat = workorchconfig.ProviderModelTargetConfig{ProviderID: "ai-proxy", ModelID: "DeepSeek-V4-Flash"}
+
+	catalog, err := buildCatalogFromWire(aiProxyModelsResponse{Object: "list", Data: []aiProxyModelRecord{
+		{ID: "DeepSeek-V4-Flash", OwnedBy: "proxy", Operations: []string{"chat_completions"}, ContextWindowTokens: 1000000, MaxOutputTokens: 65536},
+		{ID: "deepseek-v4-flash", OwnedBy: "proxy", Operations: []string{"chat_completions"}, ContextWindowTokens: 1000000, MaxOutputTokens: 65536},
+	}}, cfg, time.Now())
+	if err != nil {
+		t.Fatalf("buildCatalogFromWire: %v", err)
+	}
+	if len(catalog.Models) != 2 || catalog.Models[0].Target.ModelID == catalog.Models[1].Target.ModelID {
+		t.Fatalf("case-distinct catalog models were collapsed: %+v", catalog.Models)
+	}
+	if catalog.Models[0].CapabilityRevision == catalog.Models[1].CapabilityRevision {
+		t.Fatalf("case-distinct catalog models share capability revision: %+v", catalog.Models)
+	}
+}

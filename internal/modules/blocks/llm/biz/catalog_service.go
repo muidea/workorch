@@ -279,6 +279,8 @@ func buildCatalogFromWire(wire aiProxyModelsResponse, cfg workorchconfig.LLMConf
 	if ttl <= 0 {
 		ttl = 5 * time.Minute
 	}
+	// ai-proxy routes model IDs by exact string. Model casing is therefore part
+	// of the durable target identity and must not be collapsed in WorkOrch.
 	seen := map[string]struct{}{}
 	models := make([]llmmodels.ProviderModelDescriptor, 0, len(wire.Data))
 	for _, item := range wire.Data {
@@ -286,11 +288,10 @@ func buildCatalogFromWire(wire aiProxyModelsResponse, cfg workorchconfig.LLMConf
 		if modelID == "" {
 			return llmmodels.ProviderModelCatalog{}, fmt.Errorf("%w: catalog model id is required", common.ErrInvalidArgument)
 		}
-		fold := strings.ToLower(modelID)
-		if _, ok := seen[fold]; ok {
+		if _, ok := seen[modelID]; ok {
 			return llmmodels.ProviderModelCatalog{}, fmt.Errorf("%w: catalog contains duplicate model id %q", common.ErrInvalidArgument, modelID)
 		}
-		seen[fold] = struct{}{}
+		seen[modelID] = struct{}{}
 		routeOwner := sanitizeCatalogLogValue(strings.TrimSpace(item.OwnedBy), 128)
 		if routeOwner == "" {
 			routeOwner = runtimecontract.BuiltinAIProxyProviderID
@@ -324,7 +325,7 @@ func buildCatalogFromWire(wire aiProxyModelsResponse, cfg workorchconfig.LLMConf
 		models = append(models, desc)
 	}
 	sort.SliceStable(models, func(i, j int) bool {
-		return strings.ToLower(models[i].Target.ModelID) < strings.ToLower(models[j].Target.ModelID)
+		return models[i].Target.ModelID < models[j].Target.ModelID
 	})
 	catalog := llmmodels.ProviderModelCatalog{
 		ProviderID: runtimecontract.BuiltinAIProxyProviderID,

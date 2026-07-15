@@ -9,6 +9,8 @@ EventRecord 的单一受限解码边界；server package 的聚合测试合同�
 `make test` 已连续两次通过。最终跨进程 live verifier 已验证 catalog/chat/embedding、两个 sealed ceiling、
 catalog change、WorkOrch restart 和 persisted audit/read-model 还原，见 §1.3 与
 `docs/60-verification/ai-proxy-primary-llm-provider-cutover-live-verification-2026-07-15.md`。
+2026-07-15 随后确认 ai-proxy 按 exact model ID 路由；因此 `DeepSeek-V4-Flash` 与
+`deepseek-v4-flash` 是两个独立 target，WorkOrch catalog、override、custom model 与 revision 均保留其大小写。
 
 
 Type: closure-design
@@ -374,7 +376,7 @@ type ProviderModelCatalog struct {
 - `CapabilityReady` 是目录能力是否足以进入 Runtime V2 的判定。
 - `CapabilityRevision` 是单个模型能力 hash。
 - `Revision` 是规范化完整目录 hash。
-- model slice 必须按 case-fold 后的 model ID 稳定排序。
+- model slice 必须按 exact model ID 稳定排序；大小写是 model identity 的一部分。
 
 ### 7.3 Resolved profile
 
@@ -617,7 +619,7 @@ HTTP JSON decode 仅发生在外部协议边界。
 
 - `object` 必须为 `list`。
 - model ID trim 后不能为空。
-- model ID case-fold 后重复必须拒绝整个新目录，保留 LKG。
+- model ID 完全相同才拒绝整个新目录，保留 LKG；仅大小写不同的 ID 是两个独立目录项。
 - `contextWindowTokens <= 0`：模型可展示但 `CapabilityReady=false`。
 - `maxOutputTokens <= 0`：模型可展示但 `CapabilityReady=false`。
 - `maxOutputTokens >= contextWindowTokens`：模型不可用。
@@ -771,7 +773,8 @@ override 是高级配置，只用于 ai-proxy catalog 暂时缺字段或已知�
 - completion 前必须确认 `chat_completions`。
 - embedding 前必须确认 `embeddings`。
 - `ResolveProviderClient` 不得把“client 实现了某接口”当成“model 声明支持 operation”。
-- trim 后重复的 provider ID/model ID 必须在配置校验阶段拒绝，不能依赖 map 遍历顺序选择。
+- trim 后重复的 provider ID/model ID 必须在配置校验阶段拒绝，不能依赖 map 遍历顺序选择；provider ID
+  继续 case-fold 校验，model ID 保留 exact case。
 
 - model ID。
 - context window。
@@ -1487,7 +1490,7 @@ C01-C07 是最初切换顺序，用于说明完整目标范围；2026-07-15 评�
 
 - 正常解析多个模型并稳定排序。
 - 缺 context/max output 的模型不可运行但仍可展示。
-- case-fold 重复模型拒绝。
+- 完全重复模型拒绝；大小写不同模型保留为独立 target。
 - 超过 response bytes/model count 拒绝。
 - timeout、401、429、5xx 分类。
 - stale LKG 回退。
@@ -1831,7 +1834,8 @@ provider request；ai-proxy embedding 可用；embedding-only model 不能用于
 
 ### R03：catalog cache 与 revision 隔离
 
-当前状态：**RR03 已收口。canonicalize 在写入前检测 trim/case-fold 重复并 fail-fast；readiness/client 使用 exact map lookup。**
+当前状态：**RR03 已收口。canonicalize 在写入前检测 trim 重复并 fail-fast；provider ID case-fold，model ID
+保持 exact case；readiness/client 使用 exact map lookup。**
 
 涉及：
 
