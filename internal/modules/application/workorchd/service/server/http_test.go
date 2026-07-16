@@ -37,6 +37,8 @@ import (
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+	llmmodel "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
@@ -52,6 +54,68 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 	"github.com/muidea/workorch/web/consoleassets"
 )
+
+func TestWorkspaceLLMTargetRoutesValidateScopeAndPersistCompleteTarget(t *testing.T) {
+	hub := magicevent.NewHub(32)
+	routine := magictask.NewBackgroundRoutine(16)
+	state := newServerStateWithCommandHubAndBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = state.close(ctx)
+		_ = routine.Shutdown(ctx)
+	})
+	llmObserver := magicevent.NewSimpleObserver(llmevents.CommandDestination, hub)
+	llmObserver.Subscribe(llmevents.TopicLLMCommandResolveProviderModelTarget, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(llmevents.ResolveProviderModelTargetCommand)
+		result.Set(llmevents.ResolveProviderModelTargetResult{Profile: llmmodel.ResolvedProviderModelProfile{
+			Target: command.Target, Operation: "chat_completions", CapabilityRevision: "capability-1", ConfigurationRevision: "configuration-1",
+		}}, nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicLLMCommandResolveProviderModelTarget) })
+	var ownerCommands []workspaceevents.UpdateWorkspaceLLMTargetCommand
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandUpdateLLMTarget, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(workspaceevents.UpdateWorkspaceLLMTargetCommand)
+		ownerCommands = append(ownerCommands, command)
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: command.WorkspaceID, State: common.WorkspaceStateActive, DefaultLLMTarget: command.Target}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandUpdateLLMTarget) })
+
+	mux := newMuxWithState(state)
+	put := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/workspaces/ws-model/llm-target", strings.NewReader(`{"providerId":"custom","modelId":"model-a"}`))
+	put.Header.Set("Content-Type", "application/json")
+	putResponse := httptest.NewRecorder()
+	mux.ServeHTTP(putResponse, put)
+	if putResponse.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d body=%s", putResponse.Code, putResponse.Body.String())
+	}
+	var updated workspaceResponse
+	if err := json.NewDecoder(putResponse.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode PUT response: %v", err)
+	}
+	if updated.Workspace.ID != "ws-model" || updated.Workspace.DefaultLLMTarget == nil || updated.Workspace.DefaultLLMTarget.ProviderID != "custom" || updated.Workspace.DefaultLLMTarget.ModelID != "model-a" {
+		t.Fatalf("PUT workspace = %+v", updated.Workspace)
+	}
+
+	deleteRequest := httptest.NewRequest(http.MethodDelete, "/api/v1/workorch/workspaces/ws-model/llm-target", nil)
+	deleteResponse := httptest.NewRecorder()
+	mux.ServeHTTP(deleteResponse, deleteRequest)
+	if deleteResponse.Code != http.StatusOK {
+		t.Fatalf("DELETE status = %d body=%s", deleteResponse.Code, deleteResponse.Body.String())
+	}
+	if len(ownerCommands) != 2 || ownerCommands[0].WorkspaceID != "ws-model" || ownerCommands[0].Target == nil || ownerCommands[1].WorkspaceID != "ws-model" || ownerCommands[1].Target != nil {
+		t.Fatalf("owner commands = %+v", ownerCommands)
+	}
+
+	invalid := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/workspaces/ws-model/llm-target", strings.NewReader(`{"providerId":"custom"}`))
+	invalid.Header.Set("Content-Type", "application/json")
+	invalidResponse := httptest.NewRecorder()
+	mux.ServeHTTP(invalidResponse, invalid)
+	if invalidResponse.Code != http.StatusBadRequest {
+		t.Fatalf("invalid PUT status = %d body=%s", invalidResponse.Code, invalidResponse.Body.String())
+	}
+}
 
 func testSessionExports(session *appservice.RuntimeSession) (testkit.Exports, error) {
 	return testkit.SessionExports(session)

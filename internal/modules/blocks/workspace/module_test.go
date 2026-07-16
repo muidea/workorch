@@ -3,12 +3,15 @@ package workspace
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
+	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	filerepository "github.com/muidea/workorch/internal/pkg/repository/file"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -73,6 +76,38 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	}
 }
 
+func TestWorkspaceChangedNotificationClonesDefaultLLMTarget(t *testing.T) {
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	module := New()
+	if err := module.Configure(Dependencies{Workspaces: memory.NewWorkspaceRepository(), Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	const observerID = "/workspace/consumers/blocks/workspace/model-target-test"
+	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, hub)
+	received := make(chan workspaceevents.WorkspaceChangedData, 1)
+	observer.Subscribe(workspaceevents.TopicWorkspaceStateChanged, func(event magicevent.Event, result magicevent.Result) {
+		if data, ok := event.Data().(workspaceevents.WorkspaceChangedData); ok {
+			received <- data
+		}
+		if result != nil {
+			result.Set(nil, nil)
+		}
+	})
+	t.Cleanup(func() { observer.Unsubscribe(workspaceevents.TopicWorkspaceStateChanged) })
+	target := runtimecontract.ProviderModelTarget{ProviderID: "custom", ModelID: "model-a"}
+	module.publishWorkspaceUpdated(context.Background(), &workspacemodel.Workspace{ID: "ws-notify", DefaultLLMTarget: &target})
+	target.ModelID = "mutated"
+	select {
+	case data := <-received:
+		if data.DefaultLLMTarget == nil || data.DefaultLLMTarget.ModelID != "model-a" {
+			t.Fatalf("notification target = %+v", data.DefaultLLMTarget)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for workspace notification")
+	}
+}
+
 func TestUpdateWorkspaceLLMTargetCommandPersistsCompleteTargetAndClears(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewWorkspaceRepository()
@@ -96,6 +131,9 @@ func TestUpdateWorkspaceLLMTargetCommandPersistsCompleteTargetAndClears(t *testi
 	if result.Workspace.ActiveRunID != "run-current" {
 		t.Fatalf("active run changed = %q", result.Workspace.ActiveRunID)
 	}
+	if _, err := module.executeCommand(magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandUpdateLLMTarget, "test", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.UpdateWorkspaceLLMTargetCommand{WorkspaceID: workspaceID, Target: result.Workspace.DefaultLLMTarget})); err != nil {
+		t.Fatalf("duplicate target update: %v", err)
+	}
 	target.ModelID = "mutated"
 	stored, err := repo.Get(ctx, workspaceID)
 	if err != nil {
@@ -114,6 +152,42 @@ func TestUpdateWorkspaceLLMTargetCommandPersistsCompleteTargetAndClears(t *testi
 	}
 	if stored.DefaultLLMTarget != nil {
 		t.Fatalf("cleared target = %+v, want nil", stored.DefaultLLMTarget)
+	}
+}
+
+func TestWorkspaceLLMTargetSurvivesFileBackedOwnerRestart(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "workspaces.json")
+	workspaceID := common.WorkspaceID("ws-model-restart")
+	firstRepo := filerepository.NewWorkspaceRepository(path)
+	if err := firstRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "workspace", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	firstHub := magicevent.NewHub(16)
+	t.Cleanup(func() { firstHub.Terminate(context.Background()) })
+	first := New()
+	if err := first.Configure(Dependencies{Workspaces: firstRepo, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: firstHub}); err != nil {
+		t.Fatalf("configure first owner: %v", err)
+	}
+	target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-after-restart"}
+	update := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandUpdateLLMTarget, "test", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.UpdateWorkspaceLLMTargetCommand{WorkspaceID: workspaceID, Target: &target})
+	if _, err := first.executeCommand(update); err != nil {
+		t.Fatalf("persist target: %v", err)
+	}
+
+	secondHub := magicevent.NewHub(16)
+	t.Cleanup(func() { secondHub.Terminate(context.Background()) })
+	second := New()
+	if err := second.Configure(Dependencies{Workspaces: filerepository.NewWorkspaceRepository(path), Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: secondHub}); err != nil {
+		t.Fatalf("configure restarted owner: %v", err)
+	}
+	get := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGet, "test", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.GetWorkspaceCommand{WorkspaceID: workspaceID})
+	result, err := second.executeCommand(get)
+	if err != nil {
+		t.Fatalf("read target after restart: %v", err)
+	}
+	if result.Workspace == nil || result.Workspace.DefaultLLMTarget == nil || !result.Workspace.DefaultLLMTarget.Same(target) {
+		t.Fatalf("target after restart = %+v", result.Workspace)
 	}
 }
 

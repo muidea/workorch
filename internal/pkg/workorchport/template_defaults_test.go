@@ -7,6 +7,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestDefaultDoDItemsForWorkspaceUsesMatchingTemplate(t *testing.T) {
@@ -98,6 +99,10 @@ func (b fakeWorkspaceBackend) Snapshot(ctx context.Context, id common.WorkspaceI
 
 func (b fakeWorkspaceBackend) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
 	return nil, nil
+}
+
+func (b fakeWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*backend.WorkspaceInfo, error) {
+	return b.Get(ctx, id)
 }
 
 func (b fakeWorkspaceBackend) Delete(context.Context, common.WorkspaceID, bool) error {

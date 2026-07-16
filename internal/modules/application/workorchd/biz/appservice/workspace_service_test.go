@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,10 +18,7 @@ func TestCreateWorkspaceWithSessionReturnsInvalidArgumentWhenSessionMissing(t *t
 	}
 }
 
-func TestCreateWorkspaceWithTemplateInitializesGitRepositoryWhenRequested(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git binary not available")
-	}
+func TestCreateWorkspaceWithTemplateKeepsGitInitializationDeclarative(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
 	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
@@ -47,12 +43,11 @@ func TestCreateWorkspaceWithTemplateInitializesGitRepositoryWhenRequested(t *tes
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(item.DeliverableDirectory, ".git")); err != nil {
-		t.Fatalf("workspace git directory stat err = %v, want initialized repository", err)
+	if _, err := os.Stat(filepath.Join(item.DeliverableDirectory, ".git")); !os.IsNotExist(err) {
+		t.Fatalf("workspace git directory stat err = %v, want no eager repository initialization", err)
 	}
-	out, err := exec.Command("git", "-C", item.DeliverableDirectory, "status", "--short").CombinedOutput()
-	if err != nil {
-		t.Fatalf("git status failed: %v output=%s", err, out)
+	if _, ok := item.ContextHints["versionControl"]; !ok {
+		t.Fatalf("workspace context hints lost declarative git setup: %v", item.ContextHints)
 	}
 }
 

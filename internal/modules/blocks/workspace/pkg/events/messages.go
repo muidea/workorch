@@ -98,6 +98,7 @@ type WorkspaceChangedData struct {
 	State                common.WorkspaceState
 	ActiveRunID          common.RunID
 	RunID                common.RunID
+	DefaultLLMTarget     *runtimecontract.ProviderModelTarget
 }
 
 type GoalDefinedData struct {

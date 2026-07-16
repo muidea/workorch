@@ -1,6 +1,6 @@
 # TUI Workspace Model Selection Closure Plan
 
-Status: code-closed
+Status: completed
 
 Type: product-closure-plan
 
@@ -22,24 +22,20 @@ Last Updated: 2026-07-16
 
 ## 2. Current Facts
 
-当前已有能力：
+截至 2026-07-16，代码实现已具备：
 
-- Web workspace 启动弹窗可从系统 configuration/catalog 生成 provider/model 选项，并通过 activation `llmTarget` 对单次 Run 进行覆盖。
-- activation、scheduler、remote client、eventhub backend 与 Runtime V2 bootstrap 已支持 typed `ProviderModelTarget`。
-- 服务端已有：
-  - `GET /api/v1/workorch/configuration/llm/models`
-  - `POST /api/v1/workorch/configuration/llm/models/refresh`
-- `blocks/llm` 已维护 ai-proxy catalog 与 custom provider capability 声明。
-- TUI 已有 `/run resume`、`/run restart`、`/config` 等 slash command，但没有模型目录读取、选择状态或 workspace 模型偏好更新能力。
-- workspace 正式模型当前没有 provider/model 偏好字段。
+- workspace owner 持久化 typed `DefaultLLMTarget`，并通过专用 EventHub command 原子更新或 clear。
+- `workorchport.ConfigBackend` / `WorkspaceBackend` 已直接包含模型目录与 workspace target 稳定合同，不依赖可选 type assertion。
+- embedded EventHub backend 与 remote HTTP backend 已共享同一 port 语义。
+- TUI `/model`、`/model show`、`/model clear` 已实现完整 `providerId/modelId` 选择、双确认、刷新、取消与 stale response 防护。
+- 新 Run 已按 explicit activation → workspace → current system `defaultChat` 解析；既有 sealed Run 保持不漂移。
+- service API 文档、file-backed owner restart、HTTP/client、TUI transport integration 与 MODEL-01～18 直接测试已补齐。
 
-当前缺口：
+发布收口结果：
 
-1. `workorchport.ConfigBackend` 没有统一的 chat target 列表/刷新能力。
-2. `workorchport.WorkspaceBackend` 没有 workspace model target 更新能力。
-3. remote client/API 与 EventHub backend 没有 workspace model target 专用更新合同。
-4. activation 只实现“显式 request target → 系统 defaultChat”，尚未读取 workspace 持久化偏好。
-5. TUI 没有 model selection mode、确认流程和错误恢复。
+1. 包含 Runtime V2 `usedCapabilities` read-model 修复的最新二进制已部署。
+2. 本功能专用 deployed e2e 与 `make verify-ci-mvp-file` 均已通过。
+3. MODEL-01～18、全量测试、vet、boundary、build 与文档同步全部完成。
 
 ## 3. Final Product Contract
 
@@ -188,10 +184,11 @@ type ChatModelTargetOption struct {
 
 ### 5.2 Config backend surface
 
-增加由 concrete config backend 实现的稳定 capability interface，保留既有 `ConfigBackend.Get` 兼容面：
+扩展 `ConfigBackend`：
 
 ```go
-type ChatModelCatalogBackend interface {
+type ConfigBackend interface {
+    Get(ctx context.Context) (*ServiceConfig, error)
     ListChatModelTargets(ctx context.Context) ([]ChatModelTargetOption, error)
     RefreshChatModelTargets(ctx context.Context) ([]ChatModelTargetOption, error)
 }
@@ -225,10 +222,11 @@ type ChatModelCatalogBackend interface {
 
 ### 6.1 Stable workspace port
 
-增加由 concrete workspace backend 实现的稳定 capability interface，保留既有 `WorkspaceBackend` 兼容面：
+扩展 `WorkspaceBackend`：
 
 ```go
-type WorkspaceLLMTargetBackend interface {
+type WorkspaceBackend interface {
+    // existing methods omitted
     UpdateLLMTarget(
         ctx context.Context,
         workspaceID common.WorkspaceID,
@@ -425,6 +423,53 @@ type WorkspaceLLMTargetUpdatedMsg struct { ... }
 | MODEL-17 | HTTP PUT/DELETE scope 与 error mapping 正确 | server/client |
 | MODEL-18 | workspace owner 更新不覆盖 ActiveRunID 等并发字段 | owner regression |
 
+### 12.1 Direct Evidence
+
+| ID | 直接证据 |
+| --- | --- |
+| MODEL-01 | `TestModelCommandRequiresActiveWorkspace` |
+| MODEL-02 | `TestNormalizeChatModelTargetOptionsKeepsOnlyReadyCompleteUniqueTargets`、`TestEmbeddedAndRemoteModelTargetBackendsSharePortSemantics` |
+| MODEL-03 | `TestModelOptionsPreferCurrentWorkspaceProviderGroup`、`TestModelCommandSelectsAndPersistsProviderModelPair` |
+| MODEL-04 | `TestModelCommandSelectsAndPersistsProviderModelPair` |
+| MODEL-05 | `TestModelEscCancelsWithoutWrite` |
+| MODEL-06 | `TestModelRefreshFailurePreservesLoadedOptions`、backend refresh parity |
+| MODEL-07 | `TestModelSelectionDiscardsStaleWorkspaceResponse`、`TestWorkspaceDeletedDuringModelUpdateExitsSelection` |
+| MODEL-08 | `TestWorkspaceLLMTargetSurvivesFileBackedOwnerRestart`、`TestWorkspaceRepositoryPersistsAndClonesDefaultLLMTarget` |
+| MODEL-09 | `TestUpdateWorkspaceLLMTargetCommandPersistsCompleteTargetAndClears` duplicate update branch |
+| MODEL-10 | `TestModelClearRequiresConfirmationAndPersistsNil`、owner clear branch |
+| MODEL-11 | `TestResolveActivationProviderTargetPrecedence` explicit branch |
+| MODEL-12 | `TestResolveActivationProviderTargetPrecedence` workspace branch |
+| MODEL-13 | `TestResolveActivationProviderTargetUsesLatestInjectedSystemDefault` |
+| MODEL-14 | `TestSealedRunProviderTargetDoesNotDriftAfterWorkspacePreferenceChanges` |
+| MODEL-15 | `TestUpdateWorkspaceLLMTargetRejectsUnavailableTargetBeforeOwnerWrite`、`TestUnavailablePersistedTargetIsShownButCannotConfirm` |
+| MODEL-16 | `TestModelSelectionFlowMatchesEmbeddedAndRemoteBackends`、backend port parity |
+| MODEL-17 | `TestWorkspaceLLMTargetRoutesValidateScopeAndPersistCompleteTarget`、`TestClientWorkspaceLLMTargetRoutesCarryProviderAndModel` |
+| MODEL-18 | `TestUpdateWorkspaceLLMTargetCommandPersistsCompleteTargetAndClears` 保留 `ActiveRunID` |
+
+### 12.2 Verified Commands
+
+已通过：
+
+```bash
+make fmt-check
+make vet
+make verify-boundary-contract
+make build
+make test
+make verify-ci-mvp-file
+```
+
+最新部署实例的 feature-specific e2e 已通过：从 ready chat catalog 自动选择
+`ai-proxy/DeepSeek-V4-Flash`，创建临时 workspace，验证 PUT target、GET 持久化投影、
+DELETE clear 与无 active Run 副作用，随后清理 workspace。
+
+最新部署实例上的 `make verify-ci-mvp-file` 已通过：
+
+- WorkOrch HTTP verification passed。
+- workspace template and soul e2e verification passed。
+- LLM workspace execution verification passed。
+- MCP stdio verification passed；Runtime V2 committed MCP dispatch 已正确投影到 `usedCapabilities`。
+
 推荐命令：
 
 ```bash
@@ -438,14 +483,6 @@ make vet
 make verify-boundary-contract
 make test
 ```
-
-## 12.1 Code-Closure Evidence（2026-07-16）
-
-- 通过：workspace owner、file/memory clone、activation precedence、client、port、embedded/remote backend、TUI、server 定向测试。
-- 通过：`make fmt-check`、`make vet`、`make verify-boundary-contract`。
-- `make test` 的功能相关包全部通过；仓库全量并行执行在既有 `TestActivateWorkspaceExecutionWithBackendContinuesRunSequenceAfterRestart` 的 EventHub unsubscribe 阶段触发 10 分钟超时，该用例隔离复跑 2.458 秒通过，server 包隔离复跑通过。
-- `make verify-ci-mvp-file` 的 HTTP/template/soul 阶段通过，deployed LLM verification 在既有 `usageSource/streaming` 断言处失败；失败不经过 `/model`、workspace target 更新或 activation precedence 新路径。
-- 因代码与直接合同已收口、剩余失败属于仓库全量并发/既有 deployed LLM usage 验证，本计划按 `code-closed` 归档；不得把上述验证问题误记为 MODEL-1 产品能力未实现。
 
 ## 13. Definition of Done
 

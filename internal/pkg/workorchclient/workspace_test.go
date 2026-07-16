@@ -98,6 +98,35 @@ func TestClientWorkspaceLLMTargetRoutesCarryProviderAndModel(t *testing.T) {
 	}
 }
 
+func TestClientLLMModelCatalogRoutesUseProviderScope(t *testing.T) {
+	requests := []string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.RequestURI())
+		_, _ = w.Write([]byte(`{"catalog":{"providerId":"custom-provider","state":"ready","models":[{"providerId":"custom-provider","modelId":"model-a","operations":["chat_completions"],"capabilityReady":true}]}}`))
+	}))
+	defer server.Close()
+	cl := New(server.URL)
+	for _, call := range []func() (*ProviderCatalogSummary, error){
+		func() (*ProviderCatalogSummary, error) {
+			return cl.GetLLMModelCatalog(context.Background(), "custom-provider")
+		},
+		func() (*ProviderCatalogSummary, error) {
+			return cl.RefreshLLMModelCatalog(context.Background(), "custom-provider")
+		},
+	} {
+		catalog, err := call()
+		if err != nil {
+			t.Fatalf("catalog call: %v", err)
+		}
+		if catalog.ProviderID != "custom-provider" || len(catalog.Models) != 1 || catalog.Models[0].ModelID != "model-a" {
+			t.Fatalf("catalog = %+v", catalog)
+		}
+	}
+	if len(requests) != 2 || requests[0] != "GET /api/v1/workorch/configuration/llm/models?providerId=custom-provider" || requests[1] != "POST /api/v1/workorch/configuration/llm/models/refresh?providerId=custom-provider" {
+		t.Fatalf("requests = %+v", requests)
+	}
+}
+
 func TestClientGovernanceRequestsCarryWorkspaceScope(t *testing.T) {
 	const workspaceID = "ws-governance"
 

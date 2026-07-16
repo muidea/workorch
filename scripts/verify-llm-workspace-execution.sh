@@ -1473,16 +1473,16 @@ activate_workspace_execution_with_provider "$TMP_DIR/stream-native-activation.js
 stream_native_run_id="$(wait_activation_run "$TMP_DIR/stream-native-activation.json" "$TMP_DIR/stream-native-activation-run.json")"
 wait_run_state "$stream_native_run_id" "completed" "$TMP_DIR/stream-native-completed-status.json"
 assert_run_recovery_read_models "$stream_native_run_id" "stream-native" "completed" ""
-# Prefer provider_native+streaming when available; do not fail the suite if estimated.
-assert_run_llm_usage_semantics "$stream_native_run_id" "provider_native" "true" || \
-  assert_run_llm_usage_semantics "$stream_native_run_id" "estimated" "true" || \
-  assert_run_llm_usage_semantics "$stream_native_run_id" "estimated" "false" || true
+# Runtime V2 candidate dispatch currently uses the sealed non-streaming Complete
+# path. Stream-capable provider adapters remain covered by provider unit tests;
+# this deployed-instance verifier must assert the production path actually used.
+assert_run_llm_usage_semantics "$stream_native_run_id" "provider_native" "false"
 
 activate_workspace_execution_with_provider "$TMP_DIR/stream-estimated-activation.json" "verify-stream-estimated" "verify-stream-estimated-model"
 stream_estimated_run_id="$(wait_activation_run "$TMP_DIR/stream-estimated-activation.json" "$TMP_DIR/stream-estimated-activation-run.json")"
 wait_run_state "$stream_estimated_run_id" "completed" "$TMP_DIR/stream-estimated-completed-status.json"
-assert_run_recovery_read_models "$stream_estimated_run_id" "stream-estimated" "completed" "estimated"
-assert_run_llm_usage_semantics "$stream_estimated_run_id" "estimated" "true"
+assert_run_recovery_read_models "$stream_estimated_run_id" "stream-estimated" "completed" "provider_native"
+assert_run_llm_usage_semantics "$stream_estimated_run_id" "provider_native" "false"
 
 assert_workspace_llm_usage_breakdown "$workspace_id"
 assert_workspace_recovery_read_models "final"

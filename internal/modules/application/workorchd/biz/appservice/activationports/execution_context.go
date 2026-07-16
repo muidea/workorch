@@ -5,6 +5,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -124,11 +125,18 @@ func resolveActivationProviderTarget(ctx context.Context, hub magicevent.Hub, re
 	} else if workspaceDefault != nil {
 		target = workspaceDefault.Normalized()
 	} else {
-		cfg, err := workorchconfig.Current()
+		cfg, err := configcore.LoadFromContext(ctx)
 		if err != nil {
 			return runtimecontract.ProviderModelTarget{}, err
 		}
 		target = cfg.LLM.DefaultChat.ToRuntimeTarget()
+		if target.ProviderID == "" && target.ModelID == "" {
+			cfg, err = workorchconfig.Current()
+			if err != nil {
+				return runtimecontract.ProviderModelTarget{}, err
+			}
+			target = cfg.LLM.DefaultChat.ToRuntimeTarget()
+		}
 	}
 	if err := target.Validate(); err != nil {
 		return runtimecontract.ProviderModelTarget{}, err

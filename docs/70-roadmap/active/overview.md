@@ -52,7 +52,6 @@ Last Updated: 2026-07-16
 - `llm-context-budget-todo.md`（基础已收口；高级项进 candidates）
 - `docs-domain-module-flow-reorganization-plan.md`（目录重组历史计划）
 - `tui-data-stability-command-optimization-plan.md`（TUI 过程收口）
-- `tui-workspace-model-selection-closure-plan.md`（`/model` providerId/modelId 选择、workspace 持久化与 activation precedence code-closed）
 
 ### → `90-archive/records/`
 

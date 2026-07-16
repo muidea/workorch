@@ -257,6 +257,18 @@ func (c *Client) GetConfiguration(ctx context.Context) (*ServiceConfiguration, e
 	return decodeEnvelope[ServiceConfiguration](resp, "configuration")
 }
 
+func (c *Client) GetLLMModelCatalog(ctx context.Context, providerID string) (*ProviderCatalogSummary, error) {
+	values := url.Values{}
+	if strings.TrimSpace(providerID) != "" {
+		values.Set("providerId", strings.TrimSpace(providerID))
+	}
+	resp, err := c.do(ctx, "GET", joinQuery("/api/v1/workorch/configuration/llm/models", values), nil)
+	if err != nil {
+		return nil, err
+	}
+	return decodeEnvelope[ProviderCatalogSummary](resp, "catalog")
+}
+
 func (c *Client) RefreshLLMModelCatalog(ctx context.Context, providerID string) (*ProviderCatalogSummary, error) {
 	values := url.Values{}
 	if strings.TrimSpace(providerID) != "" {

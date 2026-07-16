@@ -4,6 +4,12 @@ import (
 	"context"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -25,5 +31,49 @@ func TestResolveActivationProviderTargetPrecedence(t *testing.T) {
 	}
 	if !got.Same(workspaceDefault) {
 		t.Fatalf("workspace target = %+v, want %+v", got, workspaceDefault)
+	}
+}
+
+func TestResolveActivationProviderTargetUsesLatestInjectedSystemDefault(t *testing.T) {
+	ctx := configcore.ContextWithLoader(context.Background(), func() (workorchconfig.Config, error) {
+		return workorchconfig.Config{LLM: workorchconfig.LLMConfig{DefaultChat: workorchconfig.ProviderModelTargetConfig{ProviderID: "latest-provider", ModelID: "latest-model"}}}, nil
+	})
+	got, err := resolveActivationProviderTarget(ctx, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("resolve system default: %v", err)
+	}
+	want := runtimecontract.ProviderModelTarget{ProviderID: "latest-provider", ModelID: "latest-model"}
+	if !got.Same(want) {
+		t.Fatalf("system target = %+v, want %+v", got, want)
+	}
+}
+
+func TestSealedRunProviderTargetDoesNotDriftAfterWorkspacePreferenceChanges(t *testing.T) {
+	ctx := context.Background()
+	runs := memory.NewRunRepository()
+	workspaces := memory.NewWorkspaceRepository()
+	sealed := runtimecontract.ProviderModelTarget{ProviderID: "provider-a", ModelID: "model-a"}
+	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-sealed", State: common.WorkspaceStateActive, DefaultLLMTarget: &sealed}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	bootstrap := runtimecontract.RuntimeBootstrap{Activation: runtimecontract.RuntimeActivationContext{ProviderTarget: sealed}}
+	if err := runs.Create(ctx, &runmodel.Run{ID: "run-sealed", WorkspaceID: "ws-sealed", State: common.RunStateActive, RuntimeBootstrap: &bootstrap}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	workspacePreference := runtimecontract.ProviderModelTarget{ProviderID: "provider-b", ModelID: "model-b"}
+	workspace, err := workspaces.Get(ctx, "ws-sealed")
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	workspace.DefaultLLMTarget = &workspacePreference
+	if err := workspaces.Update(ctx, workspace); err != nil {
+		t.Fatalf("update workspace preference: %v", err)
+	}
+	stored, err := runs.GetByWorkspaceID(ctx, "ws-sealed", "run-sealed")
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if stored.RuntimeBootstrap == nil || !stored.RuntimeBootstrap.Activation.ProviderTarget.Same(sealed) {
+		t.Fatalf("sealed run target = %+v, want %+v", stored.RuntimeBootstrap, sealed)
 	}
 }

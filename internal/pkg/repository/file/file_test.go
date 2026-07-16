@@ -55,7 +55,8 @@ func TestWorkspaceRepositoryGetReturnsErrorWhenPersistedJSONCorrupt(t *testing.T
 
 func TestWorkspaceRepositoryPersistsAndClonesDefaultLLMTarget(t *testing.T) {
 	ctx := context.Background()
-	repo := NewWorkspaceRepository(filepath.Join(t.TempDir(), "workspace.json"))
+	path := filepath.Join(t.TempDir(), "workspace.json")
+	repo := NewWorkspaceRepository(path)
 	target := orchestratormodel.ProviderModelTarget{ProviderID: "custom", ModelID: "model-a"}
 	item := &workspacemodel.Workspace{ID: "ws-model-target", Title: "workspace", State: common.WorkspaceStateActive, DefaultLLMTarget: &target}
 	if err := repo.Create(ctx, item); err != nil {
@@ -70,12 +71,26 @@ func TestWorkspaceRepositoryPersistsAndClonesDefaultLLMTarget(t *testing.T) {
 		t.Fatalf("stored target = %+v", stored.DefaultLLMTarget)
 	}
 	stored.DefaultLLMTarget.ProviderID = "mutated"
-	again, err := repo.Get(ctx, item.ID)
+	again, err := NewWorkspaceRepository(path).Get(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("second Get: %v", err)
 	}
 	if again.DefaultLLMTarget == nil || again.DefaultLLMTarget.ProviderID != "custom" {
 		t.Fatalf("cloned target = %+v", again.DefaultLLMTarget)
+	}
+}
+
+func TestWorkspaceRepositoryReadsLegacyWorkspaceWithoutDefaultLLMTarget(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workspace.json")
+	if err := os.WriteFile(path, []byte(`{"ws-legacy":{"ID":"ws-legacy","Title":"legacy","State":"active"}}`), 0o600); err != nil {
+		t.Fatalf("write legacy workspace: %v", err)
+	}
+	item, err := NewWorkspaceRepository(path).Get(context.Background(), "ws-legacy")
+	if err != nil {
+		t.Fatalf("read legacy workspace: %v", err)
+	}
+	if item.DefaultLLMTarget != nil {
+		t.Fatalf("legacy target = %+v, want nil", item.DefaultLLMTarget)
 	}
 }
 

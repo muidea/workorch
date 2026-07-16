@@ -8,6 +8,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 	cliconfig "github.com/muidea/workorch/internal/services/workorch/biz/config"
 	"github.com/muidea/workorch/internal/services/workorch/biz/session"
 )
@@ -142,6 +143,10 @@ func (b *startupFakeWorkspace) Snapshot(ctx context.Context, id common.Workspace
 
 func (b *startupFakeWorkspace) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
 	return nil, nil
+}
+
+func (b *startupFakeWorkspace) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*backend.WorkspaceInfo, error) {
+	return b.Get(ctx, id)
 }
 
 func (b *startupFakeWorkspace) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error {

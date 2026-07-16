@@ -16,6 +16,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func asModel(m tea.Model) AppModel {
@@ -5257,6 +5258,10 @@ func (f *workspaceCreateWS) RuntimeView(context.Context, backend.ReadWorkspaceRu
 	return nil, nil
 }
 
+func (f *workspaceCreateWS) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*backend.WorkspaceInfo, error) {
+	return f.Get(ctx, id)
+}
+
 func (f *workspaceCreateWS) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error {
 	return nil
 }
@@ -5383,6 +5388,10 @@ func (f *recordingWorkspace) Delete(ctx context.Context, id common.WorkspaceID, 
 	return nil
 }
 
+func (f *recordingWorkspace) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*backend.WorkspaceInfo, error) {
+	return f.Get(ctx, id)
+}
+
 type recordingGoal struct{ parent *recordingBE }
 
 func (f *recordingGoal) Define(ctx context.Context, wsID common.WorkspaceID, text string) (*backend.GoalInfo, error) {
@@ -5497,6 +5506,10 @@ func (f *conflictWorkspaceBackend) Snapshot(ctx context.Context, id common.Works
 
 func (f *conflictWorkspaceBackend) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
 	return nil, nil
+}
+
+func (f *conflictWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*backend.WorkspaceInfo, error) {
+	return f.Get(ctx, id)
 }
 
 func (f *conflictWorkspaceBackend) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error {
@@ -5624,6 +5637,15 @@ func (f *fakeWS) Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.
 
 func (f *fakeWS) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
 	return nil, nil
+}
+
+func (f *fakeWS) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*backend.WorkspaceInfo, error) {
+	item, err := f.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	item.DefaultLLMTarget = cloneModelTarget(target)
+	return item, nil
 }
 
 func (f *fakeWS) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error { return nil }
@@ -5869,6 +5891,14 @@ func (f *fakeC) Get(ctx context.Context) (*backend.ServiceConfig, error) {
 			MaxArtifactReplanAttempts:          2,
 		},
 	}, nil
+}
+
+func (f *fakeC) ListChatModelTargets(context.Context) ([]backend.ChatModelTargetOption, error) {
+	return nil, nil
+}
+
+func (f *fakeC) RefreshChatModelTargets(context.Context) ([]backend.ChatModelTargetOption, error) {
+	return nil, nil
 }
 
 type fakeE struct{}

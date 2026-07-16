@@ -2,6 +2,7 @@ package workspaceports
 
 import (
 	"context"
+	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
@@ -71,7 +72,7 @@ func UpdateWorkspaceLLMTarget(ctx context.Context, hub magicevent.Hub, workspace
 	if target != nil {
 		value := target.Normalized()
 		if err := value.Validate(); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
 		}
 		cloned = &value
 	}

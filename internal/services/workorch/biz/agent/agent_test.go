@@ -8,6 +8,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestAgentChannelLifecycle(t *testing.T) {
@@ -247,6 +248,10 @@ func (fakeWorkspace) Snapshot(context.Context, common.WorkspaceID) (*backend.Wor
 
 func (fakeWorkspace) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
 	return nil, nil
+}
+
+func (fakeWorkspace) UpdateLLMTarget(context.Context, common.WorkspaceID, *runtimecontract.ProviderModelTarget) (*backend.WorkspaceInfo, error) {
+	return &backend.WorkspaceInfo{ID: "ws-1"}, nil
 }
 
 func (fakeWorkspace) Delete(context.Context, common.WorkspaceID, bool) error { return nil }
@@ -511,6 +516,14 @@ func (fakeTemplate) Delete(context.Context, string) error { return nil }
 
 func (fakeConfig) Get(context.Context) (*backend.ServiceConfig, error) {
 	return &backend.ServiceConfig{}, nil
+}
+
+func (fakeConfig) ListChatModelTargets(context.Context) ([]backend.ChatModelTargetOption, error) {
+	return nil, nil
+}
+
+func (fakeConfig) RefreshChatModelTargets(context.Context) ([]backend.ChatModelTargetOption, error) {
+	return nil, nil
 }
 
 type fakeEvents struct{ b *fakeBackend }

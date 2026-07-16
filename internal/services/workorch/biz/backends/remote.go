@@ -1988,11 +1988,18 @@ func (b *remoteConfigBackend) Get(ctx context.Context) (*ServiceConfig, error) {
 }
 
 func (b *remoteConfigBackend) ListChatModelTargets(ctx context.Context) ([]ChatModelTargetOption, error) {
-	cfg, err := b.Get(ctx)
+	configuration, err := b.cl.GetConfiguration(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return port.NormalizeChatModelTargetOptions(cfg.ChatModelTargets), nil
+	catalog, err := b.cl.GetLLMModelCatalog(ctx, runtimecontract.BuiltinAIProxyProviderID)
+	if err != nil {
+		return nil, err
+	}
+	if configuration != nil && catalog != nil {
+		configuration.LLM.Catalog = *catalog
+	}
+	return chatModelTargetsFromClientConfig(configuration), nil
 }
 
 func (b *remoteConfigBackend) RefreshChatModelTargets(ctx context.Context) ([]ChatModelTargetOption, error) {

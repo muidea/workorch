@@ -101,6 +101,8 @@ workspace list/detail 的状态源语义以
 ### Configuration
 
 - `GET /api/v1/workorch/configuration`
+- `GET /api/v1/workorch/configuration/llm/models`
+- `POST /api/v1/workorch/configuration/llm/models/refresh`
 - `PUT /api/v1/workorch/configuration/server`
 - `PUT /api/v1/workorch/configuration/llm`
 - `PUT /api/v1/workorch/configuration/web-search`
@@ -115,6 +117,8 @@ workspace list/detail 的状态源语义以
 - `GET /api/v1/workorch/workspaces/:workspaceId/memory-recalls`
 - `GET /api/v1/workorch/workspaces/:workspaceId/soul-bindings`
 - `PUT /api/v1/workorch/workspaces/:workspaceId/soul-bindings`
+- `PUT /api/v1/workorch/workspaces/:workspaceId/llm-target`
+- `DELETE /api/v1/workorch/workspaces/:workspaceId/llm-target`
 - `GET /api/v1/workorch/workspaces/:workspaceId/runs`
 - `POST /api/v1/workorch/workspaces/:workspaceId/runs`
 - `POST /api/v1/workorch/workspaces/:workspaceId/execution-activations`
@@ -131,6 +135,24 @@ HTTP handler 请求路径逐 workspace 执行 snapshot/result/evidence heavy 聚
 `GET /api/v1/workorch/workspaces/:workspaceId/snapshot` 必须优先读取 detail
 projection。detail 未 ready 时应返回 projection state 或 partial detail，不能要求
 Web/TUI 自行 fallback 聚合。
+
+模型目录与 workspace 默认 target 的稳定语义：
+
+- `GET /configuration/llm/models` 返回 provider-scoped catalog；`providerId` query
+  缺省时使用内建 ai-proxy provider。
+- `POST /configuration/llm/models/refresh` 强制刷新同一 provider catalog，返回刷新后的
+  catalog；请求体可省略，provider scope 仍可由 query 指定。
+- TUI/Web 选择项必须来自 identity 完整、支持 `chat_completions` 且
+  `capabilityReady=true` 的 target；正式 identity 是完整 `providerId/modelId`，不能只保存
+  model ID 后在运行时猜 provider。
+- `PUT /workspaces/:workspaceId/llm-target` 只更新该 workspace 的后续 Run 默认 target；
+  body 必须同时包含非空 `providerId` 与 `modelId`，application 会在 owner 写入前执行
+  readiness 校验。
+- `DELETE /workspaces/:workspaceId/llm-target` 将 target 清为 `nil`，后续新 Run 继承届时
+  最新的系统 `defaultChat`。
+- PUT/DELETE 都不创建、Resume 或 Restart Run，也不改写当前 active/sealed Run 的
+  `RuntimeBootstrap.Activation.ProviderTarget`。新 Run 的解析优先级固定为
+  explicit activation target → workspace target → current system `defaultChat`。
 
 ### Goal And DoD
 
@@ -782,6 +804,7 @@ Web/TUI 自行 fallback 聚合。
 - create / update workspace
   - `createWorkspaceRequest`
   - `deleteWorkspaceRequest`
+  - `updateWorkspaceLLMTargetRequest`
 - run / execution command
   - `createRunRequest`
   - `resumeWorkspaceExecutionRequest`
@@ -810,6 +833,7 @@ Web/TUI 自行 fallback 聚合。
 | Endpoint Family | 主要请求体 |
 | --- | --- |
 | workspace create/delete | `createWorkspaceRequest` / `deleteWorkspaceRequest` |
+| workspace LLM target update/clear | `updateWorkspaceLLMTargetRequest` / empty DELETE body |
 | run create | `createRunRequest` |
 | workspace execution resume command | `resumeWorkspaceExecutionRequest` |
 | decision resolve | `resolveDecisionRequest` / `batchResolveDecisionsRequest` |
@@ -838,6 +862,7 @@ Web/TUI 自行 fallback 聚合。
 | Request | 关键字段 | 当前契约方向 |
 | --- | --- | --- |
 | `createWorkspaceRequest` | `workspaceId?` / `title` / `deliverableDirectory` / `templateId` | 创建 Workspace，本体目录和 template 初始化入口 |
+| `updateWorkspaceLLMTargetRequest` | `providerId` / `modelId` | 原子更新 workspace 的完整默认 target；只影响后续新建或 replacement Runtime V2 Run |
 | `createRunRequest` | `runId` / `goalId` / `doDId` | 在已定义 Goal/DoD 上创建 Run |
 | `resumeWorkspaceExecutionRequest` | `intent=resume` / `requestId` / `source` / `reason` / `goalId` / `doDId` / `llmTarget` / `soulId` / `skillIds` / `mcpServerIds` / `capabilityIds` / `memoryIds` | 提交 workspace-scoped execution command；可携带生成 **typed activation / RuntimeBootstrap 输入** 所需字段。Resume 语义进入同一 V2 drive，**不得**携带 ExecutionContextPatch；replan 语义只能通过新 activation / replacement run，不是自动 successor |
 | `resolveDecisionRequest` | `resolutionType` / `resolutionPayload` | 解决 Ticket |
@@ -1528,6 +1553,8 @@ HTTP 层统一支持：
   - Resume：仅 workspace/run scope；允许 active 或已解决 blocker；进入同一 drive；**无** ExecutionContextPatch
 - `DELETE /memory/:memoryId` 返回 `200` + `{ "deleted": true }`
   - 不走 `204`
+- `PUT /workspaces/:workspaceId/llm-target` 与 `DELETE /workspaces/:workspaceId/llm-target` 返回 `200` + 更新后的 workspace
+  - DELETE 表示清除可选字段，不删除 workspace 资源，因此不走 `204`
 
 ### First-Cut Write Guards
 
@@ -1535,6 +1562,11 @@ HTTP 层统一支持：
 
 - `createWorkspaceRequest`
   - `workspaceId` 不能由客户端指定
+- `updateWorkspaceLLMTargetRequest`
+  - `workspaceId` 只来自 path；body 不允许改写 scope
+  - `providerId` / `modelId` 必须同时非空，identity 不完整返回 `400`
+  - target 不 ready 或 capability 不支持时拒绝 owner 写入；不得静默回退到系统默认或其他模型
+  - 重复写入同一 target 与重复 clear 均按幂等成功处理
 - `createRunRequest`
   - `goalId` 和 `doDId` 必须引用已定义对象
 - `resumeWorkspaceExecutionRequest`

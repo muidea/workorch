@@ -2,6 +2,7 @@ package appservice
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -21,7 +22,7 @@ func UpdateWorkspaceLLMTargetWithHub(ctx context.Context, hub magicevent.Hub, wo
 	if target != nil {
 		value := target.Normalized()
 		if err := value.Validate(); err != nil {
-			return Workspace{}, err
+			return Workspace{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
 		}
 		if err := activationports.EnsureProviderTargetReady(ctx, hub, value); err != nil {
 			return Workspace{}, err

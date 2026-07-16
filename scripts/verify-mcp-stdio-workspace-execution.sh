@@ -14,6 +14,7 @@ CURL_READY_MAX_TIME="${WORKORCH_MCP_STDIO_VERIFY_READY_MAX_TIME:-2}"
 CURL_READY_ATTEMPTS="${WORKORCH_MCP_STDIO_VERIFY_READY_ATTEMPTS:-50}"
 MCP_SERVER_ID="mcp-stdio-verify-$VERIFY_SUFFIX"
 MCP_CAPABILITY_ID="$MCP_SERVER_ID:tool:repo.summary"
+MCP_TEMPLATE_ID="mcp-stdio-verify-$VERIFY_SUFFIX"
 MCP_ENDPOINT_ROOT="${WORKORCH_MCP_ENDPOINT_DIR:-.workorch-data/system/mcp-endpoints}"
 MCP_ENDPOINT_DIR="$MCP_ENDPOINT_ROOT/$MCP_SERVER_ID"
 MOCK_PID=""
@@ -337,62 +338,55 @@ import os
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+def last(pattern, text):
+    matches = re.findall(pattern, text or "")
+    return matches[-1] if matches else ""
+
 def decision_payload(user_content):
-    if '"runId": "probe"' in user_content:
-        return {"completionState": "failed", "thoughtSummary": "probe"}
-    if (
-        re.search(r'"assessmentOnly"\s*:\s*true', user_content)
-        or re.search(r'"graphExpansionLimitFollowUp"\s*:\s*true', user_content)
-        or re.search(r'"graphFollowUp"\s*:\s*true', user_content)
-        or re.search(r'"assessmentOnlyContractCorrection"\s*:\s*true', user_content)
-        or re.search(r'"type"\s*:\s*"assess_only"', user_content)
-        or re.search(r'"previousStepOutput"\s*:', user_content)
-        or re.search(r'"repairObjective"\s*:\s*"produce_concrete_validation_evidence"', user_content)
-        or re.search(r'"completedGraphEvidence"\s*:', user_content)
-        or re.search(r'"latestActionEvidence"\s*:', user_content)
-        or "mcp_tool_call_completed" in user_content
-    ):
-        previous = (
-            re.search(r'"previousStepId"\s*:\s*"([^"]+)"', user_content)
-            or re.search(r'"stepId"\s*:\s*"([^"]*mcp-stdio-call[^"]*)"', user_content)
-            or re.search(r'"sourceRef"\s*:\s*"step://([^"]*mcp-stdio-call[^"]*)"', user_content)
-        )
-        evidence = previous.group(1) if previous else "mcp-stdio-call"
+    action = last(r'"Action"\s*:\s*"([^"]+)"', user_content) or last(r'"action"\s*:\s*"([^"]+)"', user_content)
+    focus_id = last(r'"Focus"\s*:\s*\{\s*"ID"\s*:\s*"([^"]+)"', user_content) or last(r'"focusId"\s*:\s*"([^"]+)"', user_content) or "focus-001"
+    coverage_ids = re.findall(r'"(cwi-[A-Za-z0-9._-]+)"', user_content)
+    coverage_ids = list(dict.fromkeys(coverage_ids)) or ["cwi-001"]
+    evidence_refs = re.findall(r'"(workorch://[^"]+|run-[^"]+/graph-[^"]+|run-[^"]+/validation/[^"]+)"', user_content)
+    evidence_refs = list(dict.fromkeys(evidence_refs))
+
+    if action == "produce_assessment":
+        operation_id = "mcp-stdio-call" if focus_id == "focus-002" else "mcp-stdio-validation"
+        current_refs = [item for item in evidence_refs if operation_id in item]
         return {
-            "thoughtSummary": "MCP stdio tool call completed; DoD is satisfied.",
-            "completionState": "completed",
-            "dodAssessment": {
-                "satisfied": True,
-                "summary": "MCP stdio invocation returned structured tool evidence.",
-                "items": [{
-                    "item": "stdio MCP tool call completes",
-                    "state": "satisfied",
-                    "evidenceRefs": [evidence]
-                }],
-                "goalCoverage": {
-                    "satisfied": True,
-                    "items": [{
-                        "requirement": "Plan and execute one MCP stdio repo.summary tool call, then assess the DoD from the tool evidence.",
-                        "state": "satisfied",
-                        "evidenceRefs": [evidence]
-                    }]
-                }
-            }
+            "focusId": focus_id,
+            "coverageWorkItemIds": coverage_ids[:1],
+            "satisfied": True,
+            "summary": "MCP stdio invocation returned structured tool evidence.",
+            "evidenceRefs": current_refs[:1],
         }
-    return {
-        "thoughtSummary": "Plan one governed MCP stdio tool call.",
-        "completionState": "continue",
-        "executionGraph": {
-            "nodes": [{
-                "id": "mcp-stdio-call",
-                "kind": "mcp/tool_call",
-                "input": {
-                    "serverId": os.environ.get("WORKORCH_MCP_STDIO_VERIFY_SERVER_ID", "mcp-stdio-verify"),
-                    "tool": "repo.summary",
-                    "input": {"path": "."}
-                }
+
+    if action == "produce_validation":
+        return {
+            "operations": [{
+                "id": "mcp-stdio-validation",
+                "kind": "file/read",
+                "coverageWorkItemIds": coverage_ids[:1],
+                "targetRefs": ["mcp-stdio-validation-source.txt"],
+                "parameters": [
+                    {"name": "path", "string": "mcp-stdio-validation-source.txt"},
+                    {"name": "optional", "boolean": True},
+                    {"name": "maxBytes", "integer": 4096},
+                ],
             }]
         }
+
+    return {
+        "operations": [{
+            "id": "mcp-stdio-call",
+            "kind": "mcp/tool_call",
+            "coverageWorkItemIds": coverage_ids[:1],
+            "parameters": [
+                {"name": "serverId", "string": os.environ.get("WORKORCH_MCP_STDIO_VERIFY_SERVER_ID", "mcp-stdio-verify")},
+                {"name": "tool", "string": "repo.summary"},
+                {"name": "input.path", "string": "."},
+            ],
+        }]
     }
 
 class Handler(BaseHTTPRequestHandler):
@@ -740,57 +734,26 @@ import sys
 snapshot = json.load(open(sys.argv[1], encoding="utf-8"))["snapshot"]
 capability_id = sys.argv[2]
 run = snapshot["run"]
-steps = snapshot.get("steps") or ([] if not snapshot.get("step") else [snapshot["step"]])
-tool_calls = snapshot.get("toolCalls") or []
-validations = snapshot.get("validationResults") or []
-checkpoints = snapshot.get("runtimeCheckpoints") or []
+task_progress = snapshot.get("taskProgress") or {}
+runtime_v2 = task_progress.get("runtimeV2") or {}
+dod_evidence = snapshot.get("doDEvidence") or []
 selected_capabilities = snapshot.get("selectedCapabilities") or []
 used_capabilities = snapshot.get("usedCapabilities") or []
 
 errors = []
 if run.get("state") != "completed":
     errors.append(f"run state is {run.get('state')!r}, want completed: {run.get('failureReason', '')}")
-routing = (run.get("executionContext") or {}).get("soulRouting") or {}
-bindings = routing.get("bindings") or {}
-execution_binding = bindings.get("execution") or {}
-if routing.get("status") != "resolved":
-    errors.append(f"soulRouting.status is {routing.get('status')!r}, want resolved")
-if execution_binding.get("soulId") != "soul-generic-governed-execution":
-    errors.append(f"execution soul binding is {execution_binding!r}, want soul-generic-governed-execution")
-
-mcp_steps = [s for s in steps if s.get("kind") == "mcp/tool_call"]
-if not mcp_steps:
-    errors.append("missing mcp/tool_call step")
-else:
-    output = mcp_steps[0].get("output") or {}
-    result = output.get("result") or {}
-    structured = result.get("structuredContent") or {}
-    if mcp_steps[0].get("state") != "completed" or output.get("status") != "completed":
-        errors.append(f"mcp step did not complete: {mcp_steps[0]}")
-    if output.get("transport") != "stdio":
-        errors.append(f"mcp transport is {output.get('transport')!r}, want stdio")
-    if structured.get("tool") != "repo.summary" or structured.get("transport") != "stdio":
-        errors.append(f"unexpected structured MCP result: {structured}")
-
-assessment_steps = [s for s in steps if (s.get("output") or {}).get("stage") == "llm_dod_assessment"]
-if not assessment_steps:
-    errors.append("missing llm_dod_assessment follow-up step")
-else:
-    assessment = (assessment_steps[-1].get("output") or {}).get("dodAssessment") or {}
-    if assessment.get("satisfied") is not True:
-        errors.append(f"dodAssessment.satisfied is {assessment.get('satisfied')!r}, want true")
-    if not str(assessment.get("summary") or "").strip():
-        errors.append(f"dodAssessment.summary is empty: {assessment!r}")
-
-if not tool_calls:
-    errors.append("missing ToolCall evidence")
-if not validations:
-    errors.append("missing ValidationResult evidence")
-if not checkpoints:
-    errors.append("missing RuntimeCheckpoint evidence")
+if int(runtime_v2.get("completedDispatchCount") or 0) < 4:
+    errors.append(f"Runtime V2 completed dispatch evidence is incomplete: {runtime_v2}")
+if int(runtime_v2.get("evidenceSequence") or 0) < 4:
+    errors.append(f"Runtime V2 evidence sequence is incomplete: {runtime_v2}")
+if not any("/mcp-stdio-call" in str(item) for item in (task_progress.get("evidenceRefs") or [])):
+    errors.append(f"task progress missing committed MCP operation evidence: {task_progress.get('evidenceRefs')}")
+if not any(item.get("satisfied") is True and any((entry.get("evidenceStatus") == "linked") for entry in (item.get("items") or [])) for item in dod_evidence):
+    errors.append(f"missing linked Runtime V2 DoD assessment evidence: {dod_evidence}")
 if not any(item.get("id") == capability_id and item.get("displayName") == "仓库摘要能力 E2E" for item in selected_capabilities):
     errors.append(f"missing selected MCP capability metadata: {selected_capabilities}")
-if not any(item.get("id") == capability_id and item.get("useCount", 0) >= 1 for item in used_capabilities):
+if not any(item.get("id") == capability_id and item.get("useCount", 0) >= 1 and any("/mcp-stdio-call" in str(ref) for ref in (item.get("evidenceRefs") or [])) for item in used_capabilities):
     errors.append(f"missing used MCP capability evidence: {used_capabilities}")
 
 if errors:
@@ -800,10 +763,9 @@ if errors:
 
 print(f"runId={run['id']}")
 print(f"runState={run['state']}")
-print(f"steps={len(steps)}")
-print(f"toolCalls={len(tool_calls)}")
-print(f"validations={len(validations)}")
-print(f"runtimeCheckpoints={len(checkpoints)}")
+print(f"completedDispatches={runtime_v2.get('completedDispatchCount', 0)}")
+print(f"evidenceSequence={runtime_v2.get('evidenceSequence', 0)}")
+print(f"usedCapabilities={len(used_capabilities)}")
 PY
 }
 
@@ -843,8 +805,12 @@ grep '"displayName": "仓库摘要能力 E2E"' "$TMP_DIR/mcp-capability-updated.
 get_json "$BASE_URL/api/v1/workorch/mcp/capabilities?category=%E4%BB%A3%E7%A0%81%E4%BB%93%E5%BA%93&stage=execution&riskLevel=read_only&enabled=true&q=stdio" "$TMP_DIR/mcp-capabilities-filtered.json"
 grep "\"id\": \"$MCP_CAPABILITY_ID\"" "$TMP_DIR/mcp-capabilities-filtered.json" >/dev/null
 
+post_json "$BASE_URL/api/v1/workorch/workspace-templates" \
+  '{"id":"'"$MCP_TEMPLATE_ID"'","name":"MCP stdio verification","description":"Runtime V2 MCP stdio validation profile","goalText":"Plan and execute one MCP stdio repo.summary tool call, then assess the DoD from the tool evidence.","doDItems":["stdio MCP tool call completes"],"defaultSoulId":"soul-generic-governed-execution","soulBindings":{"planning":"soul-generic-governed-planning","execution":"soul-generic-governed-execution","validation":"soul-generic-governed-validation","decision":"soul-generic-governed-decision","approval":"soul-generic-governed-approval","artifact":"soul-generic-governed-artifact"},"contextHints":{"profileContracts":{"mcp-stdio-e2e":{"deliverableExpectations":[{"id":"mcp_stdio_tool_call","required":true,"evidenceRole":"primary_state_change","description":"MCP stdio tool execution evidence"}],"evidenceRequirements":[{"id":"mcp_stdio_tool_call","scope":"deliverable","evidenceRole":"primary_state_change","requiredEvidenceKinds":["state_change"],"requireDirectEvidence":true,"requireExecutableBehaviorEvidence":true,"acceptedStepKinds":["mcp/tool_call"]}]}}}}' \
+  "$TMP_DIR/mcp-template.json"
+
 post_json "$BASE_URL/api/v1/workorch/workspaces" \
-  '{"title":"mcp stdio verification","description":"verify MCP stdio transport through LLM execution graph","templateId":"generic-governed"}' \
+  '{"title":"mcp stdio verification","description":"verify MCP stdio transport through Runtime V2 candidate execution","templateId":"'"$MCP_TEMPLATE_ID"'"}' \
   "$TMP_DIR/workspace.json"
 workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
 [[ -n "$workspace_id" ]]

@@ -113,6 +113,10 @@ func (m *AppModel) handleModelSelectionKey(key string) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			option := m.modelSelectOptions[m.modelSelectCursor]
+			if !option.CapabilityReady {
+				m.modelSelectError = fmt.Errorf("selected target %s/%s is unavailable; refresh the catalog or choose a ready target", option.ProviderID, option.ModelID)
+				return m, nil
+			}
 			target := runtimecontract.ProviderModelTarget{ProviderID: option.ProviderID, ModelID: option.ModelID}.Normalized()
 			m.modelSelectPending = &target
 			m.modelSelectConfirming = true
@@ -135,18 +139,14 @@ func FetchChatModelTargets(be backend.Backend, workspaceID string, requestSeq in
 		if be == nil || be.Config() == nil {
 			return ChatModelTargetsLoadedMsg{RequestSeq: requestSeq, WorkspaceID: workspaceID, Refreshing: refresh, Error: common.ErrInvalidArgument}
 		}
-		catalog, ok := be.Config().(backend.ChatModelCatalogBackend)
-		if !ok {
-			return ChatModelTargetsLoadedMsg{RequestSeq: requestSeq, WorkspaceID: workspaceID, Refreshing: refresh, Error: fmt.Errorf("%w: chat model catalog backend unavailable", common.ErrInvalidArgument)}
-		}
 		var (
 			options []backend.ChatModelTargetOption
 			err     error
 		)
 		if refresh {
-			options, err = catalog.RefreshChatModelTargets(ctx)
+			options, err = be.Config().RefreshChatModelTargets(ctx)
 		} else {
-			options, err = catalog.ListChatModelTargets(ctx)
+			options, err = be.Config().ListChatModelTargets(ctx)
 		}
 		cfg, cfgErr := be.Config().Get(ctx)
 		if err == nil && cfgErr != nil {
@@ -163,11 +163,7 @@ func PersistWorkspaceLLMTarget(be backend.Backend, workspaceID string, requestSe
 		if be == nil || be.Workspace() == nil {
 			return WorkspaceLLMTargetUpdatedMsg{RequestSeq: requestSeq, WorkspaceID: workspaceID, Error: common.ErrInvalidArgument}
 		}
-		updater, ok := be.Workspace().(backend.WorkspaceLLMTargetBackend)
-		if !ok {
-			return WorkspaceLLMTargetUpdatedMsg{RequestSeq: requestSeq, WorkspaceID: workspaceID, Error: fmt.Errorf("%w: workspace model update backend unavailable", common.ErrInvalidArgument)}
-		}
-		item, err := updater.UpdateLLMTarget(ctx, common.WorkspaceID(workspaceID), cloneModelTarget(target))
+		item, err := be.Workspace().UpdateLLMTarget(ctx, common.WorkspaceID(workspaceID), cloneModelTarget(target))
 		return WorkspaceLLMTargetUpdatedMsg{RequestSeq: requestSeq, WorkspaceID: workspaceID, Workspace: item, Target: cloneModelTarget(target), Cleared: target == nil, Error: err}
 	}
 }
@@ -210,6 +206,24 @@ func (m *AppModel) applyChatModelTargetsLoaded(msg ChatModelTargetsLoadedMsg) (t
 
 func orderModelOptions(items []backend.ChatModelTargetOption, current *runtimecontract.ProviderModelTarget, systemDefault runtimecontract.ProviderModelTarget) []backend.ChatModelTargetOption {
 	ret := backend.NormalizeChatModelTargetOptions(items)
+	if current != nil && current.Validate() == nil {
+		found := false
+		for _, item := range ret {
+			if (runtimecontract.ProviderModelTarget{ProviderID: item.ProviderID, ModelID: item.ModelID}).Same(*current) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			ret = append(ret, backend.ChatModelTargetOption{
+				ProviderID:      current.ProviderID,
+				ModelID:         current.ModelID,
+				DisplayName:     current.ModelID,
+				CapabilityReady: false,
+				Source:          "workspace_persisted_unavailable",
+			})
+		}
+	}
 	providerScore := func(item backend.ChatModelTargetOption) int {
 		if current != nil && item.ProviderID == current.ProviderID {
 			return 0
@@ -268,10 +282,17 @@ func (m *AppModel) applyWorkspaceLLMTargetUpdated(msg WorkspaceLLMTargetUpdatedM
 	m.cancelModelSelection()
 	m.lastError = nil
 	m.result = "Workspace model updated\n- future runs: " + label + "\n- current run: unchanged"
-	if ws := m.activeWorkspaceOverview(); ws != nil && ws.ActiveRunID != "" {
-		m.result += "\n- apply with: /run restart"
-	} else {
-		m.result += "\n- continue with: /run resume"
+	switch m.activeWorkspacePromptMode() {
+	case workspacePromptModeDecision:
+		m.result += "\n- next: resolve the current decision, then use /run restart"
+	case workspacePromptModeApproval:
+		m.result += "\n- next: resolve the current approval, then use /run restart"
+	default:
+		if ws := m.activeWorkspaceOverview(); ws != nil && ws.ActiveRunID != "" {
+			m.result += "\n- apply with: /run restart"
+		} else {
+			m.result += "\n- continue with: /run resume"
+		}
 	}
 	m.progressText = "Workspace model configuration saved"
 	m.resetMainViewport()
@@ -332,6 +353,9 @@ func (m AppModel) renderModelSelection(width, height int) string {
 				prefix = "> "
 			}
 			label := option.ProviderID + "/" + option.ModelID
+			if !option.CapabilityReady {
+				label += " [unavailable]"
+			}
 			lines = append(lines, truncateDisplay(prefix+label, width-2))
 		}
 		lines = append(lines, "", "↑/↓ or j/k: select | Enter: review | r: refresh | Esc: cancel")

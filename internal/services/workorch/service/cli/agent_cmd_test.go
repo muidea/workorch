@@ -9,6 +9,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestRunAgentReturnsBackendErrorBeforeEvents(t *testing.T) {
@@ -99,6 +100,10 @@ func (agentCommandWorkspaceBackend) Snapshot(context.Context, common.WorkspaceID
 
 func (agentCommandWorkspaceBackend) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
 	return nil, nil
+}
+
+func (agentCommandWorkspaceBackend) UpdateLLMTarget(context.Context, common.WorkspaceID, *runtimecontract.ProviderModelTarget) (*backend.WorkspaceInfo, error) {
+	return nil, common.ErrNotFound
 }
 
 func (agentCommandWorkspaceBackend) Delete(context.Context, common.WorkspaceID, bool) error {
@@ -275,6 +280,14 @@ type agentCommandConfigBackend struct{}
 
 func (agentCommandConfigBackend) Get(context.Context) (*backend.ServiceConfig, error) {
 	return &backend.ServiceConfig{}, nil
+}
+
+func (agentCommandConfigBackend) ListChatModelTargets(context.Context) ([]backend.ChatModelTargetOption, error) {
+	return nil, nil
+}
+
+func (agentCommandConfigBackend) RefreshChatModelTargets(context.Context) ([]backend.ChatModelTargetOption, error) {
+	return nil, nil
 }
 
 type agentCommandEventsBackend struct{}

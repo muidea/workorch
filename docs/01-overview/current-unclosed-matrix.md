@@ -19,7 +19,7 @@ Last Updated: 2026-07-16
 | V1 StagePacket / NextAction / DispatchNextStep / ExecutionContextPatch 主链 | 已删除 |
 | 2026-07-14：约 146 份 completed/code-closed/V1-absorbed active plan | 已迁 `90-archive/completed/` |
 | 2026-07-16：active 假活跃产品/审计/收口日记 + verification 过程记录 + artifacts | 已迁 archive 或移出仓库 |
-| TUI workspace provider/model 选择与持久化 | `/model`、`show`、`clear`、workspace owner target、activation precedence、remote/embedded backend 已代码收口 |
+| 2026-07-16：TUI workspace provider/model 选择与持久化 | MODEL-01～18、全量 gate 与 deployed e2e 已通过，计划已迁 `90-archive/completed/` |
 
 ## Residual Open
 

@@ -6,6 +6,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 	backend "github.com/muidea/workorch/internal/services/workorch/biz/backends"
 )
 
@@ -125,6 +126,15 @@ func (f *fakeWS) Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.
 
 func (f *fakeWS) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
 	return nil, nil
+}
+
+func (f *fakeWS) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*backend.WorkspaceInfo, error) {
+	item, err := f.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	item.DefaultLLMTarget = target
+	return item, nil
 }
 
 func (f *fakeWS) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error { return nil }
@@ -347,6 +357,14 @@ type fakeCfg struct{}
 
 func (f *fakeCfg) Get(ctx context.Context) (*backend.ServiceConfig, error) {
 	return &backend.ServiceConfig{}, nil
+}
+
+func (f *fakeCfg) ListChatModelTargets(context.Context) ([]backend.ChatModelTargetOption, error) {
+	return nil, nil
+}
+
+func (f *fakeCfg) RefreshChatModelTargets(context.Context) ([]backend.ChatModelTargetOption, error) {
+	return nil, nil
 }
 
 type fakeEvents struct{ b *fakeBackend }

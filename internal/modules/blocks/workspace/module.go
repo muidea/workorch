@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"fmt"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -239,7 +240,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceC
 		} else {
 			target := cmd.Target.Normalized()
 			if err := target.Validate(); err != nil {
-				return workspaceevents.WorkspaceCommandResult{}, err
+				return workspaceevents.WorkspaceCommandResult{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
 			}
 			item.DefaultLLMTarget = &target
 		}
@@ -433,7 +434,7 @@ func (m *Module) publishWorkspaceUpdated(ctx context.Context, item *workspacemod
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceStateChanged, modulecommon.ModuleID, workspaceevents.NotificationDestination, magicevent.NewHeader(), ctx, workspaceevents.WorkspaceChangedData{
 		WorkspaceID: item.ID, Title: item.Title, Description: item.Description,
 		DeliverableDirectory: item.DeliverableDirectory, InternalDirectory: item.InternalDirectory,
-		State: item.State, ActiveRunID: item.ActiveRunID,
+		State: item.State, ActiveRunID: item.ActiveRunID, DefaultLLMTarget: cloneProviderModelTarget(item.DefaultLLMTarget),
 	})
 	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{SubjectType: "workspace", SubjectID: string(item.ID), WorkspaceID: string(item.ID)}))
 	m.eventHub.Post(event)

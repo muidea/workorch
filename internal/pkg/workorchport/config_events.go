@@ -69,9 +69,6 @@ type ChatModelTargetOption struct {
 
 type ConfigBackend interface {
 	Get(ctx context.Context) (*ServiceConfig, error)
-}
-
-type ChatModelCatalogBackend interface {
 	ListChatModelTargets(ctx context.Context) ([]ChatModelTargetOption, error)
 	RefreshChatModelTargets(ctx context.Context) ([]ChatModelTargetOption, error)
 }
