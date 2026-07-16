@@ -33,6 +33,13 @@ func FetchAll(be backend.Backend, requestSeq ...int64) tea.Cmd {
 	}
 }
 
+func RetryWorkspaceList() tea.Cmd {
+	return func() tea.Msg {
+		time.Sleep(300 * time.Millisecond)
+		return WorkspaceListRetryMsg{}
+	}
+}
+
 func FetchConfiguration(be backend.Backend) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

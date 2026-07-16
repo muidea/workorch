@@ -4389,6 +4389,23 @@ func TestModelTransientProjectionErrorSchedulesContextRetry(t *testing.T) {
 	}
 }
 
+func TestModelTransientProjectionListErrorSchedulesListRetry(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.workspaceListRequestSeq = 1
+
+	next, cmd := m.Update(WorkspaceListMsg{
+		RequestSeq: 1,
+		Error:      errors.New("code:6, message:conflict: workspace projection building"),
+	})
+	m = asModel(next)
+	if cmd == nil {
+		t.Fatal("transient projection list error did not schedule retry")
+	}
+	if m.lastError != nil || !strings.Contains(m.progressText, "retrying workspace list") {
+		t.Fatalf("lastError/progressText = %v/%q, want retry without sticky error", m.lastError, m.progressText)
+	}
+}
+
 func TestModelTransientProjectionErrorKeepsOverviewDecisionState(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	m.activeWorkspaceID = "ws-a"

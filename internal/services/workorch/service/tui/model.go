@@ -252,6 +252,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.workspaceListRefreshInFlight = false
 		m.workspaceListRefreshPending = false
 		if msg.Error != nil {
+			if isTransientProjectionError(msg.Error) {
+				m.lastError = nil
+				m.progressText = "Workspace projection is refreshing; retrying workspace list"
+				return m, RetryWorkspaceList()
+			}
 			m.setLastError(msg.Error)
 			return m, nil
 		}
@@ -269,6 +274,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.requestWorkspaceListRefresh())
 		}
 		return m, tea.Batch(cmds...)
+	case WorkspaceListRetryMsg:
+		return m, m.requestWorkspaceListRefresh()
 	case WorkspaceContextMsg:
 		if msg.RequestSeq > 0 && msg.RequestSeq != m.workspaceContextRequestSeqFor(msg.WorkspaceID) {
 			return m, nil

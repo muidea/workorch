@@ -12,6 +12,8 @@ type WorkspaceListMsg struct {
 	Error      error
 }
 
+type WorkspaceListRetryMsg struct{}
+
 type WorkspaceContextMsg struct {
 	RequestSeq        int64
 	WorkspaceID       string
