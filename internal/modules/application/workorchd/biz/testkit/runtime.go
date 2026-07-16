@@ -194,9 +194,9 @@ func startOwnerModules(exports Exports, rawHub magicevent.Hub) ([]lifecycle, err
 
 	orchestratorModule := orchestratormodule.New()
 	if err := configure(orchestratorModule, orchestratorModule.Configure(orchestratormodule.Dependencies{
-		Steps: repositories.Steps, ToolCalls: repositories.ToolCalls,
-		Patches: repositories.Patches, ValidationResults: repositories.ValidationResults,
-		RuntimeCheckpoints: repositories.RuntimeCheckpoints, EvidenceRecords: repositories.EvidenceRecords,
+		ToolCalls: repositories.ToolCalls,
+		Patches:   repositories.Patches, ValidationResults: repositories.ValidationResults,
+		EvidenceRecords:   repositories.EvidenceRecords,
 		CoverageWorkItems: repositories.CoverageWorkItems, ArtifactContinuations: repositories.ArtifactContinuations,
 		CommandHub: rawHub, BackgroundRoutine: background,
 	})); err != nil {

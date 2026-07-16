@@ -41,11 +41,9 @@ type MemoryRepositories struct {
 }
 
 type OrchestratorRepositories struct {
-	Steps                 repository.StepRepository
 	ToolCalls             repository.ToolCallRepository
 	Patches               repository.PatchRepository
 	ValidationResults     repository.ValidationResultRepository
-	RuntimeCheckpoints    repository.RuntimeCheckpointRepository
 	EvidenceRecords       repository.EvidenceRecordRepository
 	CoverageWorkItems     repository.CoverageWorkItemRepository
 	ArtifactContinuations repository.ArtifactContinuationRepository

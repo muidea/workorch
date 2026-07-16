@@ -14,6 +14,31 @@ import (
 
 const runtimeV2DriveTransitionLimit = 1024
 
+type runtimeV2ProjectionError struct {
+	cause error
+}
+
+func (e *runtimeV2ProjectionError) Error() string {
+	if e == nil || e.cause == nil {
+		return "Runtime V2 projection failed"
+	}
+	return e.cause.Error()
+}
+
+func (e *runtimeV2ProjectionError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+func runtimeV2ProjectionFailure(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &runtimeV2ProjectionError{cause: err}
+}
+
 func DriveRuntimeV2(ctx context.Context, hub magicevent.Hub, command orchestratorevents.DriveRuntimeV2Command) (orchestratorevents.DriveRuntimeV2Result, error) {
 	if hub == nil || command.WorkspaceID == "" || command.RunID == "" {
 		return orchestratorevents.DriveRuntimeV2Result{}, common.ErrInvalidArgument
@@ -129,21 +154,21 @@ func (m *Module) driveAndProjectRuntimeV2(ctx context.Context, workspaceID commo
 	case orchestratorevents.RuntimeV2DriveDispositionGovernedWait:
 		run, loadErr := (runEventRepository{hub: m.rawEventHub}).GetByWorkspaceID(ctx, workspaceID, runID)
 		if loadErr != nil {
-			return loadErr
+			return runtimeV2ProjectionFailure(loadErr)
 		}
 		if run.State == common.RunStateBlockedOnDecision && run.BlockingTicketID == result.BlockingTicketID {
 			return nil
 		}
-		return m.bizPtr.BlockOnDecision(ctx, runID, result.BlockingTicketID)
+		return runtimeV2ProjectionFailure(m.bizPtr.BlockOnDecision(ctx, runID, result.BlockingTicketID))
 	case orchestratorevents.RuntimeV2DriveDispositionTerminal:
 		aggregate, loadErr := m.bizPtr.LoadRuntimeV2(ctx, workspaceID, runID)
 		if loadErr != nil {
-			return loadErr
+			return runtimeV2ProjectionFailure(loadErr)
 		}
 		if err := m.projectRuntimeV2Result(ctx, aggregate); err != nil {
-			return err
+			return runtimeV2ProjectionFailure(err)
 		}
-		return m.bizPtr.ProjectRuntimeV2Terminal(ctx, workspaceID, runID, result.Action, result.Terminal)
+		return runtimeV2ProjectionFailure(m.bizPtr.ProjectRuntimeV2Terminal(ctx, workspaceID, runID, result.Action, result.Terminal))
 	default:
 		return fmt.Errorf("unsupported Runtime V2 production disposition %q", result.Disposition)
 	}

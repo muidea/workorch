@@ -140,11 +140,9 @@ func (r repositorySet) Memory() common.MemoryRepositories {
 
 func (r repositorySet) Orchestrator() common.OrchestratorRepositories {
 	return common.OrchestratorRepositories{
-		Steps:                 r.Steps,
 		ToolCalls:             r.ToolCalls,
 		Patches:               r.Patches,
 		ValidationResults:     r.ValidationResults,
-		RuntimeCheckpoints:    r.RuntimeCheckpoints,
 		EvidenceRecords:       r.EvidenceRecords,
 		CoverageWorkItems:     r.CoverageWorkItems,
 		ArtifactContinuations: r.ArtifactContinuations,

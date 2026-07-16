@@ -896,6 +896,7 @@ type OrchestratorCommandResult struct {
 	ValidationResults     []*runmodel.ValidationResult
 	CoverageWorkItems     []*runtimecontract.CoverageWorkItem
 	ArtifactContinuations []*runtimecontract.ArtifactContinuation
+	DeletedCount          int
 }
 
 func MessageContracts() []eventcontract.MessageContract {

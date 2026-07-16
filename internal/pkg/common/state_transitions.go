@@ -16,7 +16,7 @@ func RunStateCanTransition(from RunState, to RunState) bool {
 	switch from {
 	case RunStatePending:
 		switch to {
-		case RunStateActive, RunStateBlockedOnDecision, RunStateBlockedOnApproval, RunStateCancelled, RunStateFailed:
+		case RunStateActive, RunStateBlockedOnDecision, RunStateBlockedOnApproval, RunStateCancelled, RunStateFailed, RunStateSuperseded:
 			return true
 		}
 	case RunStateActive:

@@ -25,11 +25,9 @@ func (m *Module) Setup(_ context.Context, rawEventHub event.Hub, backgroundRouti
 		return err
 	}
 	if setupErr := m.Configure(Dependencies{
-		Steps:                 repos.Steps,
 		ToolCalls:             repos.ToolCalls,
 		Patches:               repos.Patches,
 		ValidationResults:     repos.ValidationResults,
-		RuntimeCheckpoints:    repos.RuntimeCheckpoints,
 		EvidenceRecords:       repos.EvidenceRecords,
 		CoverageWorkItems:     repos.CoverageWorkItems,
 		ArtifactContinuations: repos.ArtifactContinuations,

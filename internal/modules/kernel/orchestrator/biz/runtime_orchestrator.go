@@ -11,7 +11,6 @@ import (
 
 type RuntimeOrchestrator struct {
 	runs                repository.RunRepository
-	steps               repository.StepRepository
 	workspaces          repository.WorkspaceRepository
 	tickets             repository.DecisionTicketRepository
 	resolutions         repository.DecisionResolutionRepository
@@ -120,7 +119,6 @@ type RuntimeEvidenceRepositories struct {
 	ToolCalls             repository.ToolCallRepository
 	Patches               repository.PatchRepository
 	ValidationResults     repository.ValidationResultRepository
-	RuntimeCheckpoints    repository.RuntimeCheckpointRepository
 	EvidenceRecords       repository.EvidenceRecordRepository
 	CoverageWorkItems     repository.CoverageWorkItemRepository
 	ArtifactContinuations repository.ArtifactContinuationRepository
@@ -138,17 +136,15 @@ func (o *RuntimeOrchestrator) EvidenceRepositories() RuntimeEvidenceRepositories
 
 func NewRuntimeOrchestrator(
 	runRepo repository.RunRepository,
-	stepRepo repository.StepRepository,
 	workspaceRepo repository.WorkspaceRepository,
 	ticketRepo repository.DecisionTicketRepository,
 	approvalRepo repository.ApprovalRepository,
 ) *RuntimeOrchestrator {
-	return NewRuntimeOrchestratorWithResolutionsAndEvidence(runRepo, stepRepo, workspaceRepo, ticketRepo, nil, approvalRepo, RuntimeEvidenceRepositories{})
+	return NewRuntimeOrchestratorWithResolutionsAndEvidence(runRepo, workspaceRepo, ticketRepo, nil, approvalRepo, RuntimeEvidenceRepositories{})
 }
 
 func NewRuntimeOrchestratorWithResolutionsAndEvidence(
 	runRepo repository.RunRepository,
-	stepRepo repository.StepRepository,
 	workspaceRepo repository.WorkspaceRepository,
 	ticketRepo repository.DecisionTicketRepository,
 	resolutionRepo repository.DecisionResolutionRepository,
@@ -157,7 +153,6 @@ func NewRuntimeOrchestratorWithResolutionsAndEvidence(
 ) *RuntimeOrchestrator {
 	return &RuntimeOrchestrator{
 		runs:        runRepo,
-		steps:       stepRepo,
 		workspaces:  workspaceRepo,
 		tickets:     ticketRepo,
 		resolutions: resolutionRepo,

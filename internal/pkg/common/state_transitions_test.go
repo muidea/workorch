@@ -4,7 +4,7 @@ import "testing"
 
 func TestRunStateCanTransitionMatchesOrchestratorContract(t *testing.T) {
 	valid := map[RunState][]RunState{
-		RunStatePending:           {RunStateActive, RunStateBlockedOnDecision, RunStateBlockedOnApproval, RunStateCancelled, RunStateFailed},
+		RunStatePending:           {RunStateActive, RunStateBlockedOnDecision, RunStateBlockedOnApproval, RunStateCancelled, RunStateFailed, RunStateSuperseded},
 		RunStateActive:            {RunStateBlockedOnDecision, RunStateBlockedOnApproval, RunStateCompleted, RunStateFailed, RunStateCancelled, RunStateSuperseded},
 		RunStateBlockedOnDecision: {RunStateActive, RunStateFailed, RunStateCancelled, RunStateSuperseded},
 		RunStateBlockedOnApproval: {RunStateActive, RunStateFailed, RunStateCancelled, RunStateSuperseded},

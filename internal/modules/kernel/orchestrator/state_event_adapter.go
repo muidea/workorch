@@ -369,11 +369,12 @@ func updateRunCommandFromModel(item *runmodel.Run) runcontracts.UpdateRunCommand
 	if item == nil {
 		return runcontracts.UpdateRunCommand{}
 	}
-	return runcontracts.UpdateRunCommand{
+	ret := runcontracts.UpdateRunCommand{
 		RunID:                  item.ID,
 		WorkspaceID:            item.WorkspaceID,
 		GoalID:                 item.GoalID,
 		DoDID:                  item.DoDID,
+		Lineage:                item.Lineage,
 		DefinitionRevision:     item.DefinitionRevision,
 		InitialStepKind:        item.InitialStepKind,
 		RuntimeBootstrap:       cloneRuntimeBootstrap(item.RuntimeBootstrap),
@@ -384,7 +385,15 @@ func updateRunCommandFromModel(item *runmodel.Run) runcontracts.UpdateRunCommand
 		BlockingTicketID:       item.BlockingTicketID,
 		BlockingApprovalID:     item.BlockingApprovalID,
 		FailureReason:          item.FailureReason,
+		CreatedAt:              item.CreatedAt,
+		StartedAt:              item.StartedAt,
+		EndedAt:                item.EndedAt,
 	}
+	if item.RuntimeState != nil {
+		revision := item.RuntimeState.StateRevision
+		ret.ExpectedRuntimeStateRevision = &revision
+	}
+	return ret
 }
 
 func cloneRuntimeStateRecord(value *runtimecontract.RuntimeStateRecord) *runtimecontract.RuntimeStateRecord {

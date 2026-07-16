@@ -57,11 +57,9 @@ func TestRuntimeInitiatorMemoryRepositoriesCoverModuleContracts(t *testing.T) {
 	requireNotNil(t, "memory items", repositories.Memory().MemoryItems)
 	requireNotNil(t, "memory recall traces", repositories.Memory().MemoryRecallTraces)
 
-	requireNotNil(t, "orchestrator steps", repositories.Orchestrator().Steps)
 	requireNotNil(t, "orchestrator tool calls", repositories.Orchestrator().ToolCalls)
 	requireNotNil(t, "orchestrator patches", repositories.Orchestrator().Patches)
 	requireNotNil(t, "orchestrator validation results", repositories.Orchestrator().ValidationResults)
-	requireNotNil(t, "orchestrator checkpoints", repositories.Orchestrator().RuntimeCheckpoints)
 	requireNotNil(t, "orchestrator evidence", repositories.Orchestrator().EvidenceRecords)
 	requireNotNil(t, "orchestrator coverage", repositories.Orchestrator().CoverageWorkItems)
 	requireNotNil(t, "orchestrator artifact continuations", repositories.Orchestrator().ArtifactContinuations)

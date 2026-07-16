@@ -453,7 +453,9 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 	_ = s.traces.Upsert(ctx, trace)
 	_ = s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoResolved, trace, "")
 
-	_ = s.resume(scopedCtx, ticket.RunID)
+	if ticket.DecisionKind != "runtime_v2_governance" {
+		_ = s.resume(scopedCtx, ticket.RunID)
+	}
 }
 
 func (s *Service) processApprovalCreated(ctx context.Context, data approvalevents.ApprovalChangedData) {
@@ -558,6 +560,9 @@ func (s *Service) processRunStateChanged(ctx context.Context, data runevents.Run
 			return
 		}
 		if ticket.State != common.DecisionTicketStateResolved {
+			return
+		}
+		if ticket.DecisionKind == "runtime_v2_governance" {
 			return
 		}
 		resolution, err := s.resolutions.GetByTicketID(ctx, ticket.ID)

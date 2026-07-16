@@ -2,6 +2,7 @@ package eventstream
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -33,6 +34,25 @@ type countingEventRecordRepository struct {
 	base        repository.EventRecordRepository
 	mu          sync.Mutex
 	appendCount int
+}
+
+type failingAppendEventRecordRepository struct {
+	repository.EventRecordRepository
+	mu       sync.Mutex
+	failures int
+	err      error
+}
+
+func (r *failingAppendEventRecordRepository) Append(ctx context.Context, record *eventstreammodel.EventRecord) error {
+	r.mu.Lock()
+	if r.failures > 0 {
+		r.failures--
+		err := r.err
+		r.mu.Unlock()
+		return err
+	}
+	r.mu.Unlock()
+	return r.EventRecordRepository.Append(ctx, record)
 }
 
 func newCountingEventRecordRepository() *countingEventRecordRepository {
@@ -625,5 +645,55 @@ func TestServicePublishesTypedRecordAppendedData(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("typed record appended data was not published")
+	}
+}
+
+func TestServiceDoesNotPublishAppendedWhenRepositoryAppendFails(t *testing.T) {
+	ctx := context.Background()
+	baseRepo := memory.NewEventRecordRepository()
+	repo := &failingAppendEventRecordRepository{EventRecordRepository: baseRepo, failures: 1, err: common.ErrConflict}
+	service, rawHub := newEventStreamTestService(t, repo)
+	appended := make(chan struct{}, 1)
+	observer := magicevent.NewSimpleObserverWithMatchID("/eventstream/test/append-failure", "/eventstream/test/append-failure", rawHub)
+	observer.Subscribe(eventstreamevents.TopicEventStreamRecordAppended, func(_ magicevent.Event, result magicevent.Result) {
+		appended <- struct{}{}
+		if result != nil {
+			result.Set(nil, nil)
+		}
+	})
+	t.Cleanup(func() { observer.Unsubscribe(eventstreamevents.TopicEventStreamRecordAppended) })
+	if err := service.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(service.Stop)
+
+	result := rawHub.Send(magicevent.NewEventWithContext(
+		runevents.TopicRunCreated,
+		"kernel/run",
+		runevents.NotificationDestination,
+		magicevent.NewHeader(),
+		ctx,
+		runevents.RunStateChangedData{WorkspaceID: "ws-append-failure", RunID: "run-append-failure", State: common.RunStatePending},
+	))
+	if result == nil || result.Error() == nil || !errors.Is(result.Error().Cause, common.ErrConflict) {
+		t.Fatalf("append failure result = %+v, want conflict", result)
+	}
+	select {
+	case <-appended:
+		t.Fatal("record appended notification was published for failed repository append")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := service.appendRecord(ctx, &eventstreammodel.EventRecord{
+		Topic: runevents.TopicRunCreated, SourceModule: "kernel/run", SubjectType: "run", SubjectID: "run-append-failure",
+		WorkspaceID: "ws-append-failure", RunID: "run-append-failure",
+	}); err != nil {
+		t.Fatalf("retry append: %v", err)
+	}
+	records, err := baseRepo.List(ctx, repository.EventRecordQuery{WorkspaceID: "ws-append-failure"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Revision != 1 {
+		t.Fatalf("records after retry = %+v, want one record at revision 1", records)
 	}
 }

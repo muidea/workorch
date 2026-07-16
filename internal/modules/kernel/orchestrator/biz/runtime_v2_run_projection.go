@@ -22,7 +22,8 @@ func (o *RuntimeOrchestrator) ActivateRuntimeV2Run(ctx context.Context, workspac
 		return common.ErrNotFound
 	}
 	if run.State == common.RunStateActive {
-		return nil
+		_, err = o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, run, common.WorkspaceStateActive, nil)
+		return err
 	}
 	if run.State != common.RunStateBlockedOnDecision && run.State != common.RunStateBlockedOnApproval {
 		return common.ErrConflict
@@ -54,6 +55,13 @@ func (o *RuntimeOrchestrator) ProjectRuntimeV2Terminal(ctx context.Context, work
 	switch action {
 	case runtimecontract.RuntimeActionComplete:
 		if run.State == common.RunStateCompleted {
+			_, changed, releaseErr := o.runStateManager().releaseWorkspaceForTerminalRun(ctx, run, common.WorkspaceStateActive)
+			if releaseErr != nil {
+				return releaseErr
+			}
+			if !changed {
+				return common.ErrConflict
+			}
 			return nil
 		}
 		if run.State != common.RunStateActive {
@@ -66,16 +74,23 @@ func (o *RuntimeOrchestrator) ProjectRuntimeV2Terminal(ctx context.Context, work
 		if strings.TrimSpace(run.EndedAt) == "" {
 			run.EndedAt = runtimeEvidenceTimestamp()
 		}
-		if err := o.runs.Update(ctx, run); err != nil {
-			return err
-		}
 		_, changed, err := o.runStateManager().releaseWorkspaceForTerminalRun(ctx, run, common.WorkspaceStateActive)
-		if err != nil || !changed {
+		if err != nil {
 			return err
 		}
-		return nil
+		if !changed {
+			return common.ErrConflict
+		}
+		return o.runs.Update(ctx, run)
 	case runtimecontract.RuntimeActionFail:
 		if run.State == common.RunStateFailed {
+			_, changed, releaseErr := o.runStateManager().releaseWorkspaceForTerminalRun(ctx, run, common.WorkspaceStateActive)
+			if releaseErr != nil {
+				return releaseErr
+			}
+			if !changed {
+				return common.ErrConflict
+			}
 			return nil
 		}
 		code := strings.TrimSpace(terminal.Code)

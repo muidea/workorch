@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"sync"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -38,6 +39,8 @@ type Dependencies struct {
 }
 
 type Module struct {
+	mu          sync.RWMutex
+	stopping    bool
 	bizPtr      *runbiz.Service
 	servicePtr  *runservice.Module
 	runs        repository.RunRepository
@@ -53,9 +56,15 @@ func New() *Module { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
 
 func (m *Module) Configure(deps Dependencies) error {
+	if m == nil {
+		return common.ErrInvalidArgument
+	}
 	if deps.Runs == nil || deps.EventHub == nil {
 		return common.ErrInvalidArgument
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stopping = false
 	m.runs = deps.Runs
 	m.steps = deps.Steps
 	m.checkpoints = deps.Checkpoints
@@ -69,7 +78,12 @@ func (m *Module) Configure(deps Dependencies) error {
 }
 
 func (m *Module) Start() error {
-	if m == nil || m.servicePtr == nil || m.eventHub == nil {
+	if m == nil {
+		return common.ErrInvalidArgument
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.stopping || m.servicePtr == nil || m.eventHub == nil {
 		return common.ErrInvalidArgument
 	}
 	if m.observer != nil {
@@ -87,6 +101,7 @@ func (m *Module) Start() error {
 		runevents.TopicRunCommandListStepSummariesByRun,
 		runevents.TopicRunCommandGetRuntimeCheckpoint,
 		runevents.TopicRunCommandListCheckpointsByRun,
+		runevents.TopicRunCommandPurgeRuntimeResources,
 		runevents.TopicRunCommandUpdate,
 		runevents.TopicRunCommandDelete,
 	}
@@ -98,11 +113,13 @@ func (m *Module) Start() error {
 
 func (m *Module) Stop(ctx context.Context) error {
 	_ = ctx
-	if m.observer != nil {
-		for idx := len(m.topics) - 1; idx >= 0; idx-- {
-			m.observer.Unsubscribe(m.topics[idx])
-		}
+	if m == nil {
+		return nil
 	}
+	m.mu.Lock()
+	observer := m.observer
+	topics := append([]string(nil), m.topics...)
+	m.stopping = true
 	m.topics = nil
 	m.observer = nil
 	m.servicePtr = nil
@@ -111,10 +128,21 @@ func (m *Module) Stop(ctx context.Context) error {
 	m.steps = nil
 	m.checkpoints = nil
 	m.eventHub = nil
+	m.mu.Unlock()
+	if observer != nil {
+		for idx := len(topics) - 1; idx >= 0; idx-- {
+			observer.Unsubscribe(topics[idx])
+		}
+	}
 	return nil
 }
 
 func (m *Module) Service() Service {
+	if m == nil {
+		return nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.servicePtr
 }
 
@@ -124,10 +152,15 @@ func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
 }
 
 func (m *Module) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, error) {
+	if m == nil {
+		return runevents.RunCommandResult{}, common.ErrInvalidArgument
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	ctx := ev.Context()
 	topic := ev.ID()
 	data := ev.Data()
-	if m == nil || m.runs == nil || m.servicePtr == nil {
+	if m.stopping || m.runs == nil || m.servicePtr == nil {
 		return runevents.RunCommandResult{}, common.ErrInvalidArgument
 	}
 	workspaceID := common.WorkspaceID("")
@@ -145,6 +178,8 @@ func (m *Module) executeCommand(ev magicevent.Event) (runevents.RunCommandResult
 	case runevents.GetRuntimeCheckpointCommand:
 		workspaceID = cmd.WorkspaceID
 	case runevents.ListRuntimeCheckpointsByRunCommand:
+		workspaceID = cmd.WorkspaceID
+	case runevents.PurgeRuntimeResourcesCommand:
 		workspaceID = cmd.WorkspaceID
 	case runevents.UpdateRunCommand:
 		workspaceID = cmd.WorkspaceID
@@ -276,13 +311,27 @@ func (m *Module) executeCommand(ev magicevent.Event) (runevents.RunCommandResult
 			return runevents.RunCommandResult{}, err
 		}
 		return runevents.RunCommandResult{Checkpoints: items}, nil
+	case runevents.TopicRunCommandPurgeRuntimeResources:
+		cmd, ok := data.(runevents.PurgeRuntimeResourcesCommand)
+		if !ok || cmd.WorkspaceID == "" || cmd.RunID == "" {
+			return runevents.RunCommandResult{}, common.ErrInvalidArgument
+		}
+		if _, err := m.runs.GetByWorkspaceID(ctx, cmd.WorkspaceID, cmd.RunID); err != nil {
+			return runevents.RunCommandResult{}, err
+		}
+		deleted, err := purgeRunRuntimeResources(ctx, m.steps, m.checkpoints, cmd.RunID)
+		return runevents.RunCommandResult{DeletedCount: deleted}, err
 	case runevents.TopicRunCommandUpdate:
 		cmd, ok := data.(runevents.UpdateRunCommand)
 		if !ok || cmd.RunID == "" || cmd.WorkspaceID == "" {
 			return runevents.RunCommandResult{}, common.ErrInvalidArgument
 		}
+		current, err := m.runs.GetByWorkspaceID(ctx, cmd.WorkspaceID, cmd.RunID)
+		if err != nil {
+			return runevents.RunCommandResult{}, err
+		}
 		if cmd.RuntimeContractVersion == runtimemodel.RuntimeContractVersionV2 {
-			if cmd.RuntimeState == nil || cmd.RuntimeState.Facts.WorkspaceID != cmd.WorkspaceID || cmd.RuntimeState.Facts.RunID != cmd.RunID {
+			if cmd.RuntimeState == nil || cmd.ExpectedRuntimeStateRevision == nil || cmd.RuntimeState.Facts.WorkspaceID != cmd.WorkspaceID || cmd.RuntimeState.Facts.RunID != cmd.RunID {
 				return runevents.RunCommandResult{}, common.ErrInvalidArgument
 			}
 			if err := cmd.RuntimeState.Validate(); err != nil {
@@ -291,11 +340,10 @@ func (m *Module) executeCommand(ev magicevent.Event) (runevents.RunCommandResult
 		} else if cmd.RuntimeState != nil {
 			return runevents.RunCommandResult{}, common.ErrInvalidArgument
 		}
+		if err := validateRunUpdate(current, cmd); err != nil {
+			return runevents.RunCommandResult{}, err
+		}
 		if cmd.ExpectedRuntimeStateRevision != nil {
-			current, err := m.runs.GetByWorkspaceID(ctx, cmd.WorkspaceID, cmd.RunID)
-			if err != nil {
-				return runevents.RunCommandResult{}, err
-			}
 			currentRevision := uint64(0)
 			if current.RuntimeState != nil {
 				currentRevision = current.RuntimeState.StateRevision
@@ -325,6 +373,44 @@ func (m *Module) executeCommand(ev magicevent.Event) (runevents.RunCommandResult
 	default:
 		return runevents.RunCommandResult{}, common.ErrInvalidArgument
 	}
+}
+
+func purgeRunRuntimeResources(ctx context.Context, steps repository.StepRepository, checkpoints repository.RuntimeCheckpointRepository, runID common.RunID) (int, error) {
+	if runID == "" {
+		return 0, common.ErrInvalidArgument
+	}
+	deleted := 0
+	if steps != nil {
+		items, err := steps.ListByRun(ctx, runID)
+		if err != nil {
+			return deleted, err
+		}
+		for _, item := range items {
+			if item == nil {
+				continue
+			}
+			if err := steps.Delete(ctx, item.ID); err != nil {
+				return deleted, err
+			}
+			deleted++
+		}
+	}
+	if checkpoints != nil {
+		items, err := checkpoints.ListByRun(ctx, runID)
+		if err != nil {
+			return deleted, err
+		}
+		for _, item := range items {
+			if item == nil {
+				continue
+			}
+			if err := checkpoints.Delete(ctx, item.ID); err != nil {
+				return deleted, err
+			}
+			deleted++
+		}
+	}
+	return deleted, nil
 }
 
 func (m *Module) publishRunUpdated(ctx context.Context, item *runmodel.Run) {
@@ -392,6 +478,72 @@ func runFromUpdateCommand(cmd runcontracts.UpdateRunCommand) *runmodel.Run {
 		StartedAt:              cmd.StartedAt,
 		EndedAt:                cmd.EndedAt,
 	}
+}
+
+func validateRunUpdate(current *runmodel.Run, cmd runcontracts.UpdateRunCommand) error {
+	if current == nil || current.ID != cmd.RunID || current.WorkspaceID != cmd.WorkspaceID {
+		return common.ErrConflict
+	}
+	if current.GoalID != cmd.GoalID || current.DoDID != cmd.DoDID ||
+		current.DefinitionRevision != cmd.DefinitionRevision || current.InitialStepKind != cmd.InitialStepKind ||
+		current.CreatedAt != cmd.CreatedAt {
+		return common.ErrConflict
+	}
+	if !sameRunRuntimeBootstrap(current.RuntimeBootstrap, cmd.RuntimeBootstrap) {
+		return common.ErrConflict
+	}
+	if current.RuntimeContractVersion == runtimemodel.RuntimeContractVersionV2 && cmd.RuntimeContractVersion != runtimemodel.RuntimeContractVersionV2 {
+		return common.ErrConflict
+	}
+	if current.RuntimeState != nil && cmd.RuntimeState == nil {
+		return common.ErrConflict
+	}
+	if cmd.State != current.State && !common.RunStateCanTransition(current.State, cmd.State) {
+		return common.ErrConflict
+	}
+	if err := validateRunBlockerState(cmd); err != nil {
+		return err
+	}
+	if cmd.RuntimeContractVersion != runtimemodel.RuntimeContractVersionV2 {
+		return nil
+	}
+	if cmd.RuntimeBootstrap == nil || cmd.RuntimeState == nil {
+		return common.ErrConflict
+	}
+	bootstrap := cmd.RuntimeBootstrap.Normalized()
+	state := cmd.RuntimeState.Clone()
+	if bootstrap.Definition.GoalID != cmd.GoalID || bootstrap.Definition.DoDID != cmd.DoDID || bootstrap.Definition.Revision != cmd.DefinitionRevision ||
+		state.Definition.GoalID != cmd.GoalID || state.Definition.DoDID != cmd.DoDID || state.Definition.Revision != cmd.DefinitionRevision ||
+		!runtimemodel.SameRuntimeDefinitionContext(bootstrap.Definition, state.Definition) ||
+		!runtimemodel.SameRuntimeActivationContext(bootstrap.Activation, state.Facts.Activation) {
+		return common.ErrConflict
+	}
+	return nil
+}
+
+func validateRunBlockerState(cmd runcontracts.UpdateRunCommand) error {
+	switch cmd.State {
+	case common.RunStateBlockedOnDecision:
+		if cmd.BlockingTicketID == "" || cmd.BlockingApprovalID != "" {
+			return common.ErrConflict
+		}
+	case common.RunStateBlockedOnApproval:
+		if cmd.BlockingApprovalID == "" || cmd.BlockingTicketID != "" {
+			return common.ErrConflict
+		}
+	default:
+		if cmd.BlockingTicketID != "" || cmd.BlockingApprovalID != "" {
+			return common.ErrConflict
+		}
+	}
+	return nil
+}
+
+func sameRunRuntimeBootstrap(left *runtimemodel.RuntimeBootstrap, right *runtimemodel.RuntimeBootstrap) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return runtimemodel.SameRuntimeBootstrap(*left, *right)
 }
 
 func cloneRuntimeStateRecord(value *runtimemodel.RuntimeStateRecord) *runtimemodel.RuntimeStateRecord {

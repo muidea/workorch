@@ -7,6 +7,7 @@
 ## 组件交互及合同
 
 - Run 自身的 create/ensure/get/list/update/delete、Step 查询和 Checkpoint 查询由 `kernel/run/pkg/events` 定义具体 command 与 `RunCommandResult`。
+- workspace/run purge 通过 `PurgeRuntimeResourcesCommand` 由 Run owner 删除该 scope 下的 Step 与 RuntimeCheckpoint；命令必须先确认 Run 属于指定 workspace，并返回实际删除数量。
 - Runtime V2 正式状态使用 typed `RuntimeStateRecord` 随 Run 持久化，其中包含 facts、authority、dispatch、candidate attempt 及初始化时封存的 Goal/DoD definition context；update command 可携带 expected runtime revision，Run owner 在同一 EventHub lane 内执行 CAS 后写入。
 - Run 创建合同可携带 typed `RuntimeBootstrap`，保存 effective Goal/DoD definition、ordered focus queue 与 prerequisite requirements；bootstrap 在 RuntimeState 初始化前保持不可变。
 - 创建或启动 Run 前，通过 EventHub 读取 `blocks/workspace` 的有效 workspace definition 和 revision。
@@ -23,7 +24,8 @@
 - Run 不负责 coverage、evidence quality、Result acceptance 或 LLM 输出正确性判断。
 - 不允许形成 active Run 无 next action、无 blocker 且当前 Step 已失败的悬挂状态。
 - Step 合同失败不得先记录 completed 再回滚为 failed。
-- `RuntimeStateRecord` 必须通过 canonical invariant 校验并与 workspace/run scope 一致；stale expected revision 必须返回 conflict，不能覆盖更新后的 authority transaction。
+- `RuntimeStateRecord` 必须通过 canonical invariant 校验并与 workspace/run scope 一致；所有 V2 state update 都必须携带 expected revision，缺失 CAS 或 stale revision 必须拒绝，不能覆盖更新后的 authority transaction。
+- update 是完整 owner state replacement：GoalID、DoDID、DefinitionRevision、InitialStepKind、CreatedAt 与 RuntimeBootstrap 创建后不可漂移；V2 contract/state 不可降级或清空，blocker 字段必须与 RunState 一致，bootstrap/state 的 definition 与 activation 必须相互匹配。
 - candidate attempt history 属于 typed Runtime V2 state；Run owner 必须拒绝 attempt 1 无对应 failed attempt 0、accepted attempt 无 sealed dispatch、或同 snapshot 重复 attempt 的状态写入。
 - governance resolution consumption record 随 Runtime V2 state 持久化，并必须关联已完成的 governed dispatch；缺少对应 dispatch 或重复 resolution/snapshot 的状态不得写入。
 - open governance request binding 同样随 Runtime V2 state 持久化，记录 ticket、authority snapshot、dispatch 和 dependency；绑定必须关联 active 或 completed governed dispatch。

@@ -267,7 +267,7 @@ func TestDriveRuntimeV2CandidateFailureStopsAfterSameContractRetry(t *testing.T)
 
 func newRuntimeV2DriveTestModule(t *testing.T, hub magicevent.Hub) *Module {
 	t.Helper()
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}

@@ -3336,6 +3336,10 @@ func TestActivateWorkspaceExecutionWithBackendRestartReplacesCreatedActiveRun(t 
 	if createdRun.RuntimeBootstrap != nil {
 		createdRun.RuntimeBootstrap.Definition.Revision = "stale-restart-definition"
 	}
+	// Keep the direct repository fixture internally consistent with a created-but-not-initialized Run.
+	// Runtime V2 state is immutable owner data and must not retain the previous definition revision.
+	createdRun.RuntimeContractVersion = ""
+	createdRun.RuntimeState = nil
 	if err := repos.Runs.Update(ctx, createdRun); err != nil {
 		t.Fatalf("update created run stale context: %v", err)
 	}

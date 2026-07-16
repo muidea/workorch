@@ -61,7 +61,6 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if module.servicePtr != nil ||
 		module.bizPtr != nil ||
 		module.rawEventHub != nil ||
-		module.steps != nil ||
 		module.backgroundRoutine != nil ||
 		len(module.rawTopics) != 0 {
 		t.Fatalf("module was not cleared after Stop: %+v", module)
@@ -77,11 +76,9 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 		name string
 		deps Dependencies
 	}{
-		{name: "missing steps", deps: func() Dependencies { d := base; d.Steps = nil; return d }()},
 		{name: "missing tool calls", deps: func() Dependencies { d := base; d.ToolCalls = nil; return d }()},
 		{name: "missing patches", deps: func() Dependencies { d := base; d.Patches = nil; return d }()},
 		{name: "missing validation results", deps: func() Dependencies { d := base; d.ValidationResults = nil; return d }()},
-		{name: "missing checkpoints", deps: func() Dependencies { d := base; d.RuntimeCheckpoints = nil; return d }()},
 		{name: "missing evidence", deps: func() Dependencies { d := base; d.EvidenceRecords = nil; return d }()},
 		{name: "missing coverage", deps: func() Dependencies { d := base; d.CoverageWorkItems = nil; return d }()},
 		{name: "missing artifact continuations", deps: func() Dependencies { d := base; d.ArtifactContinuations = nil; return d }()},
@@ -101,7 +98,6 @@ func TestModuleStartRunCommandAcceptsStateAndSchedulesBackgroundDispatch(t *test
 	runID := common.RunID("run-module-background-start")
 	workspaceID := common.WorkspaceID("ws-module-background-start")
 	runRepo := memoryrepo.NewRunRepository()
-	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -111,7 +107,6 @@ func TestModuleStartRunCommandAcceptsStateAndSchedulesBackgroundDispatch(t *test
 	}
 	orch := orchestratorbiz.NewRuntimeOrchestrator(
 		runRepo,
-		stepRepo,
 		workspaceRepo,
 		memoryrepo.NewDecisionTicketRepository(),
 		memoryrepo.NewApprovalRepository())
@@ -158,7 +153,6 @@ func TestModuleResumeRunCommandSchedulesRuntimeV2Drive(t *testing.T) {
 	runID := common.RunID("run-module-background-resume")
 	workspaceID := common.WorkspaceID("ws-module-background-resume")
 	runRepo := memoryrepo.NewRunRepository()
-	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -168,7 +162,6 @@ func TestModuleResumeRunCommandSchedulesRuntimeV2Drive(t *testing.T) {
 	}
 	orch := orchestratorbiz.NewRuntimeOrchestrator(
 		runRepo,
-		stepRepo,
 		workspaceRepo,
 		memoryrepo.NewDecisionTicketRepository(),
 		memoryrepo.NewApprovalRepository())
@@ -204,7 +197,6 @@ func TestModuleResumeRunCommandRejectsTerminalRunBeforeBackgroundDispatch(t *tes
 	runID := common.RunID("run-module-background-resume-terminal")
 	workspaceID := common.WorkspaceID("ws-module-background-resume-terminal")
 	runRepo := memoryrepo.NewRunRepository()
-	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -214,7 +206,6 @@ func TestModuleResumeRunCommandRejectsTerminalRunBeforeBackgroundDispatch(t *tes
 	}
 	orch := orchestratorbiz.NewRuntimeOrchestrator(
 		runRepo,
-		stepRepo,
 		workspaceRepo,
 		memoryrepo.NewDecisionTicketRepository(),
 		memoryrepo.NewApprovalRepository())
@@ -242,14 +233,42 @@ func TestModuleResumeRunCommandRejectsTerminalRunBeforeBackgroundDispatch(t *tes
 	}
 }
 
+func TestScheduleRuntimeV2DriveCoalescesDuplicateRunRequests(t *testing.T) {
+	background := &recordingBackgroundRoutine{}
+	module := &Module{bizPtr: &orchestratorbiz.RuntimeOrchestrator{}, backgroundRoutine: background}
+	if err := module.scheduleRuntimeV2Drive(context.Background(), "ws-drive-singleflight", "run-drive-singleflight", "first"); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.scheduleRuntimeV2Drive(context.Background(), "ws-drive-singleflight", "run-drive-singleflight", "duplicate"); err != nil {
+		t.Fatal(err)
+	}
+	if background.asyncFunctionCalls != 1 {
+		t.Fatalf("background calls = %d, want one coalesced drive", background.asyncFunctionCalls)
+	}
+	if !module.beginRuntimeV2Drive("ws-drive-singleflight\x00run-other") {
+		t.Fatal("different run was unexpectedly coalesced")
+	}
+}
+
+func TestScheduleRuntimeV2DriveReleasesKeyWhenSchedulingFails(t *testing.T) {
+	background := &recordingBackgroundRoutine{err: errors.New("scheduler unavailable")}
+	module := &Module{bizPtr: &orchestratorbiz.RuntimeOrchestrator{}, backgroundRoutine: background}
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := module.scheduleRuntimeV2Drive(context.Background(), "ws-drive-retry", "run-drive-retry", "retry"); !errors.Is(err, background.err) {
+			t.Fatalf("attempt %d err = %v, want scheduler error", attempt, err)
+		}
+	}
+	if background.asyncFunctionCalls != 2 {
+		t.Fatalf("background calls = %d, want scheduling retried after key release", background.asyncFunctionCalls)
+	}
+}
+
 func moduleContractDependencies() Dependencies {
 	rawHub := magicevent.NewHub(32)
 	return Dependencies{
-		Steps:                 memoryrepo.NewStepRepository(),
 		ToolCalls:             memoryrepo.NewToolCallRepository(),
 		Patches:               memoryrepo.NewPatchRepository(),
 		ValidationResults:     memoryrepo.NewValidationResultRepository(),
-		RuntimeCheckpoints:    memoryrepo.NewRuntimeCheckpointRepository(),
 		EvidenceRecords:       memoryrepo.NewEvidenceRecordRepository(),
 		CoverageWorkItems:     memoryrepo.NewCoverageWorkItemRepository(),
 		ArtifactContinuations: memoryrepo.NewArtifactContinuationRepository(),

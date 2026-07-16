@@ -29,6 +29,7 @@ func Contracts() []eventcontract.Contract {
 	ret = append(ret, eventcontract.Build("run", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
 		TopicRunCommandCreate,
 		TopicRunCommandEnsure,
+		TopicRunCommandPurgeRuntimeResources,
 		TopicRunCommandUpdate,
 		TopicRunCommandDelete,
 	)...)

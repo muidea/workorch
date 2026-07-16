@@ -2,9 +2,7 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	cd "github.com/muidea/magicCommon/def"
@@ -106,7 +104,7 @@ func (m *Module) handleRuntimeV2GovernanceResolution(event magicevent.Event, res
 		Action:              commit.Aggregate.Decision.Action,
 		Terminal:            commit.Aggregate.Decision.Terminal,
 	}
-	if commit.Disposition == runtimev2.CommitDispositionCommitted {
+	if commit.Disposition == runtimev2.CommitDispositionCommitted || commit.Disposition == runtimev2.CommitDispositionDuplicate {
 		if err := m.continueRuntimeV2Governance(event.Context(), response, command.Resolution.WorkspaceID, command.Resolution.RunID); err != nil {
 			setRuntimeV2GovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err)
 			return
@@ -116,23 +114,13 @@ func (m *Module) handleRuntimeV2GovernanceResolution(event magicevent.Event, res
 }
 
 func (m *Module) continueRuntimeV2Governance(ctx context.Context, response orchestratorevents.CommitRuntimeGovernanceResolutionResult, workspaceID common.WorkspaceID, runID common.RunID) error {
-	continueRun := func() error {
-		if response.Action == runtimecontract.RuntimeActionComplete || response.Action == runtimecontract.RuntimeActionFail {
-			return m.bizPtr.ProjectRuntimeV2Terminal(ctx, workspaceID, runID, response.Action, response.Terminal)
-		}
-		if err := m.bizPtr.ActivateRuntimeV2Run(ctx, workspaceID, runID); err != nil {
-			return err
-		}
-		return m.driveAndProjectRuntimeV2(ctx, workspaceID, runID)
+	if response.Action == runtimecontract.RuntimeActionComplete || response.Action == runtimecontract.RuntimeActionFail {
+		return m.bizPtr.ProjectRuntimeV2Terminal(ctx, workspaceID, runID, response.Action, response.Terminal)
 	}
-	if m.backgroundRoutine == nil {
-		return continueRun()
+	if err := m.bizPtr.ActivateRuntimeV2Run(ctx, workspaceID, runID); err != nil {
+		return err
 	}
-	return m.backgroundRoutine.AsyncFunction(func() {
-		if err := continueRun(); err != nil && !errors.Is(err, context.Canceled) {
-			slog.Warn("workorch Runtime V2 governance continuation failed", "workspaceID", workspaceID, "runID", runID, "err", err)
-		}
-	})
+	return m.scheduleRuntimeV2Drive(ctx, workspaceID, runID, "governance_resolution")
 }
 
 func runtimeGovernanceDisposition(value runtimev2.CommitDisposition) orchestratorevents.RuntimeGovernanceResolutionDisposition {

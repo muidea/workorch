@@ -3,14 +3,18 @@ package run
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func newRunModuleTestHub(t *testing.T) magicevent.Hub {
@@ -95,6 +99,67 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("second Stop: %v", err)
 	}
+}
+
+func TestModuleStopWaitsForInFlightOwnerCommand(t *testing.T) {
+	ctx := context.Background()
+	rawHub := newRunModuleTestHub(t)
+	baseRuns := memory.NewRunRepository()
+	run := &runmodel.Run{ID: "run-stop-in-flight", WorkspaceID: "ws-stop-in-flight", State: common.RunStateActive, CreatedAt: "2026-07-16T00:00:00Z"}
+	if err := baseRuns.Create(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	runs := &blockingRunUpdateRepository{
+		RunRepository: baseRuns,
+		started:       make(chan struct{}),
+		release:       make(chan struct{}),
+	}
+	module := New()
+	if err := module.Configure(Dependencies{Runs: runs, EventHub: rawHub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	commandDone := make(chan error, 1)
+	go func() {
+		_, err := sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandUpdate, runevents.UpdateRunCommand{
+			RunID: run.ID, WorkspaceID: run.WorkspaceID, State: run.State, CreatedAt: run.CreatedAt,
+		})
+		commandDone <- err
+	}()
+	select {
+	case <-runs.started:
+	case <-time.After(time.Second):
+		t.Fatal("update command did not reach repository")
+	}
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- module.Stop(ctx) }()
+	select {
+	case err := <-stopDone:
+		t.Fatalf("Stop returned before in-flight command completed: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(runs.release)
+	if err := <-commandDone; err != nil {
+		t.Fatalf("in-flight command: %v", err)
+	}
+	if err := <-stopDone; err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+}
+
+type blockingRunUpdateRepository struct {
+	repository.RunRepository
+	once    sync.Once
+	started chan struct{}
+	release chan struct{}
+}
+
+func (r *blockingRunUpdateRepository) Update(ctx context.Context, run *runmodel.Run) error {
+	r.once.Do(func() { close(r.started) })
+	<-r.release
+	return r.RunRepository.Update(ctx, run)
 }
 
 func TestModuleConfigureRequiresRunRepositoryAndEventHub(t *testing.T) {
@@ -342,6 +407,66 @@ func TestRunCreateCommandRequiresWorkspaceScope(t *testing.T) {
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("create missing workspace err = %v, want invalid argument", err)
+	}
+}
+
+func TestValidateRunUpdateProtectsRuntimeV2Identity(t *testing.T) {
+	definition := runtimecontract.RuntimeDefinitionContext{GoalID: "goal-v2", DoDID: "dod-v2", Revision: "definition-v2"}
+	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-v2"}}
+	bootstrap := runtimecontract.RuntimeBootstrap{Definition: definition, Activation: activation}
+	state := runtimecontract.RuntimeStateRecord{
+		StateRevision: 1,
+		Definition:    definition,
+		Facts: runtimecontract.RuntimeFacts{
+			WorkspaceID:        "ws-v2-update",
+			RunID:              "run-v2-update",
+			DefinitionRevision: definition.Revision,
+			Activation:         activation,
+		},
+	}
+	current := &runmodel.Run{
+		ID: "run-v2-update", WorkspaceID: "ws-v2-update", GoalID: definition.GoalID, DoDID: definition.DoDID,
+		DefinitionRevision: definition.Revision, InitialStepKind: "llm/workspace_execution", RuntimeBootstrap: &bootstrap,
+		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2, RuntimeState: &state,
+		State: common.RunStateActive, CreatedAt: "2026-07-16T00:00:00Z",
+	}
+	valid := runevents.UpdateRunCommand{
+		RunID: current.ID, WorkspaceID: current.WorkspaceID, GoalID: current.GoalID, DoDID: current.DoDID,
+		DefinitionRevision: current.DefinitionRevision, InitialStepKind: current.InitialStepKind, RuntimeBootstrap: current.RuntimeBootstrap,
+		RuntimeContractVersion: current.RuntimeContractVersion, RuntimeState: current.RuntimeState,
+		State: current.State, CreatedAt: current.CreatedAt,
+	}
+	if err := validateRunUpdate(current, valid); err != nil {
+		t.Fatalf("valid Runtime V2 update rejected: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*runevents.UpdateRunCommand)
+	}{
+		{name: "goal drift", mutate: func(cmd *runevents.UpdateRunCommand) { cmd.GoalID = "goal-other" }},
+		{name: "definition revision drift", mutate: func(cmd *runevents.UpdateRunCommand) { cmd.DefinitionRevision = "definition-other" }},
+		{name: "contract downgrade", mutate: func(cmd *runevents.UpdateRunCommand) { cmd.RuntimeContractVersion = "" }},
+		{name: "runtime state removal", mutate: func(cmd *runevents.UpdateRunCommand) { cmd.RuntimeState = nil }},
+		{name: "bootstrap drift", mutate: func(cmd *runevents.UpdateRunCommand) {
+			cloned := cmd.RuntimeBootstrap.Clone()
+			cloned.Activation.ProviderTarget.ModelID = "model-other"
+			cmd.RuntimeBootstrap = &cloned
+		}},
+		{name: "state definition drift", mutate: func(cmd *runevents.UpdateRunCommand) {
+			cloned := cmd.RuntimeState.Clone()
+			cloned.Definition.Revision = "definition-other"
+			cmd.RuntimeState = &cloned
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := valid
+			tc.mutate(&cmd)
+			if err := validateRunUpdate(current, cmd); !errors.Is(err, common.ErrConflict) {
+				t.Fatalf("err = %v, want conflict", err)
+			}
+		})
 	}
 }
 

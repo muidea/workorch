@@ -19,11 +19,12 @@ func UpdateRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) erro
 	if hub == nil {
 		return common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(runevents.TopicRunCommandUpdate, "application/workorchd/appservice", runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.UpdateRunCommand{
+	command := runevents.UpdateRunCommand{
 		RunID:                  item.ID,
 		WorkspaceID:            item.WorkspaceID,
 		GoalID:                 item.GoalID,
 		DoDID:                  item.DoDID,
+		Lineage:                item.Lineage,
 		DefinitionRevision:     item.DefinitionRevision,
 		InitialStepKind:        item.InitialStepKind,
 		RuntimeBootstrap:       item.RuntimeBootstrap,
@@ -34,7 +35,15 @@ func UpdateRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) erro
 		BlockingTicketID:       item.BlockingTicketID,
 		BlockingApprovalID:     item.BlockingApprovalID,
 		FailureReason:          item.FailureReason,
-	})
+		CreatedAt:              item.CreatedAt,
+		StartedAt:              item.StartedAt,
+		EndedAt:                item.EndedAt,
+	}
+	if item.RuntimeState != nil {
+		revision := item.RuntimeState.StateRevision
+		command.ExpectedRuntimeStateRevision = &revision
+	}
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandUpdate, "application/workorchd/appservice", runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	ownerevent.BindLane(event, runevents.TopicRunCommandUpdate, "run", string(item.ID), item.WorkspaceID, item.ID, "")
 	_, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandUpdate)
 	return err

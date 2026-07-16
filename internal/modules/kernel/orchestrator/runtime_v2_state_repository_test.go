@@ -23,7 +23,7 @@ func TestRuntimeV2StateRepositoryPersistsAndLoadsThroughRunOwner(t *testing.T) {
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	runs := memory.NewRunRepository()
-	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive}); err != nil {
+	if err := runs.Create(ctx, runtimeV2RunForTest(common.RunStateActive, runtimeV2Definition())); err != nil {
 		t.Fatal(err)
 	}
 	module := runmodule.New()
@@ -80,7 +80,7 @@ func TestRuntimeV2InitializesFromPersistedRunBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -108,10 +108,10 @@ func TestRuntimeV2StateRepositoryRejectsStaleRevision(t *testing.T) {
 	runs := memory.NewRunRepository()
 	aggregate := runtimeV2Aggregate(t, 2)
 	record := runtimeStateRecordFromAggregate(aggregate)
-	if err := runs.Create(ctx, &runmodel.Run{
-		ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive,
-		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2, RuntimeState: &record,
-	}); err != nil {
+	run := runtimeV2RunForTest(common.RunStateActive, runtimeV2Definition())
+	run.RuntimeContractVersion = runtimecontract.RuntimeContractVersionV2
+	run.RuntimeState = &record
+	if err := runs.Create(ctx, run); err != nil {
 		t.Fatal(err)
 	}
 	module := runmodule.New()
@@ -135,7 +135,7 @@ func TestRuntimeV2MainlinePreparesLocalPrerequisiteThroughPersistedController(t 
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	runs := memory.NewRunRepository()
-	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive}); err != nil {
+	if err := runs.Create(ctx, runtimeV2RunForTest(common.RunStateActive, runtimeV2Definition())); err != nil {
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
@@ -155,7 +155,7 @@ func TestRuntimeV2MainlinePreparesLocalPrerequisiteThroughPersistedController(t 
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestRuntimeV2MainlineRequestsAndSealsTypedCandidate(t *testing.T) {
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	runs := memory.NewRunRepository()
-	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive}); err != nil {
+	if err := runs.Create(ctx, runtimeV2RunForTest(common.RunStateActive, runtimeV2Definition())); err != nil {
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
@@ -225,7 +225,7 @@ func TestRuntimeV2MainlineRequestsAndSealsTypedCandidate(t *testing.T) {
 	})
 	t.Cleanup(func() { fileObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteFileEditOperation) })
 
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +303,7 @@ func TestRuntimeV2MainlineRetriesSameCandidateContractOnce(t *testing.T) {
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	runs := memory.NewRunRepository()
-	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive}); err != nil {
+	if err := runs.Create(ctx, runtimeV2RunForTest(common.RunStateActive, runtimeV2Definition())); err != nil {
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
@@ -335,7 +335,7 @@ func TestRuntimeV2MainlineRetriesSameCandidateContractOnce(t *testing.T) {
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
 
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +372,7 @@ func TestRuntimeV2MainlineStopsAfterSecondCandidateFailure(t *testing.T) {
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	runs := memory.NewRunRepository()
-	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive}); err != nil {
+	if err := runs.Create(ctx, runtimeV2RunForTest(common.RunStateActive, runtimeV2Definition())); err != nil {
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
@@ -392,7 +392,7 @@ func TestRuntimeV2MainlineStopsAfterSecondCandidateFailure(t *testing.T) {
 		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Failure: &failure}, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -473,5 +473,19 @@ func runtimeV2Bootstrap() runtimecontract.RuntimeBootstrap {
 			Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 			CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.StepKindFileEdit},
 		}},
+	}
+}
+
+func runtimeV2RunForTest(state common.RunState, definition runtimecontract.RuntimeDefinitionContext) *runmodel.Run {
+	bootstrap := runtimeV2Bootstrap()
+	bootstrap.Definition = definition
+	return &runmodel.Run{
+		ID:                 "run-v2",
+		WorkspaceID:        "ws-v2",
+		GoalID:             definition.GoalID,
+		DoDID:              definition.DoDID,
+		DefinitionRevision: definition.Revision,
+		RuntimeBootstrap:   &bootstrap,
+		State:              state,
 	}
 }

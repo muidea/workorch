@@ -8,10 +8,10 @@ import (
 	decisionmodule "github.com/muidea/workorch/internal/modules/blocks/decision"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
-	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -32,7 +32,13 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	runs := memory.NewRunRepository()
-	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive}); err != nil {
+	workspaces := memory.NewWorkspaceRepository()
+	definition := runtimeV2Definition()
+	definition.CapabilityContract = append(definition.CapabilityContract, "decision/resolution")
+	if err := runs.Create(ctx, runtimeV2RunForTest(common.RunStateActive, definition)); err != nil {
+		t.Fatal(err)
+	}
+	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
@@ -55,15 +61,13 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 	}
 	t.Cleanup(func() { _ = decisionOwner.Stop(ctx) })
 
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator(runs, workspaces, nil, nil)
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	facts := runtimeV2Aggregate(t, 1).Facts
 	facts.Capabilities.GovernanceKinds = []string{"decision/resolution"}
 	facts.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassGovernanceDependency, Signature: "external-approval", Message: "需要外部裁决"}
-	definition := runtimeV2Definition()
-	definition.CapabilityContract = append(definition.CapabilityContract, "decision/resolution")
 	initialized, err := biz.InitializeRuntimeV2(ctx, facts, definition, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -132,6 +136,26 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 	loaded, err := biz.LoadRuntimeV2(ctx, facts.WorkspaceID, facts.RunID)
 	if err != nil || loaded.ActiveDispatch != nil || len(loaded.GovernanceResolutions) != 1 || loaded.Decision.Action != runtimecontract.RuntimeActionProduceStateChange {
 		t.Fatalf("persisted governance aggregate = %+v err=%v", loaded, err)
+	}
+	duplicateResult := hub.Send(magicevent.NewEventWithContext(
+		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
+		"runtime-v2-governance-test",
+		orchestratorevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		orchestratorevents.CommitRuntimeGovernanceTicketResolutionCommand{
+			ResolutionID: "resolution-1", TicketID: governanceRequest.TicketID,
+			WorkspaceID: facts.WorkspaceID, RunID: facts.RunID,
+			Outcome: runtimecontract.RuntimeGovernanceResolutionOutcomeContinue, Summary: "治理已完成",
+		},
+	))
+	if duplicateResult == nil || duplicateResult.Error() != nil {
+		t.Fatalf("duplicate governance continuation result = %+v", duplicateResult)
+	}
+	duplicateData, duplicateErr := duplicateResult.Get()
+	duplicateResponse, duplicateOK := duplicateData.(orchestratorevents.CommitRuntimeGovernanceResolutionResult)
+	if duplicateErr != nil || !duplicateOK || duplicateResponse.Disposition != orchestratorevents.RuntimeGovernanceResolutionDispositionDuplicate {
+		t.Fatalf("duplicate governance continuation = %+v err=%v", duplicateData, duplicateErr)
 	}
 	if background.asyncFunctionCalls != 1 || background.lastAsyncFunction == nil {
 		t.Fatalf("Runtime V2 governance continuation calls=%d fn=%v", background.asyncFunctionCalls, background.lastAsyncFunction != nil)

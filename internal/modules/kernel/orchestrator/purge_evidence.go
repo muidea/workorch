@@ -3,28 +3,31 @@ package orchestrator
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
-func purgeRunEvidence(ctx context.Context, steps repository.StepRepository, evidence orchestratorbiz.RuntimeEvidenceRepositories, runID common.RunID) (int, error) {
-	deleted := 0
-	if steps != nil {
-		items, err := steps.ListByRun(ctx, runID)
-		if err != nil {
-			return deleted, err
-		}
-		for _, item := range items {
-			if item == nil {
-				continue
-			}
-			if err := steps.Delete(ctx, item.ID); err != nil {
-				return deleted, err
-			}
-			deleted++
-		}
+func (m *Module) purgeRunOwnerResources(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runevents.RunCommandResult, error) {
+	if m == nil || m.rawEventHub == nil || workspaceID == "" || runID == "" {
+		return runevents.RunCommandResult{}, common.ErrInvalidArgument
 	}
+	event := magicevent.NewEventWithContext(
+		runevents.TopicRunCommandPurgeRuntimeResources,
+		ModuleID,
+		runevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		runevents.PurgeRuntimeResourcesCommand{WorkspaceID: workspaceID, RunID: runID},
+	)
+	bindOwnerCommandLane(event, runevents.TopicRunCommandPurgeRuntimeResources, "run", string(runID), workspaceID, runID)
+	return runCommandResponse(m.rawEventHub.Send(event), runevents.TopicRunCommandPurgeRuntimeResources)
+}
+
+func purgeRunEvidence(ctx context.Context, evidence orchestratorbiz.RuntimeEvidenceRepositories, runID common.RunID) (int, error) {
+	deleted := 0
 	if evidence.ToolCalls != nil {
 		items, err := evidence.ToolCalls.ListByRun(ctx, runID)
 		if err != nil {
@@ -65,21 +68,6 @@ func purgeRunEvidence(ctx context.Context, steps repository.StepRepository, evid
 				continue
 			}
 			if err := evidence.ValidationResults.Delete(ctx, item.ID); err != nil {
-				return deleted, err
-			}
-			deleted++
-		}
-	}
-	if evidence.RuntimeCheckpoints != nil {
-		items, err := evidence.RuntimeCheckpoints.ListByRun(ctx, runID)
-		if err != nil {
-			return deleted, err
-		}
-		for _, item := range items {
-			if item == nil {
-				continue
-			}
-			if err := evidence.RuntimeCheckpoints.Delete(ctx, item.ID); err != nil {
 				return deleted, err
 			}
 			deleted++

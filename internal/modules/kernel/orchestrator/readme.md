@@ -40,13 +40,17 @@
 - Decision owner 可通过 `CommitRuntimeGovernanceTicketResolutionCommand` 只提交 ticket resolution；Orchestrator 从 persisted binding 补齐 authority snapshot、dispatch 与 dependency 后进入同一 resolution commit。
 - governed dispatch 通过 `OpenRuntimeGovernanceRequestCommand/Result` 向 Decision owner 创建确定性 ticket；ticket、snapshot、dispatch 与 dependency 的绑定随 Runtime V2 aggregate 持久化。
 - `DriveRuntimeV2Command/Result` 是 Runtime V2 唯一同步推进合同；Orchestrator 在有界循环内依次处理 prerequisite、candidate、sealed dispatch、typed operation、evidence/reducer，并只返回 `governed_wait` 或 typed terminal。重复调用和进程重启必须从 Run owner aggregate 幂等恢复。
+- 进程内后台 drive 按 workspace/run scope 使用 singleflight gate；重复 Start/Resume/governance continuation 只复用当前 drive，调度失败或 drive 结束必须释放 gate，不得用并发 CAS conflict 生成伪 `runtime_v2_drive_failed` terminal。
+- reducer/aggregate 已进入 governed wait 或 terminal 后，后续 owner projection 失败只能记录 projection error 并等待幂等重试，不得把已确定的 complete/fail authority 改写成 `runtime_v2_drive_failed`。
 - Start command 先原子投影 pending Run 为 active，再由 Orchestrator 后台执行唯一 Runtime V2 drive；Resume command 只携带 workspace/run scope，只允许 active 或已解决 blocker Run，并进入同一 drive。application 不再拥有 Start/Resume continuation queue，Orchestrator service 不再暴露 execution-context-patch resume facade。
 - Orchestrator biz 只保留 Start 状态准入 `AcceptRunStart`、Resume 状态准入 `CanResumeRun` 与 V2 drive 所需 blocker/terminal 投影；不存在可直接调用的 V1 `StartRun`、`DispatchNextStep`、`ResumeRun`、patch resume 或自动 replan lifecycle。
 - V1 runtime progress/terminal-result checkpoint、restart replay、decision resume subsystem 和 approval patch resume 已删除；Runtime V2 重启只加载 persisted aggregate，治理继续只消费 typed resolution。
 - Orchestrator plugin 不再创建 RuntimeAdapter registry、EventHub runtime adapter 或 Step kind registration matrix；V2 operation 只通过各组件 typed EventHub command/result 执行。
 - Orchestrator 不再暴露 V1 `NextActionForRun` 或接收 `UpdateRuntimePolicyCommand`；Runtime V2 action 只来自 typed reducer，动态策略从 canonical configuration source 按需读取。
 - 已提供 Runtime V2 blocker→active 与 typed terminal 的窄 Run/Workspace 投影能力；正式入口切换后不得借此创建 V1 Step 或经过 V1 Result/DoD completion gate。
+- Run/Workspace 窄投影必须可重试收敛：active 重放要修复缺失的 workspace active-run 投影；terminal 投影先释放 workspace 再写 Run 终态，Run 已终态时仍要重试 workspace release，避免单边成功后永久悬挂。
 - Eventstream 订阅仍在生产发布的 Orchestrator、Run 和 Result typed notification 形成审计记录；Runtime V2 只消费同步 typed operation result 推进状态。
+- workspace/run purge 时，Orchestrator 只删除自身 ToolCall/Patch/ValidationResult/Evidence/Coverage/ArtifactContinuation/MemoryTrace；Step 与 RuntimeCheckpoint 必须通过带 WorkspaceID/RunID 的 Run owner purge command 删除，Orchestrator 不持有其 repository。
 - Runtime V1 retirement resource release 使用 Orchestrator 自有 typed command，关闭 pending/executing Step、ToolCall、ArtifactContinuation，并释放 managed validation resource；重复调用只返回本次实际变化数量。
 
 ## 相关约束
@@ -76,6 +80,7 @@
 - governance continue 必须写入 accepted governance evidence、递增 evidence revision 并回到同一 reducer；governance fail 直接生成 `governance_rejected` terminal，stale resolution 只能进入 diagnostic lineage。
 - resolution 必须携带并匹配已绑定 ticket；不存在绑定、同一 dispatch 绑定不同 ticket、或 dependency 漂移都必须返回 conflict。
 - `runtime_v2_governance` resolution committed 后由 Orchestrator 自行投影 terminal 或调度 drive continuation；application resolved watcher 不得再次发送 Resume。
+- 相同 governance resolution 的 duplicate commit 必须重试幂等 continuation/projection；singleflight gate 负责与仍在执行的 drive 合并，避免“aggregate 已提交但 Run 仍 blocked”的单边状态。
 - definition revision、Goal/DoD identity、正文或 capability contract 任一漂移都必须返回 conflict；definition context revision 必须与 facts 和 authority transaction 一致。
 - LLM dispatch 前必须先完成 manifest、target snapshot、failure target、capability、validation scratch 和 provider ceiling preflight；缺失资源只能进入 deterministic `AcquirePrerequisite`，不得混入 LLM state-changing requiredOutput。
 - block 输出只是 candidate；evidence quality、coverage binding、next action 和 accepted Result 只能由 Orchestrator 判定。

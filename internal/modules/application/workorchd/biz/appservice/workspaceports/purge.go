@@ -26,7 +26,7 @@ func PurgeWorkspaceRecords(ctx context.Context, hub magicevent.Hub, workspaceID 
 		}
 	}
 	for _, runID := range runIDs {
-		event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandPurgeRun, sourceModule, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.PurgeRunCommand{RunID: runID})
+		event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandPurgeRun, sourceModule, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.PurgeRunCommand{WorkspaceID: workspaceID, RunID: runID})
 		ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorCommandPurgeRun, "run", string(runID), workspaceID, runID, "")
 		if _, err := ownerevent.Orchestrator(hub.Send(event), orchestratorevents.TopicOrchestratorCommandPurgeRun); err != nil && !errors.Is(err, common.ErrNotFound) {
 			return err

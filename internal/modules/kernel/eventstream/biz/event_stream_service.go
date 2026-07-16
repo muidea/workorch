@@ -3,10 +3,12 @@ package eventstream
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	approvalcommon "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/common"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
@@ -77,12 +79,12 @@ func (s *Service) subscribeOrchestratorDetailNotifications() {
 	for _, topic := range patchTopics {
 		topic := topic
 		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
-			if data, ok := event.Data().(orchestratorevents.PatchChangedData); ok {
-				_ = s.appendRecord(event.Context(), patchRecord(topic, event.Source(), data))
+			data, ok := event.Data().(orchestratorevents.PatchChangedData)
+			if !ok {
+				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+				return
 			}
-			if result != nil {
-				result.Set(nil, nil)
-			}
+			s.finishRecordAppend(event, result, patchRecord(topic, event.Source(), data), nil)
 		})
 	}
 	continuationTopics := []string{
@@ -96,12 +98,12 @@ func (s *Service) subscribeOrchestratorDetailNotifications() {
 	for _, topic := range continuationTopics {
 		topic := topic
 		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
-			if data, ok := event.Data().(orchestratorevents.ArtifactContinuationChangedData); ok {
-				_ = s.appendRecord(event.Context(), artifactContinuationRecord(topic, event.Source(), data))
+			data, ok := event.Data().(orchestratorevents.ArtifactContinuationChangedData)
+			if !ok {
+				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+				return
 			}
-			if result != nil {
-				result.Set(nil, nil)
-			}
+			s.finishRecordAppend(event, result, artifactContinuationRecord(topic, event.Source(), data), nil)
 		})
 	}
 	s.unsubscribers = append(s.unsubscribers, func() {
@@ -124,21 +126,21 @@ func (s *Service) subscribeMemoryNotifications() {
 	for _, topic := range memoryTopics {
 		topic := topic
 		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
-			if data, ok := event.Data().(memoryevents.MemoryChangedData); ok {
-				_ = s.appendRecord(event.Context(), memoryRecord(topic, event.Source(), data))
+			data, ok := event.Data().(memoryevents.MemoryChangedData)
+			if !ok {
+				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+				return
 			}
-			if result != nil {
-				result.Set(nil, nil)
-			}
+			s.finishRecordAppend(event, result, memoryRecord(topic, event.Source(), data), nil)
 		})
 	}
 	observer.Subscribe(memoryevents.TopicMemoryRecallRecorded, func(event magicevent.Event, result magicevent.Result) {
-		if data, ok := event.Data().(memoryevents.MemoryRecallRecordedData); ok {
-			_ = s.appendRecord(event.Context(), memoryRecallRecord(event.Source(), data))
+		data, ok := event.Data().(memoryevents.MemoryRecallRecordedData)
+		if !ok {
+			s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+			return
 		}
-		if result != nil {
-			result.Set(nil, nil)
-		}
+		s.finishRecordAppend(event, result, memoryRecallRecord(event.Source(), data), nil)
 	})
 	s.unsubscribers = append(s.unsubscribers, func() {
 		for _, topic := range memoryTopics {
@@ -155,12 +157,12 @@ func (s *Service) subscribeLLMNotifications() {
 	const observerID = "/llm/consumers/kernel/eventstream"
 	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, s.commandHub)
 	observer.Subscribe(llmevents.TopicLLMUsageRecorded, func(event magicevent.Event, result magicevent.Result) {
-		if data, ok := event.Data().(llmevents.LLMUsageRecordedData); ok {
-			_ = s.appendRecord(event.Context(), llmUsageRecord(event.Source(), data))
+		data, ok := event.Data().(llmevents.LLMUsageRecordedData)
+		if !ok {
+			s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+			return
 		}
-		if result != nil {
-			result.Set(nil, nil)
-		}
+		s.finishRecordAppend(event, result, llmUsageRecord(event.Source(), data), nil)
 	})
 	s.unsubscribers = append(s.unsubscribers, func() {
 		observer.Unsubscribe(llmevents.TopicLLMUsageRecorded)
@@ -182,21 +184,21 @@ func (s *Service) subscribeResultNotifications() {
 	for _, topic := range resultTopics {
 		topic := topic
 		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
-			if data, ok := event.Data().(resultevents.ResultChangedData); ok {
-				_ = s.appendRecord(event.Context(), resultRecord(topic, event.Source(), data))
+			data, ok := event.Data().(resultevents.ResultChangedData)
+			if !ok {
+				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+				return
 			}
-			if result != nil {
-				result.Set(nil, nil)
-			}
+			s.finishRecordAppend(event, result, resultRecord(topic, event.Source(), data), nil)
 		})
 	}
 	observer.Subscribe(resultevents.TopicArtifactCreated, func(event magicevent.Event, result magicevent.Result) {
-		if data, ok := event.Data().(resultevents.ArtifactCreatedData); ok {
-			_ = s.appendRecord(event.Context(), artifactRecord(event.Source(), data))
+		data, ok := event.Data().(resultevents.ArtifactCreatedData)
+		if !ok {
+			s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+			return
 		}
-		if result != nil {
-			result.Set(nil, nil)
-		}
+		s.finishRecordAppend(event, result, artifactRecord(event.Source(), data), nil)
 	})
 	s.unsubscribers = append(s.unsubscribers, func() {
 		for _, topic := range resultTopics {
@@ -220,29 +222,29 @@ func (s *Service) subscribeWorkspaceNotifications() {
 	for _, topic := range workspaceTopics {
 		topic := topic
 		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
-			if data, ok := event.Data().(workspaceevents.WorkspaceChangedData); ok {
-				_ = s.appendRecord(event.Context(), workspaceRecord(topic, event.Source(), data))
+			data, ok := event.Data().(workspaceevents.WorkspaceChangedData)
+			if !ok {
+				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+				return
 			}
-			if result != nil {
-				result.Set(nil, nil)
-			}
+			s.finishRecordAppend(event, result, workspaceRecord(topic, event.Source(), data), nil)
 		})
 	}
 	observer.Subscribe(workspaceevents.TopicGoalDefined, func(event magicevent.Event, result magicevent.Result) {
-		if data, ok := event.Data().(workspaceevents.GoalDefinedData); ok {
-			_ = s.appendRecord(event.Context(), goalRecord(event.Source(), data))
+		data, ok := event.Data().(workspaceevents.GoalDefinedData)
+		if !ok {
+			s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+			return
 		}
-		if result != nil {
-			result.Set(nil, nil)
-		}
+		s.finishRecordAppend(event, result, goalRecord(event.Source(), data), nil)
 	})
 	observer.Subscribe(workspaceevents.TopicDoDDefined, func(event magicevent.Event, result magicevent.Result) {
-		if data, ok := event.Data().(workspaceevents.DoDDefinedData); ok {
-			_ = s.appendRecord(event.Context(), dodRecord(event.Source(), data))
+		data, ok := event.Data().(workspaceevents.DoDDefinedData)
+		if !ok {
+			s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+			return
 		}
-		if result != nil {
-			result.Set(nil, nil)
-		}
+		s.finishRecordAppend(event, result, dodRecord(event.Source(), data), nil)
 	})
 	s.unsubscribers = append(s.unsubscribers, func() {
 		for _, topic := range workspaceTopics {
@@ -274,12 +276,12 @@ func (s *Service) subscribeRunStateNotifications() {
 	for _, topic := range topics {
 		topic := topic
 		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
-			if data, ok := event.Data().(runevents.RunStateChangedData); ok {
-				_ = s.appendRecord(event.Context(), runStateRecord(topic, event.Source(), data))
+			data, ok := event.Data().(runevents.RunStateChangedData)
+			if !ok {
+				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+				return
 			}
-			if result != nil {
-				result.Set(nil, nil)
-			}
+			s.finishRecordAppend(event, result, runStateRecord(topic, event.Source(), data), nil)
 		})
 	}
 	s.unsubscribers = append(s.unsubscribers, func() {
@@ -304,12 +306,12 @@ func (s *Service) subscribeGovernanceNotifications() {
 	for _, topic := range topics {
 		topic := topic
 		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
-			if data, ok := event.Data().(governanceevents.GovernanceData); ok {
-				_ = s.appendRecord(event.Context(), governanceRecord(topic, data))
+			data, ok := event.Data().(governanceevents.GovernanceData)
+			if !ok {
+				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+				return
 			}
-			if result != nil {
-				result.Set(nil, nil)
-			}
+			s.finishRecordAppend(event, result, governanceRecord(topic, data), nil)
 		})
 	}
 	s.unsubscribers = append(s.unsubscribers, func() {
@@ -335,12 +337,12 @@ func (s *Service) subscribeApprovalNotifications() {
 	for _, topic := range topics {
 		topic := topic
 		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
-			if data, ok := event.Data().(approvalevents.ApprovalChangedData); ok {
-				_ = s.appendRecord(event.Context(), approvalRecord(topic, data))
+			data, ok := event.Data().(approvalevents.ApprovalChangedData)
+			if !ok {
+				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+				return
 			}
-			if result != nil {
-				result.Set(nil, nil)
-			}
+			s.finishRecordAppend(event, result, approvalRecord(topic, data), nil)
 		})
 	}
 	s.unsubscribers = append(s.unsubscribers, func() {
@@ -366,24 +368,24 @@ func (s *Service) subscribeDecisionNotifications() {
 	for _, topic := range changedTopics {
 		topic := topic
 		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
-			if data, ok := event.Data().(decisionevents.TicketChangedData); ok {
-				_ = s.appendRecord(event.Context(), decisionTicketRecord(topic, data))
+			data, ok := event.Data().(decisionevents.TicketChangedData)
+			if !ok {
+				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+				return
 			}
-			if result != nil {
-				result.Set(nil, nil)
-			}
+			s.finishRecordAppend(event, result, decisionTicketRecord(topic, data), nil)
 		})
 	}
 	resolvedTopics := []string{decisionevents.TopicTicketResolved, decisionevents.TopicDecisionTicketResolved}
 	for _, topic := range resolvedTopics {
 		topic := topic
 		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
-			if data, ok := event.Data().(decisionevents.TicketResolvedData); ok {
-				_ = s.appendRecord(event.Context(), decisionResolvedRecord(topic, data))
+			data, ok := event.Data().(decisionevents.TicketResolvedData)
+			if !ok {
+				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+				return
 			}
-			if result != nil {
-				result.Set(nil, nil)
-			}
+			s.finishRecordAppend(event, result, decisionResolvedRecord(topic, data), nil)
 		})
 	}
 	s.unsubscribers = append(s.unsubscribers, func() {
@@ -394,6 +396,23 @@ func (s *Service) subscribeDecisionNotifications() {
 			observer.Unsubscribe(topic)
 		}
 	})
+}
+
+func (s *Service) finishRecordAppend(event magicevent.Event, result magicevent.Result, record *eventstreammodel.EventRecord, inputErr error) {
+	err := inputErr
+	if err == nil {
+		err = s.appendRecord(event.Context(), record)
+	}
+	if err != nil {
+		slog.Error("workorch eventstream append failed", "topic", event.ID(), "source", event.Source(), "err", err)
+		if result != nil {
+			result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		}
+		return
+	}
+	if result != nil {
+		result.Set(nil, nil)
+	}
 }
 
 func (s *Service) appendRecord(ctx context.Context, record *eventstreammodel.EventRecord) error {
@@ -410,29 +429,28 @@ func (s *Service) appendRecord(ctx context.Context, record *eventstreammodel.Eve
 		record.OccurredAt = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 	if record.WorkspaceID != "" {
-		revision, err := s.nextWorkspaceRevision(ctx, record.WorkspaceID)
-		if err != nil {
-			return err
-		}
-		record.Revision = revision
+		return s.appendWorkspaceRecord(ctx, record)
 	}
-	if err := s.repo.Append(ctx, record); err != nil && err != common.ErrConflict {
+	if err := s.repo.Append(ctx, record); err != nil {
 		return err
 	}
 	return s.publishRecordAppended(ctx, record)
 }
 
-func (s *Service) nextWorkspaceRevision(ctx context.Context, workspaceID common.WorkspaceID) (int64, error) {
+func (s *Service) appendWorkspaceRecord(ctx context.Context, record *eventstreammodel.EventRecord) error {
+	if s == nil || s.repo == nil || record == nil || record.WorkspaceID == "" {
+		return common.ErrInvalidArgument
+	}
 	s.revisionMu.Lock()
 	defer s.revisionMu.Unlock()
 	if s.revisions == nil {
 		s.revisions = map[common.WorkspaceID]int64{}
 	}
-	current, ok := s.revisions[workspaceID]
+	current, ok := s.revisions[record.WorkspaceID]
 	if !ok {
-		items, err := s.repo.List(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), repository.EventRecordQuery{WorkspaceID: workspaceID})
+		items, err := s.repo.List(common.ContextWithRuntimeWorkspaceID(ctx, record.WorkspaceID), repository.EventRecordQuery{WorkspaceID: record.WorkspaceID})
 		if err != nil {
-			return 0, err
+			return err
 		}
 		for _, item := range items {
 			if item != nil && item.Revision > current {
@@ -440,9 +458,12 @@ func (s *Service) nextWorkspaceRevision(ctx context.Context, workspaceID common.
 			}
 		}
 	}
-	current++
-	s.revisions[workspaceID] = current
-	return current, nil
+	record.Revision = current + 1
+	if err := s.repo.Append(ctx, record); err != nil {
+		return err
+	}
+	s.revisions[record.WorkspaceID] = record.Revision
+	return s.publishRecordAppended(ctx, record)
 }
 
 func decisionTicketRecord(topic string, data decisionevents.TicketChangedData) *eventstreammodel.EventRecord {

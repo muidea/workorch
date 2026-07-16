@@ -61,6 +61,11 @@ type ListRuntimeCheckpointsByRunCommand struct {
 	RunID       common.RunID
 }
 
+type PurgeRuntimeResourcesCommand struct {
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+}
+
 type RunStateChangedData struct {
 	RunID                   common.RunID
 	WorkspaceID             common.WorkspaceID
@@ -102,12 +107,13 @@ func RunStateChangedDataFromModel(run *runmodel.Run) RunStateChangedData {
 }
 
 type RunCommandResult struct {
-	Run         *runmodel.Run
-	Runs        []*runmodel.Run
-	Step        *runmodel.Step
-	Steps       []*runmodel.Step
-	Checkpoint  *runmodel.RuntimeCheckpoint
-	Checkpoints []*runmodel.RuntimeCheckpoint
+	Run          *runmodel.Run
+	Runs         []*runmodel.Run
+	Step         *runmodel.Step
+	Steps        []*runmodel.Step
+	Checkpoint   *runmodel.RuntimeCheckpoint
+	Checkpoints  []*runmodel.RuntimeCheckpoint
+	DeletedCount int
 }
 
 func MessageContracts() []eventcontract.MessageContract {
@@ -122,6 +128,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[ListStepSummariesByRunCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandListStepSummariesByRun).MessageContract(),
 		eventcontract.CommandTopic[GetRuntimeCheckpointCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandGetRuntimeCheckpoint).MessageContract(),
 		eventcontract.CommandTopic[ListRuntimeCheckpointsByRunCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandListCheckpointsByRun).MessageContract(),
+		eventcontract.CommandTopic[PurgeRuntimeResourcesCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandPurgeRuntimeResources).MessageContract(),
 		eventcontract.CommandTopic[UpdateRunCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandUpdate).MessageContract(),
 		eventcontract.CommandTopic[DeleteRunCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandDelete).MessageContract(),
 	}

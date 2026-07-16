@@ -76,10 +76,10 @@ func (s *runStateSubsystem) syncRunAndWorkspaceForActiveState(ctx context.Contex
 	}
 	workspace.ActiveRunID = run.ID
 	workspace.State = common.CanonicalWorkspaceOwnerState(state)
-	if err := runParallel(
-		func() error { return s.runs.Update(ctx, run) },
-		func() error { return s.workspaces.Update(ctx, workspace) },
-	); err != nil {
+	if err := s.workspaces.Update(ctx, workspace); err != nil {
+		return nil, err
+	}
+	if err := s.runs.Update(ctx, run); err != nil {
 		return nil, err
 	}
 	return workspace, nil

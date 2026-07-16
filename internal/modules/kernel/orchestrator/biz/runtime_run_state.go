@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -43,6 +42,16 @@ func (o *RuntimeOrchestrator) closeLoadedRun(ctx context.Context, run *runModel.
 	if run == nil || run.ID == "" {
 		return common.ErrInvalidArgument
 	}
+	if run.State == state {
+		_, changed, err := o.runStateManager().releaseWorkspaceForTerminalRun(ctx, run, workspaceStateForTerminalRun(state))
+		if err != nil {
+			return err
+		}
+		if !changed {
+			return common.ErrConflict
+		}
+		return nil
+	}
 	if !canCloseRunAsUnsuccessfulTerminal(run.State, state) {
 		return common.ErrConflict
 	}
@@ -59,14 +68,14 @@ func (o *RuntimeOrchestrator) closeLoadedRun(ctx context.Context, run *runModel.
 	if strings.TrimSpace(run.EndedAt) == "" {
 		run.EndedAt = runtimeEvidenceTimestamp()
 	}
-	if err := o.runs.Update(ctx, run); err != nil {
-		return err
-	}
 	_, changed, err := o.runStateManager().releaseWorkspaceForTerminalRun(ctx, run, workspaceStateForTerminalRun(state))
-	if err != nil || !changed {
+	if err != nil {
 		return err
 	}
-	return nil
+	if !changed {
+		return common.ErrConflict
+	}
+	return o.runs.Update(ctx, run)
 }
 
 func (o *RuntimeOrchestrator) dismissOpenDecisionBlocker(ctx context.Context, run *runModel.Run) error {
@@ -102,30 +111,6 @@ func isTerminalRunState(state common.RunState) bool {
 	default:
 		return false
 	}
-}
-
-func runParallel(tasks ...func() error) error {
-	var wg sync.WaitGroup
-	var errMu sync.Mutex
-	var ret error
-	for _, task := range tasks {
-		if task == nil {
-			continue
-		}
-		wg.Add(1)
-		go func(task func() error) {
-			defer wg.Done()
-			if err := task(); err != nil {
-				errMu.Lock()
-				if ret == nil {
-					ret = err
-				}
-				errMu.Unlock()
-			}
-		}(task)
-	}
-	wg.Wait()
-	return ret
 }
 
 func canCloseRunAsUnsuccessfulTerminal(current common.RunState, target common.RunState) bool {

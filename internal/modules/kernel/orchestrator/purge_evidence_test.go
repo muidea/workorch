@@ -10,6 +10,7 @@ import (
 	memorymodule "github.com/muidea/workorch/internal/modules/blocks/memory"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
+	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -22,11 +23,9 @@ func TestPurgeRunEvidenceDeletesOnlyRequestedRunEvidence(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-purge-evidence")
 	runID := common.RunID("run-purge-evidence")
 	otherRunID := common.RunID("run-keep-evidence")
-	steps := memoryrepo.NewStepRepository()
 	toolCalls := memoryrepo.NewToolCallRepository()
 	patches := memoryrepo.NewPatchRepository()
 	validations := memoryrepo.NewValidationResultRepository()
-	checkpoints := memoryrepo.NewRuntimeCheckpointRepository()
 	evidenceRecords := memoryrepo.NewEvidenceRecordRepository()
 	coverageWorkItems := memoryrepo.NewCoverageWorkItemRepository()
 	continuations := memoryrepo.NewArtifactContinuationRepository()
@@ -37,16 +36,12 @@ func TestPurgeRunEvidenceDeletesOnlyRequestedRunEvidence(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	must(steps.Create(ctx, &runmodel.Step{ID: "step-purge", RunID: runID}))
-	must(steps.Create(ctx, &runmodel.Step{ID: "step-keep", RunID: otherRunID}))
 	must(toolCalls.Create(ctx, &runmodel.ToolCall{ID: "tool-purge", RunID: runID}))
 	must(toolCalls.Create(ctx, &runmodel.ToolCall{ID: "tool-keep", RunID: otherRunID}))
 	must(patches.Create(ctx, &runmodel.Patch{ID: "patch-purge", RunID: runID}))
 	must(patches.Create(ctx, &runmodel.Patch{ID: "patch-keep", RunID: otherRunID}))
 	must(validations.Create(ctx, &runmodel.ValidationResult{ID: "validation-purge", RunID: runID}))
 	must(validations.Create(ctx, &runmodel.ValidationResult{ID: "validation-keep", RunID: otherRunID}))
-	must(checkpoints.Create(ctx, &runmodel.RuntimeCheckpoint{ID: "checkpoint-purge", RunID: runID}))
-	must(checkpoints.Create(ctx, &runmodel.RuntimeCheckpoint{ID: "checkpoint-keep", RunID: otherRunID}))
 	must(evidenceRecords.Create(ctx, &orchestratormodel.EvidenceRecord{ID: "evidence-purge", WorkspaceID: workspaceID, RunID: runID, Kind: orchestratormodel.EvidenceKindValidation, Status: orchestratormodel.EvidenceStatusAccepted, SourceRef: "validation-purge"}))
 	must(evidenceRecords.Create(ctx, &orchestratormodel.EvidenceRecord{ID: "evidence-keep", WorkspaceID: workspaceID, RunID: otherRunID, Kind: orchestratormodel.EvidenceKindValidation, Status: orchestratormodel.EvidenceStatusAccepted, SourceRef: "validation-keep"}))
 	must(coverageWorkItems.Create(ctx, &orchestratormodel.CoverageWorkItem{ID: "cwi-purge", WorkspaceID: workspaceID, RunID: runID, DefinitionRevision: "rev-purge", NormalizedSourceKey: "source-purge", Status: "open"}))
@@ -56,11 +51,10 @@ func TestPurgeRunEvidenceDeletesOnlyRequestedRunEvidence(t *testing.T) {
 	must(traces.Create(ctx, &memorymodel.MemoryRecallTrace{ID: "trace-purge", WorkspaceID: workspaceID, RunID: runID}))
 	must(traces.Create(ctx, &memorymodel.MemoryRecallTrace{ID: "trace-keep", WorkspaceID: workspaceID, RunID: otherRunID}))
 
-	deleted, err := purgeRunEvidence(ctx, steps, orchestratorbiz.RuntimeEvidenceRepositories{
+	deleted, err := purgeRunEvidence(ctx, orchestratorbiz.RuntimeEvidenceRepositories{
 		ToolCalls:             toolCalls,
 		Patches:               patches,
 		ValidationResults:     validations,
-		RuntimeCheckpoints:    checkpoints,
 		EvidenceRecords:       evidenceRecords,
 		CoverageWorkItems:     coverageWorkItems,
 		ArtifactContinuations: continuations,
@@ -69,19 +63,15 @@ func TestPurgeRunEvidenceDeletesOnlyRequestedRunEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("purge run evidence: %v", err)
 	}
-	if deleted != 9 {
-		t.Fatalf("deleted = %d, want 9", deleted)
+	if deleted != 7 {
+		t.Fatalf("deleted = %d, want 7", deleted)
 	}
-	assertRunEvidenceCount(t, ctx, steps, runID, 0)
-	assertRunEvidenceCount(t, ctx, steps, otherRunID, 1)
 	assertRunEvidenceCount(t, ctx, toolCalls, runID, 0)
 	assertRunEvidenceCount(t, ctx, toolCalls, otherRunID, 1)
 	assertRunEvidenceCount(t, ctx, patches, runID, 0)
 	assertRunEvidenceCount(t, ctx, patches, otherRunID, 1)
 	assertRunEvidenceCount(t, ctx, validations, runID, 0)
 	assertRunEvidenceCount(t, ctx, validations, otherRunID, 1)
-	assertRunEvidenceCount(t, ctx, checkpoints, runID, 0)
-	assertRunEvidenceCount(t, ctx, checkpoints, otherRunID, 1)
 	assertRunEvidenceCount(t, ctx, evidenceRecords, runID, 0)
 	assertRunEvidenceCount(t, ctx, evidenceRecords, otherRunID, 1)
 	assertRunEvidenceCount(t, ctx, coverageWorkItems, runID, 0)
@@ -122,11 +112,30 @@ func assertRunEvidenceCount[T any](t *testing.T, ctx context.Context, repo runEv
 func TestPurgeRunCommandAcceptsContractPayload(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
+	t.Cleanup(func() { rawHub.Terminate(context.Background()) })
+	workspaceID := common.WorkspaceID("ws-purge-contract")
 	steps := memoryrepo.NewStepRepository()
+	checkpoints := memoryrepo.NewRuntimeCheckpointRepository()
+	runs := memoryrepo.NewRunRepository()
 	runID := common.RunID("run-purge-contract")
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	if err := runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCompleted}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
 	if err := steps.Create(ctx, &runmodel.Step{ID: "step-purge-contract", RunID: runID}); err != nil {
 		t.Fatalf("seed step: %v", err)
 	}
+	if err := checkpoints.Create(ctx, &runmodel.RuntimeCheckpoint{ID: "checkpoint-purge-contract", RunID: runID}); err != nil {
+		t.Fatalf("seed checkpoint: %v", err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, Steps: steps, Checkpoints: checkpoints, EventHub: rawHub}); err != nil {
+		t.Fatalf("configure run owner: %v", err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatalf("start run owner: %v", err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(context.Background()) })
 	memoryModule := memorymodule.New()
 	if err := memoryModule.Configure(memorymodule.Dependencies{
 		MemoryItems:        memoryrepo.NewMemoryItemRepository(),
@@ -146,11 +155,9 @@ func TestPurgeRunCommandAcceptsContractPayload(t *testing.T) {
 
 	module := New()
 	if err := module.Configure(Dependencies{
-		Steps:                 steps,
 		ToolCalls:             memoryrepo.NewToolCallRepository(),
 		Patches:               memoryrepo.NewPatchRepository(),
 		ValidationResults:     memoryrepo.NewValidationResultRepository(),
-		RuntimeCheckpoints:    memoryrepo.NewRuntimeCheckpointRepository(),
 		EvidenceRecords:       memoryrepo.NewEvidenceRecordRepository(),
 		CoverageWorkItems:     memoryrepo.NewCoverageWorkItemRepository(),
 		ArtifactContinuations: memoryrepo.NewArtifactContinuationRepository(),
@@ -173,7 +180,7 @@ func TestPurgeRunCommandAcceptsContractPayload(t *testing.T) {
 		orchestratorevents.CommandDestination,
 		magicevent.NewHeader(),
 		ctx,
-		orchestratorevents.PurgeRunCommand{RunID: runID},
+		orchestratorevents.PurgeRunCommand{WorkspaceID: workspaceID, RunID: runID},
 	))
 	if result == nil {
 		t.Fatal("purge result is nil")
@@ -188,16 +195,31 @@ func TestPurgeRunCommandAcceptsContractPayload(t *testing.T) {
 	if len(items) != 0 {
 		t.Fatalf("steps after purge = %d, want 0", len(items))
 	}
+	checkpointItems, err := checkpoints.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list checkpoints: %v", err)
+	}
+	if len(checkpointItems) != 0 {
+		t.Fatalf("checkpoints after purge = %d, want 0", len(checkpointItems))
+	}
 }
 
 func TestPurgeRunCommandUsesWorkspaceScopeForDuplicateRunIDs(t *testing.T) {
 	ctx := context.Background()
 	steps := memoryrepo.NewStepRepository()
+	checkpoints := memoryrepo.NewRuntimeCheckpointRepository()
+	runs := memoryrepo.NewRunRepository()
 	runID := common.RunID("run-duplicate-purge")
 	workspaceA := common.WorkspaceID("ws-purge-a")
 	workspaceB := common.WorkspaceID("ws-purge-b")
 	stepA := common.StepID("step-duplicate-purge-a")
 	stepB := common.StepID("step-duplicate-purge-b")
+	if err := runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceA, State: common.RunStateCompleted}); err != nil {
+		t.Fatalf("seed run A: %v", err)
+	}
+	if err := runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceB, State: common.RunStateCompleted}); err != nil {
+		t.Fatalf("seed run B: %v", err)
+	}
 	if err := steps.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceA), &runmodel.Step{ID: stepA, RunID: runID}); err != nil {
 		t.Fatalf("seed step A: %v", err)
 	}
@@ -205,6 +227,15 @@ func TestPurgeRunCommandUsesWorkspaceScopeForDuplicateRunIDs(t *testing.T) {
 		t.Fatalf("seed step B: %v", err)
 	}
 	rawHub := magicevent.NewHub(16)
+	t.Cleanup(func() { rawHub.Terminate(context.Background()) })
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, Steps: steps, Checkpoints: checkpoints, EventHub: rawHub}); err != nil {
+		t.Fatalf("configure run owner: %v", err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatalf("start run owner: %v", err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(context.Background()) })
 	memoryModule := memorymodule.New()
 	if err := memoryModule.Configure(memorymodule.Dependencies{
 		MemoryItems:        memoryrepo.NewMemoryItemRepository(),
@@ -223,11 +254,9 @@ func TestPurgeRunCommandUsesWorkspaceScopeForDuplicateRunIDs(t *testing.T) {
 	})
 	module := New()
 	if err := module.Configure(Dependencies{
-		Steps:                 steps,
 		ToolCalls:             memoryrepo.NewToolCallRepository(),
 		Patches:               memoryrepo.NewPatchRepository(),
 		ValidationResults:     memoryrepo.NewValidationResultRepository(),
-		RuntimeCheckpoints:    memoryrepo.NewRuntimeCheckpointRepository(),
 		EvidenceRecords:       memoryrepo.NewEvidenceRecordRepository(),
 		CoverageWorkItems:     memoryrepo.NewCoverageWorkItemRepository(),
 		ArtifactContinuations: memoryrepo.NewArtifactContinuationRepository(),
@@ -250,7 +279,7 @@ func TestPurgeRunCommandUsesWorkspaceScopeForDuplicateRunIDs(t *testing.T) {
 		orchestratorevents.CommandDestination,
 		magicevent.NewHeader(),
 		common.ContextWithRuntimeWorkspaceID(ctx, workspaceA),
-		orchestratorevents.PurgeRunCommand{RunID: runID},
+		orchestratorevents.PurgeRunCommand{WorkspaceID: workspaceA, RunID: runID},
 	))
 	if result == nil {
 		t.Fatal("purge result is nil")

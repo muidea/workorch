@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -24,11 +25,9 @@ const ModuleID = modulecommon.ModuleID
 type Service = orchestratorservice.Service
 
 type Dependencies struct {
-	Steps                 repository.StepRepository
 	ToolCalls             repository.ToolCallRepository
 	Patches               repository.PatchRepository
 	ValidationResults     repository.ValidationResultRepository
-	RuntimeCheckpoints    repository.RuntimeCheckpointRepository
 	EvidenceRecords       repository.EvidenceRecordRepository
 	CoverageWorkItems     repository.CoverageWorkItemRepository
 	ArtifactContinuations repository.ArtifactContinuationRepository
@@ -39,12 +38,13 @@ type Dependencies struct {
 type Module struct {
 	bizPtr            *orchestratorbiz.RuntimeOrchestrator
 	servicePtr        *orchestratorservice.Module
-	steps             repository.StepRepository
 	evidenceRecords   repository.EvidenceRecordRepository
 	rawEventHub       magicevent.Hub
 	rawObserver       magicevent.SimpleObserver
 	rawTopics         []string
 	backgroundRoutine task.BackgroundRoutine
+	driveMu           sync.Mutex
+	drivingRuns       map[string]struct{}
 }
 
 func New() *Module { return &Module{} }
@@ -52,11 +52,9 @@ func New() *Module { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
 
 func (m *Module) Configure(deps Dependencies) error {
-	if deps.Steps == nil ||
-		deps.ToolCalls == nil ||
+	if deps.ToolCalls == nil ||
 		deps.Patches == nil ||
 		deps.ValidationResults == nil ||
-		deps.RuntimeCheckpoints == nil ||
 		deps.EvidenceRecords == nil ||
 		deps.CoverageWorkItems == nil ||
 		deps.ArtifactContinuations == nil ||
@@ -65,7 +63,6 @@ func (m *Module) Configure(deps Dependencies) error {
 	}
 	m.bizPtr = orchestratorbiz.NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		runEventRepository{hub: deps.CommandHub},
-		deps.Steps,
 		workspaceEventRepository{hub: deps.CommandHub},
 		decisionEventTicketRepository{hub: deps.CommandHub},
 		decisionEventResolutionRepository{hub: deps.CommandHub},
@@ -76,7 +73,6 @@ func (m *Module) Configure(deps Dependencies) error {
 			ToolCalls:             deps.ToolCalls,
 			Patches:               deps.Patches,
 			ValidationResults:     deps.ValidationResults,
-			RuntimeCheckpoints:    deps.RuntimeCheckpoints,
 			EvidenceRecords:       deps.EvidenceRecords,
 			CoverageWorkItems:     deps.CoverageWorkItems,
 			ArtifactContinuations: deps.ArtifactContinuations,
@@ -95,7 +91,6 @@ func (m *Module) Configure(deps Dependencies) error {
 	if err := m.bizPtr.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: deps.CommandHub}); err != nil {
 		return err
 	}
-	m.steps = deps.Steps
 	m.evidenceRecords = deps.EvidenceRecords
 	m.rawEventHub = deps.CommandHub
 	m.backgroundRoutine = deps.BackgroundRoutine
@@ -156,10 +151,12 @@ func (m *Module) Stop(ctx context.Context) error {
 	m.rawTopics = nil
 	m.servicePtr = nil
 	m.bizPtr = nil
-	m.steps = nil
 	m.evidenceRecords = nil
 	m.rawEventHub = nil
 	m.backgroundRoutine = nil
+	m.driveMu.Lock()
+	m.drivingRuns = nil
+	m.driveMu.Unlock()
 	return nil
 }
 
@@ -222,11 +219,16 @@ func (m *Module) executeMagicCommand(ev magicevent.Event) (orchestratorevents.Or
 		return orchestratorevents.OrchestratorCommandResult{}, m.servicePtr.FailRun(ctx, cmd.RunID, cmd.Reason)
 	case orchestratorevents.TopicOrchestratorCommandPurgeRun:
 		cmd, ok := ev.Data().(orchestratorevents.PurgeRunCommand)
-		if !ok || cmd.RunID == "" {
+		if !ok || cmd.WorkspaceID == "" || cmd.RunID == "" {
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
-		_, err := purgeRunEvidence(ctx, m.steps, m.bizPtr.EvidenceRepositories(), cmd.RunID)
-		return orchestratorevents.OrchestratorCommandResult{}, err
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
+		runResult, err := m.purgeRunOwnerResources(ctx, cmd.WorkspaceID, cmd.RunID)
+		if err != nil {
+			return orchestratorevents.OrchestratorCommandResult{}, err
+		}
+		deleted, err := purgeRunEvidence(ctx, m.bizPtr.EvidenceRepositories(), cmd.RunID)
+		return orchestratorevents.OrchestratorCommandResult{DeletedCount: runResult.DeletedCount + deleted}, err
 	case orchestratorevents.TopicOrchestratorCommandListToolCallsByRun,
 		orchestratorevents.TopicOrchestratorCommandListPatchesByRun,
 		orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun,
@@ -287,8 +289,18 @@ func (m *Module) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.
 	if m == nil || m.bizPtr == nil || workspaceID == "" || runID == "" {
 		return common.ErrInvalidArgument
 	}
+	driveKey := string(workspaceID) + "\x00" + string(runID)
+	if !m.beginRuntimeV2Drive(driveKey) {
+		return nil
+	}
 	drive := func(driveCtx context.Context) {
+		defer m.endRuntimeV2Drive(driveKey)
 		if err := m.driveAndProjectRuntimeV2(driveCtx, workspaceID, runID); err != nil && !errors.Is(err, context.Canceled) {
+			var projectionErr *runtimeV2ProjectionError
+			if errors.As(err, &projectionErr) {
+				slog.Warn("workorch Runtime V2 projection failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", err)
+				return
+			}
 			slog.Warn("workorch Runtime V2 drive failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", err)
 			terminal := &runtimecontract.TerminalOutcome{Code: "runtime_v2_drive_failed", Summary: err.Error()}
 			if projectErr := m.bizPtr.ProjectRuntimeV2Terminal(driveCtx, workspaceID, runID, runtimecontract.RuntimeActionFail, terminal); projectErr != nil {
@@ -301,7 +313,36 @@ func (m *Module) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.
 		drive(bgCtx)
 		return nil
 	}
-	return m.backgroundRoutine.AsyncFunction(func() { drive(bgCtx) })
+	if err := m.backgroundRoutine.AsyncFunction(func() { drive(bgCtx) }); err != nil {
+		m.endRuntimeV2Drive(driveKey)
+		return err
+	}
+	return nil
+}
+
+func (m *Module) beginRuntimeV2Drive(key string) bool {
+	if m == nil || key == "" {
+		return false
+	}
+	m.driveMu.Lock()
+	defer m.driveMu.Unlock()
+	if m.drivingRuns == nil {
+		m.drivingRuns = map[string]struct{}{}
+	}
+	if _, ok := m.drivingRuns[key]; ok {
+		return false
+	}
+	m.drivingRuns[key] = struct{}{}
+	return true
+}
+
+func (m *Module) endRuntimeV2Drive(key string) {
+	if m == nil || key == "" {
+		return
+	}
+	m.driveMu.Lock()
+	delete(m.drivingRuns, key)
+	m.driveMu.Unlock()
 }
 
 func orchestratorBackgroundContext(ctx context.Context, workspaceID common.WorkspaceID) context.Context {
