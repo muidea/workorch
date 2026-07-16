@@ -134,7 +134,7 @@ TUI acceptance 当前还应明确验证以下边界：
 - `TUI-E2E-08`
 - `TUI-E2E-09`
 - `TUI-E2E-12`
-- `display-closure-tracking.md`
+- `../../90-archive/records/tui-display-closure-tracking.md`（历史闭环记录，非当前实现约束）
 
 共同证明。
 
@@ -150,4 +150,4 @@ go test ./internal/services/workorch/... --count 1
 ## Source Documents
 
 - `../../50-product-interface/tui/requirements.md`
-- `display-closure-tracking.md`
+- `../../90-archive/records/tui-display-closure-tracking.md`（历史）

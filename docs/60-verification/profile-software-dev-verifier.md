@@ -297,4 +297,4 @@ software-dev verifier 当前主要对以下读模型施加约束：
 ## Source Documents
 
 - `../40-profiles-capabilities/software-dev/goal-coverage-and-dod.md`
-- `../70-roadmap/active/software-requirement-development-orchestration-plan.md`
+- `../90-archive/completed/software-requirement-development-orchestration-plan.md`（历史过程稿）

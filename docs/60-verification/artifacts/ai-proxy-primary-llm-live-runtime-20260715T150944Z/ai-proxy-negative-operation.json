@@ -1,1 +1,0 @@
-{"error":{"code":"operation_unsupported","message":"model \"live-embedding\" does not support operation \"chat_completions\"","type":"invalid_request_error","model":"live-embedding","operation":"chat_completions","client_endpoint":"/v1/chat/completions","client_protocol":"openai"}}

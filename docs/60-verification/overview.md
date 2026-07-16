@@ -4,12 +4,13 @@ Status: active
 
 Type: verification
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-16
 
 ## Purpose
 
 集中承接服务验收、core/profile verifier、TUI acceptance 与 loadtest baseline。  
-历史 alignment checklist / acceptance-record / V1 live 复盘已迁入 `90-archive/records/`，**不再**作为当前实现约束。
+历史 alignment checklist / acceptance-record / dated live 记录 / V1 live 复盘已迁入 `90-archive/records/`，**不再**作为当前实现约束。
+`artifacts/` live 运行产物已从仓库移除（git 历史可找回）；结论保留在 records markdown。
 
 生产 runtime 主链为 **Runtime V2 only**。验收不得把 `StagePacket` / `NextAction` / graph dispatch / `ExecutionContextPatch` / 自动 replan successor 重新声明为通过标准。
 
@@ -41,9 +42,8 @@ Last Updated: 2026-07-14
 | [service-acceptance.md](service-acceptance.md) | 服务级验收入口与门禁指针 |
 | [core-runtime-verifier.md](core-runtime-verifier.md) | core runtime verifier 说明 |
 | [profile-software-dev-verifier.md](profile-software-dev-verifier.md) | software-dev profile verifier |
-| [authority-live-e2e-closure-verification.md](authority-live-e2e-closure-verification.md) | authority live e2e 记录（与 active design 配套） |
 | [loadtest-baseline.md](loadtest-baseline.md) | 压测 baseline |
-| `tui/` | TUI 验收相关 |
+| [tui/tui-agent-acceptance.md](tui/tui-agent-acceptance.md) | TUI agent 验收入口 |
 
 ## Common Commands（make verify-*）
 
@@ -77,8 +77,11 @@ make verify-runtime-profile-software-dev
 
 - `acceptance-record-*`、`*-code-alignment-checklist`、`framework-eventhub-module-boundary-checklist`
 - `convergence-authority-dispatch-live-verification.md`、`workorch-runtime-closure-modification-spec.md`
+- 2026-07-16：`authority-live-e2e-closure-verification.md`、`ai-proxy-*-live-verification-*.md`、`tui-workspace-runtime-refresh-history-closure-verification-*.md`、`tui-display-closure-tracking.md` → `90-archive/records/`
+- 2026-07-16：`tui-data-stability-command-optimization-plan.md` → `90-archive/completed/`
+- 2026-07-16：`60-verification/artifacts/**` 整目录出库（live JSON/log；结论在 records markdown）
 
-检索：[../90-archive/records/overview.md](../90-archive/records/overview.md)
+检索：[../90-archive/records/overview.md](../90-archive/records/overview.md)、[../90-archive/completed/overview.md](../90-archive/completed/overview.md)
 
 ## Related
 

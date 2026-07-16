@@ -109,3 +109,28 @@ Acceptance to define before development:
 - Formal business models and ownership boundaries.
 - Web control-plane workflow.
 - Interaction with Workspace, Run, Decision, Approval, and Memory models.
+
+### C10. LLM Context Budget Advanced Follow-ups
+
+Status: deferred-candidate
+
+Source: 2026-07-16 docs cleanup demoted
+`90-archive/completed/llm-context-budget-todo.md` out of active. Baseline
+bytes budget / timeout retry / CTX-01/CTX-02 already closed in code.
+
+Target direction:
+
+- Provider failover advanced policy (beyond single-target sealed ceiling).
+- Real tokenizer / provider-native token usage precision across models.
+- Broader multi-entry governance semantic normalization for context budget.
+- Differentiated governance for `context-too-large` (vs generic failure).
+
+Acceptance to define before development:
+
+- Must not reopen sealed Runtime V2 provider/model ceiling authority.
+- Keep provider-neutral C0–C5 cache plan; no map-based authority rebuild.
+- Promote only with formal plan + verifier coverage before re-entering active.
+
+Historical process note:
+
+- `../../90-archive/completed/llm-context-budget-todo.md`

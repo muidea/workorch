@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-16
 
 
 ## LLM Provider（2026-07-15）
@@ -84,9 +84,12 @@ Last Updated: 2026-07-14
 
 代码主链已收口。当前剩余主要是：
 
-1. **运维切换**：`deployed-workspace-progress-blocker-component-closure-plan.md` 中 production 目录维护窗口 / clean build 正式 apply（暂留 active）。
-2. **产品未关项**：auto-governance、software-dev DoD repair、requirement orchestration、TUI/console 统一、file-patch owner 迁移、MVP acceptance、run closure quality、llm context budget 等（见 active overview）。
-3. **文档债务**：权威层已按 V2 刷新；次要专题 / 个别 block readme 措辞可继续轻触。
+1. **运维切换（OPS-1）**：真实生产目录 `runtime-v1-retirement --apply` + clean build 维护窗口（过程日记已归档，不在 active 放长文）。
+2. **可选验证（OPT-1）**：file-patch `apply + validation + DoD closeout` 的 deployed live 一次。
+3. **延期候选**：LLM context budget 高级项见 `70-roadmap/candidates/`，**不占 active**。
+4. **文档维护**：权威层术语抽查、个别 block readme 措辞、archive 索引（见 matrix D-*）。
+
+2026-07-16 已将 active 中假活跃产品/审计日记、dated live 记录与 `60-verification/artifacts` 清理出当前入口；检索见 [90-archive](../90-archive/completed/overview.md)。
 
 统一清单：
 

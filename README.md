@@ -159,7 +159,7 @@ workorch ships with 6 built-in workspace templates and 36 per-stage Souls, loade
 | `doc-generator` | Technical documentation generation from source code |
 | `data-analysis` | Data query, Python/R scripting, statistical modeling |
 
-Each template has 6 Souls (planning, execution, decision, approval, validation, artifact). Users can customize templates and Souls after creation through the Web Console or API. See `docs/builtin-templates-and-souls-design.md` for details.
+Each template has 6 Souls (planning, execution, decision, approval, validation, artifact). Users can customize templates and Souls after creation through the Web Console or API. See `docs/40-profiles-capabilities/builtin-templates-and-souls.md` for details.
 
 ## Workorch Service
 
@@ -440,7 +440,7 @@ curl -f http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}
 
 The workspace create endpoint creates one formal `workorch` workspace instance, accepts an optional `description`, and defaults `deliverableDirectory` to `.workorch-workspaces/<generated-workspace-id>` for the file backend when the client omits it. Runtime state is stored under `repository.dataDir/internal/workspaces/<workspace-id>`. The workspace snapshot endpoint aggregates one workspace together with its related runs and blocking items. The run create, list, single-run, snapshot, status, and observability endpoints provide formal `workorch` run instance management. The run start endpoint synchronously advances a created `run` and returns the updated state, which may already be `completed`, `failed`, `blocked_on_decision`, or `blocked_on_approval`. The run resume endpoint returns `409 conflict` with `blocked` when the required decision or approval has not yet been resolved. The decision and approval endpoints provide formal query and processing paths for blocked runs. All run execution entrypoints share one in-process priority-aware wait queue behind `server.maxConcurrentRuns`. If `[llm].defaultEmbedding` is configured with an explicit provider/model target that supports the `embeddings` operation, workspace execution activation uses `/embeddings` for vector Memory recall and records `memoryRetrieval` evidence on the Run execution context. When defaultEmbedding is unset or embedding fails, activation falls back to workspace memory list baseline selection.
 
-Container-oriented deployment details are in `docs/deployment.md`, and `config/application.toml` provides the baseline runtime configuration template.
+Container-oriented deployment details are in `docs/50-product-interface/deployment.md`, and `config/application.toml` provides the baseline runtime configuration template.
 
 Formal verification entrypoints:
 
@@ -485,14 +485,13 @@ make ci
 
 ## Docs
 
-- `docs/structure.md`: layout normalization mapping
-- `docs/01-overview/current-state.md`: current documentation authority and migration entry
-- `docs/mvp-backlog.md`: closed MVP scope, completed items, and closure criteria used
-- `docs/next-mvp-acceptance.md`: next MVP scope aligned with the WorkOrch product planning baseline
-- `docs/runtime-expansion-plan.md`: completed runtime adapter, shell, patch, graph, and observability scope
-- `docs/advanced-runtime-scheduling-plan.md`: completed advanced MCP and priority scheduling scope
-- `docs/mcp-capability-management-design.md`: MCP tool/resource/prompt capability recognition, management, binding, and evidence design
-- `docs/workspace-concurrency-loadtest-plan.md`: workspace concurrency load test scope and completed pressure-test findings for mock and real LLM governed execution
-- `docs/run-closure-quality-improvement-plan.md`: active quality-improvement tracker for stable Run closure, strict DoD acceptance, recovery, efficiency, task decomposition, and Result / Artifact summary quality
-- `docs/next-stage-p1-development-plan.md`: completed P1 runtime context, provider capability, vector Memory, and lifecycle scope
-- `docs/next-stage-demand-candidates.md`: future demand candidates that are not active MVP leftovers
+正式导航入口：
+
+- `docs/README.md`：文档地图与阅读顺序
+- `docs/01-overview/current-state.md`：当前生产事实与权威分层
+- `docs/00-core/runtime-stage-contract.md`：中立 runtime 合约（设计 SoT）
+- `docs/70-roadmap/active/overview.md`：仅真实 residual 未关项
+- `docs/70-roadmap/candidates/next-stage-demand-candidates.md`：延期产品候选
+- `docs/90-archive/completed/overview.md`：已完成过程计划（历史检索，不约束新实现）
+
+实现 SoT：`internal/modules/kernel/orchestrator/readme.md` 与 `internal/pkg/workorchruntimecontract`。

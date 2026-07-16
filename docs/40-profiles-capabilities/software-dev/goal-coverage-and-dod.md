@@ -169,5 +169,5 @@ software-dev profile 的稳定证据面应优先复用：
 ## Source Documents
 
 - `code-agent.md`
-- `../../70-roadmap/active/software-requirement-development-orchestration-plan.md`
+- `../../90-archive/completed/software-requirement-development-orchestration-plan.md`（历史过程稿）
 - `../../90-archive/completed/software-dev-code-agent-closure-plan.md`

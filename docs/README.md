@@ -2,7 +2,7 @@
 
 Status: active
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-16
 
 ## Purpose
 
@@ -90,13 +90,14 @@ Last Updated: 2026-07-14
 
 若旧文档与核心合约冲突，以 `00-core/runtime-stage-contract.md` 为准。若设计文档与模块 readme/代码冲突，以代码与模块 readme 为准并回写设计文档。
 
-## Current Documentation Status（2026-07-14）
+## Current Documentation Status（2026-07-16）
 
 - **生产代码路径 = Runtime V2 only**（Start/Resume → `DriveRuntimeV2`）。
-- 权威层已按 V2 刷新：`00-core` 双层映射、`01-overview` 事实入口、`20-runtime-flow` / `30-module-architecture` 主链、active roadmap 瘦身。
-- 约 146 份已完成 / V1-absorbed plan 已迁 `90-archive/completed/`。
-- Active 仅保留运维切换项（deployed-blocker 生产 apply）与真实产品未关项。
+- 权威层已按 V2 刷新：`00-core` 双层映射、`01-overview` 事实入口、`20-runtime-flow` / `30-module-architecture` 主链。
+- 2026-07-14：约 146 份 completed / V1-absorbed plan 已迁 `90-archive/completed/`。
+- **2026-07-16 文档清理**：`active/` 假活跃产品/审计/收口日记全部归档；dated live verification 迁 `records/`；`60-verification/artifacts/**` 出库。
+- **Active 仅保留 residual 索引**（OPS-1 生产 apply + 可选 OPT-1）；过程日记只在 archive 检索。
 - **已废止作为生产主链叙述**：StagePacket、NextAction、graph dispatch checkpoint、ExecutionContextPatch、自动 replan successor。
-- 根目录正式文档：本文 +（可选）`docs-domain-module-flow-reorganization-plan.md`（历史迁移计划，不再指导 V2 实现）。
+- 根目录正式导航：本文。历史目录重组计划见 `90-archive/completed/docs-domain-module-flow-reorganization-plan.md`。
 
 详见：[01-overview/current-state.md](01-overview/current-state.md)、[70-roadmap/active/overview.md](70-roadmap/active/overview.md)。

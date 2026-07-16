@@ -9,7 +9,8 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 AI_PROXY_ROOT="${AI_PROXY_ROOT:-/home/rangh/aispace/ai-proxy}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-ARTIFACT_DIR="${WORKORCH_AI_PROXY_LIVE_ARTIFACT_DIR:-$ROOT_DIR/docs/60-verification/artifacts/ai-proxy-primary-llm-live-$STAMP}"
+# Live outputs stay local/ephemeral by default (not committed under docs/).
+ARTIFACT_DIR="${WORKORCH_AI_PROXY_LIVE_ARTIFACT_DIR:-${TMPDIR:-/tmp}/workorch-live-artifacts/ai-proxy-primary-llm-live-$STAMP}"
 UPSTREAM_ADDR="${WORKORCH_AI_PROXY_LIVE_UPSTREAM_ADDR:-127.0.0.1:18182}"
 AI_PROXY_ADDR="${WORKORCH_AI_PROXY_LIVE_PROXY_ADDR:-127.0.0.1:18183}"
 WORKORCH_ADDR="${WORKORCH_AI_PROXY_LIVE_WORKORCH_ADDR:-127.0.0.1:18080}"

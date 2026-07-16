@@ -1,3 +1,0 @@
-sse_connected=true
-sse_state=interrupted
-sse_state=reconnected lastEventId=projection:6e5e6203c98bee1620407e63fb169deb:ws-8c31db3fcee13ffc:1784121903426890079

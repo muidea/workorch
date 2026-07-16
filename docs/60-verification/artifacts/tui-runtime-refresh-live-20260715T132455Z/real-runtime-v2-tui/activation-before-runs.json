@@ -1,6 +1,0 @@
-{
-  "service": "workorch",
-  "backend": "file",
-  "dataRoot": "/home/rangh/aispace/workorch/docs/60-verification/artifacts/tui-runtime-refresh-live-20260715T132455Z/data",
-  "runs": []
-}

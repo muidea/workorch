@@ -10,16 +10,16 @@
 #   5. real Runtime V2 execution through the production activation endpoint
 #   6. actual Bubble Tea TUI/PTY rendering gate
 #
-# Artifacts are written under a versioned docs path by default so the plan
-# completion definition can cite them (not a disposable /tmp-only path).
+# Live outputs stay local/ephemeral by default (not committed under docs/).
+# Override with WORKORCH_TUI_REFRESH_VERIFY_ARTIFACT_DIR / KEEP_ARTIFACTS as needed.
 
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STAMP="${WORKORCH_TUI_REFRESH_VERIFY_STAMP:-$(date -u +%Y%m%dT%H%M%SZ)}"
-DEFAULT_ARTIFACT_DIR="$ROOT_DIR/docs/60-verification/artifacts/tui-runtime-refresh-live-$STAMP"
+DEFAULT_ARTIFACT_DIR="${TMPDIR:-/tmp}/workorch-live-artifacts/tui-runtime-refresh-live-$STAMP"
 ARTIFACT_DIR="${WORKORCH_TUI_REFRESH_VERIFY_ARTIFACT_DIR:-$DEFAULT_ARTIFACT_DIR}"
-KEEP_ARTIFACTS="${WORKORCH_TUI_REFRESH_VERIFY_KEEP_ARTIFACTS:-1}"
+KEEP_ARTIFACTS="${WORKORCH_TUI_REFRESH_VERIFY_KEEP_ARTIFACTS:-0}"
 CONFIG_DIR="$ARTIFACT_DIR/config"
 DATA_DIR="${WORKORCH_TUI_REFRESH_VERIFY_DATA_DIR:-$ARTIFACT_DIR/data}"
 SERVER_LOG="$ARTIFACT_DIR/workorch-server.log"

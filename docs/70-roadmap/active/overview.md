@@ -4,11 +4,11 @@ Status: active
 
 Type: roadmap
 
-Last Updated: 2026-07-15
+Last Updated: 2026-07-16
 
 ## Purpose
 
-仅索引 **当前仍未关闭** 的工作项。已完成 / code-closed / 被 Runtime V2 吸收的 V1 hardening 与 `goal-dod-nextaction-s*` 切片已迁入 [90-archive/completed](../../90-archive/completed/overview.md)，不再在此列出。
+仅索引 **当前仍未关闭** 的工作项。已完成 / code-closed / 过程日记 / 被 Runtime V2 吸收的计划一律在 [90-archive/completed](../../90-archive/completed/overview.md) 检索，**不得**再从 archive 推导新实现约束。
 
 ## Runtime Code Status
 
@@ -18,48 +18,56 @@ Last Updated: 2026-07-15
 | V1 StagePacket / NextAction / graph dispatch 主链 | **已删除** |
 | 设计结论上提 | 见 [00-core/runtime-stage-contract.md](../../00-core/runtime-stage-contract.md)、[current-state.md](../../01-overview/current-state.md) |
 
-## Active Items
+## Residual Open（仅此）
 
-### 运维切换（代码已关，生产 apply 未关）
+| ID | 项 | 说明 | 历史过程稿 |
+| --- | --- | --- | --- |
+| OPS-1 | 生产目录 V1 retirement 正式 apply | 代码/live 已 complete；等待 clean build + 真实生产目录维护窗口执行 `runtime-v1-retirement --apply` | [deployed-workspace-progress-blocker-component-closure-plan.md](../../90-archive/completed/deployed-workspace-progress-blocker-component-closure-plan.md) |
+| OPT-1 | file-patch deployed live（可选） | 代码迁移已完成；可选补一次 `patch apply + validation + DoD closeout` 的 deployed live | [file-patch-side-effect-owner-migration-plan.md](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
 
-| 文档 | 说明 |
-| --- | --- |
-| [deployed-workspace-progress-blocker-component-closure-plan.md](deployed-workspace-progress-blocker-component-closure-plan.md) | RV2-01~08 code/live complete；等待 clean build + 生产目录维护窗口正式 apply。稳定结论已上提 core/flow/module，本文件不再充当实现 SoT。 |
+延期产品候选（**不占 active**）：LLM context budget 高级项（failover / tokenizer / 原生 usage 精度 / context-too-large 差异化）→ [candidates/next-stage-demand-candidates.md](../candidates/next-stage-demand-candidates.md)。
 
-### 产品 / 能力
+统一清单：[current-unclosed-matrix.md](../../01-overview/current-unclosed-matrix.md)、[unfinished-todo-index.md](../../01-overview/unfinished-todo-index.md)。
 
-| 文档 | 说明 |
-| --- | --- |
-| [auto-governance-ticket-approval-plan.md](auto-governance-ticket-approval-plan.md) | 自动治理与 ticket approval 产品化 |
-| [software-dev-dod-repair-closure-plan.md](software-dev-dod-repair-closure-plan.md) | software-dev profile DoD repair |
-| [software-requirement-development-orchestration-plan.md](software-requirement-development-orchestration-plan.md) | 需求开发编排产品能力 |
-| [unified-tui-console-migration-plan.md](unified-tui-console-migration-plan.md) | TUI / Web console 统一 |
-| [file-patch-side-effect-owner-migration-plan.md](file-patch-side-effect-owner-migration-plan.md) | file-patch 副作用 owner 迁移 |
-| [next-mvp-acceptance.md](next-mvp-acceptance.md) | 下一阶段 MVP 验收 |
-| [run-closure-quality-improvement-plan.md](run-closure-quality-improvement-plan.md) | Run 收口质量 |
-| [llm-context-budget-todo.md](llm-context-budget-todo.md) | LLM context budget 产品/实现跟进 |
-| [ai-proxy-primary-llm-provider-cutover-design-2026-07-15.md](ai-proxy-primary-llm-provider-cutover-design-2026-07-15.md) | ai-proxy cutover：RR01–RR06 代码与门禁收口（make test/fmt/vet/build/boundary 绿）；仅待 live 后改 code-closed |
-| [authority-live-verification-e2e-closure-design.md](authority-live-verification-e2e-closure-design.md) | authority live e2e 验证设计 |
-| [module-block-contract-closure-validation-plan.md](module-block-contract-closure-validation-plan.md) | module/block 合同校验 |
-| [module-block-initiator-inventory-audit-2026-07-09.md](module-block-initiator-inventory-audit-2026-07-09.md) | initiator 清单审计 |
-| [operation-map-json-contract-audit-2026-07-14.md](operation-map-json-contract-audit-2026-07-14.md) | operation map / JSON 交互合同残留审计与收口 backlog |
+## 2026-07-16 Docs Cleanup Ingest
 
-## Archived From Active (this refresh)
+本轮从 `active/` 与验证过程目录迁出 / 移除：
 
-本轮从 `active/` 迁出约 **146** 份文档，包括：
+### → `90-archive/completed/`
 
-- `tui-workspace-runtime-refresh-history-closure-plan-2026-07-15.md`（FR01–FR07 + TC10 live completed, 2026-07-15）
+- `ai-proxy-primary-llm-provider-cutover-design-2026-07-15.md`（code-closed + live 通过）
+- `operation-map-json-contract-audit-2026-07-14.md`
+- `module-block-initiator-inventory-audit-2026-07-09.md`
+- `runtime-v2-typed-event-contract-closure-summary-2026-07-14.md`
+- `auto-governance-ticket-approval-plan.md`（AG 全 verified）
+- `software-dev-dod-repair-closure-plan.md`（SDR 全 completed）
+- `software-requirement-development-orchestration-plan.md`（SRD 全 verified/implemented）
+- `next-mvp-acceptance.md`（N1–N4 completed）
+- `unified-tui-console-migration-plan.md`（仅勿回退约束）
+- `run-closure-quality-improvement-plan.md`（过程日记）
+- `authority-live-verification-e2e-closure-design.md`（V1-era，P0–P2 已 code-closed）
+- `module-block-contract-closure-validation-plan.md`（收口方法论）
+- `deployed-workspace-progress-blocker-component-closure-plan.md`（长日记；residual 仅 OPS-1）
+- `file-patch-side-effect-owner-migration-plan.md`（长日记；residual 仅 OPT-1）
+- `llm-context-budget-todo.md`（基础已收口；高级项进 candidates）
+- `docs-domain-module-flow-reorganization-plan.md`（目录重组历史计划）
+- `tui-data-stability-command-optimization-plan.md`（TUI 过程收口）
 
-- 全部 `goal-dod-nextaction-s*` 与 iterative delivery plan（completed）
-- V1 contract-retry batch audit / evidence index
-- 已被 Runtime V2 reducer 吸收的 convergence-authority / runtime-*-closure / nextaction hardening 计划
-- `Status: completed|code-closed|closed|implemented` 的其余收口文
+### → `90-archive/records/`
 
-检索入口：[90-archive/completed/overview.md](../../90-archive/completed/overview.md)
+- `ai-proxy-primary-llm-provider-cutover-live-verification-2026-07-15.md`
+- `tui-workspace-runtime-refresh-history-closure-verification-2026-07-15.md`
+- `authority-live-e2e-closure-verification.md`
+- `tui-display-closure-tracking.md`
+
+### 从仓库移除
+
+- `docs/60-verification/artifacts/**`（live 运行产物；结论保留在 records markdown；git 历史可找回）
 
 ## Rules
 
 1. 新增 active 项必须对应真实未完成工作；已归档 plan 只有在代码/证据复核给出明确反证并同步作废旧 completion record 时才允许重新打开。
 2. 实现约束以 `00-core` + 模块 readme + `workorchruntimecontract` 为准。
 3. 某项 code-closed 且无运维/产品尾巴时，应 `git mv` 至 `90-archive/completed/` 并更新本 overview。
-4. 清理失效内容：V1 主链术语、重复 audit、假活跃 Status 不得继续占用 active。
+4. active **不**存放 100KB+ 过程日记；过程细节只在 archive 检索。
+5. 清理失效内容：V1 主链术语、重复 audit、假活跃 Status 不得继续占用 active。

@@ -1,3 +1,0 @@
-artifact=/home/rangh/aispace/workorch/docs/60-verification/artifacts/ai-proxy-primary-llm-live-runtime-20260715T150944Z
-ai_proxy_addr=127.0.0.1:18183
-workorch_addr=127.0.0.1:18080

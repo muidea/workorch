@@ -23,7 +23,8 @@ WorkOrch 以内置 `ai-proxy` 为唯一默认 LLM endpoint：
 - `selectProviderConfig` 与 map 遍历回退
 - activation `llmProviderId` 与 provider-only context value
 
-设计执行依据：`docs/70-roadmap/active/ai-proxy-primary-llm-provider-cutover-design-2026-07-15.md`。
+设计执行依据（历史收口稿，非当前实现 SoT）：`docs/90-archive/completed/ai-proxy-primary-llm-provider-cutover-design-2026-07-15.md`。
+当前事实见 `docs/01-overview/current-state.md` 与 `internal/modules/blocks/llm/readme.md`。
 
 ---
 

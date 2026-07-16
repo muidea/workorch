@@ -70,5 +70,5 @@ TUI 必须使用与 backend/Web 一致的状态源语义：
 
 ## Source Documents
 
-- `../../30-module-architecture/mvvp-workspace-viewmodel-architecture.md`
-- `../../60-verification/tui/display-closure-tracking.md`
+- `../../90-archive/superseded/mvvp-workspace-viewmodel-architecture.md`（历史）
+- `../../90-archive/records/tui-display-closure-tracking.md`（历史闭环记录）

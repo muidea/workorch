@@ -4,7 +4,7 @@ Status: active
 
 Type: archive
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-16
 
 ## Purpose
 
@@ -16,6 +16,30 @@ Last Updated: 2026-07-14
 - 仅过渡或被新结构完全替代 → 可再迁 `superseded/`
 - 当前事实 / API / 验收 **不得** 回写本目录
 - 实现约束以 `00-core` + 模块 readme + `workorchruntimecontract` 为准
+
+## 2026-07-16 Docs Cleanup Ingest
+
+本轮从 `70-roadmap/active/`、`docs/` 根与 `60-verification/` 迁入过程稿（**不约束新实现**）：
+
+| 文件 | 一行结论 |
+| --- | --- |
+| `ai-proxy-primary-llm-provider-cutover-design-2026-07-15.md` | code-closed + live 通过 |
+| `operation-map-json-contract-audit-2026-07-14.md` | map/JSON 交互合同收口 completed |
+| `module-block-initiator-inventory-audit-2026-07-09.md` | 22 组件职责审计 completed |
+| `runtime-v2-typed-event-contract-closure-summary-2026-07-14.md` | V2 强类型事件收口总结 |
+| `auto-governance-ticket-approval-plan.md` | AG 全 verified |
+| `software-dev-dod-repair-closure-plan.md` | SDR 全 completed |
+| `software-requirement-development-orchestration-plan.md` | SRD 全 verified/implemented |
+| `next-mvp-acceptance.md` | N1–N4 completed |
+| `unified-tui-console-migration-plan.md` | 入口收敛完成；仅勿回退约束 |
+| `run-closure-quality-improvement-plan.md` | 过程日记（稳定定义已迁正式结构） |
+| `authority-live-verification-e2e-closure-design.md` | V1-era live design；P0–P2 已 code-closed |
+| `module-block-contract-closure-validation-plan.md` | 收口方法论，非开放 backlog |
+| `deployed-workspace-progress-blocker-component-closure-plan.md` | 长日记；residual 仅 OPS-1 生产 apply |
+| `file-patch-side-effect-owner-migration-plan.md` | 代码迁移完成；可选 OPT-1 live |
+| `llm-context-budget-todo.md` | 基础已收口；高级项进 candidates |
+| `docs-domain-module-flow-reorganization-plan.md` | 目录重组历史计划 |
+| `tui-data-stability-command-optimization-plan.md` | TUI 数据稳定化过程收口 |
 
 ## 2026-07-14 Runtime V2 Docs Refresh Ingest
 
@@ -29,7 +53,7 @@ Last Updated: 2026-07-14
 | runtime-*-closure | 各类 V1 nextaction / ledger / validation / statechange hardening |
 | 其他 completed/code-closed | Status 已关闭的收口与 audit |
 
-完整文件列表以本目录 `ls` 为准（约 150+ 文件）。检索时按文件名主题过滤即可。
+完整文件列表以本目录 `ls` 为准。检索时按文件名主题过滤即可。
 
 ## Early Completed Themes（既有）
 

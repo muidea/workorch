@@ -1,6 +1,0 @@
-: connected
-
-id: projection:a8af6aad6e91b93eaba0782209425208:ws-8c31db3fcee13ffc:1784121904422382197
-event: workorch
-data: {"id":"projection:a8af6aad6e91b93eaba0782209425208:ws-8c31db3fcee13ffc:1784121904422382197","streamGeneration":"a8af6aad6e91b93eaba0782209425208","streamRevision":1784121904422382197,"workspaceId":"ws-8c31db3fcee13ffc","runId":"run-live-a-493077","revision":{"streamGeneration":"a8af6aad6e91b93eaba0782209425208","streamRevision":1784121904422382197,"workspaceRevision":1784121904422382196,"activityRevision":1784121904422382196},"changedSections":["overview","runtime_progress","activity","result"],"projectionState":"ready","updatedAt":"2026-07-15T13:25:05.24953455Z"}
-
