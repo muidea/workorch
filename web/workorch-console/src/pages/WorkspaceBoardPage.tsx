@@ -7,6 +7,7 @@ import { useSSE } from '../hooks';
 import { errorMessage, shortId, stateTag, stateLabel, boundedParagraph, metricGrid } from '../utils';
 import { projectionStatusSummary, workspaceBoardActivationRequest, workspaceBoardActivationHint } from '../helpers';
 import type { ControlPlaneProps, ProjectionStatus, Workspace, WorkspaceExecutionActivationRequest } from '../types';
+import { WorkspaceSetupModal } from './components/WorkspaceSetupModal';
 
 type WorkspaceBoardCardItem = {
   workspace: Workspace;
@@ -21,6 +22,7 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
   const [boardItems, setBoardItems] = useState<WorkspaceBoardCardItem[]>([]);
   const [projection, setProjection] = useState<ProjectionStatus | undefined>(undefined);
   const [loading, setLoading] = useState(false);
+  const [workspaceSetupOpen, setWorkspaceSetupOpen] = useState(false);
 
   const loadBoard = useCallback(async (showLoading = true) => {
     if (showLoading) {
@@ -81,14 +83,33 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
     trackWorkspaceResumeInBackground(workspace.id, request);
   };
 
+  const handleWorkspaceCreated = async (workspaceId: string) => {
+    await loadBoard();
+    onOpenWorkspace(workspaceId);
+  };
+
   return (
     <PageContainer
       title="业务总览"
-      subTitle={projection ? projectionStatusSummary(projection) : '从工作空间视角查看目标、运行、治理阻塞和交付状态'}
-      extra={<Button onClick={() => void loadBoard()} loading={loading}>刷新</Button>}
+      subTitle={boardItems.length > 0 && projection
+        ? projectionStatusSummary(projection)
+        : '创建工作空间后，可在这里查看目标、运行、治理阻塞和交付状态'}
+      extra={<Space><Button type="primary" onClick={() => setWorkspaceSetupOpen(true)}>创建工作空间</Button><Button onClick={() => void loadBoard()} loading={loading}>刷新</Button></Space>}
     >
       {boardItems.length === 0 && !loading ? (
-        <Empty description="暂无工作空间" />
+        <ProCard className="workspace-board-empty" bordered>
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={(
+              <Space direction="vertical" size="small">
+                <Typography.Text strong>还没有工作空间</Typography.Text>
+                <Typography.Text type="secondary">从这里创建一个工作空间，定义目标、验收标准和执行人格后，即可提交执行并在此跟踪全局进展。</Typography.Text>
+              </Space>
+            )}
+          >
+            <Button type="primary" onClick={() => setWorkspaceSetupOpen(true)}>创建第一个工作空间</Button>
+          </Empty>
+        </ProCard>
       ) : (
         <CardGrid className="workspace-board-grid" loading={loading}>
           {boardItems.map((item) => {
@@ -140,6 +161,11 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
           })}
         </CardGrid>
       )}
+      <WorkspaceSetupModal
+        open={workspaceSetupOpen}
+        onClose={() => setWorkspaceSetupOpen(false)}
+        onCreated={handleWorkspaceCreated}
+      />
     </PageContainer>
   );
 }

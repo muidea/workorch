@@ -52,7 +52,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const [dods, setDoDs] = useState<DoD[]>([]);
   const [souls, setSouls] = useState<Soul[]>([]);
   const [soulBindings, setSoulBindings] = useState<WorkspaceSoulBindings | undefined>(undefined);
-  const [workspaceTemplates, setWorkspaceTemplates] = useState<WorkspaceTemplate[]>([]);
+  const [workspaceTemplates] = useState<WorkspaceTemplate[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [mcpServers, setMCPServers] = useState<MCPServer[]>([]);
   const [mcpCapabilities, setMCPCapabilities] = useState<MCPCapability[]>([]);
@@ -914,30 +914,6 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     clearWorkspaceSetupDraftSession();
   };
 
-  const openWorkspaceSetup = async () => {
-    setLoading(true);
-    try {
-      const [nextSouls, nextTemplates] = await Promise.all([
-        workorchApi.listSouls(),
-        workorchApi.listWorkspaceTemplates()
-      ]);
-      setSouls(nextSouls);
-      setWorkspaceTemplates(nextTemplates);
-      workspaceForm.resetFields();
-      setupGoalForm.resetFields();
-      setupDoDForm.resetFields();
-      setupSoulBindingsForm.resetFields();
-      setWorkspaceSetupMode('manual');
-      clearWorkspaceSetupDraftSession();
-      setSetupStep(0);
-      setWorkspaceSetupOpen(true);
-    } catch (error) {
-      message.error(errorMessage(error));
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const applyWorkspaceTemplate = (templateID?: string) => {
     clearWorkspaceSetupDraftSession();
     const template = workspaceTemplates.find((item) => item.id === templateID);
@@ -1270,7 +1246,6 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           </div>
           <div className="workspace-header-actions-main">
             <Button type="primary" disabled={!workspaceId} onClick={requestWorkspaceActivation}>提交执行</Button>
-            <Button onClick={() => void openWorkspaceSetup()}>创建工作空间</Button>
             <Dropdown
               menu={{
                 items: [
