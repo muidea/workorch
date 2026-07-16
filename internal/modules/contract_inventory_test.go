@@ -10,7 +10,8 @@ import (
 
 func TestModuleBlockInitiatorClosurePlanCoversRegisteredComponents(t *testing.T) {
 	root := findRepoRoot(t)
-	planPath := filepath.Join(root, "docs", "70-roadmap", "active", "module-block-contract-closure-validation-plan.md")
+	// Process plan was archived during docs cleanup; inventory coverage still uses it as a historical checklist.
+	planPath := filepath.Join(root, "docs", "90-archive", "completed", "module-block-contract-closure-validation-plan.md")
 	planBytes, err := os.ReadFile(planPath)
 	if err != nil {
 		t.Fatalf("read closure plan: %v", err)

@@ -52,7 +52,9 @@ fi
 
 # 4. No HTTP client outside workorchclient and biz/backends/remote.
 echo "  → Checking no HTTP client leakage outside allowed packages..."
-HTTP_LEAKS=$(grep -rn '"github.com/muidea/workorch/internal/pkg/workorchclient"' \
+# Production sources only; *_test.go may import the client to assert remote boundaries.
+HTTP_LEAKS=$(grep -rn --include='*.go' --exclude='*_test.go' \
+  '"github.com/muidea/workorch/internal/pkg/workorchclient"' \
   "$CLI_ROOT/$MODULE_BASE/" 2>/dev/null | grep -v 'workorchclient/' | grep -v 'biz/backends/remote.go' || true)
 if [ -n "$HTTP_LEAKS" ]; then
   fail "HTTP client leaked outside allowed packages: $HTTP_LEAKS"
@@ -62,7 +64,8 @@ fi
 
 # 5. Local/eventhub backend must not import workorchclient; remote backend is the
 # only backend transport allowed to use the HTTP client.
-LOCAL_BACKEND_LEAKS=$(grep -rn '"github.com/muidea/workorch/internal/pkg/workorchclient"\|"workorchclient"' \
+LOCAL_BACKEND_LEAKS=$(grep -rn --include='*.go' --exclude='*_test.go' \
+  '"github.com/muidea/workorch/internal/pkg/workorchclient"\|"workorchclient"' \
   "$CLI_ROOT/$MODULE_BASE/biz/backends/" 2>/dev/null | grep -v 'biz/backends/remote.go' || true)
 if [ -n "$LOCAL_BACKEND_LEAKS" ]; then
   fail "Local/eventhub backend imports HTTP client: $LOCAL_BACKEND_LEAKS"
