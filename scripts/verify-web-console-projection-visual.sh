@@ -79,7 +79,6 @@ require_file_contains "$SRC_DIR/pages/WorkspaceBoardPage.tsx" "workorchApi.readW
 require_file_contains "$SRC_DIR/api.ts" "readRunSnapshot: async (runId: string, workspaceId: string)" "run snapshot API requires workspace scope"
 require_file_contains "$SRC_DIR/api.ts" "runPath(workspaceId, runId, 'snapshot')" "run snapshot API uses workspace-scoped path"
 require_file_contains "$SRC_DIR/api.ts" "runCommandBody('resume', workspaceId, runId" "web resume sends canonical resume intent"
-require_file_contains "$SRC_DIR/api.ts" "executionContextPatch" "web resume preserves execution context patch"
 require_file_contains "$SRC_DIR/api.ts" "source: 'web'" "web run command carries source"
 require_file_contains "$SRC_DIR/api.ts" "reason: 'user_requested'" "web run command carries reason"
 

@@ -432,7 +432,7 @@ DOD_ID="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 
 REQUEST_ID="verify-resume-$VERIFY_SUFFIX"
 post_json "/api/v1/workorch/workspaces/$WORKSPACE_ID/execution-activations" \
-  '{"goalId":"'"$GOAL_ID"'","doDId":"'"$DOD_ID"'","priority":2,"requestId":"'"$REQUEST_ID"'","reason":"e2e_resume","executionContextPatch":{"latestOperatorInput":{"source":"e2e","content":"resume verification"}}}' \
+  '{"goalId":"'"$GOAL_ID"'","doDId":"'"$DOD_ID"'","priority":2,"requestId":"'"$REQUEST_ID"'","reason":"e2e_resume"}' \
   "$TMP_DIR/resume-activation.json"
 grep '"accepted"[[:space:]]*:[[:space:]]*true' "$TMP_DIR/resume-activation.json" >/dev/null
 validate_command_response "$TMP_DIR/resume-activation.json" "resume" "$REQUEST_ID" "e2e_resume"
@@ -455,7 +455,7 @@ PY
 if [[ -n "$RUN_ID" ]]; then
   REPEAT_REQUEST_ID="verify-repeat-resume-$VERIFY_SUFFIX"
   post_json "/api/v1/workorch/workspaces/$WORKSPACE_ID/runs/$RUN_ID/resume?priority=2" \
-    '{"requestId":"'"$REPEAT_REQUEST_ID"'","reason":"e2e_repeat_resume","executionContextPatch":{"latestOperatorInput":{"source":"e2e","content":"repeat resume verification"}}}' \
+    '{"requestId":"'"$REPEAT_REQUEST_ID"'","reason":"e2e_repeat_resume"}' \
     "$TMP_DIR/repeat-resume.json"
   grep '"accepted"[[:space:]]*:[[:space:]]*true' "$TMP_DIR/repeat-resume.json" >/dev/null
   validate_command_response "$TMP_DIR/repeat-resume.json" "resume" "$REPEAT_REQUEST_ID" "e2e_repeat_resume"
@@ -467,7 +467,7 @@ if [[ "$MANAGE_INSTANCE" == "1" || "$MANAGE_INSTANCE" == "true" ]]; then
   restart_server
   RESTART_REQUEST_ID="verify-restart-resume-$VERIFY_SUFFIX"
   post_json "/api/v1/workorch/workspaces/$WORKSPACE_ID/execution-activations" \
-    '{"goalId":"'"$GOAL_ID"'","doDId":"'"$DOD_ID"'","priority":2,"requestId":"'"$RESTART_REQUEST_ID"'","reason":"e2e_service_restart_resume","executionContextPatch":{"latestOperatorInput":{"source":"e2e","content":"service restart resume verification"}}}' \
+    '{"goalId":"'"$GOAL_ID"'","doDId":"'"$DOD_ID"'","priority":2,"requestId":"'"$RESTART_REQUEST_ID"'","reason":"e2e_service_restart_resume"}' \
     "$TMP_DIR/restart-resume.json"
   grep '"accepted"[[:space:]]*:[[:space:]]*true' "$TMP_DIR/restart-resume.json" >/dev/null
   validate_command_response "$TMP_DIR/restart-resume.json" "resume" "$RESTART_REQUEST_ID" "e2e_service_restart_resume"

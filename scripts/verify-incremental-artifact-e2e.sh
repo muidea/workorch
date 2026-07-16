@@ -798,32 +798,6 @@ payload = {
     "doDId": dod_id,
     "llmTarget": {"providerId": provider_id, "modelId": "verify-model"},
     "priority": 1,
-    "executionContextPatch": {
-        "stateChangingOutputRequired": True,
-        "repairObjective": "produce_state_changing_output",
-        "requestedOutputMode": "incrementalArtifact",
-        "repairActionPackage": {
-            "requiredOutput": {
-                "mustIncludeStateChangingNode": True,
-                "estimatedPatchContentBytes": 20000,
-                "expectedStateChangingArtifactCount": 1,
-            },
-        },
-        "executionContract": {
-            "stateChangePolicy": "must_produce_state_change",
-            "profileContracts": {
-                "neutral": {
-                    "deliverableExpectations": [
-                        {
-                            "id": "source_change",
-                            "required": True,
-                            "description": "A neutral workspace deliverable must be changed through runtime-managed artifact output.",
-                        }
-                    ],
-                },
-            },
-        },
-    },
 }
 with open(path, "w", encoding="utf-8") as handle:
     json.dump(payload, handle, separators=(",", ":"))

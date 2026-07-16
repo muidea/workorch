@@ -326,11 +326,11 @@ RESUME_REQUEST_2="s11-2-resume-$VERIFY_SUFFIX-2"
 RESUME_REASON="s11_2_dual_workspace_resume"
 
 post_json "/api/v1/workorch/workspaces/$WORKSPACE_1/execution-activations" \
-  '{"goalId":"'"$GOAL_1"'","doDId":"'"$DOD_1"'","priority":2,"requestId":"'"$RESUME_REQUEST_1"'","reason":"'"$RESUME_REASON"'","intent":"resume","executionContextPatch":{"latestOperatorInput":{"source":"e2e","content":"dual workspace resume one"}}}' \
+  '{"goalId":"'"$GOAL_1"'","doDId":"'"$DOD_1"'","priority":2,"requestId":"'"$RESUME_REQUEST_1"'","reason":"'"$RESUME_REASON"'","intent":"resume"}' \
   "$TMP_DIR/resume-1.json" &
 pid_resume_1=$!
 post_json "/api/v1/workorch/workspaces/$WORKSPACE_2/execution-activations" \
-  '{"goalId":"'"$GOAL_2"'","doDId":"'"$DOD_2"'","priority":2,"requestId":"'"$RESUME_REQUEST_2"'","reason":"'"$RESUME_REASON"'","intent":"resume","executionContextPatch":{"latestOperatorInput":{"source":"e2e","content":"dual workspace resume two"}}}' \
+  '{"goalId":"'"$GOAL_2"'","doDId":"'"$DOD_2"'","priority":2,"requestId":"'"$RESUME_REQUEST_2"'","reason":"'"$RESUME_REASON"'","intent":"resume"}' \
   "$TMP_DIR/resume-2.json" &
 pid_resume_2=$!
 wait_for_pids "$pid_resume_1" "$pid_resume_2"
@@ -355,11 +355,11 @@ DECISION_2="s11-2-decision-$VERIFY_SUFFIX-2"
 REPLAN_REASON="s11_2_dual_workspace_replan"
 
 post_json "/api/v1/workorch/workspaces/$WORKSPACE_1/runs/$RUN_1/resume?priority=2" \
-  '{"intent":"replan","requestId":"'"$REPLAN_REQUEST_1"'","decisionId":"'"$DECISION_1"'","reason":"'"$REPLAN_REASON"'","executionContextPatch":{"latestOperatorInput":{"source":"e2e","content":"dual workspace replan one"}}}' \
+  '{"intent":"replan","requestId":"'"$REPLAN_REQUEST_1"'","decisionId":"'"$DECISION_1"'","reason":"'"$REPLAN_REASON"'}' \
   "$TMP_DIR/replan-1.json" &
 pid_replan_1=$!
 post_json "/api/v1/workorch/workspaces/$WORKSPACE_2/runs/$RUN_2/resume?priority=2" \
-  '{"intent":"replan","requestId":"'"$REPLAN_REQUEST_2"'","decisionId":"'"$DECISION_2"'","reason":"'"$REPLAN_REASON"'","executionContextPatch":{"latestOperatorInput":{"source":"e2e","content":"dual workspace replan two"}}}' \
+  '{"intent":"replan","requestId":"'"$REPLAN_REQUEST_2"'","decisionId":"'"$DECISION_2"'","reason":"'"$REPLAN_REASON"'}' \
   "$TMP_DIR/replan-2.json" &
 pid_replan_2=$!
 wait_for_pids "$pid_replan_1" "$pid_replan_2"

@@ -554,7 +554,7 @@ dod_id="$(json_field "$TMP_DIR/dod.json" dod.id)"
 capture_runs_before_activation "$TMP_DIR/activation-before-runs.json"
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$WORKSPACE_ID/execution-activations" \
   -H 'Content-Type: application/json' \
-  -d '{"intent":"resume","requestId":"acceptance-slice-e2e-'"$VERIFY_SUFFIX"'","reason":"e2e_resume","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmTarget":{"providerId":"verify","modelId":"verify-model"},"executionContextPatch":{"executionContract":{"acceptanceSlicePolicy":{"schemaVersion":"workorch.acceptance_slice_policy.v1","maxWorkItems":1,"completionPolicy":"all_required_items_accepted","resultPolicy":"slice_result_allowed"}}}}' >"$TMP_DIR/activation.json"
+  -d '{"intent":"resume","requestId":"acceptance-slice-e2e-'"$VERIFY_SUFFIX"'","reason":"e2e_resume","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmTarget":{"providerId":"verify","modelId":"verify-model"}}' >"$TMP_DIR/activation.json"
 
 run_id="$(wait_activation_run "$TMP_DIR/activation.json" "$TMP_DIR/activation-before-runs.json" "$TMP_DIR/activation-run.json")"
 wait_run_completed "$run_id"

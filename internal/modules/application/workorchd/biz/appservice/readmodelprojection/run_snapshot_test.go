@@ -303,7 +303,7 @@ func TestProjectStepViewIncludesCompactContractAuditWithoutFullInput(t *testing.
 		t.Fatalf("projected Input = %+v, want omitted full input", projected.Input)
 	}
 	audit := projected.ContractAudit
-	if audit["schemaVersion"] != "workorch.step_contract_audit.v1" ||
+	if audit["schemaVersion"] != "workorch.step_contract_audit.v2" ||
 		audit["runtimeStage"] != "repair" ||
 		audit["currentActionKind"] != "state_change" ||
 		audit["currentFocusId"] != "cwi-101" ||
@@ -319,6 +319,26 @@ func TestProjectStepViewIncludesCompactContractAuditWithoutFullInput(t *testing.
 	}
 	if required["mustReturnExecutionGraph"] != true || required["mustProduceConcreteValidationEvidence"] != true {
 		t.Fatalf("requiredOutput = %+v, want compact boolean contract flags", required)
+	}
+}
+
+func TestProjectStepViewDoesNotProjectLegacyStagePacketContractAudit(t *testing.T) {
+	t.Parallel()
+
+	projected := ProjectStepView(StepView{
+		ID:    "run-a/legacy-step",
+		Kind:  "llm/workspace_execution",
+		State: "completed",
+		Input: map[string]any{
+			"stagePacket": map[string]any{
+				"runtimeStage": "repair",
+				"nextAction":   map[string]any{"kind": "state_change"},
+			},
+		},
+	})
+
+	if projected.ContractAudit != nil {
+		t.Fatalf("ContractAudit = %+v, want no projection from legacy stagePacket", projected.ContractAudit)
 	}
 }
 

@@ -6,7 +6,7 @@ func projectStepContractAudit(sources ...map[string]any) map[string]any {
 		if len(source) == 0 {
 			continue
 		}
-		if readModelStringValue(source["schemaVersion"]) == "workorch.step_contract_audit.v1" ||
+		if readModelStringValue(source["schemaVersion"]) == "workorch.step_contract_audit.v2" ||
 			len(readModelMapValue(source["requiredOutput"])) > 0 ||
 			readModelStringValue(source["currentActionKind"]) != "" ||
 			readModelStringValue(source["currentFocusId"]) != "" {
@@ -16,7 +16,6 @@ func projectStepContractAudit(sources ...map[string]any) map[string]any {
 			}
 		}
 		if len(readModelMapValue(source["currentActionContract"])) > 0 ||
-			len(readModelMapValue(source["stagePacket"])) > 0 ||
 			len(readModelMapValue(source["coverageWorkItemContext"])) > 0 ||
 			len(readModelMapValue(source["convergenceAuthority"])) > 0 {
 			input = source
@@ -26,38 +25,33 @@ func projectStepContractAudit(sources ...map[string]any) map[string]any {
 	if len(input) == 0 {
 		return nil
 	}
-	if readModelStringValue(input["schemaVersion"]) == "workorch.step_contract_audit.v1" {
+	if readModelStringValue(input["schemaVersion"]) == "workorch.step_contract_audit.v2" {
 		return cloneReadModelMap(input)
 	}
 
 	currentActionContract := readModelMapValue(input["currentActionContract"])
-	stagePacket := readModelMapValue(input["stagePacket"])
 	coverageContext := readModelMapValue(input["coverageWorkItemContext"])
 	authority := readModelMapValue(input["convergenceAuthority"])
 	if len(coverageContext) == 0 {
 		coverageContext = readModelMapValue(authority["coverageWorkItemContext"])
 	}
-	requiredOutput, requiredOutputSource := selectStepContractRequiredOutput(input, currentActionContract, stagePacket)
+	requiredOutput, requiredOutputSource := selectStepContractRequiredOutput(input, currentActionContract)
 	currentFocus := firstNonEmptyMap(
 		readModelMapValue(currentActionContract["currentFocus"]),
-		readModelMapValue(stagePacket["activeFocus"]),
 		readModelMapValue(coverageContext["currentFocus"]),
 		readModelMapValue(authority["currentFocus"]),
 	)
 	nextAction := firstNonEmptyMap(
 		readModelMapValue(currentActionContract["nextAction"]),
 		readModelMapValue(currentActionContract["prerequisite"]),
-		readModelMapValue(stagePacket["nextAction"]),
 		readModelMapValue(authority["nextAction"]),
 	)
 
 	ret := map[string]any{
-		"schemaVersion": "workorch.step_contract_audit.v1",
+		"schemaVersion": "workorch.step_contract_audit.v2",
 	}
 	if stage := firstNonEmptyString(
 		readModelStringValue(input["runtimeStage"]),
-		readModelStringValue(stagePacket["runtimeStage"]),
-		readModelStringValue(stagePacket["stage"]),
 		readModelStringValue(currentActionContract["runtimeStage"]),
 	); stage != "" {
 		ret["runtimeStage"] = stage
@@ -92,19 +86,18 @@ func projectStepContractAudit(sources ...map[string]any) map[string]any {
 		ret["requiredOutputSource"] = requiredOutputSource
 		ret["requiredOutput"] = compactStepRequiredOutputForAudit(requiredOutput)
 	}
-	if diagnostic := selectStepContractValidationFailureDiagnostic(input, currentActionContract, stagePacket); len(diagnostic) > 0 {
+	if diagnostic := selectStepContractValidationFailureDiagnostic(input, currentActionContract); len(diagnostic) > 0 {
 		ret["validationFailureDiagnostic"] = diagnostic
 	}
 	return ret
 }
 
-func selectStepContractValidationFailureDiagnostic(input map[string]any, currentActionContract map[string]any, stagePacket map[string]any) map[string]any {
+func selectStepContractValidationFailureDiagnostic(input map[string]any, currentActionContract map[string]any) map[string]any {
 	for _, source := range []map[string]any{
 		input,
 		readModelMapValue(input["runtimeDiagnostics"]),
 		readModelMapValue(input["lastFailureDiagnostics"]),
 		currentActionContract,
-		stagePacket,
 	} {
 		if diagnostic := readModelMapValue(source["validationFailureDiagnostic"]); len(diagnostic) > 0 {
 			return compactStepValidationFailureDiagnosticForAudit(diagnostic)
@@ -113,13 +106,12 @@ func selectStepContractValidationFailureDiagnostic(input map[string]any, current
 	return nil
 }
 
-func selectStepContractRequiredOutput(input map[string]any, currentActionContract map[string]any, stagePacket map[string]any) (map[string]any, string) {
+func selectStepContractRequiredOutput(input map[string]any, currentActionContract map[string]any) (map[string]any, string) {
 	candidates := []struct {
 		name  string
 		value map[string]any
 	}{
 		{name: "currentActionContract.requiredOutput", value: readModelMapValue(currentActionContract["requiredOutput"])},
-		{name: "stagePacket.requiredOutput", value: readModelMapValue(stagePacket["requiredOutput"])},
 		{name: "requiredOutput", value: readModelMapValue(input["requiredOutput"])},
 		{name: "repairActionPackage.requiredOutput", value: readModelMapValue(readModelMapValue(input["repairActionPackage"])["requiredOutput"])},
 	}
