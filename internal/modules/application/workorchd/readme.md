@@ -20,6 +20,7 @@
 - Decision/Approval HTTP resolve 只提交对应 owner command 并刷新投影，不发布 Run Resume；Runtime V2 Decision resolution 由 Decision owner 通过 typed EventHub command 直接提交 Orchestrator。
 - run-scoped Start/Resume scheduler command 直接发送 Orchestrator 定义的 typed owner command；Resume 只携带 workspace/run scope，不再通过 CLI、session 或 Run port 发送 execution context patch。application 不维护 run pending/started queue，也不执行 Run 状态机或 runtime drive。
 - workspace activation/restart command 同步执行 activation 用例；用例通过 Workspace、Run 和 Orchestrator 的 typed EventHub command 创建带 Runtime V2 bootstrap 的 Run 并启动 drive，不维护 application background queue。
+- WorkspaceTemplate 中的 capability / version-control 声明只作为定义与 activation 输入；application 不直接执行 Git、Shell、File 或其他 capability 副作用。
 - Runtime V1 retirement planner 依据 Run owner 的 typed bootstrap/state 识别 V1 对象，确定性生成 Run、Workspace、Decision 和 Approval 的退役动作及 dry-run 报告；planner 本身不直接访问 owner repository。
 - retirement inventory 只通过 Run、Workspace、Decision 和 Approval owner 的 typed EventHub list command 采集，不读取 application bootstrap export 或 owner repository。
 - `RuntimeV1RetirementCommand/Result` 是 migration 的 typed application command；dry-run 只返回动作与资源统计，正式 apply 必须在 owner 写入完成且重新盘点无遗留后执行 projection full rebuild。

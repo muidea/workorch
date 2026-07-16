@@ -1,11 +1,6 @@
 package workspacecore
 
 import (
-	"context"
-	"os"
-	"path/filepath"
-	"runtime"
-	"strings"
 	"testing"
 
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
@@ -24,6 +19,9 @@ func TestApplyTemplateToWorkspace(t *testing.T) {
 		},
 		ContextHints: map[string]any{
 			"mode": "verify",
+			"versionControl": map[string]any{
+				"initializeRepository": true,
+			},
 			"semanticCodeNavigation": map[string]any{
 				"defaultMCPServerIds": []any{"mcp-lsp-bridge"},
 			},
@@ -56,6 +54,13 @@ func TestApplyTemplateToWorkspace(t *testing.T) {
 	if mode != "verify" {
 		t.Fatalf("context hints were not cloned: %v", got.ContextHints)
 	}
+	versionControl, ok := got.ContextHints.Object("versionControl")
+	if !ok {
+		t.Fatalf("version control template declaration was removed: %v", got.ContextHints)
+	}
+	if initializeRepository, ok := versionControl.Bool("initializeRepository"); !ok || !initializeRepository {
+		t.Fatalf("version control template declaration = %v, want initializeRepository=true", versionControl)
+	}
 	if _, ok := got.ContextHints.Field("managedWorkspaceConfigs"); ok {
 		t.Fatalf("managedWorkspaceConfigs were copied into workspace context hints: %v", got.ContextHints)
 	}
@@ -67,56 +72,4 @@ func TestApplyTemplateToWorkspace(t *testing.T) {
 	if kind != "validation" {
 		t.Fatalf("evidence policies were not cloned: %v", got.EvidencePolicies)
 	}
-}
-
-func TestInitializeGitRepositorySkipsExistingGitDirectory(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
-		t.Fatalf("mkdir .git: %v", err)
-	}
-	oldPath := os.Getenv("PATH")
-	t.Setenv("PATH", "")
-	if err := InitializeGitRepository(context.Background(), dir); err != nil {
-		t.Fatalf("InitializeGitRepository existing git err = %v, old PATH was %q", err, oldPath)
-	}
-}
-
-func TestInitializeGitRepositoryUsesGitBinary(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("test uses a POSIX shell git shim")
-	}
-	dir := t.TempDir()
-	binDir := t.TempDir()
-	logPath := filepath.Join(t.TempDir(), "git.log")
-	gitPath := filepath.Join(binDir, "git")
-	script := "#!/bin/sh\n" +
-		"printf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\n" +
-		"if [ \"$1\" = \"init\" ]; then /bin/mkdir -p .git; fi\n"
-	if err := os.WriteFile(gitPath, []byte(script), 0o755); err != nil {
-		t.Fatalf("write git shim: %v", err)
-	}
-	t.Setenv("PATH", binDir)
-
-	if err := InitializeGitRepository(context.Background(), dir); err != nil {
-		t.Fatalf("InitializeGitRepository err = %v", err)
-	}
-	raw, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read git log: %v", err)
-	}
-	log := string(raw)
-	for _, expected := range []string{
-		"init -q",
-		"config user.name WorkOrch",
-		"config user.email workorch@example.local",
-		"config core.hooksPath /dev/null",
-	} {
-		if !strings.Contains(log, expected) {
-			t.Fatalf("git log missing %q in:\n%s", expected, log)
-		}
-	}
-}
-
-func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }

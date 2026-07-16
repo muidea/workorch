@@ -30,11 +30,6 @@ func ApplyWorkspaceTemplateOnCreate(ctx context.Context, hub magicevent.Hub, ite
 	if err != nil {
 		return nil, err
 	}
-	if workspacecore.TemplateRequestsGitInit(updated.ContextHints.Map()) {
-		if err := workspacecore.InitializeGitRepository(ctx, updated.DeliverableDirectory); err != nil {
-			return nil, err
-		}
-	}
 	if err := UpdateWorkspaceRecord(ctx, hub, updated); err != nil {
 		return nil, err
 	}
