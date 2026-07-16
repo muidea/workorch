@@ -39,7 +39,9 @@ type Dependencies struct {
 }
 
 type Module struct {
-	mu          sync.RWMutex
+	// commandMu only coordinates in-flight EventHub owner commands with Stop.
+	// Framework serializes Configure/Start/Stop lifecycle calls.
+	commandMu   sync.RWMutex
 	stopping    bool
 	bizPtr      *runbiz.Service
 	servicePtr  *runservice.Module
@@ -62,8 +64,6 @@ func (m *Module) Configure(deps Dependencies) error {
 	if deps.Runs == nil || deps.EventHub == nil {
 		return common.ErrInvalidArgument
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.stopping = false
 	m.runs = deps.Runs
 	m.steps = deps.Steps
@@ -81,8 +81,6 @@ func (m *Module) Start() error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.stopping || m.servicePtr == nil || m.eventHub == nil {
 		return common.ErrInvalidArgument
 	}
@@ -116,7 +114,7 @@ func (m *Module) Stop(ctx context.Context) error {
 	if m == nil {
 		return nil
 	}
-	m.mu.Lock()
+	m.commandMu.Lock()
 	observer := m.observer
 	topics := append([]string(nil), m.topics...)
 	m.stopping = true
@@ -128,7 +126,7 @@ func (m *Module) Stop(ctx context.Context) error {
 	m.steps = nil
 	m.checkpoints = nil
 	m.eventHub = nil
-	m.mu.Unlock()
+	m.commandMu.Unlock()
 	if observer != nil {
 		for idx := len(topics) - 1; idx >= 0; idx-- {
 			observer.Unsubscribe(topics[idx])
@@ -141,8 +139,6 @@ func (m *Module) Service() Service {
 	if m == nil {
 		return nil
 	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
 	return m.servicePtr
 }
 
@@ -155,8 +151,8 @@ func (m *Module) executeCommand(ev magicevent.Event) (runevents.RunCommandResult
 	if m == nil {
 		return runevents.RunCommandResult{}, common.ErrInvalidArgument
 	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.commandMu.RLock()
+	defer m.commandMu.RUnlock()
 	ctx := ev.Context()
 	topic := ev.ID()
 	data := ev.Data()
