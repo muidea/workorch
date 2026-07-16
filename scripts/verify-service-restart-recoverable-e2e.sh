@@ -125,9 +125,12 @@ dataDir = "$DATA_DIR"
 [runtime.git]
 defaultTimeout = "30s"
 
-[llm]
-timeout = "60s"
-disabled = true
+[llm.aiProxy]
+baseURL = "http://127.0.0.1:9"
+
+[llm.defaultChat]
+providerID = "ai-proxy"
+modelID = "managed-verify-placeholder"
 EOF
 }
 
