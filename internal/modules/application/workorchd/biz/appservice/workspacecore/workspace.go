@@ -5,6 +5,7 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func MapWorkspace(item *workspacemodel.Workspace) appmodelcore.Workspace {
@@ -21,6 +22,7 @@ func MapWorkspace(item *workspacemodel.Workspace) appmodelcore.Workspace {
 		ActiveRunID:          string(item.ActiveRunID),
 		TemplateID:           item.TemplateID,
 		ProfileID:            item.ProfileID,
+		DefaultLLMTarget:     cloneProviderModelTarget(item.DefaultLLMTarget),
 		DefaultSoulID:        string(item.DefaultSoulID),
 		SoulBindings:         appmodelcore.MapSoulBindingIDs(item.SoulBindings),
 		ContextHints:         cloneContextMap(item.ContextHints.Map()),
@@ -50,9 +52,18 @@ func WorkspaceModelFromView(item appmodelcore.Workspace) *workspacemodel.Workspa
 		ActiveRunID:          common.RunID(item.ActiveRunID),
 		TemplateID:           item.TemplateID,
 		ProfileID:            item.ProfileID,
+		DefaultLLMTarget:     cloneProviderModelTarget(item.DefaultLLMTarget),
 		DefaultSoulID:        common.SoulID(item.DefaultSoulID),
 		SoulBindings:         SoulBindingsFromView(item.SoulBindings),
 		ContextHints:         contextHints,
 		EvidencePolicies:     evidencePolicies,
 	}
+}
+
+func cloneProviderModelTarget(input *runtimecontract.ProviderModelTarget) *runtimecontract.ProviderModelTarget {
+	if input == nil {
+		return nil
+	}
+	value := input.Clone()
+	return &value
 }

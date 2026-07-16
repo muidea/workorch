@@ -90,7 +90,7 @@ func BuildWorkspaceRuntimeActivation(ctx context.Context, request WorkspaceRunti
 		return WorkspaceRuntimeActivationBuild{}, err
 	}
 
-	providerTarget, err := resolveActivationProviderTarget(ctx, request.Hub, command.LLMTarget)
+	providerTarget, err := resolveActivationProviderTarget(ctx, request.Hub, command.LLMTarget, workspace.DefaultLLMTarget)
 	if err != nil {
 		return WorkspaceRuntimeActivationBuild{}, err
 	}
@@ -117,10 +117,12 @@ func BuildWorkspaceRuntimeActivation(ctx context.Context, request WorkspaceRunti
 	}, nil
 }
 
-func resolveActivationProviderTarget(ctx context.Context, hub magicevent.Hub, requested *runtimecontract.ProviderModelTarget) (runtimecontract.ProviderModelTarget, error) {
+func resolveActivationProviderTarget(ctx context.Context, hub magicevent.Hub, requested *runtimecontract.ProviderModelTarget, workspaceDefault *runtimecontract.ProviderModelTarget) (runtimecontract.ProviderModelTarget, error) {
 	var target runtimecontract.ProviderModelTarget
 	if requested != nil {
 		target = requested.Normalized()
+	} else if workspaceDefault != nil {
+		target = workspaceDefault.Normalized()
 	} else {
 		cfg, err := workorchconfig.Current()
 		if err != nil {

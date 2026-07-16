@@ -21,6 +21,7 @@ func (d *CLICommandDispatcher) runTypedCLI() error {
 		workorchdevents.TopicCLIWorkspaceList,
 		workorchdevents.TopicCLIWorkspaceSnapshot,
 		workorchdevents.TopicCLIWorkspaceDelete,
+		workorchdevents.TopicCLIWorkspaceUpdateLLMTarget,
 	} {
 		d.typed.Subscribe(topic, d.handleTypedCLIWorkspace)
 	}
@@ -94,6 +95,7 @@ func (d *CLICommandDispatcher) runTypedCLI() error {
 		d.typed.Subscribe(topic, d.handleTypedCLITemplate)
 	}
 	d.typed.Subscribe(workorchdevents.TopicCLIConfigurationGet, d.handleTypedCLIConfiguration)
+	d.typed.Subscribe(workorchdevents.TopicCLIConfigurationRefreshChatModels, d.handleTypedCLIConfiguration)
 	return nil
 }
 

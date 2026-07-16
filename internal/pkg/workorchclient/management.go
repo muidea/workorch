@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 func (c *Client) ListSouls(ctx context.Context) ([]Soul, error) {
@@ -254,6 +255,18 @@ func (c *Client) GetConfiguration(ctx context.Context) (*ServiceConfiguration, e
 		return nil, err
 	}
 	return decodeEnvelope[ServiceConfiguration](resp, "configuration")
+}
+
+func (c *Client) RefreshLLMModelCatalog(ctx context.Context, providerID string) (*ProviderCatalogSummary, error) {
+	values := url.Values{}
+	if strings.TrimSpace(providerID) != "" {
+		values.Set("providerId", strings.TrimSpace(providerID))
+	}
+	resp, err := c.do(ctx, "POST", joinQuery("/api/v1/workorch/configuration/llm/models/refresh", values), nil)
+	if err != nil {
+		return nil, err
+	}
+	return decodeEnvelope[ProviderCatalogSummary](resp, "catalog")
 }
 
 func (c *Client) ListEvents(ctx context.Context, query EventRecordQuery) ([]EventRecord, error) {

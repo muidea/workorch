@@ -17,6 +17,10 @@ func ensureProviderTargetReady(ctx context.Context, hub magicevent.Hub, target r
 	return ensureProviderTargetReadyForOperation(ctx, hub, target, "chat_completions")
 }
 
+func EnsureProviderTargetReady(ctx context.Context, hub magicevent.Hub, target runtimecontract.ProviderModelTarget) error {
+	return ensureProviderTargetReady(ctx, hub, target)
+}
+
 func ensureProviderTargetReadyForOperation(ctx context.Context, hub magicevent.Hub, target runtimecontract.ProviderModelTarget, operation string) error {
 	target = target.Normalized()
 	if hub == nil {

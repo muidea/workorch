@@ -70,6 +70,22 @@ func (c *Client) DeleteWorkspace(ctx context.Context, id string, purge bool) err
 	return nil
 }
 
+func (c *Client) UpdateWorkspaceLLMTarget(ctx context.Context, id string, target ProviderModelTarget) (*Workspace, error) {
+	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/workspaces/%s/llm-target", escapePath(id)), target)
+	if err != nil {
+		return nil, err
+	}
+	return decodeEnvelope[Workspace](resp, "workspace")
+}
+
+func (c *Client) ClearWorkspaceLLMTarget(ctx context.Context, id string) (*Workspace, error) {
+	resp, err := c.do(ctx, "DELETE", fmt.Sprintf("/api/v1/workorch/workspaces/%s/llm-target", escapePath(id)), nil)
+	if err != nil {
+		return nil, err
+	}
+	return decodeEnvelope[Workspace](resp, "workspace")
+}
+
 // GetWorkspaceSnapshot returns the workspace snapshot (aggregated read model).
 func (c *Client) GetWorkspaceSnapshot(ctx context.Context, id string) (*WorkspaceSnapshot, error) {
 	projection, err := c.GetWorkspaceSnapshotProjection(ctx, id)

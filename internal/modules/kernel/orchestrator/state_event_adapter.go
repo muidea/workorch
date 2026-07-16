@@ -439,11 +439,20 @@ func updateWorkspaceCommandFromModel(item *workspacemodel.Workspace) (workspacee
 		ActiveRunID:          item.ActiveRunID,
 		TemplateID:           item.TemplateID,
 		ProfileID:            item.ProfileID,
+		DefaultLLMTarget:     cloneProviderModelTarget(item.DefaultLLMTarget),
 		DefaultSoulID:        item.DefaultSoulID,
 		SoulBindings:         cloneSoulBindingMap(item.SoulBindings),
 		ContextHints:         item.ContextHints.Clone(),
 		EvidencePolicies:     workorcheventpayload.CloneSlice(item.EvidencePolicies),
 	}, nil
+}
+
+func cloneProviderModelTarget(value *runtimecontract.ProviderModelTarget) *runtimecontract.ProviderModelTarget {
+	if value == nil {
+		return nil
+	}
+	cloned := value.Clone()
+	return &cloned
 }
 
 func memoryCommandFromModel(item *memorymodel.MemoryItem) memorycontracts.CreateMemoryItemCommand {

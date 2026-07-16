@@ -1762,17 +1762,18 @@ Provider retry / config blocker 的边界必须基于中立失败形态：
 - LLM 已经返回可解析 decision，但 decision 因 runtime 输出合同或准入合同被拒绝时，不属于 provider transient failure。包括 `executionGraph patch/apply input invalid`、`patch describes a non-substantive state-change placeholder`、`scoped state-changing runtime repair requires bounded verification`、`strategyReassessment.required`、invalid decision/schema contract 等等价中立合同错误，必须继续进入 runtime repair / repair-of-repair / blocker 治理，并继承 `repairActionPackage`、target snapshot、current failure 与 stage contract。
 - `llm_context_integrity_failed`、context gate fail-fast/read-required、provider retry wrapper、schema repair wrapper 和其他 runtime envelope failure 只能作为诊断 lineage；不得被提升为 replan successor / provider retry / repair follow-up 的 primary actionable failure、`currentGap` 或 `repairActionPackage.currentFailure`。若 wrapper failure 已被后续代码修复或 decision 恢复，successor 必须继续从 coverage ledger、原始 actionable failure、current run evidence 或 stage contract 重建当前缺口，不能把已失效的 wrapper 错误再次提交给 LLM。
 
-### LLM 运行期动态绑定
+### LLM target 选择与运行期动态绑定
 
-LLM provider、model、base URL、context profile、failover 目标等信息属于运行期动态绑定，不属于 workspace/run/step/ticket 的可恢复业务状态。runtime 持久化记录可以保留中立观测指标，例如 token 数、请求/响应字节、耗时、failure class、stream diagnostics，但不得把 provider/model/base URL 作为后续恢复、retry、repair、memory 或 decision 的依据。
+LLM provider/model identity 与 provider client 动态配置必须分层处理：workspace 可以持久化完整 `providerId/modelId` 作为“后续新建或 replacement Run 的默认选择”，Run activation 必须封存当次解析后的 target 以维持 Runtime V2 authority、provider ceiling 与审计一致性；base URL、credential、client、context profile、failover 状态等仍属于运行期动态绑定，不得进入 workspace/run/step/ticket 的可恢复业务状态。runtime 持久化记录可以保留中立观测指标，例如 token 数、请求/响应字节、耗时、failure class、stream diagnostics，但不得把 base URL、credential 或历史 client 状态作为后续恢复、retry、repair、memory 或 decision 的依据。
 
 因此：
 
-- run activation、CLI、HTTP、backend/eventhub 等入口不得把 `llmProviderId` 写入 run execution context。
-- step input、provider retry input、decision ticket context 和 LLM context compaction 必须剥离 provider/model/base URL 等绑定字段。
-- provider/config blocker 被解决并收到“继续处理 / retry same step”后，runtime 必须重新按当前系统配置动态解析 provider；不得因为历史 step 记录中的旧 provider 继续原地 reblock。
-- provider unavailable / auth or config / schema drift 这类配置型失败可以先进入 config blocker；但 blocker 解决后的 retry 是一次新的运行期绑定，不继承旧 provider 选择。
-- 显式 provider 选择如后续重新支持，必须设计为短生命周期调度参数，而不是持久化恢复状态。
+- activation、CLI、HTTP、backend/eventhub 等入口只能传递 typed `ProviderModelTarget`，不得把 provider/model 写入 V1 map execution context 或非 typed step input。
+- workspace target 的解析优先级为“activation 显式 target → workspace 默认 target → 当前系统 defaultChat”；解析结果只影响新 Run，不能改写 active/sealed Run。
+- step input、provider retry input、decision ticket context 和 LLM context compaction 必须剥离 base URL、credential、client 与 failover 动态状态；provider/model identity 只能通过 sealed Runtime V2 activation/ceiling 使用，不进入 C0/C1/C2 stable prefix。
+- provider/config blocker 被解决并收到“继续处理 / retry same step”后，runtime 必须基于当前 Run 已封存 target 重新解析最新 provider client 配置；不得因为历史 base URL、credential 或 client 状态继续原地 reblock。
+- provider unavailable / auth or config / schema drift 这类配置型失败可以先进入 config blocker；blocker 解决后的 retry 不改变当前 Run target，也不继承旧 client 实例。
+- workspace 默认 target 属于声明式产品配置，不属于 recovery/repair evidence；修改或清除它不得自动 resume、restart 或改变当前 Run。
 
 允许：
 

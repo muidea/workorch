@@ -19,6 +19,7 @@ Last Updated: 2026-07-16
 | V1 StagePacket / NextAction / DispatchNextStep / ExecutionContextPatch 主链 | 已删除 |
 | 2026-07-14：约 146 份 completed/code-closed/V1-absorbed active plan | 已迁 `90-archive/completed/` |
 | 2026-07-16：active 假活跃产品/审计/收口日记 + verification 过程记录 + artifacts | 已迁 archive 或移出仓库 |
+| TUI workspace provider/model 选择与持久化 | `/model`、`show`、`clear`、workspace owner target、activation precedence、remote/embedded backend 已代码收口 |
 
 ## Residual Open
 
@@ -52,7 +53,7 @@ Last Updated: 2026-07-16
 
 - **代码**：Runtime V2 only，可作为后续产品工作的稳定底座。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；不得再从已归档 plan 推导实现约束。
-- **Active roadmap**：仅 OPS-1（+ 可选 OPT-1）；其余历史切片在 archive / candidates 检索。
+- **Active roadmap**：OPS-1（+ 可选 OPT-1）；其余历史切片在 archive / candidates 检索。
 - **清理原则**：失效主链叙述、重复 audit、过程日记、live 产物一律归档或出库，不在 active 保留“假活跃”项。
 
 ## Navigation

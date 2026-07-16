@@ -5,10 +5,27 @@ import (
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestUpdateWorkspaceCommandFromModelPreservesDefaultLLMTarget(t *testing.T) {
+	target := runtimecontract.ProviderModelTarget{ProviderID: "custom", ModelID: "model-a"}
+	command, err := updateWorkspaceCommandFromModel(&workspacemodel.Workspace{ID: "ws-model", ActiveRunID: "run-current", DefaultLLMTarget: &target})
+	if err != nil {
+		t.Fatalf("updateWorkspaceCommandFromModel: %v", err)
+	}
+	if command.DefaultLLMTarget == nil || !command.DefaultLLMTarget.Same(target) || command.ActiveRunID != "run-current" {
+		t.Fatalf("command = %+v", command)
+	}
+	target.ModelID = "mutated"
+	if command.DefaultLLMTarget.ModelID != "model-a" {
+		t.Fatalf("command target aliased input = %+v", command.DefaultLLMTarget)
+	}
+}
 
 func TestRunEventRepositoryGetPropagatesRuntimeWorkspaceScope(t *testing.T) {
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-run-event-scope")

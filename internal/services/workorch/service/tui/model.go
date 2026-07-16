@@ -14,6 +14,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/doditems"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type viewMode int
@@ -111,6 +112,20 @@ type AppModel struct {
 	workspaceListRefreshInFlight bool
 	workspaceListRefreshPending  bool
 	workspaceListRequestSeq      int64
+	modelSelectMode              bool
+	modelSelectLoading           bool
+	modelSelectRefreshing        bool
+	modelSelectConfirming        bool
+	modelSelectSubmitting        bool
+	modelSelectClearConfirming   bool
+	modelSelectCursor            int
+	modelSelectOptions           []backend.ChatModelTargetOption
+	modelSelectCurrent           *runtimecontract.ProviderModelTarget
+	modelSelectPending           *runtimecontract.ProviderModelTarget
+	modelSelectDefault           runtimecontract.ProviderModelTarget
+	modelSelectError             error
+	modelSelectRequestSeq        int64
+	modelSelectWorkspaceID       string
 
 	projectionCh            chan backend.WorkspaceProjectionChangedInfo
 	subscriptionStatusCh    chan backend.SubscriptionStatusInfo
@@ -616,6 +631,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastError = nil
 		m.resetMainViewport()
 		return m, nil
+	case ChatModelTargetsLoadedMsg:
+		return m.applyChatModelTargetsLoaded(msg)
+	case WorkspaceLLMTargetUpdatedMsg:
+		return m.applyWorkspaceLLMTargetUpdated(msg)
+	case WorkspaceLLMTargetShowMsg:
+		return m.applyWorkspaceLLMTargetShow(msg)
 	case ErrorMsg:
 		m.setLastError(msg.Error)
 		return m, nil
@@ -625,6 +646,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+	if m.modelSelectMode {
+		return m.handleModelSelectionKey(key)
+	}
 	if m.helpOpen {
 		switch key {
 		case "esc", "ctrl+h", KeyQuit, KeyEnter:
@@ -865,6 +889,31 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		m.progressText = "Loading system configuration"
 		m.lastError = nil
 		return m, FetchConfiguration(m.be), true
+	case "model":
+		m.addInputHistory(text)
+		args := strings.TrimSpace(strings.TrimPrefix(cmd, strings.Fields(cmd)[0]))
+		subcommand, _ := splitSlashSubcommand(args)
+		switch subcommand {
+		case "":
+			m.clearInput()
+			cmd := m.beginModelSelection(false)
+			return m, cmd, true
+		case "show":
+			m.clearInput()
+			if m.activeWorkspaceID == "" {
+				m.lastError = fmt.Errorf("no active workspace")
+				return m, nil, true
+			}
+			m.progressText = "Loading workspace model configuration"
+			return m, FetchWorkspaceLLMTargetShow(m.be, m.activeWorkspaceID), true
+		case "clear":
+			m.clearInput()
+			cmd := m.beginModelSelection(true)
+			return m, cmd, true
+		default:
+			m.lastError = fmt.Errorf("unknown model subcommand: %s", subcommand)
+			return m, nil, true
+		}
 	case "workspace", "ws":
 		m.addInputHistory(text)
 		args := strings.TrimSpace(strings.TrimPrefix(cmd, strings.Fields(cmd)[0]))

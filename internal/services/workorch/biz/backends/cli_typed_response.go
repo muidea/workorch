@@ -127,6 +127,24 @@ func cliWorkspaceDeleteResponse(response magicevent.Result) (workorchdevents.CLI
 	return result, nil
 }
 
+func cliWorkspaceUpdateLLMTargetResponse(response magicevent.Result) (workorchdevents.CLIWorkspaceUpdateLLMTargetResult, error) {
+	if response == nil {
+		return workorchdevents.CLIWorkspaceUpdateLLMTargetResult{}, common.ErrInvalidArgument
+	}
+	if err := cd.ToStdError(response.Error()); err != nil {
+		return workorchdevents.CLIWorkspaceUpdateLLMTargetResult{}, err
+	}
+	data, resultErr := response.Get()
+	if err := cd.ToStdError(resultErr); err != nil {
+		return workorchdevents.CLIWorkspaceUpdateLLMTargetResult{}, err
+	}
+	result, ok := data.(workorchdevents.CLIWorkspaceUpdateLLMTargetResult)
+	if !ok {
+		return workorchdevents.CLIWorkspaceUpdateLLMTargetResult{}, fmt.Errorf("%w: workspace llm target update result type %T", common.ErrInvalidArgument, data)
+	}
+	return result, nil
+}
+
 func cliGoalDefineResponse(response magicevent.Result) (workorchdevents.CLIGoalDefineResult, error) {
 	if response == nil {
 		return workorchdevents.CLIGoalDefineResult{}, common.ErrInvalidArgument
@@ -910,6 +928,24 @@ func cliConfigurationGetResponse(response magicevent.Result) (workorchdevents.CL
 	result, ok := data.(workorchdevents.CLIConfigurationGetResult)
 	if !ok {
 		return workorchdevents.CLIConfigurationGetResult{}, fmt.Errorf("%w: configuration get result type %T", common.ErrInvalidArgument, data)
+	}
+	return result, nil
+}
+
+func cliConfigurationRefreshChatModelsResponse(response magicevent.Result) (workorchdevents.CLIConfigurationRefreshChatModelsResult, error) {
+	if response == nil {
+		return workorchdevents.CLIConfigurationRefreshChatModelsResult{}, common.ErrInvalidArgument
+	}
+	if err := cd.ToStdError(response.Error()); err != nil {
+		return workorchdevents.CLIConfigurationRefreshChatModelsResult{}, err
+	}
+	data, resultErr := response.Get()
+	if err := cd.ToStdError(resultErr); err != nil {
+		return workorchdevents.CLIConfigurationRefreshChatModelsResult{}, err
+	}
+	result, ok := data.(workorchdevents.CLIConfigurationRefreshChatModelsResult)
+	if !ok {
+		return workorchdevents.CLIConfigurationRefreshChatModelsResult{}, fmt.Errorf("%w: configuration refresh chat models result type %T", common.ErrInvalidArgument, data)
 	}
 	return result, nil
 }

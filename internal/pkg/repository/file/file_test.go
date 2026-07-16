@@ -53,6 +53,32 @@ func TestWorkspaceRepositoryGetReturnsErrorWhenPersistedJSONCorrupt(t *testing.T
 	}
 }
 
+func TestWorkspaceRepositoryPersistsAndClonesDefaultLLMTarget(t *testing.T) {
+	ctx := context.Background()
+	repo := NewWorkspaceRepository(filepath.Join(t.TempDir(), "workspace.json"))
+	target := orchestratormodel.ProviderModelTarget{ProviderID: "custom", ModelID: "model-a"}
+	item := &workspacemodel.Workspace{ID: "ws-model-target", Title: "workspace", State: common.WorkspaceStateActive, DefaultLLMTarget: &target}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	item.DefaultLLMTarget.ModelID = "mutated"
+	stored, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if stored.DefaultLLMTarget == nil || stored.DefaultLLMTarget.ProviderID != "custom" || stored.DefaultLLMTarget.ModelID != "model-a" {
+		t.Fatalf("stored target = %+v", stored.DefaultLLMTarget)
+	}
+	stored.DefaultLLMTarget.ProviderID = "mutated"
+	again, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("second Get: %v", err)
+	}
+	if again.DefaultLLMTarget == nil || again.DefaultLLMTarget.ProviderID != "custom" {
+		t.Fatalf("cloned target = %+v", again.DefaultLLMTarget)
+	}
+}
+
 func TestRunRepositoryCreateReturnsErrorWhenPersistedJSONCorrupt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "run.json")
 	corrupt := []byte("{not-json")

@@ -11,6 +11,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchpayloadmapper"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func PortWorkspaceSnapshotInfo(snapshot readmodelcore.WorkspaceSnapshot) port.WorkspaceSnapshotInfo {
@@ -61,11 +62,20 @@ func PortWorkspaceInfo(item appmodelcore.Workspace) port.WorkspaceInfo {
 		BlockingApprovalID:   common.ApprovalID(item.BlockingApprovalID),
 		TemplateID:           item.TemplateID,
 		ProfileID:            item.ProfileID,
+		DefaultLLMTarget:     cloneRuntimeProviderTarget(item.DefaultLLMTarget),
 		DefaultSoulID:        common.SoulID(item.DefaultSoulID),
 		SoulBindings:         portSoulBindings(item.SoulBindings),
 		Projection:           portProjectionFromAppViewModel(item.ViewModel),
 		ViewModel:            portAppWorkspaceViewModelInfo(item.ViewModel),
 	}
+}
+
+func cloneRuntimeProviderTarget(input *runtimecontract.ProviderModelTarget) *runtimecontract.ProviderModelTarget {
+	if input == nil {
+		return nil
+	}
+	value := input.Clone()
+	return &value
 }
 
 func PortWorkspaceInfos(items []appmodelcore.Workspace) []port.WorkspaceInfo {
@@ -400,7 +410,7 @@ func PortTemplateInfos(items []workspacecore.WorkspaceTemplate) []port.TemplateI
 }
 
 func PortServiceConfig(item configcore.ServiceConfiguration) port.ServiceConfig {
-	return port.ServiceConfig{
+	ret := port.ServiceConfig{
 		ServerAddr: item.Server.Addr,
 		Backend:    item.Repository.Backend,
 		DataDir:    item.Repository.DataDir,
@@ -422,6 +432,38 @@ func PortServiceConfig(item configcore.ServiceConfiguration) port.ServiceConfig 
 			MaxArtifactReplanAttempts:          item.Runtime.LLMOutput.MaxArtifactReplanAttempts,
 		},
 	}
+	for _, model := range item.LLM.Catalog.Models {
+		if !model.CapabilityReady || !containsString(model.Operations, "chat_completions") {
+			continue
+		}
+		ret.ChatModelTargets = append(ret.ChatModelTargets, port.ChatModelTargetOption{
+			ProviderID: model.ProviderID, ModelID: model.ModelID, DisplayName: model.ModelID,
+			ContextWindowTokens: model.ContextWindowTokens, MaxOutputTokens: model.MaxOutputTokens,
+			CapabilityReady: true, CapabilityRevision: model.CapabilityRevision, Source: item.LLM.Catalog.Source,
+		})
+	}
+	for _, provider := range item.LLM.CustomProviders {
+		for _, model := range provider.Models {
+			if !containsString(model.Operations, "chat_completions") {
+				continue
+			}
+			ret.ChatModelTargets = append(ret.ChatModelTargets, port.ChatModelTargetOption{
+				ProviderID: provider.ID, ModelID: model.ID, DisplayName: model.ID,
+				ContextWindowTokens: model.ContextWindowTokens, MaxOutputTokens: model.MaxOutputTokens,
+				CapabilityReady: true, Source: "configuration",
+			})
+		}
+	}
+	return ret
+}
+
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
 
 func portWorkspaceOutcomeInfo(item readmodelcore.WorkspaceOutcome) port.WorkspaceOutcomeInfo {

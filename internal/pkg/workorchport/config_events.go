@@ -2,6 +2,8 @@ package workorchport
 
 import (
 	"context"
+	"sort"
+	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -51,10 +53,53 @@ type ServiceConfig struct {
 	MaxConcurrentRuns int64
 	AIProxyBaseURL    string
 	LLMOutput         LLMOutputConfig
+	ChatModelTargets  []ChatModelTargetOption
+}
+
+type ChatModelTargetOption struct {
+	ProviderID          string
+	ModelID             string
+	DisplayName         string
+	ContextWindowTokens int
+	MaxOutputTokens     int
+	CapabilityReady     bool
+	CapabilityRevision  string
+	Source              string
 }
 
 type ConfigBackend interface {
 	Get(ctx context.Context) (*ServiceConfig, error)
+}
+
+type ChatModelCatalogBackend interface {
+	ListChatModelTargets(ctx context.Context) ([]ChatModelTargetOption, error)
+	RefreshChatModelTargets(ctx context.Context) ([]ChatModelTargetOption, error)
+}
+
+func NormalizeChatModelTargetOptions(items []ChatModelTargetOption) []ChatModelTargetOption {
+	unique := map[string]ChatModelTargetOption{}
+	for _, item := range items {
+		item.ProviderID = strings.TrimSpace(item.ProviderID)
+		item.ModelID = strings.TrimSpace(item.ModelID)
+		if item.ProviderID == "" || item.ModelID == "" || !item.CapabilityReady {
+			continue
+		}
+		if strings.TrimSpace(item.DisplayName) == "" {
+			item.DisplayName = item.ModelID
+		}
+		unique[item.ProviderID+"\x00"+item.ModelID] = item
+	}
+	ret := make([]ChatModelTargetOption, 0, len(unique))
+	for _, item := range unique {
+		ret = append(ret, item)
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		if ret[i].ProviderID != ret[j].ProviderID {
+			return ret[i].ProviderID < ret[j].ProviderID
+		}
+		return ret[i].ModelID < ret[j].ModelID
+	})
+	return ret
 }
 
 // EventType classifies backend-published events for the TUI/agent.

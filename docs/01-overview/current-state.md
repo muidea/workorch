@@ -12,6 +12,8 @@ Last Updated: 2026-07-16
 - 首选 provider：内置 `ai-proxy`
 - 模型发现：`blocks/llm` 读取 `/v1/models` catalog
 - activation：提交/持久化 `llmTarget` / `ProviderModelTarget`
+- workspace 默认 target：`blocks/workspace` 持久化可选 `DefaultLLMTarget`；新 Run 按 explicit activation → workspace → system `defaultChat` 解析
+- TUI：`/model` 自动列出 ready chat `providerId/modelId`，双确认后更新当前 workspace；`/model show` 查看，`/model clear` 恢复继承系统默认
 - Runtime V2：`ProviderCeiling` 封存 target + token/byte ceiling + revision
 - 旧 `defaultProvider` / provider list / model pattern / provider context 路径已删除
 

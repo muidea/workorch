@@ -17,6 +17,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorchdefaults"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const ModuleID = modulecommon.ModuleID
@@ -89,6 +90,7 @@ func (m *Module) Start() error {
 		workspaceevents.TopicWorkspaceCommandGet,
 		workspaceevents.TopicWorkspaceCommandList,
 		workspaceevents.TopicWorkspaceCommandUpdate,
+		workspaceevents.TopicWorkspaceCommandUpdateLLMTarget,
 		workspaceevents.TopicWorkspaceCommandDelete,
 		workspaceevents.TopicWorkspaceCommandPurge,
 		workspaceevents.TopicWorkspaceCommandDefineGoal,
@@ -218,6 +220,29 @@ func (m *Module) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceC
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
 		item := workspaceFromUpdateCommand(cmd)
+		if err := m.workspaces.Update(ctx, item); err != nil {
+			return workspaceevents.WorkspaceCommandResult{}, err
+		}
+		m.publishWorkspaceUpdated(ctx, item)
+		return workspaceevents.WorkspaceCommandResult{Workspace: item}, nil
+	case workspaceevents.TopicWorkspaceCommandUpdateLLMTarget:
+		cmd, ok := ev.Data().(workspaceevents.UpdateWorkspaceLLMTargetCommand)
+		if !ok || cmd.WorkspaceID == "" || m.workspaces == nil {
+			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
+		}
+		item, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
+		if err != nil {
+			return workspaceevents.WorkspaceCommandResult{}, err
+		}
+		if cmd.Target == nil {
+			item.DefaultLLMTarget = nil
+		} else {
+			target := cmd.Target.Normalized()
+			if err := target.Validate(); err != nil {
+				return workspaceevents.WorkspaceCommandResult{}, err
+			}
+			item.DefaultLLMTarget = &target
+		}
 		if err := m.workspaces.Update(ctx, item); err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
@@ -427,6 +452,8 @@ func workspaceScopeFromCommand(ev magicevent.Event) (common.WorkspaceID, error) 
 		return cmd.WorkspaceID, nil
 	case workspaceevents.UpdateWorkspaceCommand:
 		return cmd.WorkspaceID, nil
+	case workspaceevents.UpdateWorkspaceLLMTargetCommand:
+		return cmd.WorkspaceID, nil
 	case workspaceevents.DeleteWorkspaceCommand:
 		return cmd.WorkspaceID, nil
 	case workspaceevents.DefineGoalCommand:
@@ -496,11 +523,20 @@ func workspaceFromUpdateCommand(cmd workspaceevents.UpdateWorkspaceCommand) *wor
 		ActiveRunID:          cmd.ActiveRunID,
 		TemplateID:           cmd.TemplateID,
 		ProfileID:            cmd.ProfileID,
+		DefaultLLMTarget:     cloneProviderModelTarget(cmd.DefaultLLMTarget),
 		DefaultSoulID:        cmd.DefaultSoulID,
 		SoulBindings:         cloneSoulBindingMap(cmd.SoulBindings),
 		ContextHints:         cmd.ContextHints.Clone(),
 		EvidencePolicies:     workorcheventpayload.CloneSlice(cmd.EvidencePolicies),
 	}
+}
+
+func cloneProviderModelTarget(input *runtimecontract.ProviderModelTarget) *runtimecontract.ProviderModelTarget {
+	if input == nil {
+		return nil
+	}
+	value := input.Clone()
+	return &value
 }
 
 func cloneMap(input map[string]any) map[string]any {

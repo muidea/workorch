@@ -13,6 +13,7 @@ const (
 	TopicCLIWorkspaceList                         = "/cli/workspace/list"
 	TopicCLIWorkspaceSnapshot                     = "/cli/workspace/snapshot"
 	TopicCLIWorkspaceDelete                       = "/cli/workspace/delete"
+	TopicCLIWorkspaceUpdateLLMTarget              = "/cli/workspace/update-llm-target"
 	TopicCLIGoalDefine                            = "/cli/goal/define"
 	TopicCLIGoalList                              = "/cli/goal/list"
 	TopicCLIGoalGet                               = "/cli/goal/get"
@@ -58,4 +59,5 @@ const (
 	TopicCLITemplateUpdate                        = "/cli/template/update"
 	TopicCLITemplateDelete                        = "/cli/template/delete"
 	TopicCLIConfigurationGet                      = "/cli/configuration/get"
+	TopicCLIConfigurationRefreshChatModels        = "/cli/configuration/refresh-chat-models"
 )

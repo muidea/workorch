@@ -64,6 +64,17 @@ func (d *CLICommandDispatcher) handleTypedCLIWorkspace(event magicevent.Event, r
 			return
 		}
 		result.Set(workorchdevents.CLIWorkspaceDeleteResult{Deleted: true}, nil)
+	case workorchdevents.CLIWorkspaceUpdateLLMTargetCommand:
+		if command.WorkspaceID == "" {
+			setInvalidTypedCLICommand(result)
+			return
+		}
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
+		item, err := UpdateWorkspaceLLMTargetWithHub(ctx, d.commandHub, string(command.WorkspaceID), command.Target)
+		if setTypedCLIError(result, err) {
+			return
+		}
+		result.Set(workorchdevents.CLIWorkspaceUpdateLLMTargetResult{Workspace: readmodelports.PortWorkspaceInfo(item)}, nil)
 	default:
 		setInvalidTypedCLICommand(result)
 	}

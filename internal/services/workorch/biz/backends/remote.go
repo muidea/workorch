@@ -14,6 +14,7 @@ import (
 	client "github.com/muidea/workorch/internal/pkg/workorchclient"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchpayloadmapper"
+	port "github.com/muidea/workorch/internal/pkg/workorchport"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -119,11 +120,20 @@ func workspaceInfoFromClient(ws *client.Workspace) WorkspaceInfo {
 		BlockingApprovalID:   common.ApprovalID(ws.BlockingApprovalID),
 		TemplateID:           ws.TemplateID,
 		ProfileID:            ws.ProfileID,
+		DefaultLLMTarget:     runtimeProviderTargetFromClient(ws.DefaultLLMTarget),
 		DefaultSoulID:        common.SoulID(ws.DefaultSoulID),
 		SoulBindings:         commonSoulBindings(ws.SoulBindings),
 		Projection:           projectionInfoFromClient(ws.Projection),
 		ViewModel:            workspaceViewModelInfoFromClient(ws.ViewModel),
 	}
+}
+
+func runtimeProviderTargetFromClient(target *client.ProviderModelTarget) *runtimecontract.ProviderModelTarget {
+	if target == nil {
+		return nil
+	}
+	value := runtimecontract.ProviderModelTarget{ProviderID: target.ProviderID, ModelID: target.ModelID}.Normalized()
+	return &value
 }
 
 func projectionInfoFromClient(input client.ProjectionStatus) ProjectionInfo {
@@ -233,6 +243,30 @@ func (b *remoteWorkspaceBackend) RuntimeView(ctx context.Context, req ReadWorksp
 		view.Projection = status
 	}
 	return &view, nil
+}
+
+func (b *remoteWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*WorkspaceInfo, error) {
+	if b == nil || b.cl == nil || id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	var (
+		ws  *client.Workspace
+		err error
+	)
+	if target == nil {
+		ws, err = b.cl.ClearWorkspaceLLMTarget(ctx, string(id))
+	} else {
+		value := target.Normalized()
+		if err := value.Validate(); err != nil {
+			return nil, err
+		}
+		ws, err = b.cl.UpdateWorkspaceLLMTarget(ctx, string(id), client.ProviderModelTarget{ProviderID: value.ProviderID, ModelID: value.ModelID})
+	}
+	if err != nil {
+		return nil, err
+	}
+	info := workspaceInfoFromClient(ws)
+	return &info, nil
 }
 
 func workspaceRuntimeViewInfoFromClient(input client.WorkspaceRuntimeView) WorkspaceRuntimeViewInfo {
@@ -1927,7 +1961,7 @@ func (b *remoteConfigBackend) Get(ctx context.Context) (*ServiceConfig, error) {
 	if cfg == nil {
 		return &ServiceConfig{}, nil
 	}
-	return &ServiceConfig{
+	ret := &ServiceConfig{
 		ServerAddr: cfg.Server.Addr,
 		Backend:    cfg.Repository.Backend,
 		DataDir:    cfg.Repository.DataDir,
@@ -1948,7 +1982,55 @@ func (b *remoteConfigBackend) Get(ctx context.Context) (*ServiceConfig, error) {
 			MaxArtifactPlanAttempts:            cfg.Runtime.LLMOutput.MaxArtifactPlanAttempts,
 			MaxArtifactReplanAttempts:          cfg.Runtime.LLMOutput.MaxArtifactReplanAttempts,
 		},
-	}, nil
+	}
+	ret.ChatModelTargets = chatModelTargetsFromClientConfig(cfg)
+	return ret, nil
+}
+
+func (b *remoteConfigBackend) ListChatModelTargets(ctx context.Context) ([]ChatModelTargetOption, error) {
+	cfg, err := b.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return port.NormalizeChatModelTargetOptions(cfg.ChatModelTargets), nil
+}
+
+func (b *remoteConfigBackend) RefreshChatModelTargets(ctx context.Context) ([]ChatModelTargetOption, error) {
+	if _, err := b.cl.RefreshLLMModelCatalog(ctx, runtimecontract.BuiltinAIProxyProviderID); err != nil {
+		return nil, err
+	}
+	return b.ListChatModelTargets(ctx)
+}
+
+func chatModelTargetsFromClientConfig(cfg *client.ServiceConfiguration) []ChatModelTargetOption {
+	if cfg == nil {
+		return nil
+	}
+	ret := make([]ChatModelTargetOption, 0)
+	for _, model := range cfg.LLM.Catalog.Models {
+		if !model.CapabilityReady || !stringSliceContains(model.Operations, "chat_completions") {
+			continue
+		}
+		ret = append(ret, ChatModelTargetOption{ProviderID: model.ProviderID, ModelID: model.ModelID, DisplayName: model.ModelID, ContextWindowTokens: model.ContextWindowTokens, MaxOutputTokens: model.MaxOutputTokens, CapabilityReady: true, CapabilityRevision: model.CapabilityRevision, Source: cfg.LLM.Catalog.Source})
+	}
+	for _, provider := range cfg.LLM.CustomProviders {
+		for _, model := range provider.Models {
+			if !stringSliceContains(model.Operations, "chat_completions") {
+				continue
+			}
+			ret = append(ret, ChatModelTargetOption{ProviderID: provider.ID, ModelID: model.ID, DisplayName: model.ID, ContextWindowTokens: model.ContextWindowTokens, MaxOutputTokens: model.MaxOutputTokens, CapabilityReady: true, Source: "configuration"})
+		}
+	}
+	return port.NormalizeChatModelTargetOptions(ret)
+}
+
+func stringSliceContains(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
 
 type remoteEventsBackend struct {

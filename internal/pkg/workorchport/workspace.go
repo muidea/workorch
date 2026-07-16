@@ -5,6 +5,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type CreateWorkspaceRequest struct {
@@ -25,6 +26,7 @@ type WorkspaceInfo struct {
 	BlockingApprovalID   common.ApprovalID
 	TemplateID           string
 	ProfileID            string
+	DefaultLLMTarget     *runtimecontract.ProviderModelTarget
 	DefaultSoulID        common.SoulID
 	SoulBindings         map[string]common.SoulID
 	Projection           ProjectionInfo
@@ -261,4 +263,8 @@ type WorkspaceBackend interface {
 	Snapshot(ctx context.Context, id common.WorkspaceID) (*WorkspaceSnapshotInfo, error)
 	RuntimeView(ctx context.Context, req ReadWorkspaceRuntimeViewRequest) (*WorkspaceRuntimeViewInfo, error)
 	Delete(ctx context.Context, id common.WorkspaceID, purge bool) error
+}
+
+type WorkspaceLLMTargetBackend interface {
+	UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*WorkspaceInfo, error)
 }

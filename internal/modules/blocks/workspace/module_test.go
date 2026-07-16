@@ -6,8 +6,11 @@ import (
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
@@ -67,6 +70,50 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	}
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("second Stop: %v", err)
+	}
+}
+
+func TestUpdateWorkspaceLLMTargetCommandPersistsCompleteTargetAndClears(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewWorkspaceRepository()
+	workspaceID := common.WorkspaceID("ws-model-target")
+	if err := repo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "workspace", State: common.WorkspaceStateActive, ActiveRunID: "run-current"}); err != nil {
+		t.Fatalf("Create workspace: %v", err)
+	}
+	module := New()
+	if err := module.Configure(Dependencies{Workspaces: repo, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: magicevent.NewHub(16)}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	target := runtimecontract.ProviderModelTarget{ProviderID: "custom-provider", ModelID: "model-a"}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandUpdateLLMTarget, "test", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.UpdateWorkspaceLLMTargetCommand{WorkspaceID: workspaceID, Target: &target})
+	result, err := module.executeCommand(event)
+	if err != nil {
+		t.Fatalf("update target: %v", err)
+	}
+	if result.Workspace == nil || result.Workspace.DefaultLLMTarget == nil || !result.Workspace.DefaultLLMTarget.Same(target) {
+		t.Fatalf("updated target = %+v", result.Workspace)
+	}
+	if result.Workspace.ActiveRunID != "run-current" {
+		t.Fatalf("active run changed = %q", result.Workspace.ActiveRunID)
+	}
+	target.ModelID = "mutated"
+	stored, err := repo.Get(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("Get workspace: %v", err)
+	}
+	if stored.DefaultLLMTarget == nil || stored.DefaultLLMTarget.ModelID != "model-a" {
+		t.Fatalf("stored target = %+v", stored.DefaultLLMTarget)
+	}
+	clearEvent := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandUpdateLLMTarget, "test", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.UpdateWorkspaceLLMTargetCommand{WorkspaceID: workspaceID})
+	if _, err := module.executeCommand(clearEvent); err != nil {
+		t.Fatalf("clear target: %v", err)
+	}
+	stored, err = repo.Get(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("Get cleared workspace: %v", err)
+	}
+	if stored.DefaultLLMTarget != nil {
+		t.Fatalf("cleared target = %+v, want nil", stored.DefaultLLMTarget)
 	}
 }
 

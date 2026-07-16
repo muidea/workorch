@@ -5,6 +5,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type CLIWorkspaceCreateCommand struct {
@@ -24,6 +25,11 @@ type CLIWorkspaceDeleteCommand struct {
 	Purge       bool
 }
 type CLIWorkspaceDeleteResult struct{ Deleted bool }
+type CLIWorkspaceUpdateLLMTargetCommand struct {
+	WorkspaceID common.WorkspaceID
+	Target      *runtimecontract.ProviderModelTarget
+}
+type CLIWorkspaceUpdateLLMTargetResult struct{ Workspace workorchport.WorkspaceInfo }
 
 type CLIGoalDefineCommand struct {
 	WorkspaceID common.WorkspaceID
@@ -212,6 +218,8 @@ type CLITemplateDeleteResult struct{ Deleted bool }
 
 type CLIConfigurationGetCommand struct{}
 type CLIConfigurationGetResult struct{ Configuration workorchport.ServiceConfig }
+type CLIConfigurationRefreshChatModelsCommand struct{ ProviderID string }
+type CLIConfigurationRefreshChatModelsResult struct{ Configuration workorchport.ServiceConfig }
 
 func CLIMessageContracts() []eventcontract.MessageContract {
 	return eventcontract.MessageContracts(
@@ -220,6 +228,7 @@ func CLIMessageContracts() []eventcontract.MessageContract {
 		eventcontract.FacadeTopic[CLIWorkspaceListCommand, CLIWorkspaceListResult]("cli.workspace", definitionPackage, TopicCLIWorkspaceList),
 		eventcontract.FacadeTopic[CLIWorkspaceSnapshotCommand, CLIWorkspaceSnapshotResult]("cli.workspace", definitionPackage, TopicCLIWorkspaceSnapshot),
 		eventcontract.FacadeTopic[CLIWorkspaceDeleteCommand, CLIWorkspaceDeleteResult]("cli.workspace", definitionPackage, TopicCLIWorkspaceDelete),
+		eventcontract.FacadeTopic[CLIWorkspaceUpdateLLMTargetCommand, CLIWorkspaceUpdateLLMTargetResult]("cli.workspace", definitionPackage, TopicCLIWorkspaceUpdateLLMTarget),
 		eventcontract.FacadeTopic[CLIGoalDefineCommand, CLIGoalDefineResult]("cli.goal", definitionPackage, TopicCLIGoalDefine),
 		eventcontract.FacadeTopic[CLIGoalListCommand, CLIGoalListResult]("cli.goal", definitionPackage, TopicCLIGoalList),
 		eventcontract.FacadeTopic[CLIGoalGetCommand, CLIGoalGetResult]("cli.goal", definitionPackage, TopicCLIGoalGet),
@@ -265,12 +274,13 @@ func CLIMessageContracts() []eventcontract.MessageContract {
 		eventcontract.FacadeTopic[CLITemplateUpdateCommand, CLITemplateUpdateResult]("cli.template", definitionPackage, TopicCLITemplateUpdate),
 		eventcontract.FacadeTopic[CLITemplateDeleteCommand, CLITemplateDeleteResult]("cli.template", definitionPackage, TopicCLITemplateDelete),
 		eventcontract.FacadeTopic[CLIConfigurationGetCommand, CLIConfigurationGetResult]("cli.configuration", definitionPackage, TopicCLIConfigurationGet),
+		eventcontract.FacadeTopic[CLIConfigurationRefreshChatModelsCommand, CLIConfigurationRefreshChatModelsResult]("cli.configuration", definitionPackage, TopicCLIConfigurationRefreshChatModels),
 	)
 }
 
 func CLITopics() []string {
 	return []string{
-		TopicCLIWorkspaceCreate, TopicCLIWorkspaceGet, TopicCLIWorkspaceList, TopicCLIWorkspaceSnapshot, TopicCLIWorkspaceDelete,
+		TopicCLIWorkspaceCreate, TopicCLIWorkspaceGet, TopicCLIWorkspaceList, TopicCLIWorkspaceSnapshot, TopicCLIWorkspaceDelete, TopicCLIWorkspaceUpdateLLMTarget,
 		TopicCLIGoalDefine, TopicCLIGoalList, TopicCLIGoalGet, TopicCLIGoalUpdate,
 		TopicCLIDoDDefine, TopicCLIDoDList, TopicCLIDoDGet, TopicCLIDoDUpdate,
 		TopicCLIRunGet, TopicCLIRunList, TopicCLIRunStatus,
@@ -281,6 +291,6 @@ func CLITopics() []string {
 		TopicCLIMCPServerCreate, TopicCLIMCPServerGet, TopicCLIMCPServerList, TopicCLIMCPServerUpdate, TopicCLIMCPCapabilityList,
 		TopicCLIMemoryCreate, TopicCLIMemoryGet, TopicCLIMemoryUpdate, TopicCLIMemoryDelete, TopicCLIMemoryList, TopicCLIMemorySearch,
 		TopicCLITemplateCreate, TopicCLITemplateGet, TopicCLITemplateList, TopicCLITemplateUpdate, TopicCLITemplateDelete,
-		TopicCLIConfigurationGet,
+		TopicCLIConfigurationGet, TopicCLIConfigurationRefreshChatModels,
 	}
 }

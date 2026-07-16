@@ -113,6 +113,7 @@ type TemplateBackend = port.TemplateBackend
 type ProviderModelTarget = port.ProviderModelTarget
 type LLMOutputConfig = port.LLMOutputConfig
 type ServiceConfig = port.ServiceConfig
+type ChatModelTargetOption = port.ChatModelTargetOption
 type ConfigBackend = port.ConfigBackend
 type EventType = port.EventType
 type Event = port.Event

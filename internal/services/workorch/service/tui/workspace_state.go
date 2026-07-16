@@ -359,6 +359,9 @@ func (m *AppModel) removeWorkspace(id common.WorkspaceID) {
 	if id == "" {
 		return
 	}
+	if m.modelSelectWorkspaceID == string(id) {
+		m.cancelModelSelection()
+	}
 	if m.workspaceRuntimeStates != nil {
 		delete(m.workspaceRuntimeStates, string(id))
 	}
@@ -437,6 +440,7 @@ func (m *AppModel) setActiveWorkspace(id string) {
 		return
 	}
 	m.saveActiveWorkspaceDisplayState()
+	m.cancelModelSelection()
 	m.activeWorkspaceID = id
 	m.selectedWorkspaceID = id
 	if !m.restoreWorkspaceDisplayState(id) {

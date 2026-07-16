@@ -19,6 +19,9 @@ func (m AppModel) View() string {
 	if m.helpOpen {
 		return m.renderHelpOverlay(width, height)
 	}
+	if m.modelSelectMode {
+		return m.renderModelSelection(width, height)
+	}
 
 	status := m.renderRuntimeStatusBar(width)
 	input := m.renderInput(width)
@@ -993,7 +996,7 @@ func (m AppModel) renderInput(width int) string {
 }
 
 func (m AppModel) renderHelp(width int) string {
-	help := "enter: submit | /goal | /run resume | /dod | /status | /coverage | /timeline | /memory | /config | /exit"
+	help := "enter: submit | /goal | /run resume | /dod | /model | /status | /coverage | /timeline | /memory | /config | /exit"
 	if width < 120 {
 		help = "enter | /goal | /dod | /run resume | /status | /coverage | /memory | /exit"
 	}
@@ -1031,6 +1034,9 @@ func (m AppModel) renderHelpOverlay(width, height int) string {
 		"System:",
 		"  /workspace           select workspace",
 		"  /workspace create    create workspace",
+		"  /model               select workspace provider/model",
+		"  /model show          show workspace and system model targets",
+		"  /model clear         inherit the system default for future runs",
 		"  /config              system configuration",
 		"  /clear               clear display",
 		"  /help                show this help",

@@ -15,7 +15,7 @@ func Contracts() []eventcontract.Contract {
 	ret = append(ret, eventcontract.Build("workorchd.workspace_projection", eventcontract.CommandClassNotify, eventcontract.LanePolicyState,
 		TopicWorkspaceProjectionChanged,
 	)...)
-	ret = append(ret, eventcontract.Build("cli.workspace", eventcontract.CommandClassFacade, eventcontract.LanePolicyTopic, TopicCLIWorkspaceCreate, TopicCLIWorkspaceGet, TopicCLIWorkspaceList, TopicCLIWorkspaceSnapshot, TopicCLIWorkspaceDelete)...)
+	ret = append(ret, eventcontract.Build("cli.workspace", eventcontract.CommandClassFacade, eventcontract.LanePolicyTopic, TopicCLIWorkspaceCreate, TopicCLIWorkspaceGet, TopicCLIWorkspaceList, TopicCLIWorkspaceSnapshot, TopicCLIWorkspaceDelete, TopicCLIWorkspaceUpdateLLMTarget)...)
 	ret = append(ret, eventcontract.Build("cli.goal", eventcontract.CommandClassFacade, eventcontract.LanePolicyTopic, TopicCLIGoalDefine, TopicCLIGoalList, TopicCLIGoalGet, TopicCLIGoalUpdate)...)
 	ret = append(ret, eventcontract.Build("cli.dod", eventcontract.CommandClassFacade, eventcontract.LanePolicyTopic, TopicCLIDoDDefine, TopicCLIDoDList, TopicCLIDoDGet, TopicCLIDoDUpdate)...)
 	ret = append(ret, eventcontract.Build("cli.run", eventcontract.CommandClassFacade, eventcontract.LanePolicyTopic, TopicCLIRunGet, TopicCLIRunList, TopicCLIRunStatus)...)
@@ -26,7 +26,7 @@ func Contracts() []eventcontract.Contract {
 	ret = append(ret, eventcontract.Build("cli.mcp", eventcontract.CommandClassFacade, eventcontract.LanePolicyTopic, TopicCLIMCPServerCreate, TopicCLIMCPServerGet, TopicCLIMCPServerList, TopicCLIMCPServerUpdate, TopicCLIMCPCapabilityList)...)
 	ret = append(ret, eventcontract.Build("cli.memory", eventcontract.CommandClassFacade, eventcontract.LanePolicyTopic, TopicCLIMemoryCreate, TopicCLIMemoryGet, TopicCLIMemoryUpdate, TopicCLIMemoryDelete, TopicCLIMemoryList, TopicCLIMemorySearch)...)
 	ret = append(ret, eventcontract.Build("cli.template", eventcontract.CommandClassFacade, eventcontract.LanePolicyTopic, TopicCLITemplateCreate, TopicCLITemplateGet, TopicCLITemplateList, TopicCLITemplateUpdate, TopicCLITemplateDelete)...)
-	ret = append(ret, eventcontract.Build("cli.configuration", eventcontract.CommandClassFacade, eventcontract.LanePolicyTopic, TopicCLIConfigurationGet)...)
+	ret = append(ret, eventcontract.Build("cli.configuration", eventcontract.CommandClassFacade, eventcontract.LanePolicyTopic, TopicCLIConfigurationGet, TopicCLIConfigurationRefreshChatModels)...)
 	ret = append(ret, eventcontract.Build("cli", eventcontract.CommandClassNotify, eventcontract.LanePolicyTopic,
 		TopicCLIProgress,
 	)...)

@@ -14,6 +14,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState) {
@@ -422,6 +423,41 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			DataRoot:  state.config.DataRoot,
 			Workspace: item,
 		})
+	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/llm-target", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
+		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
+		if !ok || action != "llm-target" {
+			http.NotFound(w, r)
+			return
+		}
+		var target runtimecontract.ProviderModelTarget
+		if err := decodeJSON(r, &target); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		item, err := appservice.UpdateWorkspaceLLMTargetWithHub(r.Context(), state.commandHub, workspaceID, &target)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		state.upsertProjectedWorkspace(item)
+		writeJSON(w, http.StatusOK, workspaceResponse{Service: "workorch", Backend: state.config.Backend, DataRoot: state.config.DataRoot, Workspace: item})
+	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/llm-target", http.MethodDelete, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
+		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
+		if !ok || action != "llm-target" {
+			http.NotFound(w, r)
+			return
+		}
+		item, err := appservice.UpdateWorkspaceLLMTargetWithHub(r.Context(), state.commandHub, workspaceID, nil)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		state.upsertProjectedWorkspace(item)
+		writeJSON(w, http.StatusOK, workspaceResponse{Service: "workorch", Backend: state.config.Backend, DataRoot: state.config.DataRoot, Workspace: item})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId", http.MethodDelete, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))

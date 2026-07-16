@@ -56,6 +56,48 @@ func TestClientDecodesWorkspaceProjectionMetadata(t *testing.T) {
 	}
 }
 
+func TestClientWorkspaceLLMTargetRoutesCarryProviderAndModel(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Path != "/api/v1/workorch/workspaces/ws-model/llm-target" {
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+		switch r.Method {
+		case http.MethodPut:
+			var target ProviderModelTarget
+			if err := json.NewDecoder(r.Body).Decode(&target); err != nil {
+				t.Fatalf("decode target: %v", err)
+			}
+			if target.ProviderID != "custom" || target.ModelID != "model-a" {
+				t.Fatalf("target = %+v", target)
+			}
+			_, _ = w.Write([]byte(`{"workspace":{"id":"ws-model","title":"Model","state":"active","defaultLLMTarget":{"providerId":"custom","modelId":"model-a"}}}`))
+		case http.MethodDelete:
+			_, _ = w.Write([]byte(`{"workspace":{"id":"ws-model","title":"Model","state":"active"}}`))
+		default:
+			t.Fatalf("method = %q", r.Method)
+		}
+	}))
+	defer server.Close()
+
+	cl := New(server.URL)
+	updated, err := cl.UpdateWorkspaceLLMTarget(context.Background(), "ws-model", ProviderModelTarget{ProviderID: "custom", ModelID: "model-a"})
+	if err != nil {
+		t.Fatalf("UpdateWorkspaceLLMTarget: %v", err)
+	}
+	if updated.DefaultLLMTarget == nil || updated.DefaultLLMTarget.ProviderID != "custom" || updated.DefaultLLMTarget.ModelID != "model-a" {
+		t.Fatalf("updated workspace = %+v", updated)
+	}
+	cleared, err := cl.ClearWorkspaceLLMTarget(context.Background(), "ws-model")
+	if err != nil {
+		t.Fatalf("ClearWorkspaceLLMTarget: %v", err)
+	}
+	if cleared.DefaultLLMTarget != nil || requests != 2 {
+		t.Fatalf("cleared workspace = %+v requests=%d", cleared, requests)
+	}
+}
+
 func TestClientGovernanceRequestsCarryWorkspaceScope(t *testing.T) {
 	const workspaceID = "ws-governance"
 

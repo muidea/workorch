@@ -23,6 +23,8 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	port "github.com/muidea/workorch/internal/pkg/workorchport"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 // eventHubBackend extends the local backend with EventHub-driven progress
@@ -364,6 +366,19 @@ func (b *eventHubWorkspaceBackend) RuntimeView(ctx context.Context, req ReadWork
 	}
 	view := result.View
 	return &view, nil
+}
+
+func (b *eventHubWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*WorkspaceInfo, error) {
+	if b == nil || b.parent == nil || b.parent.commandHub == nil || id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIWorkspaceUpdateLLMTarget, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIWorkspaceUpdateLLMTargetCommand{WorkspaceID: id, Target: target})
+	bindCLIEvent(event, workorchdevents.TopicCLIWorkspaceUpdateLLMTarget, "workspace", string(id), id, "")
+	result, err := cliWorkspaceUpdateLLMTargetResponse(b.parent.commandHub.Send(event))
+	if err != nil {
+		return nil, err
+	}
+	return &result.Workspace, nil
 }
 
 func (b *eventHubWorkspaceBackend) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error {
@@ -1019,4 +1034,25 @@ func (b *eventHubConfigBackend) Get(ctx context.Context) (*ServiceConfig, error)
 		return nil, err
 	}
 	return &result.Configuration, nil
+}
+
+func (b *eventHubConfigBackend) ListChatModelTargets(ctx context.Context) ([]ChatModelTargetOption, error) {
+	cfg, err := b.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return port.NormalizeChatModelTargetOptions(cfg.ChatModelTargets), nil
+}
+
+func (b *eventHubConfigBackend) RefreshChatModelTargets(ctx context.Context) ([]ChatModelTargetOption, error) {
+	if b == nil || b.parent == nil || b.parent.commandHub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIConfigurationRefreshChatModels, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIConfigurationRefreshChatModelsCommand{ProviderID: runtimecontract.BuiltinAIProxyProviderID})
+	bindCLIEvent(event, workorchdevents.TopicCLIConfigurationRefreshChatModels, "configuration", "chat-models", "", "")
+	result, err := cliConfigurationRefreshChatModelsResponse(b.parent.commandHub.Send(event))
+	if err != nil {
+		return nil, err
+	}
+	return port.NormalizeChatModelTargetOptions(result.Configuration.ChatModelTargets), nil
 }

@@ -1255,6 +1255,10 @@ func stringSliceContains(items []string, want string) bool {
 }
 
 func cloneWorkspace(item appmodelcore.Workspace) appmodelcore.Workspace {
+	if item.DefaultLLMTarget != nil {
+		target := item.DefaultLLMTarget.Clone()
+		item.DefaultLLMTarget = &target
+	}
 	item.SoulBindings = cloneStringStringMap(item.SoulBindings)
 	item.ContextHints = cloneStringAnyMap(item.ContextHints)
 	item.EvidencePolicies = cloneMapSlice(item.EvidencePolicies)

@@ -11,6 +11,7 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func ReadWorkspaceRecord(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) (*workspacemodel.Workspace, error) {
@@ -51,6 +52,7 @@ func UpdateWorkspaceRecord(ctx context.Context, hub magicevent.Hub, item *worksp
 		ActiveRunID:          item.ActiveRunID,
 		TemplateID:           item.TemplateID,
 		ProfileID:            item.ProfileID,
+		DefaultLLMTarget:     cloneProviderModelTarget(item.DefaultLLMTarget),
 		DefaultSoulID:        item.DefaultSoulID,
 		SoulBindings:         cloneSoulBindingMap(item.SoulBindings),
 		ContextHints:         item.ContextHints.Clone(),
@@ -59,6 +61,41 @@ func UpdateWorkspaceRecord(ctx context.Context, hub magicevent.Hub, item *worksp
 	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandUpdate, "workspace", string(item.ID), item.ID, item.ActiveRunID, "")
 	_, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandUpdate)
 	return err
+}
+
+func UpdateWorkspaceLLMTarget(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*workspacemodel.Workspace, error) {
+	if hub == nil || workspaceID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	var cloned *runtimecontract.ProviderModelTarget
+	if target != nil {
+		value := target.Normalized()
+		if err := value.Validate(); err != nil {
+			return nil, err
+		}
+		cloned = &value
+	}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandUpdateLLMTarget, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.UpdateWorkspaceLLMTargetCommand{
+		WorkspaceID: workspaceID,
+		Target:      cloned,
+	})
+	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandUpdateLLMTarget, "workspace", string(workspaceID), workspaceID, "", "")
+	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandUpdateLLMTarget)
+	if err != nil {
+		return nil, err
+	}
+	if response.Workspace == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	return response.Workspace, nil
+}
+
+func cloneProviderModelTarget(input *runtimecontract.ProviderModelTarget) *runtimecontract.ProviderModelTarget {
+	if input == nil {
+		return nil
+	}
+	value := input.Clone()
+	return &value
 }
 
 func DeleteWorkspaceRecord(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) error {

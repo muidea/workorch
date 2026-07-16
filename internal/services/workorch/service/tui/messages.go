@@ -3,6 +3,7 @@ package tui
 import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type WorkspaceListMsg struct {
@@ -121,4 +122,28 @@ type ApprovalResolvedMsg struct {
 type ConfigMsg struct {
 	Config *backend.ServiceConfig
 	Error  error
+}
+
+type ChatModelTargetsLoadedMsg struct {
+	RequestSeq  int64
+	WorkspaceID string
+	Refreshing  bool
+	Options     []backend.ChatModelTargetOption
+	Config      *backend.ServiceConfig
+	Error       error
+}
+
+type WorkspaceLLMTargetUpdatedMsg struct {
+	RequestSeq  int64
+	WorkspaceID string
+	Workspace   *backend.WorkspaceInfo
+	Target      *runtimecontract.ProviderModelTarget
+	Cleared     bool
+	Error       error
+}
+
+type WorkspaceLLMTargetShowMsg struct {
+	WorkspaceID string
+	Config      *backend.ServiceConfig
+	Error       error
 }
