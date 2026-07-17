@@ -256,7 +256,7 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 				AcceptedStepKinds:     acceptedKinds, AcceptedOperations: acceptedOps, RejectedStepKinds: rejectedKinds,
 				RequireDirectEvidence: requireDirect, RequireClaimEvidence: requireClaim,
 				RequireExecutableBehaviorEvidence: requireExec, RequireCoverageTargets: requireTargets,
-				RequireAssessment: requireAssessment || true,
+				RequireAssessment: requireAssessment,
 			}.Normalized()
 			focuses = append(focuses, focus)
 			slices = append(slices, runtimecontract.RuntimeAcceptanceSlice{

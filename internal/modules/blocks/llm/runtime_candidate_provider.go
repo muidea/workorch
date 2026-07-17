@@ -47,6 +47,7 @@ type runtimeCandidateContextProjection struct {
 	EvidenceRevision     string                                  `json:"evidenceRevision"`
 	Focus                runtimecontract.CoverageFocus           `json:"focus"`
 	MissingEvidenceKinds []string                                `json:"missingEvidenceKinds,omitempty"`
+	AllowedEvidenceRefs  []string                                `json:"allowedAcceptedEvidenceRefs,omitempty"`
 	Evidence             runtimecontract.EvidenceLedger          `json:"evidence"`
 	Assessments          []runtimecontract.RuntimeAssessmentFact `json:"assessments,omitempty"`
 	Failure              *runtimecontract.FailureFact            `json:"failure,omitempty"`
@@ -404,7 +405,8 @@ func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidat
 	return runtimeCandidateContextProjection{
 		WorkspaceID: context.WorkspaceID, RunID: context.RunID,
 		DefinitionRevision: context.DefinitionRevision, EvidenceRevision: context.EvidenceRevision,
-		Focus: context.Focus, MissingEvidenceKinds: runtimecontract.MissingRequiredEvidenceKinds(facts), Evidence: context.Evidence,
+		Focus: context.Focus, MissingEvidenceKinds: runtimecontract.MissingRequiredEvidenceKinds(facts),
+		AllowedEvidenceRefs: runtimecontract.AcceptedEvidenceRefsForFocus(facts), Evidence: context.Evidence,
 		Assessments: context.Assessments, Failure: context.Failure, RepairHints: runtimecontract.DeriveRuntimeRepairHints(facts),
 		Capabilities: context.Capabilities,
 		Resources: runtimeCandidateResourceProjection{
@@ -452,7 +454,7 @@ func runtimeV2CandidateSchema(action runtimecontract.RuntimeAction) string {
 	case runtimecontract.RuntimeActionProduceStateChange, runtimecontract.RuntimeActionProduceValidation:
 		return `{"type":"object","additionalProperties":false,"required":["operations"],"properties":{"operations":{"type":"array","minItems":1,"items":{"type":"object","additionalProperties":false,"required":["id","kind","coverageWorkItemIds"],"properties":{"id":{"type":"string"},"kind":{"type":"string"},"dependsOn":{"type":"array","items":{"type":"string"}},"coverageWorkItemIds":{"type":"array","minItems":1,"items":{"type":"string"}},"targetRefs":{"type":"array","items":{"type":"string"}},"parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["name"],"properties":{"name":{"type":"string"},"string":{"type":"string"},"integer":{"type":"integer"},"boolean":{"type":"boolean"},"stringList":{"type":"array","items":{"type":"string"}}}}}}}}}}`
 	case runtimecontract.RuntimeActionProduceAssessment:
-		return `{"type":"object","additionalProperties":false,"required":["focusId","coverageWorkItemIds","summary"],"properties":{"focusId":{"type":"string"},"sliceId":{"type":"string"},"coverageWorkItemIds":{"type":"array","minItems":1,"items":{"type":"string"}},"satisfied":{"type":"boolean"},"disposition":{"type":"string","enum":["satisfied","repairable_gap","governance_required","terminal_rejection"]},"items":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["coverageWorkItemId","satisfied"],"properties":{"coverageWorkItemId":{"type":"string"},"satisfied":{"type":"boolean"},"reason":{"type":"string"},"evidenceRefs":{"type":"array","items":{"type":"string"}}}}},"gap":{"type":"object","additionalProperties":false,"properties":{"coverageWorkItemIds":{"type":"array","items":{"type":"string"}},"missingEvidenceKinds":{"type":"array","items":{"type":"string"}},"targetRefs":{"type":"array","items":{"type":"string"}},"evidenceRefs":{"type":"array","items":{"type":"string"}},"reason":{"type":"string"},"failureClass":{"type":"string"},"failureCode":{"type":"string"},"failureSignature":{"type":"string"}}},"summary":{"type":"string"},"evidenceRefs":{"type":"array","items":{"type":"string"}},"artifactRefs":{"type":"array","items":{"type":"string"}}}}`
+		return `{"type":"object","additionalProperties":false,"required":["focusId","coverageWorkItemIds","disposition","summary"],"properties":{"focusId":{"type":"string"},"sliceId":{"type":"string"},"coverageWorkItemIds":{"type":"array","minItems":1,"items":{"type":"string"}},"satisfied":{"type":"boolean"},"disposition":{"type":"string","enum":["satisfied","repairable_gap","governance_required","terminal_rejection"]},"items":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["coverageWorkItemId","satisfied"],"properties":{"coverageWorkItemId":{"type":"string"},"satisfied":{"type":"boolean"},"reason":{"type":"string"},"evidenceRefs":{"type":"array","items":{"type":"string"}}}}},"gap":{"type":"object","additionalProperties":false,"properties":{"coverageWorkItemIds":{"type":"array","items":{"type":"string"}},"missingEvidenceKinds":{"type":"array","items":{"type":"string"}},"targetRefs":{"type":"array","items":{"type":"string"}},"evidenceRefs":{"type":"array","items":{"type":"string"}},"reason":{"type":"string"},"failureClass":{"type":"string"},"failureCode":{"type":"string"},"failureSignature":{"type":"string"}}},"summary":{"type":"string"},"evidenceRefs":{"type":"array","items":{"type":"string"}},"artifactRefs":{"type":"array","items":{"type":"string"}}},"allOf":[{"if":{"properties":{"disposition":{"const":"satisfied"}},"required":["disposition"]},"then":{"required":["evidenceRefs"],"properties":{"evidenceRefs":{"type":"array","minItems":1,"items":{"type":"string"}}}}}]}`
 	case runtimecontract.RuntimeActionRequestGovernance:
 		return `{"type":"object","additionalProperties":false,"required":["externalDependency"],"properties":{"externalDependency":{"type":"object","additionalProperties":false,"required":["kind","reason"],"properties":{"kind":{"type":"string"},"subjectRef":{"type":"string"},"reason":{"type":"string"}}}}}`
 	default:
@@ -472,6 +474,7 @@ func runtimeV2CandidateContractCatalog() string {
 		"When context.missingEvidenceKinds is present, produce only those missing evidence kinds.",
 		"Use operationContracts for allowed parameters of each kind. Dynamic fields are only valid where the contract permits them.",
 		"When context.repairHints is present, follow those domain-neutral hints and do not repeat an active rejected operation shape.",
+		"For a satisfied assessment, evidenceRefs is mandatory and every value must be copied exactly from context.allowedAcceptedEvidenceRefs. Satisfied item evidenceRefs must use the same allowed set.",
 	}, "\n")
 }
 

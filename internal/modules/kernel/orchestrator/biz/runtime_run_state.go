@@ -7,6 +7,7 @@ import (
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func (o *RuntimeOrchestrator) CancelRun(ctx context.Context, runID common.RunID) error {
@@ -27,7 +28,17 @@ func (o *RuntimeOrchestrator) FailRun(ctx context.Context, runID common.RunID, r
 	if runID == "" || reason == "" {
 		return common.ErrInvalidArgument
 	}
-	return o.closeRun(ctx, runID, common.RunStateFailed, reason)
+	run, err := o.runtimeEventRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	// Administrative activation/start failure is allowed before a Runtime V2
+	// aggregate exists. Once authority is persisted, only the reducer terminal
+	// projection may fail the Run.
+	if run.RuntimeContractVersion == runtimecontract.RuntimeContractVersionV2 && run.RuntimeState != nil {
+		return common.ErrConflict
+	}
+	return o.closeLoadedRun(ctx, run, common.RunStateFailed, reason)
 }
 
 func (o *RuntimeOrchestrator) closeRun(ctx context.Context, runID common.RunID, state common.RunState, reason string) error {

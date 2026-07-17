@@ -160,3 +160,74 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 		t.Fatalf("runtimeV2ProviderRequest ceiling err = %v, want typed provider ceiling failure", err)
 	}
 }
+
+func TestRuntimeV2AssessmentRequestPublishesCanonicalEvidenceRefContract(t *testing.T) {
+	facts := runtimecontract.RuntimeFacts{
+		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-v2-00000000000000000001",
+		Focus: runtimecontract.CoverageFocus{
+			ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequireAssessment: true,
+		},
+		Evidence: runtimecontract.EvidenceLedger{Accepted: []runtimecontract.EvidenceFact{{
+			ID: "runtime-operation-1", Kind: runtimecontract.EvidenceKindStateChange, SourceRef: "workorch://runtime-operations/dispatch-1/op-1",
+			EvidenceRefs: []string{"workorch://workspace/main.go"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		}}},
+		Capabilities: runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{"file/write"}},
+		Resources: runtimecontract.RuntimeResourceFacts{ProviderCeiling: &runtimecontract.ProviderCeiling{
+			Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ContextWindowTokens: 128000,
+			ProviderMaxOutputTokens: 16384, EffectiveMaxOutputTokens: 4096, MaxInputTokens: 92928, MaxBytes: 96 * 1024,
+			CapabilityRevision: "capability-1", ConfigurationRevision: "config-1",
+		}},
+	}
+	facts = facts.Normalized()
+	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
+		State: runtimecontract.ConvergenceStateNeedAssessment, Action: runtimecontract.RuntimeActionProduceAssessment, Focus: facts.Focus,
+		RequiredOutput: runtimecontract.RequiredOutputContract{Kind: runtimecontract.RequiredOutputKindAssessment, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs},
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := runtimecontract.RuntimeDefinitionContext{
+		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod",
+	}
+	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, facts.Activation.ExecutionContract)
+	context := runtimecontract.RuntimeCandidateContextFromFacts(facts)
+	projection := runtimeV2CandidateContextProjection(context, decision.Action)
+	wantRefs := runtimecontract.AcceptedEvidenceRefsForFocus(facts)
+	if strings.Join(projection.AllowedEvidenceRefs, "|") != strings.Join(wantRefs, "|") || len(wantRefs) != 3 {
+		t.Fatalf("allowed evidence refs = %+v, want %+v", projection.AllowedEvidenceRefs, wantRefs)
+	}
+	request, err := runtimeV2ProviderRequest(llmmodels.RuntimeCandidateRequest{
+		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix,
+		DefinitionContext: definition, CandidateContext: context,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dynamic := request.PromptContext.Sections[3].Content
+	for _, ref := range wantRefs {
+		if !strings.Contains(dynamic, ref) {
+			t.Fatalf("assessment context lost allowed evidence ref %q: %s", ref, dynamic)
+		}
+	}
+	schema := runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceAssessment)
+	for _, contract := range []string{`"required":["focusId","coverageWorkItemIds","disposition","summary"]`, `"const":"satisfied"`, `"required":["evidenceRefs"]`, `"minItems":1`} {
+		if !strings.Contains(schema, contract) {
+			t.Fatalf("assessment schema lost conditional evidence contract %q: %s", contract, schema)
+		}
+	}
+	retryFailure := runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassSchema, Reason: "missing evidenceRefs"}
+	retry, err := runtimeV2ProviderRequest(llmmodels.RuntimeCandidateRequest{
+		Decision: decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1, PreviousFailure: &retryFailure, StablePrefixHash: prefix,
+		DefinitionContext: definition, CandidateContext: context,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range wantRefs {
+		if !strings.Contains(retry.PromptContext.Sections[3].Content, ref) {
+			t.Fatalf("assessment retry lost allowed evidence ref %q", ref)
+		}
+	}
+}

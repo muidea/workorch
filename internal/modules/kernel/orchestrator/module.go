@@ -302,9 +302,24 @@ func (m *Module) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.
 				return
 			}
 			slog.Warn("workorch Runtime V2 drive failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", err)
-			terminal := &runtimecontract.TerminalOutcome{Code: "runtime_v2_drive_failed", Summary: err.Error()}
-			if projectErr := m.bizPtr.ProjectRuntimeV2Terminal(driveCtx, workspaceID, runID, runtimecontract.RuntimeActionFail, terminal); projectErr != nil {
-				slog.Warn("workorch Runtime V2 drive failure projection failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", projectErr)
+			aggregate, recordErr := m.bizPtr.RecordRuntimeV2FailureFact(driveCtx, workspaceID, runID, runtimecontract.FailureFact{
+				Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_v2_drive_failed",
+				Signature: "runtime-v2-drive-failed", Message: err.Error(),
+			})
+			if recordErr != nil {
+				slog.Warn("workorch Runtime V2 drive failure fact commit failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", recordErr)
+				return
+			}
+			if aggregate.Decision.Action != runtimecontract.RuntimeActionFail || aggregate.Decision.Terminal == nil {
+				slog.Warn("workorch Runtime V2 drive failure did not reduce to terminal", "source", source, "workspaceID", workspaceID, "runID", runID)
+				return
+			}
+			if projectErr := m.projectRuntimeV2Result(driveCtx, aggregate); projectErr != nil {
+				slog.Warn("workorch Runtime V2 drive failure result projection failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", projectErr)
+				return
+			}
+			if projectErr := m.bizPtr.ProjectRuntimeV2Terminal(driveCtx, workspaceID, runID, aggregate.Decision.Action, aggregate.Decision.Terminal); projectErr != nil {
+				slog.Warn("workorch Runtime V2 drive failure terminal projection failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", projectErr)
 			}
 		}
 	}

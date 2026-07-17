@@ -117,6 +117,80 @@ func TestRejectedValidationEvidenceAtomicallyReturnsToStateChange(t *testing.T) 
 	}
 }
 
+func TestRejectedTextReplaceConsumesRepairBudgetAndRequiresFreshTargetSnapshot(t *testing.T) {
+	aggregate := stateChangeAggregate(t)
+	aggregate.Facts.ConvergencePolicy = runtimecontract.RuntimeConvergencePolicy{MaxRepairAttemptsPerFocus: 3}
+	aggregate.Facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
+		TargetRef: "main.go", Content: "package main\n", ContentHash: "old-hash", ContentState: runtimecontract.SnapshotContentStateComplete,
+	}}
+	repository := &durableRuntimeStateRepository{aggregate: aggregate}
+	coordinator, _ := NewDispatchCoordinator(repository)
+	oldText := "func missing() {}"
+	newText := "func present() {}"
+	patchType := "text_replace"
+	targetRef := "main.go"
+	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+		ID: "patch-1", Kind: runtimecontract.RuntimeBlockKindPatchApply,
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{targetRef},
+		Parameters: []runtimecontract.OperationParameter{
+			{Name: "targetRef", String: &targetRef}, {Name: "patchType", String: &patchType},
+			{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText},
+		},
+	}}}}}
+	sealed, err := coordinator.PersistDispatch(context.Background(), aggregate.Decision, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := ExecutionEvidence{
+		EventID: "event-patch-conflict", WorkspaceID: "ws-1", RunID: "run-1",
+		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
+		OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusRejected,
+		Failure: &runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassExecutionFailure, Code: "text_replace_not_found",
+			Signature: "patch-text-replace-not-found", Message: "oldText not found", TargetRefs: []string{"main.go"},
+		},
+	}
+	rejected, err := coordinator.CommitEvidence(context.Background(), evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rejected.Aggregate.Facts.Repair.RepairAttempts != 1 || rejected.Aggregate.Facts.Repair.ActiveGap == nil {
+		t.Fatalf("repair ledger = %+v", rejected.Aggregate.Facts.Repair)
+	}
+	if rejected.Aggregate.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(rejected.Aggregate.Facts.Prerequisites.Pending) != 1 {
+		t.Fatalf("rejected patch decision = %+v prerequisites=%+v", rejected.Aggregate.Decision, rejected.Aggregate.Facts.Prerequisites.Pending)
+	}
+	prerequisite := rejected.Aggregate.Facts.Prerequisites.Pending[0]
+	if prerequisite.Kind != runtimecontract.PrerequisiteKindTargetSnapshot || prerequisite.SubjectRef != "main.go" || len(rejected.Aggregate.Facts.Resources.TargetSnapshots) != 0 {
+		t.Fatalf("fresh snapshot prerequisite = %+v resources=%+v", prerequisite, rejected.Aggregate.Facts.Resources)
+	}
+	revision := rejected.Aggregate.StateRevision
+	duplicate, err := coordinator.CommitEvidence(context.Background(), evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.StateRevision != revision || duplicate.Aggregate.Facts.Repair.RepairAttempts != 1 {
+		t.Fatalf("duplicate rejection changed repair authority: %+v", duplicate)
+	}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshed, err := controller.CommitPrerequisite(context.Background(), "ws-1", "run-1", PrerequisiteResult{
+		PrerequisiteID: prerequisite.ID,
+		TargetSnapshot: &runtimecontract.TargetSnapshot{
+			TargetRef: "main.go", Content: "package main\nfunc present() {}\n", ContentHash: "fresh-hash", ContentState: runtimecontract.SnapshotContentStateComplete,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(refreshed.Facts.Prerequisites.Pending) != 0 ||
+		len(refreshed.Facts.Resources.TargetSnapshots) != 1 || refreshed.Facts.Resources.TargetSnapshots[0].ContentHash != "fresh-hash" {
+		t.Fatalf("fresh snapshot did not return to same-focus repair: %+v", refreshed)
+	}
+}
+
 func TestCoordinatorRestartRecoversPersistedDispatchWithoutProcessState(t *testing.T) {
 	repository := &durableRuntimeStateRepository{aggregate: stateChangeAggregate(t)}
 	first, _ := NewDispatchCoordinator(repository)

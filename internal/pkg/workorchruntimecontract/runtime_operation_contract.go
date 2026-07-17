@@ -394,6 +394,23 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 	return nil
 }
 
+// RuntimeOperationRequiresCurrentTargetSnapshot reports whether an operation's
+// technical contract depends on exact current target content. Repair planning
+// uses it to reacquire stale targets after a conflict; it does not encode
+// business or profile semantics.
+func RuntimeOperationRequiresCurrentTargetSnapshot(operation RuntimeOperation) bool {
+	operation = operation.Normalized()
+	switch operation.Kind {
+	case StepKindFileEdit:
+		return true
+	case RuntimeBlockKindPatchApply:
+		patchType := operationStringParameter(operation.Parameters, "patchType")
+		return patchType == "text_replace" || patchType == "unified_diff"
+	default:
+		return false
+	}
+}
+
 func invalidRuntimeOperationParameterError(kind string, name string, contract RuntimeOperationContract) string {
 	kind = strings.TrimSpace(kind)
 	name = strings.TrimSpace(name)

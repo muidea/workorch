@@ -64,6 +64,13 @@ func (o *RuntimeOrchestrator) RecordRuntimeV2FeasibilityFact(ctx context.Context
 	return o.runtimeV2Controller.RecordFeasibilityFact(ctx, workspaceID, runID, fact)
 }
 
+func (o *RuntimeOrchestrator) RecordRuntimeV2FailureFact(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, fact runtimemodel.FailureFact) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.RecordFailureFact(ctx, workspaceID, runID, fact)
+}
+
 func (o *RuntimeOrchestrator) BeginRuntimeV2CandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string) (runtimev2.RuntimeAggregate, error) {
 	if o == nil || o.runtimeV2Controller == nil {
 		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument

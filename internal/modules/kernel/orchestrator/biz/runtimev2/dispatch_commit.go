@@ -250,8 +250,10 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 		Summary: evidence.Evidence.Summary, ContentHash: evidence.Evidence.ContentHash,
 		ExitCode: evidence.Evidence.ExitCode, EvidenceRefs: append([]string(nil), evidence.Evidence.EvidenceRefs...),
 	}
+	var committedOperation runtimecontract.RuntimeOperation
 	for _, operation := range candidateRuntimeOperations(aggregate.ActiveDispatch.Candidate) {
 		if operation.Normalized().ID == evidence.OperationID {
+			committedOperation = operation.Normalized()
 			fact.CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), operation.CoverageWorkItemIDs...)
 			break
 		}
@@ -275,6 +277,7 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 			aggregate.Facts.Assessments = invalidateNonSatisfiedAssessmentsForFocus(aggregate.Facts.Assessments, aggregate.Facts.Focus.ID)
 			aggregate.Facts.Failure = nil
 			aggregate.Facts.Repair = aggregate.Facts.Repair.NoteProgress(fact.Revision)
+			aggregate.Facts.Repair.ActiveGap = nil
 		}
 	case ExecutionEvidenceStatusRejected:
 		if evidence.Failure != nil {
@@ -284,6 +287,44 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 			fact.FailureMessage = evidence.Failure.Message
 			failure := *evidence.Failure
 			aggregate.Facts.Failure = &failure
+			gap := runtimecontract.RuntimeAssessmentGap{
+				CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), fact.CoverageWorkItemIDs...),
+				TargetRefs:          append([]string(nil), failure.TargetRefs...), Reason: failure.Message,
+				FailureClass: failure.Class, FailureCode: failure.Code, FailureSignature: failure.Signature,
+			}
+			if len(gap.CoverageWorkItemIDs) == 0 {
+				gap.CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), aggregate.Facts.Focus.CoverageWorkItemIDs...)
+			}
+			if len(gap.TargetRefs) == 0 {
+				gap.TargetRefs = append([]string(nil), aggregate.Facts.Focus.TargetRefs...)
+			}
+			switch fact.Kind {
+			case runtimecontract.EvidenceKindValidation:
+				gap.MissingEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+			default:
+				gap.MissingEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+			}
+			signature := strings.TrimSpace(failure.Signature)
+			if signature == "" {
+				signature = runtimecontract.StableAssessmentFailureSignature(aggregate.Facts.Focus.ID, runtimecontract.AssessmentDispositionRepairableGap, &gap)
+				gap.FailureSignature = signature
+				aggregate.Facts.Failure.Signature = signature
+				fact.FailureSignature = signature
+			}
+			previousCount := repairFailureSignatureCount(aggregate.Facts.Repair, signature)
+			cycleID := runtimecontract.StableRepairCycleID(string(aggregate.Facts.RunID), aggregate.Facts.Focus.ID, signature, evidence.EventID)
+			ledger, _, cycleErr := aggregate.Facts.Repair.BeginRepairCycle(aggregate.Facts.Focus.ID, aggregate.Facts.Focus.SliceID, cycleID, signature, aggregate.Facts.ConvergencePolicy)
+			if cycleErr != nil {
+				return EvidenceCommitResult{}, cycleErr
+			}
+			ledger.ActiveGap = &gap
+			if previousCount > 0 {
+				ledger = ledger.NoteNoProgress()
+			}
+			aggregate.Facts.Repair = ledger
+			if fact.Kind == runtimecontract.EvidenceKindStateChange && runtimecontract.RuntimeOperationRequiresCurrentTargetSnapshot(committedOperation) {
+				aggregate.Facts = requireFreshTargetSnapshots(aggregate.Facts, committedOperation.TargetRefs)
+			}
 		}
 		aggregate.Facts.Evidence.Rejected = append(aggregate.Facts.Evidence.Rejected, fact)
 	default:
@@ -314,6 +355,43 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 		return EvidenceCommitResult{}, err
 	}
 	return EvidenceCommitResult{Disposition: CommitDispositionCommitted, DispatchCompleted: dispatchCompleted, Aggregate: aggregate}, nil
+}
+
+func repairFailureSignatureCount(ledger runtimecontract.RuntimeRepairLedger, signature string) int {
+	for _, item := range ledger.SignatureCounts {
+		if item.Signature == signature {
+			return item.Count
+		}
+	}
+	return 0
+}
+
+func requireFreshTargetSnapshots(facts runtimecontract.RuntimeFacts, targetRefs []string) runtimecontract.RuntimeFacts {
+	targets := map[string]struct{}{}
+	for _, ref := range targetRefs {
+		ref = strings.TrimSpace(ref)
+		if ref != "" {
+			targets[ref] = struct{}{}
+		}
+	}
+	if len(targets) == 0 {
+		return facts
+	}
+	kept := make([]runtimecontract.TargetSnapshot, 0, len(facts.Resources.TargetSnapshots))
+	for _, snapshot := range facts.Resources.TargetSnapshots {
+		if _, refresh := targets[snapshot.TargetRef]; !refresh {
+			kept = append(kept, snapshot)
+		}
+	}
+	facts.Resources.TargetSnapshots = kept
+	requirements := make([]RuntimeRequirement, 0, len(targets))
+	for ref := range targets {
+		requirements = append(requirements, RuntimeRequirement{
+			Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: ref, Reason: "fresh target snapshot required after state-change conflict",
+		})
+	}
+	return PreflightRuntimeFacts(facts, requirements)
 }
 
 func closeCoverageForEvidence(coverage []runtimecontract.RuntimeCoverageItemFact, evidence runtimecontract.EvidenceFact, fallback []common.CoverageWorkItemID) []runtimecontract.RuntimeCoverageItemFact {

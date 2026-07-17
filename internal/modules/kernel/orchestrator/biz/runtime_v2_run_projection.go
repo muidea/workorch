@@ -45,12 +45,26 @@ func (o *RuntimeOrchestrator) ProjectRuntimeV2Terminal(ctx context.Context, work
 	if o == nil || workspaceID == "" || runID == "" || terminal == nil {
 		return common.ErrInvalidArgument
 	}
+	if action != runtimecontract.RuntimeActionComplete && action != runtimecontract.RuntimeActionFail {
+		return common.ErrInvalidArgument
+	}
 	run, err := o.runtimeEventRun(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), runID)
 	if err != nil {
 		return err
 	}
 	if run.WorkspaceID != workspaceID {
 		return common.ErrNotFound
+	}
+	if run.State != common.RunStateCompleted && run.State != common.RunStateFailed {
+		if run.RuntimeContractVersion != runtimecontract.RuntimeContractVersionV2 || run.RuntimeState == nil {
+			return common.ErrConflict
+		}
+		state := run.RuntimeState.Normalized()
+		if err := state.Validate(); err != nil || state.Decision.Action != action || state.Decision.Terminal == nil ||
+			strings.TrimSpace(state.Decision.Terminal.Code) != strings.TrimSpace(terminal.Code) ||
+			strings.TrimSpace(state.Decision.Terminal.Summary) != strings.TrimSpace(terminal.Summary) {
+			return common.ErrConflict
+		}
 	}
 	switch action {
 	case runtimecontract.RuntimeActionComplete:
@@ -88,7 +102,6 @@ func (o *RuntimeOrchestrator) ProjectRuntimeV2Terminal(ctx context.Context, work
 			reason = code
 		}
 		return o.closeLoadedRun(ctx, run, common.RunStateFailed, reason)
-	default:
-		return common.ErrInvalidArgument
 	}
+	return common.ErrInvalidArgument
 }

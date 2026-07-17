@@ -46,7 +46,8 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 		return base, nil
 	}
 	if facts.Failure != nil {
-		if repeatedFailureCount(facts, facts.Failure.Signature) >= 3 {
+		if facts.Failure.Class == runtimecontract.FailureClassExecutionFailure &&
+			(facts.Repair.Exhausted || facts.Repair.RepairAttempts >= facts.ConvergencePolicy.MaxRepairAttemptsPerFocus) {
 			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "no_progress_exhausted", facts.Failure.Message), nil
 		}
 		switch facts.Failure.Class {
@@ -142,27 +143,6 @@ func currentFocusCoverageSatisfied(facts runtimecontract.RuntimeFacts) bool {
 	return true
 }
 
-func repeatedFailureCount(facts runtimecontract.RuntimeFacts, signature string) int {
-	signature = strings.TrimSpace(signature)
-	if signature == "" {
-		return 0
-	}
-	latestAcceptedRevision := ""
-	for _, evidence := range facts.Evidence.Accepted {
-		if evidenceAppliesToCurrentFocus(facts, evidence) && evidence.Revision > latestAcceptedRevision {
-			latestAcceptedRevision = evidence.Revision
-		}
-	}
-	count := 0
-	for _, evidence := range facts.Evidence.Rejected {
-		if evidenceAppliesToCurrentFocus(facts, evidence) && strings.TrimSpace(evidence.FailureSignature) == signature &&
-			(latestAcceptedRevision == "" || evidence.Revision == "" || evidence.Revision > latestAcceptedRevision) {
-			count++
-		}
-	}
-	return count
-}
-
 func assessmentDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeDecision {
 	base.State = runtimecontract.ConvergenceStateNeedAssessment
 	base.Action = runtimecontract.RuntimeActionProduceAssessment
@@ -175,7 +155,10 @@ func assessmentDecision(base runtimecontract.RuntimeDecision, facts runtimecontr
 func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision, error) {
 	acceptedKinds := focusAcceptedKinds(facts.Capabilities.StateChangeKinds, facts.Focus)
 	if len(acceptedKinds) == 0 {
-		return runtimecontract.RuntimeDecision{}, fmt.Errorf("state-change authority requires a concrete runtime capability")
+		if len(facts.Capabilities.GovernanceKinds) > 0 {
+			return governanceDecision(base, facts, "state-change authority has no concrete runtime capability")
+		}
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "capability_unavailable", "state-change authority has no concrete runtime capability"), nil
 	}
 	base.State = runtimecontract.ConvergenceStateNeedStateChange
 	base.Action = runtimecontract.RuntimeActionProduceStateChange
@@ -193,7 +176,10 @@ func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecont
 func validationDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision, error) {
 	acceptedKinds := focusAcceptedKinds(facts.Capabilities.ValidationKinds, facts.Focus)
 	if len(acceptedKinds) == 0 {
-		return runtimecontract.RuntimeDecision{}, fmt.Errorf("validation authority requires a concrete runtime capability")
+		if len(facts.Capabilities.GovernanceKinds) > 0 {
+			return governanceDecision(base, facts, "validation authority has no concrete runtime capability")
+		}
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "capability_unavailable", "validation authority has no concrete runtime capability"), nil
 	}
 	base.State = runtimecontract.ConvergenceStateNeedValidation
 	base.Action = runtimecontract.RuntimeActionProduceValidation

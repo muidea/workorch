@@ -93,7 +93,7 @@ func TestReduceRuntimeStateIsDeterministic(t *testing.T) {
 	}
 }
 
-func TestReduceRuntimeStateBoundsRepeatedStableFailureAcrossAuthorities(t *testing.T) {
+func TestReduceRuntimeStateUsesSealedRepairBudgetForRepeatedStableFailure(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
 	facts.Capabilities.StateChangeKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
@@ -122,12 +122,23 @@ func TestReduceRuntimeStateBoundsRepeatedStableFailureAcrossAuthorities(t *testi
 		Revision:            "evidence-v2-00000000000000000004",
 		CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	})
+	// Rejected evidence count is diagnostic only; the sealed repair ledger is
+	// the single budget authority.
+	decision, err = ReduceRuntimeState(facts, &decision.AuthoritySnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+		t.Fatalf("rejected count bypassed repair ledger: %+v", decision)
+	}
+	facts.ConvergencePolicy = runtimecontract.RuntimeConvergencePolicy{MaxRepairAttemptsPerFocus: 3}
+	facts.Repair = runtimecontract.RuntimeRepairLedger{FocusID: facts.Focus.ID, RepairAttempts: 3}
 	decision, err = ReduceRuntimeState(facts, &decision.AuthoritySnapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "no_progress_exhausted" {
-		t.Fatalf("three repeated failures decision = %+v", decision)
+		t.Fatalf("sealed repair budget decision = %+v", decision)
 	}
 }
 
@@ -165,6 +176,38 @@ func TestReduceRuntimeStateProgression(t *testing.T) {
 			}
 			if got.State != tt.state || got.Action != tt.action {
 				t.Fatalf("decision = %s/%s, want %s/%s", got.State, got.Action, tt.state, tt.action)
+			}
+		})
+	}
+}
+
+func TestReduceRuntimeStateMissingConcreteCapabilityUsesFormalDecision(t *testing.T) {
+	tests := []struct {
+		name       string
+		governance bool
+		action     runtimecontract.RuntimeAction
+		code       string
+	}{
+		{name: "bounded terminal without governance", action: runtimecontract.RuntimeActionFail, code: "capability_unavailable"},
+		{name: "governance when capability exists", governance: true, action: runtimecontract.RuntimeActionRequestGovernance},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			facts := validationFacts()
+			facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+			facts.Capabilities.StateChangeKinds = nil
+			if tt.governance {
+				facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindDecisionRequest}
+			}
+			decision, err := ReduceRuntimeState(facts, nil)
+			if err != nil {
+				t.Fatalf("missing capability escaped reducer as error: %v", err)
+			}
+			if decision.Action != tt.action {
+				t.Fatalf("decision = %+v, want action %s", decision, tt.action)
+			}
+			if tt.code != "" && (decision.Terminal == nil || decision.Terminal.Code != tt.code) {
+				t.Fatalf("terminal = %+v, want code %s", decision.Terminal, tt.code)
 			}
 		})
 	}

@@ -3,6 +3,7 @@ package runtimev2
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -144,6 +145,32 @@ func TestRuntimeControllerRecordsInfeasibleCandidateAsReducerFact(t *testing.T) 
 	}
 }
 
+func TestRuntimeControllerRecordsFailureFactBeforeTerminalDecision(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, _ := NewRuntimeController(repository)
+	if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
+		t.Fatal(err)
+	}
+	terminal, err := controller.RecordFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_v2_drive_failed",
+		Signature: "runtime-v2-drive-failed", Message: "authority transaction mismatch",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if terminal.Facts.Failure == nil || terminal.Facts.Failure.Code != "runtime_v2_drive_failed" ||
+		terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "runtime_contract_defect" {
+		t.Fatalf("failure fact terminal = %+v", terminal)
+	}
+	saves := repository.saves
+	replayed, err := controller.RecordFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassRuntimeContractMisalignment, Message: "replayed drive failure",
+	})
+	if err != nil || repository.saves != saves || replayed.StateRevision != terminal.StateRevision {
+		t.Fatalf("terminal failure replay = %+v saves=%d err=%v", replayed, repository.saves, err)
+	}
+}
+
 func TestRuntimeControllerOwnsDispatchAndEvidenceCommit(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
@@ -215,6 +242,72 @@ func TestRuntimeControllerCommitsTypedAssessmentBeforeCompletion(t *testing.T) {
 	if completed.Decision.Action != runtimecontract.RuntimeActionComplete || len(completed.Facts.Assessments) != 1 || !completed.Facts.Assessments[0].Satisfied {
 		t.Fatalf("completed assessment aggregate = %+v", completed)
 	}
+}
+
+func TestRuntimeControllerRejectsSatisfiedAssessmentItemWithUnknownEvidenceRef(t *testing.T) {
+	controller := prepareAssessmentController(t, runtimecontract.AssessmentCandidate{
+		FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+		Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "satisfied", EvidenceRefs: []string{"event-1"},
+		Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-v2", Satisfied: true, EvidenceRefs: []string{"unknown-evidence"}}},
+	})
+	if _, err := controller.CommitAssessment(context.Background(), "ws-v2", "run-v2"); err == nil || !strings.Contains(err.Error(), "not accepted current-focus evidence") {
+		t.Fatalf("CommitAssessment unknown item ref err = %v", err)
+	}
+}
+
+func TestRuntimeControllerSatisfiedAssessmentItemInheritsTopLevelEvidenceRefs(t *testing.T) {
+	controller := prepareAssessmentController(t, runtimecontract.AssessmentCandidate{
+		FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+		Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "satisfied", EvidenceRefs: []string{"event-1"},
+		Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-v2", Satisfied: true}},
+	})
+	completed, err := controller.CommitAssessment(context.Background(), "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Decision.Action != runtimecontract.RuntimeActionComplete || len(completed.Facts.Coverage) != 1 ||
+		len(completed.Facts.Coverage[0].EvidenceRefs) != 1 || completed.Facts.Coverage[0].EvidenceRefs[0] != "event-1" {
+		t.Fatalf("assessment item evidence inheritance = %+v", completed)
+	}
+	if len(completed.Facts.Assessments) != 1 || len(completed.Facts.Assessments[0].Items) != 1 ||
+		len(completed.Facts.Assessments[0].Items[0].EvidenceRefs) != 1 || completed.Facts.Assessments[0].Items[0].EvidenceRefs[0] != "event-1" {
+		t.Fatalf("assessment fact did not persist inherited item evidence: %+v", completed.Facts.Assessments)
+	}
+}
+
+func prepareAssessmentController(t *testing.T, assessment runtimecontract.AssessmentCandidate) *RuntimeController {
+	t.Helper()
+	repository := &controllerRepository{}
+	controller, _ := NewRuntimeController(repository)
+	facts := controllerFacts()
+	facts.Focus.RequireAssessment = true
+	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "state-change-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+		ID: "write-1", Kind: "file/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+	}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := controller.CommitEvidence(context.Background(), ExecutionEvidence{
+		EventID: "event-1", WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: sealed.ActiveDispatch.ID,
+		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "write-1",
+		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
+	})
+	if err != nil || evidence.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
+		t.Fatalf("prepare assessment evidence = %+v err=%v", evidence, err)
+	}
+	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "assessment-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{Assessment: &assessment}); err != nil {
+		t.Fatal(err)
+	}
+	return controller
 }
 
 func TestRuntimeControllerCandidateRetryIsPersistedAndLimitedToTwoAttempts(t *testing.T) {

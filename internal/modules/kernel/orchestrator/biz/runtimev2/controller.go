@@ -115,6 +115,37 @@ func (c *RuntimeController) RecordFeasibilityFact(ctx context.Context, workspace
 	return aggregate, nil
 }
 
+// RecordFailureFact persists an SM-2 failure input and lets the reducer choose
+// repair, governance, or terminal. Drive/adapter errors must never project a
+// Run terminal without this authority transition.
+func (c *RuntimeController) RecordFailureFact(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, fact runtimecontract.FailureFact) (RuntimeAggregate, error) {
+	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || fact.Class == "" || strings.TrimSpace(fact.Message) == "" {
+		return RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if aggregate.Decision.Action == runtimecontract.RuntimeActionComplete || aggregate.Decision.Action == runtimecontract.RuntimeActionFail {
+		return aggregate, nil
+	}
+	expectedRevision := aggregate.StateRevision
+	fact.Code = strings.TrimSpace(fact.Code)
+	fact.Signature = strings.TrimSpace(fact.Signature)
+	fact.Message = strings.TrimSpace(fact.Message)
+	aggregate.Facts.Failure = &fact
+	decision, err := ReduceRuntimeState(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	aggregate.Decision = decision
+	aggregate.StateRevision++
+	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return aggregate, nil
+}
+
 func (c *RuntimeController) CommitPrerequisite(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, result PrerequisiteResult) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
@@ -324,8 +355,8 @@ func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID co
 	}
 	assessment.Disposition = disposition
 	assessment.Satisfied = disposition == runtimecontract.AssessmentDispositionSatisfied
+	known := stringSet(runtimecontract.AcceptedEvidenceRefsForFocus(aggregate.Facts))
 	if assessment.Satisfied {
-		known := acceptedEvidenceRefsForFocus(aggregate.Facts)
 		for _, ref := range assessment.EvidenceRefs {
 			if _, ok := known[ref]; !ok {
 				return RuntimeAggregate{}, fmt.Errorf("assessment evidence ref %q is not accepted current-focus evidence", ref)
@@ -340,11 +371,27 @@ func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID co
 	for _, id := range aggregate.Facts.Focus.CoverageWorkItemIDs {
 		requiredCoverage[id] = struct{}{}
 	}
-	for _, item := range assessment.Items {
+	for idx := range assessment.Items {
+		item := &assessment.Items[idx]
 		if len(requiredCoverage) > 0 {
 			if _, ok := requiredCoverage[item.CoverageWorkItemID]; !ok {
 				return RuntimeAggregate{}, fmt.Errorf("assessment item %q is outside current slice coverage", item.CoverageWorkItemID)
 			}
+		}
+		if item.Satisfied {
+			refs := item.EvidenceRefs
+			if len(refs) == 0 {
+				refs = assessment.EvidenceRefs
+			}
+			if len(refs) == 0 {
+				return RuntimeAggregate{}, fmt.Errorf("satisfied assessment item %q requires current-focus evidence refs", item.CoverageWorkItemID)
+			}
+			for _, ref := range refs {
+				if _, ok := known[ref]; !ok {
+					return RuntimeAggregate{}, fmt.Errorf("assessment item %q evidence ref %q is not accepted current-focus evidence", item.CoverageWorkItemID, ref)
+				}
+			}
+			item.EvidenceRefs = append([]string(nil), refs...)
 		}
 	}
 	assessment.CoverageWorkItemIDs = runtimeAssessmentCoverageIDs(assessment.CoverageWorkItemIDs, aggregate.Facts.Focus.CoverageWorkItemIDs)
@@ -422,23 +469,6 @@ func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID co
 	return aggregate, nil
 }
 
-func acceptedEvidenceRefsForFocus(facts runtimecontract.RuntimeFacts) map[string]struct{} {
-	ret := map[string]struct{}{}
-	for _, evidence := range facts.Evidence.Accepted {
-		if len(facts.Focus.RequiredEvidenceKinds) > 0 && !evidenceAppliesToCurrentFocus(facts, evidence) {
-			continue
-		}
-		ret[string(evidence.ID)] = struct{}{}
-		if evidence.SourceRef != "" {
-			ret[evidence.SourceRef] = struct{}{}
-		}
-		for _, ref := range evidence.EvidenceRefs {
-			ret[ref] = struct{}{}
-		}
-	}
-	return ret
-}
-
 func runtimeAssessmentCoverageIDs(ids []common.CoverageWorkItemID, fallback []common.CoverageWorkItemID) []common.CoverageWorkItemID {
 	if len(ids) == 0 {
 		ids = fallback
@@ -480,6 +510,9 @@ func applyAssessmentCoverage(coverage []runtimecontract.RuntimeCoverageItemFact,
 					break
 				}
 			}
+		}
+		if named && claim.Satisfied && len(claim.EvidenceRefs) == 0 {
+			claim.EvidenceRefs = append([]string(nil), assessment.EvidenceRefs...)
 		}
 		if !named || item.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
 			continue

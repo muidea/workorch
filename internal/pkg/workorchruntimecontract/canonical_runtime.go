@@ -464,6 +464,22 @@ func (f RuntimeFacts) Validate() error {
 	return nil
 }
 
+// AcceptedEvidenceRefsForFocus returns the canonical reference set that an
+// assessment may cite for the current focus. Rendering and commit validation
+// must use this same helper to avoid two evidence namespaces.
+func AcceptedEvidenceRefsForFocus(facts RuntimeFacts) []string {
+	facts = facts.Normalized()
+	ret := []string{}
+	for _, evidence := range facts.Evidence.Accepted {
+		if len(facts.Focus.RequiredEvidenceKinds) > 0 && !EvidenceAppliesToCurrentFocus(facts, evidence) {
+			continue
+		}
+		ret = append(ret, string(evidence.ID), evidence.SourceRef)
+		ret = append(ret, evidence.EvidenceRefs...)
+	}
+	return normalizeStrings(ret)
+}
+
 func (f CoverageFocus) Normalized() CoverageFocus {
 	f.ID = strings.TrimSpace(f.ID)
 	f.SliceID = strings.TrimSpace(f.SliceID)

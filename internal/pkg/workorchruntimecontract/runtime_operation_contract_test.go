@@ -41,4 +41,29 @@ func TestValidateRuntimeOperationContractMCPDynamicInputAllowed(t *testing.T) {
 	}
 }
 
+func TestRuntimeOperationRequiresCurrentTargetSnapshot(t *testing.T) {
+	tests := []struct {
+		name      string
+		operation RuntimeOperation
+		want      bool
+	}{
+		{name: "file edit", operation: RuntimeOperation{Kind: StepKindFileEdit}, want: true},
+		{name: "text replace", operation: patchOperationWithType("text_replace"), want: true},
+		{name: "unified diff", operation: patchOperationWithType("unified_diff"), want: true},
+		{name: "file write", operation: patchOperationWithType("file_write"), want: false},
+		{name: "validation", operation: RuntimeOperation{Kind: RuntimeBlockKindManagedValidationSession}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := RuntimeOperationRequiresCurrentTargetSnapshot(tt.operation); got != tt.want {
+				t.Fatalf("RuntimeOperationRequiresCurrentTargetSnapshot() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func patchOperationWithType(patchType string) RuntimeOperation {
+	return RuntimeOperation{Kind: RuntimeBlockKindPatchApply, Parameters: []OperationParameter{{Name: "patchType", String: &patchType}}}
+}
+
 func strPtr(value string) *string { return &value }

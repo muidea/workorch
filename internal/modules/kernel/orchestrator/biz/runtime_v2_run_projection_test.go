@@ -50,11 +50,11 @@ func TestProjectRuntimeV2CompleteBypassesLegacyResultGate(t *testing.T) {
 	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive}); err != nil {
+	terminal := &runtimecontract.TerminalOutcome{Code: "coverage_satisfied", Summary: "全部 coverage focus 已满足"}
+	if err := runs.Create(ctx, terminalRuntimeV2Run(t, "run-v2", runtimecontract.RuntimeActionComplete, terminal)); err != nil {
 		t.Fatal(err)
 	}
 	orchestrator := NewRuntimeOrchestrator(runs, workspaces, nil, nil)
-	terminal := &runtimecontract.TerminalOutcome{Code: "coverage_satisfied", Summary: "全部 coverage focus 已满足"}
 	if err := orchestrator.ProjectRuntimeV2Terminal(ctx, "ws-v2", "run-v2", runtimecontract.RuntimeActionComplete, terminal); err != nil {
 		t.Fatal(err)
 	}
@@ -81,11 +81,11 @@ func TestProjectRuntimeV2FailurePreservesTerminalCodeForObservation(t *testing.T
 	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive}); err != nil {
+	terminal := &runtimecontract.TerminalOutcome{Code: "no_progress_exhausted", Summary: "patch input remains invalid"}
+	if err := runs.Create(ctx, terminalRuntimeV2Run(t, "run-v2", runtimecontract.RuntimeActionFail, terminal)); err != nil {
 		t.Fatal(err)
 	}
 	orchestrator := NewRuntimeOrchestrator(runs, workspaces, nil, nil)
-	terminal := &runtimecontract.TerminalOutcome{Code: "no_progress_exhausted", Summary: "patch input remains invalid"}
 	if err := orchestrator.ProjectRuntimeV2Terminal(ctx, "ws-v2", "run-v2", runtimecontract.RuntimeActionFail, terminal); err != nil {
 		t.Fatal(err)
 	}
@@ -95,6 +95,76 @@ func TestProjectRuntimeV2FailurePreservesTerminalCodeForObservation(t *testing.T
 	}
 	if run.State != common.RunStateFailed || run.FailureReason != "no_progress_exhausted: patch input remains invalid" {
 		t.Fatalf("failed run = %+v", run)
+	}
+}
+
+func TestFailRunRejectsActiveRuntimeV2AggregateBypass(t *testing.T) {
+	ctx := context.Background()
+	runs := memory.NewRunRepository()
+	workspaces := memory.NewWorkspaceRepository()
+	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
+		t.Fatal(err)
+	}
+	state := runtimecontract.RuntimeStateRecord{StateRevision: 1}
+	if err := runs.Create(ctx, &runmodel.Run{
+		ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive,
+		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2, RuntimeState: &state,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	orchestrator := NewRuntimeOrchestrator(runs, workspaces, nil, nil)
+	if err := orchestrator.FailRun(ctx, "run-v2", "adapter failed"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("FailRun active Runtime V2 err = %v, want conflict", err)
+	}
+	run, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.State != common.RunStateActive || run.FailureReason != "" {
+		t.Fatalf("FailRun bypass changed active Runtime V2 run: %+v", run)
+	}
+}
+
+func TestProjectRuntimeV2TerminalRejectsUnsealedProjection(t *testing.T) {
+	ctx := context.Background()
+	runs := memory.NewRunRepository()
+	workspaces := memory.NewWorkspaceRepository()
+	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive, RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2}); err != nil {
+		t.Fatal(err)
+	}
+	orchestrator := NewRuntimeOrchestrator(runs, workspaces, nil, nil)
+	terminal := &runtimecontract.TerminalOutcome{Code: "runtime_v2_drive_failed", Summary: "adapter failed"}
+	if err := orchestrator.ProjectRuntimeV2Terminal(ctx, "ws-v2", "run-v2", runtimecontract.RuntimeActionFail, terminal); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unsealed terminal projection err = %v, want conflict", err)
+	}
+}
+
+func TestFailRunAllowsRuntimeV2ActivationFailureBeforeAggregateExists(t *testing.T) {
+	ctx := context.Background()
+	runs := memory.NewRunRepository()
+	workspaces := memory.NewWorkspaceRepository()
+	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runs.Create(ctx, &runmodel.Run{
+		ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStatePending,
+		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	orchestrator := NewRuntimeOrchestrator(runs, workspaces, nil, nil)
+	if err := orchestrator.FailRun(ctx, "run-v2", "activation failed"); err != nil {
+		t.Fatal(err)
+	}
+	run, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.State != common.RunStateFailed || run.FailureReason != "activation failed" {
+		t.Fatalf("activation failure run = %+v", run)
 	}
 }
 
@@ -129,11 +199,11 @@ func TestProjectRuntimeV2TerminalConvergesAfterRunUpdateFailure(t *testing.T) {
 	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := baseRuns.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive}); err != nil {
+	terminal := &runtimecontract.TerminalOutcome{Code: "coverage_satisfied", Summary: "done"}
+	if err := baseRuns.Create(ctx, terminalRuntimeV2Run(t, "run-v2", runtimecontract.RuntimeActionComplete, terminal)); err != nil {
 		t.Fatal(err)
 	}
 	orchestrator := NewRuntimeOrchestrator(runs, workspaces, nil, nil)
-	terminal := &runtimecontract.TerminalOutcome{Code: "coverage_satisfied", Summary: "done"}
 	if err := orchestrator.ProjectRuntimeV2Terminal(ctx, "ws-v2", "run-v2", runtimecontract.RuntimeActionComplete, terminal); !errors.Is(err, runUpdateErr) {
 		t.Fatalf("first terminal projection err = %v", err)
 	}
@@ -185,14 +255,14 @@ func TestProjectRuntimeV2TerminalDoesNotStealLiveActiveRun(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := runs.Create(ctx, &runmodel.Run{ID: "run-old", WorkspaceID: "ws-v2", State: common.RunStateActive}); err != nil {
+	terminal := &runtimecontract.TerminalOutcome{Code: "coverage_satisfied", Summary: "old run done"}
+	if err := runs.Create(ctx, terminalRuntimeV2Run(t, "run-old", runtimecontract.RuntimeActionComplete, terminal)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runs.Create(ctx, &runmodel.Run{ID: "run-live", WorkspaceID: "ws-v2", State: common.RunStateActive}); err != nil {
 		t.Fatal(err)
 	}
 	orchestrator := NewRuntimeOrchestrator(runs, workspaces, nil, nil)
-	terminal := &runtimecontract.TerminalOutcome{Code: "coverage_satisfied", Summary: "old run done"}
 	if err := orchestrator.ProjectRuntimeV2Terminal(ctx, "ws-v2", "run-old", runtimecontract.RuntimeActionComplete, terminal); err != nil {
 		t.Fatalf("terminal projection for superseded slot: %v", err)
 	}
@@ -235,11 +305,11 @@ func TestProjectRuntimeV2TerminalClearsStaleTerminalActiveRunSlot(t *testing.T) 
 	if err := runs.Create(ctx, &runmodel.Run{ID: "run-stale", WorkspaceID: "ws-v2", State: common.RunStateFailed}); err != nil {
 		t.Fatal(err)
 	}
-	if err := runs.Create(ctx, &runmodel.Run{ID: "run-new", WorkspaceID: "ws-v2", State: common.RunStateActive}); err != nil {
+	terminal := &runtimecontract.TerminalOutcome{Code: "coverage_satisfied", Summary: "done"}
+	if err := runs.Create(ctx, terminalRuntimeV2Run(t, "run-new", runtimecontract.RuntimeActionComplete, terminal)); err != nil {
 		t.Fatal(err)
 	}
 	orchestrator := NewRuntimeOrchestrator(runs, workspaces, nil, nil)
-	terminal := &runtimecontract.TerminalOutcome{Code: "coverage_satisfied", Summary: "done"}
 	if err := orchestrator.ProjectRuntimeV2Terminal(ctx, "ws-v2", "run-new", runtimecontract.RuntimeActionComplete, terminal); err != nil {
 		t.Fatal(err)
 	}
@@ -256,5 +326,39 @@ func TestProjectRuntimeV2TerminalClearsStaleTerminalActiveRunSlot(t *testing.T) 
 	}
 	if run.State != common.RunStateCompleted {
 		t.Fatalf("run state = %s", run.State)
+	}
+}
+
+func terminalRuntimeV2Run(t *testing.T, runID common.RunID, action runtimecontract.RuntimeAction, terminal *runtimecontract.TerminalOutcome) *runmodel.Run {
+	t.Helper()
+	facts := runtimecontract.RuntimeFacts{
+		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		WorkspaceID: "ws-v2", RunID: runID, DefinitionRevision: "definition-v2", EvidenceRevision: runtimecontract.InitialRuntimeEvidenceRevision,
+		Focus: runtimecontract.CoverageFocus{ID: "focus-v2"},
+	}
+	stateValue := runtimecontract.ConvergenceStateComplete
+	if action == runtimecontract.RuntimeActionFail {
+		stateValue = runtimecontract.ConvergenceStateFailed
+	}
+	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
+		State: stateValue, Action: action, Focus: facts.Focus, Terminal: terminal,
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := runtimecontract.RuntimeStateRecord{
+		SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent, StateRevision: 1,
+		Definition: runtimecontract.RuntimeDefinitionContext{
+			Revision: "definition-v2", GoalID: "goal-v2", GoalDefinition: "goal", DoDID: "dod-v2", DoDDefinition: "dod",
+			CapabilityContract: []string{"file/write"},
+		},
+		Facts: facts.Normalized(), Decision: decision,
+	}
+	if err := state.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	return &runmodel.Run{
+		ID: runID, WorkspaceID: "ws-v2", State: common.RunStateActive,
+		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2, RuntimeState: &state,
 	}
 }
