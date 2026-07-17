@@ -4,7 +4,7 @@ Status: active
 
 Type: module-readme
 
-Last Updated: 2026-07-15
+Last Updated: 2026-07-17
 
 ## 职责
 
@@ -25,6 +25,7 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 3. catalog 精确模型容量是能力权威；exact override / custom explicit 是仅有的替代来源。
 4. 能力不完整时 fail-fast，不使用 model pattern 或 conservative default。
 5. 已封存 `ProviderCeiling` 的 Run 不因 catalog 刷新漂移。
+6. ai-proxy client API key 是可选配置；catalog、chat、stream、embedding 仅在 key 非空时发送 Bearer header，空 key 不得编码成无效 `Authorization: Bearer `。
 
 ## EventHub 合同
 

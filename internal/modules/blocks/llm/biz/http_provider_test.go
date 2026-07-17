@@ -99,6 +99,56 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 	}
 }
 
+func TestHTTPProviderOmitsBearerAuthorizationWhenAPIKeyIsBlank(t *testing.T) {
+	var authorizations []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorizations = append(authorizations, r.Header.Get("Authorization"))
+		switch r.URL.Path {
+		case "/v1/chat/completions":
+			var payload chatCompletionRequest
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode chat request: %v", err)
+			}
+			if payload.Stream {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"completionState\\\":\\\"continue\\\"}\"}}]}\n\n"))
+				_, _ = w.Write([]byte("data: [DONE]\n\n"))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"completionState\":\"continue\"}"}}]}`))
+		case "/v1/embeddings":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"embedding":[0.1,0.2]}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	provider := NewHTTPProvider(llmmodels.ProviderConfig{
+		ID: "ai-proxy", Provider: llmcommon.ProviderCompatible, APISurface: llmcommon.ProviderSurfaceOpenAICompatibleHTTP,
+		BaseURL: server.URL + "/v1", APIKey: "  ", Model: "test-model", Timeout: 5 * time.Second,
+	})
+	if _, err := provider.Complete(context.Background(), llmProviderRequest()); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if _, err := provider.StreamComplete(context.Background(), llmProviderRequest(), nil); err != nil {
+		t.Fatalf("stream complete: %v", err)
+	}
+	if _, err := provider.Embed(context.Background(), llmmodels.ProviderEmbeddingRequest{Input: "workspace goal"}); err != nil {
+		t.Fatalf("embed: %v", err)
+	}
+	if len(authorizations) != 3 {
+		t.Fatalf("authorization observations = %v, want chat/stream/embedding", authorizations)
+	}
+	for idx, value := range authorizations {
+		if value != "" {
+			t.Fatalf("authorization[%d] = %q, want omitted for blank api key", idx, value)
+		}
+	}
+}
+
 func TestHTTPProviderCompleteUsesAnthropicMessagesShapeAndDeclaredCacheControl(t *testing.T) {
 	var gotPath string
 	var gotAPIKey string

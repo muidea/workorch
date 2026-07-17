@@ -222,9 +222,7 @@ func (s *CatalogService) fetchCatalog(ctx context.Context, cfg workorchconfig.LL
 		return llmmodels.ProviderModelCatalog{}, err
 	}
 	req.Header.Set("Accept", "application/json")
-	if apiKey := strings.TrimSpace(cfg.AIProxy.APIKey); apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiKey)
-	}
+	setBearerAuthorization(req.Header, cfg.AIProxy.APIKey)
 
 	client := s.client
 	if client == nil {

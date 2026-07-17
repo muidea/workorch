@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-07-15
+Last Updated: 2026-07-17
 
 ## 当前生产合同（2026-07-15 cutover）
 
@@ -15,6 +15,7 @@ WorkOrch 以内置 `ai-proxy` 为唯一默认 LLM endpoint：
 3. application activation 解析完整 `ProviderModelTarget`，写入 typed `RuntimeBootstrap.Activation.ProviderTarget`。
 4. Runtime V2 prerequisite 封存完整 `ProviderCeiling`（target + token/byte ceiling + capability/configuration revision）。
 5. candidate/completion/embedding 强制使用已封存 target；不存在 provider map fallback 或 provider context 传递。
+6. `llm.aiProxy.apiKey` 是可选客户端身份配置；`/v1/models`、chat、stream 与 embedding 必须使用同一 header 规则，仅在 key 非空时发送 Bearer credential。
 
 已删除：
 

@@ -136,7 +136,7 @@ func (p *HTTPProvider) completeOpenAICompatible(ctx context.Context, request llm
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+p.config.APIKey)
+	setBearerAuthorization(httpReq.Header, p.config.APIKey)
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
@@ -214,7 +214,7 @@ func (p *HTTPProvider) streamOpenAICompatible(ctx context.Context, request llmmo
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
-	httpReq.Header.Set("Authorization", "Bearer "+p.config.APIKey)
+	setBearerAuthorization(httpReq.Header, p.config.APIKey)
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
@@ -271,7 +271,7 @@ func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbe
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+p.config.APIKey)
+	setBearerAuthorization(httpReq.Header, p.config.APIKey)
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
@@ -300,6 +300,18 @@ func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbe
 		Input:      input,
 		Vector:     vector,
 	}, nil
+}
+
+func setBearerAuthorization(header http.Header, apiKey string) {
+	if header == nil {
+		return
+	}
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		header.Del("Authorization")
+		return
+	}
+	header.Set("Authorization", "Bearer "+apiKey)
 }
 
 type chatCompletionRequest struct {

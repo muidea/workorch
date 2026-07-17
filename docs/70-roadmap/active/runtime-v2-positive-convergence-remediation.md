@@ -40,6 +40,8 @@ orchestrator readme remains the implementation SoT.
   no-provider paths have direct regression coverage.
 - Acceptance focus count is bounded and the software-dev profile batches direct
   validation coverage in groups of up to 16 items.
+- The ai-proxy HTTP adapter now omits the Authorization header consistently for
+  catalog, chat, stream, and embedding when the optional client API key is empty.
 
 ## Remaining Blocking Work
 
