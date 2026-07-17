@@ -167,3 +167,45 @@ func TestCommitPrerequisiteResultMergesCapabilitiesFromMultipleOwners(t *testing
 		t.Fatalf("merged capabilities = %+v", facts.Capabilities)
 	}
 }
+
+func TestMergeCapabilityKindsDoesNotOverwrite(t *testing.T) {
+	existing := []string{"file/read", "validation/managed_session"}
+	incoming := []string{"validation/managed_session", "shell/command"}
+	got := mergeCapabilityKinds(existing, incoming)
+	want := []string{"file/read", "validation/managed_session", "shell/command"}
+	if len(got) != len(want) {
+		t.Fatalf("merge = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("merge = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestApplyCapabilityPrerequisiteMergesOwners(t *testing.T) {
+	facts := runtimecontract.RuntimeFacts{
+		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1",
+		Activation:   runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		Focus:        runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}},
+		Capabilities: runtimecontract.RuntimeCapabilities{ValidationKinds: []string{"file/read"}},
+		Prerequisites: runtimecontract.PrerequisiteState{Pending: []runtimecontract.RuntimePrerequisite{{
+			ID: "cap-shell", Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{"validation/managed_session"},
+		}}},
+	}
+	facts = facts.Normalized()
+	err := applyPrerequisiteResult(&facts, runtimecontract.RuntimePrerequisite{
+		ID: "cap-shell", Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{"validation/managed_session"},
+	}, PrerequisiteResult{
+		PrerequisiteID: "cap-shell",
+		Capabilities:   &runtimecontract.RuntimeCapabilities{ValidationKinds: []string{"validation/managed_session"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(facts.Capabilities.ValidationKinds) != 2 || facts.Capabilities.ValidationKinds[0] != "file/read" || facts.Capabilities.ValidationKinds[1] != "validation/managed_session" {
+		t.Fatalf("merged capabilities = %+v", facts.Capabilities)
+	}
+}

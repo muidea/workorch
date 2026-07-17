@@ -35,6 +35,7 @@ type WorkspaceInfo struct {
 
 type ProjectionInfo struct {
 	State                   string
+	StreamGeneration        string
 	GlobalRevision          int64
 	WorkspaceRevision       int64
 	SourceEventRevision     int64
@@ -44,6 +45,8 @@ type ProjectionInfo struct {
 	Degraded                bool
 	StaleReason             string
 	Error                   string
+	FailedWorkspaceIds      []string
+	DegradedSince           string
 }
 
 type AcceptanceSliceInfo struct {

@@ -30,6 +30,7 @@ type RuntimeProfileEvidenceRequirement struct {
 	ID                                string
 	Scope                             string
 	EvidenceRole                      string
+	RequiredEvidenceKinds             []string
 	RequireDirectEvidence             bool
 	RequireClaimEvidence              bool
 	RequireExecutableBehaviorEvidence bool
@@ -132,6 +133,7 @@ func normalizeRuntimeProfileEvidenceRequirements(values []RuntimeProfileEvidence
 		value.ID = strings.TrimSpace(value.ID)
 		value.Scope = strings.TrimSpace(value.Scope)
 		value.EvidenceRole = strings.TrimSpace(value.EvidenceRole)
+		value.RequiredEvidenceKinds = normalizeStrings(value.RequiredEvidenceKinds)
 		value.AcceptedStepKinds = normalizeStrings(value.AcceptedStepKinds)
 		value.AcceptedOperations = normalizeStrings(value.AcceptedOperations)
 		value.RejectedStepKinds = normalizeStrings(value.RejectedStepKinds)
@@ -175,7 +177,7 @@ func sameRuntimeProfileContract(left RuntimeProfileContract, right RuntimeProfil
 	}
 	for idx := range left.EvidenceRequirements {
 		l, r := left.EvidenceRequirements[idx], right.EvidenceRequirements[idx]
-		if l.ID != r.ID || l.Scope != r.Scope || l.EvidenceRole != r.EvidenceRole || l.RequireDirectEvidence != r.RequireDirectEvidence ||
+		if l.ID != r.ID || l.Scope != r.Scope || l.EvidenceRole != r.EvidenceRole || !sameStrings(l.RequiredEvidenceKinds, r.RequiredEvidenceKinds) || l.RequireDirectEvidence != r.RequireDirectEvidence ||
 			l.RequireClaimEvidence != r.RequireClaimEvidence || l.RequireExecutableBehaviorEvidence != r.RequireExecutableBehaviorEvidence ||
 			l.RequireCoverageTargets != r.RequireCoverageTargets || l.Description != r.Description ||
 			!sameStrings(l.AcceptedStepKinds, r.AcceptedStepKinds) || !sameStrings(l.AcceptedOperations, r.AcceptedOperations) || !sameStrings(l.RejectedStepKinds, r.RejectedStepKinds) {

@@ -38,7 +38,7 @@ func (e eventRuntimeV2OperationExecutor) ExecuteRuntimeOperation(ctx context.Con
 		return e.executePatchApply(ctx, request, workspace.DeliverableDirectory, workspace.InternalDirectory)
 	case runtimecontract.RuntimeBlockKindPatchPreview:
 		return e.executePatchPreview(ctx, request, workspace.DeliverableDirectory, workspace.InternalDirectory)
-	case runtimecontract.StepKindShellCommand:
+	case runtimecontract.StepKindShellCommand, runtimecontract.RuntimeBlockKindManagedValidationSession:
 		return e.executeShell(ctx, request, workspace.DeliverableDirectory, workspace.InternalDirectory)
 	case runtimecontract.StepKindGitRead, runtimecontract.StepKindGitWrite:
 		return e.executeGit(ctx, request, workspace.DeliverableDirectory, workspace.InternalDirectory)

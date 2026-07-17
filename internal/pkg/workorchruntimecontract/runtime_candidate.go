@@ -106,6 +106,7 @@ func StableRuntimeCandidateHash(candidate RuntimeCandidate) string {
 		}
 		writeHashStrings(h, coverage)
 		writeHashString(h, fmt.Sprintf("%t", value.Satisfied))
+		writeHashString(h, string(value.Disposition))
 		writeHashString(h, value.Summary)
 		writeHashStrings(h, value.EvidenceRefs)
 		writeHashStrings(h, value.ArtifactRefs)
@@ -191,19 +192,45 @@ type ValidationCandidate struct {
 
 type AssessmentCandidate struct {
 	FocusID             string
+	SliceID             string
 	CoverageWorkItemIDs []common.CoverageWorkItemID
-	Satisfied           bool
-	Summary             string
-	EvidenceRefs        []string
-	ArtifactRefs        []string
+	// Satisfied remains for legacy readers; authority is Disposition.
+	Satisfied    bool
+	Disposition  AssessmentDisposition
+	Items        []RuntimeAssessmentItemFact
+	Gap          *RuntimeAssessmentGap
+	Summary      string
+	EvidenceRefs []string
+	ArtifactRefs []string
 }
 
 func (c AssessmentCandidate) Normalized() AssessmentCandidate {
 	c.FocusID = strings.TrimSpace(c.FocusID)
+	c.SliceID = strings.TrimSpace(c.SliceID)
 	c.CoverageWorkItemIDs = normalizeCoverageWorkItemIDs(c.CoverageWorkItemIDs)
+	c.Disposition = c.Disposition.Normalized()
 	c.Summary = strings.TrimSpace(c.Summary)
 	c.EvidenceRefs = normalizeStrings(c.EvidenceRefs)
 	c.ArtifactRefs = normalizeStrings(c.ArtifactRefs)
+	if len(c.Items) > 0 {
+		items := make([]RuntimeAssessmentItemFact, 0, len(c.Items))
+		for _, item := range c.Items {
+			item = item.Normalized()
+			if item.CoverageWorkItemID != "" {
+				items = append(items, item)
+			}
+		}
+		c.Items = items
+	}
+	if c.Gap != nil {
+		gap := c.Gap.Normalized()
+		c.Gap = &gap
+	}
+	if c.Disposition == AssessmentDispositionSatisfied {
+		c.Satisfied = true
+	} else if c.Disposition != "" {
+		c.Satisfied = false
+	}
 	return c
 }
 
@@ -271,13 +298,49 @@ func (c RuntimeCandidate) ValidateWithActivation(decision RuntimeDecision, activ
 		if assessment.FocusID != decision.Focus.ID || assessment.Summary == "" {
 			return fmt.Errorf("assessment candidate requires current focus and summary")
 		}
+		if decision.Focus.SliceID != "" && assessment.SliceID != "" && assessment.SliceID != decision.Focus.SliceID {
+			return fmt.Errorf("assessment candidate slice %q does not match current focus slice %q", assessment.SliceID, decision.Focus.SliceID)
+		}
 		requiredCoverage := coverageIDSet(decision.RequiredOutput.CoverageWorkItemIDs)
+		if len(requiredCoverage) == 0 {
+			requiredCoverage = coverageIDSet(decision.Focus.CoverageWorkItemIDs)
+		}
 		if len(requiredCoverage) > 0 && !coverageIDsIntersect(requiredCoverage, assessment.CoverageWorkItemIDs) {
 			return fmt.Errorf("assessment candidate is not bound to required coverage")
 		}
-		if assessment.Satisfied && len(assessment.EvidenceRefs) == 0 {
-			return fmt.Errorf("satisfied assessment candidate requires current-run evidence refs")
+		for _, item := range assessment.Items {
+			if len(requiredCoverage) > 0 {
+				if _, ok := requiredCoverage[item.CoverageWorkItemID]; !ok {
+					return fmt.Errorf("assessment item %q is outside current slice coverage", item.CoverageWorkItemID)
+				}
+			}
 		}
+		disposition, err := DeriveAssessmentDisposition(assessment.Satisfied, assessment.Disposition, assessment.Items, assessment.Gap)
+		if err != nil {
+			return err
+		}
+		assessment.Disposition = disposition
+		assessment.Satisfied = disposition == AssessmentDispositionSatisfied
+		if assessment.Disposition == AssessmentDispositionSatisfied {
+			if len(assessment.Items) > 0 {
+				for id := range requiredCoverage {
+					found := false
+					for _, item := range assessment.Items {
+						if item.CoverageWorkItemID == id && item.Satisfied {
+							found = true
+							break
+						}
+					}
+					if !found {
+						return fmt.Errorf("satisfied assessment must cover all current slice items")
+					}
+				}
+			}
+			if len(assessment.EvidenceRefs) == 0 {
+				return fmt.Errorf("satisfied assessment candidate requires current-run evidence refs")
+			}
+		}
+		c.Assessment = &assessment
 		return nil
 	case RuntimeActionRequestGovernance:
 		if c.Governance == nil {

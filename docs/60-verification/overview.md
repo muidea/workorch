@@ -20,6 +20,7 @@ Last Updated: 2026-07-16
 
 | 维度 | 必须覆盖 |
 | --- | --- |
+| Four-state-machine conformance | SM-1 Run lifecycle、SM-2 authority/focus、SM-3 candidate/dispatch、SM-4 drive/recovery/projection；合法/禁止迁移与协调协议全部有证据 |
 | Activation / Bootstrap | typed `RuntimeBootstrap`（Definition + Activation + Focuses + Requirements）；缺 bootstrap 失败并投影 terminal |
 | Start | AcceptRunStart pending→active 后进入 `DriveRuntimeV2` |
 | Drive | 有界循环；非等待非终态 transition 递增 StateRevision；无进展 / 超 guard fail-fast |

@@ -25,5 +25,6 @@ const (
 	TopicRunCommandListCheckpointsByRun   = "/run/command/list-runtime-checkpoints-by-run"
 	TopicRunCommandPurgeRuntimeResources  = "/run/command/purge-runtime-resources"
 	TopicRunCommandUpdate                 = "/run/command/update"
+	TopicRunCommandLinkSuccessor          = "/run/command/link-successor"
 	TopicRunCommandDelete                 = "/run/command/delete"
 )

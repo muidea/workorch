@@ -161,3 +161,29 @@ func TestShellModuleStartRequiresEventHub(t *testing.T) {
 		t.Fatalf("Start without EventHub err = %v, want invalid argument", err)
 	}
 }
+
+func TestShellModuleResolvesManagedValidationCapability(t *testing.T) {
+	result, err := orchestratorevents.ResolveRuntimeCapabilities(orchestratorevents.AcquireRuntimeCapabilitiesCommand{
+		WorkspaceID: "ws-1", RunID: "run-1", AuthoritySnapshotID: "snap-1", PrerequisiteID: "cap-1",
+		ModuleID: ModuleID, CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation,
+		RequiredKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession, StepKindCommand},
+	}, ModuleID, StepKindCommand, runtimecontract.RuntimeBlockKindManagedValidationSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Capabilities.ValidationKinds) != 2 {
+		t.Fatalf("validation kinds = %v", result.Capabilities.ValidationKinds)
+	}
+	foundManaged, foundShell := false, false
+	for _, kind := range result.Capabilities.ValidationKinds {
+		if kind == runtimecontract.RuntimeBlockKindManagedValidationSession {
+			foundManaged = true
+		}
+		if kind == StepKindCommand {
+			foundShell = true
+		}
+	}
+	if !foundManaged || !foundShell {
+		t.Fatalf("validation kinds = %v", result.Capabilities.ValidationKinds)
+	}
+}

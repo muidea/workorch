@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -9,6 +10,7 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
+	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -272,4 +274,27 @@ func newRuntimeV2DriveTestModule(t *testing.T, hub magicevent.Hub) *Module {
 		t.Fatal(err)
 	}
 	return &Module{bizPtr: biz, rawEventHub: hub}
+}
+
+func TestRuntimeV2EnsureCandidateFeasibleBlocksProviderWithoutKinds(t *testing.T) {
+	aggregate := runtimev2.RuntimeAggregate{
+		Decision: runtimecontract.RuntimeDecision{
+			Action: runtimecontract.RuntimeActionProduceValidation,
+			RequiredOutput: runtimecontract.RequiredOutputContract{
+				Kind:                runtimecontract.RequiredOutputKindValidation,
+				AcceptedKinds:       []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+			},
+		},
+		Facts: runtimecontract.RuntimeFacts{
+			Capabilities: runtimecontract.RuntimeCapabilities{ValidationKinds: []string{runtimecontract.StepKindShellCommand}},
+		},
+	}
+	if err := runtimeV2EnsureCandidateFeasible(aggregate); err == nil || !strings.Contains(err.Error(), "no feasible operation kinds") {
+		t.Fatalf("expected infeasible validation, got %v", err)
+	}
+	aggregate.Facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+	if err := runtimeV2EnsureCandidateFeasible(aggregate); err != nil {
+		t.Fatalf("managed validation should be feasible: %v", err)
+	}
 }

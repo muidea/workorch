@@ -1,5 +1,7 @@
 package appmodelcore
 
+import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+
 type Run struct {
 	ID                 string     `json:"id"`
 	WorkspaceID        string     `json:"workspaceId"`
@@ -19,10 +21,14 @@ type Run struct {
 	CreatedAt          string     `json:"createdAt,omitempty"`
 	StartedAt          string     `json:"startedAt,omitempty"`
 	EndedAt            string     `json:"endedAt,omitempty"`
+	// RuntimeState is projection input only. It must never be serialized as an
+	// application DTO or become a second authority.
+	RuntimeState *runtimecontract.RuntimeStateRecord `json:"-"`
 }
 
 type RunLineage struct {
-	PredecessorRunID string `json:"predecessorRunId,omitempty"`
-	SuccessorRunID   string `json:"successorRunId,omitempty"`
-	LineageState     string `json:"lineageState,omitempty"`
+	PredecessorRunID    string `json:"predecessorRunId,omitempty"`
+	PredecessorResultID string `json:"predecessorResultId,omitempty"`
+	SuccessorRunID      string `json:"successorRunId,omitempty"`
+	LineageState        string `json:"lineageState,omitempty"`
 }

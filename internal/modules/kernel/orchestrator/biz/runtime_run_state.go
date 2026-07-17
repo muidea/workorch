@@ -43,14 +43,9 @@ func (o *RuntimeOrchestrator) closeLoadedRun(ctx context.Context, run *runModel.
 		return common.ErrInvalidArgument
 	}
 	if run.State == state {
-		_, changed, err := o.runStateManager().releaseWorkspaceForTerminalRun(ctx, run, workspaceStateForTerminalRun(state))
-		if err != nil {
-			return err
-		}
-		if !changed {
-			return common.ErrConflict
-		}
-		return nil
+		// Already terminal: ensure ActiveRun release is converged; do not rewrite Run.
+		_, _, err := o.runStateManager().releaseWorkspaceForTerminalRun(ctx, run, workspaceStateForTerminalRun(state))
+		return err
 	}
 	if !canCloseRunAsUnsuccessfulTerminal(run.State, state) {
 		return common.ErrConflict
@@ -68,12 +63,9 @@ func (o *RuntimeOrchestrator) closeLoadedRun(ctx context.Context, run *runModel.
 	if strings.TrimSpace(run.EndedAt) == "" {
 		run.EndedAt = runtimeEvidenceTimestamp()
 	}
-	_, changed, err := o.runStateManager().releaseWorkspaceForTerminalRun(ctx, run, workspaceStateForTerminalRun(state))
+	_, _, err := o.runStateManager().releaseWorkspaceForTerminalRun(ctx, run, workspaceStateForTerminalRun(state))
 	if err != nil {
 		return err
-	}
-	if !changed {
-		return common.ErrConflict
 	}
 	return o.runs.Update(ctx, run)
 }

@@ -1,6 +1,7 @@
 package readmodelprojection
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
@@ -19,10 +20,20 @@ func MapConvergenceStatus(snapshot readmodelcore.RunSnapshot) *readmodelcore.Con
 		ret.MissingEvidenceKinds = compactUniqueStrings(requiredEvidenceKindsFromTodoItems(snapshot.GapBaseline.TodoItems))
 		ret.AcceptedEvidenceCount = len(compactUniqueStrings(snapshot.GapBaseline.AcceptedEvidenceRefs))
 		ret.RejectedEvidenceCount = len(compactUniqueStrings(snapshot.GapBaseline.RejectedEvidenceRefs))
+		if refs := compactUniqueStrings(snapshot.GapBaseline.AcceptedEvidenceRefs); len(refs) > 0 {
+			ret.LatestAcceptedEvidenceRef = refs[len(refs)-1]
+		}
+		if open := len(snapshot.GapBaseline.OpenCoverageWorkItems); open > 0 {
+			ret.RemainingCoverageItemCount = open
+		}
+		if reason := strings.TrimSpace(snapshot.GapBaseline.NextAction.Reason); reason != "" {
+			ret.GapSummary = reason
+		}
 	}
 	if snapshot.Acceptance.CurrentFocus != nil {
 		focus := snapshot.Acceptance.CurrentFocus
 		ret.CurrentFocusID = firstNonEmptyString(ret.CurrentFocusID, focus.ID)
+		ret.CurrentSliceID = firstNonEmptyString(ret.CurrentSliceID, focus.SliceID)
 		ret.MissingEvidenceKinds = compactUniqueStrings(append(ret.MissingEvidenceKinds, focus.RequiredEvidenceKinds...))
 		if ret.AcceptedEvidenceCount == 0 {
 			ret.AcceptedEvidenceCount = len(compactUniqueStrings(focus.AcceptedEvidenceRefs))
@@ -30,6 +41,71 @@ func MapConvergenceStatus(snapshot readmodelcore.RunSnapshot) *readmodelcore.Con
 		if ret.RejectedEvidenceCount == 0 {
 			ret.RejectedEvidenceCount = len(compactUniqueStrings(focus.RejectedEvidenceRefs))
 		}
+		if refs := compactUniqueStrings(focus.AcceptedEvidenceRefs); len(refs) > 0 {
+			ret.LatestAcceptedEvidenceRef = firstNonEmptyString(ret.LatestAcceptedEvidenceRef, refs[len(refs)-1])
+		}
+		if ret.CurrentGap == "" && strings.TrimSpace(focus.FailureClass) != "" {
+			ret.CurrentGap = strings.TrimSpace(focus.FailureClass)
+		}
+		if ret.GapSummary == "" && strings.TrimSpace(focus.FailureSignature) != "" {
+			ret.GapSummary = strings.TrimSpace(focus.FailureSignature)
+		}
+	}
+	if snapshot.Acceptance.ActiveSliceID != "" {
+		ret.CurrentSliceID = firstNonEmptyString(ret.CurrentSliceID, snapshot.Acceptance.ActiveSliceID)
+	}
+	if budget := snapshot.Acceptance.Budget; budget != nil {
+		ret.RepairAttempts = budget.RepairAttempts
+		ret.MaxRepairAttempts = budget.MaxRepairAttemptsPerFocus
+		ret.RepeatedFailureSignatureCount = budget.RepeatedFailureSignatures
+		if ret.CurrentSliceID == "" {
+			ret.CurrentSliceID = strings.TrimSpace(budget.SliceID)
+		}
+		if ret.CurrentFocusID == "" {
+			ret.CurrentFocusID = strings.TrimSpace(budget.FocusID)
+		}
+		if ret.GapSummary == "" {
+			ret.GapSummary = firstNonEmptyString(budget.LastDecisionReason, budget.LastNoDeltaReason)
+		}
+	}
+	// TaskProgress / RuntimeV2 / AssessmentOutcome are authoritative product-boundary summaries.
+	progress := snapshot.TaskProgress
+	if progress.RuntimeV2 != nil {
+		rv2 := progress.RuntimeV2
+		ret.CurrentFocusID = firstNonEmptyString(ret.CurrentFocusID, rv2.CurrentFocusID)
+		ret.NextActionKind = firstNonEmptyString(ret.NextActionKind, rv2.CurrentAction)
+		if rv2.AcceptedEvidenceCount > ret.AcceptedEvidenceCount {
+			ret.AcceptedEvidenceCount = rv2.AcceptedEvidenceCount
+		}
+		if rv2.RejectedEvidenceCount > ret.RejectedEvidenceCount {
+			ret.RejectedEvidenceCount = rv2.RejectedEvidenceCount
+		}
+		ret.MissingEvidenceKinds = compactUniqueStrings(append(ret.MissingEvidenceKinds, rv2.MissingEvidenceKinds...))
+		if ret.CurrentGap == "" {
+			ret.CurrentGap = firstNonEmptyString(rv2.FailureClass, rv2.FailureCode)
+		}
+		if ret.GapSummary == "" {
+			ret.GapSummary = firstNonEmptyString(rv2.FailureMessage, rv2.FailureSignature)
+		}
+	}
+	outcome := progress.AssessmentOutcome
+	if outcome.SatisfiedCoverageCount > 0 || outcome.RemainingCoverageCount > 0 {
+		ret.ClosedCoverageItemCount = outcome.SatisfiedCoverageCount
+		ret.RemainingCoverageItemCount = outcome.RemainingCoverageCount
+	}
+	if disposition := strings.TrimSpace(outcome.State); disposition != "" {
+		ret.AssessmentDisposition = disposition
+	}
+	if ret.GapSummary == "" && strings.TrimSpace(outcome.LatestRejectedReason) != "" {
+		ret.GapSummary = strings.TrimSpace(outcome.LatestRejectedReason)
+	}
+	// nextActivationRequired: terminal-like gap needing a new activation, or explicit next_activation action.
+	next := strings.ToLower(strings.TrimSpace(ret.NextActionKind))
+	if next == "next_activation" || next == "require_activation" || next == "activation_required" {
+		ret.NextActivationRequired = true
+	}
+	if !ret.NextActivationRequired && isTerminalRunStateForActivation(ret.RunState) && ret.RemainingCoverageItemCount > 0 {
+		ret.NextActivationRequired = true
 	}
 	if denied := latestDecisionEligibilityDenied(snapshot.Steps); denied != nil {
 		ret.DecisionEligibilityDenied = true
@@ -43,7 +119,23 @@ func MapConvergenceStatus(snapshot readmodelcore.RunSnapshot) *readmodelcore.Con
 	if ret.RunID == "" {
 		return nil
 	}
+	// Default gap summary from structured fields when still empty.
+	if ret.GapSummary == "" && ret.CurrentGap != "" {
+		ret.GapSummary = ret.CurrentGap
+	}
+	if ret.GapSummary == "" && ret.RemainingCoverageItemCount > 0 {
+		ret.GapSummary = fmt.Sprintf("%d coverage items remaining", ret.RemainingCoverageItemCount)
+	}
 	return &ret
+}
+
+func isTerminalRunStateForActivation(state string) bool {
+	switch strings.TrimSpace(state) {
+	case "completed", "failed", "cancelled", "superseded", "rejected":
+		return true
+	default:
+		return false
+	}
 }
 
 func convergenceDecisionCause(status readmodelcore.ConvergenceStatus) string {
@@ -80,14 +172,17 @@ func MapWorkspaceConvergenceStatus(snapshot readmodelcore.WorkspaceSnapshot) *re
 		run.WorkspaceID = snapshot.Workspace.ID
 	}
 	runSnapshot := readmodelcore.RunSnapshot{
-		Workspace:   snapshot.Workspace,
-		Run:         run,
-		GapBaseline: snapshot.GapBaseline,
-		Acceptance:  snapshot.Acceptance,
+		Workspace:    snapshot.Workspace,
+		Run:          run,
+		GapBaseline:  snapshot.GapBaseline,
+		Acceptance:   snapshot.Acceptance,
+		TaskProgress: snapshot.TaskProgress,
+		Steps:        nil,
 	}
 	ret := MapConvergenceStatus(runSnapshot)
 	if ret != nil {
 		ret.LatestEffectiveProgressAt = snapshot.RunHeartbeat.LatestEffectiveProgressAt
+		ret.LastProgressAt = firstNonEmptyString(snapshot.RunHeartbeat.LatestEffectiveProgressAt, ret.LastProgressAt)
 		ret.Stalled = snapshot.RunHeartbeat.Stalled
 		ret.IneffectiveRetry = snapshot.RunHeartbeat.IneffectiveRetry
 	}

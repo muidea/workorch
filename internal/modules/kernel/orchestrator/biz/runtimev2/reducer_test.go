@@ -376,3 +376,206 @@ func validationFacts() runtimecontract.RuntimeFacts {
 		},
 	}
 }
+
+func TestReduceRuntimeStateRequiresRunLevelStateChangeBeforeComplete(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.RequireAssessment = false
+	facts.RemainingFocuses = nil
+	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
+		ID: "val-1", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		Revision: facts.EvidenceRevision,
+	}}
+	facts.StateChange = runtimecontract.NewRuntimeStateChangeLedger(runtimecontract.RuntimeRunStateChangeRequirement{
+		Required: true, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+	})
+	facts = facts.Normalized()
+	decision, err := ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+		t.Fatalf("decision = %+v, want produce_state_change for unsatisfied run ledger", decision)
+	}
+
+	// satisfy ledger then complete
+	facts.StateChange = facts.StateChange.ApplyAcceptedStateChangeEvidence(runtimecontract.EvidenceFact{
+		ID: "state-1", Kind: runtimecontract.EvidenceKindStateChange, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		Revision: "evidence-v2-00000000000000000002",
+	}, []common.CoverageWorkItemID{"cwi-1"})
+	decision, err = ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionComplete {
+		t.Fatalf("decision = %+v, want complete after ledger satisfied", decision)
+	}
+}
+
+func TestReduceRuntimeStateRepairableAssessmentDoesNotTerminal(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.RequireAssessment = true
+	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
+		ID: "val-1", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		Revision: facts.EvidenceRevision,
+	}}
+	facts.Assessments = []runtimecontract.RuntimeAssessmentFact{{
+		FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		Disposition: runtimecontract.AssessmentDispositionRepairableGap,
+		Summary:     "implementation incomplete",
+		Gap: &runtimecontract.RuntimeAssessmentGap{
+			CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
+			MissingEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			Reason:               "tools not implemented",
+		},
+	}}
+	facts = facts.Normalized()
+	decision, err := ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+		t.Fatalf("decision = %+v, want produce_state_change for repairable implementation gap", decision)
+	}
+	if decision.State == runtimecontract.ConvergenceStateFailed {
+		t.Fatalf("repairable assessment must not terminal: %+v", decision)
+	}
+}
+
+func TestReduceRuntimeStateTerminalAssessmentWithoutPersistedGovernanceRejectionRepairs(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.RequireAssessment = true
+	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
+		ID: "val-1", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		Revision: facts.EvidenceRevision,
+	}}
+	facts.Assessments = []runtimecontract.RuntimeAssessmentFact{{
+		FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		Disposition: runtimecontract.AssessmentDispositionTerminalRejection,
+		Summary:     "irrecoverable acceptance failure",
+	}}
+	facts = facts.Normalized()
+	decision, err := ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionProduceStateChange || decision.State == runtimecontract.ConvergenceStateFailed {
+		t.Fatalf("decision = %+v, want repair because assessment text cannot choose terminal", decision)
+	}
+}
+
+func TestReduceRuntimeStateSameFocusRepairThenReassess(t *testing.T) {
+	// After repairable assessment -> state-change -> validation, missing evidence is empty and
+	// the prior repairable assessment has been invalidated, so reducer must request assessment again.
+	facts := validationFacts()
+	facts.Focus.RequireAssessment = true
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
+	facts.Capabilities.StateChangeKinds = []string{"patch/apply"}
+	facts.Capabilities.ValidationKinds = []string{"validation/managed_session"}
+	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{
+		{ID: "state-1", Kind: runtimecontract.EvidenceKindStateChange, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "evidence-v2-00000000000000000001"},
+		{ID: "val-1", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "evidence-v2-00000000000000000002"},
+	}
+	// No assessment present (invalidated after repair evidence) => produce_assessment.
+	facts = facts.Normalized()
+	decision, err := ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionProduceAssessment {
+		t.Fatalf("decision = %+v, want produce_assessment after repair evidence", decision)
+	}
+
+	// Satisfied assessment then completes.
+	facts.Assessments = []runtimecontract.RuntimeAssessmentFact{{
+		FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		Disposition: runtimecontract.AssessmentDispositionSatisfied, Satisfied: true,
+		Summary: "coverage satisfied", EvidenceRefs: []string{"val-1"},
+	}}
+	facts.StateChange = runtimecontract.NewRuntimeStateChangeLedger(runtimecontract.RuntimeRunStateChangeRequirement{Required: false})
+	facts = facts.Normalized()
+	decision, err = ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionComplete {
+		t.Fatalf("decision = %+v, want complete after satisfied assessment", decision)
+	}
+}
+
+func TestInvalidateNonSatisfiedAssessmentsForFocus(t *testing.T) {
+	values := []runtimecontract.RuntimeAssessmentFact{
+		{FocusID: "focus-1", Disposition: runtimecontract.AssessmentDispositionRepairableGap, Summary: "gap"},
+		{FocusID: "focus-1", Disposition: runtimecontract.AssessmentDispositionSatisfied, Satisfied: true, Summary: "ok"},
+		{FocusID: "focus-2", Disposition: runtimecontract.AssessmentDispositionRepairableGap, Summary: "other"},
+	}
+	got := invalidateNonSatisfiedAssessmentsForFocus(values, "focus-1")
+	if len(got) != 2 {
+		t.Fatalf("got = %+v, want satisfied focus-1 and focus-2 retained", got)
+	}
+	if got[0].Disposition != runtimecontract.AssessmentDispositionSatisfied || got[1].FocusID != "focus-2" {
+		t.Fatalf("got = %+v", got)
+	}
+}
+
+func TestReduceRuntimeStateRepairBudgetExhausted(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.RequireAssessment = true
+	facts.ConvergencePolicy = runtimecontract.RuntimeConvergencePolicy{MaxRepairAttemptsPerFocus: 2, MaxValidationOnlyRetriesPerFocus: 1}
+	facts.Repair = runtimecontract.RuntimeRepairLedger{FocusID: facts.Focus.ID, RepairAttempts: 2, Exhausted: false}
+	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
+		ID: "val-1", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		Revision: facts.EvidenceRevision,
+	}}
+	facts.Assessments = []runtimecontract.RuntimeAssessmentFact{{
+		FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		Disposition: runtimecontract.AssessmentDispositionRepairableGap,
+		Summary:     "still broken",
+		Gap: &runtimecontract.RuntimeAssessmentGap{
+			CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
+			MissingEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			Reason:               "still broken",
+		},
+	}}
+	facts = facts.Normalized()
+	decision, err := ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionFail || decision.State != runtimecontract.ConvergenceStateFailed {
+		t.Fatalf("decision = %+v, want budget exhausted terminal", decision)
+	}
+	if decision.Terminal == nil || decision.Terminal.Code != "no_progress_exhausted" {
+		t.Fatalf("terminal = %+v, want no_progress_exhausted", decision.Terminal)
+	}
+}
+
+func TestReduceRuntimeStateValidationOnlyCapEscalatesToStateChange(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.RequireAssessment = true
+	facts.Capabilities.StateChangeKinds = []string{"patch/apply"}
+	facts.Capabilities.ValidationKinds = []string{"validation/managed_session"}
+	facts.ConvergencePolicy = runtimecontract.RuntimeConvergencePolicy{MaxRepairAttemptsPerFocus: 10, MaxValidationOnlyRetriesPerFocus: 1}
+	facts.Repair = runtimecontract.RuntimeRepairLedger{FocusID: facts.Focus.ID, RepairAttempts: 1, ValidationOnlyRetries: 1}
+	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
+		ID: "val-1", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		Revision: facts.EvidenceRevision,
+	}}
+	facts.Assessments = []runtimecontract.RuntimeAssessmentFact{{
+		FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		Disposition: runtimecontract.AssessmentDispositionRepairableGap,
+		Summary:     "validation still failing",
+		Gap: &runtimecontract.RuntimeAssessmentGap{
+			CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
+			MissingEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+			Reason:               "validation still failing",
+		},
+	}}
+	facts = facts.Normalized()
+	decision, err := ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+		t.Fatalf("decision = %+v, want escalate to state-change after validation-only cap", decision)
+	}
+}

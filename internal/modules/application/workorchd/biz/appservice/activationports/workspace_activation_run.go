@@ -6,6 +6,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -63,6 +64,21 @@ func startWorkspaceExecutionRun(ctx context.Context, request ActivateWorkspaceEx
 	if err != nil {
 		return "", err
 	}
+	lineage := runmodel.RunLineage{LineageState: "active"}
+	if rejected := activationBuild.RuntimeActivation.Continuation.RejectedResult; rejected != nil {
+		predecessorID := rejected.PredecessorRunID
+		if leaf, err := resolveLineageLeafPredecessor(ctx, request.Hub, workspace.ID, predecessorID); err == nil && leaf != "" {
+			predecessorID = leaf
+		}
+		lineage.PredecessorRunID = predecessorID
+		lineage.PredecessorResultID = rejected.ResultID
+	} else if replan := activationBuild.RuntimeActivation.Continuation.Replan; replan != nil {
+		predecessorID := replan.PredecessorRunID
+		if leaf, err := resolveLineageLeafPredecessor(ctx, request.Hub, workspace.ID, predecessorID); err == nil && leaf != "" {
+			predecessorID = leaf
+		}
+		lineage.PredecessorRunID = predecessorID
+	}
 	return CreateAndStartWorkspaceExecutionRun(ctx, request.Hub, CreateAndStartWorkspaceExecutionRunRequest{
 		WorkspaceID:        workspace.ID,
 		GoalID:             goal.ID,
@@ -70,5 +86,6 @@ func startWorkspaceExecutionRun(ctx context.Context, request ActivateWorkspaceEx
 		DefinitionRevision: bootstrap.Definition.Revision,
 		Priority:           request.Command.Priority,
 		RuntimeBootstrap:   bootstrap,
+		Lineage:            lineage,
 	})
 }

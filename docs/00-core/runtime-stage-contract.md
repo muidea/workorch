@@ -4,7 +4,7 @@ Status: active
 
 Type: core-contract
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-16
 
 本文定义 WorkOrch 面向长流程任务的唯一核心运行设计合约。目标是解决反复单点修复后仍无法稳定推进的问题，同时明确核心框架必须保持功能中立：runtime 只能治理阶段语义、约束、证据、结果、上下文和恢复策略，不得内置软件开发、代码 patch、具体技术栈或具体业务领域规则。
 
@@ -116,6 +116,258 @@ for transition < guard:
 | `RuntimeStateRecord` | Run owner CAS；正式 V2 状态 |
 | Result accepted/rejected | Orchestrator 裁决后写入 Result owner；Result 不裁决 |
 | Run / Workspace terminal / blocker | Orchestrator 窄投影 |
+
+### Runtime V2 四状态机固化规约
+
+Runtime V2 的长期稳定收敛**不是**一张扁平状态图，而是四个相互协调、持久化权威清晰且禁止越权的状态机。任何新增或修改 runtime action、Run lifecycle、candidate/dispatch、repair/governance、恢复或 projection 的实现，都必须同时满足本节。
+
+四个状态机分别为：
+
+| ID | 状态机 | 正式权威 | 主要职责 |
+| --- | --- | --- | --- |
+| SM-1 | Run Lifecycle State Machine | Run owner + Orchestrator 窄裁决 | pending/active/blocked/terminal 生命周期与 lineage |
+| SM-2 | Authority And Focus Convergence State Machine | Orchestrator `RuntimeFacts` + reducer | prerequisite、focus、evidence、assessment、repair、governance 与 completion/failure 决策 |
+| SM-3 | Candidate And Sealed Dispatch Transaction State Machine | Orchestrator aggregate | candidate attempt、authority transaction、seal、operation execution 与 evidence commit |
+| SM-4 | Drive, Recovery And Projection Delivery State Machine | Run owner aggregate + Orchestrator drive；projection store 仅为派生状态 | 有界 drive、幂等恢复、singleflight、owner projection 重试与 read model 健康 |
+
+四个状态机不得合并为 application queue、通用 step dispatcher、projection watcher 或进程内 callback 状态机。SM-1～SM-4 之间只能通过 persisted aggregate、typed EventHub command/result、sealed transaction、typed evidence/resolution 和窄 owner projection 协调。
+
+#### SM-1 Run Lifecycle State Machine
+
+正式状态流：
+
+```text
+pending
+  -> active
+       <-> blocked_on_governance
+       -> completed
+       -> failed
+
+completed / failed = immutable terminal
+需要继续未完成工作 = 产品层显式创建新 typed activation / 新 Run
+```
+
+权威与约束：
+
+- Run owner 持久化 Run state、Runtime V2 aggregate、definition revision 和 lineage；不选择 RuntimeAction。
+- `StartRunCommand` 只允许 `pending -> active`，随后触发 SM-4 drive。
+- `ResumeRunCommand` 只允许 active 或已解决 blocker 的同一 Run；不得携带 definition、provider/model patch、ExecutionContextPatch 或 loaded Run。
+- `request_governance` 成功打开 ticket 后，Orchestrator 投影 `active -> blocked_on_governance`；resolution commit 后由 Orchestrator 投影 `blocked_on_governance -> active` 并回到同一 reducer/drive。
+- `complete` / `fail` 只能来自 SM-2 sealed terminal decision；application、Result、projection、TUI/Web、owner block 均不得直接终态化 Run。
+- `completed` / `failed` 不得 Resume、修改 aggregate 或回退 active；后续继续只能新建独立 V2 Run。
+- 新 Run 若承接 predecessor，必须持久化 `PredecessorRunID` / result lineage；旧 Run 保持终态不可变。是否创建新 Run由产品层显式 activation 决定，不存在自动 successor lifecycle。
+- terminal projection 必须最终释放 workspace active-run；单边投影失败只允许重试，不得更改 SM-2 terminal authority。
+
+禁止迁移：
+
+- terminal -> active；
+- blocked -> active 但没有匹配 persisted governance resolution；
+- application/HTTP/TUI 直接写 Run terminal；
+- Resume 注入新 definition、focus、provider/model 或 repair patch；
+- projection 状态反向驱动 Run lifecycle。
+
+#### SM-2 Authority And Focus Convergence State Machine
+
+正式状态流：
+
+```text
+load / initialize RuntimeFacts
+  -> pending prerequisites?
+       yes -> need_prerequisite / acquire_prerequisite
+              -> typed prerequisite commit
+              -> reduce
+       no  -> authority feasibility gate
+              -> current focus
+
+current focus
+  -> missing state-change evidence
+       -> need_state_change / produce_state_change
+  -> missing validation evidence
+       -> need_validation / produce_validation
+  -> required evidence quality/coverage gate satisfied
+       -> need_assessment / produce_assessment
+            -> satisfied / partially_satisfied
+                 -> atomically close satisfied work items
+                 -> remaining current-slice item or next focus
+                 -> when no remaining focus: Run-level completion gate
+                      -> complete
+                      -> repairable gap
+            -> repairable_gap
+                 -> persist structured assessment gap
+                 -> implementation gap -> produce_state_change
+                 -> evidence gap       -> produce_validation
+                 -> capability gap     -> request_governance or bounded fail
+            -> governance_required
+                 -> need_governance / request_governance
+            -> terminal_rejection or budget_exhausted
+                 -> fail with structured rejected result
+```
+
+权威与约束：
+
+- reducer 是 `RuntimeFacts -> RuntimeDecision + AuthoritySnapshot + AuthorityTransaction` 的唯一权威。
+- prerequisite 未完成时不得请求 candidate；manifest、target snapshot、failure target、capability、validation scratch、provider ceiling 等只能通过 owner typed prerequisite acquisition 完成。
+- `RequiredOutputContract` 必须由 current focus、owner-confirmed capabilities、evidence policy 与 side-effect compatibility 的中立交集产生。
+- authority feasibility gate 必须在请求 LLM 前证明至少存在一个可执行、action-compatible、side-effect-compatible 的 concrete operation kind；不存在时不得让 LLM 猜测。
+- “required evidence 齐备”必须同时满足 kind、coverage binding、current-run、freshness、quality、claim alignment、accepted/rejected operation contract 等适用门禁；不能只按 evidence 数量判断。
+- Run 级 `must_produce_state_change` 表示整个 Run 必须产生至少一次与 active coverage 对齐的 primary state-change evidence，不表示每个 DoD focus 都必须修改 workspace。
+- focus/slice 必须保留 item-level coverage identity；partial assessment 只能关闭明确 satisfied 的 item，未满足 item 留在 current/remaining queue。
+- `repairable_gap` 不得直接终态化；必须结构化记录 missing evidence kinds、coverage work item IDs、target refs、reason、evidence refs 和 disposition，再由 reducer选择同 focus repair action。
+- candidate contract retry budget 与 focus repair budget必须分离；repair budget 按 focus/failure signature 计算，并在有效新 evidence 或 focus advance 后按合同重置。
+- `request_governance` 只用于真实权限、外部依赖、不可行 capability、预算升级或配置阻塞；不得把普通可恢复 evidence gap伪装为治理依赖。
+- `complete` 只允许在所有 active coverage item 关闭、Run-level completion gate、required deliverable/state-change/result policy 全部满足后产生。
+- `fail` 必须携带 typed terminal code 与 structured failure/gap；Result owner 只持久化该裁决。
+
+禁止迁移：
+
+- pending prerequisite -> candidate；
+- evidence kind 数量满足 -> 跳过 evidence quality/coverage gate；
+- `Assessment.Satisfied=false` 无条件 -> terminal fail；
+- repairable evidence gap -> 自动新 Run；
+- previous focus evidence 无 coverage 对齐 -> 关闭 current focus；
+- capability 不可行 -> 消耗 LLM candidate attempt；
+- profile ID、软件开发、LSP、HTTP、语言或测试框架语义进入 reducer 分支。
+
+#### SM-3 Candidate And Sealed Dispatch Transaction State Machine
+
+正式状态流：
+
+```text
+sealed authority decision / transaction
+  -> candidate attempt 0 pending
+       -> accepted
+       -> failed
+            -> same transaction + same stable prefix
+            -> candidate attempt 1 pending
+                 -> accepted
+                 -> failed -> structured candidate exhaustion fact -> SM-2 reduce
+
+accepted candidate
+  -> persist SealedDispatch(transaction + candidate hash + typed input)
+  -> execute operations in deterministic dependency order
+       -> accepted operation result
+       -> rejected operation result
+       -> stale result    -> diagnostic only
+       -> duplicate result -> idempotent
+  -> commit typed evidence / assessment / governance binding
+  -> close dispatch
+  -> SM-2 reduce
+```
+
+权威与约束：
+
+- attempt 0/1 必须绑定同一 `AuthorityTransaction`、definition/evidence revision、requiredOutput hash 与 stable prefix；任一漂移不得 seal。
+- candidate attempt 只修正同合同 schema/contract 输出，不承担业务 repair；不存在 attempt 2。
+- candidate accepted 前必须通过 typed schema、operation kind、coverage、target、side-effect、capability、dependency 和 parameter contract 校验。
+- accepted candidate 必须同步形成 active 或 completed `SealedDispatch`；不存在 dispatch 的 accepted attempt 是 invariant violation。
+- operation 只有在 dispatch seal 后才能通过 `ExecuteRuntimeOperationCommand/Result` 交给 owner block；block 不得自行追加 operation、修改 transaction 或直接提交 Result。
+- 多 operation dispatch 按 dependency graph 确定性执行；graph 只表达 sealed operations 的依赖顺序，不是 V1 graph dispatcher。
+- evidence commit 必须匹配 workspace/run/snapshot/dispatch/operation/coverage；stale 只进入 diagnostic lineage，duplicate 幂等，未知 operation 拒绝。
+- operation rejected 必须形成 typed rejected evidence/failure fact，再交 SM-2 决定 repair、governance 或 terminal；executor 不选择下一 action。
+- assessment candidate 通过同一 attempt/seal 规则；assessment commit 后写 ledger 并回 SM-2。
+- governance candidate seal 后打开确定性 ticket，ticket/snapshot/dispatch/dependency binding 必须持久化。
+
+禁止迁移：
+
+- 未 BeginCandidateAttempt 直接请求/接受 candidate；
+- attempt 1 使用不同 stable prefix 或 authority transaction；
+- accepted candidate 不 seal 直接执行；
+- executor/block 直接推进 focus、Run terminal 或 Result；
+- stale/duplicate evidence 增加 accepted evidence 或推进 StateRevision；
+- candidate failure通过修改 transaction 伪装成 same-contract retry。
+
+#### SM-4 Drive, Recovery And Projection Delivery State Machine
+
+正式状态流：
+
+```text
+Start / Resume / governance continuation
+  -> workspace/run singleflight gate
+  -> load persisted Run + RuntimeStateRecord
+       -> no aggregate: initialize once from typed bootstrap
+       -> aggregate exists: load only
+  -> bounded DriveRuntimeV2 loop
+       -> execute one SM-2/SM-3 transition
+       -> persist StateRevision
+       -> governed_wait: project blocked and return
+       -> terminal: write Result + project Run/Workspace terminal and return
+       -> no persisted progress / guard exhausted: bounded fail-fast
+
+owner projection lane (one-way derived delivery)
+  -> source event / terminal authority marks projection stale
+  -> workspace/full rebuild
+       -> success -> ready
+       -> current-generation failure -> degraded/stale + retry
+  -> projection result never feeds authority reducer
+```
+
+权威与约束：
+
+- `DriveRuntimeV2Command/Result` 是唯一同步推进合同；application 不持有 continuation queue。
+- drive 的每个非等待、非终态 transition 必须增加 persisted `StateRevision`；无 revision 进展立即 fail-fast。
+- drive transition guard 必须有界；超过 guard 生成 typed no-progress/runtime failure，不允许进程内无限循环。
+- singleflight key 必须包含 workspace/run scope；重复 Start/Resume/resolution continuation 复用当前 drive，不能并发生成伪 CAS failure terminal。
+- 服务重启只加载 persisted aggregate；Initialize 幂等，不重复 prerequisite、candidate attempt、sealed dispatch、evidence 或 governance resolution。
+- 进程重启后不得依赖 V1 checkpoint、进程内 executor map、watchdog next-action 或 application patch恢复 authority。
+- active sealed dispatch 的恢复必须依据持久化 dispatch/evidence/resolution事实选择幂等重读、等待 owner result、提交已存在 evidence 或 bounded failure；不得盲目重复副作用。
+- Result/Run/Workspace projection 失败只能记录 delivery error 并幂等重试，不得改写已确定的 SM-2 complete/fail。
+- projection health 按当前 stream generation/current workspace entries 计算；historical/deleted workspace failure counter 不得永久保持 degraded。
+- projection/read model 可以展示 progress、repair、usage、lineage、health，但不能产生 RuntimeAction、candidate、evidence acceptance 或 terminal。
+
+禁止迁移：
+
+- 重启后重新 Initialize 已存在 aggregate；
+- 重复 Drive 增加 candidate attempt 或重复副作用；
+- projection/watchdog/application callback 驱动 reducer；
+- projection failure -> `runtime_v2_drive_failed` 覆盖既有 terminal；
+- global degraded counter 作为 runtime blocker；
+- 无 StateRevision 进展的无限循环。
+
+#### 四状态机协调协议
+
+唯一允许的协调方向：
+
+```text
+SM-1 Start/Resume admission
+  -> SM-4 drive/load
+  -> SM-2 reducer authority
+  -> SM-3 candidate/seal/execute/evidence
+  -> SM-2 reduce/advance/governance/terminal
+  -> SM-1 blocked/terminal narrow projection
+  -> SM-4 derived projection delivery/retry
+```
+
+协调不变量：
+
+1. SM-1 不选择 RuntimeAction；SM-2 不直接执行 operation；SM-3 不选择 next action；SM-4 不重建 authority。
+2. 每次跨状态机交互必须携带 workspace/run scope，以及适用的 definition/evidence revision、authority snapshot、dispatch/operation ID。
+3. 正式推进事实必须先持久化再产生外部可见 projection；projection 可最终一致，authority 不可由 projection 反推。
+4. candidate/dispatch、governance resolution、evidence commit 和 terminal projection 都必须幂等。
+5. definition/provider target/activation 在 Run 内封存；definition 变化或 terminal 后继续只能创建新 Run。
+6. 任一状态机发现 contract/invariant violation，必须生成 typed diagnostic/failure 并沿正式协调方向处理；不得绕过另一状态机直接修复正式状态。
+
+#### 四状态机变更门禁
+
+任何修改以下路径或等价职责的变更，都视为“四状态机变更”：
+
+- `internal/pkg/workorchruntimecontract` 中 convergence state、action、focus、evidence、candidate、dispatch、assessment、governance、continuation 类型；
+- `kernel/orchestrator/biz/runtimev2` reducer/controller/dispatch commit；
+- `kernel/orchestrator/runtime_v2_*` drive/prerequisite/candidate/operation/projection；
+- `kernel/run` 的 Run state、aggregate、lineage 持久化；
+- application activation/focus/continuation compiler；
+- Result、Decision、Approval 与 capability block 的 Runtime V2 typed command/result；
+- workspace/read-model projection 对 active/blocker/terminal/progress 的计算。
+
+上述变更必须同时完成：
+
+1. 标明影响 SM-1～SM-4 中的哪些状态、transition、invariant 或禁止迁移；
+2. 若语义变化，先更新本节；flow/readme/active plan 只能引用本节，不得另建并列状态机；
+3. 增加或更新 transition table/unit tests，至少覆盖合法迁移、禁止迁移、幂等、restart、stale/duplicate、budget/guard；
+4. 增加跨状态机 contract test，证明 scope/revision/snapshot/dispatch binding 完整；
+5. 更新 core verifier mapping，并通过 `make verify-boundary-contract` 与 Runtime V2 core/file-backed/deployed gates；
+6. 确认没有引入 application queue、通用 executor registry、projection authority、自动 successor 或 V1 contract。
+
+任何只修改其中一个状态机、却使其他状态机的合同或测试失配的变更，均不得视为完成。
 
 ### Candidate / Dispatch 不变量
 

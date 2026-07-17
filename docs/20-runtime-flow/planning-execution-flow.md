@@ -4,7 +4,7 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-16
 
 ## Purpose
 
@@ -18,6 +18,16 @@ candidate → seal → ExecuteRuntimeOperation → evidence → reducer
 ```
 
 **不是** V1 的 `llm → executionGraph → checkpoint`。
+
+## State Machine Binding
+
+本 flow 绑定核心规约中的：
+
+- SM-2：reducer authority、focus、required output 与 evidence 后续动作；
+- SM-3：candidate attempt 0/1、seal、operation execution 与 evidence commit；
+- SM-4：bounded drive transition 与 persisted progress。
+
+本文件不允许以 execution graph、block callback 或 application queue 建立第二条状态机；完整规约见 [Runtime V2 四状态机固化规约](../00-core/runtime-stage-contract.md#runtime-v2-四状态机固化规约)。
 
 ## Flow
 

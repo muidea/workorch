@@ -14,3 +14,5 @@
 internal/modules/application/**/.workorch-data/
 internal/modules/application/**/.workorch-workspaces/
 internal/modules/application/**/workspaces/
+
+.workorch-e2e/

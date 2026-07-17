@@ -22,17 +22,20 @@ type Workspace struct {
 }
 
 type ProjectionStatus struct {
-	State                   string `json:"state"`
-	GlobalRevision          int64  `json:"globalRevision"`
-	WorkspaceRevision       int64  `json:"workspaceRevision,omitempty"`
-	SourceEventRevision     int64  `json:"sourceEventRevision,omitempty"`
-	ProjectedSourceRevision int64  `json:"projectedSourceRevision,omitempty"`
-	WorkspaceTotal          int    `json:"workspaceTotal,omitempty"`
-	UpdatedAt               string `json:"updatedAt,omitempty"`
-	RebuiltAt               string `json:"rebuiltAt,omitempty"`
-	Degraded                bool   `json:"degraded,omitempty"`
-	StaleReason             string `json:"staleReason,omitempty"`
-	Error                   string `json:"error,omitempty"`
+	State                   string   `json:"state"`
+	StreamGeneration        string   `json:"streamGeneration,omitempty"`
+	GlobalRevision          int64    `json:"globalRevision"`
+	WorkspaceRevision       int64    `json:"workspaceRevision,omitempty"`
+	SourceEventRevision     int64    `json:"sourceEventRevision,omitempty"`
+	ProjectedSourceRevision int64    `json:"projectedSourceRevision,omitempty"`
+	WorkspaceTotal          int      `json:"workspaceTotal,omitempty"`
+	UpdatedAt               string   `json:"updatedAt,omitempty"`
+	RebuiltAt               string   `json:"rebuiltAt,omitempty"`
+	Degraded                bool     `json:"degraded,omitempty"`
+	StaleReason             string   `json:"staleReason,omitempty"`
+	Error                   string   `json:"error,omitempty"`
+	FailedWorkspaceIds      []string `json:"failedWorkspaceIds,omitempty"`
+	DegradedSince           string   `json:"degradedSince,omitempty"`
 }
 
 type WorkspaceListProjection struct {
@@ -62,21 +65,29 @@ type DoD struct {
 }
 
 // Run resource types.
+type RunLineage struct {
+	PredecessorRunID    string `json:"predecessorRunId,omitempty"`
+	PredecessorResultID string `json:"predecessorResultId,omitempty"`
+	SuccessorRunID      string `json:"successorRunId,omitempty"`
+	LineageState        string `json:"lineageState,omitempty"`
+}
+
 type Run struct {
-	ID                 string `json:"id"`
-	WorkspaceID        string `json:"workspaceId"`
-	GoalID             string `json:"goalId,omitempty"`
-	DoDID              string `json:"doDId,omitempty"`
-	DefinitionRevision string `json:"definitionRevision,omitempty"`
-	InitialStepKind    string `json:"initialStepKind,omitempty"`
-	State              string `json:"state"`
-	CurrentStepID      string `json:"currentStepId,omitempty"`
-	CurrentStepKind    string `json:"currentStepKind,omitempty"`
-	CurrentStepState   string `json:"currentStepState,omitempty"`
-	Priority           int    `json:"priority,omitempty"`
-	BlockingTicketID   string `json:"blockingTicketId,omitempty"`
-	BlockingApprovalID string `json:"blockingApprovalId,omitempty"`
-	FailureReason      string `json:"failureReason,omitempty"`
+	ID                 string     `json:"id"`
+	WorkspaceID        string     `json:"workspaceId"`
+	GoalID             string     `json:"goalId,omitempty"`
+	DoDID              string     `json:"doDId,omitempty"`
+	DefinitionRevision string     `json:"definitionRevision,omitempty"`
+	InitialStepKind    string     `json:"initialStepKind,omitempty"`
+	Lineage            RunLineage `json:"lineage,omitempty"`
+	State              string     `json:"state"`
+	CurrentStepID      string     `json:"currentStepId,omitempty"`
+	CurrentStepKind    string     `json:"currentStepKind,omitempty"`
+	CurrentStepState   string     `json:"currentStepState,omitempty"`
+	Priority           int        `json:"priority,omitempty"`
+	BlockingTicketID   string     `json:"blockingTicketId,omitempty"`
+	BlockingApprovalID string     `json:"blockingApprovalId,omitempty"`
+	FailureReason      string     `json:"failureReason,omitempty"`
 }
 
 type AcceptanceSlice struct {
@@ -435,19 +446,30 @@ type RunStatus struct {
 }
 
 type ConvergenceStatus struct {
-	WorkspaceID               string   `json:"workspaceId,omitempty"`
-	RunID                     string   `json:"runId,omitempty"`
-	RunState                  string   `json:"runState,omitempty"`
-	CurrentFocusID            string   `json:"currentFocusId,omitempty"`
-	NextActionKind            string   `json:"nextActionKind,omitempty"`
-	CurrentGap                string   `json:"currentGap,omitempty"`
-	MissingEvidenceKinds      []string `json:"missingEvidenceKinds,omitempty"`
-	AcceptedEvidenceCount     int      `json:"acceptedEvidenceCount,omitempty"`
-	RejectedEvidenceCount     int      `json:"rejectedEvidenceCount,omitempty"`
-	LatestEffectiveProgressAt string   `json:"latestEffectiveProgressAt,omitempty"`
-	DecisionCause             string   `json:"decisionCause,omitempty"`
-	Stalled                   bool     `json:"stalled,omitempty"`
-	IneffectiveRetry          bool     `json:"ineffectiveRetry,omitempty"`
+	WorkspaceID                   string   `json:"workspaceId,omitempty"`
+	RunID                         string   `json:"runId,omitempty"`
+	RunState                      string   `json:"runState,omitempty"`
+	CurrentSliceID                string   `json:"currentSliceId,omitempty"`
+	CurrentFocusID                string   `json:"currentFocusId,omitempty"`
+	NextActionKind                string   `json:"nextActionKind,omitempty"`
+	CurrentGap                    string   `json:"currentGap,omitempty"`
+	MissingEvidenceKinds          []string `json:"missingEvidenceKinds,omitempty"`
+	AcceptedEvidenceCount         int      `json:"acceptedEvidenceCount,omitempty"`
+	RejectedEvidenceCount         int      `json:"rejectedEvidenceCount,omitempty"`
+	ClosedCoverageItemCount       int      `json:"closedCoverageItemCount,omitempty"`
+	RemainingCoverageItemCount    int      `json:"remainingCoverageItemCount,omitempty"`
+	AssessmentDisposition         string   `json:"assessmentDisposition,omitempty"`
+	RepairAttempts                int      `json:"repairAttempts,omitempty"`
+	MaxRepairAttempts             int      `json:"maxRepairAttempts,omitempty"`
+	RepeatedFailureSignatureCount int      `json:"repeatedFailureSignatureCount,omitempty"`
+	LatestAcceptedEvidenceRef     string   `json:"latestAcceptedEvidenceRef,omitempty"`
+	NextActivationRequired        bool     `json:"nextActivationRequired,omitempty"`
+	GapSummary                    string   `json:"gapSummary,omitempty"`
+	LatestEffectiveProgressAt     string   `json:"latestEffectiveProgressAt,omitempty"`
+	LastProgressAt                string   `json:"lastProgressAt,omitempty"`
+	DecisionCause                 string   `json:"decisionCause,omitempty"`
+	Stalled                       bool     `json:"stalled,omitempty"`
+	IneffectiveRetry              bool     `json:"ineffectiveRetry,omitempty"`
 }
 
 type GapBaseline struct {

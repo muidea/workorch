@@ -1,6 +1,7 @@
 package activationcore
 
 import (
+	"strings"
 	"testing"
 
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
@@ -27,6 +28,12 @@ func TestRuntimeV2BootstrapBuildsOrderedDoDFocuses(t *testing.T) {
 	}
 	if !containsBootstrapCapability(bootstrap.Requirements, runtimecontract.RuntimeModuleFile, runtimecontract.RuntimeCapabilityClassValidation, runtimecontract.StepKindFileRead) {
 		t.Fatalf("bootstrap must provide a non-mutating file/read validation capability: %+v", bootstrap.Requirements)
+	}
+	if !containsBootstrapCapability(bootstrap.Requirements, runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeCapabilityClassValidation, runtimecontract.RuntimeBlockKindManagedValidationSession) {
+		t.Fatalf("bootstrap must provide managed validation capability: %+v", bootstrap.Requirements)
+	}
+	if containsBootstrapCapability(bootstrap.Requirements, runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeCapabilityClassValidation, runtimecontract.StepKindShellCommand) {
+		t.Fatalf("bootstrap must not seal side-effecting shell/command as default validation capability: %+v", bootstrap.Requirements)
 	}
 	facts, err := bootstrap.InitialFacts(common.WorkspaceID("ws-1"), common.RunID("run-1"))
 	if err != nil {
@@ -109,5 +116,61 @@ func TestRuntimeV2BootstrapAppendsRequiredProfileFocusesWithTypedRequirements(t 
 	}
 	if !foundGit {
 		t.Fatalf("profile capability requirements = %+v, want git/write state-change", bootstrap.Requirements)
+	}
+}
+
+func TestRuntimeV2BootstrapRejectsUnknownProfileAcceptedKind(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{
+		StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
+		ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+			ID: "broken-profile",
+			EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
+				{ID: "mystery", Scope: "acceptanceDimension", AcceptedStepKinds: []string{"totally/unknown"}},
+			},
+		}},
+	}}
+	_, err := RuntimeV2Bootstrap(
+		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "交付完整能力"},
+		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"行为已验证"}},
+		"definition-1", nil, activation,
+	)
+	if err == nil || !strings.Contains(err.Error(), "no runtime operation descriptor") {
+		t.Fatalf("expected unknown accepted kind failure, got %v", err)
+	}
+}
+
+func TestRuntimeV2BootstrapSoftwareDevProfileIncludesManagedValidation(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{
+		StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
+		ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+			ID: "software-dev",
+			EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
+				{ID: "runtime_entrypoint", Scope: "acceptanceDimension", AcceptedStepKinds: []string{"shell/command", "mcp/tool_call", "validation/managed_session"}},
+			},
+		}},
+	}}
+	bootstrap, err := RuntimeV2Bootstrap(
+		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "交付完整能力"},
+		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"行为已验证"}},
+		"definition-1", nil, activation,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundManaged := false
+	foundShellCommand := false
+	for _, kind := range bootstrap.Definition.CapabilityContract {
+		if kind == runtimecontract.RuntimeBlockKindManagedValidationSession {
+			foundManaged = true
+		}
+		if kind == runtimecontract.StepKindShellCommand {
+			foundShellCommand = true
+		}
+	}
+	if !foundManaged || !foundShellCommand {
+		t.Fatalf("capability contract = %v, want managed_session and shell/command", bootstrap.Definition.CapabilityContract)
+	}
+	if !containsBootstrapCapability(bootstrap.Requirements, runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeCapabilityClassValidation, runtimecontract.RuntimeBlockKindManagedValidationSession) {
+		t.Fatalf("requirements missing managed validation: %+v", bootstrap.Requirements)
 	}
 }

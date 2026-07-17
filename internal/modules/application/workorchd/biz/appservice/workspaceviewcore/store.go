@@ -43,6 +43,9 @@ type Store struct {
 	workspaces              map[string]*workspaceProjectionEntry
 	globalStale             bool
 	globalStaleReason       string
+	// Current-generation projection health. Metrics counters never decide ready/degraded.
+	globalFailure     *ProjectionFailure
+	workspaceFailures map[string]ProjectionFailure
 }
 
 type workspaceProjectionEntry struct {
@@ -180,12 +183,13 @@ func NewStoreWithRevisionFloor(floor int64) *Store {
 		floor = 1
 	}
 	return &Store{
-		state:            StateBuilding,
-		revisionEpoch:    floor,
-		streamGeneration: newProjectionStreamGeneration(),
-		highWaterMark:    floor - 1, // first assign yields >= floor
-		globalRevision:   floor - 1, // FR05: stream/GlobalRevision shares process floor so SSE IDs do not restart at 1
-		workspaces:       map[string]*workspaceProjectionEntry{},
+		state:             StateBuilding,
+		revisionEpoch:     floor,
+		streamGeneration:  newProjectionStreamGeneration(),
+		highWaterMark:     floor - 1, // first assign yields >= floor
+		globalRevision:    floor - 1, // FR05: stream/GlobalRevision shares process floor so SSE IDs do not restart at 1
+		workspaces:        map[string]*workspaceProjectionEntry{},
+		workspaceFailures: map[string]ProjectionFailure{},
 	}
 }
 
@@ -330,11 +334,25 @@ func (s *Store) StatusForWorkspace(workspaceID string) Status {
 
 func (s *Store) statusLocked() Status {
 	state := s.state
-	degraded := s.state == StateDegraded || s.hasWorkspaceErrorLocked()
-	if state == StateReady && degraded {
-		state = StateDegraded
-	} else if state == StateReady && (s.globalStale || s.hasStaleWorkspaceLocked()) {
-		state = StateStale
+	failedIDs, latestError, degradedSince := s.currentGenerationFailuresLocked()
+	degraded := s.globalFailure != nil || len(failedIDs) > 0 || s.hasWorkspaceErrorLocked()
+	// Lifecycle states take priority; ready/stale may upgrade to degraded from current failures.
+	switch state {
+	case StateStopped, StateFailed, StateBuilding:
+		// keep lifecycle state
+	default:
+		if degraded {
+			state = StateDegraded
+		} else if s.globalStale || s.hasStaleWorkspaceLocked() {
+			state = StateStale
+		} else if state == StateDegraded {
+			// sticky degraded without current failures recovers to ready
+			state = StateReady
+		}
+	}
+	errText := s.errText
+	if errText == "" {
+		errText = latestError
 	}
 	return Status{
 		State:                   state,
@@ -345,9 +363,11 @@ func (s *Store) statusLocked() Status {
 		WorkspaceTotal:          s.workspaceTotalLocked(),
 		UpdatedAt:               formatProjectionTime(s.updatedAt),
 		RebuiltAt:               formatProjectionTime(s.rebuiltAt),
-		Degraded:                degraded,
+		Degraded:                degraded || state == StateDegraded,
 		StaleReason:             s.globalStaleReason,
-		Error:                   s.errText,
+		Error:                   errText,
+		FailedWorkspaceIds:      failedIDs,
+		DegradedSince:           formatProjectionTime(degradedSince),
 	}
 }
 
@@ -391,6 +411,17 @@ func (s *Store) statusForWorkspaceLocked(workspaceID string) Status {
 	} else if stale && state == StateReady {
 		state = StateStale
 	}
+	var failedIDs []string
+	var degradedSince time.Time
+	if degraded {
+		failedIDs = []string{workspaceID}
+		if failure, ok := s.workspaceFailures[workspaceID]; ok && failure.Generation == s.streamGeneration {
+			degradedSince = failure.Since
+			if errText == "" {
+				errText = failure.Error
+			}
+		}
+	}
 	return Status{
 		State:                   state,
 		StreamGeneration:        s.streamGeneration,
@@ -404,6 +435,8 @@ func (s *Store) statusForWorkspaceLocked(workspaceID string) Status {
 		Degraded:                degraded,
 		StaleReason:             staleReason,
 		Error:                   errText,
+		FailedWorkspaceIds:      failedIDs,
+		DegradedSince:           formatProjectionTime(degradedSince),
 	}
 }
 
@@ -499,11 +532,18 @@ func (s *Store) ReplaceAll(workspaces []appmodelcore.Workspace, snapshots map[st
 	s.globalStale = false
 	s.globalStaleReason = ""
 	if degraded != nil {
-		s.state = StateDegraded
+		s.state = StateReady // statusLocked upgrades to degraded from failure set
 		s.errText = degraded.Error()
+		s.recordGlobalFailureLocked(degraded)
+		// Mark remaining workspace failures for entries without snapshots.
+		for id, entry := range s.workspaces {
+			if entry != nil && strings.TrimSpace(entry.Error) != "" {
+				s.recordWorkspaceFailureLocked(id, fmt.Errorf("%s", entry.Error))
+			}
+		}
 	} else {
 		s.state = StateReady
-		s.errText = ""
+		s.clearAllCurrentFailuresLocked()
 	}
 	s.updatedAt = now
 	s.rebuiltAt = now
@@ -537,12 +577,23 @@ func (s *Store) ReplaceWorkspaceList(workspaces []appmodelcore.Workspace, degrad
 	s.advanceGlobalRevision()
 	s.globalStale = false
 	s.globalStaleReason = ""
+	// Drop failure records for workspaces no longer present in the list.
+	for workspaceID := range s.workspaceFailures {
+		if _, ok := nextWorkspaces[workspaceID]; !ok {
+			delete(s.workspaceFailures, workspaceID)
+		}
+	}
 	if degraded != nil {
-		s.state = StateDegraded
+		s.state = StateReady
 		s.errText = degraded.Error()
+		s.recordGlobalFailureLocked(degraded)
 	} else {
 		s.state = StateReady
-		s.errText = ""
+		// List-only refresh keeps remaining workspace failures; only clears global list loader failure.
+		s.globalFailure = nil
+		if s.errText != "" && (s.workspaceFailures == nil || len(s.workspaceFailures) == 0) {
+			s.errText = ""
+		}
 	}
 	s.updatedAt = now
 	s.rebuiltAt = now
@@ -557,6 +608,7 @@ func (s *Store) setFailed(err error) {
 	s.state = StateFailed
 	if err != nil {
 		s.errText = err.Error()
+		s.recordGlobalFailureLocked(err)
 	}
 	s.updatedAt = time.Now().UTC()
 }
@@ -601,11 +653,17 @@ func (s *Store) UpsertSnapshot(snapshot readmodelcore.WorkspaceSnapshot) {
 	entry.Stale = false
 	entry.StaleReason = ""
 	entry.Error = ""
+	s.clearWorkspaceFailureLocked(workspaceID)
 	s.refreshProjectedSourceRevisionLocked()
 	s.globalStale = false
 	s.globalStaleReason = ""
-	s.state = StateReady
-	s.errText = ""
+	s.globalFailure = nil
+	if s.state != StateStopped && s.state != StateFailed {
+		s.state = StateReady
+	}
+	if len(s.workspaceFailures) == 0 {
+		s.errText = ""
+	}
 	s.updatedAt = now
 }
 
@@ -650,11 +708,17 @@ func (s *Store) UpsertWorkspace(workspace appmodelcore.Workspace) {
 	entry.Stale = false
 	entry.StaleReason = ""
 	entry.Error = ""
+	s.clearWorkspaceFailureLocked(workspace.ID)
 	s.refreshProjectedSourceRevisionLocked()
 	s.globalStale = false
 	s.globalStaleReason = ""
-	s.state = StateReady
-	s.errText = ""
+	s.globalFailure = nil
+	if s.state != StateStopped && s.state != StateFailed {
+		s.state = StateReady
+	}
+	if len(s.workspaceFailures) == 0 {
+		s.errText = ""
+	}
 	s.updatedAt = now
 }
 
@@ -780,11 +844,15 @@ func (s *Store) MarkWorkspaceDegraded(workspaceID string, err error) {
 	entry := s.entryForUpdateLocked(workspaceID)
 	if err != nil {
 		entry.Error = err.Error()
+		s.recordWorkspaceFailureLocked(workspaceID, err)
 	}
 	entry.Stale = true
 	entry.StaleReason = "rebuild_failed"
 	s.advanceGlobalRevision()
-	s.state = StateReady
+	// Do not sticky-set StateDegraded; statusLocked derives degraded from current failure set.
+	if s.state != StateBuilding && s.state != StateStopped && s.state != StateFailed {
+		s.state = StateReady
+	}
 	s.updatedAt = time.Now().UTC()
 }
 
@@ -795,6 +863,7 @@ func (s *Store) DeleteWorkspace(workspaceID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.workspaces, workspaceID)
+	s.clearWorkspaceFailureLocked(workspaceID)
 	nextOrder := s.workspaceOrder[:0]
 	for _, id := range s.workspaceOrder {
 		if id != workspaceID {
@@ -806,8 +875,12 @@ func (s *Store) DeleteWorkspace(workspaceID string) {
 	s.refreshProjectedSourceRevisionLocked()
 	s.globalStale = false
 	s.globalStaleReason = ""
-	s.state = StateReady
-	s.errText = ""
+	if s.state != StateStopped && s.state != StateFailed {
+		s.state = StateReady
+	}
+	if len(s.workspaceFailures) == 0 && s.globalFailure == nil {
+		s.errText = ""
+	}
 	s.updatedAt = time.Now().UTC()
 }
 
@@ -979,6 +1052,7 @@ func workspaceViewModelFromStatus(snapshot readmodelcore.WorkspaceSnapshot, stat
 		State:                   status.State,
 		PromptMode:              workspacePromptMode(snapshot),
 		Revision:                revision,
+		StreamGeneration:        status.StreamGeneration,
 		GlobalRevision:          status.GlobalRevision,
 		WorkspaceRevision:       status.WorkspaceRevision,
 		SourceEventRevision:     status.SourceEventRevision,
@@ -988,6 +1062,8 @@ func workspaceViewModelFromStatus(snapshot readmodelcore.WorkspaceSnapshot, stat
 		Degraded:                status.Degraded,
 		StaleReason:             status.StaleReason,
 		Error:                   status.Error,
+		FailedWorkspaceIds:      append([]string(nil), status.FailedWorkspaceIds...),
+		DegradedSince:           status.DegradedSince,
 		Sections:                map[string]readmodelcore.WorkspaceViewModelSection{},
 	}
 	for _, name := range []string{
@@ -1028,6 +1104,7 @@ func appWorkspaceViewModelFromReadModel(source readmodelcore.WorkspaceViewModel)
 		State:                   source.State,
 		PromptMode:              source.PromptMode,
 		Revision:                source.Revision,
+		StreamGeneration:        source.StreamGeneration,
 		GlobalRevision:          source.GlobalRevision,
 		WorkspaceRevision:       source.WorkspaceRevision,
 		SourceEventRevision:     source.SourceEventRevision,
@@ -1037,6 +1114,8 @@ func appWorkspaceViewModelFromReadModel(source readmodelcore.WorkspaceViewModel)
 		Degraded:                source.Degraded,
 		StaleReason:             source.StaleReason,
 		Error:                   source.Error,
+		FailedWorkspaceIds:      append([]string(nil), source.FailedWorkspaceIds...),
+		DegradedSince:           source.DegradedSince,
 	}
 	if len(source.Sections) > 0 {
 		ret.Sections = make(map[string]appmodelcore.WorkspaceViewModelSection, len(source.Sections))
@@ -1155,6 +1234,92 @@ func (s *Store) workspaceTotalLocked() int {
 		}
 	}
 	return total
+}
+
+func (s *Store) currentGenerationFailuresLocked() (failedIDs []string, latestError string, degradedSince time.Time) {
+	if s.globalFailure != nil && s.globalFailure.Generation == s.streamGeneration {
+		latestError = s.globalFailure.Error
+		degradedSince = s.globalFailure.Since
+	}
+	for workspaceID, failure := range s.workspaceFailures {
+		if failure.Generation != s.streamGeneration {
+			continue
+		}
+		failedIDs = append(failedIDs, workspaceID)
+		if latestError == "" {
+			latestError = failure.Error
+		}
+		if degradedSince.IsZero() || (!failure.Since.IsZero() && failure.Since.Before(degradedSince)) {
+			degradedSince = failure.Since
+		}
+	}
+	// Also surface entry.Error for current entries as failure IDs when not already tracked
+	// for the current stream generation.
+	for workspaceID, entry := range s.workspaces {
+		if entry == nil || strings.TrimSpace(entry.Error) == "" {
+			continue
+		}
+		if failure, ok := s.workspaceFailures[workspaceID]; ok && failure.Generation == s.streamGeneration {
+			continue
+		}
+		failedIDs = append(failedIDs, workspaceID)
+		if latestError == "" {
+			latestError = entry.Error
+		}
+	}
+	if len(failedIDs) > 0 {
+		sort.Strings(failedIDs)
+	}
+	return failedIDs, latestError, degradedSince
+}
+
+func (s *Store) recordWorkspaceFailureLocked(workspaceID string, err error) {
+	if s == nil || strings.TrimSpace(workspaceID) == "" || err == nil {
+		return
+	}
+	if s.workspaceFailures == nil {
+		s.workspaceFailures = map[string]ProjectionFailure{}
+	}
+	now := time.Now().UTC()
+	if existing, ok := s.workspaceFailures[workspaceID]; ok && existing.Generation == s.streamGeneration && !existing.Since.IsZero() {
+		now = existing.Since
+	}
+	s.workspaceFailures[workspaceID] = ProjectionFailure{
+		Generation: s.streamGeneration,
+		Error:      err.Error(),
+		Since:      now,
+	}
+}
+
+func (s *Store) clearWorkspaceFailureLocked(workspaceID string) {
+	if s == nil || s.workspaceFailures == nil || strings.TrimSpace(workspaceID) == "" {
+		return
+	}
+	delete(s.workspaceFailures, workspaceID)
+}
+
+func (s *Store) recordGlobalFailureLocked(err error) {
+	if s == nil || err == nil {
+		return
+	}
+	now := time.Now().UTC()
+	if s.globalFailure != nil && s.globalFailure.Generation == s.streamGeneration && !s.globalFailure.Since.IsZero() {
+		now = s.globalFailure.Since
+	}
+	s.globalFailure = &ProjectionFailure{
+		Generation: s.streamGeneration,
+		Error:      err.Error(),
+		Since:      now,
+	}
+}
+
+func (s *Store) clearAllCurrentFailuresLocked() {
+	if s == nil {
+		return
+	}
+	s.globalFailure = nil
+	s.workspaceFailures = map[string]ProjectionFailure{}
+	s.errText = ""
 }
 
 func (s *Store) hasWorkspaceErrorLocked() bool {

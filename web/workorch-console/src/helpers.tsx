@@ -200,17 +200,27 @@ export function runtimeExecutionDescriptions(runtime?: RuntimeExecution) {
 }
 
 export function convergenceStatusDescriptions(status?: ConvergenceStatus) {
-  if (!status || (!status.runId && !status.currentFocusId && !status.nextActionKind && !status.currentGap && !status.latestContractViolationRule)) {
+  if (!status || (!status.runId && !status.currentFocusId && !status.nextActionKind && !status.currentGap && !status.gapSummary && !status.latestContractViolationRule && !status.assessmentDisposition && !status.currentSliceId)) {
     return [{ key: 'convergenceStatus', label: '收敛状态', children: '-' }];
   }
+  const repairLabel = status.maxRepairAttempts
+    ? `${status.repairAttempts ?? 0}/${status.maxRepairAttempts}`
+    : (status.repairAttempts ?? status.retryAttempt)
+      ? String(status.repairAttempts ?? status.retryAttempt)
+      : null;
   return [
     { key: 'run', label: '收敛运行', children: [status.runId, status.runState].filter(Boolean).join(' / ') || '-' },
+    { key: 'slice', label: '当前 Slice', children: status.currentSliceId || '-' },
     { key: 'focus', label: '当前 Focus', children: status.currentFocusId || '-' },
     { key: 'nextAction', label: '下一动作', children: status.nextActionKind ? <Tag color="blue">{status.nextActionKind}</Tag> : '-' },
-    { key: 'gap', label: '当前 Gap', children: boundedParagraph(status.currentGap, { rows: 2 }) },
+    { key: 'coverage', label: 'Coverage', children: <Space wrap><Tag color="green">closed {status.closedCoverageItemCount ?? 0}</Tag><Tag color="gold">remaining {status.remainingCoverageItemCount ?? 0}</Tag></Space> },
+    { key: 'disposition', label: 'Assessment Disposition', children: status.assessmentDisposition ? <Tag color="purple">{status.assessmentDisposition}</Tag> : '-' },
+    { key: 'repair', label: 'Repair / Budget', children: <Space wrap>{repairLabel ? <Tag>repair {repairLabel}</Tag> : null}{status.repeatedFailureSignatureCount || status.retrySignatureRepeatCount ? <Tag color="gold">repeat {status.repeatedFailureSignatureCount ?? status.retrySignatureRepeatCount}</Tag> : null}{!repairLabel && !(status.repeatedFailureSignatureCount || status.retrySignatureRepeatCount) ? '-' : null}</Space> },
+    { key: 'gap', label: '当前 Gap', children: boundedParagraph(status.gapSummary || status.currentGap, { rows: 2 }) },
     { key: 'missingEvidence', label: '缺失证据', children: compactTags(status.missingEvidenceKinds ?? [], 4) },
-    { key: 'evidenceCount', label: '证据计数', children: <Space wrap><Tag color="green">accepted {status.acceptedEvidenceCount ?? 0}</Tag><Tag color="red">rejected {status.rejectedEvidenceCount ?? 0}</Tag></Space> },
-    { key: 'latestProgress', label: '最近有效进展', children: status.latestEffectiveProgressAt || '-' },
+    { key: 'evidenceCount', label: '证据计数', children: <Space wrap><Tag color="green">accepted {status.acceptedEvidenceCount ?? 0}</Tag><Tag color="red">rejected {status.rejectedEvidenceCount ?? 0}</Tag>{status.latestAcceptedEvidenceRef ? <Tag>latest {status.latestAcceptedEvidenceRef}</Tag> : null}</Space> },
+    { key: 'latestProgress', label: '最近有效进展', children: status.lastProgressAt || status.latestEffectiveProgressAt || '-' },
+    { key: 'nextActivation', label: '需要下一 Activation', children: status.nextActivationRequired ? <Tag color="red">required</Tag> : '-' },
     { key: 'contractViolation', label: '最近合同违例', children: status.latestContractViolationRule ? <Space wrap><Tag color="red">{status.latestContractViolationRule}</Tag>{status.latestRecovery ? <Tag color="gold">{status.latestRecovery}</Tag> : null}</Space> : '-' },
     { key: 'decisionCause', label: '决策原因', children: status.decisionCause ? <Tag color="gold">{status.decisionCause}</Tag> : '-' },
     { key: 'retryState', label: 'Retry 状态', children: <Space wrap>{status.retryAttempt ? <Tag>retry {status.retryMaxAttempts ? `${status.retryAttempt}/${status.retryMaxAttempts}` : status.retryAttempt}</Tag> : null}{status.narrowedRetryAttempted ? <Tag color="blue">narrowed</Tag> : null}{status.managedValidationAvailable ? <Tag color="cyan">managed validation</Tag> : null}{status.retrySignatureRepeatCount ? <Tag color="gold">repeat {status.retrySignatureRepeatCount}</Tag> : null}{!status.retryAttempt && !status.narrowedRetryAttempted && !status.managedValidationAvailable && !status.retrySignatureRepeatCount ? '-' : null}</Space> },

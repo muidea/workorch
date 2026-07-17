@@ -61,15 +61,16 @@ func MapRun(item *runmodel.Run) appmodelcore.Run {
 	if item == nil {
 		return appmodelcore.Run{}
 	}
-	return appmodelcore.Run{
+	ret := appmodelcore.Run{
 		ID:          string(item.ID),
 		WorkspaceID: string(item.WorkspaceID),
 		GoalID:      string(item.GoalID),
 		DoDID:       string(item.DoDID),
 		Lineage: appmodelcore.RunLineage{
-			PredecessorRunID: string(item.Lineage.PredecessorRunID),
-			SuccessorRunID:   string(item.Lineage.SuccessorRunID),
-			LineageState:     item.Lineage.LineageState,
+			PredecessorRunID:    string(item.Lineage.PredecessorRunID),
+			PredecessorResultID: string(item.Lineage.PredecessorResultID),
+			SuccessorRunID:      string(item.Lineage.SuccessorRunID),
+			LineageState:        item.Lineage.LineageState,
 		},
 		DefinitionRevision: item.DefinitionRevision,
 		InitialStepKind:    item.InitialStepKind,
@@ -82,4 +83,9 @@ func MapRun(item *runmodel.Run) appmodelcore.Run {
 		StartedAt:          item.StartedAt,
 		EndedAt:            item.EndedAt,
 	}
+	if item.RuntimeState != nil {
+		state := item.RuntimeState.Clone()
+		ret.RuntimeState = &state
+	}
+	return ret
 }

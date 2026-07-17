@@ -184,6 +184,7 @@ func TestDispatchCommitAdvancesToNextCoverageFocusDeterministically(t *testing.T
 		ID: "focus-2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-2"},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, TargetRefs: []string{"other.go"},
 	}}
+	aggregate.Facts.Coverage = runtimecontract.InitialRuntimeCoverageFacts(nil, append([]runtimecontract.CoverageFocus{aggregate.Facts.Focus}, aggregate.Facts.RemainingFocuses...))
 	decision, err := ReduceRuntimeState(aggregate.Facts, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -277,7 +278,9 @@ func patchApplyTestParameters(targetRef string) []runtimecontract.OperationParam
 }
 
 func validationCandidate() runtimecontract.RuntimeCandidate {
+	command := "true"
 	return runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "validate-1", Kind: "validation/managed_session", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
+		Parameters: []runtimecontract.OperationParameter{{Name: "command", String: &command}},
 	}}}}}
 }

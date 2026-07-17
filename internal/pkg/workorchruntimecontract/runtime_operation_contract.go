@@ -99,9 +99,9 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 		contract, _ := RuntimeOperationContractForKind(RuntimeBlockKindPatchApply)
 		contract.Kind = RuntimeBlockKindPatchPreview
 		return contract, true
-	case StepKindShellCommand:
+	case StepKindShellCommand, RuntimeBlockKindManagedValidationSession:
 		return RuntimeOperationContract{
-			Kind: StepKindShellCommand,
+			Kind: CanonicalRuntimeBlockKind(kind),
 			Parameters: []RuntimeOperationParameterContract{
 				{Name: "command", Type: RuntimeOperationParameterTypeString, Required: true, Description: "executable or shell binary"},
 				{Name: "args", Type: RuntimeOperationParameterTypeStringList, Description: "ordered command arguments"},
@@ -298,7 +298,7 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 		if occurrence, ok := parameterInteger(values["occurrence"]); ok && occurrence <= 0 {
 			return fmt.Errorf("kind %q occurrence must be positive", operation.Kind)
 		}
-	case StepKindShellCommand:
+	case StepKindShellCommand, RuntimeBlockKindManagedValidationSession:
 		if parameterString(values["command"]) == "" {
 			return fmt.Errorf("kind %q requires a non-empty command", operation.Kind)
 		}

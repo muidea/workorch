@@ -652,14 +652,26 @@ func convergenceStatusText(item *backend.ConvergenceStatusInfo) string {
 		return ""
 	}
 	parts := compactStrings([]string{
+		convergenceSliceText(item),
 		convergenceFocusText(item),
 		convergenceNextActionText(item),
+		convergenceCoverageText(item),
+		convergenceDispositionText(item),
+		convergenceRepairText(item),
 		convergenceGapText(item),
 		convergenceEvidenceText(item),
 		convergenceDecisionCauseText(item),
 		convergenceHeartbeatText(item),
+		convergenceActivationText(item),
 	})
 	return strings.Join(parts, " | ")
+}
+
+func convergenceSliceText(item *backend.ConvergenceStatusInfo) string {
+	if item == nil || strings.TrimSpace(item.CurrentSliceID) == "" {
+		return ""
+	}
+	return "slice " + strings.TrimSpace(item.CurrentSliceID)
 }
 
 func convergenceFocusText(item *backend.ConvergenceStatusInfo) string {
@@ -676,8 +688,49 @@ func convergenceNextActionText(item *backend.ConvergenceStatusInfo) string {
 	return "next " + strings.TrimSpace(item.NextActionKind)
 }
 
+func convergenceCoverageText(item *backend.ConvergenceStatusInfo) string {
+	if item == nil {
+		return ""
+	}
+	if item.ClosedCoverageItemCount == 0 && item.RemainingCoverageItemCount == 0 {
+		return ""
+	}
+	return fmt.Sprintf("coverage closed %d remaining %d", item.ClosedCoverageItemCount, item.RemainingCoverageItemCount)
+}
+
+func convergenceDispositionText(item *backend.ConvergenceStatusInfo) string {
+	if item == nil || strings.TrimSpace(item.AssessmentDisposition) == "" {
+		return ""
+	}
+	return "disposition " + strings.TrimSpace(item.AssessmentDisposition)
+}
+
+func convergenceRepairText(item *backend.ConvergenceStatusInfo) string {
+	if item == nil {
+		return ""
+	}
+	parts := make([]string, 0, 2)
+	if item.MaxRepairAttempts > 0 || item.RepairAttempts > 0 {
+		if item.MaxRepairAttempts > 0 {
+			parts = append(parts, fmt.Sprintf("repair %d/%d", item.RepairAttempts, item.MaxRepairAttempts))
+		} else {
+			parts = append(parts, fmt.Sprintf("repair %d", item.RepairAttempts))
+		}
+	}
+	if item.RepeatedFailureSignatureCount > 0 {
+		parts = append(parts, fmt.Sprintf("repeat %d", item.RepeatedFailureSignatureCount))
+	}
+	return strings.Join(parts, " ")
+}
+
 func convergenceGapText(item *backend.ConvergenceStatusInfo) string {
-	if item == nil || strings.TrimSpace(item.CurrentGap) == "" {
+	if item == nil {
+		return ""
+	}
+	if summary := strings.TrimSpace(item.GapSummary); summary != "" {
+		return "gap " + summary
+	}
+	if strings.TrimSpace(item.CurrentGap) == "" {
 		return ""
 	}
 	return "gap " + strings.TrimSpace(item.CurrentGap)
@@ -687,7 +740,7 @@ func convergenceEvidenceText(item *backend.ConvergenceStatusInfo) string {
 	if item == nil {
 		return ""
 	}
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, 4)
 	if len(item.MissingEvidenceKinds) > 0 {
 		parts = append(parts, "missing "+strings.Join(item.MissingEvidenceKinds, ","))
 	}
@@ -696,6 +749,9 @@ func convergenceEvidenceText(item *backend.ConvergenceStatusInfo) string {
 	}
 	if item.RejectedEvidenceCount > 0 {
 		parts = append(parts, fmt.Sprintf("rejected %d", item.RejectedEvidenceCount))
+	}
+	if ref := strings.TrimSpace(item.LatestAcceptedEvidenceRef); ref != "" {
+		parts = append(parts, "latest "+ref)
 	}
 	if len(parts) == 0 {
 		return ""
@@ -721,10 +777,21 @@ func convergenceHeartbeatText(item *backend.ConvergenceStatusInfo) string {
 	if item.IneffectiveRetry {
 		parts = append(parts, "ineffectiveRetry")
 	}
-	if strings.TrimSpace(item.LatestEffectiveProgressAt) != "" {
-		parts = append(parts, "progress "+strings.TrimSpace(item.LatestEffectiveProgressAt))
+	progressAt := strings.TrimSpace(item.LastProgressAt)
+	if progressAt == "" {
+		progressAt = strings.TrimSpace(item.LatestEffectiveProgressAt)
+	}
+	if strings.TrimSpace(progressAt) != "" {
+		parts = append(parts, "progress "+strings.TrimSpace(progressAt))
 	}
 	return strings.Join(parts, " ")
+}
+
+func convergenceActivationText(item *backend.ConvergenceStatusInfo) string {
+	if item == nil || !item.NextActivationRequired {
+		return ""
+	}
+	return "nextActivationRequired"
 }
 
 func artifactContinuationProgressText(payload map[string]any) string {

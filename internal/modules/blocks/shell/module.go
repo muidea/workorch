@@ -130,7 +130,7 @@ func (m *Module) handleRuntimeCapabilities(event magicevent.Event, result magice
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	response, err := orchestratorevents.ResolveRuntimeCapabilities(command, ModuleID, StepKindCommand)
+	response, err := orchestratorevents.ResolveRuntimeCapabilities(command, ModuleID, StepKindCommand, runtimecontract.RuntimeBlockKindManagedValidationSession)
 	if err != nil {
 		setCapabilityError(result, err)
 		return

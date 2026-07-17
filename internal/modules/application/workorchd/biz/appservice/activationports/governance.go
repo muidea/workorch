@@ -123,6 +123,40 @@ func runtimeV2RejectedResultContinuation(item *resultmodel.Result) runtimecontra
 		RejectionReason:   continuationPayloadString(item.SummaryDetail.Diagnostics, "rejectionReason"),
 		SourceSummary:     continuationPayloadString(item.SummaryDetail.Diagnostics, "sourceSummary"),
 	}
+	// Prefer Orchestrator-authored RuntimeCloseout when present.
+	if item.RuntimeCloseout != nil {
+		closeout := item.RuntimeCloseout.Normalized()
+		ret.DefinitionRevision = closeout.DefinitionRevision
+		ret.Disposition = closeout.Disposition
+		if closeout.FailureCode != "" || closeout.FailureSignature != "" || closeout.FailureClass != "" {
+			ret.Failure = &runtimecontract.RuntimeContinuationFailure{
+				Class: string(closeout.FailureClass), Signature: closeout.FailureSignature, Summary: item.Summary,
+			}
+		}
+		for _, id := range closeout.SatisfiedCoverageWorkItemIDs {
+			ret.SatisfiedDoDItems = append(ret.SatisfiedDoDItems, runtimecontract.RuntimeContinuationItem{
+				CoverageWorkItemID: id, State: "satisfied",
+			})
+		}
+		for _, id := range closeout.UnsatisfiedCoverageWorkItemIDs {
+			ret.UnsatisfiedDoDItems = append(ret.UnsatisfiedDoDItems, runtimecontract.RuntimeContinuationItem{
+				CoverageWorkItemID: id, State: "unsatisfied",
+			})
+		}
+		for _, gap := range closeout.Gaps {
+			ret.CoverageGaps = append(ret.CoverageGaps, runtimecontract.RuntimeContinuationCoverageGap{
+				Scope: "coverage", CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), gap.CoverageWorkItemIDs...),
+				MissingEvidenceKinds: append([]string(nil), gap.MissingEvidenceKinds...),
+				TargetRefs:           append([]string(nil), gap.TargetRefs...),
+				FailureClass:         gap.FailureClass, FailureCode: gap.FailureCode, FailureSignature: gap.FailureSignature,
+				State: "unsatisfied", EvidenceRefs: append([]string(nil), gap.EvidenceRefs...), Requirement: gap.Reason,
+			})
+		}
+		ret.RequiredEvidence = append(ret.RequiredEvidence, closeout.MissingEvidenceKinds...)
+		ret.EvidenceRefs = append(ret.EvidenceRefs, closeout.EvidenceRefs...)
+		ret.ArtifactRefs = append(ret.ArtifactRefs, closeout.ArtifactRefs...)
+		return ret.Normalized()
+	}
 	for _, value := range item.DoDAssessment.Items {
 		continuationItem := runtimecontract.RuntimeContinuationItem{
 			Item: value.Item, State: value.State, Reason: value.FailureReason, EvidenceRefs: value.EvidenceRefs,

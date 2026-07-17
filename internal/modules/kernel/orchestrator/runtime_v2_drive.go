@@ -128,6 +128,11 @@ func (m *Module) driveRuntimeV2(ctx context.Context, command orchestratorevents.
 func (m *Module) driveRuntimeV2Decision(ctx context.Context, aggregate runtimev2.RuntimeAggregate, stablePrefixHash string) (runtimev2.RuntimeAggregate, error) {
 	var err error
 	if aggregate.ActiveDispatch == nil {
+		if feasibility, feasibilityErr := runtimeV2FeasibilityFact(aggregate); feasibilityErr != nil {
+			return runtimev2.RuntimeAggregate{}, feasibilityErr
+		} else if feasibility != nil {
+			return m.bizPtr.RecordRuntimeV2FeasibilityFact(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, *feasibility)
+		}
 		aggregate, err = m.requestAndSealRuntimeV2CandidateWithRetry(ctx, aggregate, stablePrefixHash)
 		if err != nil {
 			return runtimev2.RuntimeAggregate{}, err

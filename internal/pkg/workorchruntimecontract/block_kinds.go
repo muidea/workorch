@@ -50,62 +50,41 @@ func CanonicalRuntimeBlockKind(kind string) string {
 	}
 }
 
+// RuntimeModuleForOperationKind returns the owner module for a concrete operation kind.
+// Authority is RuntimeOperationDescriptorForKind; unknown kinds return empty string.
 func RuntimeModuleForOperationKind(kind string) string {
-	switch CanonicalRuntimeBlockKind(kind) {
-	case StepKindFileList, StepKindFileRead, StepKindFileEdit, RuntimeBlockKindPatchApply, RuntimeBlockKindPatchPreview:
-		return RuntimeModuleFile
-	case StepKindGitRead, StepKindGitWrite:
-		return RuntimeModuleGit
-	case StepKindMCPToolCall, StepKindMCPResourceRead, StepKindMCPPromptGet:
-		return RuntimeModuleMCP
-	case StepKindShellCommand:
-		return RuntimeModuleShell
-	case StepKindSSHCommand:
-		return RuntimeModuleSSH
-	case StepKindWebSearch, StepKindWebFetch:
-		return RuntimeModuleWeb
-	default:
+	descriptor, ok := RuntimeOperationDescriptorForKind(kind)
+	if !ok {
 		return ""
 	}
+	return descriptor.OwnerModuleID
 }
 
 // OperationHasWorkspaceSideEffects reports whether a concrete operation may mutate
-// workspace or remote state. Kind-level known pure operations are non-mutating;
-// general Shell, SSH and MCP tool calls default to mutating because their contracts
-// do not seal a trustworthy non-mutating claim. Prefer
-// OperationHasWorkspaceSideEffectsWithCapabilities when sealed MCP capability
+// workspace or remote state. Kind-level effect comes from RuntimeOperationDescriptor.
+// Prefer OperationHasWorkspaceSideEffectsWithCapabilities when sealed MCP capability
 // metadata is available.
 func OperationHasWorkspaceSideEffects(operation RuntimeOperation) bool {
 	return OperationHasWorkspaceSideEffectsWithCapabilities(operation, nil)
 }
 
 // OperationHasWorkspaceSideEffectsWithCapabilities is the capability-aware side-effect
-// gate. Unknown MCP tools default to mutating; only owner-sealed RiskLevel=read_only
-// capabilities may enter produce_validation. Candidate-declared stateChanging is never
-// consulted as a side-effect safety authority.
+// gate. Descriptor EffectClass is the kind-level authority. Unknown kinds default to
+// mutating. MCP tool calls may be narrowed to non-mutating only when owner-sealed
+// RiskLevel=read_only capability metadata matches. Candidate-declared stateChanging is
+// never consulted as a side-effect safety authority.
 func OperationHasWorkspaceSideEffectsWithCapabilities(operation RuntimeOperation, capabilities []RuntimeMCPCapabilityContext) bool {
 	operation = operation.Normalized()
 	kind := CanonicalRuntimeBlockKind(operation.Kind)
-	switch kind {
-	case StepKindFileEdit, RuntimeBlockKindPatchApply, RuntimeBlockKindPatchRevert, StepKindGitWrite, RuntimeBlockKindMemoryWrite:
-		return true
-	case RuntimeBlockKindPatchPreview, StepKindFileList, StepKindFileRead, StepKindGitRead, StepKindWebSearch, StepKindWebFetch, StepKindMCPResourceRead, StepKindMCPPromptGet,
-		RuntimeBlockKindManagedValidationSession, RuntimeBlockKindDoDAssessment, RuntimeBlockKindDecisionRequest, RuntimeBlockKindApprovalRequest:
-		return false
-	case StepKindShellCommand:
-		// A general shell command can mutate workspace, remote state, or both. The
-		// candidate's stateChanging field only declares intent for state-change
-		// evidence; it is never a validation safety authority.
-		return true
-	case StepKindSSHCommand:
-		// Remote commands have no sealed non-mutating metadata in the operation contract.
-		return true
-	case StepKindMCPToolCall:
-		return mcpToolCallHasWorkspaceSideEffects(operation, capabilities)
-	default:
+	descriptor, ok := RuntimeOperationDescriptorForKind(kind)
+	if !ok {
 		// Unknown kinds must not enter validation as "pure".
 		return true
 	}
+	if kind == StepKindMCPToolCall {
+		return mcpToolCallHasWorkspaceSideEffects(operation, capabilities)
+	}
+	return operationEffectHasWorkspaceSideEffects(descriptor.EffectClass)
 }
 
 func mcpToolCallHasWorkspaceSideEffects(operation RuntimeOperation, capabilities []RuntimeMCPCapabilityContext) bool {

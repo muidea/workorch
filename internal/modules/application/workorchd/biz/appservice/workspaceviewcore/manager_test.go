@@ -208,6 +208,21 @@ func TestStoreDegradedAndDetailNotReady(t *testing.T) {
 	if !status.Degraded {
 		t.Fatalf("status = %+v, want degraded flag", status)
 	}
+	if status.StreamGeneration == "" {
+		t.Fatal("degraded status missing streamGeneration")
+	}
+	if len(status.FailedWorkspaceIds) != 1 || status.FailedWorkspaceIds[0] != "ws-a" {
+		t.Fatalf("failedWorkspaceIds = %v, want [ws-a]", status.FailedWorkspaceIds)
+	}
+	if status.DegradedSince == "" {
+		t.Fatalf("status = %+v, want degradedSince", status)
+	}
+	if items[0].ViewModel.StreamGeneration != status.StreamGeneration {
+		t.Fatalf("viewModel streamGeneration = %q, want %q", items[0].ViewModel.StreamGeneration, status.StreamGeneration)
+	}
+	if len(items[0].ViewModel.FailedWorkspaceIds) != 1 || items[0].ViewModel.FailedWorkspaceIds[0] != "ws-a" {
+		t.Fatalf("viewModel failedWorkspaceIds = %v", items[0].ViewModel.FailedWorkspaceIds)
+	}
 	if _, detailStatus, err := store.GetSnapshot("ws-a"); err == nil {
 		t.Fatal("get missing detail succeeded, want error")
 	} else if detailStatus.State != StateDegraded {
@@ -1972,5 +1987,163 @@ func TestStoreRestartCreatesDistinctNonEmptyStreamGeneration(t *testing.T) {
 	}
 	if oldGeneration == newGeneration {
 		t.Fatalf("store restart reused stream generation %q", oldGeneration)
+	}
+}
+
+// RVC-13: current-generation failure set drives health; successful rebuild recovers ready.
+func TestStoreProjectionGenerationRecovery(t *testing.T) {
+	store := NewStore()
+	generation := store.Status().StreamGeneration
+	if generation == "" {
+		t.Fatal("empty stream generation")
+	}
+
+	// Seed a healthy workspace, then mark degraded via rebuild failure.
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-a": {
+			Workspace:    appmodelcore.Workspace{ID: "ws-a", State: "active", ActiveRunID: "run-a"},
+			TaskProgress: readmodelcore.TaskProgress{RunID: "run-a", State: "running"},
+		},
+	}, nil)
+	ready := store.Status()
+	if ready.State != StateReady || ready.Degraded || len(ready.FailedWorkspaceIds) != 0 {
+		t.Fatalf("ready status = %+v", ready)
+	}
+
+	store.MarkWorkspaceDegraded("ws-a", errors.New("snapshot rebuild failed"))
+	degraded := store.Status()
+	if degraded.State != StateDegraded || !degraded.Degraded {
+		t.Fatalf("after MarkWorkspaceDegraded status = %+v, want degraded", degraded)
+	}
+	if degraded.StreamGeneration != generation {
+		t.Fatalf("streamGeneration changed unexpectedly: %q -> %q", generation, degraded.StreamGeneration)
+	}
+	if len(degraded.FailedWorkspaceIds) != 1 || degraded.FailedWorkspaceIds[0] != "ws-a" {
+		t.Fatalf("failedWorkspaceIds = %v", degraded.FailedWorkspaceIds)
+	}
+	if degraded.Error == "" || degraded.DegradedSince == "" {
+		t.Fatalf("degraded status missing error/since: %+v", degraded)
+	}
+	// Metrics failure counters (if any) must not be required for degraded.
+	// Successful rebuild of the same workspace recovers ready for current generation.
+	store.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+		Workspace:    appmodelcore.Workspace{ID: "ws-a", State: "active", ActiveRunID: "run-a"},
+		TaskProgress: readmodelcore.TaskProgress{RunID: "run-a", State: "running"},
+	})
+	recovered := store.Status()
+	if recovered.State != StateReady || recovered.Degraded {
+		t.Fatalf("after successful rebuild status = %+v, want ready", recovered)
+	}
+	if len(recovered.FailedWorkspaceIds) != 0 || recovered.Error != "" || recovered.DegradedSince != "" {
+		t.Fatalf("recovered status still reports failure: %+v", recovered)
+	}
+	if recovered.StreamGeneration != generation {
+		t.Fatalf("streamGeneration drifted: %q -> %q", generation, recovered.StreamGeneration)
+	}
+}
+
+// RVC-13: deleted/retired workspace failures must not pollute current generation health.
+func TestStoreDeletedWorkspaceClearsGenerationFailure(t *testing.T) {
+	store := NewStore()
+	store.ReplaceAll([]appmodelcore.Workspace{
+		{ID: "ws-a", State: "active"},
+		{ID: "ws-b", State: "active"},
+	}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-a": {Workspace: appmodelcore.Workspace{ID: "ws-a", State: "active"}},
+		"ws-b": {Workspace: appmodelcore.Workspace{ID: "ws-b", State: "active"}},
+	}, nil)
+
+	store.MarkWorkspaceDegraded("ws-b", errors.New("ws-b rebuild failed"))
+	degraded := store.Status()
+	if degraded.State != StateDegraded || len(degraded.FailedWorkspaceIds) != 1 || degraded.FailedWorkspaceIds[0] != "ws-b" {
+		t.Fatalf("status = %+v, want degraded only on ws-b", degraded)
+	}
+
+	store.DeleteWorkspace("ws-b")
+	afterDelete := store.Status()
+	if afterDelete.State != StateReady || afterDelete.Degraded {
+		t.Fatalf("after delete status = %+v, want ready", afterDelete)
+	}
+	if len(afterDelete.FailedWorkspaceIds) != 0 {
+		t.Fatalf("failedWorkspaceIds after delete = %v", afterDelete.FailedWorkspaceIds)
+	}
+
+	// Full ReplaceAll success clears any residual failure pollution.
+	store.MarkWorkspaceDegraded("ws-a", errors.New("ws-a rebuild failed"))
+	if store.Status().State != StateDegraded {
+		t.Fatalf("expected degraded after MarkWorkspaceDegraded, got %+v", store.Status())
+	}
+	store.ReplaceAll([]appmodelcore.Workspace{
+		{ID: "ws-a", State: "active"},
+	}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-a": {Workspace: appmodelcore.Workspace{ID: "ws-a", State: "active"}},
+	}, nil)
+	cleared := store.Status()
+	if cleared.State != StateReady || cleared.Degraded || len(cleared.FailedWorkspaceIds) != 0 {
+		t.Fatalf("after ReplaceAll success status = %+v, want ready", cleared)
+	}
+}
+
+// RVC-13: process restart creates a new generation; old failures are not copied.
+func TestStoreRestartDoesNotCarryGenerationFailures(t *testing.T) {
+	old := NewStore()
+	old.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, nil, errors.New("old generation failure"))
+	oldStatus := old.Status()
+	if oldStatus.State != StateDegraded || len(oldStatus.FailedWorkspaceIds) == 0 {
+		t.Fatalf("old status = %+v, want degraded with failures", oldStatus)
+	}
+
+	// New process: fresh Store has empty failure set and distinct generation.
+	neu := NewStore()
+	newStatus := neu.Status()
+	if newStatus.StreamGeneration == "" || newStatus.StreamGeneration == oldStatus.StreamGeneration {
+		t.Fatalf("new generation = %q, old = %q", newStatus.StreamGeneration, oldStatus.StreamGeneration)
+	}
+	if newStatus.State == StateDegraded || newStatus.Degraded || len(newStatus.FailedWorkspaceIds) != 0 {
+		t.Fatalf("new store inherited failures: %+v", newStatus)
+	}
+}
+
+// RVC-13: metrics failure totals live on Manager and never decide Store ready/degraded.
+func TestManagerMetricsDoNotDriveProjectionHealth(t *testing.T) {
+	manager := NewManager(ManagerOptions{})
+	store := manager.store
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-a": {Workspace: appmodelcore.Workspace{ID: "ws-a", State: "active"}},
+	}, nil)
+
+	// Accumulate historical failure metrics without a current generation failure.
+	manager.mu.Lock()
+	manager.metrics.fullRebuildFailedTotal = 99
+	if manager.metrics.workspaceRebuilds == nil {
+		manager.metrics.workspaceRebuilds = map[string]*workspaceRebuildMetrics{}
+	}
+	manager.metrics.workspaceRebuilds["ws-a"] = &workspaceRebuildMetrics{failedTotal: 12, rebuildTotal: 12}
+	manager.mu.Unlock()
+
+	status := manager.Status()
+	if status.State != StateReady || status.Degraded || len(status.FailedWorkspaceIds) != 0 {
+		t.Fatalf("metrics alone drove degraded: %+v", status)
+	}
+	metrics := manager.Metrics()
+	if metrics.FullRebuildFailedTotal != 99 {
+		t.Fatalf("metrics not preserved: %+v", metrics)
+	}
+	// Current-generation failure still drives degraded independently of metrics.
+	store.MarkWorkspaceDegraded("ws-a", errors.New("current rebuild failed"))
+	degraded := manager.Status()
+	if degraded.State != StateDegraded || !degraded.Degraded {
+		t.Fatalf("current failure did not degrade: %+v", degraded)
+	}
+	// Successful rebuild recovers even while historical metrics remain high.
+	store.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+		Workspace: appmodelcore.Workspace{ID: "ws-a", State: "active"},
+	})
+	recovered := manager.Status()
+	if recovered.State != StateReady || recovered.Degraded {
+		t.Fatalf("recovery failed while metrics high: %+v", recovered)
+	}
+	if manager.Metrics().FullRebuildFailedTotal != 99 {
+		t.Fatalf("metrics cleared unexpectedly: %+v", manager.Metrics())
 	}
 }

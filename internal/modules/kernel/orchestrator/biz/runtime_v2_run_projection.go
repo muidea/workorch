@@ -55,14 +55,10 @@ func (o *RuntimeOrchestrator) ProjectRuntimeV2Terminal(ctx context.Context, work
 	switch action {
 	case runtimecontract.RuntimeActionComplete:
 		if run.State == common.RunStateCompleted {
-			_, changed, releaseErr := o.runStateManager().releaseWorkspaceForTerminalRun(ctx, run, common.WorkspaceStateActive)
-			if releaseErr != nil {
-				return releaseErr
-			}
-			if !changed {
-				return common.ErrConflict
-			}
-			return nil
+			// Idempotent retry: release is a no-op when ActiveRun already cleared or
+			// owned by another live run; never rewrite completed Run authority.
+			_, _, releaseErr := o.runStateManager().releaseWorkspaceForTerminalRun(ctx, run, common.WorkspaceStateActive)
+			return releaseErr
 		}
 		if run.State != common.RunStateActive {
 			return common.ErrConflict
@@ -74,24 +70,15 @@ func (o *RuntimeOrchestrator) ProjectRuntimeV2Terminal(ctx context.Context, work
 		if strings.TrimSpace(run.EndedAt) == "" {
 			run.EndedAt = runtimeEvidenceTimestamp()
 		}
-		_, changed, err := o.runStateManager().releaseWorkspaceForTerminalRun(ctx, run, common.WorkspaceStateActive)
+		_, _, err := o.runStateManager().releaseWorkspaceForTerminalRun(ctx, run, common.WorkspaceStateActive)
 		if err != nil {
 			return err
-		}
-		if !changed {
-			return common.ErrConflict
 		}
 		return o.runs.Update(ctx, run)
 	case runtimecontract.RuntimeActionFail:
 		if run.State == common.RunStateFailed {
-			_, changed, releaseErr := o.runStateManager().releaseWorkspaceForTerminalRun(ctx, run, common.WorkspaceStateActive)
-			if releaseErr != nil {
-				return releaseErr
-			}
-			if !changed {
-				return common.ErrConflict
-			}
-			return nil
+			_, _, releaseErr := o.runStateManager().releaseWorkspaceForTerminalRun(ctx, run, common.WorkspaceStateActive)
+			return releaseErr
 		}
 		code := strings.TrimSpace(terminal.Code)
 		reason := strings.TrimSpace(terminal.Summary)

@@ -129,6 +129,9 @@ func (m *Module) requestAndSealRuntimeV2Candidate(
 	default:
 		return runtimev2.RuntimeAggregate{}, fmt.Errorf("runtime action %s does not request an LLM candidate", aggregate.Decision.Action)
 	}
+	if err := runtimeV2EnsureCandidateFeasible(aggregate); err != nil {
+		return runtimev2.RuntimeAggregate{}, err
+	}
 	aggregate, err := m.bizPtr.BeginRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, stablePrefixHash)
 	if err != nil {
 		return runtimev2.RuntimeAggregate{}, err
@@ -261,4 +264,43 @@ func nextRuntimeV2CandidateAttempt(aggregate runtimev2.RuntimeAggregate) (int, b
 	default:
 		return 0, false
 	}
+}
+
+// runtimeV2EnsureCandidateFeasible blocks provider requests when the sealed required
+// output has no concrete executable operation kind under current capabilities.
+// Assessment/governance candidates are LLM-produced and skip this gate.
+func runtimeV2EnsureCandidateFeasible(aggregate runtimev2.RuntimeAggregate) error {
+	fact, err := runtimeV2FeasibilityFact(aggregate)
+	if err != nil || fact == nil {
+		return err
+	}
+	return fmt.Errorf("%s", fact.Reason)
+}
+
+// runtimeV2FeasibilityFact produces a persisted SM-2 input for a blocked
+// candidate request. Callers must RecordFeasibilityFact and re-drive rather
+// than returning this error to the process boundary.
+func runtimeV2FeasibilityFact(aggregate runtimev2.RuntimeAggregate) (*runtimecontract.RuntimeFeasibilityFact, error) {
+	switch aggregate.Decision.Action {
+	case runtimecontract.RuntimeActionProduceStateChange, runtimecontract.RuntimeActionProduceValidation:
+	default:
+		return nil, nil
+	}
+	required := aggregate.Decision.RequiredOutput.Normalized()
+	if len(required.AcceptedKinds) == 0 {
+		return &runtimecontract.RuntimeFeasibilityFact{
+			FocusID: aggregate.Facts.Focus.ID, Action: aggregate.Decision.Action,
+			Reason: fmt.Sprintf("runtime action %s has no accepted operation kinds", aggregate.Decision.Action),
+		}, nil
+	}
+	feasible := runtimecontract.FeasibleOperationKinds(required, aggregate.Facts.Capabilities)
+	if len(feasible) == 0 {
+		return &runtimecontract.RuntimeFeasibilityFact{
+			FocusID: aggregate.Facts.Focus.ID, Action: aggregate.Decision.Action,
+			RequiredOperationKinds: append([]string(nil), required.AcceptedKinds...),
+			MissingCapabilityKinds: append([]string(nil), required.AcceptedKinds...),
+			Reason:                 fmt.Sprintf("runtime action %s has no feasible operation kinds under sealed capabilities", aggregate.Decision.Action),
+		}, nil
+	}
+	return nil, nil
 }

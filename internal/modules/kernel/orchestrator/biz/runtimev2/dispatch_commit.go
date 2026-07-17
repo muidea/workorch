@@ -259,6 +259,23 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 	switch evidence.Status {
 	case ExecutionEvidenceStatusAccepted:
 		aggregate.Facts.Evidence.Accepted = append(aggregate.Facts.Evidence.Accepted, fact)
+		if !aggregate.Facts.Focus.RequireAssessment {
+			aggregate.Facts.Coverage = closeCoverageForEvidence(aggregate.Facts.Coverage, fact, aggregate.Facts.Focus.CoverageWorkItemIDs)
+		}
+		if fact.Kind == runtimecontract.EvidenceKindStateChange {
+			currentCoverage := append([]common.CoverageWorkItemID(nil), aggregate.Facts.Focus.CoverageWorkItemIDs...)
+			for _, focus := range aggregate.Facts.RemainingFocuses {
+				currentCoverage = append(currentCoverage, focus.CoverageWorkItemIDs...)
+			}
+			aggregate.Facts.StateChange = aggregate.Facts.StateChange.ApplyAcceptedStateChangeEvidence(fact, currentCoverage)
+		}
+		// Accepted progress on the current focus invalidates prior non-satisfied assessments so
+		// the same-focus loop can re-enter produce_assessment after repair evidence.
+		if runtimecontract.EvidenceAppliesToCurrentFocus(aggregate.Facts, fact) {
+			aggregate.Facts.Assessments = invalidateNonSatisfiedAssessmentsForFocus(aggregate.Facts.Assessments, aggregate.Facts.Focus.ID)
+			aggregate.Facts.Failure = nil
+			aggregate.Facts.Repair = aggregate.Facts.Repair.NoteProgress(fact.Revision)
+		}
 	case ExecutionEvidenceStatusRejected:
 		if evidence.Failure != nil {
 			fact.FailureClass = evidence.Failure.Class
@@ -297,6 +314,27 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 		return EvidenceCommitResult{}, err
 	}
 	return EvidenceCommitResult{Disposition: CommitDispositionCommitted, DispatchCompleted: dispatchCompleted, Aggregate: aggregate}, nil
+}
+
+func closeCoverageForEvidence(coverage []runtimecontract.RuntimeCoverageItemFact, evidence runtimecontract.EvidenceFact, fallback []common.CoverageWorkItemID) []runtimecontract.RuntimeCoverageItemFact {
+	if len(coverage) == 0 {
+		coverage = runtimecontract.InitialRuntimeCoverageFacts(nil, []runtimecontract.CoverageFocus{{ID: "legacy-current", CoverageWorkItemIDs: fallback}})
+	}
+	ids := evidence.CoverageWorkItemIDs
+	if len(ids) == 0 {
+		ids = fallback
+	}
+	matched := map[common.CoverageWorkItemID]struct{}{}
+	for _, id := range ids {
+		matched[id] = struct{}{}
+	}
+	for idx := range coverage {
+		if _, ok := matched[coverage[idx].ID]; ok {
+			coverage[idx].State = runtimecontract.RuntimeCoverageItemStateSatisfied
+			coverage[idx].EvidenceRefs = append(coverage[idx].EvidenceRefs, string(evidence.ID))
+		}
+	}
+	return runtimecontract.NormalizeRuntimeCoverageFacts(coverage)
 }
 
 func (a RuntimeAggregate) Validate() error {
@@ -451,4 +489,25 @@ func candidateOperationCount(candidate runtimecontract.RuntimeCandidate) int {
 	default:
 		return 0
 	}
+}
+
+// invalidateNonSatisfiedAssessmentsForFocus drops repairable/governance/terminal assessments
+// for the active focus after new accepted evidence arrives. Satisfied assessments are retained
+// as lineage; the next reduce will request a fresh assessment when required.
+func invalidateNonSatisfiedAssessmentsForFocus(values []runtimecontract.RuntimeAssessmentFact, focusID string) []runtimecontract.RuntimeAssessmentFact {
+	focusID = strings.TrimSpace(focusID)
+	if focusID == "" || len(values) == 0 {
+		return values
+	}
+	ret := make([]runtimecontract.RuntimeAssessmentFact, 0, len(values))
+	for _, value := range values {
+		if value.FocusID == focusID && value.Disposition != runtimecontract.AssessmentDispositionSatisfied && !value.Satisfied {
+			continue
+		}
+		ret = append(ret, value)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
 }

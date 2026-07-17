@@ -62,6 +62,7 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 			writeHashString(h, requirement.ID)
 			writeHashString(h, requirement.Scope)
 			writeHashString(h, requirement.EvidenceRole)
+			writeHashStrings(h, requirement.RequiredEvidenceKinds)
 			writeHashString(h, fmt.Sprintf("%t", requirement.RequireDirectEvidence))
 			writeHashString(h, fmt.Sprintf("%t", requirement.RequireClaimEvidence))
 			writeHashString(h, fmt.Sprintf("%t", requirement.RequireExecutableBehaviorEvidence))

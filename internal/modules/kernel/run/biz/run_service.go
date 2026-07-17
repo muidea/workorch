@@ -66,7 +66,7 @@ func (s *Service) CreateRun(ctx context.Context, cmd runcontracts.CreateRunComma
 		WorkspaceID:        cmd.WorkspaceID,
 		GoalID:             cmd.GoalID,
 		DoDID:              cmd.DoDID,
-		Lineage:            runModel.RunLineage{LineageState: "active"},
+		Lineage:            normalizeCreateRunLineage(cmd.Lineage),
 		DefinitionRevision: definitionRevision,
 		InitialStepKind:    cmd.InitialStepKind,
 		RuntimeBootstrap:   cloneRuntimeBootstrap(cmd.RuntimeBootstrap),
@@ -118,6 +118,62 @@ func (s *Service) EnsureRun(ctx context.Context, cmd runcontracts.CreateRunComma
 		return err
 	}
 	return s.CreateRun(ctx, cmd)
+}
+
+func normalizeCreateRunLineage(lineage runModel.RunLineage) runModel.RunLineage {
+	lineage.PredecessorRunID = common.RunID(strings.TrimSpace(string(lineage.PredecessorRunID)))
+	lineage.PredecessorResultID = common.ResultID(strings.TrimSpace(string(lineage.PredecessorResultID)))
+	lineage.SuccessorRunID = common.RunID(strings.TrimSpace(string(lineage.SuccessorRunID)))
+	lineage.LineageState = strings.TrimSpace(lineage.LineageState)
+	if lineage.LineageState == "" {
+		lineage.LineageState = "active"
+	}
+	// Create must not invent successor links; successor is linked via LinkRunSuccessor.
+	lineage.SuccessorRunID = ""
+	return lineage
+}
+
+// LinkRunSuccessor CAS-updates predecessor.SuccessorRunID.
+// Empty expected means only empty successor is allowed; same successor is idempotent success.
+func (s *Service) LinkRunSuccessor(ctx context.Context, cmd runcontracts.LinkRunSuccessorCommand) error {
+	if s == nil || s.runs == nil || cmd.WorkspaceID == "" || cmd.PredecessorRunID == "" || cmd.SuccessorRunID == "" {
+		return common.ErrInvalidArgument
+	}
+	if cmd.PredecessorRunID == cmd.SuccessorRunID {
+		return common.ErrInvalidArgument
+	}
+	predecessor, err := s.runs.GetByWorkspaceID(ctx, cmd.WorkspaceID, cmd.PredecessorRunID)
+	if err != nil {
+		return err
+	}
+	successor, err := s.runs.GetByWorkspaceID(ctx, cmd.WorkspaceID, cmd.SuccessorRunID)
+	if err != nil {
+		return err
+	}
+	// Successor must already record this predecessor (create-time lineage).
+	if successor.Lineage.PredecessorRunID != cmd.PredecessorRunID {
+		return fmt.Errorf("%w: successor predecessor lineage mismatch", common.ErrConflict)
+	}
+	current := common.RunID(strings.TrimSpace(string(predecessor.Lineage.SuccessorRunID)))
+	expected := common.RunID(strings.TrimSpace(string(cmd.ExpectedSuccessorRunID)))
+	if current == cmd.SuccessorRunID {
+		return nil // idempotent
+	}
+	if expected == "" {
+		if current != "" {
+			return fmt.Errorf("%w: predecessor already has successor %s", common.ErrConflict, current)
+		}
+	} else if current != expected {
+		return fmt.Errorf("%w: predecessor successor CAS mismatch have=%s expected=%s", common.ErrConflict, current, expected)
+	}
+	predecessor.Lineage.SuccessorRunID = cmd.SuccessorRunID
+	if strings.TrimSpace(predecessor.Lineage.LineageState) == "" {
+		predecessor.Lineage.LineageState = "active"
+	}
+	if err := s.runs.Update(ctx, predecessor); err != nil {
+		return err
+	}
+	return s.publishRunEvent(ctx, runevents.TopicRunStateChanged, predecessor)
 }
 
 func cloneRuntimeBootstrap(value *runtimemodel.RuntimeBootstrap) *runtimemodel.RuntimeBootstrap {

@@ -1299,10 +1299,13 @@ func (b *remoteRunBackend) resumeWorkspaceExecution(ctx context.Context, wsID co
 	return &RunInfo{
 		ID: common.RunID(act.Run.ID), WorkspaceID: common.WorkspaceID(act.Run.WorkspaceID),
 		GoalID: common.GoalID(act.Run.GoalID), DoDID: common.DoDID(act.Run.DoDID),
-		State:              common.RunState(act.Run.State),
-		BlockingTicketID:   common.TicketID(act.Run.BlockingTicketID),
-		BlockingApprovalID: common.ApprovalID(act.Run.BlockingApprovalID),
-		FailureReason:      act.Run.FailureReason,
+		PredecessorRunID:    common.RunID(act.Run.Lineage.PredecessorRunID),
+		PredecessorResultID: common.ResultID(act.Run.Lineage.PredecessorResultID),
+		SuccessorRunID:      common.RunID(act.Run.Lineage.SuccessorRunID),
+		State:               common.RunState(act.Run.State),
+		BlockingTicketID:    common.TicketID(act.Run.BlockingTicketID),
+		BlockingApprovalID:  common.ApprovalID(act.Run.BlockingApprovalID),
+		FailureReason:       act.Run.FailureReason,
 	}, nil
 }
 
@@ -1368,11 +1371,14 @@ func remoteRunInfoFromClientRun(r *client.Run) *RunInfo {
 	return &RunInfo{
 		ID: common.RunID(r.ID), WorkspaceID: common.WorkspaceID(r.WorkspaceID),
 		GoalID: common.GoalID(r.GoalID), DoDID: common.DoDID(r.DoDID),
-		DefinitionRevision: r.DefinitionRevision,
-		State:              common.RunState(r.State),
-		BlockingTicketID:   common.TicketID(r.BlockingTicketID),
-		BlockingApprovalID: common.ApprovalID(r.BlockingApprovalID),
-		FailureReason:      r.FailureReason,
+		DefinitionRevision:  r.DefinitionRevision,
+		PredecessorRunID:    common.RunID(r.Lineage.PredecessorRunID),
+		PredecessorResultID: common.ResultID(r.Lineage.PredecessorResultID),
+		SuccessorRunID:      common.RunID(r.Lineage.SuccessorRunID),
+		State:               common.RunState(r.State),
+		BlockingTicketID:    common.TicketID(r.BlockingTicketID),
+		BlockingApprovalID:  common.ApprovalID(r.BlockingApprovalID),
+		FailureReason:       r.FailureReason,
 	}
 }
 func (b *remoteRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*RunInfo, error) {
@@ -1386,11 +1392,14 @@ func (b *remoteRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, id 
 	return &RunInfo{
 		ID: common.RunID(r.ID), WorkspaceID: common.WorkspaceID(r.WorkspaceID),
 		GoalID: common.GoalID(r.GoalID), DoDID: common.DoDID(r.DoDID),
-		DefinitionRevision: r.DefinitionRevision,
-		State:              common.RunState(r.State),
-		BlockingTicketID:   common.TicketID(r.BlockingTicketID),
-		BlockingApprovalID: common.ApprovalID(r.BlockingApprovalID),
-		FailureReason:      r.FailureReason,
+		DefinitionRevision:  r.DefinitionRevision,
+		PredecessorRunID:    common.RunID(r.Lineage.PredecessorRunID),
+		PredecessorResultID: common.ResultID(r.Lineage.PredecessorResultID),
+		SuccessorRunID:      common.RunID(r.Lineage.SuccessorRunID),
+		State:               common.RunState(r.State),
+		BlockingTicketID:    common.TicketID(r.BlockingTicketID),
+		BlockingApprovalID:  common.ApprovalID(r.BlockingApprovalID),
+		FailureReason:       r.FailureReason,
 	}, nil
 }
 func (b *remoteRunBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]RunInfo, error) {
@@ -1403,11 +1412,14 @@ func (b *remoteRunBackend) List(ctx context.Context, wsID common.WorkspaceID) ([
 		result = append(result, RunInfo{
 			ID: common.RunID(r.ID), WorkspaceID: common.WorkspaceID(r.WorkspaceID),
 			GoalID: common.GoalID(r.GoalID), DoDID: common.DoDID(r.DoDID),
-			DefinitionRevision: r.DefinitionRevision,
-			State:              common.RunState(r.State),
-			BlockingTicketID:   common.TicketID(r.BlockingTicketID),
-			BlockingApprovalID: common.ApprovalID(r.BlockingApprovalID),
-			FailureReason:      r.FailureReason,
+			DefinitionRevision:  r.DefinitionRevision,
+			PredecessorRunID:    common.RunID(r.Lineage.PredecessorRunID),
+			PredecessorResultID: common.ResultID(r.Lineage.PredecessorResultID),
+			SuccessorRunID:      common.RunID(r.Lineage.SuccessorRunID),
+			State:               common.RunState(r.State),
+			BlockingTicketID:    common.TicketID(r.BlockingTicketID),
+			BlockingApprovalID:  common.ApprovalID(r.BlockingApprovalID),
+			FailureReason:       r.FailureReason,
 		})
 	}
 	return result, nil
@@ -1442,19 +1454,30 @@ func convergenceStatusInfoFromClient(input *client.ConvergenceStatus) *Convergen
 		return nil
 	}
 	return &ConvergenceStatusInfo{
-		WorkspaceID:               common.WorkspaceID(input.WorkspaceID),
-		RunID:                     common.RunID(input.RunID),
-		RunState:                  common.RunState(input.RunState),
-		CurrentFocusID:            input.CurrentFocusID,
-		NextActionKind:            input.NextActionKind,
-		CurrentGap:                input.CurrentGap,
-		MissingEvidenceKinds:      append([]string(nil), input.MissingEvidenceKinds...),
-		AcceptedEvidenceCount:     input.AcceptedEvidenceCount,
-		RejectedEvidenceCount:     input.RejectedEvidenceCount,
-		LatestEffectiveProgressAt: input.LatestEffectiveProgressAt,
-		DecisionCause:             input.DecisionCause,
-		Stalled:                   input.Stalled,
-		IneffectiveRetry:          input.IneffectiveRetry,
+		WorkspaceID:                   common.WorkspaceID(input.WorkspaceID),
+		RunID:                         common.RunID(input.RunID),
+		RunState:                      common.RunState(input.RunState),
+		CurrentSliceID:                input.CurrentSliceID,
+		CurrentFocusID:                input.CurrentFocusID,
+		NextActionKind:                input.NextActionKind,
+		CurrentGap:                    input.CurrentGap,
+		MissingEvidenceKinds:          append([]string(nil), input.MissingEvidenceKinds...),
+		AcceptedEvidenceCount:         input.AcceptedEvidenceCount,
+		RejectedEvidenceCount:         input.RejectedEvidenceCount,
+		ClosedCoverageItemCount:       input.ClosedCoverageItemCount,
+		RemainingCoverageItemCount:    input.RemainingCoverageItemCount,
+		AssessmentDisposition:         input.AssessmentDisposition,
+		RepairAttempts:                input.RepairAttempts,
+		MaxRepairAttempts:             input.MaxRepairAttempts,
+		RepeatedFailureSignatureCount: input.RepeatedFailureSignatureCount,
+		LatestAcceptedEvidenceRef:     input.LatestAcceptedEvidenceRef,
+		NextActivationRequired:        input.NextActivationRequired,
+		GapSummary:                    input.GapSummary,
+		LatestEffectiveProgressAt:     input.LatestEffectiveProgressAt,
+		LastProgressAt:                input.LastProgressAt,
+		DecisionCause:                 input.DecisionCause,
+		Stalled:                       input.Stalled,
+		IneffectiveRetry:              input.IneffectiveRetry,
 	}
 }
 

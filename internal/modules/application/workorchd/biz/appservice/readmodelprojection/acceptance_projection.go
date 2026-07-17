@@ -7,7 +7,64 @@ import (
 )
 
 func MapAcceptanceProjection(run readmodelcore.Run) readmodelcore.AcceptanceProjection {
-	return emptyAcceptanceProjection()
+	if run.RuntimeState == nil {
+		return emptyAcceptanceProjection()
+	}
+	facts := run.RuntimeState.Facts.Normalized()
+	projection := readmodelcore.AcceptanceProjection{}
+	byID := map[string]string{}
+	for _, item := range facts.Coverage {
+		byID[string(item.ID)] = string(item.State)
+	}
+	for _, slice := range facts.Slices {
+		item := readmodelcore.AcceptanceSlice{
+			ID: slice.ID, Title: slice.Title, Scope: slice.Scope, Priority: slice.Priority,
+			RequiredEvidenceKinds: append([]string(nil), slice.RequiredEvidenceKinds...),
+			CompletionPolicy:      slice.CompletionPolicy, ResultPolicy: slice.ResultPolicy,
+		}
+		for _, id := range slice.CoverageWorkItemIDs {
+			item.CoverageWorkItemIDs = append(item.CoverageWorkItemIDs, string(id))
+		}
+		item.State = "accepted"
+		for _, id := range item.CoverageWorkItemIDs {
+			if byID[id] != "satisfied" {
+				item.State = "pending"
+				break
+			}
+		}
+		if slice.ID == facts.Focus.SliceID {
+			projection.ActiveSliceID = slice.ID
+			if item.State != "accepted" {
+				item.State = "active"
+			}
+		}
+		projection.Slices = append(projection.Slices, item)
+	}
+	if len(projection.Slices) == 0 && facts.Focus.ID != "" {
+		projection.ActiveSliceID = facts.Focus.SliceID
+	}
+	projection.CurrentFocus = &readmodelcore.CoverageFocus{
+		ID: facts.Focus.ID, SliceID: facts.Focus.SliceID,
+		RequiredEvidenceKinds: append([]string(nil), facts.Focus.RequiredEvidenceKinds...),
+		TargetRefs:            append([]string(nil), facts.Focus.TargetRefs...), State: string(run.RuntimeState.Decision.State),
+		Attempt: facts.Repair.RepairAttempts,
+	}
+	for _, id := range facts.Focus.CoverageWorkItemIDs {
+		projection.CurrentFocus.CoverageWorkItemIDs = append(projection.CurrentFocus.CoverageWorkItemIDs, string(id))
+	}
+	if facts.Repair.ActiveGap != nil {
+		projection.CurrentFocus.FailureClass = string(facts.Repair.ActiveGap.FailureClass)
+		projection.CurrentFocus.FailureSignature = facts.Repair.ActiveGap.FailureSignature
+	}
+	projection.Budget = &readmodelcore.ConvergenceBudget{
+		FocusID: facts.Focus.ID, SliceID: facts.Focus.SliceID, State: string(run.RuntimeState.Decision.State), Decision: string(run.RuntimeState.Decision.Action),
+		MaxRepairAttemptsPerFocus: facts.ConvergencePolicy.MaxRepairAttemptsPerFocus,
+		MaxValidationOnlyRetries:  facts.ConvergencePolicy.MaxValidationOnlyRetriesPerFocus,
+		RepairAttempts:            facts.Repair.RepairAttempts, ValidationOnlyRetries: facts.Repair.ValidationOnlyRetries,
+		RepeatedFailureSignatures: len(facts.Repair.SignatureCounts), NoCoverageDeltaRounds: facts.Repair.NoProgressCount,
+	}
+	projection.Summary = summarizeAcceptanceSlices(projection.Slices)
+	return projection
 }
 
 func MapWorkspaceAcceptanceProjection(snapshot readmodelcore.WorkspaceSnapshot) readmodelcore.AcceptanceProjection {

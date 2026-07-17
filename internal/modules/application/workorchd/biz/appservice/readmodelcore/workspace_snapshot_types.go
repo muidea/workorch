@@ -43,6 +43,7 @@ type WorkspaceViewModel struct {
 	State                   string                               `json:"state,omitempty"`
 	PromptMode              string                               `json:"promptMode,omitempty"`
 	Revision                int64                                `json:"revision,omitempty"`
+	StreamGeneration        string                               `json:"streamGeneration,omitempty"`
 	GlobalRevision          int64                                `json:"globalRevision,omitempty"`
 	WorkspaceRevision       int64                                `json:"workspaceRevision,omitempty"`
 	SourceEventRevision     int64                                `json:"sourceEventRevision,omitempty"`
@@ -52,6 +53,8 @@ type WorkspaceViewModel struct {
 	Degraded                bool                                 `json:"degraded,omitempty"`
 	StaleReason             string                               `json:"staleReason,omitempty"`
 	Error                   string                               `json:"error,omitempty"`
+	FailedWorkspaceIds      []string                             `json:"failedWorkspaceIds,omitempty"`
+	DegradedSince           string                               `json:"degradedSince,omitempty"`
 	Sections                map[string]WorkspaceViewModelSection `json:"sections,omitempty"`
 }
 

@@ -128,14 +128,28 @@ func TestRunSnapshotProjectionUsesCompactEventTimeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunSnapshot: %v", err)
 	}
-	if len(events.queries) < 1 {
-		t.Fatalf("event reader queries = %d, want projection event query", len(events.queries))
+	if len(events.queries) < 2 {
+		t.Fatalf("event reader queries = %d, want metadata timeline + llm usage queries", len(events.queries))
 	}
-	if events.queries[0].IncludePayload {
-		t.Fatalf("projection include payload = true, want compact metadata-only query")
+	var sawMetadata, sawUsage bool
+	for _, query := range events.queries {
+		if query.Topic == "/run/llm_usage/recorded" {
+			sawUsage = true
+			if !query.IncludePayload {
+				t.Fatalf("usage query = %+v, want IncludePayload", query)
+			}
+			continue
+		}
+		sawMetadata = true
+		if query.IncludePayload {
+			t.Fatalf("projection include payload = true, want compact metadata-only query: %+v", query)
+		}
+		if len(query.ExcludeTopics) != 1 || query.ExcludeTopics[0] != "/run/llm_stream/progress" {
+			t.Fatalf("projection exclude topics = %+v, want stream progress excluded", query.ExcludeTopics)
+		}
 	}
-	if len(events.queries[0].ExcludeTopics) != 1 || events.queries[0].ExcludeTopics[0] != "/run/llm_stream/progress" {
-		t.Fatalf("projection exclude topics = %+v, want stream progress excluded", events.queries[0].ExcludeTopics)
+	if !sawMetadata || !sawUsage {
+		t.Fatalf("queries = %+v, want metadata timeline + llm usage payload query", events.queries)
 	}
 }
 

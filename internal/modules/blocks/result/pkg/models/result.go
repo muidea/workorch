@@ -3,28 +3,30 @@ package result
 import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type Result struct {
-	ID            common.ResultID
-	WorkspaceID   common.WorkspaceID
-	RunID         common.RunID
-	GoalID        common.GoalID
-	DoDID         common.DoDID
-	State         common.ResultState
-	Title         string
-	Summary       string
-	SourceType    string
-	SourceRef     string
-	EvidenceRefs  []string
-	ArtifactRefs  []common.ArtifactID
-	DoDAssessment DoDAssessment
-	SummaryDetail ResultSummary
-	AcceptedAt    string
-	RejectedAt    string
-	AcceptedBy    string
-	CreatedAt     string
-	UpdatedAt     string
+	ID              common.ResultID
+	WorkspaceID     common.WorkspaceID
+	RunID           common.RunID
+	GoalID          common.GoalID
+	DoDID           common.DoDID
+	State           common.ResultState
+	Title           string
+	Summary         string
+	SourceType      string
+	SourceRef       string
+	EvidenceRefs    []string
+	ArtifactRefs    []common.ArtifactID
+	DoDAssessment   DoDAssessment
+	SummaryDetail   ResultSummary
+	AcceptedAt      string
+	RejectedAt      string
+	AcceptedBy      string
+	CreatedAt       string
+	UpdatedAt       string
+	RuntimeCloseout *runtimecontract.RuntimeResultCloseout
 }
 
 type ResultSummary struct {

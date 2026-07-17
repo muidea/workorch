@@ -4,48 +4,55 @@ Status: active
 
 Type: index
 
-Last Updated: 2026-07-16
+Last Updated: 2026-07-17
 
 ## Purpose
 
-Runtime V2 代码收口与 **2026-07-16 文档清理** 之后的 **真实未关项** 单点索引。
+Runtime V2-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **真实未关项** 单点索引。
 已完成切片、过程日记、假活跃 plan、dated live 记录、verification artifacts **不再罗列**（见 `90-archive/`）。
 
 ## 阅读导航
 
-1. [A. 运维切换](#a-运维切换)
-2. [B. 可选验证](#b-可选验证)
-3. [C. 延期候选](#c-延期候选)
-4. [D. 文档维护](#d-文档维护)
-5. [E. 已清理 / 不再跟踪](#e-已清理--不再跟踪)
+1. [A. Runtime 正向收敛](#a-runtime-正向收敛)
+2. [B. 运维切换](#b-运维切换)
+3. [C. 可选验证](#c-可选验证)
+4. [D. 延期候选](#d-延期候选)
+5. [E. 文档维护](#e-文档维护)
+6. [F. 已清理 / 不再跟踪](#f-已清理--不再跟踪)
 
-## A. 运维切换
+## A. Runtime 正向收敛
+
+| # | 主题 | 状态 | 归档 |
+| --- | --- | --- | --- |
+| A1 | Runtime V2 positive convergence | **completed**（RVC-01～18） | `90-archive/completed/runtime-v2-positive-convergence-closure-plan.md` |
+
+## B. 运维切换
 
 | # | 主题 | 待办 | 历史过程稿 |
 | --- | --- | --- | --- |
-| A1 | 生产 apply | clean build + 生产目录维护窗口正式 `runtime-v1-retirement --apply` | `90-archive/completed/deployed-workspace-progress-blocker-component-closure-plan.md` |
+| B1 | 生产 apply | clean build + 生产目录维护窗口正式 `runtime-v1-retirement --apply` | `90-archive/completed/deployed-workspace-progress-blocker-component-closure-plan.md` |
 
-## B. 可选验证
+## C. 可选验证
 
 | # | 主题 | 待办 | 历史过程稿 |
 | --- | --- | --- | --- |
-| B1 | file-patch live | 可选补一次 deployed `patch apply + validation + DoD closeout` | `90-archive/completed/file-patch-side-effect-owner-migration-plan.md` |
+| C1 | file-patch live | 可选补一次 deployed `patch apply + validation + DoD closeout` | `90-archive/completed/file-patch-side-effect-owner-migration-plan.md` |
 
-## C. 延期候选
-
-| # | 主题 | 说明 |
-| --- | --- | --- |
-| C1 | LLM context budget 高级项 | failover / tokenizer / 原生 usage 精度 / context-too-large 差异化 → `70-roadmap/candidates/next-stage-demand-candidates.md`（不占 active） |
-
-## D. 文档维护
+## D. 延期候选
 
 | # | 主题 | 说明 |
 | --- | --- | --- |
-| D1 | 权威层术语抽查 | 确认 StagePacket/NextAction 等不再被写成生产主链 |
-| D2 | block readme 措辞 | 可选；实现 SoT 仍是 `kernel/orchestrator/readme.md` |
-| D3 | archive 索引 | 保持 `90-archive/*/overview.md` 可检索 |
+| D1 | LLM context budget 高级项 | failover / tokenizer / 原生 usage 精度 / context-too-large 差异化 → `70-roadmap/candidates/next-stage-demand-candidates.md`（不占 active） |
 
-## E. 已清理 / 不再跟踪
+## E. 文档维护
+
+| # | 主题 | 说明 |
+| --- | --- | --- |
+| E1 | 权威层术语抽查 | 确认 StagePacket/NextAction 等不再被写成生产主链 |
+| E2 | block readme 措辞 | 可选；实现 SoT 仍是 `kernel/orchestrator/readme.md` |
+| E3 | archive 索引 | 保持 `90-archive/*/overview.md` 可检索 |
+
+## F. 已清理 / 不再跟踪
 
 以下类别 **已从 active / 当前验收导航移除**，不在本索引展开：
 

@@ -51,6 +51,10 @@ type RuntimeCandidateAttemptRecord struct {
 
 // RuntimeStateRecord 是 Runtime V2 在 Run owner 中持久化的唯一正式状态。
 type RuntimeStateRecord struct {
+	// SchemaVersion is the persisted Runtime V2 aggregate schema. Zero is the
+	// legacy additive schema and is normalized in-memory on load before any
+	// reducer/drive work is performed.
+	SchemaVersion         uint32
 	StateRevision         uint64
 	EvidenceSequence      uint64
 	Definition            RuntimeDefinitionContext
@@ -65,7 +69,22 @@ type RuntimeStateRecord struct {
 	GovernanceResolutions []RuntimeGovernanceResolutionRecord
 }
 
+const (
+	RuntimeStateSchemaVersionLegacy  uint32 = 0
+	RuntimeStateSchemaVersionCurrent uint32 = 1
+)
+
+func (r RuntimeStateRecord) Normalized() RuntimeStateRecord {
+	if r.SchemaVersion == RuntimeStateSchemaVersionLegacy {
+		r.SchemaVersion = RuntimeStateSchemaVersionCurrent
+	}
+	return r
+}
+
 func (r RuntimeStateRecord) Validate() error {
+	if r.SchemaVersion != RuntimeStateSchemaVersionLegacy && r.SchemaVersion != RuntimeStateSchemaVersionCurrent {
+		return fmt.Errorf("unsupported runtime state schema version %d", r.SchemaVersion)
+	}
 	if r.Facts.WorkspaceID == "" || r.Facts.RunID == "" {
 		return fmt.Errorf("runtime state requires workspace and run scope")
 	}

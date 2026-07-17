@@ -15,13 +15,14 @@ func appendRunSnapshotObservabilityTasks(ctx context.Context, tasks []func() err
 		models.EventRecords, err = readers.EventRecords.List(ctx, runSnapshotEventRecordQuery(item.ID, loadMode))
 		return err
 	}))
-	if loadMode != runSnapshotLoadCompact {
-		tasks = append(tasks, namedLoadTask("runSnapshot.llmUsageEventRecords", func() error {
-			var err error
-			models.LLMUsageEventRecords, err = readers.EventRecords.List(ctx, readmodelcore.RunLLMUsageEventRecordRepositoryQuery(item.ID, readmodelcore.DefaultLLMUsageEventRecordLimit))
-			return err
-		}))
-	}
+	// RVC-14: /run/llm_usage/recorded must hydrate Run snapshot summary on every formal
+	// snapshot path (compact/detail/projection/observability). Payload query is bounded
+	// and topic-scoped; general event timeline remains metadata-only.
+	tasks = append(tasks, namedLoadTask("runSnapshot.llmUsageEventRecords", func() error {
+		var err error
+		models.LLMUsageEventRecords, err = readers.EventRecords.List(ctx, readmodelcore.RunLLMUsageEventRecordRepositoryQuery(item.ID, readmodelcore.DefaultLLMUsageEventRecordLimit))
+		return err
+	}))
 	tasks = append(tasks, namedLoadTask("runSnapshot.memoryRecalls", func() error {
 		var err error
 		if readers.MemoryRecalls != nil {

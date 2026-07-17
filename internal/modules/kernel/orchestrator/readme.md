@@ -11,6 +11,25 @@
 - candidate 强制使用 ceiling target；Restart/Resume 不携带 provider/model patch
 - Orchestrator 只校验 identity/revision/ceiling 完整性，不解释 ai-proxy 或模型品牌
 
+## Runtime V2 四状态机实现约束（2026-07-16）
+
+完整规范以 `docs/00-core/runtime-stage-contract.md` 的“Runtime V2 四状态机固化规约”为唯一权威。本模块按以下四个状态机落实现有职责，不定义第二份状态语义：
+
+| 状态机 | 本模块职责 | 外部 owner |
+| --- | --- | --- |
+| SM-1 Run lifecycle | Start/Resume 准入、blocked/terminal 窄投影 | Run owner 持久化 state/aggregate/lineage；Workspace owner 持久化 activeRun |
+| SM-2 authority/focus | reducer、focus/evidence/assessment/repair/governance/terminal 裁决 | application 只编译 typed bootstrap；Result 只存 outcome |
+| SM-3 candidate/dispatch | attempt 0/1、transaction、seal、typed operation、evidence commit | LLM 返回 candidate；capability block 执行 operation |
+| SM-4 drive/recovery/projection delivery | bounded drive、singleflight、restart load、owner projection retry | projection store/read model 只保存派生状态 |
+
+实现必须保持：
+
+- SM-1 不选择 action，SM-2 不执行 operation，SM-3 不选择 next action，SM-4 不重建 authority。
+- 所有跨状态机推进都使用 persisted aggregate + typed EventHub command/result。
+- projection failure 不得覆盖 reducer terminal；重启不得重复 prerequisite/candidate/side effect。
+- 任何修改 reducer/controller/drive/operation projection 前，必须说明影响的 SM 编号并补合法/禁止迁移、幂等、restart、stale/duplicate、budget/guard 测试。
+- 本模块不得恢复 V1 mainline、application continuation queue、通用 RuntimeAdapter registry、projection authority 或自动 successor。
+
 
 ## 组件交互及合同
 

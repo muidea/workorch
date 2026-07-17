@@ -24,6 +24,10 @@ func (s *runStateSubsystem) canTerminalRunReleaseWorkspace(ctx context.Context, 
 	if workspace == nil || run == nil || workspace.ID != run.WorkspaceID {
 		return false, nil
 	}
+	// Terminal projection for run R only clears ActiveRun when the slot is empty,
+	// owned by R, or owned by a missing/foreign/terminal run. A different live
+	// active run must not be stolen — but that is still a successful no-op for R
+	// (see releaseWorkspaceForTerminalRun).
 	if workspace.ActiveRunID == "" || workspace.ActiveRunID == run.ID {
 		return true, nil
 	}
@@ -51,12 +55,35 @@ func (s *runStateSubsystem) releaseWorkspaceForTerminalRun(ctx context.Context, 
 	if err != nil {
 		return nil, false, err
 	}
-	canRelease, err := s.canTerminalRunReleaseWorkspace(ctx, workspace, run)
-	if err != nil || !canRelease {
-		return workspace, false, err
+	desiredState := common.CanonicalWorkspaceOwnerState(state)
+
+	// Already released: terminal authority for this run is satisfied without rewrite.
+	if workspace.ActiveRunID == "" {
+		if workspace.State == desiredState {
+			return workspace, true, nil
+		}
+		workspace.State = desiredState
+		if err := s.workspaces.Update(ctx, workspace); err != nil {
+			return nil, false, err
+		}
+		return workspace, true, nil
 	}
+
+	// Different live active run owns the slot: do not steal; our terminal projection
+	// is still satisfied (ActiveRun is not this run).
+	if workspace.ActiveRunID != run.ID {
+		canRelease, err := s.canTerminalRunReleaseWorkspace(ctx, workspace, run)
+		if err != nil {
+			return workspace, false, err
+		}
+		if !canRelease {
+			return workspace, true, nil
+		}
+		// Other active is terminal/missing/foreign — clear stale slot.
+	}
+
 	workspace.ActiveRunID = ""
-	workspace.State = common.CanonicalWorkspaceOwnerState(state)
+	workspace.State = desiredState
 	if err := s.workspaces.Update(ctx, workspace); err != nil {
 		return nil, false, err
 	}

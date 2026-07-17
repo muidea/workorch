@@ -2053,6 +2053,9 @@ func (s *serverState) close(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var errs []error
 	if s.workspaceProjection != nil {
 		s.workspaceProjection.Close()
@@ -2066,7 +2069,12 @@ func (s *serverState) close(ctx context.Context) error {
 		}
 	}
 	s.eventUnsubscribes = nil
-	if err := s.waitBackground(ctx); err != nil {
+	// Each teardown stage gets its own deadline so an earlier timeout cannot leave
+	// later Close/Terminate/Drain calls running against an already-cancelled ctx
+	// (which can hang under full-suite load).
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), closeStageTimeout(ctx))
+	defer waitCancel()
+	if err := s.waitBackground(waitCtx); err != nil {
 		errs = append(errs, err)
 	}
 	s.sharedSessionMu.Lock()
@@ -2074,10 +2082,37 @@ func (s *serverState) close(ctx context.Context) error {
 	s.sharedSession = nil
 	s.sharedSessionMu.Unlock()
 	if session != nil {
-		errs = append(errs, session.Close(ctx))
+		sessionCtx, sessionCancel := context.WithTimeout(context.Background(), closeStageTimeout(ctx))
+		errs = append(errs, session.Close(sessionCtx))
+		sessionCancel()
 	}
-	errs = append(errs, appservice.CloseSharedBackendSession(ctx, s.config.Backend, s.config.DataRoot))
+	sharedCtx, sharedCancel := context.WithTimeout(context.Background(), closeStageTimeout(ctx))
+	defer sharedCancel()
+	errs = append(errs, appservice.CloseSharedBackendSession(sharedCtx, s.config.Backend, s.config.DataRoot))
 	return errors.Join(errs...)
+}
+
+func closeStageTimeout(ctx context.Context) time.Duration {
+	const defaultTimeout = 5 * time.Second
+	if ctx == nil {
+		return defaultTimeout
+	}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return defaultTimeout
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return defaultTimeout
+	}
+	if remaining > defaultTimeout {
+		return defaultTimeout
+	}
+	// Keep a usable floor so parallel suite cleanup still terminates.
+	if remaining < 500*time.Millisecond {
+		return 500 * time.Millisecond
+	}
+	return remaining
 }
 
 func (s *serverState) waitBackground(ctx context.Context) error {

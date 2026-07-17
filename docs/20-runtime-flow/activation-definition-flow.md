@@ -4,7 +4,7 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-16
 
 ## Purpose
 
@@ -13,6 +13,16 @@ Last Updated: 2026-07-14
 
 生产主线不创建 V1 首个 `llm/workspace_execution` Step、不组装 V1 execution-context map，
 也不以 graph dispatch 作为 activation 输出。
+
+## State Machine Binding
+
+本 flow 绑定核心规约中的：
+
+- SM-1：新 Run 的 pending/active admission 与 predecessor lineage；
+- SM-2：typed focus/requirement 初始事实；
+- SM-4：Initialize 幂等与首次 drive。
+
+本文件不重新定义状态迁移；完整合法/禁止迁移以 [Runtime V2 四状态机固化规约](../00-core/runtime-stage-contract.md#runtime-v2-四状态机固化规约) 为准。
 
 ## Flow
 
@@ -68,8 +78,9 @@ RuntimeBootstrap
 
 - bootstrap 必须 `Validate()` 通过后才能落库
 - focus 需要 identity、coverage work item IDs，以及 required evidence kinds 或 `RequireAssessment`
-- `RuntimeActivationContext` 只保存 provider-facing 稳定内容快照（Soul/Skill/MCP/Memory、
-  evidence policies、execution contract、continuation 摘要），不保存 provider/model 动态绑定
+- `RuntimeActivationContext` 保存 provider-facing 稳定内容快照（Soul/Skill/MCP/Memory、
+  evidence policies、execution contract、continuation 摘要）以及当次封存的 `providerId/modelId` identity；
+  base URL、credential、provider client、failover/runtime transport 状态不得进入可恢复业务状态
 - 不使用 map / JSON bridge 表达组件合同
 
 #### Activation Vs Workspace Setup

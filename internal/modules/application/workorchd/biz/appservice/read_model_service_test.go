@@ -414,8 +414,13 @@ func TestReadRunSnapshotUsesBoundedProjectedEventRecords(t *testing.T) {
 			t.Fatalf("snapshot event contains raw output payload: %+v", item.Payload)
 		}
 	}
-	if snapshot.LLMUsageSummary.EntryTotal != 0 || snapshot.LLMUsageSummary.TotalTokens != 0 {
-		t.Fatalf("compact llm usage summary = %+v, want metadata-only snapshot without usage payload hydration", snapshot.LLMUsageSummary)
+	// RVC-14: formal Run snapshot hydrates topic-scoped usage payloads into summary
+	// even on the compact path. General event timeline remains metadata-only above.
+	if snapshot.LLMUsageSummary.EntryTotal == 0 || snapshot.LLMUsageSummary.TotalTokens == 0 {
+		t.Fatalf("compact llm usage summary = %+v, want non-zero usage from /run/llm_usage/recorded", snapshot.LLMUsageSummary)
+	}
+	if len(snapshot.LLMUsageTraces) == 0 {
+		t.Fatalf("compact llm usage traces empty, want hydrated run-scoped traces")
 	}
 }
 

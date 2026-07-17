@@ -4,7 +4,7 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-16
 
 ## Purpose
 
@@ -19,23 +19,36 @@ Last Updated: 2026-07-14
 
 生产主线**不**存在 V1 自动 replan successor lifecycle、`ExecutionContextPatch` resume 或 graph 重放。
 
+## State Machine Binding
+
+本 flow 绑定核心规约中的：
+
+- SM-2：same-focus repair、failure signature budget、governance/terminal；
+- SM-3：same-transaction candidate retry 与 rejected operation evidence；
+- SM-1：blocked/active/terminal lifecycle，以及显式新 Run lineage；
+- SM-4：restart/load、governance continuation 与 bounded no-progress guard。
+
+repair 与 replan 的边界不得由 application queue、自动 successor 或 projection watcher实现。完整规约见 [Runtime V2 四状态机固化规约](../00-core/runtime-stage-contract.md#runtime-v2-四状态机固化规约)。
+
 ## Flow
 
 ```text
-failure / missing prerequisite / candidate schema failure / operation failure / governance need
+failure / missing prerequisite / candidate schema failure / operation failure / repairable assessment / governance need
   -> reducer updates FailureFact / Diagnostics / Prerequisites / Decision.Action
   -> same-run reconverge:
        AcquirePrerequisite
        | candidate attempt 0 -> fail -> attempt 1 (same transaction + stable prefix)
-       | ProduceStateChange / ProduceValidation / ProduceAssessment
+       | repairable implementation gap -> ProduceStateChange
+       | repairable evidence gap       -> ProduceValidation
+       | ProduceAssessment -> partial/satisfied/repairable/governance/terminal disposition
        | RequestGovernance -> governed_wait
             OpenRuntimeGovernanceRequest
             ... external Decision / Approval ...
             CommitRuntimeGovernanceResolution (once per resolution ID + snapshot)
             accepted governance evidence -> same reducer
             governance fail -> governance_rejected terminal
-  -> if path cannot continue within V2 invariants:
-       Terminal Fail  (or operator creates a new activation/run)
+  -> if path cannot continue within V2 invariants or repair budget exhausted:
+       structured Terminal Fail  (or product later creates a new activation/run)
 ```
 
 ## Main Stages
@@ -50,6 +63,8 @@ repair 在 V2 中不是独立 stage 对象，而是 **drive/reducer 在当前 au
   → 同一 authority 上 attempt 1（复用 transaction + stable prefix）
 - operation 失败 evidence  
   → FailureFact 进入 facts；reducer 决定下一 action（仍可能是 state change / validation / governance）
+- assessment 返回 repairable gap
+  → 结构化 gap 进入 facts；按 missing evidence kind 回 state change / validation，不能直接 terminal
 - 需要外部信息 / 审批 / 依赖  
   → sealed governance candidate → ticket → resolution commit
 
@@ -64,7 +79,7 @@ repair 在 V2 中不是独立 stage 对象，而是 **drive/reducer 在当前 au
 
 - attempt 0 与 attempt 1 状态随 aggregate 持久化
 - attempt 1 必须复用相同 `AuthorityTransaction` 与 `StablePrefixHash`
-- 第二次失败后只能进入 governance 或 terminal
+- 第二次失败后生成 structured candidate exhaustion fact，交 SM-2 按合同进入 governance 或 bounded terminal；不得发起第三次 same-contract candidate
 - 进程重启不增加 attempt；只加载已有 `CandidateAttempts`
 
 ### 3. Governance-Mediated Recovery

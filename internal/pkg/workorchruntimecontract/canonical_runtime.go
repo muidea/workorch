@@ -49,18 +49,23 @@ const (
 )
 
 type CoverageFocus struct {
-	ID                    string
-	AssessmentScope       string
-	AssessmentID          string
-	AssessmentText        string
-	CoverageWorkItemIDs   []common.CoverageWorkItemID
-	RequiredEvidenceKinds []string
-	TargetRefs            []string
-	EvidenceRole          string
-	AcceptedStepKinds     []string
-	AcceptedOperations    []string
-	RejectedStepKinds     []string
-	RequireAssessment     bool
+	ID                                string
+	SliceID                           string
+	AssessmentScope                   string
+	AssessmentID                      string
+	AssessmentText                    string
+	CoverageWorkItemIDs               []common.CoverageWorkItemID
+	RequiredEvidenceKinds             []string
+	TargetRefs                        []string
+	EvidenceRole                      string
+	AcceptedStepKinds                 []string
+	AcceptedOperations                []string
+	RejectedStepKinds                 []string
+	RequireDirectEvidence             bool
+	RequireClaimEvidence              bool
+	RequireExecutableBehaviorEvidence bool
+	RequireCoverageTargets            bool
+	RequireAssessment                 bool
 }
 
 type EvidenceLedger struct {
@@ -69,15 +74,21 @@ type EvidenceLedger struct {
 }
 
 type RuntimeAssessmentFact struct {
+	ID                  string
 	FocusID             string
+	SliceID             string
 	Scope               string
 	RequirementID       string
 	RequirementText     string
 	CoverageWorkItemIDs []common.CoverageWorkItemID
-	Satisfied           bool
-	Summary             string
-	EvidenceRefs        []string
-	ArtifactRefs        []string
+	// Satisfied is a compatibility projection of Disposition==satisfied. Reducer/Result must not use it as authority.
+	Satisfied    bool
+	Disposition  AssessmentDisposition
+	Items        []RuntimeAssessmentItemFact
+	Gap          *RuntimeAssessmentGap
+	Summary      string
+	EvidenceRefs []string
+	ArtifactRefs []string
 }
 
 type EvidenceFact struct {
@@ -186,6 +197,24 @@ type RuntimeFacts struct {
 	Capabilities       RuntimeCapabilities
 	Resources          RuntimeResourceFacts
 	Activation         RuntimeActivationContext
+	StateChange        RuntimeStateChangeLedger
+	ConvergencePolicy  RuntimeConvergencePolicy
+	Repair             RuntimeRepairLedger
+	Coverage           []RuntimeCoverageItemFact
+	Feasibility        *RuntimeFeasibilityFact
+	Slices             []RuntimeAcceptanceSlice
+}
+
+// RuntimeFeasibilityFact is the persisted result of the pre-candidate
+// capability gate. It is a reducer input, not a drive error or a candidate
+// retry signal.
+type RuntimeFeasibilityFact struct {
+	FocusID                string
+	Action                 RuntimeAction
+	RequiredOperationKinds []string
+	FeasibleOperationKinds []string
+	MissingCapabilityKinds []string
+	Reason                 string
 }
 
 type RuntimeCapabilities struct {
@@ -367,6 +396,24 @@ func (f RuntimeFacts) Normalized() RuntimeFacts {
 	f.Capabilities.GovernanceKinds = normalizeStrings(f.Capabilities.GovernanceKinds)
 	f.Resources = f.Resources.Normalized()
 	f.Activation = f.Activation.Normalized()
+	f.StateChange = f.StateChange.Normalized()
+	f.ConvergencePolicy = f.ConvergencePolicy.Normalized()
+	f.Repair = f.Repair.Normalized()
+	f.Coverage = NormalizeRuntimeCoverageFacts(f.Coverage)
+	f.Slices = NormalizeRuntimeAcceptanceSlices(f.Slices)
+	if len(f.Coverage) == 0 {
+		f.Coverage = InitialRuntimeCoverageFacts(nil, append([]CoverageFocus{f.Focus}, f.RemainingFocuses...))
+	}
+	if f.Feasibility != nil {
+		value := *f.Feasibility
+		value.FocusID = strings.TrimSpace(value.FocusID)
+		value.Action = RuntimeAction(strings.TrimSpace(string(value.Action)))
+		value.RequiredOperationKinds = normalizeStrings(value.RequiredOperationKinds)
+		value.FeasibleOperationKinds = normalizeStrings(value.FeasibleOperationKinds)
+		value.MissingCapabilityKinds = normalizeStrings(value.MissingCapabilityKinds)
+		value.Reason = strings.TrimSpace(value.Reason)
+		f.Feasibility = &value
+	}
 	if f.Failure != nil {
 		failure := *f.Failure
 		failure.Class = FailureClass(strings.TrimSpace(string(failure.Class)))
@@ -403,11 +450,23 @@ func (f RuntimeFacts) Validate() error {
 		}
 		seenFocus[focus.ID] = struct{}{}
 	}
+	coverage := map[common.CoverageWorkItemID]struct{}{}
+	for _, item := range f.Coverage {
+		coverage[item.ID] = struct{}{}
+	}
+	for _, focus := range append([]CoverageFocus{f.Focus}, f.RemainingFocuses...) {
+		for _, id := range focus.CoverageWorkItemIDs {
+			if _, ok := coverage[id]; !ok {
+				return fmt.Errorf("runtime facts focus coverage item %s has no coverage ledger entry", id)
+			}
+		}
+	}
 	return nil
 }
 
 func (f CoverageFocus) Normalized() CoverageFocus {
 	f.ID = strings.TrimSpace(f.ID)
+	f.SliceID = strings.TrimSpace(f.SliceID)
 	f.AssessmentScope = strings.TrimSpace(f.AssessmentScope)
 	f.AssessmentID = strings.TrimSpace(f.AssessmentID)
 	f.AssessmentText = strings.TrimSpace(f.AssessmentText)
@@ -835,21 +894,51 @@ func normalizeRuntimeAssessmentFacts(values []RuntimeAssessmentFact) []RuntimeAs
 	ret := make([]RuntimeAssessmentFact, 0, len(values))
 	seen := map[string]struct{}{}
 	for _, value := range values {
+		value.ID = strings.TrimSpace(value.ID)
 		value.FocusID = strings.TrimSpace(value.FocusID)
+		value.SliceID = strings.TrimSpace(value.SliceID)
 		value.Scope = strings.TrimSpace(value.Scope)
 		value.RequirementID = strings.TrimSpace(value.RequirementID)
 		value.RequirementText = strings.TrimSpace(value.RequirementText)
 		value.CoverageWorkItemIDs = normalizeCoverageWorkItemIDs(value.CoverageWorkItemIDs)
+		value.Disposition = value.Disposition.Normalized()
+		if value.Disposition == "" {
+			if value.Satisfied {
+				value.Disposition = AssessmentDispositionSatisfied
+			} else {
+				// legacy unsatisfied assessments remain repairable for active runs
+				value.Disposition = AssessmentDispositionRepairableGap
+			}
+		}
+		value.Satisfied = value.Disposition == AssessmentDispositionSatisfied
+		if len(value.Items) > 0 {
+			items := make([]RuntimeAssessmentItemFact, 0, len(value.Items))
+			for _, item := range value.Items {
+				item = item.Normalized()
+				if item.CoverageWorkItemID != "" {
+					items = append(items, item)
+				}
+			}
+			value.Items = items
+		}
+		if value.Gap != nil {
+			gap := value.Gap.Normalized()
+			value.Gap = &gap
+		}
 		value.Summary = strings.TrimSpace(value.Summary)
 		value.EvidenceRefs = normalizeStrings(value.EvidenceRefs)
 		value.ArtifactRefs = normalizeStrings(value.ArtifactRefs)
 		if value.FocusID == "" {
 			continue
 		}
-		if _, ok := seen[value.FocusID]; ok {
+		key := value.FocusID
+		if value.ID != "" {
+			key = value.ID
+		}
+		if _, ok := seen[key]; ok {
 			continue
 		}
-		seen[value.FocusID] = struct{}{}
+		seen[key] = struct{}{}
 		ret = append(ret, value)
 	}
 	return nilIfEmpty(ret)

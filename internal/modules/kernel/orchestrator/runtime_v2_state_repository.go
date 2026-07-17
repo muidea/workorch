@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
@@ -26,7 +27,13 @@ func (r runtimeV2StateRepository) Load(ctx context.Context, workspaceID common.W
 	if run.RuntimeContractVersion != runtimecontract.RuntimeContractVersionV2 || run.RuntimeState == nil {
 		return runtimev2.RuntimeAggregate{}, common.ErrNotFound
 	}
-	aggregate := runtimeAggregateFromRecord(run.RuntimeState.Clone())
+	record := run.RuntimeState.Clone()
+	if record.SchemaVersion > runtimecontract.RuntimeStateSchemaVersionCurrent {
+		return runtimev2.RuntimeAggregate{}, fmt.Errorf("unsupported future Runtime V2 state schema %d", record.SchemaVersion)
+	}
+	// Legacy records are normalized purely in memory. The next successful CAS
+	// writes the current schema; load itself never mutates a Run.
+	aggregate := runtimeAggregateFromRecord(record)
 	if err := aggregate.Validate(); err != nil {
 		return runtimev2.RuntimeAggregate{}, err
 	}
@@ -60,6 +67,7 @@ func (r runtimeV2StateRepository) Save(ctx context.Context, aggregate runtimev2.
 
 func runtimeStateRecordFromAggregate(aggregate runtimev2.RuntimeAggregate) runtimecontract.RuntimeStateRecord {
 	ret := runtimecontract.RuntimeStateRecord{
+		SchemaVersion:         runtimecontract.RuntimeStateSchemaVersionCurrent,
 		StateRevision:         aggregate.StateRevision,
 		EvidenceSequence:      aggregate.EvidenceSequence,
 		Definition:            aggregate.Definition,
@@ -89,6 +97,7 @@ func runtimeStateRecordFromAggregate(aggregate runtimev2.RuntimeAggregate) runti
 }
 
 func runtimeAggregateFromRecord(record runtimecontract.RuntimeStateRecord) runtimev2.RuntimeAggregate {
+	record = record.Normalized()
 	ret := runtimev2.RuntimeAggregate{
 		StateRevision:         record.StateRevision,
 		EvidenceSequence:      record.EvidenceSequence,

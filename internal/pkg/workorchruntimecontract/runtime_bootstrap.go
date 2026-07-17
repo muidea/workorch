@@ -10,22 +10,37 @@ import (
 const InitialRuntimeEvidenceRevision = "evidence-v2-00000000000000000000"
 
 type RuntimeBootstrap struct {
-	Definition   RuntimeDefinitionContext
-	Activation   RuntimeActivationContext
-	Focuses      []CoverageFocus
-	Requirements []RuntimeRequirement
+	SchemaVersion          uint32
+	Definition             RuntimeDefinitionContext
+	Activation             RuntimeActivationContext
+	Focuses                []CoverageFocus
+	Slices                 []RuntimeAcceptanceSlice
+	CoverageItems          []RuntimeCoverageItem
+	Requirements           []RuntimeRequirement
+	StateChangeRequirement RuntimeRunStateChangeRequirement
+	ConvergencePolicy      RuntimeConvergencePolicy
 }
 
 func (b RuntimeBootstrap) Normalized() RuntimeBootstrap {
+	if b.SchemaVersion == RuntimeStateSchemaVersionLegacy {
+		b.SchemaVersion = RuntimeStateSchemaVersionCurrent
+	}
 	b.Definition = b.Definition.Normalized()
 	b.Activation = b.Activation.Normalized()
 	b.Focuses = normalizeCoverageFocusQueue(b.Focuses)
+	b.Slices = NormalizeRuntimeAcceptanceSlices(b.Slices)
+	b.CoverageItems = NormalizeRuntimeCoverageItems(b.CoverageItems)
 	b.Requirements = normalizeRuntimeRequirements(b.Requirements)
+	b.StateChangeRequirement = b.StateChangeRequirement.Normalized()
+	b.ConvergencePolicy = b.ConvergencePolicy.Normalized()
 	return b
 }
 
 func (b RuntimeBootstrap) Validate() error {
 	b = b.Normalized()
+	if b.SchemaVersion != RuntimeStateSchemaVersionCurrent {
+		return fmt.Errorf("unsupported runtime bootstrap schema version %d", b.SchemaVersion)
+	}
 	if err := b.Definition.Validate(); err != nil {
 		return err
 	}
@@ -74,8 +89,13 @@ func (b RuntimeBootstrap) InitialFacts(workspaceID common.WorkspaceID, runID com
 	return RuntimeFacts{
 		WorkspaceID: workspaceID, RunID: runID, DefinitionRevision: b.Definition.Revision,
 		EvidenceRevision: InitialRuntimeEvidenceRevision, Focus: b.Focuses[0],
-		RemainingFocuses: append([]CoverageFocus(nil), b.Focuses[1:]...),
-		Activation:       b.Activation.Clone(),
+		RemainingFocuses:  append([]CoverageFocus(nil), b.Focuses[1:]...),
+		Activation:        b.Activation.Clone(),
+		StateChange:       NewRuntimeStateChangeLedger(b.StateChangeRequirement),
+		ConvergencePolicy: b.ConvergencePolicy.Normalized(),
+		Repair:            RuntimeRepairLedger{},
+		Coverage:          InitialRuntimeCoverageFacts(b.CoverageItems, b.Focuses),
+		Slices:            append([]RuntimeAcceptanceSlice(nil), b.Slices...),
 	}, nil
 }
 
@@ -83,7 +103,10 @@ func SameRuntimeBootstrap(left RuntimeBootstrap, right RuntimeBootstrap) bool {
 	left = left.Normalized()
 	right = right.Normalized()
 	if !SameRuntimeDefinitionContext(left.Definition, right.Definition) || !SameRuntimeActivationContext(left.Activation, right.Activation) ||
-		len(left.Focuses) != len(right.Focuses) || len(left.Requirements) != len(right.Requirements) {
+		len(left.Focuses) != len(right.Focuses) || len(left.Slices) != len(right.Slices) || len(left.CoverageItems) != len(right.CoverageItems) ||
+		len(left.Requirements) != len(right.Requirements) ||
+		left.StateChangeRequirement.Required != right.StateChangeRequirement.Required ||
+		!sameCoverageWorkItemIDs(left.StateChangeRequirement.CoverageWorkItemIDs, right.StateChangeRequirement.CoverageWorkItemIDs) {
 		return false
 	}
 	for idx := range left.Focuses {
@@ -102,9 +125,11 @@ func SameRuntimeBootstrap(left RuntimeBootstrap, right RuntimeBootstrap) bool {
 func sameCoverageFocus(left CoverageFocus, right CoverageFocus) bool {
 	left = left.Normalized()
 	right = right.Normalized()
-	return left.ID == right.ID && sameCoverageWorkItemIDs(left.CoverageWorkItemIDs, right.CoverageWorkItemIDs) &&
+	return left.ID == right.ID && left.SliceID == right.SliceID && sameCoverageWorkItemIDs(left.CoverageWorkItemIDs, right.CoverageWorkItemIDs) &&
 		left.AssessmentScope == right.AssessmentScope && left.AssessmentID == right.AssessmentID && left.AssessmentText == right.AssessmentText &&
 		left.EvidenceRole == right.EvidenceRole && left.RequireAssessment == right.RequireAssessment &&
+		left.RequireDirectEvidence == right.RequireDirectEvidence && left.RequireClaimEvidence == right.RequireClaimEvidence &&
+		left.RequireExecutableBehaviorEvidence == right.RequireExecutableBehaviorEvidence && left.RequireCoverageTargets == right.RequireCoverageTargets &&
 		sameStrings(left.RequiredEvidenceKinds, right.RequiredEvidenceKinds) && sameStrings(left.TargetRefs, right.TargetRefs) &&
 		sameStrings(left.AcceptedStepKinds, right.AcceptedStepKinds) && sameStrings(left.AcceptedOperations, right.AcceptedOperations) &&
 		sameStrings(left.RejectedStepKinds, right.RejectedStepKinds)

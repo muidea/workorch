@@ -27,7 +27,8 @@ type Run struct {
 }
 
 type RunLineage struct {
-	PredecessorRunID common.RunID
-	SuccessorRunID   common.RunID
-	LineageState     string
+	PredecessorRunID    common.RunID
+	PredecessorResultID common.ResultID
+	SuccessorRunID      common.RunID
+	LineageState        string
 }

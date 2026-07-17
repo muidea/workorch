@@ -17,6 +17,7 @@ type RuntimeExecutionContract struct {
 	StateChangePolicy       RuntimeStateChangePolicy
 	CapabilityUsagePolicies []RuntimeCapabilityUsagePolicy
 	ProfileContracts        []RuntimeProfileContract
+	AcceptanceSlicePolicy   *RuntimeAcceptanceSlicePolicy
 	TemplateStagePolicy     *RuntimeTemplateStagePolicy
 }
 
@@ -41,6 +42,10 @@ func (c RuntimeExecutionContract) Normalized() RuntimeExecutionContract {
 	}
 	c.CapabilityUsagePolicies = normalizeRuntimeCapabilityUsagePolicies(c.CapabilityUsagePolicies)
 	c.ProfileContracts = NormalizeRuntimeProfileContracts(c.ProfileContracts)
+	if c.AcceptanceSlicePolicy != nil {
+		policy := c.AcceptanceSlicePolicy.Normalized()
+		c.AcceptanceSlicePolicy = &policy
+	}
 	if c.TemplateStagePolicy != nil {
 		policy := c.TemplateStagePolicy.Normalized()
 		c.TemplateStagePolicy = &policy
@@ -63,6 +68,11 @@ func (c RuntimeExecutionContract) Validate() error {
 	if err := ValidateRuntimeProfileContracts(c.ProfileContracts); err != nil {
 		return err
 	}
+	if c.AcceptanceSlicePolicy != nil {
+		if err := c.AcceptanceSlicePolicy.Validate(); err != nil {
+			return err
+		}
+	}
 	if c.TemplateStagePolicy != nil {
 		if err := c.TemplateStagePolicy.Validate(); err != nil {
 			return err
@@ -75,7 +85,8 @@ func SameRuntimeExecutionContract(left RuntimeExecutionContract, right RuntimeEx
 	left = left.Normalized()
 	right = right.Normalized()
 	if left.StateChangePolicy != right.StateChangePolicy || len(left.CapabilityUsagePolicies) != len(right.CapabilityUsagePolicies) ||
-		!SameRuntimeProfileContracts(left.ProfileContracts, right.ProfileContracts) || !SameRuntimeTemplateStagePolicy(left.TemplateStagePolicy, right.TemplateStagePolicy) {
+		!SameRuntimeProfileContracts(left.ProfileContracts, right.ProfileContracts) || !SameRuntimeTemplateStagePolicy(left.TemplateStagePolicy, right.TemplateStagePolicy) ||
+		!sameRuntimeAcceptanceSlicePolicy(left.AcceptanceSlicePolicy, right.AcceptanceSlicePolicy) {
 		return false
 	}
 	for idx := range left.CapabilityUsagePolicies {
@@ -127,4 +138,26 @@ func sameRuntimeCapabilityUsagePolicy(left RuntimeCapabilityUsagePolicy, right R
 		left.EvidenceStrength == right.EvidenceStrength && left.UsageMode == right.UsageMode && left.FallbackPolicy == right.FallbackPolicy &&
 		sameStrings(left.TriggerStages, right.TriggerStages) && sameStrings(left.TriggerSignals, right.TriggerSignals) &&
 		sameStrings(left.PreferredTools, right.PreferredTools) && sameStrings(left.RequiredAfterKinds, right.RequiredAfterKinds) && sameStrings(left.Notes, right.Notes)
+}
+
+func sameRuntimeAcceptanceSlicePolicy(left *RuntimeAcceptanceSlicePolicy, right *RuntimeAcceptanceSlicePolicy) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	l := left.Normalized()
+	r := right.Normalized()
+	if l.SchemaVersion != r.SchemaVersion || l.MaxWorkItems != r.MaxWorkItems || l.CompletionPolicy != r.CompletionPolicy || l.ResultPolicy != r.ResultPolicy || len(l.Groups) != len(r.Groups) {
+		return false
+	}
+	for idx := range l.Groups {
+		lg, rg := l.Groups[idx], r.Groups[idx]
+		if lg.ID != rg.ID || lg.Title != rg.Title || lg.Scope != rg.Scope || lg.Priority != rg.Priority || lg.MaxWorkItems != rg.MaxWorkItems ||
+			lg.Match.All != rg.Match.All || !sameStrings(lg.Match.EvidenceRoles, rg.Match.EvidenceRoles) ||
+			!sameStrings(lg.Match.MissingEvidenceKinds, rg.Match.MissingEvidenceKinds) ||
+			!sameStrings(lg.Match.SourceRequirementIDs, rg.Match.SourceRequirementIDs) ||
+			!sameStrings(lg.Match.SourceScopes, rg.Match.SourceScopes) {
+			return false
+		}
+	}
+	return true
 }

@@ -91,3 +91,33 @@ func TestConcreteSSHandWebOperationData(t *testing.T) {
 		t.Fatalf("web data = %+v", webData)
 	}
 }
+
+func TestShellManagedValidationSessionOperationData(t *testing.T) {
+	command := "go"
+	arg := "test"
+	timeout := int64(5000)
+	scratch := "/tmp/validation-scratch"
+	autoCleanup := true
+	data, err := ShellOperationDataFromRuntimeOperation(runtimecontract.RuntimeOperation{
+		ID: "validate-1", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+		Parameters: []runtimecontract.OperationParameter{
+			{Name: "command", String: &command},
+			{Name: "args", StringList: []string{arg, "./..."}},
+			{Name: "timeoutMillis", Integer: &timeout},
+			{Name: "validationScratchDir", String: &scratch},
+			{Name: "validationScratchAutoCleanup", Boolean: &autoCleanup},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.Command != command || len(data.Args) != 2 || data.Args[0] != arg || data.TimeoutMillis != timeout {
+		t.Fatalf("managed session shell data = %+v", data)
+	}
+	if data.ValidationScratchDirectory != scratch || !data.ValidationScratchAutoCleanup || !data.ValidationScratchAutoCleanupSet {
+		t.Fatalf("managed session scratch = %+v", data)
+	}
+	if !data.ManagedValidation.RuntimeManaged || data.ManagedValidation.Kind != runtimecontract.RuntimeBlockKindManagedValidationSession || !data.ManagedValidation.AutoCleanup {
+		t.Fatalf("managed validation metadata = %+v", data.ManagedValidation)
+	}
+}

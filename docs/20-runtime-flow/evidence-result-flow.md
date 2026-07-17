@@ -4,12 +4,18 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-16
 
 ## Purpose
 
 本文件定义 Runtime V2 过程 evidence 如何提交、如何与 authority 对齐、如何进入
 assessment / Result projection，以及 aggregate 如何 CAS 持久化。
+
+## State Machine Binding
+
+本 flow 绑定核心规约中的 SM-2 evidence ledger、SM-3 dispatch/evidence transaction、SM-1 terminal lifecycle 与 SM-4 CAS/restart/projection delivery。stale/duplicate/conflict 只能按核心规约进入 diagnostic/idempotent 路径，不得推进 authority。
+
+完整规约见 [Runtime V2 四状态机固化规约](../00-core/runtime-stage-contract.md#runtime-v2-四状态机固化规约)。
 
 ## Flow
 
@@ -18,7 +24,8 @@ sealed operation / assessment / governance resolution
   -> validate authority snapshot + dispatch + operation identity
   -> commit path:
        accepted evidence  -> EvidenceLedger + evidenceRevision++
-       focus advance if required evidence satisfied
+       required evidence ready -> reducer / assessment
+       focus advance only when assessment contract (if required) closes explicit work items
        reducer
   -> stale / duplicate / conflict path:
        DiagnosticRecord only (no ledger closeout)

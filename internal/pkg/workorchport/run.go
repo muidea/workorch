@@ -9,16 +9,19 @@ import (
 )
 
 type RunInfo struct {
-	ID                 common.RunID
-	WorkspaceID        common.WorkspaceID
-	GoalID             common.GoalID
-	DoDID              common.DoDID
-	DefinitionRevision string
-	State              common.RunState
-	Priority           int
-	BlockingTicketID   common.TicketID
-	BlockingApprovalID common.ApprovalID
-	FailureReason      string
+	ID                  common.RunID
+	WorkspaceID         common.WorkspaceID
+	GoalID              common.GoalID
+	DoDID               common.DoDID
+	DefinitionRevision  string
+	PredecessorRunID    common.RunID
+	PredecessorResultID common.ResultID
+	SuccessorRunID      common.RunID
+	State               common.RunState
+	Priority            int
+	BlockingTicketID    common.TicketID
+	BlockingApprovalID  common.ApprovalID
+	FailureReason       string
 }
 
 type ActivateRunRequest struct {
@@ -114,19 +117,30 @@ type RunStatusInfo struct {
 }
 
 type ConvergenceStatusInfo struct {
-	WorkspaceID               common.WorkspaceID
-	RunID                     common.RunID
-	RunState                  common.RunState
-	CurrentFocusID            string
-	NextActionKind            string
-	CurrentGap                string
-	MissingEvidenceKinds      []string
-	AcceptedEvidenceCount     int
-	RejectedEvidenceCount     int
-	LatestEffectiveProgressAt string
-	DecisionCause             string
-	Stalled                   bool
-	IneffectiveRetry          bool
+	WorkspaceID                   common.WorkspaceID
+	RunID                         common.RunID
+	RunState                      common.RunState
+	CurrentSliceID                string
+	CurrentFocusID                string
+	NextActionKind                string
+	CurrentGap                    string
+	MissingEvidenceKinds          []string
+	AcceptedEvidenceCount         int
+	RejectedEvidenceCount         int
+	ClosedCoverageItemCount       int
+	RemainingCoverageItemCount    int
+	AssessmentDisposition         string
+	RepairAttempts                int
+	MaxRepairAttempts             int
+	RepeatedFailureSignatureCount int
+	LatestAcceptedEvidenceRef     string
+	NextActivationRequired        bool
+	GapSummary                    string
+	LatestEffectiveProgressAt     string
+	LastProgressAt                string
+	DecisionCause                 string
+	Stalled                       bool
+	IneffectiveRetry              bool
 }
 
 type RunBackend interface {

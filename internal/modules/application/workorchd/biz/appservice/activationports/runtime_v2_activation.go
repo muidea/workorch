@@ -129,6 +129,7 @@ func runtimeV2ExecutionContract(input map[string]any) runtimecontract.RuntimeExe
 		for _, item := range runtimeV2MapSlice(profile["evidenceRequirements"]) {
 			contract.EvidenceRequirements = append(contract.EvidenceRequirements, runtimecontract.RuntimeProfileEvidenceRequirement{
 				ID: runtimeV2String(item["id"]), Scope: runtimeV2String(item["scope"]), EvidenceRole: runtimeV2String(item["evidenceRole"]),
+				RequiredEvidenceKinds: runtimeV2Strings(item["requiredEvidenceKinds"]),
 				RequireDirectEvidence: runtimeV2Bool(item["requireDirectEvidence"]), RequireClaimEvidence: runtimeV2Bool(item["requireClaimEvidence"]),
 				RequireExecutableBehaviorEvidence: runtimeV2Bool(item["requireExecutableBehaviorEvidence"]), RequireCoverageTargets: runtimeV2Bool(item["requireCoverageTargets"]),
 				AcceptedStepKinds: runtimeV2Strings(item["acceptedStepKinds"]), AcceptedOperations: runtimeV2Strings(item["acceptedOperations"]),
@@ -136,6 +137,29 @@ func runtimeV2ExecutionContract(input map[string]any) runtimecontract.RuntimeExe
 			})
 		}
 		ret.ProfileContracts = append(ret.ProfileContracts, contract)
+	}
+	if policy := runtimeV2Map(input["acceptanceSlicePolicy"]); len(policy) > 0 {
+		slicePolicy := runtimecontract.RuntimeAcceptanceSlicePolicy{
+			SchemaVersion:    runtimeV2String(policy["schemaVersion"]),
+			MaxWorkItems:     runtimeV2Int(policy["maxWorkItems"]),
+			CompletionPolicy: runtimeV2String(policy["completionPolicy"]),
+			ResultPolicy:     runtimeV2String(policy["resultPolicy"]),
+		}
+		for _, item := range runtimeV2MapSlice(policy["groups"]) {
+			match := runtimeV2Map(item["match"])
+			slicePolicy.Groups = append(slicePolicy.Groups, runtimecontract.RuntimeAcceptanceSliceGroupPolicy{
+				ID: runtimeV2String(item["id"]), Title: runtimeV2String(item["title"]), Scope: runtimeV2String(item["scope"]),
+				Priority: runtimeV2Int(item["priority"]), MaxWorkItems: runtimeV2Int(item["maxWorkItems"]),
+				Match: runtimecontract.RuntimeAcceptanceSliceMatch{
+					EvidenceRoles:        runtimeV2Strings(match["evidenceRoles"]),
+					MissingEvidenceKinds: runtimeV2Strings(match["missingEvidenceKinds"]),
+					SourceRequirementIDs: runtimeV2Strings(match["sourceRequirementIds"]),
+					SourceScopes:         runtimeV2Strings(match["sourceScopes"]),
+					All:                  runtimeV2Bool(match["all"]),
+				},
+			})
+		}
+		ret.AcceptanceSlicePolicy = &slicePolicy
 	}
 	if policy := runtimeV2Map(input["templateStagePolicies"]); len(policy) > 0 {
 		stagePolicy := runtimecontract.RuntimeTemplateStagePolicy{SchemaVersion: runtimeV2String(policy["schemaVersion"])}

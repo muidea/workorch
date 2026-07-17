@@ -4,7 +4,7 @@ Status: active
 
 Type: verification
 
-Last Updated: 2026-05-30
+Last Updated: 2026-07-16
 
 ## Purpose
 
@@ -14,6 +14,7 @@ Last Updated: 2026-05-30
 
 core verifier 应只验证：
 
+- Runtime V2 四状态机合法/禁止迁移与协调协议
 - stage contract
 - context gate
 - evidence/result boundary
@@ -39,6 +40,10 @@ make verify-boundary-contract
 
 core verifier 需要覆盖：
 
+- SM-1 Run lifecycle：pending/active/blocked/terminal、terminal immutable、lineage、workspace release
+- SM-2 authority/focus：prerequisite、feasibility、focus/evidence/assessment/repair/governance/completion
+- SM-3 candidate/dispatch：attempt 0/1、stable transaction/prefix、seal-before-execute、stale/duplicate evidence
+- SM-4 drive/recovery/projection：StateRevision、transition guard、singleflight、restart idempotency、projection one-way delivery
 - `runtimeStage` / `runtimeStageMode` / stage contract 的一致性
 - context gate fail-fast / read_required / blocker_required / replan_required 的中立分流
 - `stateChangingOutputRequired`、assessment-only、follow-up graph、repair/replan continuation 的合同边界
@@ -48,6 +53,26 @@ core verifier 需要覆盖：
 - `incrementalArtifact` 的 selector / continuation / apply / validation / projection 边界
 - 领域中立守卫：core 不解析业务词、语言词、测试框架词来决定治理动作
 - canonical failure hydration、coverage target auto-rebuild、context-gate recovery routing
+
+### Four-State-Machine Mandatory Matrix
+
+| 状态机 | 必须验证的合法迁移 | 必须拒绝的迁移 |
+| --- | --- | --- |
+| SM-1 | pending→active、active↔blocked、active→completed/failed、新 Run lineage | terminal→active、无 resolution blocked→active、projection 直接终态 |
+| SM-2 | prerequisite→reduce、missing evidence→state/validation、partial assessment→remaining、repairable gap→same-focus repair、all gates→terminal | prerequisite→candidate、false assessment 无条件 terminal、跨 focus 弱证据关闭、capability gap 消耗 candidate attempt |
+| SM-3 | attempt0→attempt1、accepted→seal→execute→evidence→reduce | attempt2、transaction/prefix 漂移、未 seal 执行、executor 选择 next action、stale/duplicate 推进 authority |
+| SM-4 | Start/Resume→singleflight→load/initialize→bounded drive、restart load、projection retry→ready | 重复 Initialize、重复副作用、无 revision 空转、projection/watchdog/application 反向驱动 reducer |
+
+任何涉及四状态机职责的代码变更，都必须在测试说明中标明受影响 SM 编号，并提供：
+
+- transition table unit test；
+- invariant/forbidden transition test；
+- restart/idempotency test；
+- stale/duplicate/CAS test；
+- budget/transition guard test；
+- 至少一个跨状态机 contract test。
+
+缺少上述映射的 runtime 变更不得通过 core verifier 收口。
 
 ## Mapping To Test Layers
 

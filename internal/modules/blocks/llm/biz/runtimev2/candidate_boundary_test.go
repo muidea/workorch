@@ -168,7 +168,7 @@ func TestRequestCandidateProviderReceivesOnlySealedTypedRequest(t *testing.T) {
 		if got.Transaction != request.Transaction || got.Decision.AuthoritySnapshot.ID != request.Decision.AuthoritySnapshot.ID || got.Decision.RequiredOutput.Kind != runtimecontract.RequiredOutputKindValidation {
 			t.Fatalf("provider request changed sealed authority: %+v", got)
 		}
-		return generationResult([]byte(`{"operations":[{"id":"validate-1","kind":"validation/managed_session","coverageWorkItemIds":["cwi-1"]}]}`), nil)
+		return generationResult([]byte(`{"operations":[{"id":"validate-1","kind":"validation/managed_session","coverageWorkItemIds":["cwi-1"],"parameters":[{"name":"command","string":"true"}]}]}`), nil)
 	})
 	response, err := RequestCandidate(context.Background(), provider, request)
 	if err != nil {

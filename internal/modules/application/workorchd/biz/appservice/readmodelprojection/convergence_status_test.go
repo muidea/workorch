@@ -95,3 +95,98 @@ func TestMapWorkspaceConvergenceStatusAddsHeartbeatSignals(t *testing.T) {
 		t.Fatalf("heartbeat fields = %+v, want compact heartbeat problem signals", got)
 	}
 }
+
+// RVC-15: ConvergenceStatus projects coverage/slice/disposition/repair/activation fields
+// from Acceptance + RuntimeV2 + AssessmentOutcome without reverse-driving authority.
+func TestMapConvergenceStatusProjectsPositiveProgressFields(t *testing.T) {
+	t.Parallel()
+
+	got := MapConvergenceStatus(readmodelcore.RunSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-progress"},
+		Run:       readmodelcore.Run{ID: "run-progress", WorkspaceID: "ws-progress", State: "running"},
+		Acceptance: readmodelcore.AcceptanceProjection{
+			ActiveSliceID: "slice-1",
+			CurrentFocus: &readmodelcore.CoverageFocus{
+				ID: "focus-1", SliceID: "slice-1",
+				AcceptedEvidenceRefs:  []string{"ev-1", "ev-2"},
+				RejectedEvidenceRefs:  []string{"ev-bad"},
+				RequiredEvidenceKinds: []string{"validation"},
+				FailureClass:          "repairable_gap",
+				FailureSignature:      "missing validation for cwi-2",
+			},
+			Budget: &readmodelcore.ConvergenceBudget{
+				FocusID: "focus-1", SliceID: "slice-1",
+				MaxRepairAttemptsPerFocus: 10,
+				RepairAttempts:            3,
+				RepeatedFailureSignatures: 2,
+				LastDecisionReason:        "retry validation",
+			},
+		},
+		TaskProgress: readmodelcore.TaskProgress{
+			RuntimeV2: &readmodelcore.RuntimeV2Progress{
+				CurrentFocusID:        "focus-1",
+				CurrentAction:         "produce_validation",
+				AcceptedEvidenceCount: 2,
+				RejectedEvidenceCount: 1,
+				MissingEvidenceKinds:  []string{"validation"},
+			},
+			AssessmentOutcome: readmodelcore.AssessmentOutcome{
+				State:                  "repairable_gap",
+				SatisfiedCoverageCount: 4,
+				RemainingCoverageCount: 2,
+			},
+		},
+	})
+	if got == nil {
+		t.Fatal("ConvergenceStatus is nil")
+	}
+	if got.CurrentSliceID != "slice-1" || got.CurrentFocusID != "focus-1" {
+		t.Fatalf("slice/focus = %+v", got)
+	}
+	if got.NextActionKind != "produce_validation" {
+		t.Fatalf("NextActionKind = %q", got.NextActionKind)
+	}
+	if got.ClosedCoverageItemCount != 4 || got.RemainingCoverageItemCount != 2 {
+		t.Fatalf("coverage counts = %d/%d", got.ClosedCoverageItemCount, got.RemainingCoverageItemCount)
+	}
+	if got.AssessmentDisposition != "repairable_gap" {
+		t.Fatalf("AssessmentDisposition = %q", got.AssessmentDisposition)
+	}
+	if got.RepairAttempts != 3 || got.MaxRepairAttempts != 10 || got.RepeatedFailureSignatureCount != 2 {
+		t.Fatalf("repair budget = attempts=%d max=%d repeat=%d", got.RepairAttempts, got.MaxRepairAttempts, got.RepeatedFailureSignatureCount)
+	}
+	if got.LatestAcceptedEvidenceRef != "ev-2" {
+		t.Fatalf("LatestAcceptedEvidenceRef = %q", got.LatestAcceptedEvidenceRef)
+	}
+	if got.GapSummary == "" {
+		t.Fatalf("GapSummary empty: %+v", got)
+	}
+	if got.NextActivationRequired {
+		t.Fatalf("NextActivationRequired unexpectedly true for active run: %+v", got)
+	}
+}
+
+func TestMapConvergenceStatusMarksNextActivationWhenTerminalWithRemainingCoverage(t *testing.T) {
+	t.Parallel()
+
+	got := MapConvergenceStatus(readmodelcore.RunSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-term"},
+		Run:       readmodelcore.Run{ID: "run-term", WorkspaceID: "ws-term", State: "failed"},
+		TaskProgress: readmodelcore.TaskProgress{
+			AssessmentOutcome: readmodelcore.AssessmentOutcome{
+				State:                  "repairable_gap",
+				SatisfiedCoverageCount: 1,
+				RemainingCoverageCount: 3,
+			},
+		},
+	})
+	if got == nil {
+		t.Fatal("ConvergenceStatus is nil")
+	}
+	if !got.NextActivationRequired {
+		t.Fatalf("NextActivationRequired = false, want true for terminal with remaining coverage: %+v", got)
+	}
+	if got.ClosedCoverageItemCount != 1 || got.RemainingCoverageItemCount != 3 {
+		t.Fatalf("coverage counts = %d/%d", got.ClosedCoverageItemCount, got.RemainingCoverageItemCount)
+	}
+}

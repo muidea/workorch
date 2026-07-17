@@ -4,7 +4,7 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-16
 
 ## Purpose
 
@@ -35,6 +35,17 @@ Last Updated: 2026-07-14
 | Runtime V2 drive | implementation 语言 | bootstrap、facts、reducer decision、candidate、`SealedDispatch`、operation evidence、CAS aggregate |
 
 中立 stage 描述“当前需要什么”；V2 drive/reducer/sealed dispatch 描述“如何确定性收敛”。
+
+### Four Coordinated State Machines
+
+生产 Runtime V2 必须遵守核心合同中的四状态机规约：
+
+1. SM-1 Run lifecycle；
+2. SM-2 authority/focus convergence；
+3. SM-3 candidate/sealed dispatch transaction；
+4. SM-4 drive/recovery/projection delivery。
+
+本目录仅按 flow 拆解四状态机，不重新定义 transition。完整状态、合法/禁止迁移、协调协议和变更门禁以 [Runtime V2 四状态机固化规约](../00-core/runtime-stage-contract.md#runtime-v2-四状态机固化规约) 为准。
 
 ### V2 Drive Loop
 

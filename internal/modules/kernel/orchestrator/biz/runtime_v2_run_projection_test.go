@@ -173,3 +173,88 @@ func (r *failRunUpdateRepository) Update(ctx context.Context, run *runmodel.Run)
 	}
 	return r.RunRepository.Update(ctx, run)
 }
+
+// RVC-14: terminal projection for run R must not steal ActiveRun owned by a different live run,
+// and must not rewrite already-completed Run authority on retry.
+func TestProjectRuntimeV2TerminalDoesNotStealLiveActiveRun(t *testing.T) {
+	ctx := context.Background()
+	runs := memory.NewRunRepository()
+	workspaces := memory.NewWorkspaceRepository()
+	if err := workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-live",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runs.Create(ctx, &runmodel.Run{ID: "run-old", WorkspaceID: "ws-v2", State: common.RunStateActive}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runs.Create(ctx, &runmodel.Run{ID: "run-live", WorkspaceID: "ws-v2", State: common.RunStateActive}); err != nil {
+		t.Fatal(err)
+	}
+	orchestrator := NewRuntimeOrchestrator(runs, workspaces, nil, nil)
+	terminal := &runtimecontract.TerminalOutcome{Code: "coverage_satisfied", Summary: "old run done"}
+	if err := orchestrator.ProjectRuntimeV2Terminal(ctx, "ws-v2", "run-old", runtimecontract.RuntimeActionComplete, terminal); err != nil {
+		t.Fatalf("terminal projection for superseded slot: %v", err)
+	}
+	workspace, err := workspaces.Get(ctx, "ws-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workspace.ActiveRunID != "run-live" {
+		t.Fatalf("ActiveRunID = %q, want live run preserved", workspace.ActiveRunID)
+	}
+	old, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old.State != common.RunStateCompleted {
+		t.Fatalf("old run state = %s, want completed", old.State)
+	}
+	// Retry must remain idempotent without conflict or rewrite.
+	if err := orchestrator.ProjectRuntimeV2Terminal(ctx, "ws-v2", "run-old", runtimecontract.RuntimeActionComplete, terminal); err != nil {
+		t.Fatalf("terminal retry: %v", err)
+	}
+	workspace, err = workspaces.Get(ctx, "ws-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workspace.ActiveRunID != "run-live" {
+		t.Fatalf("retry stole ActiveRun: %q", workspace.ActiveRunID)
+	}
+}
+
+func TestProjectRuntimeV2TerminalClearsStaleTerminalActiveRunSlot(t *testing.T) {
+	ctx := context.Background()
+	runs := memory.NewRunRepository()
+	workspaces := memory.NewWorkspaceRepository()
+	if err := workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-stale",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runs.Create(ctx, &runmodel.Run{ID: "run-stale", WorkspaceID: "ws-v2", State: common.RunStateFailed}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runs.Create(ctx, &runmodel.Run{ID: "run-new", WorkspaceID: "ws-v2", State: common.RunStateActive}); err != nil {
+		t.Fatal(err)
+	}
+	orchestrator := NewRuntimeOrchestrator(runs, workspaces, nil, nil)
+	terminal := &runtimecontract.TerminalOutcome{Code: "coverage_satisfied", Summary: "done"}
+	if err := orchestrator.ProjectRuntimeV2Terminal(ctx, "ws-v2", "run-new", runtimecontract.RuntimeActionComplete, terminal); err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := workspaces.Get(ctx, "ws-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workspace.ActiveRunID != "" {
+		t.Fatalf("ActiveRunID = %q after terminal, want cleared", workspace.ActiveRunID)
+	}
+	run, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.State != common.RunStateCompleted {
+		t.Fatalf("run state = %s", run.State)
+	}
+}

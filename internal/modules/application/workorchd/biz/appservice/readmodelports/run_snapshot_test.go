@@ -67,14 +67,32 @@ func TestRunSnapshotBuildsSnapshotFromReaders(t *testing.T) {
 	if status := RunStatusFromSnapshot(got); status.CurrentStepID != got.Run.CurrentStepID {
 		t.Fatalf("status current step = %q, want snapshot run current step %q", status.CurrentStepID, got.Run.CurrentStepID)
 	}
-	if events.calls != 1 {
-		t.Fatalf("event reader calls = %d, want compact run event metadata query", events.calls)
+	// RVC-14: compact snapshot issues metadata event timeline + topic-scoped usage payload query.
+	if events.calls != 2 {
+		t.Fatalf("event reader calls = %d, want compact metadata + llm usage queries", events.calls)
 	}
-	if len(events.queries) != 1 {
-		t.Fatalf("event reader queries = %d, want compact run event metadata query", len(events.queries))
+	if len(events.queries) != 2 {
+		t.Fatalf("event reader queries = %d, want compact metadata + llm usage queries", len(events.queries))
 	}
-	if len(events.queries[0].ExcludeTopics) != 1 || events.queries[0].ExcludeTopics[0] != "/run/llm_stream/progress" {
-		t.Fatalf("snapshot event exclude topics = %+v, want stream progress excluded", events.queries[0].ExcludeTopics)
+	var sawMetadata, sawUsage bool
+	for _, query := range events.queries {
+		if query.Topic == "/run/llm_usage/recorded" {
+			sawUsage = true
+			if !query.IncludePayload {
+				t.Fatalf("usage query = %+v, want IncludePayload", query)
+			}
+			continue
+		}
+		sawMetadata = true
+		if query.IncludePayload {
+			t.Fatalf("metadata event query = %+v, want metadata-only", query)
+		}
+		if len(query.ExcludeTopics) != 1 || query.ExcludeTopics[0] != "/run/llm_stream/progress" {
+			t.Fatalf("snapshot event exclude topics = %+v, want stream progress excluded", query.ExcludeTopics)
+		}
+	}
+	if !sawMetadata || !sawUsage {
+		t.Fatalf("queries = %+v, want both metadata timeline and llm usage payload query", events.queries)
 	}
 }
 

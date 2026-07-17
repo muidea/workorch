@@ -30,6 +30,7 @@ Last Updated: 2026-07-16
 - 正式运行时状态：`RuntimeStateRecord` / Runtime V2 aggregate（Run owner CAS 持久化）。
 - `runtimeContractVersion=v2` 仅为审计字段，不是 V1/V2 路由开关。
 - V1 主链已删除：`StagePacket`、`NextAction`、`DispatchNextStep`、`ExecutionContextPatch`、自动 replan successor、V1 progress/terminal checkpoint replay、通用 RuntimeAdapter registry。
+- 完整生产规约由四个协调状态机组成：SM-1 Run lifecycle、SM-2 authority/focus convergence、SM-3 candidate/sealed dispatch transaction、SM-4 drive/recovery/projection delivery；任何 runtime 变更必须通过四状态机变更门禁。
 
 一句话架构真值：
 
@@ -84,12 +85,13 @@ Last Updated: 2026-07-16
 
 ## Remaining Open Work
 
-代码主链已收口。当前剩余主要是：
+Runtime V2-only 主链与正向收敛闭环均已收口。当前剩余主要是：
 
-1. **运维切换（OPS-1）**：真实生产目录 `runtime-v1-retirement --apply` + clean build 维护窗口（过程日记已归档，不在 active 放长文）。
-2. **可选验证（OPT-1）**：file-patch `apply + validation + DoD closeout` 的 deployed live 一次。
-3. **延期候选**：LLM context budget 高级项见 `70-roadmap/candidates/`，**不占 active**。
-4. **文档维护**：权威层术语抽查、个别 block readme 措辞、archive 索引（见 matrix D-*）。
+1. **Runtime 正向收敛（RVC-1）**：**completed**（RVC-01～18；deployed dual-workspace live 通过）；计划见 [archive](../90-archive/completed/runtime-v2-positive-convergence-closure-plan.md)。
+2. **运维切换（OPS-1）**：真实生产目录 `runtime-v1-retirement --apply` + clean build 维护窗口（过程日记已归档，不在 active 放长文）。
+3. **可选验证（OPT-1）**：file-patch `apply + validation + DoD closeout` 的 deployed live 一次。
+4. **延期候选**：LLM context budget 高级项见 `70-roadmap/candidates/`，**不占 active**。
+5. **文档维护**：权威层术语抽查、个别 block readme 措辞、archive 索引（见 matrix D-*）。
 
 2026-07-16 已将 active 中假活跃产品/审计日记、dated live 记录与 `60-verification/artifacts` 清理出当前入口；检索见 [90-archive](../90-archive/completed/overview.md)。
 

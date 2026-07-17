@@ -123,6 +123,27 @@ func TestRuntimeControllerCommitsPrerequisiteAndReducesAtomically(t *testing.T) 
 	}
 }
 
+func TestRuntimeControllerRecordsInfeasibleCandidateAsReducerFact(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, _ := NewRuntimeController(repository)
+	facts := controllerFacts()
+	facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindDecisionRequest}
+	aggregate, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	progressed, err := controller.RecordFeasibilityFact(context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeFeasibilityFact{
+		FocusID: aggregate.Facts.Focus.ID, Action: runtimecontract.RuntimeActionProduceStateChange,
+		RequiredOperationKinds: []string{"file/write"}, MissingCapabilityKinds: []string{"file/write"}, Reason: "owner capability unavailable",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if progressed.Decision.Action != runtimecontract.RuntimeActionRequestGovernance || progressed.Facts.Feasibility == nil || len(progressed.CandidateAttempts) != 0 {
+		t.Fatalf("feasibility transition = %+v", progressed)
+	}
+}
+
 func TestRuntimeControllerOwnsDispatchAndEvidenceCommit(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)

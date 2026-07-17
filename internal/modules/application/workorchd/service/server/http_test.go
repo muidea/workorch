@@ -60,7 +60,9 @@ func TestWorkspaceLLMTargetRoutesValidateScopeAndPersistCompleteTarget(t *testin
 	routine := magictask.NewBackgroundRoutine(16)
 	state := newServerStateWithCommandHubAndBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		// Parallel full-suite load can slow hub/background drain; keep a bounded
+		// but non-trivial timeout so teardown does not hang package timeout.
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = state.close(ctx)
 		_ = routine.Shutdown(ctx)

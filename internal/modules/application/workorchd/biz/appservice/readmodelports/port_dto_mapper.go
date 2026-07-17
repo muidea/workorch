@@ -121,16 +121,19 @@ func PortDoDInfos(items []appmodelcore.DoD) []port.DoDInfo {
 
 func PortRunInfo(item appmodelcore.Run) port.RunInfo {
 	return port.RunInfo{
-		ID:                 common.RunID(item.ID),
-		WorkspaceID:        common.WorkspaceID(item.WorkspaceID),
-		GoalID:             common.GoalID(item.GoalID),
-		DoDID:              common.DoDID(item.DoDID),
-		DefinitionRevision: item.DefinitionRevision,
-		State:              common.RunState(item.State),
-		Priority:           item.Priority,
-		BlockingTicketID:   common.TicketID(item.BlockingTicketID),
-		BlockingApprovalID: common.ApprovalID(item.BlockingApprovalID),
-		FailureReason:      item.FailureReason,
+		ID:                  common.RunID(item.ID),
+		WorkspaceID:         common.WorkspaceID(item.WorkspaceID),
+		GoalID:              common.GoalID(item.GoalID),
+		DoDID:               common.DoDID(item.DoDID),
+		DefinitionRevision:  item.DefinitionRevision,
+		PredecessorRunID:    common.RunID(item.Lineage.PredecessorRunID),
+		PredecessorResultID: common.ResultID(item.Lineage.PredecessorResultID),
+		SuccessorRunID:      common.RunID(item.Lineage.SuccessorRunID),
+		State:               common.RunState(item.State),
+		Priority:            item.Priority,
+		BlockingTicketID:    common.TicketID(item.BlockingTicketID),
+		BlockingApprovalID:  common.ApprovalID(item.BlockingApprovalID),
+		FailureReason:       item.FailureReason,
 	}
 }
 
@@ -231,6 +234,7 @@ func PortWorkspaceViewModelInfo(item readmodelcore.WorkspaceViewModel) port.Work
 func PortProjectionInfo(item readmodelcore.WorkspaceViewModel) port.ProjectionInfo {
 	return port.ProjectionInfo{
 		State:                   item.State,
+		StreamGeneration:        item.StreamGeneration,
 		GlobalRevision:          item.GlobalRevision,
 		WorkspaceRevision:       item.WorkspaceRevision,
 		SourceEventRevision:     item.SourceEventRevision,
@@ -240,6 +244,8 @@ func PortProjectionInfo(item readmodelcore.WorkspaceViewModel) port.ProjectionIn
 		Degraded:                item.Degraded,
 		StaleReason:             item.StaleReason,
 		Error:                   item.Error,
+		FailedWorkspaceIds:      append([]string(nil), item.FailedWorkspaceIds...),
+		DegradedSince:           item.DegradedSince,
 	}
 }
 
@@ -607,19 +613,30 @@ func portConvergenceStatusInfo(item *readmodelcore.ConvergenceStatus) *port.Conv
 		return nil
 	}
 	return &port.ConvergenceStatusInfo{
-		WorkspaceID:               common.WorkspaceID(item.WorkspaceID),
-		RunID:                     common.RunID(item.RunID),
-		RunState:                  common.RunState(item.RunState),
-		CurrentFocusID:            item.CurrentFocusID,
-		NextActionKind:            item.NextActionKind,
-		CurrentGap:                item.CurrentGap,
-		MissingEvidenceKinds:      cloneStrings(item.MissingEvidenceKinds),
-		AcceptedEvidenceCount:     item.AcceptedEvidenceCount,
-		RejectedEvidenceCount:     item.RejectedEvidenceCount,
-		LatestEffectiveProgressAt: item.LatestEffectiveProgressAt,
-		DecisionCause:             item.DecisionCause,
-		Stalled:                   item.Stalled,
-		IneffectiveRetry:          item.IneffectiveRetry,
+		WorkspaceID:                   common.WorkspaceID(item.WorkspaceID),
+		RunID:                         common.RunID(item.RunID),
+		RunState:                      common.RunState(item.RunState),
+		CurrentSliceID:                item.CurrentSliceID,
+		CurrentFocusID:                item.CurrentFocusID,
+		NextActionKind:                item.NextActionKind,
+		CurrentGap:                    item.CurrentGap,
+		MissingEvidenceKinds:          cloneStrings(item.MissingEvidenceKinds),
+		AcceptedEvidenceCount:         item.AcceptedEvidenceCount,
+		RejectedEvidenceCount:         item.RejectedEvidenceCount,
+		ClosedCoverageItemCount:       item.ClosedCoverageItemCount,
+		RemainingCoverageItemCount:    item.RemainingCoverageItemCount,
+		AssessmentDisposition:         item.AssessmentDisposition,
+		RepairAttempts:                item.RepairAttempts,
+		MaxRepairAttempts:             item.MaxRepairAttempts,
+		RepeatedFailureSignatureCount: item.RepeatedFailureSignatureCount,
+		LatestAcceptedEvidenceRef:     item.LatestAcceptedEvidenceRef,
+		NextActivationRequired:        item.NextActivationRequired,
+		GapSummary:                    item.GapSummary,
+		LatestEffectiveProgressAt:     item.LatestEffectiveProgressAt,
+		LastProgressAt:                item.LastProgressAt,
+		DecisionCause:                 item.DecisionCause,
+		Stalled:                       item.Stalled,
+		IneffectiveRetry:              item.IneffectiveRetry,
 	}
 }
 
@@ -1311,6 +1328,7 @@ func portAppWorkspaceViewModelInfo(item appmodelcore.WorkspaceViewModel) port.Wo
 func portProjectionFromAppViewModel(item appmodelcore.WorkspaceViewModel) port.ProjectionInfo {
 	return port.ProjectionInfo{
 		State:                   item.State,
+		StreamGeneration:        item.StreamGeneration,
 		GlobalRevision:          item.GlobalRevision,
 		WorkspaceRevision:       item.WorkspaceRevision,
 		SourceEventRevision:     item.SourceEventRevision,
@@ -1320,6 +1338,8 @@ func portProjectionFromAppViewModel(item appmodelcore.WorkspaceViewModel) port.P
 		Degraded:                item.Degraded,
 		StaleReason:             item.StaleReason,
 		Error:                   item.Error,
+		FailedWorkspaceIds:      append([]string(nil), item.FailedWorkspaceIds...),
+		DegradedSince:           item.DegradedSince,
 	}
 }
 

@@ -94,9 +94,10 @@ func applyPrerequisiteResult(facts *runtimecontract.RuntimeFacts, prerequisite r
 		if result.Capabilities == nil || !capabilitiesSatisfy(*result.Capabilities, prerequisite.CapabilityClass, prerequisite.RequiredCapabilities) {
 			return fmt.Errorf("capability prerequisite returned no required capabilities")
 		}
-		facts.Capabilities.StateChangeKinds = append(facts.Capabilities.StateChangeKinds, result.Capabilities.StateChangeKinds...)
-		facts.Capabilities.ValidationKinds = append(facts.Capabilities.ValidationKinds, result.Capabilities.ValidationKinds...)
-		facts.Capabilities.GovernanceKinds = append(facts.Capabilities.GovernanceKinds, result.Capabilities.GovernanceKinds...)
+		// Owner merges are additive and must not replace another owner's sealed kinds.
+		facts.Capabilities.StateChangeKinds = mergeCapabilityKinds(facts.Capabilities.StateChangeKinds, result.Capabilities.StateChangeKinds)
+		facts.Capabilities.ValidationKinds = mergeCapabilityKinds(facts.Capabilities.ValidationKinds, result.Capabilities.ValidationKinds)
+		facts.Capabilities.GovernanceKinds = mergeCapabilityKinds(facts.Capabilities.GovernanceKinds, result.Capabilities.GovernanceKinds)
 	case runtimecontract.PrerequisiteKindValidationScratch:
 		if result.ValidationScratch == nil || strings.TrimSpace(result.ValidationScratch.Reference) == "" || strings.TrimSpace(result.ValidationScratch.Revision) == "" {
 			return fmt.Errorf("validation scratch prerequisite returned no scratch reference")
@@ -146,6 +147,28 @@ func runtimeRequirementSatisfied(facts runtimecontract.RuntimeFacts, requirement
 	default:
 		return false
 	}
+}
+
+func mergeCapabilityKinds(existing []string, incoming []string) []string {
+	ret := make([]string, 0, len(existing)+len(incoming))
+	seen := map[string]struct{}{}
+	for _, values := range [][]string{existing, incoming} {
+		for _, value := range values {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				continue
+			}
+			if _, ok := seen[value]; ok {
+				continue
+			}
+			seen[value] = struct{}{}
+			ret = append(ret, value)
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
 }
 
 func capabilitiesSatisfy(capabilities runtimecontract.RuntimeCapabilities, class runtimecontract.RuntimeCapabilityClass, required []string) bool {

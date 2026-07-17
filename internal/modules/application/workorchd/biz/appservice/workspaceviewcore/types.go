@@ -19,18 +19,28 @@ const (
 )
 
 type Status struct {
-	State                   string `json:"state"`
-	StreamGeneration        string `json:"streamGeneration,omitempty"`
-	GlobalRevision          int64  `json:"globalRevision"`
-	WorkspaceRevision       int64  `json:"workspaceRevision,omitempty"`
-	SourceEventRevision     int64  `json:"sourceEventRevision"`
-	ProjectedSourceRevision int64  `json:"projectedSourceRevision"`
-	WorkspaceTotal          int    `json:"workspaceTotal"`
-	UpdatedAt               string `json:"updatedAt,omitempty"`
-	RebuiltAt               string `json:"rebuiltAt,omitempty"`
-	Degraded                bool   `json:"degraded,omitempty"`
-	StaleReason             string `json:"staleReason,omitempty"`
-	Error                   string `json:"error,omitempty"`
+	State                   string   `json:"state"`
+	StreamGeneration        string   `json:"streamGeneration,omitempty"`
+	GlobalRevision          int64    `json:"globalRevision"`
+	WorkspaceRevision       int64    `json:"workspaceRevision,omitempty"`
+	SourceEventRevision     int64    `json:"sourceEventRevision"`
+	ProjectedSourceRevision int64    `json:"projectedSourceRevision"`
+	WorkspaceTotal          int      `json:"workspaceTotal"`
+	UpdatedAt               string   `json:"updatedAt,omitempty"`
+	RebuiltAt               string   `json:"rebuiltAt,omitempty"`
+	Degraded                bool     `json:"degraded,omitempty"`
+	StaleReason             string   `json:"staleReason,omitempty"`
+	Error                   string   `json:"error,omitempty"`
+	FailedWorkspaceIds      []string `json:"failedWorkspaceIds,omitempty"`
+	DegradedSince           string   `json:"degradedSince,omitempty"`
+}
+
+// ProjectionFailure is a current-generation projection health fact.
+// Cumulative metrics counters must not decide ready/degraded.
+type ProjectionFailure struct {
+	Generation string
+	Error      string
+	Since      time.Time
 }
 
 type Metrics struct {

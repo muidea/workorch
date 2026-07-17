@@ -61,6 +61,9 @@ type RuntimeRejectedResultContinuation struct {
 	SourceRef           string
 	Summary             string
 	GoalOutcome         string
+	DefinitionRevision  string
+	Disposition         AssessmentDisposition
+	Failure             *RuntimeContinuationFailure
 	SatisfiedDoDItems   []RuntimeContinuationItem
 	UnsatisfiedDoDItems []RuntimeContinuationItem
 	CoverageGaps        []RuntimeContinuationCoverageGap
@@ -73,25 +76,32 @@ type RuntimeRejectedResultContinuation struct {
 }
 
 type RuntimeContinuationItem struct {
-	Item         string
-	State        string
-	Reason       string
-	EvidenceRefs []string
+	CoverageWorkItemID common.CoverageWorkItemID
+	Item               string
+	State              string
+	Reason             string
+	EvidenceRefs       []string
 }
 
 type RuntimeContinuationCoverageGap struct {
-	Scope        string
-	ID           string
-	Deliverable  string
-	Name         string
-	Path         string
-	Goal         string
-	GoalItem     string
-	Item         string
-	Requirement  string
-	State        string
-	EvidenceRefs []string
-	ArtifactRefs []common.ArtifactID
+	Scope                string
+	ID                   string
+	CoverageWorkItemIDs  []common.CoverageWorkItemID
+	MissingEvidenceKinds []string
+	TargetRefs           []string
+	FailureClass         FailureClass
+	FailureCode          string
+	FailureSignature     string
+	Deliverable          string
+	Name                 string
+	Path                 string
+	Goal                 string
+	GoalItem             string
+	Item                 string
+	Requirement          string
+	State                string
+	EvidenceRefs         []string
+	ArtifactRefs         []common.ArtifactID
 }
 
 func (c RuntimeContinuationContext) Normalized() RuntimeContinuationContext {
@@ -251,6 +261,16 @@ func (r RuntimeRejectedResultContinuation) Normalized() RuntimeRejectedResultCon
 	r.SourceRef = strings.TrimSpace(r.SourceRef)
 	r.Summary = strings.TrimSpace(r.Summary)
 	r.GoalOutcome = strings.TrimSpace(r.GoalOutcome)
+	r.DefinitionRevision = strings.TrimSpace(r.DefinitionRevision)
+	r.Disposition = r.Disposition.Normalized()
+	if r.Failure != nil {
+		failure := r.Failure.Normalized()
+		if failure.empty() {
+			r.Failure = nil
+		} else {
+			r.Failure = &failure
+		}
+	}
 	r.SatisfiedDoDItems = normalizeRuntimeContinuationItems(r.SatisfiedDoDItems)
 	r.UnsatisfiedDoDItems = normalizeRuntimeContinuationItems(r.UnsatisfiedDoDItems)
 	r.CoverageGaps = normalizeRuntimeContinuationCoverageGaps(r.CoverageGaps)
@@ -277,11 +297,12 @@ func (r RuntimeRejectedResultContinuation) Clone() RuntimeRejectedResultContinua
 func normalizeRuntimeContinuationItems(values []RuntimeContinuationItem) []RuntimeContinuationItem {
 	ret := make([]RuntimeContinuationItem, 0, len(values))
 	for _, value := range values {
+		value.CoverageWorkItemID = common.CoverageWorkItemID(strings.TrimSpace(string(value.CoverageWorkItemID)))
 		value.Item = strings.TrimSpace(value.Item)
 		value.State = strings.TrimSpace(value.State)
 		value.Reason = strings.TrimSpace(value.Reason)
 		value.EvidenceRefs = normalizeStrings(value.EvidenceRefs)
-		if value.Item != "" {
+		if value.Item != "" || value.CoverageWorkItemID != "" {
 			ret = append(ret, value)
 		}
 	}
@@ -301,6 +322,12 @@ func normalizeRuntimeContinuationCoverageGaps(values []RuntimeContinuationCovera
 	for _, value := range values {
 		value.Scope = strings.TrimSpace(value.Scope)
 		value.ID = strings.TrimSpace(value.ID)
+		value.CoverageWorkItemIDs = normalizeCoverageWorkItemIDs(value.CoverageWorkItemIDs)
+		value.MissingEvidenceKinds = normalizeStrings(value.MissingEvidenceKinds)
+		value.TargetRefs = normalizeStrings(value.TargetRefs)
+		value.FailureClass = FailureClass(strings.TrimSpace(string(value.FailureClass)))
+		value.FailureCode = strings.TrimSpace(value.FailureCode)
+		value.FailureSignature = strings.TrimSpace(value.FailureSignature)
 		value.Deliverable = strings.TrimSpace(value.Deliverable)
 		value.Name = strings.TrimSpace(value.Name)
 		value.Path = strings.TrimSpace(value.Path)
@@ -311,7 +338,7 @@ func normalizeRuntimeContinuationCoverageGaps(values []RuntimeContinuationCovera
 		value.State = strings.TrimSpace(value.State)
 		value.EvidenceRefs = normalizeStrings(value.EvidenceRefs)
 		value.ArtifactRefs = normalizeRuntimeArtifactIDs(value.ArtifactRefs)
-		if value.Scope != "" && (value.ID != "" || value.Deliverable != "" || value.Name != "" || value.Path != "" || value.Goal != "" || value.GoalItem != "" || value.Item != "" || value.Requirement != "") {
+		if value.Scope != "" && (value.ID != "" || len(value.CoverageWorkItemIDs) > 0 || value.Deliverable != "" || value.Name != "" || value.Path != "" || value.Goal != "" || value.GoalItem != "" || value.Item != "" || value.Requirement != "") {
 			ret = append(ret, value)
 		}
 	}

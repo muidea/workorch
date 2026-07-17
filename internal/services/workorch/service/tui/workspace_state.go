@@ -1145,12 +1145,23 @@ func convergenceStatusEqual(a, b *backend.ConvergenceStatusInfo) bool {
 	return strings.TrimSpace(string(a.WorkspaceID)) == strings.TrimSpace(string(b.WorkspaceID)) &&
 		strings.TrimSpace(string(a.RunID)) == strings.TrimSpace(string(b.RunID)) &&
 		string(a.RunState) == string(b.RunState) &&
+		strings.TrimSpace(a.CurrentSliceID) == strings.TrimSpace(b.CurrentSliceID) &&
 		strings.TrimSpace(a.CurrentFocusID) == strings.TrimSpace(b.CurrentFocusID) &&
 		strings.TrimSpace(a.NextActionKind) == strings.TrimSpace(b.NextActionKind) &&
 		strings.TrimSpace(a.CurrentGap) == strings.TrimSpace(b.CurrentGap) &&
 		a.AcceptedEvidenceCount == b.AcceptedEvidenceCount &&
 		a.RejectedEvidenceCount == b.RejectedEvidenceCount &&
+		a.ClosedCoverageItemCount == b.ClosedCoverageItemCount &&
+		a.RemainingCoverageItemCount == b.RemainingCoverageItemCount &&
+		strings.TrimSpace(a.AssessmentDisposition) == strings.TrimSpace(b.AssessmentDisposition) &&
+		a.RepairAttempts == b.RepairAttempts &&
+		a.MaxRepairAttempts == b.MaxRepairAttempts &&
+		a.RepeatedFailureSignatureCount == b.RepeatedFailureSignatureCount &&
+		strings.TrimSpace(a.LatestAcceptedEvidenceRef) == strings.TrimSpace(b.LatestAcceptedEvidenceRef) &&
+		a.NextActivationRequired == b.NextActivationRequired &&
+		strings.TrimSpace(a.GapSummary) == strings.TrimSpace(b.GapSummary) &&
 		strings.TrimSpace(a.LatestEffectiveProgressAt) == strings.TrimSpace(b.LatestEffectiveProgressAt) &&
+		strings.TrimSpace(a.LastProgressAt) == strings.TrimSpace(b.LastProgressAt) &&
 		strings.TrimSpace(a.DecisionCause) == strings.TrimSpace(b.DecisionCause) &&
 		a.Stalled == b.Stalled &&
 		a.IneffectiveRetry == b.IneffectiveRetry &&

@@ -32,6 +32,7 @@ func CreateRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) erro
 		DefinitionRevision: item.DefinitionRevision,
 		InitialStepKind:    kind,
 		RuntimeBootstrap:   item.RuntimeBootstrap,
+		Lineage:            item.Lineage,
 		Priority:           item.Priority,
 	})
 	ownerevent.BindLane(event, runevents.TopicRunCommandCreate, "run", string(item.ID), item.WorkspaceID, item.ID, "")

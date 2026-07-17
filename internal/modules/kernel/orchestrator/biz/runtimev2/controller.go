@@ -80,6 +80,41 @@ func (c *RuntimeController) Load(ctx context.Context, workspaceID common.Workspa
 	return c.repository.Load(ctx, workspaceID, runID)
 }
 
+// RecordFeasibilityFact CAS-persists the pre-candidate capability gate and
+// immediately re-reduces. A missing operation is therefore a formal SM-2 fact,
+// never a provider error or consumed candidate attempt.
+func (c *RuntimeController) RecordFeasibilityFact(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, fact runtimecontract.RuntimeFeasibilityFact) (RuntimeAggregate, error) {
+	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
+		return RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if aggregate.ActiveDispatch != nil || (aggregate.Decision.Action != runtimecontract.RuntimeActionProduceStateChange && aggregate.Decision.Action != runtimecontract.RuntimeActionProduceValidation) {
+		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action does not accept feasibility facts", common.ErrConflict)
+	}
+	fact.FocusID = strings.TrimSpace(fact.FocusID)
+	if fact.FocusID == "" {
+		fact.FocusID = aggregate.Facts.Focus.ID
+	}
+	if fact.FocusID != aggregate.Facts.Focus.ID || fact.Action != aggregate.Decision.Action || fact.Reason == "" {
+		return RuntimeAggregate{}, fmt.Errorf("%w: feasibility fact does not match current authority", common.ErrConflict)
+	}
+	expectedRevision := aggregate.StateRevision
+	aggregate.Facts.Feasibility = &fact
+	decision, err := ReduceRuntimeState(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	aggregate.Decision = decision
+	aggregate.StateRevision++
+	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return aggregate, nil
+}
+
 func (c *RuntimeController) CommitPrerequisite(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, result PrerequisiteResult) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
@@ -283,6 +318,12 @@ func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID co
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime dispatch does not carry assessment", common.ErrConflict)
 	}
 	assessment := aggregate.ActiveDispatch.Candidate.Assessment.Normalized()
+	disposition, err := runtimecontract.DeriveAssessmentDisposition(assessment.Satisfied, assessment.Disposition, assessment.Items, assessment.Gap)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	assessment.Disposition = disposition
+	assessment.Satisfied = disposition == runtimecontract.AssessmentDispositionSatisfied
 	if assessment.Satisfied {
 		known := acceptedEvidenceRefsForFocus(aggregate.Facts)
 		for _, ref := range assessment.EvidenceRefs {
@@ -294,12 +335,74 @@ func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID co
 			return RuntimeAggregate{}, fmt.Errorf("satisfied assessment requires accepted current-focus evidence refs")
 		}
 	}
+	// Item facts must stay inside current focus/slice coverage.
+	requiredCoverage := map[common.CoverageWorkItemID]struct{}{}
+	for _, id := range aggregate.Facts.Focus.CoverageWorkItemIDs {
+		requiredCoverage[id] = struct{}{}
+	}
+	for _, item := range assessment.Items {
+		if len(requiredCoverage) > 0 {
+			if _, ok := requiredCoverage[item.CoverageWorkItemID]; !ok {
+				return RuntimeAggregate{}, fmt.Errorf("assessment item %q is outside current slice coverage", item.CoverageWorkItemID)
+			}
+		}
+	}
+	assessment.CoverageWorkItemIDs = runtimeAssessmentCoverageIDs(assessment.CoverageWorkItemIDs, aggregate.Facts.Focus.CoverageWorkItemIDs)
+	aggregate.Facts.Coverage = applyAssessmentCoverage(aggregate.Facts.Coverage, assessment, aggregate.Facts.Focus.ID, aggregate.Facts.Focus.SliceID, aggregate.ActiveDispatch.ID)
+	if assessment.Disposition == runtimecontract.AssessmentDispositionSatisfied {
+		if open := openCoverageIDs(aggregate.Facts.Coverage, aggregate.Facts.Focus.CoverageWorkItemIDs); len(open) > 0 {
+			assessment.Disposition = runtimecontract.AssessmentDispositionRepairableGap
+			assessment.Satisfied = false
+			assessment.Gap = &runtimecontract.RuntimeAssessmentGap{
+				CoverageWorkItemIDs: open,
+				Reason:              "assessment did not close every current slice coverage item",
+			}
+		}
+	}
 	expectedRevision := aggregate.StateRevision
-	aggregate.Facts.Assessments = append(aggregate.Facts.Assessments, runtimecontract.RuntimeAssessmentFact{
-		FocusID: assessment.FocusID, Scope: aggregate.Facts.Focus.AssessmentScope, RequirementID: aggregate.Facts.Focus.AssessmentID,
-		RequirementText: aggregate.Facts.Focus.AssessmentText, CoverageWorkItemIDs: assessment.CoverageWorkItemIDs, Satisfied: assessment.Satisfied,
+	fact := runtimecontract.RuntimeAssessmentFact{
+		ID: aggregate.ActiveDispatch.ID, FocusID: assessment.FocusID, SliceID: firstNonEmpty(assessment.SliceID, aggregate.Facts.Focus.SliceID),
+		Scope: aggregate.Facts.Focus.AssessmentScope, RequirementID: aggregate.Facts.Focus.AssessmentID,
+		RequirementText: aggregate.Facts.Focus.AssessmentText, CoverageWorkItemIDs: assessment.CoverageWorkItemIDs,
+		Satisfied: assessment.Satisfied, Disposition: assessment.Disposition, Items: append([]runtimecontract.RuntimeAssessmentItemFact(nil), assessment.Items...),
 		Summary: assessment.Summary, EvidenceRefs: assessment.EvidenceRefs, ArtifactRefs: assessment.ArtifactRefs,
-	})
+	}
+	if assessment.Gap != nil {
+		gap := assessment.Gap.Normalized()
+		fact.Gap = &gap
+	}
+	aggregate.Facts.Assessments = append(aggregate.Facts.Assessments, fact)
+	if assessment.Disposition == runtimecontract.AssessmentDispositionRepairableGap {
+		signature := runtimecontract.StableAssessmentFailureSignature(aggregate.Facts.Focus.ID, assessment.Disposition, assessment.Gap)
+		cycleID := runtimecontract.StableRepairCycleID(string(aggregate.Facts.RunID), aggregate.Facts.Focus.ID, signature, fact.ID)
+		ledger, _, cycleErr := aggregate.Facts.Repair.BeginRepairCycle(aggregate.Facts.Focus.ID, aggregate.Facts.Focus.SliceID, cycleID, signature, aggregate.Facts.ConvergencePolicy)
+		if cycleErr != nil {
+			return RuntimeAggregate{}, cycleErr
+		}
+		if assessment.Gap != nil {
+			gap := assessment.Gap.Normalized()
+			ledger.ActiveGap = &gap
+		}
+		if assessment.Gap != nil {
+			hasStateChangeGap := false
+			hasValidationGap := false
+			for _, kind := range assessment.Gap.MissingEvidenceKinds {
+				if kind == runtimecontract.EvidenceKindStateChange {
+					hasStateChangeGap = true
+				}
+				if kind == runtimecontract.EvidenceKindValidation {
+					hasValidationGap = true
+				}
+			}
+			if hasValidationGap && !hasStateChangeGap {
+				ledger = ledger.MarkValidationOnlyRetry(aggregate.Facts.ConvergencePolicy)
+			}
+		}
+		aggregate.Facts.Repair = ledger
+	}
+	if assessment.Disposition == runtimecontract.AssessmentDispositionSatisfied {
+		aggregate.Facts.Repair = aggregate.Facts.Repair.NoteProgress(aggregate.Facts.EvidenceRevision)
+	}
 	aggregate.EvidenceSequence++
 	aggregate.Facts.EvidenceRevision = nextEvidenceRevision(aggregate.EvidenceSequence)
 	dispatch := *aggregate.ActiveDispatch
@@ -336,6 +439,76 @@ func acceptedEvidenceRefsForFocus(facts runtimecontract.RuntimeFacts) map[string
 	return ret
 }
 
+func runtimeAssessmentCoverageIDs(ids []common.CoverageWorkItemID, fallback []common.CoverageWorkItemID) []common.CoverageWorkItemID {
+	if len(ids) == 0 {
+		ids = fallback
+	}
+	seen := map[common.CoverageWorkItemID]struct{}{}
+	ret := make([]common.CoverageWorkItemID, 0, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ret = append(ret, id)
+	}
+	return ret
+}
+
+// applyAssessmentCoverage is deliberately ledger-first: an assessment can only
+// close the concrete items it names, and later assessments cannot reopen a
+// satisfied item. This preserves partial acceptance across repair/restart.
+func applyAssessmentCoverage(coverage []runtimecontract.RuntimeCoverageItemFact, assessment runtimecontract.AssessmentCandidate, focusID, sliceID, assessmentID string) []runtimecontract.RuntimeCoverageItemFact {
+	itemClaims := map[common.CoverageWorkItemID]runtimecontract.RuntimeAssessmentItemFact{}
+	for _, item := range assessment.Items {
+		itemClaims[item.CoverageWorkItemID] = item
+	}
+	for idx := range coverage {
+		item := &coverage[idx]
+		if item.SliceID != "" && sliceID != "" && item.SliceID != sliceID {
+			continue
+		}
+		claim, named := itemClaims[item.ID]
+		if !named && assessment.Disposition == runtimecontract.AssessmentDispositionSatisfied {
+			for _, id := range assessment.CoverageWorkItemIDs {
+				if id == item.ID {
+					claim = runtimecontract.RuntimeAssessmentItemFact{CoverageWorkItemID: item.ID, Satisfied: true, EvidenceRefs: assessment.EvidenceRefs}
+					named = true
+					break
+				}
+			}
+		}
+		if !named || item.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
+			continue
+		}
+		item.LastAssessmentID = assessmentID
+		item.EvidenceRefs = append(item.EvidenceRefs, claim.EvidenceRefs...)
+		if claim.Satisfied {
+			item.State = runtimecontract.RuntimeCoverageItemStateSatisfied
+		} else {
+			item.State = runtimecontract.RuntimeCoverageItemStateUnsatisfied
+		}
+	}
+	return runtimecontract.NormalizeRuntimeCoverageFacts(coverage)
+}
+
+func openCoverageIDs(coverage []runtimecontract.RuntimeCoverageItemFact, ids []common.CoverageWorkItemID) []common.CoverageWorkItemID {
+	state := map[common.CoverageWorkItemID]runtimecontract.RuntimeCoverageItemState{}
+	for _, item := range coverage {
+		state[item.ID] = item.State
+	}
+	ret := make([]common.CoverageWorkItemID, 0, len(ids))
+	for _, id := range ids {
+		if state[id] != runtimecontract.RuntimeCoverageItemStateSatisfied {
+			ret = append(ret, id)
+		}
+	}
+	return ret
+}
+
 func sameRuntimeDefinition(left runtimecontract.RuntimeFacts, right runtimecontract.RuntimeFacts) bool {
 	left = left.Normalized()
 	right = right.Normalized()
@@ -356,4 +529,13 @@ func sealedDispatchesToRuntimeRecords(values []SealedDispatch) []runtimecontract
 		})
 	}
 	return ret
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }

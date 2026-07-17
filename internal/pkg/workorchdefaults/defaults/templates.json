@@ -33,7 +33,9 @@
             "requiredOutputs": [
               {
                 "kind": "gap_baseline",
-                "evidenceKinds": ["assessment"]
+                "evidenceKinds": [
+                  "assessment"
+                ]
               }
             ],
             "completion": {
@@ -59,7 +61,9 @@
             "requiredOutputs": [
               {
                 "kind": "state_change",
-                "evidenceKinds": ["state_change"]
+                "evidenceKinds": [
+                  "state_change"
+                ]
               }
             ],
             "completion": {
@@ -85,7 +89,9 @@
             "requiredOutputs": [
               {
                 "kind": "validation",
-                "evidenceKinds": ["validation"]
+                "evidenceKinds": [
+                  "validation"
+                ]
               }
             ],
             "completion": {
@@ -169,7 +175,9 @@
             "requiredOutputs": [
               {
                 "kind": "gap_baseline",
-                "evidenceKinds": ["assessment"]
+                "evidenceKinds": [
+                  "assessment"
+                ]
               }
             ],
             "completion": {
@@ -181,7 +189,9 @@
             },
             "policyRefs": {
               "evidencePolicies": [],
-              "capabilityUsagePolicies": ["software-dev-code-semantics-guidance"]
+              "capabilityUsagePolicies": [
+                "software-dev-code-semantics-guidance"
+              ]
             }
           },
           {
@@ -195,7 +205,9 @@
             "requiredOutputs": [
               {
                 "kind": "state_change",
-                "evidenceKinds": ["state_change"]
+                "evidenceKinds": [
+                  "state_change"
+                ]
               }
             ],
             "completion": {
@@ -207,7 +219,9 @@
             },
             "policyRefs": {
               "evidencePolicies": [],
-              "capabilityUsagePolicies": ["software-dev-code-semantics-guidance"]
+              "capabilityUsagePolicies": [
+                "software-dev-code-semantics-guidance"
+              ]
             }
           },
           {
@@ -221,7 +235,9 @@
             "requiredOutputs": [
               {
                 "kind": "state_change",
-                "evidenceKinds": ["state_change"]
+                "evidenceKinds": [
+                  "state_change"
+                ]
               }
             ],
             "completion": {
@@ -232,8 +248,12 @@
               "approvalMode": "when_required"
             },
             "policyRefs": {
-              "evidencePolicies": ["software-dev-validation-evidence"],
-              "capabilityUsagePolicies": ["software-dev-code-semantics-guidance"]
+              "evidencePolicies": [
+                "software-dev-validation-evidence"
+              ],
+              "capabilityUsagePolicies": [
+                "software-dev-code-semantics-guidance"
+              ]
             }
           },
           {
@@ -247,7 +267,9 @@
             "requiredOutputs": [
               {
                 "kind": "validation",
-                "evidenceKinds": ["validation"]
+                "evidenceKinds": [
+                  "validation"
+                ]
               }
             ],
             "completion": {
@@ -258,8 +280,12 @@
               "approvalMode": "when_required"
             },
             "policyRefs": {
-              "evidencePolicies": ["software-dev-validation-evidence"],
-              "capabilityUsagePolicies": ["software-dev-code-semantics-guidance"]
+              "evidencePolicies": [
+                "software-dev-validation-evidence"
+              ],
+              "capabilityUsagePolicies": [
+                "software-dev-code-semantics-guidance"
+              ]
             }
           },
           {
@@ -273,7 +299,9 @@
             "requiredOutputs": [
               {
                 "kind": "artifact",
-                "evidenceKinds": ["artifact"]
+                "evidenceKinds": [
+                  "artifact"
+                ]
               }
             ],
             "completion": {
@@ -284,7 +312,9 @@
               "approvalMode": "when_required"
             },
             "policyRefs": {
-              "evidencePolicies": ["software-dev-validation-evidence"],
+              "evidencePolicies": [
+                "software-dev-validation-evidence"
+              ],
               "capabilityUsagePolicies": []
             }
           }
@@ -304,7 +334,9 @@
             "priority": 10,
             "maxWorkItems": 2,
             "match": {
-              "evidenceRoles": ["primary_state_change"]
+              "evidenceRoles": [
+                "primary_state_change"
+              ]
             }
           },
           {
@@ -314,7 +346,9 @@
             "priority": 20,
             "maxWorkItems": 4,
             "match": {
-              "missingEvidenceKinds": ["validation"]
+              "missingEvidenceKinds": [
+                "validation"
+              ]
             }
           },
           {
@@ -324,7 +358,9 @@
             "priority": 30,
             "maxWorkItems": 4,
             "match": {
-              "evidenceRoles": ["supplemental_evidence"]
+              "evidenceRoles": [
+                "supplemental_evidence"
+              ]
             }
           },
           {
@@ -334,7 +370,9 @@
             "priority": 25,
             "maxWorkItems": 2,
             "match": {
-              "sourceRequirementIds": ["version_control_snapshot"]
+              "sourceRequirementIds": [
+                "version_control_snapshot"
+              ]
             }
           },
           {
@@ -376,7 +414,9 @@
         "provider": "mcp",
         "optional": true,
         "evidenceStrength": "auxiliary",
-        "defaultMCPServerIds": ["mcp-lsp-bridge"],
+        "defaultMCPServerIds": [
+          "mcp-lsp-bridge"
+        ],
         "defaultCapabilityIds": [
           "mcp-lsp-bridge:tool:lsp_initialize",
           "mcp-lsp-bridge:tool:lsp_sync",
@@ -400,7 +440,12 @@
           "appliesToCategory": "code_semantics",
           "evidenceStrength": "auxiliary",
           "usageMode": "prefer_when_triggered",
-          "triggerStages": ["planning", "execution", "repair", "validation"],
+          "triggerStages": [
+            "planning",
+            "execution",
+            "repair",
+            "validation"
+          ],
           "triggerSignals": [
             "cross_file_impact_unclear",
             "symbol_resolution_needed",
@@ -421,7 +466,9 @@
             "lsp_shutdown",
             "lsp_repair"
           ],
-          "requiredAfterKinds": ["patch/apply"],
+          "requiredAfterKinds": [
+            "patch/apply"
+          ],
           "fallbackPolicy": "fallback_to_file_read_and_build_output_without_blocking",
           "notes": [
             "use semantic capabilities to reduce ambiguity before broad patching when local textual evidence is insufficient",
@@ -434,18 +481,37 @@
         {
           "id": "software-dev-validation-discovery-first",
           "scope": "workspace_profile",
-          "appliesToEvidenceKinds": ["validation"],
+          "appliesToEvidenceKinds": [
+            "validation"
+          ],
           "validationSafetyClass": "bounded",
           "discoveryRequired": true,
-          "discoverySources": ["workspace_manifest", "project_files", "declared_commands", "available_capabilities"],
-          "allowedExecutionModes": ["llm_graph", "managed_harness", "deferred", "decision"],
+          "discoverySources": [
+            "workspace_manifest",
+            "project_files",
+            "declared_commands",
+            "available_capabilities"
+          ],
+          "allowedExecutionModes": [
+            "llm_graph",
+            "managed_harness",
+            "deferred",
+            "decision"
+          ],
           "validationFailureImpliesStateChange": true,
-          "implementationGapDiagnosticClasses": ["implementation_gap_detected"],
+          "implementationGapDiagnosticClasses": [
+            "implementation_gap_detected"
+          ],
           "maxValidationOnlyRetriesPerFocus": 2,
           "preferMinimalPatchBeforeRepeatedValidation": true,
           "ifNoTargetRoute": "failed_assessment_with_missing_evidence_or_deferred",
           "validationScratchRequired": true,
-          "allowedValidationModes": ["discovered_target", "controlled_substitute", "managed_harness", "deferred_evidence"],
+          "allowedValidationModes": [
+            "discovered_target",
+            "controlled_substitute",
+            "managed_harness",
+            "deferred_evidence"
+          ],
           "notes": [
             "Inspect or enumerate available validation targets before selecting a validation route.",
             "Only run discovered targets or controlled substitutes that are explicitly tied to current Goal/DoD coverage.",
@@ -461,19 +527,33 @@
           "content": {
             "languages": {
               "go": {
-                "command": ["gopls", "serve"]
+                "command": [
+                  "gopls",
+                  "serve"
+                ]
               },
               "python": {
-                "command": ["pyright-langserver", "--stdio"]
+                "command": [
+                  "pyright-langserver",
+                  "--stdio"
+                ]
               },
               "typescript": {
-                "command": ["typescript-language-server", "--stdio"]
+                "command": [
+                  "typescript-language-server",
+                  "--stdio"
+                ]
               },
               "rust": {
-                "command": ["rust-analyzer"]
+                "command": [
+                  "rust-analyzer"
+                ]
               },
               "shell": {
-                "command": ["bash-language-server", "start"]
+                "command": [
+                  "bash-language-server",
+                  "start"
+                ]
               }
             }
           }
@@ -482,23 +562,88 @@
       "profileContracts": {
         "software-dev": {
           "acceptanceDimensions": [
-            { "id": "functional_behavior", "required": false, "description": "Goal-level functional behavior and primary path" },
-            { "id": "external_contract", "required": false, "description": "API, CLI, file format, protocol, input/output compatibility, or other external contract" },
-            { "id": "runtime_entrypoint", "required": false, "description": "Command, service, script, package, or callable entrypoint used to run the deliverable" },
-            { "id": "configuration", "required": false, "description": "Configuration sources, defaults, environment overrides, and configuration error behavior" },
-            { "id": "persistence_or_side_effect", "required": false, "description": "File writes, state changes, audit records, or external side effects promised by the Goal or DoD" },
-            { "id": "error_behavior", "required": false, "description": "Error propagation, status, invalid input, dependency failure, or exceptional path behavior" },
-            { "id": "streaming_or_long_running", "required": false, "description": "Streaming, incremental output, long-running operation, cancellation, or completion behavior" },
-            { "id": "concurrency", "required": false, "description": "Concurrent calls, shared state, locks, races, or resource safety" },
-            { "id": "quantitative_behavior", "required": false, "description": "Measured performance, resource use, compression, throughput, latency, budget, or other quantified behavior promised by Goal or DoD" },
-            { "id": "deliverable", "required": false, "description": "Build artifact, binary, package, document, or other user-facing deliverable" }
+            {
+              "id": "functional_behavior",
+              "required": false,
+              "description": "Goal-level functional behavior and primary path"
+            },
+            {
+              "id": "external_contract",
+              "required": false,
+              "description": "API, CLI, file format, protocol, input/output compatibility, or other external contract"
+            },
+            {
+              "id": "runtime_entrypoint",
+              "required": false,
+              "description": "Command, service, script, package, or callable entrypoint used to run the deliverable"
+            },
+            {
+              "id": "configuration",
+              "required": false,
+              "description": "Configuration sources, defaults, environment overrides, and configuration error behavior"
+            },
+            {
+              "id": "persistence_or_side_effect",
+              "required": false,
+              "description": "File writes, state changes, audit records, or external side effects promised by the Goal or DoD"
+            },
+            {
+              "id": "error_behavior",
+              "required": false,
+              "description": "Error propagation, status, invalid input, dependency failure, or exceptional path behavior"
+            },
+            {
+              "id": "streaming_or_long_running",
+              "required": false,
+              "description": "Streaming, incremental output, long-running operation, cancellation, or completion behavior"
+            },
+            {
+              "id": "concurrency",
+              "required": false,
+              "description": "Concurrent calls, shared state, locks, races, or resource safety"
+            },
+            {
+              "id": "quantitative_behavior",
+              "required": false,
+              "description": "Measured performance, resource use, compression, throughput, latency, budget, or other quantified behavior promised by Goal or DoD"
+            },
+            {
+              "id": "deliverable",
+              "required": false,
+              "description": "Build artifact, binary, package, document, or other user-facing deliverable"
+            }
           ],
           "deliverableExpectations": [
-            { "id": "source_change", "required": true, "evidenceRole": "primary_state_change", "description": "Source, configuration, documentation, or workspace state change directly related to Goal" },
-            { "id": "validation_report", "required": true, "evidenceRole": "supplemental_evidence", "description": "Validation command, test report, lint/static check, or justified skipped validation" },
-            { "id": "coverage_map", "required": true, "evidenceRole": "supplemental_evidence", "description": "Mapping between Goal leaves, DoD items, acceptance dimensions, evidenceRefs, and residual risks" },
-            { "id": "version_control_snapshot", "required": true, "evidenceRole": "supplemental_evidence", "description": "Local version-control snapshot for meaningful workspace output changes, including changed paths and commit evidence" },
-            { "id": "user_deliverable", "required": true, "evidenceRole": "supplemental_evidence", "description": "Goal-specific user-facing artifact such as binary, package, service endpoint, document, or generated data" }
+            {
+              "id": "source_change",
+              "required": true,
+              "evidenceRole": "primary_state_change",
+              "description": "Source, configuration, documentation, or workspace state change directly related to Goal"
+            },
+            {
+              "id": "validation_report",
+              "required": true,
+              "evidenceRole": "supplemental_evidence",
+              "description": "Validation command, test report, lint/static check, or justified skipped validation"
+            },
+            {
+              "id": "coverage_map",
+              "required": true,
+              "evidenceRole": "supplemental_evidence",
+              "description": "Mapping between Goal leaves, DoD items, acceptance dimensions, evidenceRefs, and residual risks"
+            },
+            {
+              "id": "version_control_snapshot",
+              "required": true,
+              "evidenceRole": "supplemental_evidence",
+              "description": "Local version-control snapshot for meaningful workspace output changes, including changed paths and commit evidence"
+            },
+            {
+              "id": "user_deliverable",
+              "required": true,
+              "evidenceRole": "supplemental_evidence",
+              "description": "Goal-specific user-facing artifact such as binary, package, service endpoint, document, or generated data"
+            }
           ],
           "stateChangingRepairGuidance": [
             "When repairActionPackage.requiredOutput accepts patch/apply, return at least one patch/apply node that performs a concrete source, configuration, test, documentation, or workspace state change directly tied to the current failure.",
@@ -515,7 +660,14 @@
           "validationEnvironmentPolicy": {
             "schemaVersion": "workorch.software_dev.validation_environment.v1",
             "scratchIsolationRequired": true,
-            "preferManagedSessionFor": ["service", "proxy", "streaming", "long_running", "temporary_port", "process_cleanup"],
+            "preferManagedSessionFor": [
+              "service",
+              "proxy",
+              "streaming",
+              "long_running",
+              "temporary_port",
+              "process_cleanup"
+            ],
             "boundedForegroundOnly": true,
             "cleanupRequired": true,
             "languageProfiles": {
@@ -539,8 +691,17 @@
               "scope": "acceptanceDimension",
               "requireDirectEvidence": true,
               "requireExecutableBehaviorEvidence": true,
-              "acceptedStepKinds": ["shell/command", "mcp/tool_call", "validation/managed_session"],
-              "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"],
+              "acceptedStepKinds": [
+                "shell/command",
+                "mcp/tool_call",
+                "validation/managed_session"
+              ],
+              "rejectedStepKinds": [
+                "file/read",
+                "file/list",
+                "mcp/resource_read",
+                "mcp/prompt_get"
+              ],
               "description": "Entrypoint claims must be supported by direct executable validation or equivalent action evidence, not only by read-only inspection or summary artifacts; service lifecycle validation should prefer runtime-managed validation session when available."
             },
             {
@@ -548,8 +709,17 @@
               "scope": "acceptanceDimension",
               "requireDirectEvidence": true,
               "requireExecutableBehaviorEvidence": true,
-              "acceptedStepKinds": ["shell/command", "mcp/tool_call"],
-              "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"],
+              "acceptedStepKinds": [
+                "validation/managed_session",
+                "shell/command",
+                "mcp/tool_call"
+              ],
+              "rejectedStepKinds": [
+                "file/read",
+                "file/list",
+                "mcp/resource_read",
+                "mcp/prompt_get"
+              ],
               "description": "Read-only file evidence can show existing state, but cannot prove writes, append behavior, audit records, or other side effects."
             },
             {
@@ -557,8 +727,17 @@
               "scope": "acceptanceDimension",
               "requireDirectEvidence": true,
               "requireExecutableBehaviorEvidence": true,
-              "acceptedStepKinds": ["shell/command", "mcp/tool_call", "validation/managed_session"],
-              "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"],
+              "acceptedStepKinds": [
+                "shell/command",
+                "mcp/tool_call",
+                "validation/managed_session"
+              ],
+              "rejectedStepKinds": [
+                "file/read",
+                "file/list",
+                "mcp/resource_read",
+                "mcp/prompt_get"
+              ],
               "description": "Streaming or long-running behavior must be supported by executed validation or equivalent runtime action evidence; prefer runtime-managed validation session when available."
             },
             {
@@ -566,8 +745,17 @@
               "scope": "acceptanceDimension",
               "requireDirectEvidence": true,
               "requireExecutableBehaviorEvidence": true,
-              "acceptedStepKinds": ["shell/command", "mcp/tool_call"],
-              "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"],
+              "acceptedStepKinds": [
+                "validation/managed_session",
+                "shell/command",
+                "mcp/tool_call"
+              ],
+              "rejectedStepKinds": [
+                "file/read",
+                "file/list",
+                "mcp/resource_read",
+                "mcp/prompt_get"
+              ],
               "description": "API, CLI, protocol, format, or other external contract claims must be supported by direct validation or equivalent action evidence."
             },
             {
@@ -575,8 +763,17 @@
               "scope": "acceptanceDimension",
               "requireDirectEvidence": true,
               "requireExecutableBehaviorEvidence": true,
-              "acceptedStepKinds": ["shell/command", "mcp/tool_call"],
-              "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"],
+              "acceptedStepKinds": [
+                "validation/managed_session",
+                "shell/command",
+                "mcp/tool_call"
+              ],
+              "rejectedStepKinds": [
+                "file/read",
+                "file/list",
+                "mcp/resource_read",
+                "mcp/prompt_get"
+              ],
               "description": "Error-path behavior must be supported by executed validation or equivalent runtime action evidence."
             },
             {
@@ -584,8 +781,17 @@
               "scope": "acceptanceDimension",
               "requireDirectEvidence": true,
               "requireExecutableBehaviorEvidence": true,
-              "acceptedStepKinds": ["shell/command", "mcp/tool_call"],
-              "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"],
+              "acceptedStepKinds": [
+                "validation/managed_session",
+                "shell/command",
+                "mcp/tool_call"
+              ],
+              "rejectedStepKinds": [
+                "file/read",
+                "file/list",
+                "mcp/resource_read",
+                "mcp/prompt_get"
+              ],
               "description": "Concurrency claims must be supported by executed validation or equivalent runtime action evidence."
             },
             {
@@ -594,8 +800,17 @@
               "requireDirectEvidence": true,
               "requireClaimEvidence": true,
               "requireExecutableBehaviorEvidence": true,
-              "acceptedStepKinds": ["shell/command", "mcp/tool_call"],
-              "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"],
+              "acceptedStepKinds": [
+                "validation/managed_session",
+                "shell/command",
+                "mcp/tool_call"
+              ],
+              "rejectedStepKinds": [
+                "file/read",
+                "file/list",
+                "mcp/resource_read",
+                "mcp/prompt_get"
+              ],
               "description": "Quantified performance, resource, compression, throughput, latency, or budget claims must cite executed measurement evidence with actual numeric output and threshold comparison."
             },
             {
@@ -604,8 +819,15 @@
               "evidenceRole": "primary_state_change",
               "requireDirectEvidence": true,
               "requireCoverageTargets": true,
-              "acceptedStepKinds": ["patch/apply"],
-              "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"],
+              "acceptedStepKinds": [
+                "patch/apply"
+              ],
+              "rejectedStepKinds": [
+                "file/read",
+                "file/list",
+                "mcp/resource_read",
+                "mcp/prompt_get"
+              ],
               "description": "A satisfied source_change deliverable must cite direct state-changing patch evidence for the workspace output with coverageTargets aligned to the Goal, DoD, or deliverable item, not only read-only inspection or summary artifacts."
             },
             {
@@ -613,9 +835,19 @@
               "scope": "deliverable",
               "evidenceRole": "supplemental_evidence",
               "requireDirectEvidence": true,
-              "acceptedStepKinds": ["git/write"],
-              "acceptedOperations": ["commit"],
-              "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get", "shell/command"],
+              "acceptedStepKinds": [
+                "git/write"
+              ],
+              "acceptedOperations": [
+                "commit"
+              ],
+              "rejectedStepKinds": [
+                "file/read",
+                "file/list",
+                "mcp/resource_read",
+                "mcp/prompt_get",
+                "shell/command"
+              ],
               "description": "A satisfied version-control snapshot must cite git/write evidence, normally add plus commit, rather than read-only inspection or shell-based git commands."
             },
             {
@@ -624,8 +856,18 @@
               "requireDirectEvidence": true,
               "requireClaimEvidence": true,
               "requireExecutableBehaviorEvidence": true,
-              "acceptedStepKinds": ["shell/command", "patch/apply", "mcp/tool_call"],
-              "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"],
+              "acceptedStepKinds": [
+                "validation/managed_session",
+                "shell/command",
+                "patch/apply",
+                "mcp/tool_call"
+              ],
+              "rejectedStepKinds": [
+                "file/read",
+                "file/list",
+                "mcp/resource_read",
+                "mcp/prompt_get"
+              ],
               "description": "Satisfied DoD items must be backed by direct evidence whose output, input, or coverageTargets align with the specific claim; a generic build/test pass is not sufficient for detailed behavioral claims."
             },
             {
@@ -634,8 +876,18 @@
               "requireDirectEvidence": true,
               "requireClaimEvidence": true,
               "requireExecutableBehaviorEvidence": true,
-              "acceptedStepKinds": ["shell/command", "patch/apply", "mcp/tool_call"],
-              "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"],
+              "acceptedStepKinds": [
+                "validation/managed_session",
+                "shell/command",
+                "patch/apply",
+                "mcp/tool_call"
+              ],
+              "rejectedStepKinds": [
+                "file/read",
+                "file/list",
+                "mcp/resource_read",
+                "mcp/prompt_get"
+              ],
               "description": "Satisfied Goal coverage items must be backed by direct evidence whose output, input, or coverageTargets align with the specific Goal requirement; broad validation commands cannot close unrelated Goal leaves by themselves."
             }
           ]
@@ -649,7 +901,9 @@
         "rule": "software_dev_test_zero_work_is_inconclusive",
         "appliesTo": "shell/command",
         "commandName": "go",
-        "argsContain": ["test"],
+        "argsContain": [
+          "test"
+        ],
         "zeroWorkMarkers": [
           "testing: warning: no tests to run",
           "[no tests to run]",
@@ -664,29 +918,55 @@
         ],
         "qualityOnZeroWork": "inconclusive",
         "zeroWork": true,
-        "evidenceTags": ["software-dev", "test", "zero_work"],
+        "evidenceTags": [
+          "software-dev",
+          "test",
+          "zero_work"
+        ],
         "evidenceReason": "test command completed without executing matching tests",
         "coverageRequirements": [
           {
             "id": "*",
             "scope": "dod_item",
-            "requiredEvidenceKinds": ["validation"],
+            "requiredEvidenceKinds": [
+              "validation"
+            ],
             "requireDirectEvidence": true,
             "requireClaimEvidence": true,
             "requireExecutableBehaviorEvidence": true,
-            "acceptedStepKinds": ["shell/command", "mcp/tool_call"],
-            "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"],
+            "acceptedStepKinds": [
+              "validation/managed_session",
+              "shell/command",
+              "mcp/tool_call"
+            ],
+            "rejectedStepKinds": [
+              "file/read",
+              "file/list",
+              "mcp/resource_read",
+              "mcp/prompt_get"
+            ],
             "description": "DoD satisfaction claims require direct validation evidence; zero-work validation is inconclusive."
           },
           {
             "id": "*",
             "scope": "goal_coverage",
-            "requiredEvidenceKinds": ["validation"],
+            "requiredEvidenceKinds": [
+              "validation"
+            ],
             "requireDirectEvidence": true,
             "requireClaimEvidence": true,
             "requireExecutableBehaviorEvidence": true,
-            "acceptedStepKinds": ["shell/command", "mcp/tool_call"],
-            "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"],
+            "acceptedStepKinds": [
+              "validation/managed_session",
+              "shell/command",
+              "mcp/tool_call"
+            ],
+            "rejectedStepKinds": [
+              "file/read",
+              "file/list",
+              "mcp/resource_read",
+              "mcp/prompt_get"
+            ],
             "description": "Goal coverage claims require direct validation evidence; zero-work validation is inconclusive."
           }
         ],

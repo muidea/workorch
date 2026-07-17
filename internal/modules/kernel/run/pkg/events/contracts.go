@@ -31,6 +31,7 @@ func Contracts() []eventcontract.Contract {
 		TopicRunCommandEnsure,
 		TopicRunCommandPurgeRuntimeResources,
 		TopicRunCommandUpdate,
+		TopicRunCommandLinkSuccessor,
 		TopicRunCommandDelete,
 	)...)
 	return ret

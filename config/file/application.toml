@@ -8,6 +8,7 @@ writeTimeout = '180s'
 idleTimeout = '60s'
 shutdownTimeout = '5s'
 maxConcurrentRuns = 1
+staleDispatchedStepMinAge = ''
 defaultDialogLanguage = ''
 
 [repository]
@@ -18,6 +19,10 @@ dataDir = '.workorch-data'
 defaultSoulId = ''
 maxRuntimeRepairAttempts = 10
 maxProviderRetryAttempts = 10
+maxContractViolationRetriesPerStep = 2
+maxContractViolationRetriesPerRun = 8
+maxRepeatedContractViolationSignature = 1
+maxConsecutiveContractViolationNoShapeChange = 1
 shellCommandTimeout = '60s'
 
 [runtime.git]

@@ -60,22 +60,45 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "governance_rejected", facts.Failure.Message), nil
 		}
 	}
+	if feasibilityBlocksCurrentAction(facts) {
+		if len(facts.Capabilities.GovernanceKinds) == 0 {
+			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "capability_unavailable", firstNonEmpty(facts.Feasibility.Reason, "current focus has no feasible operation under sealed capabilities")), nil
+		}
+		return governanceDecision(base, facts, firstNonEmpty(facts.Feasibility.Reason, "current focus has no feasible operation under sealed capabilities"))
+	}
 	if needsStateChangeAfterRejectedValidation(facts) {
 		return stateChangeDecision(base, facts)
 	}
 	missing := missingEvidenceKinds(facts)
 	if len(missing) == 0 {
 		if !facts.Focus.RequireAssessment {
-			return terminalDecision(base, runtimecontract.ConvergenceStateComplete, runtimecontract.RuntimeActionComplete, "coverage_satisfied", "current coverage focus is satisfied"), nil
+			return completeOrAdvanceDecision(base, facts, "current coverage focus is satisfied")
 		}
 		assessment, ok := assessmentForCurrentFocus(facts)
 		if !ok {
 			return assessmentDecision(base, facts), nil
 		}
-		if assessment.Satisfied {
-			return terminalDecision(base, runtimecontract.ConvergenceStateComplete, runtimecontract.RuntimeActionComplete, "coverage_satisfied", "current coverage focus is satisfied"), nil
+		switch assessment.Disposition {
+		case runtimecontract.AssessmentDispositionSatisfied:
+			if currentFocusCoverageSatisfied(facts) {
+				return completeOrAdvanceDecision(base, facts, "current coverage focus is satisfied")
+			}
+			return repairableAssessmentDecision(base, facts, assessment)
+		case runtimecontract.AssessmentDispositionRepairableGap:
+			return repairableAssessmentDecision(base, facts, assessment)
+		case runtimecontract.AssessmentDispositionGovernanceRequired:
+			return governanceDecision(base, facts, firstNonEmptyAssessmentSummary(assessment, "assessment requires governance"))
+		case runtimecontract.AssessmentDispositionTerminalRejection:
+			// The candidate can report irrecoverability, but terminal authority stays
+			// in the reducer. Only an already-persisted governance rejection is an
+			// irrecoverable state; all other negative assessment facts are repaired.
+			if assessment.Gap != nil && assessment.Gap.FailureClass == runtimecontract.FailureClassGovernanceRejected {
+				return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "governance_rejected", firstNonEmptyAssessmentSummary(assessment, "governance rejected")), nil
+			}
+			return repairableAssessmentDecision(base, facts, assessment)
+		default:
+			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "assessment_rejected", firstNonEmptyAssessmentSummary(assessment, "unknown assessment disposition")), nil
 		}
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "assessment_rejected", assessment.Summary), nil
 	}
 	if contains(missing, runtimecontract.EvidenceKindStateChange) {
 		return stateChangeDecision(base, facts)
@@ -84,6 +107,39 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 		return validationDecision(base, facts)
 	}
 	return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "unsupported_evidence_gap", fmt.Sprintf("unsupported required evidence kinds: %s", strings.Join(missing, ","))), nil
+}
+
+func feasibilityBlocksCurrentAction(facts runtimecontract.RuntimeFacts) bool {
+	if facts.Feasibility == nil {
+		return false
+	}
+	fact := facts.Feasibility
+	if fact.FocusID != facts.Focus.ID || len(fact.FeasibleOperationKinds) != 0 {
+		return false
+	}
+	missing := missingEvidenceKinds(facts)
+	return (fact.Action == runtimecontract.RuntimeActionProduceStateChange && contains(missing, runtimecontract.EvidenceKindStateChange)) ||
+		(fact.Action == runtimecontract.RuntimeActionProduceValidation && contains(missing, runtimecontract.EvidenceKindValidation))
+}
+
+func currentFocusCoverageSatisfied(facts runtimecontract.RuntimeFacts) bool {
+	assessment, assessed := assessmentForCurrentFocus(facts)
+	// Legacy records did not have an item ledger. A satisfied disposition is a
+	// compatibility source only for those records; new controller commits always
+	// materialize Coverage before this reducer runs.
+	if assessed && assessment.Disposition == runtimecontract.AssessmentDispositionSatisfied {
+		return true
+	}
+	for _, id := range facts.Focus.CoverageWorkItemIDs {
+		for _, item := range facts.Coverage {
+			if item.ID == id && item.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
+				goto next
+			}
+		}
+		return false
+	next:
+	}
+	return true
 }
 
 func repeatedFailureCount(facts runtimecontract.RuntimeFacts, signature string) int {
@@ -189,6 +245,21 @@ func governanceDecision(base runtimecontract.RuntimeDecision, facts runtimecontr
 	return base, nil
 }
 
+// completeOrAdvanceDecision completes the current focus only when remaining focuses are empty
+// and the Run-level state-change ledger satisfies the sealed activation policy.
+func completeOrAdvanceDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, summary string) (runtimecontract.RuntimeDecision, error) {
+	if len(facts.RemainingFocuses) > 0 {
+		// Focus-level satisfaction alone does not terminal the Run while more focuses remain.
+		// Drive/commit paths advance the focus queue; reducer reports complete for the current focus.
+		return terminalDecision(base, runtimecontract.ConvergenceStateComplete, runtimecontract.RuntimeActionComplete, "coverage_satisfied", summary), nil
+	}
+	if !facts.StateChange.SatisfiesRequirement() {
+		// Run policy still needs coverage-bound primary state-change evidence.
+		return stateChangeDecision(base, facts)
+	}
+	return terminalDecision(base, runtimecontract.ConvergenceStateComplete, runtimecontract.RuntimeActionComplete, "coverage_satisfied", summary), nil
+}
+
 func terminalDecision(base runtimecontract.RuntimeDecision, state runtimecontract.ConvergenceState, action runtimecontract.RuntimeAction, code, summary string) runtimecontract.RuntimeDecision {
 	base.State = state
 	base.Action = action
@@ -245,24 +316,89 @@ func evidenceRevisionAfter(left string, right string) bool {
 
 func advanceSatisfiedCoverageFocus(facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeFacts {
 	facts = facts.Normalized()
-	assessment, assessed := assessmentForCurrentFocus(facts)
-	assessmentSatisfied := !facts.Focus.RequireAssessment || (assessed && assessment.Satisfied)
-	if len(missingEvidenceKinds(facts)) != 0 || !assessmentSatisfied || len(facts.RemainingFocuses) == 0 {
+	if len(missingEvidenceKinds(facts)) != 0 || !currentFocusCoverageSatisfied(facts) || len(facts.RemainingFocuses) == 0 {
 		return facts
 	}
 	facts.Focus = facts.RemainingFocuses[0]
 	facts.RemainingFocuses = append([]runtimecontract.CoverageFocus(nil), facts.RemainingFocuses[1:]...)
 	facts.Failure = nil
+	facts.Feasibility = nil
 	return facts.Normalized()
 }
 
-func assessmentForCurrentFocus(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeAssessmentFact, bool) {
-	for _, assessment := range facts.Assessments {
-		if assessment.FocusID == facts.Focus.ID {
-			return assessment, true
+// repairableAssessmentDecision keeps the Run active and re-opens state-change or validation
+// based on the structured gap. Repair budget is independent from candidate attempt 0/1.
+func repairableAssessmentDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, assessment runtimecontract.RuntimeAssessmentFact) (runtimecontract.RuntimeDecision, error) {
+	policy := facts.ConvergencePolicy.Normalized()
+	ledger := facts.Repair.Normalized()
+	if ledger.Exhausted || ledger.RepairAttempts >= policy.MaxRepairAttemptsPerFocus {
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "no_progress_exhausted", firstNonEmptyAssessmentSummary(assessment, "repair budget exhausted")), nil
+	}
+
+	wantValidationOnly := false
+	if assessment.Gap != nil {
+		for _, kind := range assessment.Gap.MissingEvidenceKinds {
+			if kind == runtimecontract.EvidenceKindStateChange {
+				return stateChangeDecision(base, facts)
+			}
+		}
+		for _, kind := range assessment.Gap.MissingEvidenceKinds {
+			if kind == runtimecontract.EvidenceKindValidation {
+				wantValidationOnly = true
+				break
+			}
 		}
 	}
-	return runtimecontract.RuntimeAssessmentFact{}, false
+	if !wantValidationOnly {
+		for _, evidence := range facts.Evidence.Accepted {
+			if evidenceAppliesToCurrentFocus(facts, evidence) && evidence.Kind == runtimecontract.EvidenceKindStateChange {
+				wantValidationOnly = true
+				break
+			}
+		}
+	}
+	if wantValidationOnly {
+		if ledger.ValidationOnlyRetries >= policy.MaxValidationOnlyRetriesPerFocus {
+			if len(facts.Capabilities.StateChangeKinds) > 0 {
+				return stateChangeDecision(base, facts)
+			}
+			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "no_progress_exhausted", "validation-only repair budget exhausted"), nil
+		}
+		return validationDecision(base, facts)
+	}
+	if len(facts.Capabilities.StateChangeKinds) > 0 {
+		return stateChangeDecision(base, facts)
+	}
+	return validationDecision(base, facts)
+}
+
+func firstNonEmptyAssessmentSummary(assessment runtimecontract.RuntimeAssessmentFact, fallback string) string {
+	if summary := strings.TrimSpace(assessment.Summary); summary != "" {
+		return summary
+	}
+	if assessment.Gap != nil {
+		if reason := strings.TrimSpace(assessment.Gap.Reason); reason != "" {
+			return reason
+		}
+	}
+	return fallback
+}
+
+func assessmentForCurrentFocus(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeAssessmentFact, bool) {
+	// Prefer the latest assessment for the current focus so repair cycles can supersede older facts.
+	found := false
+	var latest runtimecontract.RuntimeAssessmentFact
+	for _, assessment := range facts.Assessments {
+		if assessment.FocusID != facts.Focus.ID {
+			continue
+		}
+		latest = assessment
+		found = true
+	}
+	if !found {
+		return runtimecontract.RuntimeAssessmentFact{}, false
+	}
+	return latest, true
 }
 
 func evidenceAppliesToCurrentFocus(facts runtimecontract.RuntimeFacts, evidence runtimecontract.EvidenceFact) bool {

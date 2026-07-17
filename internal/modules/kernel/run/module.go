@@ -101,6 +101,7 @@ func (m *Module) Start() error {
 		runevents.TopicRunCommandListCheckpointsByRun,
 		runevents.TopicRunCommandPurgeRuntimeResources,
 		runevents.TopicRunCommandUpdate,
+		runevents.TopicRunCommandLinkSuccessor,
 		runevents.TopicRunCommandDelete,
 	}
 	for _, topic := range m.topics {
@@ -178,6 +179,8 @@ func (m *Module) executeCommand(ev magicevent.Event) (runevents.RunCommandResult
 	case runevents.PurgeRuntimeResourcesCommand:
 		workspaceID = cmd.WorkspaceID
 	case runevents.UpdateRunCommand:
+		workspaceID = cmd.WorkspaceID
+	case runevents.LinkRunSuccessorCommand:
 		workspaceID = cmd.WorkspaceID
 	case runevents.DeleteRunCommand:
 		workspaceID = cmd.WorkspaceID
@@ -317,6 +320,15 @@ func (m *Module) executeCommand(ev magicevent.Event) (runevents.RunCommandResult
 		}
 		deleted, err := purgeRunRuntimeResources(ctx, m.steps, m.checkpoints, cmd.RunID)
 		return runevents.RunCommandResult{DeletedCount: deleted}, err
+	case runevents.TopicRunCommandLinkSuccessor:
+		cmd, ok := data.(runevents.LinkRunSuccessorCommand)
+		if !ok || cmd.WorkspaceID == "" || cmd.PredecessorRunID == "" || cmd.SuccessorRunID == "" {
+			return runevents.RunCommandResult{}, common.ErrInvalidArgument
+		}
+		if err := m.bizPtr.LinkRunSuccessor(ctx, cmd); err != nil {
+			return runevents.RunCommandResult{}, err
+		}
+		return runevents.RunCommandResult{}, nil
 	case runevents.TopicRunCommandUpdate:
 		cmd, ok := data.(runevents.UpdateRunCommand)
 		if !ok || cmd.RunID == "" || cmd.WorkspaceID == "" {

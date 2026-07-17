@@ -14,7 +14,17 @@ type CreateRunCommand struct {
 	DefinitionRevision string
 	InitialStepKind    string
 	RuntimeBootstrap   *runtimemodel.RuntimeBootstrap
+	Lineage            runmodel.RunLineage
 	Priority           int
+}
+
+// LinkRunSuccessorCommand links predecessor.SuccessorRunID to a successor Run under CAS semantics.
+// Empty ExpectedSuccessorRunID means only empty successor may be set; same successor is idempotent.
+type LinkRunSuccessorCommand struct {
+	WorkspaceID            common.WorkspaceID
+	PredecessorRunID       common.RunID
+	SuccessorRunID         common.RunID
+	ExpectedSuccessorRunID common.RunID
 }
 
 type StartRunCommand struct{ RunID common.RunID }

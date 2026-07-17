@@ -5,10 +5,10 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
-
-	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -27,7 +27,7 @@ func SupersedeRun(ctx context.Context, hub magicevent.Hub, workspaceID common.Wo
 	return err
 }
 
-func CreateWorkspaceExecutionRun(ctx context.Context, hub magicevent.Hub, runID common.RunID, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, definitionRevision string, runtimeBootstrap *runtimecontract.RuntimeBootstrap, priority int) error {
+func CreateWorkspaceExecutionRun(ctx context.Context, hub magicevent.Hub, runID common.RunID, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, definitionRevision string, runtimeBootstrap *runtimecontract.RuntimeBootstrap, priority int, lineage runmodel.RunLineage) error {
 	if hub == nil {
 		return common.ErrInvalidArgument
 	}
@@ -39,10 +39,26 @@ func CreateWorkspaceExecutionRun(ctx context.Context, hub magicevent.Hub, runID 
 		DefinitionRevision: definitionRevision,
 		InitialStepKind:    llmcommon.StepKindWorkspaceExecution,
 		RuntimeBootstrap:   runtimeBootstrap,
+		Lineage:            lineage,
 		Priority:           priority,
 	})
 	ownerevent.BindLane(event, runevents.TopicRunCommandCreate, "run", string(runID), workspaceID, runID, "")
 	_, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandCreate)
+	return err
+}
+
+func LinkRunSuccessor(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, predecessorRunID common.RunID, successorRunID common.RunID, expectedSuccessorRunID common.RunID) error {
+	if hub == nil || workspaceID == "" || predecessorRunID == "" || successorRunID == "" {
+		return common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandLinkSuccessor, activationRunCommandSource, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.LinkRunSuccessorCommand{
+		WorkspaceID:            workspaceID,
+		PredecessorRunID:       predecessorRunID,
+		SuccessorRunID:         successorRunID,
+		ExpectedSuccessorRunID: expectedSuccessorRunID,
+	})
+	ownerevent.BindLane(event, runevents.TopicRunCommandLinkSuccessor, "run", string(predecessorRunID), workspaceID, predecessorRunID, "")
+	_, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandLinkSuccessor)
 	return err
 }
 

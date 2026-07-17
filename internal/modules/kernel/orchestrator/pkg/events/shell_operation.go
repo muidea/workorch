@@ -9,13 +9,25 @@ import (
 
 func ShellOperationDataFromRuntimeOperation(operation runtimecontract.RuntimeOperation) (ShellOperationData, error) {
 	operation = operation.Normalized()
-	if operation.Kind != runtimecontract.StepKindShellCommand {
-		return ShellOperationData{}, fmt.Errorf("operation kind %q is not shell/command", operation.Kind)
+	switch operation.Kind {
+	case runtimecontract.StepKindShellCommand, runtimecontract.RuntimeBlockKindManagedValidationSession:
+	default:
+		return ShellOperationData{}, fmt.Errorf("operation kind %q is not a shell-owned runtime operation", operation.Kind)
 	}
 	if err := runtimecontract.ValidateRuntimeOperationContract(operation); err != nil {
 		return ShellOperationData{}, err
 	}
 	ret := ShellOperationData{TargetRefs: append([]string(nil), operation.TargetRefs...)}
+	if operation.Kind == runtimecontract.RuntimeBlockKindManagedValidationSession {
+		ret.ManagedValidation = runtimecontract.RuntimeManagedValidation{
+			RuntimeManaged:   true,
+			Kind:             runtimecontract.RuntimeBlockKindManagedValidationSession,
+			OriginalNodeKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			CleanupPolicy:    "process_group_on_timeout_or_completion",
+			AutoCleanup:      true,
+			AutoCleanupSet:   true,
+		}
+	}
 	for _, parameter := range operation.Parameters {
 		switch parameter.Name {
 		case "command":
@@ -41,6 +53,12 @@ func ShellOperationDataFromRuntimeOperation(operation runtimecontract.RuntimeOpe
 		case "validationScratchAutoCleanup":
 			ret.ValidationScratchAutoCleanup = *parameter.Boolean
 			ret.ValidationScratchAutoCleanupSet = true
+		}
+	}
+	if operation.Kind == runtimecontract.RuntimeBlockKindManagedValidationSession {
+		if ret.ValidationScratchAutoCleanupSet {
+			ret.ManagedValidation.AutoCleanup = ret.ValidationScratchAutoCleanup
+			ret.ManagedValidation.AutoCleanupSet = true
 		}
 	}
 	return ret, nil

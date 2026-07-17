@@ -230,9 +230,28 @@ func DecodeCandidatePayload(action runtimecontract.RuntimeAction, payload []byte
 		if err := strictDecode(payload, &value); err != nil {
 			return runtimecontract.RuntimeCandidate{}, err
 		}
+		items := make([]runtimecontract.RuntimeAssessmentItemFact, 0, len(value.Items))
+		for _, item := range value.Items {
+			items = append(items, runtimecontract.RuntimeAssessmentItemFact{
+				CoverageWorkItemID: item.CoverageWorkItemID, Satisfied: item.Satisfied, Reason: item.Reason,
+				EvidenceRefs: append([]string(nil), item.EvidenceRefs...),
+			})
+		}
+		var gap *runtimecontract.RuntimeAssessmentGap
+		if value.Gap != nil {
+			gap = &runtimecontract.RuntimeAssessmentGap{
+				CoverageWorkItemIDs:  append([]common.CoverageWorkItemID(nil), value.Gap.CoverageWorkItemIDs...),
+				MissingEvidenceKinds: append([]string(nil), value.Gap.MissingEvidenceKinds...),
+				TargetRefs:           append([]string(nil), value.Gap.TargetRefs...),
+				EvidenceRefs:         append([]string(nil), value.Gap.EvidenceRefs...),
+				Reason:               value.Gap.Reason, FailureClass: runtimecontract.FailureClass(value.Gap.FailureClass),
+				FailureCode: value.Gap.FailureCode, FailureSignature: value.Gap.FailureSignature,
+			}
+		}
 		return runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
-			FocusID: value.FocusID, CoverageWorkItemIDs: value.CoverageWorkItemIDs, Satisfied: value.Satisfied,
-			Summary: value.Summary, EvidenceRefs: value.EvidenceRefs, ArtifactRefs: value.ArtifactRefs,
+			FocusID: value.FocusID, SliceID: value.SliceID, CoverageWorkItemIDs: value.CoverageWorkItemIDs,
+			Satisfied: value.Satisfied, Disposition: runtimecontract.AssessmentDisposition(value.Disposition),
+			Items: items, Gap: gap, Summary: value.Summary, EvidenceRefs: value.EvidenceRefs, ArtifactRefs: value.ArtifactRefs,
 		}}, nil
 	case runtimecontract.RuntimeActionRequestGovernance:
 		var value governanceCandidateDTO
@@ -362,11 +381,33 @@ type governanceCandidateDTO struct {
 
 type assessmentCandidateDTO struct {
 	FocusID             string                      `json:"focusId"`
+	SliceID             string                      `json:"sliceId,omitempty"`
 	CoverageWorkItemIDs []common.CoverageWorkItemID `json:"coverageWorkItemIds"`
 	Satisfied           bool                        `json:"satisfied"`
+	Disposition         string                      `json:"disposition,omitempty"`
+	Items               []assessmentItemDTO         `json:"items,omitempty"`
+	Gap                 *assessmentGapDTO           `json:"gap,omitempty"`
 	Summary             string                      `json:"summary"`
 	EvidenceRefs        []string                    `json:"evidenceRefs,omitempty"`
 	ArtifactRefs        []string                    `json:"artifactRefs,omitempty"`
+}
+
+type assessmentItemDTO struct {
+	CoverageWorkItemID common.CoverageWorkItemID `json:"coverageWorkItemId"`
+	Satisfied          bool                      `json:"satisfied"`
+	Reason             string                    `json:"reason,omitempty"`
+	EvidenceRefs       []string                  `json:"evidenceRefs,omitempty"`
+}
+
+type assessmentGapDTO struct {
+	CoverageWorkItemIDs  []common.CoverageWorkItemID `json:"coverageWorkItemIds"`
+	MissingEvidenceKinds []string                    `json:"missingEvidenceKinds,omitempty"`
+	TargetRefs           []string                    `json:"targetRefs,omitempty"`
+	EvidenceRefs         []string                    `json:"evidenceRefs,omitempty"`
+	Reason               string                      `json:"reason,omitempty"`
+	FailureClass         string                      `json:"failureClass,omitempty"`
+	FailureCode          string                      `json:"failureCode,omitempty"`
+	FailureSignature     string                      `json:"failureSignature,omitempty"`
 }
 
 type externalDependencyDTO struct {

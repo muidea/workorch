@@ -14,9 +14,10 @@ func TestMapRunProjectsLineageAndLifecycleTimestamps(t *testing.T) {
 		GoalID:      "goal-run-lineage",
 		DoDID:       "dod-run-lineage",
 		Lineage: runmodel.RunLineage{
-			PredecessorRunID: "run-predecessor",
-			SuccessorRunID:   "run-next",
-			LineageState:     "active",
+			PredecessorRunID:    "run-predecessor",
+			PredecessorResultID: "result-predecessor",
+			SuccessorRunID:      "run-next",
+			LineageState:        "active",
 		},
 		State:     common.RunStateActive,
 		CreatedAt: "2026-07-06T03:00:00Z",
@@ -26,6 +27,7 @@ func TestMapRunProjectsLineageAndLifecycleTimestamps(t *testing.T) {
 
 	got := MapRun(item)
 	if got.Lineage.PredecessorRunID != "run-predecessor" ||
+		got.Lineage.PredecessorResultID != "result-predecessor" ||
 		got.Lineage.SuccessorRunID != "run-next" ||
 		got.Lineage.LineageState != "active" ||
 		got.CreatedAt != item.CreatedAt ||
