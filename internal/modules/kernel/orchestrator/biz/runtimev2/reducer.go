@@ -309,6 +309,7 @@ func advanceSatisfiedCoverageFocus(facts runtimecontract.RuntimeFacts) runtimeco
 	facts.RemainingFocuses = append([]runtimecontract.CoverageFocus(nil), facts.RemainingFocuses[1:]...)
 	facts.Failure = nil
 	facts.Feasibility = nil
+	facts.Repair = facts.Repair.ResetForFocus(facts.Focus.ID, facts.Focus.SliceID, facts.EvidenceRevision)
 	return facts.Normalized()
 }
 

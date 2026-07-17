@@ -192,7 +192,8 @@ func (c *RuntimeController) BeginCandidateAttempt(ctx context.Context, workspace
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action does not request a candidate", common.ErrConflict)
 	}
 	transaction := aggregate.Decision.AuthorityTransaction()
-	current := candidateAttemptsForSnapshot(aggregate.CandidateAttempts, transaction.AuthoritySnapshotID)
+	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, transaction)
+	current := candidateAttemptsForContract(aggregate.CandidateAttempts, workspaceID, runID, contractID)
 	for _, record := range current {
 		if record.Attempt != attempt {
 			continue
@@ -208,13 +209,13 @@ func (c *RuntimeController) BeginCandidateAttempt(ctx context.Context, workspace
 		}
 	} else {
 		first, ok := candidateAttemptRecord(current, 0)
-		if !ok || first.State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.StablePrefixHash != stablePrefixHash || first.Transaction != transaction {
+		if !ok || first.State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.StablePrefixHash != stablePrefixHash || !runtimecontract.SameAuthorityContract(first.Transaction, transaction) {
 			return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt 1 requires a failed same-contract attempt 0", common.ErrConflict)
 		}
 	}
 	expectedRevision := aggregate.StateRevision
 	aggregate.CandidateAttempts = append(aggregate.CandidateAttempts, runtimecontract.RuntimeCandidateAttemptRecord{
-		Transaction: transaction, Attempt: attempt, StablePrefixHash: stablePrefixHash, State: runtimecontract.RuntimeCandidateAttemptStatePending,
+		AuthorityContractID: contractID, Transaction: transaction, Attempt: attempt, StablePrefixHash: stablePrefixHash, State: runtimecontract.RuntimeCandidateAttemptStatePending,
 	})
 	aggregate.StateRevision++
 	if err := aggregate.Validate(); err != nil {
@@ -234,7 +235,8 @@ func (c *RuntimeController) AcceptCandidateAttempt(ctx context.Context, workspac
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	idx, record, ok := pendingCandidateAttempt(aggregate.CandidateAttempts, aggregate.Decision.AuthoritySnapshot.ID, attempt)
+	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
+	idx, record, ok := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
 	if !ok {
 		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d is not pending", common.ErrConflict, attempt)
 	}
@@ -272,7 +274,8 @@ func (c *RuntimeController) FailCandidateAttempt(ctx context.Context, workspaceI
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	idx, _, ok := pendingCandidateAttempt(aggregate.CandidateAttempts, aggregate.Decision.AuthoritySnapshot.ID, attempt)
+	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
+	idx, _, ok := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
 	if !ok {
 		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d is not pending", common.ErrConflict, attempt)
 	}
@@ -280,12 +283,15 @@ func (c *RuntimeController) FailCandidateAttempt(ctx context.Context, workspaceI
 	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateFailed
 	failureCopy := failure
 	aggregate.CandidateAttempts[idx].Failure = &failureCopy
+	createdTerminalFailure := false
 	if failure.Class == runtimecontract.RuntimeCandidateFailureClassInternal {
 		aggregate.Facts.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeContractMisalignment, Signature: "candidate-internal", Message: failure.Reason}
+		createdTerminalFailure = true
 	} else if attempt == 1 {
 		aggregate.Facts.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateExhausted, Signature: "candidate-retry-exhausted", Message: failure.Reason}
+		createdTerminalFailure = true
 	}
-	if aggregate.Facts.Failure != nil {
+	if createdTerminalFailure {
 		decision, reduceErr := ReduceRuntimeState(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
 		if reduceErr != nil {
 			return RuntimeAggregate{}, reduceErr
@@ -302,10 +308,10 @@ func (c *RuntimeController) FailCandidateAttempt(ctx context.Context, workspaceI
 	return aggregate, nil
 }
 
-func candidateAttemptsForSnapshot(values []runtimecontract.RuntimeCandidateAttemptRecord, snapshotID string) []runtimecontract.RuntimeCandidateAttemptRecord {
+func candidateAttemptsForContract(values []runtimecontract.RuntimeCandidateAttemptRecord, workspaceID common.WorkspaceID, runID common.RunID, contractID string) []runtimecontract.RuntimeCandidateAttemptRecord {
 	ret := make([]runtimecontract.RuntimeCandidateAttemptRecord, 0, 2)
 	for _, value := range values {
-		if value.Transaction.AuthoritySnapshotID == snapshotID {
+		if runtimecontract.CandidateAttemptAuthorityContractID(workspaceID, runID, value) == contractID {
 			ret = append(ret, value)
 		}
 	}
@@ -321,9 +327,9 @@ func candidateAttemptRecord(values []runtimecontract.RuntimeCandidateAttemptReco
 	return runtimecontract.RuntimeCandidateAttemptRecord{}, false
 }
 
-func pendingCandidateAttempt(values []runtimecontract.RuntimeCandidateAttemptRecord, snapshotID string, attempt int) (int, runtimecontract.RuntimeCandidateAttemptRecord, bool) {
+func pendingCandidateAttempt(values []runtimecontract.RuntimeCandidateAttemptRecord, workspaceID common.WorkspaceID, runID common.RunID, contractID string, attempt int) (int, runtimecontract.RuntimeCandidateAttemptRecord, bool) {
 	for idx, value := range values {
-		if value.Transaction.AuthoritySnapshotID == snapshotID && value.Attempt == attempt && value.State == runtimecontract.RuntimeCandidateAttemptStatePending {
+		if runtimecontract.CandidateAttemptAuthorityContractID(workspaceID, runID, value) == contractID && value.Attempt == attempt && value.State == runtimecontract.RuntimeCandidateAttemptStatePending {
 			return idx, value, true
 		}
 	}

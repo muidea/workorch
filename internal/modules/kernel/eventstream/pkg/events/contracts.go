@@ -7,6 +7,9 @@ func Contracts() []eventcontract.Contract {
 	ret = append(ret, eventcontract.Build("eventstream", eventcontract.CommandClassRead, eventcontract.LanePolicyQuery,
 		TopicEventStreamCommandList,
 	)...)
+	ret = append(ret, eventcontract.Build("eventstream", eventcontract.CommandClassRead, eventcontract.LanePolicyQuery,
+		TopicEventStreamCommandHighWatermarks,
+	)...)
 	ret = append(ret, eventcontract.Build("eventstream", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
 		TopicEventStreamCommandPurgeWorkspace,
 	)...)

@@ -41,6 +41,7 @@ func (m *Module) Configure(deps Dependencies) error {
 	m.bizPtr = eventstreambiz.NewService(deps.EventRecords, deps.EventHub)
 	m.servicePtr = eventstreamservice.New(eventstreamservice.Dependencies{
 		ListEvents:           m.bizPtr.ListEvents,
+		HighWatermarks:       m.bizPtr.HighWatermarks,
 		PurgeWorkspaceEvents: m.bizPtr.PurgeWorkspaceEvents,
 	})
 	m.eventHub = deps.EventHub
@@ -60,6 +61,7 @@ func (m *Module) Start() error {
 	m.observer = magicevent.NewSimpleObserver(ModuleID, m.eventHub)
 	m.topics = []string{
 		eventstreamevents.TopicEventStreamCommandList,
+		eventstreamevents.TopicEventStreamCommandHighWatermarks,
 		eventstreamevents.TopicEventStreamCommandPurgeWorkspace,
 	}
 	for _, topic := range m.topics {
@@ -128,6 +130,16 @@ func (m *Module) executeCommand(ev magicevent.Event) (eventstreamevents.EventStr
 			events = append(events, converted)
 		}
 		return eventstreamevents.EventStreamCommandResult{Events: events}, nil
+	case eventstreamevents.TopicEventStreamCommandHighWatermarks:
+		cmd, ok := data.(eventstreamevents.HighWatermarksCommand)
+		if !ok {
+			return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
+		}
+		items, err := m.servicePtr.HighWatermarks(ctx, cmd.WorkspaceIDs)
+		if err != nil {
+			return eventstreamevents.EventStreamCommandResult{}, err
+		}
+		return eventstreamevents.EventStreamCommandResult{HighWatermarks: items}, nil
 	case eventstreamevents.TopicEventStreamCommandPurgeWorkspace:
 		cmd, ok := data.(eventstreamevents.PurgeWorkspaceCommand)
 		if !ok || cmd.WorkspaceID == "" {

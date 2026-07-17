@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -410,8 +411,8 @@ func TestRuntimeV2MainlineStopsAfterSecondCandidateFailure(t *testing.T) {
 }
 
 func TestNextRuntimeV2CandidateAttemptResumesPersistedPendingOrFailedState(t *testing.T) {
-	transaction := runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "snapshot-1"}
-	base := runtimev2.RuntimeAggregate{Decision: runtimecontract.RuntimeDecision{AuthoritySnapshot: runtimecontract.AuthoritySnapshot{ID: "snapshot-1"}}}
+	transaction := runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "snapshot-1", FocusID: "focus-v2", Action: runtimecontract.RuntimeActionProduceStateChange, RequiredOutputHash: "output-v2", DefinitionRevision: "definition-v2", EvidenceRevision: "evidence-v2"}
+	base := runtimev2.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: "ws-v2", RunID: "run-v2"}, Decision: runtimecontract.RuntimeDecision{AuthoritySnapshot: runtimecontract.AuthoritySnapshot{ID: "snapshot-1", FocusID: "focus-v2", Action: runtimecontract.RuntimeActionProduceStateChange, RequiredOutputHash: "output-v2", DefinitionRevision: "definition-v2", EvidenceRevision: "evidence-v2"}}}
 	tests := []struct {
 		name     string
 		attempts []runtimecontract.RuntimeCandidateAttemptRecord
@@ -433,6 +434,27 @@ func TestNextRuntimeV2CandidateAttemptResumesPersistedPendingOrFailedState(t *te
 				t.Fatalf("next attempt = %d/%t, want %d/%t", got, ok, tc.want, tc.ok)
 			}
 		})
+	}
+}
+
+func TestNextRuntimeV2CandidateAttemptRejectsLegacyResealRunaway(t *testing.T) {
+	aggregate := runtimeV2Aggregate(t, 100)
+	transaction := aggregate.Decision.AuthorityTransaction()
+	for idx := 0; idx < 3; idx++ {
+		legacy := transaction
+		legacy.AuthoritySnapshotID = fmt.Sprintf("legacy-snapshot-%d", idx)
+		legacy.Attempt = idx
+		aggregate.CandidateAttempts = append(aggregate.CandidateAttempts, runtimecontract.RuntimeCandidateAttemptRecord{
+			Transaction: legacy, Attempt: 0, StablePrefixHash: "stable-prefix-v2",
+			State:   runtimecontract.RuntimeCandidateAttemptStateFailed,
+			Failure: &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: "invalid candidate"},
+		})
+	}
+	if attempt, ok := nextRuntimeV2CandidateAttempt(aggregate); ok {
+		t.Fatalf("legacy runaway offered candidate attempt %d", attempt)
+	}
+	if !runtimeV2CandidateContractExhausted(aggregate) {
+		t.Fatal("legacy runaway was not recognized as exhausted")
 	}
 }
 

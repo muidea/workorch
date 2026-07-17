@@ -151,6 +151,83 @@ func (m *Manager) Status() Status {
 	return m.store.Status()
 }
 
+// ReconcileSourceHighWatermarks closes the readiness blind spot where a
+// projection subscriber misses EventRecordAppended and otherwise compares its
+// own stale counters. Both owner workspace identity and EventStream revisions
+// are read through typed EventHub/owner ports.
+func (m *Manager) ReconcileSourceHighWatermarks(ctx context.Context) error {
+	if m == nil || m.loader == nil || m.store == nil || m.commandHub == nil {
+		return common.ErrInvalidArgument
+	}
+	workspaces, err := m.loader.ListWorkspaces(ctx)
+	if err != nil {
+		return err
+	}
+	workspaceIDs := make([]common.WorkspaceID, 0, len(workspaces))
+	ownerIDs := make([]string, 0, len(workspaces))
+	for _, workspace := range workspaces {
+		workspaceID := strings.TrimSpace(workspace.ID)
+		if workspaceID == "" {
+			continue
+		}
+		workspaceIDs = append(workspaceIDs, common.WorkspaceID(workspaceID))
+		ownerIDs = append(ownerIDs, workspaceID)
+	}
+	sort.Strings(ownerIDs)
+	if !equalProjectionWorkspaceIDs(ownerIDs, m.store.WorkspaceIDs()) {
+		m.store.MarkStale("", 0)
+		m.ScheduleRebuildAll()
+	}
+	if len(workspaceIDs) == 0 {
+		return nil
+	}
+	event := magicevent.NewEventWithContext(
+		eventstreamevents.TopicEventStreamCommandHighWatermarks,
+		"application/workorchd/workspace-view", eventstreamevents.CommandDestination,
+		magicevent.NewHeader(), ctx, eventstreamevents.HighWatermarksCommand{WorkspaceIDs: workspaceIDs},
+	)
+	response := m.commandHub.Send(event)
+	if response == nil {
+		return fmt.Errorf("eventstream high-watermark query returned no response")
+	}
+	if response.Error() != nil {
+		return response.Error()
+	}
+	data, magicErr := response.Get()
+	if magicErr != nil {
+		return fmt.Errorf("eventstream high-watermark query failed: %s", magicErr.Message)
+	}
+	result, ok := data.(eventstreamevents.EventStreamCommandResult)
+	if !ok {
+		return fmt.Errorf("eventstream high-watermark query returned %T", data)
+	}
+	observed := map[common.WorkspaceID]struct{}{}
+	for _, item := range result.HighWatermarks {
+		observed[item.WorkspaceID] = struct{}{}
+		if m.store.ObserveSourceHighWatermark(string(item.WorkspaceID), item.Revision) {
+			m.ScheduleRebuildWorkspace(string(item.WorkspaceID))
+		}
+	}
+	for _, workspaceID := range workspaceIDs {
+		if _, ok := observed[workspaceID]; !ok {
+			return fmt.Errorf("eventstream high-watermark query omitted workspace %s", workspaceID)
+		}
+	}
+	return nil
+}
+
+func equalProjectionWorkspaceIDs(left []string, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for idx := range left {
+		if left[idx] != right[idx] {
+			return false
+		}
+	}
+	return true
+}
+
 func (m *Manager) Metrics() Metrics {
 	if m == nil {
 		return Metrics{}

@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-07-16
+Last Updated: 2026-07-17
 
 
 ## LLM Provider（2026-07-15）
@@ -31,6 +31,10 @@ Last Updated: 2026-07-16
 - `runtimeContractVersion=v2` 仅为审计字段，不是 V1/V2 路由开关。
 - V1 主链已删除：`StagePacket`、`NextAction`、`DispatchNextStep`、`ExecutionContextPatch`、自动 replan successor、V1 progress/terminal checkpoint replay、通用 RuntimeAdapter registry。
 - 完整生产规约由四个协调状态机组成：SM-1 Run lifecycle、SM-2 authority/focus convergence、SM-3 candidate/sealed dispatch transaction、SM-4 drive/recovery/projection delivery；任何 runtime 变更必须通过四状态机变更门禁。
+- candidate attempt 预算按稳定 authority contract identity 计算，不按包含 reducer attempt 的 snapshot ID 计算；历史 reseal runaway 会正式收口为 `candidate_retry_exhausted`。
+- drive 同时要求 persisted revision 与 convergence progress signature 推进；仅增加 retry/snapshot bookkeeping 不算正向进展。
+- terminal delivery 统一为 persisted terminal → Result → Run/Workspace，并对派生交付失败执行幂等重试。
+- projection readiness 通过 EventStream typed high-watermark 查询核对真实 source revision；stale/degraded projection 不再通过 `/readyz`。
 
 一句话架构真值：
 

@@ -99,6 +99,7 @@ func (m *Module) driveRuntimeV2(ctx context.Context, command orchestratorevents.
 	stablePrefixHash := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
 	for transition := 0; transition < runtimeV2DriveTransitionLimit; transition++ {
 		previousRevision := aggregate.StateRevision
+		previousConvergence := runtimev2.RuntimeConvergenceProgressSignature(aggregate)
 		switch aggregate.Decision.Action {
 		case runtimecontract.RuntimeActionAcquirePrerequisite:
 			aggregate, err = m.prepareRuntimeV2Prerequisites(ctx, aggregate)
@@ -120,6 +121,9 @@ func (m *Module) driveRuntimeV2(ctx context.Context, command orchestratorevents.
 		}
 		if aggregate.StateRevision <= previousRevision {
 			return orchestratorevents.DriveRuntimeV2Result{}, fmt.Errorf("%w: Runtime V2 drive made no persisted progress at revision %d", common.ErrConflict, previousRevision)
+		}
+		if runtimev2.RuntimeConvergenceProgressSignature(aggregate) == previousConvergence {
+			return orchestratorevents.DriveRuntimeV2Result{}, fmt.Errorf("%w: Runtime V2 drive changed only retry bookkeeping at revision %d", common.ErrConflict, aggregate.StateRevision)
 		}
 	}
 	return orchestratorevents.DriveRuntimeV2Result{}, fmt.Errorf("%w: Runtime V2 drive exceeded %d persisted transitions", common.ErrConflict, runtimeV2DriveTransitionLimit)
@@ -170,10 +174,7 @@ func (m *Module) driveAndProjectRuntimeV2(ctx context.Context, workspaceID commo
 		if loadErr != nil {
 			return runtimeV2ProjectionFailure(loadErr)
 		}
-		if err := m.projectRuntimeV2Result(ctx, aggregate); err != nil {
-			return runtimeV2ProjectionFailure(err)
-		}
-		return runtimeV2ProjectionFailure(m.bizPtr.ProjectRuntimeV2Terminal(ctx, workspaceID, runID, result.Action, result.Terminal))
+		return runtimeV2ProjectionFailure(m.deliverRuntimeV2Terminal(ctx, aggregate))
 	default:
 		return fmt.Errorf("unsupported Runtime V2 production disposition %q", result.Disposition)
 	}

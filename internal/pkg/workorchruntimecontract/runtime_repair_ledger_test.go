@@ -56,3 +56,22 @@ func TestStableAssessmentFailureSignatureIgnoresMessageNoise(t *testing.T) {
 		t.Fatalf("signature unstable: %q vs %q", left, right)
 	}
 }
+
+func TestRuntimeRepairLedgerProgressResetsWindowsButPreservesFocusTotal(t *testing.T) {
+	ledger := RuntimeRepairLedger{
+		FocusID: "focus-1", SliceID: "slice-1", RepairAttempts: 4,
+		ValidationOnlyRetries: 1, NoProgressCount: 2,
+		SignatureCounts: []RuntimeFailureSignatureCount{{Signature: "same-gap", Count: 3}},
+		LastCycleID:     "cycle-4", ActiveGap: &RuntimeAssessmentGap{Reason: "gap"}, Exhausted: true,
+	}
+	progressed := ledger.NoteProgress("evidence-5")
+	if progressed.RepairAttempts != 4 || progressed.ValidationOnlyRetries != 0 || progressed.NoProgressCount != 0 ||
+		len(progressed.SignatureCounts) != 0 || progressed.LastCycleID != "" || progressed.ActiveGap != nil || progressed.Exhausted ||
+		progressed.LastProgressRevision != "evidence-5" {
+		t.Fatalf("same-focus progress reset = %+v", progressed)
+	}
+	advanced := progressed.ResetForFocus("focus-2", "slice-2", "evidence-6")
+	if advanced.FocusID != "focus-2" || advanced.SliceID != "slice-2" || advanced.RepairAttempts != 0 || advanced.LastProgressRevision != "evidence-6" {
+		t.Fatalf("focus advance reset = %+v", advanced)
+	}
+}

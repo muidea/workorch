@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -13,6 +14,23 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+// deliverRuntimeV2Terminal is the single SM-4 terminal delivery lane. The
+// persisted aggregate remains authority; Result and Run/Workspace are
+// idempotent derived deliveries and may be retried in this order.
+func (m *Module) deliverRuntimeV2Terminal(ctx context.Context, aggregate runtimev2.RuntimeAggregate) error {
+	if m == nil || m.bizPtr == nil || aggregate.Decision.Terminal == nil ||
+		(aggregate.Decision.Action != runtimecontract.RuntimeActionComplete && aggregate.Decision.Action != runtimecontract.RuntimeActionFail) {
+		return common.ErrInvalidArgument
+	}
+	if err := aggregate.Validate(); err != nil {
+		return fmt.Errorf("persisted Runtime V2 terminal aggregate is invalid: %w", err)
+	}
+	if err := m.projectRuntimeV2Result(ctx, aggregate); err != nil {
+		return err
+	}
+	return m.bizPtr.ProjectRuntimeV2Terminal(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Decision.Action, aggregate.Decision.Terminal)
+}
 
 func (m *Module) projectRuntimeV2Result(ctx context.Context, aggregate runtimev2.RuntimeAggregate) error {
 	if m == nil || m.rawEventHub == nil || aggregate.Decision.Terminal == nil {

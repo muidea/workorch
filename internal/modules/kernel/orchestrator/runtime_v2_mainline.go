@@ -191,9 +191,10 @@ func runtimeV2PreviousCandidateFailure(aggregate runtimev2.RuntimeAggregate, can
 	if candidateAttempt != 1 {
 		return nil, fmt.Errorf("runtime candidate attempt must be 0 or 1")
 	}
+	contractID := runtimecontract.StableAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Decision.AuthorityTransaction())
 	for idx := range aggregate.CandidateAttempts {
 		record := aggregate.CandidateAttempts[idx]
-		if record.Transaction.AuthoritySnapshotID != aggregate.Decision.AuthoritySnapshot.ID || record.Attempt != 0 {
+		if runtimecontract.CandidateAttemptAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, record) != contractID || record.Attempt != 0 {
 			continue
 		}
 		if record.State != runtimecontract.RuntimeCandidateAttemptStateFailed || record.Failure == nil {
@@ -222,6 +223,12 @@ func (m *Module) requestAndSealRuntimeV2CandidateWithRetry(
 		}
 		attempt, ok := nextRuntimeV2CandidateAttempt(aggregate)
 		if !ok {
+			if runtimeV2CandidateContractExhausted(aggregate) {
+				return m.bizPtr.RecordRuntimeV2FailureFact(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.FailureFact{
+					Class: runtimecontract.FailureClassCandidateExhausted, Code: "candidate_retry_exhausted",
+					Signature: "candidate-retry-exhausted", Message: "candidate authority contract exhausted its sealed attempt 0/1 budget",
+				})
+			}
 			return runtimev2.RuntimeAggregate{}, fmt.Errorf("%w: no candidate attempt is available for authority snapshot %s", common.ErrConflict, aggregate.Decision.AuthoritySnapshot.ID)
 		}
 		next, err := m.requestAndSealRuntimeV2Candidate(ctx, aggregate, stablePrefixHash, attempt)
@@ -234,19 +241,30 @@ func (m *Module) requestAndSealRuntimeV2CandidateWithRetry(
 }
 
 func nextRuntimeV2CandidateAttempt(aggregate runtimev2.RuntimeAggregate) (int, bool) {
-	snapshotID := aggregate.Decision.AuthoritySnapshot.ID
+	contractID := runtimecontract.StableAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Decision.AuthorityTransaction())
 	var first *runtimecontract.RuntimeCandidateAttemptRecord
 	var second *runtimecontract.RuntimeCandidateAttemptRecord
+	matched := 0
 	for idx := range aggregate.CandidateAttempts {
 		record := &aggregate.CandidateAttempts[idx]
-		if record.Transaction.AuthoritySnapshotID != snapshotID {
+		if runtimecontract.CandidateAttemptAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, *record) != contractID {
 			continue
 		}
+		matched++
 		if record.Attempt == 0 {
+			if first != nil {
+				return 0, false
+			}
 			first = record
 		} else if record.Attempt == 1 {
+			if second != nil {
+				return 0, false
+			}
 			second = record
 		}
+	}
+	if matched > 2 {
+		return 0, false
 	}
 	if first == nil {
 		return 0, true
@@ -264,6 +282,24 @@ func nextRuntimeV2CandidateAttempt(aggregate runtimev2.RuntimeAggregate) (int, b
 	default:
 		return 0, false
 	}
+}
+
+func runtimeV2CandidateContractExhausted(aggregate runtimev2.RuntimeAggregate) bool {
+	contractID := runtimecontract.StableAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Decision.AuthorityTransaction())
+	count := 0
+	for _, record := range aggregate.CandidateAttempts {
+		if runtimecontract.CandidateAttemptAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, record) != contractID {
+			continue
+		}
+		count++
+		if record.State == runtimecontract.RuntimeCandidateAttemptStateAccepted {
+			return false
+		}
+		if record.Attempt == 1 && record.State == runtimecontract.RuntimeCandidateAttemptStateFailed {
+			return true
+		}
+	}
+	return count >= 2
 }
 
 // runtimeV2EnsureCandidateFeasible blocks provider requests when the sealed required

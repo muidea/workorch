@@ -169,10 +169,26 @@ func (l RuntimeRepairLedger) MarkValidationOnlyRetry(policy RuntimeConvergencePo
 func (l RuntimeRepairLedger) NoteProgress(revision string) RuntimeRepairLedger {
 	l = l.Normalized()
 	l.NoProgressCount = 0
+	l.ValidationOnlyRetries = 0
+	l.SignatureCounts = nil
+	l.LastCycleID = ""
+	l.ActiveGap = nil
+	l.Exhausted = false
 	if strings.TrimSpace(revision) != "" {
 		l.LastProgressRevision = strings.TrimSpace(revision)
 	}
 	return l
+}
+
+// ResetForFocus starts a fresh per-focus repair budget after an atomic focus
+// advance. Same-focus progress intentionally does not reset RepairAttempts, so
+// alternating successful operations and new gaps cannot create an unbounded
+// repair loop.
+func (l RuntimeRepairLedger) ResetForFocus(focusID, sliceID, revision string) RuntimeRepairLedger {
+	return RuntimeRepairLedger{
+		FocusID: strings.TrimSpace(focusID), SliceID: strings.TrimSpace(sliceID),
+		LastProgressRevision: strings.TrimSpace(revision),
+	}
 }
 
 func (l RuntimeRepairLedger) NoteNoProgress() RuntimeRepairLedger {

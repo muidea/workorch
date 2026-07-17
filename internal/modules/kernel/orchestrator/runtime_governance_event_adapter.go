@@ -115,7 +115,11 @@ func (m *Module) handleRuntimeV2GovernanceResolution(event magicevent.Event, res
 
 func (m *Module) continueRuntimeV2Governance(ctx context.Context, response orchestratorevents.CommitRuntimeGovernanceResolutionResult, workspaceID common.WorkspaceID, runID common.RunID) error {
 	if response.Action == runtimecontract.RuntimeActionComplete || response.Action == runtimecontract.RuntimeActionFail {
-		return m.bizPtr.ProjectRuntimeV2Terminal(ctx, workspaceID, runID, response.Action, response.Terminal)
+		aggregate, err := m.bizPtr.LoadRuntimeV2(ctx, workspaceID, runID)
+		if err != nil {
+			return err
+		}
+		return m.deliverRuntimeV2Terminal(ctx, aggregate)
 	}
 	if err := m.bizPtr.ActivateRuntimeV2Run(ctx, workspaceID, runID); err != nil {
 		return err

@@ -439,7 +439,7 @@ func (a RuntimeAggregate) Validate() error {
 			return fmt.Errorf("runtime aggregate active dispatch: %w", err)
 		}
 	}
-	if err := runtimecontract.ValidateRuntimeCandidateAttemptRecords(a.CandidateAttempts); err != nil {
+	if err := runtimecontract.ValidateRuntimeCandidateAttemptRecordsForScope(a.Facts.WorkspaceID, a.Facts.RunID, a.CandidateAttempts); err != nil {
 		return err
 	}
 	for _, attempt := range a.CandidateAttempts {

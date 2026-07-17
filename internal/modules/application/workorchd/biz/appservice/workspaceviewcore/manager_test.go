@@ -947,6 +947,43 @@ func TestManagerPublishesProjectionChangedThroughAsyncHub(t *testing.T) {
 	}
 }
 
+func TestManagerReconcilesMissedEventFromOwnerHighWatermark(t *testing.T) {
+	ctx := context.Background()
+	commandHub := magicevent.NewHub(16)
+	t.Cleanup(func() { commandHub.Terminate(ctx) })
+	observer := magicevent.NewSimpleObserver(eventstreamevents.CommandDestination, commandHub)
+	observer.Subscribe(eventstreamevents.TopicEventStreamCommandHighWatermarks, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(eventstreamevents.HighWatermarksCommand)
+		if len(command.WorkspaceIDs) != 1 || command.WorkspaceIDs[0] != "ws-a" {
+			t.Fatalf("high-watermark command = %+v", command)
+		}
+		result.Set(eventstreamevents.EventStreamCommandResult{HighWatermarks: []eventstreamevents.WorkspaceHighWatermark{{WorkspaceID: "ws-a", Revision: 42}}}, nil)
+	})
+	t.Cleanup(func() { observer.Unsubscribe(eventstreamevents.TopicEventStreamCommandHighWatermarks) })
+	scheduled := map[string]int{}
+	manager := NewManager(ManagerOptions{
+		Loader:     fakeProjectionLoader{workspaces: []appmodelcore.Workspace{{ID: "ws-a", State: "active"}}},
+		CommandHub: commandHub,
+		Schedule: func(name string, _ func(context.Context)) bool {
+			scheduled[name]++
+			return true
+		},
+	})
+	manager.store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-a": {Workspace: readmodelcore.Workspace{ID: "ws-a", State: "active"}},
+	}, nil)
+	if err := manager.ReconcileSourceHighWatermarks(ctx); err != nil {
+		t.Fatal(err)
+	}
+	status := manager.Status()
+	if status.State != StateStale || status.SourceEventRevision != 42 || status.ProjectedSourceRevision >= 42 {
+		t.Fatalf("reconciled projection status = %+v", status)
+	}
+	if scheduled["workspace_projection_rebuild"] != 1 {
+		t.Fatalf("workspace rebuild schedules = %d, want 1", scheduled["workspace_projection_rebuild"])
+	}
+}
+
 func TestStoreRunCommandAcceptedProjectsCommandRevision(t *testing.T) {
 	store := NewStore()
 	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{

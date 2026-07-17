@@ -357,6 +357,76 @@ func TestRuntimeControllerCandidateRetryIsPersistedAndLimitedToTwoAttempts(t *te
 	}
 }
 
+func TestRuntimeControllerCandidateFailureDoesNotResealPreExistingExecutionFailure(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, _ := NewRuntimeController(repository)
+	facts := controllerFacts()
+	facts.Failure = &runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassExecutionFailure, Code: "base_hash_mismatch",
+		Signature: "patch-base-hash", Message: "patch baseHash mismatch",
+	}
+	facts.Repair = runtimecontract.RuntimeRepairLedger{FocusID: facts.Focus.ID, RepairAttempts: 1}
+	initialized, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: "candidate schema does not satisfy required output",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.Decision.AuthoritySnapshot != pending.Decision.AuthoritySnapshot || failed.Decision.AuthoritySnapshot != initialized.Decision.AuthoritySnapshot {
+		t.Fatalf("attempt 0 failure re-sealed authority: initialized=%+v pending=%+v failed=%+v", initialized.Decision.AuthoritySnapshot, pending.Decision.AuthoritySnapshot, failed.Decision.AuthoritySnapshot)
+	}
+	if failed.Facts.Failure == nil || failed.Facts.Failure.Signature != "patch-base-hash" {
+		t.Fatalf("attempt 0 failure replaced execution failure: %+v", failed.Facts.Failure)
+	}
+	retried, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(retried.CandidateAttempts) != 2 || retried.CandidateAttempts[0].AuthorityContractID == "" || retried.CandidateAttempts[0].AuthorityContractID != retried.CandidateAttempts[1].AuthorityContractID {
+		t.Fatalf("candidate retry did not preserve authority contract identity: %+v", retried.CandidateAttempts)
+	}
+}
+
+func TestRuntimeControllerAllowsOneLegacySameContractRetryAfterReseal(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, _ := NewRuntimeController(repository)
+	if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	failed, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: "legacy invalid candidate",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed.CandidateAttempts[0].AuthorityContractID = ""
+	resealed, err := ReduceRuntimeState(failed.Facts, &failed.Decision.AuthoritySnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed.Decision = resealed
+	failed.StateRevision++
+	repository.aggregate = &failed
+	retried, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(retried.CandidateAttempts) != 2 || retried.CandidateAttempts[1].AuthorityContractID == "" {
+		t.Fatalf("legacy retry = %+v", retried.CandidateAttempts)
+	}
+}
+
 func TestRuntimeControllerCandidateExhaustionWithGovernanceCapabilityIsTerminal(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)

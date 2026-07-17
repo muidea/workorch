@@ -28,9 +28,16 @@ func registerSystemRoutes(router engine.RouteRegistry, state *serverState) {
 			writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: err.Error()})
 			return
 		}
-		projection := state.workspaceProjectionStatus()
+		projection, projectionErr := state.reconciledWorkspaceProjectionStatus(r.Context())
+		if projectionErr != nil {
+			writeJSON(w, http.StatusServiceUnavailable, statusResponse{
+				Service: "workorch", Status: "not_ready", Projection: &projection,
+				Diagnostics: state.schedulerDiagnosticsFor("", ""),
+			})
+			return
+		}
 		switch projection.State {
-		case workspaceProjectionStateReady, workspaceProjectionStateStale, workspaceProjectionStateDegraded:
+		case workspaceProjectionStateReady:
 		default:
 			writeJSON(w, http.StatusServiceUnavailable, statusResponse{
 				Service:     "workorch",

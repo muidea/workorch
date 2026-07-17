@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"sync"
+	"time"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -294,11 +295,18 @@ func (m *Module) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.
 		return nil
 	}
 	drive := func(driveCtx context.Context) {
-		defer m.endRuntimeV2Drive(driveKey)
+		retryDelivery := false
+		defer func() {
+			m.endRuntimeV2Drive(driveKey)
+			if retryDelivery {
+				m.scheduleRuntimeV2DeliveryRetry(driveCtx, workspaceID, runID)
+			}
+		}()
 		if err := m.driveAndProjectRuntimeV2(driveCtx, workspaceID, runID); err != nil && !errors.Is(err, context.Canceled) {
 			var projectionErr *runtimeV2ProjectionError
 			if errors.As(err, &projectionErr) {
 				slog.Warn("workorch Runtime V2 projection failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", err)
+				retryDelivery = true
 				return
 			}
 			slog.Warn("workorch Runtime V2 drive failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", err)
@@ -314,12 +322,9 @@ func (m *Module) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.
 				slog.Warn("workorch Runtime V2 drive failure did not reduce to terminal", "source", source, "workspaceID", workspaceID, "runID", runID)
 				return
 			}
-			if projectErr := m.projectRuntimeV2Result(driveCtx, aggregate); projectErr != nil {
-				slog.Warn("workorch Runtime V2 drive failure result projection failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", projectErr)
-				return
-			}
-			if projectErr := m.bizPtr.ProjectRuntimeV2Terminal(driveCtx, workspaceID, runID, aggregate.Decision.Action, aggregate.Decision.Terminal); projectErr != nil {
-				slog.Warn("workorch Runtime V2 drive failure terminal projection failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", projectErr)
+			if projectErr := m.deliverRuntimeV2Terminal(driveCtx, aggregate); projectErr != nil {
+				slog.Warn("workorch Runtime V2 drive failure delivery failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", projectErr)
+				retryDelivery = true
 			}
 		}
 	}
@@ -333,6 +338,27 @@ func (m *Module) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.
 		return err
 	}
 	return nil
+}
+
+func (m *Module) scheduleRuntimeV2DeliveryRetry(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) {
+	if m == nil || m.backgroundRoutine == nil || workspaceID == "" || runID == "" {
+		return
+	}
+	retryCtx := orchestratorBackgroundContext(ctx, workspaceID)
+	if err := m.backgroundRoutine.AsyncFunction(func() {
+		timer := time.NewTimer(time.Second)
+		defer timer.Stop()
+		select {
+		case <-retryCtx.Done():
+			return
+		case <-timer.C:
+		}
+		if err := m.scheduleRuntimeV2Drive(retryCtx, workspaceID, runID, "terminal_delivery_retry"); err != nil && !errors.Is(err, context.Canceled) {
+			slog.Warn("workorch Runtime V2 delivery retry scheduling failed", "workspaceID", workspaceID, "runID", runID, "err", err)
+		}
+	}); err != nil {
+		slog.Warn("workorch Runtime V2 delivery retry was not accepted", "workspaceID", workspaceID, "runID", runID, "err", err)
+	}
 }
 
 func (m *Module) beginRuntimeV2Drive(key string) bool {

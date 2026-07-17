@@ -488,6 +488,42 @@ func (s *Store) MarkStale(workspaceID string, sourceRevision int64) {
 	s.updatedAt = time.Now().UTC()
 }
 
+func (s *Store) WorkspaceIDs() []string {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ret := append([]string(nil), s.workspaceOrder...)
+	sort.Strings(ret)
+	return ret
+}
+
+// ObserveSourceHighWatermark compares the projection with the EventStream
+// owner's authoritative persisted revision. It returns true only when a
+// workspace rebuild is required.
+func (s *Store) ObserveSourceHighWatermark(workspaceID string, sourceRevision int64) bool {
+	if s == nil || strings.TrimSpace(workspaceID) == "" || sourceRevision < 0 {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.entryForUpdateLocked(workspaceID)
+	if sourceRevision > s.sourceRevision {
+		s.sourceRevision = sourceRevision
+	}
+	if sourceRevision > entry.SourceRevision {
+		entry.SourceRevision = sourceRevision
+	}
+	if sourceRevision <= entry.ProjectedSourceRevision {
+		return false
+	}
+	entry.Stale = true
+	entry.StaleReason = "source_high_watermark"
+	s.updatedAt = time.Now().UTC()
+	return true
+}
+
 func (s *Store) ReplaceAll(workspaces []appmodelcore.Workspace, snapshots map[string]readmodelcore.WorkspaceSnapshot, degraded error) {
 	if s == nil {
 		return

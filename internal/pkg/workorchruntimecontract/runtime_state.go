@@ -1,6 +1,8 @@
 package workorchruntimecontract
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -42,11 +44,12 @@ const (
 )
 
 type RuntimeCandidateAttemptRecord struct {
-	Transaction      AuthorityTransaction
-	Attempt          int
-	StablePrefixHash string
-	State            RuntimeCandidateAttemptState
-	Failure          *RuntimeCandidateFailure
+	AuthorityContractID string
+	Transaction         AuthorityTransaction
+	Attempt             int
+	StablePrefixHash    string
+	State               RuntimeCandidateAttemptState
+	Failure             *RuntimeCandidateFailure
 }
 
 // RuntimeStateRecord 是 Runtime V2 在 Run owner 中持久化的唯一正式状态。
@@ -108,7 +111,7 @@ func (r RuntimeStateRecord) Validate() error {
 			return fmt.Errorf("runtime state active dispatch: %w", err)
 		}
 	}
-	if err := ValidateRuntimeCandidateAttemptRecords(r.CandidateAttempts); err != nil {
+	if err := ValidateRuntimeCandidateAttemptRecordsForScope(r.Facts.WorkspaceID, r.Facts.RunID, r.CandidateAttempts); err != nil {
 		return err
 	}
 	if err := ValidateRuntimeGovernanceResolutionRecords(r.GovernanceResolutions); err != nil {
@@ -201,7 +204,7 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 	for snapshotID, attempts := range bySnapshot {
 		first, hasFirst := runtimeCandidateAttemptByNumber(attempts, 0)
 		second, hasSecond := runtimeCandidateAttemptByNumber(attempts, 1)
-		if hasSecond && (!hasFirst || first.State != RuntimeCandidateAttemptStateFailed || first.Transaction != second.Transaction || first.StablePrefixHash != second.StablePrefixHash) {
+		if hasSecond && hasFirst && (first.State != RuntimeCandidateAttemptStateFailed || first.Transaction != second.Transaction || first.StablePrefixHash != second.StablePrefixHash) {
 			return fmt.Errorf("runtime candidate snapshot %s attempt 1 is not a same-contract retry", snapshotID)
 		}
 		if hasFirst && first.State == RuntimeCandidateAttemptStateAccepted && hasSecond {
@@ -209,6 +212,78 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 		}
 	}
 	return nil
+}
+
+// ValidateRuntimeCandidateAttemptRecordsForScope validates new records against
+// their stable authority contract identity while preserving read compatibility
+// for legacy records that predate AuthorityContractID.
+func ValidateRuntimeCandidateAttemptRecordsForScope(workspaceID common.WorkspaceID, runID common.RunID, values []RuntimeCandidateAttemptRecord) error {
+	if err := ValidateRuntimeCandidateAttemptRecords(values); err != nil {
+		return err
+	}
+	byContract := map[string][]RuntimeCandidateAttemptRecord{}
+	explicitContract := map[string]bool{}
+	for _, value := range values {
+		contractID := CandidateAttemptAuthorityContractID(workspaceID, runID, value)
+		byContract[contractID] = append(byContract[contractID], value)
+		if strings.TrimSpace(value.AuthorityContractID) == "" {
+			continue
+		}
+		explicitContract[contractID] = true
+		if value.AuthorityContractID != contractID || value.AuthorityContractID != StableAuthorityContractID(workspaceID, runID, value.Transaction) {
+			return fmt.Errorf("runtime candidate authority contract id mismatch")
+		}
+	}
+	for contractID, attempts := range byContract {
+		// Legacy-only groups remain loadable even if an old bug re-sealed the
+		// same contract repeatedly. Drive detects and formally exhausts them.
+		if !explicitContract[contractID] {
+			continue
+		}
+		attemptCounts := [2]int{}
+		for _, attempt := range attempts {
+			attemptCounts[attempt.Attempt]++
+		}
+		first, hasFirst := runtimeCandidateAttemptByNumber(attempts, 0)
+		second, hasSecond := runtimeCandidateAttemptByNumber(attempts, 1)
+		if len(attempts) > 2 || attemptCounts[0] > 1 || attemptCounts[1] > 1 || (hasSecond && (!hasFirst || first.State != RuntimeCandidateAttemptStateFailed || !SameAuthorityContract(first.Transaction, second.Transaction) || first.StablePrefixHash != second.StablePrefixHash)) {
+			return fmt.Errorf("runtime candidate authority contract %s exceeds the sealed attempt 0/1 transaction", contractID)
+		}
+		if hasFirst && first.State == RuntimeCandidateAttemptStateAccepted && hasSecond {
+			return fmt.Errorf("runtime candidate authority contract %s retried after accepted attempt 0", contractID)
+		}
+	}
+	return nil
+}
+
+// StableAuthorityContractID identifies the candidate retry contract without
+// reducer bookkeeping identity. It remains stable if legacy data re-sealed an
+// equivalent authority snapshot with a different snapshot attempt.
+func StableAuthorityContractID(workspaceID common.WorkspaceID, runID common.RunID, transaction AuthorityTransaction) string {
+	h := sha256.New()
+	writeHashString(h, string(workspaceID))
+	writeHashString(h, string(runID))
+	writeHashString(h, transaction.FocusID)
+	writeHashString(h, string(transaction.Action))
+	writeHashString(h, transaction.RequiredOutputHash)
+	writeHashString(h, transaction.DefinitionRevision)
+	writeHashString(h, transaction.EvidenceRevision)
+	return "authority-contract-" + hex.EncodeToString(h.Sum(nil))[:20]
+}
+
+func SameAuthorityContract(left AuthorityTransaction, right AuthorityTransaction) bool {
+	return left.FocusID == right.FocusID &&
+		left.Action == right.Action &&
+		left.RequiredOutputHash == right.RequiredOutputHash &&
+		left.DefinitionRevision == right.DefinitionRevision &&
+		left.EvidenceRevision == right.EvidenceRevision
+}
+
+func CandidateAttemptAuthorityContractID(workspaceID common.WorkspaceID, runID common.RunID, record RuntimeCandidateAttemptRecord) string {
+	if value := strings.TrimSpace(record.AuthorityContractID); value != "" {
+		return value
+	}
+	return StableAuthorityContractID(workspaceID, runID, record.Transaction)
 }
 
 func runtimeCandidateAttemptByNumber(values []RuntimeCandidateAttemptRecord, attempt int) (RuntimeCandidateAttemptRecord, bool) {

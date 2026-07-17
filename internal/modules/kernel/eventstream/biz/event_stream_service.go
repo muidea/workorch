@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -43,6 +44,38 @@ var eventRecordIDSequence atomic.Uint64
 
 func NewService(repo repository.EventRecordRepository, commandHub magicevent.Hub) *Service {
 	return &Service{repo: repo, commandHub: commandHub}
+}
+
+func (s *Service) HighWatermarks(ctx context.Context, workspaceIDs []common.WorkspaceID) ([]eventstreamevents.WorkspaceHighWatermark, error) {
+	if s == nil || s.repo == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	revisions := map[common.WorkspaceID]int64{}
+	for _, workspaceID := range workspaceIDs {
+		if workspaceID == "" {
+			continue
+		}
+		revisions[workspaceID] = 0
+	}
+	items, err := s.repo.List(ctx, repository.EventRecordQuery{})
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		current, ok := revisions[item.WorkspaceID]
+		if ok && item.Revision > current {
+			revisions[item.WorkspaceID] = item.Revision
+		}
+	}
+	ret := make([]eventstreamevents.WorkspaceHighWatermark, 0, len(revisions))
+	for workspaceID, revision := range revisions {
+		ret = append(ret, eventstreamevents.WorkspaceHighWatermark{WorkspaceID: workspaceID, Revision: revision})
+	}
+	sort.Slice(ret, func(i, j int) bool { return string(ret[i].WorkspaceID) < string(ret[j].WorkspaceID) })
+	return ret, nil
 }
 
 func (s *Service) Start() error {

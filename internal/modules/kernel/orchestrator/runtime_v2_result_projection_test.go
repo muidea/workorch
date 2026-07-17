@@ -1,12 +1,77 @@
 package orchestrator
 
 import (
+	"context"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
+	resultmodule "github.com/muidea/workorch/internal/modules/blocks/result"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestDeliverRuntimeV2TerminalCreatesResultAndProjectsOwnersIdempotently(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	resultRepo := memory.NewResultRepository()
+	resultOwner := resultmodule.New()
+	if err := resultOwner.Configure(resultmodule.Dependencies{
+		Results: resultRepo, Artifacts: memory.NewArtifactRepository(), EventHub: hub,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := resultOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = resultOwner.Stop(ctx) })
+	aggregate := runtimeV2Aggregate(t, 2)
+	aggregate.Facts.Failure = &runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_contract_defect",
+		Signature: "contract-defect", Message: "sealed contract mismatch",
+	}
+	decision, err := runtimev2.ReduceRuntimeState(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Decision = decision
+	runs := memory.NewRunRepository()
+	workspaces := memory.NewWorkspaceRepository()
+	record := runtimeStateRecordFromAggregate(aggregate)
+	if err := runs.Create(ctx, &runmodel.Run{
+		ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive,
+		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2, RuntimeState: &record,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
+		t.Fatal(err)
+	}
+	biz := orchestratorbiz.NewRuntimeOrchestrator(runs, workspaces, nil, nil)
+	module := &Module{bizPtr: biz, rawEventHub: hub}
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := module.deliverRuntimeV2Terminal(ctx, aggregate); err != nil {
+			t.Fatalf("delivery attempt %d: %v", attempt, err)
+		}
+	}
+	item, err := resultRepo.Get(ctx, "ws-v2/run-v2/result/dod-assessment")
+	if err != nil || item.State != common.ResultStateRejected {
+		t.Fatalf("result = %+v err=%v", item, err)
+	}
+	run, err := runs.Get(ctx, "run-v2")
+	if err != nil || run.State != common.RunStateFailed {
+		t.Fatalf("run = %+v err=%v", run, err)
+	}
+	workspace, err := workspaces.Get(ctx, "ws-v2")
+	if err != nil || workspace.ActiveRunID != "" {
+		t.Fatalf("workspace = %+v err=%v", workspace, err)
+	}
+}
 
 func TestRuntimeV2ResultProjectionBuildsAcceptedDoDAssessment(t *testing.T) {
 	aggregate := runtimev2.RuntimeAggregate{

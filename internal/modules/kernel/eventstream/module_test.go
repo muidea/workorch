@@ -177,3 +177,36 @@ func TestPurgeWorkspaceCommandAcceptsContractPayload(t *testing.T) {
 		t.Fatalf("event records after purge = %d, want 0", len(items))
 	}
 }
+
+func TestHighWatermarksCommandReadsPersistedWorkspaceRevisions(t *testing.T) {
+	ctx := context.Background()
+	rawHub := magicevent.NewHub(16)
+	repo := memory.NewEventRecordRepository()
+	for _, item := range []*eventstreammodel.EventRecord{
+		{ID: "event-a-1", WorkspaceID: "ws-a", Topic: "/test", Revision: 1},
+		{ID: "event-a-7", WorkspaceID: "ws-a", Topic: "/test", Revision: 7},
+		{ID: "event-b-3", WorkspaceID: "ws-b", Topic: "/test", Revision: 3},
+	} {
+		if err := repo.Append(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	module := New()
+	if err := module.Configure(Dependencies{EventRecords: repo, EventHub: rawHub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+	response, err := sendEventStreamTestCommand(ctx, rawHub, eventstreamevents.TopicEventStreamCommandHighWatermarks, eventstreamevents.HighWatermarksCommand{
+		WorkspaceIDs: []common.WorkspaceID{"ws-b", "ws-a"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.HighWatermarks) != 2 || response.HighWatermarks[0].WorkspaceID != "ws-a" || response.HighWatermarks[0].Revision != 7 ||
+		response.HighWatermarks[1].WorkspaceID != "ws-b" || response.HighWatermarks[1].Revision != 3 {
+		t.Fatalf("high watermarks = %+v", response.HighWatermarks)
+	}
+}

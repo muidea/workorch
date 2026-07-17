@@ -79,6 +79,20 @@ func (s *serverState) workspaceProjectionStatus() workspaceProjectionStatus {
 	return s.workspaceProjection.Status()
 }
 
+func (s *serverState) reconciledWorkspaceProjectionStatus(ctx context.Context) (workspaceProjectionStatus, error) {
+	if s == nil || s.workspaceProjection == nil {
+		return workspaceProjectionStatus{State: workspaceProjectionStateFailed, Error: "workspace projection is not configured"}, common.ErrConflict
+	}
+	if err := s.workspaceProjection.ReconcileSourceHighWatermarks(ctx); err != nil {
+		status := s.workspaceProjection.Status()
+		status.State = workspaceProjectionStateDegraded
+		status.Degraded = true
+		status.Error = err.Error()
+		return status, err
+	}
+	return s.workspaceProjection.Status(), nil
+}
+
 func (s *serverState) listProjectedWorkspaces() ([]appservice.Workspace, workspaceProjectionStatus, error) {
 	if s == nil || s.workspaceProjection == nil {
 		return nil, workspaceProjectionStatus{State: workspaceProjectionStateFailed}, common.ErrConflict

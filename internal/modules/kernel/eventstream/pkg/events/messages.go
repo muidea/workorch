@@ -3,6 +3,7 @@ package events
 import (
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/common"
 	eventstreamcontracts "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/contracts"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
@@ -16,9 +17,19 @@ type ListEventsCommand struct {
 
 type PurgeWorkspaceCommand = eventstreamcontracts.PurgeWorkspaceCommand
 
+type HighWatermarksCommand struct {
+	WorkspaceIDs []common.WorkspaceID
+}
+
+type WorkspaceHighWatermark struct {
+	WorkspaceID common.WorkspaceID
+	Revision    int64
+}
+
 type EventStreamCommandResult struct {
-	Events       []EventRecordData
-	DeletedCount int
+	Events         []EventRecordData
+	HighWatermarks []WorkspaceHighWatermark
+	DeletedCount   int
 }
 
 type EventRecordAppendedData struct {
@@ -28,6 +39,7 @@ type EventRecordAppendedData struct {
 func MessageContracts() []eventcontract.MessageContract {
 	return eventcontract.MessageContracts(
 		eventcontract.CommandTopic[ListEventsCommand, EventStreamCommandResult]("eventstream", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicEventStreamCommandList),
+		eventcontract.CommandTopic[HighWatermarksCommand, EventStreamCommandResult]("eventstream", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicEventStreamCommandHighWatermarks),
 		eventcontract.CommandTopic[PurgeWorkspaceCommand, EventStreamCommandResult]("eventstream", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicEventStreamCommandPurgeWorkspace),
 		eventcontract.DataTopic[EventRecordAppendedData]("eventstream", definitionPackage, eventcontract.LanePolicyState, TopicEventStreamRecordAppended),
 	)
