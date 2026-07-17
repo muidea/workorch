@@ -94,7 +94,8 @@ func runtimeV2DefinitionChangeSet(input map[string]any, effectiveKey, latestKey,
 
 func runtimeV2ExecutionContract(input map[string]any) runtimecontract.RuntimeExecutionContract {
 	ret := runtimecontract.RuntimeExecutionContract{
-		StateChangePolicy: runtimecontract.RuntimeStateChangePolicy(runtimeV2String(input["stateChangePolicy"])),
+		StateChangePolicy:         runtimecontract.RuntimeStateChangePolicy(runtimeV2String(input["stateChangePolicy"])),
+		MaxRepairAttemptsPerFocus: runtimeV2Int(input["maxRepairAttemptsPerFocus"]),
 	}
 	for _, item := range runtimeV2MapSlice(input["capabilityUsagePolicies"]) {
 		ret.CapabilityUsagePolicies = append(ret.CapabilityUsagePolicies, runtimecontract.RuntimeCapabilityUsagePolicy{
@@ -104,6 +105,21 @@ func runtimeV2ExecutionContract(input map[string]any) runtimecontract.RuntimeExe
 			TriggerStages: runtimeV2Strings(item["triggerStages"]), TriggerSignals: runtimeV2Strings(item["triggerSignals"]),
 			PreferredTools: runtimeV2Strings(item["preferredTools"]), RequiredAfterKinds: runtimeV2Strings(item["requiredAfterKinds"]),
 			Notes: runtimeV2Strings(item["notes"]),
+		})
+	}
+	for _, item := range runtimeV2MapSlice(input["validationPolicies"]) {
+		ret.ValidationPolicies = append(ret.ValidationPolicies, runtimecontract.RuntimeValidationPolicy{
+			ID: runtimeV2String(item["id"]), Scope: runtimeV2String(item["scope"]),
+			AppliesToEvidenceKinds: runtimeV2Strings(item["appliesToEvidenceKinds"]),
+			ValidationSafetyClass:  runtimeV2String(item["validationSafetyClass"]),
+			DiscoveryRequired:      runtimeV2Bool(item["discoveryRequired"]), DiscoverySources: runtimeV2Strings(item["discoverySources"]),
+			AllowedExecutionModes:                      runtimeV2Strings(item["allowedExecutionModes"]),
+			ValidationFailureImpliesStateChange:        runtimeV2Bool(item["validationFailureImpliesStateChange"]),
+			ImplementationGapDiagnosticClasses:         runtimeV2Strings(item["implementationGapDiagnosticClasses"]),
+			MaxValidationOnlyRetriesPerFocus:           runtimeV2Int(item["maxValidationOnlyRetriesPerFocus"]),
+			PreferMinimalPatchBeforeRepeatedValidation: runtimeV2Bool(item["preferMinimalPatchBeforeRepeatedValidation"]),
+			IfNoTargetRoute:                            runtimeV2String(item["ifNoTargetRoute"]), ValidationScratchRequired: runtimeV2Bool(item["validationScratchRequired"]),
+			AllowedValidationModes: runtimeV2Strings(item["allowedValidationModes"]), Notes: runtimeV2Strings(item["notes"]),
 		})
 	}
 	profileContracts := runtimeV2Map(input["profileContracts"])

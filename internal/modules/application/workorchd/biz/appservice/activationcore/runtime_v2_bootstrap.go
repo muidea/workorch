@@ -68,6 +68,12 @@ func RuntimeV2Bootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defi
 		}
 	}
 	convergencePolicy := runtimecontract.DefaultRuntimeConvergencePolicy()
+	if maxAttempts := activation.ExecutionContract.MaxRepairAttemptsPerFocus; maxAttempts > 0 {
+		convergencePolicy.MaxRepairAttemptsPerFocus = maxAttempts
+	}
+	if maxRetries, ok := runtimecontract.RuntimeValidationRetryLimit(activation.ExecutionContract.ValidationPolicies, runtimecontract.EvidenceKindValidation); ok {
+		convergencePolicy.MaxValidationOnlyRetriesPerFocus = maxRetries
+	}
 	if activation.ExecutionContract.AcceptanceSlicePolicy != nil {
 		maxItems := activation.ExecutionContract.AcceptanceSlicePolicy.Normalized().MaxWorkItems
 		if maxItems > 0 {

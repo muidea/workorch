@@ -190,3 +190,16 @@ func TestMapConvergenceStatusMarksNextActivationWhenTerminalWithRemainingCoverag
 		t.Fatalf("coverage counts = %d/%d", got.ClosedCoverageItemCount, got.RemainingCoverageItemCount)
 	}
 }
+
+func TestMapConvergenceStatusDoesNotReportRequiredEvidenceAsMissingDuringAssessment(t *testing.T) {
+	status := MapConvergenceStatus(readmodelcore.RunSnapshot{
+		Run: readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: "active"},
+		Acceptance: readmodelcore.AcceptanceProjection{CurrentFocus: &readmodelcore.CoverageFocus{
+			ID: "focus-1", RequiredEvidenceKinds: []string{"validation"}, AcceptedEvidenceRefs: []string{"evidence-1"}, State: "need_assessment",
+		}},
+		TaskProgress: readmodelcore.TaskProgress{RuntimeV2: &readmodelcore.RuntimeV2Progress{CurrentFocusID: "focus-1", CurrentAction: "produce_assessment", AcceptedEvidenceCount: 1}},
+	})
+	if status == nil || len(status.MissingEvidenceKinds) != 0 || status.NextActionKind != "produce_assessment" {
+		t.Fatalf("convergence status = %+v", status)
+	}
+}

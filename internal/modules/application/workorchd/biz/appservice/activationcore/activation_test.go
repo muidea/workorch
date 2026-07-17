@@ -256,6 +256,21 @@ func TestWorkspaceExecutionContractIncludesAcceptanceSlicePolicyFromHints(t *tes
 	}
 }
 
+func TestWorkspaceExecutionContractIncludesValidationPoliciesFromHints(t *testing.T) {
+	workspace := &workspacemodel.Workspace{ID: "ws-validation", TemplateID: "template-validation"}
+	reader := fakeWorkspaceTemplateReader{item: &repository.WorkspaceTemplate{
+		ID: "template-validation",
+		ContextHints: mustActivationPayload(t, map[string]any{"validationPolicies": []any{map[string]any{
+			"id": "validation-1", "scope": "workspace_profile", "appliesToEvidenceKinds": []any{"validation"}, "maxValidationOnlyRetriesPerFocus": 2,
+		}}}),
+	}}
+	contract := WorkspaceExecutionContract(context.Background(), reader, workspace)
+	policies, ok := contract["validationPolicies"].([]any)
+	if !ok || len(policies) != 1 || policies[0].(map[string]any)["id"] != "validation-1" {
+		t.Fatalf("executionContract.validationPolicies = %+v", contract["validationPolicies"])
+	}
+}
+
 func TestWorkspaceExecutionContractIncludesTemplateStagePoliciesFromHints(t *testing.T) {
 	workspace := &workspacemodel.Workspace{
 		ID:         "ws-stage-policy",

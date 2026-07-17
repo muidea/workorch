@@ -86,6 +86,29 @@ func TestRuntimeCandidatePrefixChangesWithTemplateStagePolicy(t *testing.T) {
 	}
 }
 
+func TestRuntimeCandidatePrefixChangesWithSealedValidationAndSlicePolicies(t *testing.T) {
+	definition := RuntimeDefinitionContext{
+		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/read"},
+	}
+	base := RuntimeExecutionContract{
+		MaxRepairAttemptsPerFocus: 7,
+		ValidationPolicies: []RuntimeValidationPolicy{{
+			ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{EvidenceKindValidation}, MaxValidationOnlyRetriesPerFocus: 2,
+		}},
+		AcceptanceSlicePolicy: &RuntimeAcceptanceSlicePolicy{SchemaVersion: RuntimeAcceptanceSlicePolicySchemaV1, MaxWorkItems: 4},
+	}
+	changedValidation := base.Normalized()
+	changedValidation.ValidationPolicies[0].MaxValidationOnlyRetriesPerFocus = 3
+	if StableRuntimeCandidatePrefixHashWithExecutionContract(definition, base) == StableRuntimeCandidatePrefixHashWithExecutionContract(definition, changedValidation) {
+		t.Fatal("candidate prefix did not change with validation policy")
+	}
+	changedSlice := base.Normalized()
+	changedSlice.AcceptanceSlicePolicy.MaxWorkItems = 8
+	if StableRuntimeCandidatePrefixHashWithExecutionContract(definition, base) == StableRuntimeCandidatePrefixHashWithExecutionContract(definition, changedSlice) {
+		t.Fatal("candidate prefix did not change with acceptance slice policy")
+	}
+}
+
 func TestRuntimeCandidatePrefixChangesWithDefinitionChangeImpact(t *testing.T) {
 	definition := RuntimeDefinitionContext{
 		Revision: "definition-1", GoalID: "goal-2", GoalDefinition: "goal", DoDID: "dod-2", DoDDefinition: "dod", CapabilityContract: []string{"file/edit"},

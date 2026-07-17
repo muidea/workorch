@@ -1,6 +1,7 @@
 package activationcore
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -348,6 +349,21 @@ func TestCompileRuntimeV2CoverageRejectsInvalidSliceMax(t *testing.T) {
 	)
 	if err == nil || !strings.Contains(err.Error(), "maxWorkItems") {
 		t.Fatalf("expected maxWorkItems validation failure, got %v", err)
+	}
+}
+
+func TestCompileRuntimeV2CoverageRejectsUnboundedFocusCount(t *testing.T) {
+	items := make([]string, runtimecontract.RuntimeAcceptanceFocusMaxCount+1)
+	for idx := range items {
+		items[idx] = fmt.Sprintf("requirement-%03d", idx+1)
+	}
+	_, err := compileRuntimeV2Coverage(
+		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
+		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: items},
+		runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+	)
+	if err == nil || !strings.Contains(err.Error(), "exceeding neutral limit") {
+		t.Fatalf("expected focus-count guard failure, got %v", err)
 	}
 }
 

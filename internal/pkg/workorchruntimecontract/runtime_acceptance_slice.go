@@ -18,6 +18,7 @@ const (
 	RuntimeAcceptanceSliceMaxWorkItemsMin = 1
 	RuntimeAcceptanceSliceMaxWorkItemsMax = 32
 	RuntimeAcceptanceSliceDefaultMaxItems = 1
+	RuntimeAcceptanceFocusMaxCount        = 64
 )
 
 // RuntimeAcceptanceSlicePolicy is the typed activation policy for grouping coverage

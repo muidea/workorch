@@ -11,18 +11,20 @@ import (
 )
 
 type RuntimeCandidateContext struct {
-	WorkspaceID        common.WorkspaceID
-	RunID              common.RunID
-	DefinitionRevision string
-	EvidenceRevision   string
-	Focus              CoverageFocus
-	RemainingFocuses   []CoverageFocus
-	Evidence           EvidenceLedger
-	Assessments        []RuntimeAssessmentFact
-	Failure            *FailureFact
-	Capabilities       RuntimeCapabilities
-	Resources          RuntimeResourceFacts
-	Activation         RuntimeActivationContext
+	WorkspaceID              common.WorkspaceID
+	RunID                    common.RunID
+	DefinitionRevision       string
+	EvidenceRevision         string
+	Focus                    CoverageFocus
+	RemainingFocuses         []CoverageFocus
+	Evidence                 EvidenceLedger
+	Assessments              []RuntimeAssessmentFact
+	Failure                  *FailureFact
+	AdmissibleOperationKinds []string
+	RejectedOperationShapes  []RuntimeRejectedOperationShape
+	Capabilities             RuntimeCapabilities
+	Resources                RuntimeResourceFacts
+	Activation               RuntimeActivationContext
 }
 
 func RuntimeCandidateContextFromFacts(facts RuntimeFacts) RuntimeCandidateContext {
@@ -34,6 +36,13 @@ func RuntimeCandidateContextFromFacts(facts RuntimeFacts) RuntimeCandidateContex
 		Assessments: facts.Assessments, Failure: facts.Failure,
 		Capabilities: facts.Capabilities, Resources: facts.Resources, Activation: facts.Activation,
 	}.Normalized()
+}
+
+func RuntimeCandidateContextForDecision(facts RuntimeFacts, decision RuntimeDecision, completedDispatches []RuntimeDispatchRecord) RuntimeCandidateContext {
+	context := RuntimeCandidateContextFromFacts(facts)
+	context.AdmissibleOperationKinds = FeasibleOperationKinds(decision.RequiredOutput, facts.Capabilities)
+	context.RejectedOperationShapes = ActiveRejectedOperationShapes(facts, completedDispatches)
+	return context.Normalized()
 }
 
 func (c RuntimeCandidateContext) Normalized() RuntimeCandidateContext {
@@ -51,6 +60,8 @@ func (c RuntimeCandidateContext) Normalized() RuntimeCandidateContext {
 	c.Evidence = facts.Evidence
 	c.Assessments = facts.Assessments
 	c.Failure = facts.Failure
+	c.AdmissibleOperationKinds = normalizeStrings(c.AdmissibleOperationKinds)
+	c.RejectedOperationShapes = NormalizeRuntimeRejectedOperationShapes(c.RejectedOperationShapes)
 	c.Capabilities = facts.Capabilities
 	c.Resources = facts.Resources
 	c.Activation = facts.Activation

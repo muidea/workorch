@@ -263,6 +263,9 @@ func missingEvidenceKinds(facts runtimecontract.RuntimeFacts) []string {
 // anti-replay and only waste candidate budget. Re-validation is allowed only after accepted
 // state-change progress supersedes the failed validation lineage.
 func needsStateChangeAfterRejectedValidation(facts runtimecontract.RuntimeFacts) bool {
+	if !runtimecontract.RuntimeValidationFailureRequiresStateChange(facts.Activation.ExecutionContract.ValidationPolicies, runtimecontract.EvidenceKindValidation) {
+		return false
+	}
 	validationRevision, ok := latestRejectedValidationRevision(facts)
 	if !ok {
 		return false
@@ -346,7 +349,7 @@ func repairableAssessmentDecision(base runtimecontract.RuntimeDecision, facts ru
 	}
 	if wantValidationOnly {
 		if ledger.ValidationOnlyRetries >= policy.MaxValidationOnlyRetriesPerFocus {
-			if len(facts.Capabilities.StateChangeKinds) > 0 {
+			if runtimecontract.RuntimeValidationFailureRequiresStateChange(facts.Activation.ExecutionContract.ValidationPolicies, runtimecontract.EvidenceKindValidation) && len(facts.Capabilities.StateChangeKinds) > 0 {
 				return stateChangeDecision(base, facts)
 			}
 			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "no_progress_exhausted", "validation-only repair budget exhausted"), nil

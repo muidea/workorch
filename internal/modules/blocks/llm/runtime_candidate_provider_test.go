@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -228,6 +229,40 @@ func TestRuntimeV2AssessmentRequestPublishesCanonicalEvidenceRefContract(t *test
 	for _, ref := range wantRefs {
 		if !strings.Contains(retry.PromptContext.Sections[3].Content, ref) {
 			t.Fatalf("assessment retry lost allowed evidence ref %q", ref)
+		}
+	}
+}
+
+func TestRuntimeV2CandidateContextPublishesExactRejectedShapes(t *testing.T) {
+	path := "main.go"
+	operation := runtimecontract.RuntimeOperation{ID: "validate-1", Kind: runtimecontract.StepKindFileRead, TargetRefs: []string{path}, Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &path}}}
+	facts := runtimecontract.RuntimeFacts{
+		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-v2-00000000000000000001",
+		Focus:        runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}},
+		Capabilities: runtimecontract.RuntimeCapabilities{ValidationKinds: []string{runtimecontract.StepKindFileRead}},
+		Evidence: runtimecontract.EvidenceLedger{Rejected: []runtimecontract.EvidenceFact{{
+			ID: "rejected-1", Kind: runtimecontract.EvidenceKindValidation, DispatchID: "dispatch-1", OperationID: "validate-1",
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "evidence-v2-00000000000000000001", FailureSignature: "sig-1",
+		}}},
+	}.Normalized()
+	decision := runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceValidation, RequiredOutput: runtimecontract.RequiredOutputContract{
+		Kind: runtimecontract.RequiredOutputKindValidation, AcceptedKinds: []string{runtimecontract.StepKindFileRead}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+	}}
+	context := runtimecontract.RuntimeCandidateContextForDecision(facts, decision, []runtimecontract.RuntimeDispatchRecord{{
+		ID: "dispatch-1", Candidate: runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: operation}}}},
+	}})
+	projection := runtimeV2CandidateContextProjection(context, decision.Action)
+	if len(projection.AdmissibleOperationKinds) != 1 || len(projection.RejectedOperationShapes) != 1 || projection.RejectedOperationShapes[0].FailureSignature != "sig-1" {
+		t.Fatalf("candidate admissibility projection = %+v", projection)
+	}
+	payload, err := json.Marshal(projection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{"rejectedOperationShapes", "validate-1", "file/read", "sig-1", "admissibleOperationKinds"} {
+		if !strings.Contains(string(payload), value) {
+			t.Fatalf("candidate context lost %q: %s", value, payload)
 		}
 	}
 }

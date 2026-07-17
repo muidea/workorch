@@ -946,6 +946,9 @@ func assertSoftwareDevAcceptanceSlicePolicy(t *testing.T, hints map[string]any) 
 	if policy["schemaVersion"] != "workorch.acceptance_slice_policy.v1" {
 		t.Fatalf("acceptanceSlicePolicy schemaVersion = %q", policy["schemaVersion"])
 	}
+	if got := testIntFromAny(policy["maxWorkItems"]); got != 16 {
+		t.Fatalf("acceptanceSlicePolicy maxWorkItems = %d, want 16", got)
+	}
 	groups, ok := policy["groups"].([]any)
 	if !ok || len(groups) < 4 {
 		t.Fatalf("acceptanceSlicePolicy groups = %+v, want declared groups", policy["groups"])
@@ -957,6 +960,13 @@ func assertSoftwareDevAcceptanceSlicePolicy(t *testing.T, hints map[string]any) 
 		"slice-supplemental-evidence":    false,
 		"slice-remaining-acceptance":     false,
 	}
+	wantMaxWorkItems := map[string]int{
+		"slice-primary-state-change":     2,
+		"slice-direct-validation":        16,
+		"slice-version-control-snapshot": 2,
+		"slice-supplemental-evidence":    8,
+		"slice-remaining-acceptance":     16,
+	}
 	priorities := map[string]int{}
 	for _, raw := range groups {
 		group, ok := raw.(map[string]any)
@@ -966,6 +976,9 @@ func assertSoftwareDevAcceptanceSlicePolicy(t *testing.T, hints map[string]any) 
 		id := testStringFromAny(group["id"])
 		if _, ok := want[id]; ok {
 			want[id] = true
+		}
+		if expected, ok := wantMaxWorkItems[id]; ok && testIntFromAny(group["maxWorkItems"]) != expected {
+			t.Fatalf("acceptanceSlicePolicy group %q maxWorkItems = %d, want %d", id, testIntFromAny(group["maxWorkItems"]), expected)
 		}
 		priorities[id] = testIntFromAny(group["priority"])
 		match, ok := group["match"].(map[string]any)

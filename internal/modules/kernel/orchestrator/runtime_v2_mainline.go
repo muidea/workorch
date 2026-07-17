@@ -146,7 +146,11 @@ func (m *Module) requestAndSealRuntimeV2Candidate(
 		Decision: aggregate.Decision, Transaction: transaction, CandidateAttempt: candidateAttempt,
 		PreviousFailure:  previousFailure,
 		StablePrefixHash: stablePrefixHash, DefinitionContext: aggregate.Definition,
-		CandidateContext: runtimecontract.RuntimeCandidateContextFromFacts(aggregate.Facts),
+		CandidateContext: runtimecontract.RuntimeCandidateContextForDecision(
+			aggregate.Facts,
+			aggregate.Decision,
+			runtimeV2CompletedDispatchRecords(aggregate.CompletedDispatches),
+		),
 	})
 	if err != nil {
 		return m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, runtimecontract.RuntimeCandidateFailure{
@@ -171,6 +175,14 @@ func (m *Module) requestAndSealRuntimeV2Candidate(
 		return runtimev2.RuntimeAggregate{}, err
 	}
 	return accepted, nil
+}
+
+func runtimeV2CompletedDispatchRecords(values []runtimev2.SealedDispatch) []runtimecontract.RuntimeDispatchRecord {
+	ret := make([]runtimecontract.RuntimeDispatchRecord, len(values))
+	for idx := range values {
+		ret[idx] = runtimeDispatchRecordFromAggregate(values[idx])
+	}
+	return ret
 }
 
 func isRuntimeCandidateReplayError(err error) bool {

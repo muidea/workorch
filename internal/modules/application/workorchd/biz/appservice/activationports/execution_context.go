@@ -38,6 +38,9 @@ func BuildWorkspaceRuntimeActivation(ctx context.Context, request WorkspaceRunti
 	command := request.Command
 	dialogLanguage := activationcore.DialogLanguage(command.DialogLanguage, request.DefaultDialogLanguage)
 	executionContract := WorkspaceExecutionContract(ctx, request.Hub, workspace)
+	if err := applyConfiguredRuntimeRepairLimit(ctx, executionContract); err != nil {
+		return WorkspaceRuntimeActivationBuild{}, err
+	}
 	toolHints := WorkspaceToolContextHintsFor(ctx, request.Hub, workspace)
 	if err := workspacecore.EnsureManagedConfigs(workspace.InternalDirectory, toolHints.Template, toolHints.Workspace); err != nil {
 		return WorkspaceRuntimeActivationBuild{}, err
@@ -116,6 +119,17 @@ func BuildWorkspaceRuntimeActivation(ctx context.Context, request WorkspaceRunti
 			continuation,
 		),
 	}, nil
+}
+
+func applyConfiguredRuntimeRepairLimit(ctx context.Context, executionContract map[string]any) error {
+	configuration, err := configcore.LoadFromContext(ctx)
+	if err != nil {
+		return err
+	}
+	if configuration.Runtime.MaxRuntimeRepairAttempts > 0 && executionContract != nil {
+		executionContract["maxRepairAttemptsPerFocus"] = configuration.Runtime.MaxRuntimeRepairAttempts
+	}
+	return nil
 }
 
 func resolveActivationProviderTarget(ctx context.Context, hub magicevent.Hub, requested *runtimecontract.ProviderModelTarget, workspaceDefault *runtimecontract.ProviderModelTarget) (runtimecontract.ProviderModelTarget, error) {

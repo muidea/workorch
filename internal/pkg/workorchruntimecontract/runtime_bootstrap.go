@@ -71,6 +71,11 @@ func (b RuntimeBootstrap) Clone() RuntimeBootstrap {
 	for idx := range b.Focuses {
 		b.Focuses[idx] = b.Focuses[idx].Normalized()
 	}
+	b.Slices = append([]RuntimeAcceptanceSlice(nil), b.Slices...)
+	for idx := range b.Slices {
+		b.Slices[idx] = b.Slices[idx].Normalized()
+	}
+	b.CoverageItems = append([]RuntimeCoverageItem(nil), b.CoverageItems...)
 	b.Requirements = append([]RuntimeRequirement(nil), b.Requirements...)
 	for idx := range b.Requirements {
 		b.Requirements[idx].RequiredCapabilities = append([]string(nil), b.Requirements[idx].RequiredCapabilities...)
@@ -102,15 +107,26 @@ func (b RuntimeBootstrap) InitialFacts(workspaceID common.WorkspaceID, runID com
 func SameRuntimeBootstrap(left RuntimeBootstrap, right RuntimeBootstrap) bool {
 	left = left.Normalized()
 	right = right.Normalized()
-	if !SameRuntimeDefinitionContext(left.Definition, right.Definition) || !SameRuntimeActivationContext(left.Activation, right.Activation) ||
+	if left.SchemaVersion != right.SchemaVersion || !SameRuntimeDefinitionContext(left.Definition, right.Definition) || !SameRuntimeActivationContext(left.Activation, right.Activation) ||
 		len(left.Focuses) != len(right.Focuses) || len(left.Slices) != len(right.Slices) || len(left.CoverageItems) != len(right.CoverageItems) ||
 		len(left.Requirements) != len(right.Requirements) ||
 		left.StateChangeRequirement.Required != right.StateChangeRequirement.Required ||
-		!sameCoverageWorkItemIDs(left.StateChangeRequirement.CoverageWorkItemIDs, right.StateChangeRequirement.CoverageWorkItemIDs) {
+		!sameCoverageWorkItemIDs(left.StateChangeRequirement.CoverageWorkItemIDs, right.StateChangeRequirement.CoverageWorkItemIDs) ||
+		left.ConvergencePolicy != right.ConvergencePolicy {
 		return false
 	}
 	for idx := range left.Focuses {
 		if !sameCoverageFocus(left.Focuses[idx], right.Focuses[idx]) {
+			return false
+		}
+	}
+	for idx := range left.Slices {
+		if !sameRuntimeAcceptanceSlice(left.Slices[idx], right.Slices[idx]) {
+			return false
+		}
+	}
+	for idx := range left.CoverageItems {
+		if left.CoverageItems[idx].Normalized() != right.CoverageItems[idx].Normalized() {
 			return false
 		}
 	}
@@ -120,6 +136,14 @@ func SameRuntimeBootstrap(left RuntimeBootstrap, right RuntimeBootstrap) bool {
 		}
 	}
 	return true
+}
+
+func sameRuntimeAcceptanceSlice(left, right RuntimeAcceptanceSlice) bool {
+	left = left.Normalized()
+	right = right.Normalized()
+	return left.ID == right.ID && left.Title == right.Title && left.Scope == right.Scope && left.Priority == right.Priority &&
+		left.CompletionPolicy == right.CompletionPolicy && left.ResultPolicy == right.ResultPolicy &&
+		sameCoverageWorkItemIDs(left.CoverageWorkItemIDs, right.CoverageWorkItemIDs) && sameStrings(left.RequiredEvidenceKinds, right.RequiredEvidenceKinds)
 }
 
 func sameCoverageFocus(left CoverageFocus, right CoverageFocus) bool {

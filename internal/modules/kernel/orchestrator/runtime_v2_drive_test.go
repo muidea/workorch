@@ -298,3 +298,54 @@ func TestRuntimeV2EnsureCandidateFeasibleBlocksProviderWithoutKinds(t *testing.T
 		t.Fatalf("managed validation should be feasible: %v", err)
 	}
 }
+
+func TestRuntimeV2DecisionPersistsFeasibilityWithoutCallingProvider(t *testing.T) {
+	facts := runtimecontract.RuntimeFacts{
+		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		WorkspaceID: "ws-v2", RunID: "run-v2", DefinitionRevision: "definition-v2", EvidenceRevision: runtimecontract.InitialRuntimeEvidenceRevision,
+		Focus:        runtimecontract.CoverageFocus{ID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}},
+		Capabilities: runtimecontract.RuntimeCapabilities{ValidationKinds: []string{runtimecontract.StepKindShellCommand}},
+	}
+	decision, err := runtimev2.ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &runtimeV2DriveRepository{aggregate: runtimev2.RuntimeAggregate{StateRevision: 1, Definition: runtimeV2Definition(), Facts: facts.Normalized(), Decision: decision}}
+	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	if err := biz.ConfigureRuntimeV2Repository(repository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	providerCalls := 0
+	observer := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providerCalls++ })
+	t.Cleanup(func() { observer.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	module := &Module{bizPtr: biz, rawEventHub: hub}
+	next, err := module.driveRuntimeV2Decision(context.Background(), repository.aggregate, "unused-prefix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 0 || next.Facts.Feasibility == nil || next.Decision.Action != runtimecontract.RuntimeActionFail || next.Decision.Terminal == nil || next.Decision.Terminal.Code != "capability_unavailable" {
+		t.Fatalf("feasibility transition = %+v providerCalls=%d", next, providerCalls)
+	}
+}
+
+type runtimeV2DriveRepository struct {
+	aggregate runtimev2.RuntimeAggregate
+}
+
+func (r *runtimeV2DriveRepository) Load(_ context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runtimev2.RuntimeAggregate, error) {
+	if r == nil || r.aggregate.Facts.WorkspaceID != workspaceID || r.aggregate.Facts.RunID != runID {
+		return runtimev2.RuntimeAggregate{}, common.ErrNotFound
+	}
+	return r.aggregate, nil
+}
+
+func (r *runtimeV2DriveRepository) Save(_ context.Context, aggregate runtimev2.RuntimeAggregate, expectedRevision uint64) error {
+	if r == nil || r.aggregate.StateRevision != expectedRevision {
+		return common.ErrConflict
+	}
+	r.aggregate = aggregate
+	return nil
+}

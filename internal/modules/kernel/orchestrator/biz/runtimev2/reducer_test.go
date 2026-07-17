@@ -329,6 +329,32 @@ func TestReduceRuntimeStateKeepsStateChangeAfterRejectedRepair(t *testing.T) {
 	}
 }
 
+func TestReduceRuntimeStateHonorsTypedValidationFailureRoute(t *testing.T) {
+	facts := validationFacts()
+	facts.Activation.ExecutionContract.ValidationPolicies = []runtimecontract.RuntimeValidationPolicy{{
+		ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+		ValidationFailureImpliesStateChange: false, MaxValidationOnlyRetriesPerFocus: 2,
+	}}
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
+	facts.Capabilities.StateChangeKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
+	facts.Capabilities.ValidationKinds = []string{runtimecontract.StepKindFileRead}
+	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
+		ID: "accepted-state", Kind: runtimecontract.EvidenceKindStateChange, Revision: "evidence-v2-00000000000000000001", CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+	}}
+	facts.Evidence.Rejected = []runtimecontract.EvidenceFact{{
+		ID: "rejected-validation", Kind: runtimecontract.EvidenceKindValidation, Revision: "evidence-v2-00000000000000000002",
+		FailureClass: runtimecontract.FailureClassExecutionFailure, FailureMessage: "validation failed", CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+	}}
+	facts.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassExecutionFailure, Message: "validation failed"}
+	decision, err := ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionProduceValidation {
+		t.Fatalf("typed validation failure route decision = %+v", decision)
+	}
+}
+
 func TestReduceRuntimeStateAllowsValidationAfterAcceptedRepair(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
 		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},

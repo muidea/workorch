@@ -208,12 +208,14 @@ current focus
 - reducer 是 `RuntimeFacts -> RuntimeDecision + AuthoritySnapshot + AuthorityTransaction` 的唯一权威。
 - prerequisite 未完成时不得请求 candidate；manifest、target snapshot、failure target、capability、validation scratch、provider ceiling 等只能通过 owner typed prerequisite acquisition 完成。
 - `RequiredOutputContract` 必须由 current focus、owner-confirmed capabilities、evidence policy 与 side-effect compatibility 的中立交集产生。
-- authority feasibility gate 必须在请求 LLM 前证明至少存在一个可执行、action-compatible、side-effect-compatible 的 concrete operation kind；不存在时不得让 LLM 猜测。
+- authority feasibility gate 必须在请求 LLM 前证明至少存在一个可执行、action-compatible、side-effect-compatible 的 concrete operation kind；不存在时不得让 LLM 猜测。current focus 存在 active rejected operation shape 时，candidate volatile context 必须同时携带精确 typed operation、shape hash、failure lineage 与 admissible operation kinds，不能只给出自然语言“不要重复”。
 - “required evidence 齐备”必须同时满足 kind、coverage binding、current-run、freshness、quality、claim alignment、accepted/rejected operation contract 等适用门禁；不能只按 evidence 数量判断。
 - Run 级 `must_produce_state_change` 表示整个 Run 必须产生至少一次与 active coverage 对齐的 primary state-change evidence，不表示每个 DoD focus 都必须修改 workspace。
 - focus/slice 必须保留 item-level coverage identity；partial assessment 只能关闭明确 satisfied 的 item，未满足 item 留在 current/remaining queue。
 - `repairable_gap` 不得直接终态化；必须结构化记录 missing evidence kinds、coverage work item IDs、target refs、reason、evidence refs 和 disposition，再由 reducer选择同 focus repair action。
 - candidate contract retry budget 与 focus repair budget必须分离；repair budget 按 focus/failure signature 计算，并在有效新 evidence 或 focus advance 后按合同重置。
+- validation policy 必须在 application activation boundary 从 template/profile map 编译为 typed `RuntimeValidationPolicy`，并将 matched validation-only retry limit 与系统 repair limit 封存进新 Run 的 `RuntimeBootstrap.ConvergencePolicy`；Resume/restart 只读取封存值。
+- acceptance slice compiler 必须有中立 focus-count guard；profile 应通过 bounded slice 合并共享 evidence/assessment 的 coverage item，不得无界生成一 item 一 LLM loop。
 - `request_governance` 只用于真实权限、外部依赖、不可行 capability、预算升级或配置阻塞；不得把普通可恢复 evidence gap伪装为治理依赖。
 - `complete` 只允许在所有 active coverage item 关闭、Run-level completion gate、required deliverable/state-change/result policy 全部满足后产生。
 - `fail` 必须携带 typed terminal code 与 structured failure/gap；Result owner 只持久化该裁决。
@@ -259,6 +261,7 @@ accepted candidate
 - attempt 0/1 必须绑定同一 `AuthorityTransaction`、definition/evidence revision、requiredOutput hash 与 stable prefix；任一漂移不得 seal。
 - candidate attempt 只修正同合同 schema/contract 输出，不承担业务 repair；不存在 attempt 2。
 - candidate accepted 前必须通过 typed schema、operation kind、coverage、target、side-effect、capability、dependency 和 parameter contract 校验。
+- active rejected operation shapes 属于 C3/C4 volatile authority context；attempt 0/1 均必须看到同一精确禁止集合。该集合只能由 persisted rejected evidence + completed sealed dispatch 派生，不能由 LLM 或 application map 声明。
 - accepted candidate 必须同步形成 active 或 completed `SealedDispatch`；不存在 dispatch 的 accepted attempt 是 invariant violation。
 - operation 只有在 dispatch seal 后才能通过 `ExecuteRuntimeOperationCommand/Result` 交给 owner block；block 不得自行追加 operation、修改 transaction 或直接提交 Result。
 - 多 operation dispatch 按 dependency graph 确定性执行；graph 只表达 sealed operations 的依赖顺序，不是 V1 graph dispatcher。
@@ -311,8 +314,10 @@ owner projection lane (one-way derived delivery)
 - 进程重启后不得依赖 V1 checkpoint、进程内 executor map、watchdog next-action 或 application patch恢复 authority。
 - active sealed dispatch 的恢复必须依据持久化 dispatch/evidence/resolution事实选择幂等重读、等待 owner result、提交已存在 evidence 或 bounded failure；不得盲目重复副作用。
 - Result/Run/Workspace projection 失败只能记录 delivery error 并幂等重试，不得改写已确定的 SM-2 complete/fail。
+- terminal Result 的 evidence/artifact refs 必须从 current-run accepted/rejected evidence ledger、coverage ledger、assessment/gap ledger 稳定去重打包；即使在 assessment 前 terminal，也不得生成空 evidence closeout。Result 只封装，不重新裁决。
 - projection health 按当前 stream generation/current workspace entries 计算；historical/deleted workspace failure counter 不得永久保持 degraded。
 - projection/read model 可以展示 progress、repair、usage、lineage、health，但不能产生 RuntimeAction、candidate、evidence acceptance 或 terminal。
+- read model 必须把 SM-3 candidate contract attempt 与 SM-2 focus repair ledger 分开展示；focus advance 后不得让历史 candidate failure/repeated reason 继续把当前 heartbeat 标记为 ineffective retry，required evidence 也不得在 `produce_assessment` 时被误报为 missing evidence。
 
 禁止迁移：
 

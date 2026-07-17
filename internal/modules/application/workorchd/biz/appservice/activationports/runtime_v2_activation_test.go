@@ -32,8 +32,13 @@ func TestRuntimeV2ActivationContextUsesConcreteSelectionSnapshots(t *testing.T) 
 			workorcheventpayload.StringField("qualityOnZeroWork", "inconclusive"),
 		)},
 		map[string]any{
-			"stateChangePolicy":       "must_produce_state_change",
-			"capabilityUsagePolicies": []any{map[string]any{"id": "usage-1", "preferredTools": []any{"lsp_diagnostics"}}},
+			"stateChangePolicy":         "must_produce_state_change",
+			"maxRepairAttemptsPerFocus": 7,
+			"capabilityUsagePolicies":   []any{map[string]any{"id": "usage-1", "preferredTools": []any{"lsp_diagnostics"}}},
+			"validationPolicies": []any{map[string]any{
+				"id": "validation-1", "scope": "workspace_profile", "appliesToEvidenceKinds": []any{"validation"},
+				"discoveryRequired": true, "validationScratchRequired": true, "maxValidationOnlyRetriesPerFocus": 2,
+			}},
 			"profileContracts": map[string]any{
 				"software-dev": map[string]any{
 					"acceptanceDimensions":    []any{map[string]any{"id": "runtime_entrypoint", "required": true, "description": "runtime entrypoint is usable"}},
@@ -66,7 +71,9 @@ func TestRuntimeV2ActivationContextUsesConcreteSelectionSnapshots(t *testing.T) 
 		activation.StageSoulBindings[0].Soul.Instructions != "execution instructions" || len(activation.Skills) != 1 || len(activation.MCPCapabilities) != 1 || len(activation.Memories) != 1 || len(activation.EvidencePolicies) != 1 {
 		t.Fatalf("runtime activation = %+v", activation)
 	}
-	if activation.ExecutionContract.StateChangePolicy != "must_produce_state_change" || len(activation.ExecutionContract.CapabilityUsagePolicies) != 1 || len(activation.ExecutionContract.ProfileContracts) != 1 {
+	if activation.ExecutionContract.StateChangePolicy != "must_produce_state_change" || activation.ExecutionContract.MaxRepairAttemptsPerFocus != 7 ||
+		len(activation.ExecutionContract.CapabilityUsagePolicies) != 1 || len(activation.ExecutionContract.ValidationPolicies) != 1 ||
+		activation.ExecutionContract.ValidationPolicies[0].MaxValidationOnlyRetriesPerFocus != 2 || len(activation.ExecutionContract.ProfileContracts) != 1 {
 		t.Fatalf("runtime execution contract = %+v", activation.ExecutionContract)
 	}
 	profile := activation.ExecutionContract.ProfileContracts[0]

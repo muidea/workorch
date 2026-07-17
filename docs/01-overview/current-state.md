@@ -89,9 +89,9 @@ Last Updated: 2026-07-17
 
 ## Remaining Open Work
 
-Runtime V2-only 主链与正向收敛闭环均已收口。当前剩余主要是：
+Runtime V2-only 主链已收口；正向收敛 remediation 的代码项已完成，等待最新实例 deployed/file-backed 双 workspace cross-focus 复核。当前剩余主要是：
 
-1. **Runtime 正向收敛（RVC-1）**：**completed**（RVC-01～18；deployed dual-workspace live 通过）；计划见 [archive](../90-archive/completed/runtime-v2-positive-convergence-closure-plan.md)。
+1. **Runtime 正向收敛（RVC-1）**：**code-closed / deployed verification pending**；typed validation policy、rejected-shape context、Result ledger、restart/CAS/no-provider tests、read-model retry semantics 与 focus cost guard 已收口，剩余 RVC-R4 live 复核见 [active remediation](../70-roadmap/active/runtime-v2-positive-convergence-remediation.md)。
 2. **运维切换（OPS-1）**：真实生产目录 `runtime-v1-retirement --apply` + clean build 维护窗口（过程日记已归档，不在 active 放长文）。
 3. **可选验证（OPT-1）**：file-patch `apply + validation + DoD closeout` 的 deployed live 一次。
 4. **延期候选**：LLM context budget 高级项见 `70-roadmap/candidates/`，**不占 active**。

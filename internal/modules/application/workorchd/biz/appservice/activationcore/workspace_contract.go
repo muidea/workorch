@@ -30,6 +30,9 @@ func WorkspaceExecutionContract(ctx context.Context, templates WorkspaceTemplate
 	if policies, ok := hints["capabilityUsagePolicies"].([]any); ok && len(policies) > 0 {
 		contract["capabilityUsagePolicies"] = cloneContextValue(policies)
 	}
+	if policies, ok := hints["validationPolicies"].([]any); ok && len(policies) > 0 {
+		contract["validationPolicies"] = cloneContextValue(policies)
+	}
 	if runtimeRepair, ok := hints["runtimeRepair"].(map[string]any); ok && len(runtimeRepair) > 0 {
 		contract["runtimeRepair"] = cloneContextValue(runtimeRepair)
 	}

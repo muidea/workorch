@@ -64,9 +64,9 @@ func TestApplyRuntimeV2ProgressAlignsCountsAndMilestones(t *testing.T) {
 	if progress.RuntimeV2.CompletedDispatchCount != 2 {
 		t.Fatalf("completed dispatch count = %d", progress.RuntimeV2.CompletedDispatchCount)
 	}
-	// Healthy first accepted attempt must not count as repair; only failed/retry attempts do.
-	if progress.RepairLoop.AttemptCount != 2 {
-		t.Fatalf("repair attempt count = %d, want 2 (failed+retry only)", progress.RepairLoop.AttemptCount)
+	// Candidate contract failures are SM-3 retry bookkeeping, not SM-2 focus repair.
+	if progress.RepairLoop.AttemptCount != 0 {
+		t.Fatalf("repair attempt count = %d, want 0 from the focus repair ledger", progress.RepairLoop.AttemptCount)
 	}
 	if progress.RepairLoop.State != "terminated" {
 		t.Fatalf("repair state = %s", progress.RepairLoop.State)
@@ -188,7 +188,8 @@ func TestApplyRuntimeV2ProgressCompletedRunRepairResolved(t *testing.T) {
 			Facts: runtimecontract.RuntimeFacts{
 				Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 				WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def", EvidenceRevision: "ev",
-				Focus: runtimecontract.CoverageFocus{ID: "focus-1"},
+				Focus:  runtimecontract.CoverageFocus{ID: "focus-1"},
+				Repair: runtimecontract.RuntimeRepairLedger{FocusID: "focus-1", RepairAttempts: 1},
 			},
 			Decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionComplete},
 		},
@@ -196,5 +197,29 @@ func TestApplyRuntimeV2ProgressCompletedRunRepairResolved(t *testing.T) {
 	applyRuntimeV2Progress(&progress, run)
 	if progress.RepairLoop.State != "resolved" {
 		t.Fatalf("completed run repair state = %s, want resolved", progress.RepairLoop.State)
+	}
+}
+
+func TestApplyRuntimeV2ProgressClearsHistoricalCandidateFailureAfterFocusAdvance(t *testing.T) {
+	progress := readmodelcore.TaskProgress{
+		WorkspaceID: "ws-1", RunID: "run-1", State: string(common.RunStateActive),
+		RepairLoop: readmodelcore.RepairLoop{State: "active", AttemptCount: 2, RepeatedFailureReason: "old candidate failure", Escalated: true},
+	}
+	run := &runmodel.Run{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive, RuntimeState: &runtimecontract.RuntimeStateRecord{
+		CandidateAttempts: []runtimecontract.RuntimeCandidateAttemptRecord{
+			{Attempt: 0, State: runtimecontract.RuntimeCandidateAttemptStateFailed},
+			{Attempt: 1, State: runtimecontract.RuntimeCandidateAttemptStateAccepted},
+		},
+		Facts: runtimecontract.RuntimeFacts{
+			Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+			WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def", EvidenceRevision: "ev-2",
+			Focus:    runtimecontract.CoverageFocus{ID: "focus-2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-2"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, RequireAssessment: true},
+			Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-2", State: runtimecontract.RuntimeCoverageItemStateOpen}},
+		},
+		Decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceAssessment},
+	}}
+	applyRuntimeV2Progress(&progress, run)
+	if progress.RepairLoop.State != "inactive" || progress.RepairLoop.AttemptCount != 0 || progress.RepairLoop.RepeatedFailureReason != "" || progress.RepairLoop.Escalated {
+		t.Fatalf("repair loop retained historical candidate failure: %+v", progress.RepairLoop)
 	}
 }

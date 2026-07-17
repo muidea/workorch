@@ -41,7 +41,7 @@
 - Orchestrator 自有 Runtime V2 drive、prerequisite、candidate、operation、governance resolution、retirement resource release与只读查询合同定义在 `kernel/orchestrator/pkg/events`。
 - Runtime V2 prerequisite command/result 由 Orchestrator 在 `kernel/orchestrator/pkg/events` 定义；当前 target snapshot acquisition 通过 EventHub 交给 File block，并将具体 `TargetSnapshot` 提交回 typed runtime facts。
 - Runtime V2 candidate command/result 同样由 Orchestrator 定义；请求封存完整 authority transaction，LLM block 返回的 candidate 必须绑定同一 snapshot，transaction 漂移不得进入执行。
-- candidate request 携带从 persisted facts 构造的 typed `RuntimeCandidateContext`，明确当前 focus、accepted/rejected evidence、failure、capabilities、manifest、target snapshot、validation scratch 与 provider ceiling；LLM block 不从 V1 map 或临时上下文重建 authority。
+- candidate request 携带从 persisted facts 与 completed sealed dispatch 构造的 typed `RuntimeCandidateContext`，明确当前 focus、accepted/rejected evidence、精确 active rejected operation shapes、admissible operation kinds、failure、capabilities、manifest、target snapshot、validation scratch 与 provider ceiling；LLM block 不从 V1 map 或临时上下文重建 authority。
 - Runtime V2 dispatch 在执行前持久化 `SealedDispatch`、完整 transaction、candidate hash 和 typed step input；execution evidence 只有在 snapshot、dispatch 与 operation 一致时才能提交并触发下一次 reducer。
 - Runtime V2 aggregate 通过 Run owner 的 EventHub update 合同持久化；Orchestrator 使用 expected revision 执行 CAS，不直接访问 Run repository，也不把 aggregate 编码进 `map[string]any`。
 - Runtime V2 初始化时封存 typed Goal/DoD definition context；后续 candidate request 与重启恢复只能读取 Run owner 中持久化的定义快照，不能由调用方临时重建。
@@ -52,7 +52,7 @@
 - 多 operation dispatch 按 dependency graph 确定性执行；每个 operation 独立提交 evidence，全部成功或任一失败后才结束 dispatch 并再次 reducer。
 - RuntimeFacts 持久化当前 focus 与有序 remaining focus queue；当前 focus 的 required evidence 满足后，evidence commit 原子切换到下一 focus，再调用同一 reducer。
 - 显式声明 `RequireAssessment` 的 focus 在执行证据齐备后进入 typed `need_assessment` authority；LLM 只能返回绑定当前 focus/coverage 的 `AssessmentCandidate`，Orchestrator 校验其 evidence refs 来自当前 Run 的 accepted evidence 后写入 assessment ledger。
-- 最后一个 assessment 关闭后，Orchestrator 通过 Result owner 定义的具体 EventHub create command 写入 accepted/rejected DoD Result，再投影 Run/Workspace terminal；Result block 只持久化正式 outcome，不参与 acceptance 裁决。
+- 最后一个 assessment 关闭或 typed terminal failure 形成后，Orchestrator 从 current-run evidence/coverage/assessment ledger 稳定打包 Result/closeout，再通过 Result owner 的具体 EventHub create command写入 accepted/rejected outcome，最后投影 Run/Workspace terminal；Result block 不参与 acceptance 裁决。
 - CoverageFocus 可携带 evidence role、accepted/rejected step kinds 与 accepted operations；reducer 只在 owner 已确认的 capability kinds 中做中立交集/排除，并把结果封入 `RequiredOutputContract`。若声明 accepted operations，candidate 至少包含一个匹配的具体 operation 参数，不能用同 step kind 的其他动作替代。
 - candidate attempt 0/1 的 pending、failed、accepted 状态随 aggregate 持久化；attempt 1 必须复用相同 transaction 和 stable prefix，第二次失败后只能进入 governance 或 terminal。
 - candidate retry 预算按稳定 `AuthorityContractID` 计算；identity 绑定 workspace/run、focus、action、definition/evidence revision 与 requiredOutput hash，不包含 snapshot/authority attempt。旧记录缺少该字段时仅作读兼容并按同一 semantic contract 聚合，发现历史重复 reseal 已超过 0/1 时直接写入 typed `candidate_retry_exhausted` fact，禁止再次请求 provider。
@@ -73,6 +73,7 @@
 - 已提供 Runtime V2 blocker→active 与 typed terminal 的窄 Run/Workspace 投影能力；正式入口切换后不得借此创建 V1 Step 或经过 V1 Result/DoD completion gate。
 - Run/Workspace 窄投影必须可重试收敛：active 重放要修复缺失的 workspace active-run 投影；terminal 投影先释放 workspace 再写 Run 终态，Run 已终态时仍要重试 workspace release，避免单边成功后永久悬挂。
 - repair ledger 的 `RepairAttempts` 是同 focus 总预算；有效新 evidence 只重置 failure-signature、validation-only 与 no-progress 窗口，不清零总预算。只有原子 focus advance 才创建下一 focus 的全新 repair ledger。
+- candidate attempt 只投影为 SM-3 contract attempt；read model 的 repair loop、ineffective retry 和 repair budget 必须来自 `Facts.Repair` 与当前 failure，不得把历史 candidate retry 当成当前 focus repair。
 - Eventstream 订阅仍在生产发布的 Orchestrator、Run 和 Result typed notification 形成审计记录；Runtime V2 只消费同步 typed operation result 推进状态。
 - workspace/run purge 时，Orchestrator 只删除自身 ToolCall/Patch/ValidationResult/Evidence/Coverage/ArtifactContinuation/MemoryTrace；Step 与 RuntimeCheckpoint 必须通过带 WorkspaceID/RunID 的 Run owner purge command 删除，Orchestrator 不持有其 repository。
 - Runtime V1 retirement resource release 使用 Orchestrator 自有 typed command，关闭 pending/executing Step、ToolCall、ArtifactContinuation，并释放 managed validation resource；重复调用只返回本次实际变化数量。

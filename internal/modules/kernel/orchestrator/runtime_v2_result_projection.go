@@ -52,6 +52,7 @@ func (m *Module) projectRuntimeV2Result(ctx context.Context, aggregate runtimev2
 }
 
 func runtimeV2ResultFromAggregate(aggregate runtimev2.RuntimeAggregate) *resultmodel.Result {
+	aggregate.Facts = aggregate.Facts.Normalized()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	accepted := aggregate.Decision.Action == runtimecontract.RuntimeActionComplete
 	state := common.ResultStateRejected
@@ -59,12 +60,12 @@ func runtimeV2ResultFromAggregate(aggregate runtimev2.RuntimeAggregate) *resultm
 		state = common.ResultStateAccepted
 	}
 	assessment := resultmodel.DoDAssessment{Satisfied: accepted, Summary: aggregate.Decision.Terminal.Summary}
-	evidenceRefs := []string{}
+	evidenceRefs := runtimeV2TerminalEvidenceRefs(aggregate.Facts)
+	artifactRefs := runtimeV2TerminalArtifactRefs(aggregate.Facts)
 	goalCoverage := resultmodel.DoDCoverage{Satisfied: true}
 	acceptanceDimensions := resultmodel.DoDCoverage{Satisfied: true}
 	deliverableCoverage := resultmodel.DoDCoverage{Satisfied: true}
 	for _, fact := range aggregate.Facts.Assessments {
-		evidenceRefs = append(evidenceRefs, fact.EvidenceRefs...)
 		switch fact.Scope {
 		case "goalCoverage":
 			goalCoverage.Items = append(goalCoverage.Items, runtimeV2CoverageItem(fact))
@@ -96,8 +97,8 @@ func runtimeV2ResultFromAggregate(aggregate runtimev2.RuntimeAggregate) *resultm
 		GoalID: aggregate.Definition.GoalID, DoDID: aggregate.Definition.DoDID, State: state,
 		Title: "Runtime V2 acceptance result", Summary: aggregate.Decision.Terminal.Summary,
 		SourceType: resultcommon.SourceTypeDoDAssessment, SourceRef: aggregate.Decision.AuthoritySnapshot.ID,
-		EvidenceRefs: evidenceRefs, DoDAssessment: assessment,
-		SummaryDetail: resultmodel.ResultSummary{GoalOutcome: aggregate.Decision.Terminal.Summary, EvidenceRefs: append([]string(nil), evidenceRefs...)},
+		EvidenceRefs: evidenceRefs, ArtifactRefs: artifactRefs, DoDAssessment: assessment,
+		SummaryDetail: resultmodel.ResultSummary{GoalOutcome: aggregate.Decision.Terminal.Summary, EvidenceRefs: append([]string(nil), evidenceRefs...), ArtifactRefs: append([]common.ArtifactID(nil), artifactRefs...)},
 		CreatedAt:     now, UpdatedAt: now,
 	}
 	if accepted {
@@ -115,6 +116,7 @@ func runtimeV2ResultCloseout(aggregate runtimev2.RuntimeAggregate, accepted bool
 		SchemaVersion:      runtimecontract.RuntimeResultCloseoutSchemaVersionCurrent,
 		DefinitionRevision: aggregate.Facts.DefinitionRevision,
 		EvidenceRefs:       append([]string(nil), evidenceRefs...),
+		ArtifactRefs:       runtimeV2TerminalArtifactRefs(aggregate.Facts),
 	}
 	satisfied := map[common.CoverageWorkItemID]struct{}{}
 	unsatisfied := map[common.CoverageWorkItemID]struct{}{}
@@ -148,22 +150,6 @@ func runtimeV2ResultCloseout(aggregate runtimev2.RuntimeAggregate, accepted bool
 		case runtimecontract.AssessmentDispositionTerminalRejection:
 			if !accepted {
 				disposition = runtimecontract.AssessmentDispositionTerminalRejection
-			}
-		}
-		if len(aggregate.Facts.Coverage) == 0 { // legacy read-only compatibility
-			for _, item := range fact.Items {
-				if item.Satisfied {
-					satisfied[item.CoverageWorkItemID] = struct{}{}
-				} else {
-					unsatisfied[item.CoverageWorkItemID] = struct{}{}
-				}
-			}
-			for _, id := range fact.CoverageWorkItemIDs {
-				if fact.Disposition == runtimecontract.AssessmentDispositionSatisfied {
-					satisfied[id] = struct{}{}
-				} else {
-					unsatisfied[id] = struct{}{}
-				}
 			}
 		}
 		if fact.Gap != nil {
@@ -206,6 +192,21 @@ func runtimeV2ResultCloseout(aggregate runtimev2.RuntimeAggregate, accepted bool
 	closeout.TargetRefs = stringsFromSet(targets)
 	closeout.Disposition = disposition
 	if !accepted {
+		if aggregate.Facts.Failure != nil {
+			if closeout.FailureClass == "" {
+				closeout.FailureClass = aggregate.Facts.Failure.Class
+			}
+			if closeout.FailureCode == "" {
+				closeout.FailureCode = strings.TrimSpace(aggregate.Facts.Failure.Code)
+			}
+			if closeout.FailureSignature == "" {
+				closeout.FailureSignature = strings.TrimSpace(aggregate.Facts.Failure.Signature)
+			}
+			for _, ref := range aggregate.Facts.Failure.TargetRefs {
+				targets[ref] = struct{}{}
+			}
+			closeout.TargetRefs = stringsFromSet(targets)
+		}
 		if closeout.FailureCode == "" && aggregate.Decision.Terminal != nil {
 			closeout.FailureCode = strings.TrimSpace(aggregate.Decision.Terminal.Code)
 		}
@@ -218,6 +219,76 @@ func runtimeV2ResultCloseout(aggregate runtimev2.RuntimeAggregate, accepted bool
 	}
 	value := closeout.Normalized()
 	return &value
+}
+
+func runtimeV2TerminalEvidenceRefs(facts runtimecontract.RuntimeFacts) []string {
+	facts = facts.Normalized()
+	values := map[string]struct{}{}
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			values[value] = struct{}{}
+		}
+	}
+	for _, ledger := range [][]runtimecontract.EvidenceFact{facts.Evidence.Accepted, facts.Evidence.Rejected} {
+		for _, evidence := range ledger {
+			add(string(evidence.ID))
+			add(evidence.SourceRef)
+			for _, ref := range evidence.EvidenceRefs {
+				add(ref)
+			}
+		}
+	}
+	for _, assessment := range facts.Assessments {
+		for _, ref := range assessment.EvidenceRefs {
+			add(ref)
+		}
+		for _, item := range assessment.Items {
+			for _, ref := range item.EvidenceRefs {
+				add(ref)
+			}
+		}
+		if assessment.Gap != nil {
+			for _, ref := range assessment.Gap.EvidenceRefs {
+				add(ref)
+			}
+		}
+	}
+	for _, item := range facts.Coverage {
+		for _, ref := range item.EvidenceRefs {
+			add(ref)
+		}
+	}
+	return stringsFromSet(values)
+}
+
+func runtimeV2TerminalArtifactRefs(facts runtimecontract.RuntimeFacts) []common.ArtifactID {
+	values := map[common.ArtifactID]struct{}{}
+	for _, assessment := range facts.Normalized().Assessments {
+		for _, ref := range assessment.ArtifactRefs {
+			id := common.ArtifactID(strings.TrimSpace(ref))
+			if id != "" {
+				values[id] = struct{}{}
+			}
+		}
+		for _, item := range assessment.Items {
+			for _, ref := range item.ArtifactRefs {
+				id := common.ArtifactID(strings.TrimSpace(string(ref)))
+				if id != "" {
+					values[id] = struct{}{}
+				}
+			}
+		}
+	}
+	ret := make([]common.ArtifactID, 0, len(values))
+	for id := range values {
+		ret = append(ret, id)
+	}
+	sort.Slice(ret, func(i, j int) bool { return string(ret[i]) < string(ret[j]) })
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
 }
 
 func coverageIDsFromSet(values map[common.CoverageWorkItemID]struct{}) []common.CoverageWorkItemID {

@@ -6,6 +6,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestMapRunHeartbeatProjectsLatestProgressEvidence(t *testing.T) {
@@ -86,7 +87,7 @@ func TestMapRunHeartbeatMarksConvergenceBudgetEscalationIneffectiveRetry(t *test
 		Acceptance: readmodelcore.AcceptanceProjection{
 			Budget: &readmodelcore.ConvergenceBudget{
 				State:    "escalated",
-				Decision: "escalate_decision",
+				Decision: "budget_exhausted",
 			},
 		},
 	})
@@ -106,6 +107,19 @@ func TestMapRunHeartbeatMarksRuntimeV2NoProgressTerminalAsIneffectiveRetry(t *te
 	got := mapRunHeartbeatAt(snapshot, time.Now().UTC())
 	if !got.IneffectiveRetry || got.Stalled {
 		t.Fatalf("heartbeat = %+v, want terminal ineffective retry without stalled", got)
+	}
+}
+
+func TestMapRunHeartbeatDoesNotTreatAssessmentActionAsBudgetEscalation(t *testing.T) {
+	got := MapRunHeartbeat(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
+		Runs:      []readmodelcore.Run{{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)}},
+		Acceptance: readmodelcore.AcceptanceProjection{Budget: &readmodelcore.ConvergenceBudget{
+			Decision: string(runtimecontract.RuntimeActionProduceAssessment),
+		}},
+	})
+	if got.IneffectiveRetry || got.ActivityState == "ineffective_retry" {
+		t.Fatalf("assessment action was treated as ineffective retry: %+v", got)
 	}
 }
 

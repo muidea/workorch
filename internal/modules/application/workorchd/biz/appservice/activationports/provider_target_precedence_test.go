@@ -48,6 +48,27 @@ func TestResolveActivationProviderTargetUsesLatestInjectedSystemDefault(t *testi
 	}
 }
 
+func TestApplyConfiguredRuntimeRepairLimitUsesInjectedLatestValue(t *testing.T) {
+	ctx := configcore.ContextWithLoader(context.Background(), func() (workorchconfig.Config, error) {
+		return workorchconfig.Config{Runtime: workorchconfig.RuntimeConfig{MaxRuntimeRepairAttempts: 7}}, nil
+	})
+	contract := map[string]any{"stateChangePolicy": "allowed_but_not_required"}
+	if err := applyConfiguredRuntimeRepairLimit(ctx, contract); err != nil {
+		t.Fatal(err)
+	}
+	if contract["maxRepairAttemptsPerFocus"] != 7 {
+		t.Fatalf("maxRepairAttemptsPerFocus = %+v, want injected latest value 7", contract["maxRepairAttemptsPerFocus"])
+	}
+
+	withoutLoader := map[string]any{"stateChangePolicy": "allowed_but_not_required"}
+	if err := applyConfiguredRuntimeRepairLimit(context.Background(), withoutLoader); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := withoutLoader["maxRepairAttemptsPerFocus"]; ok {
+		t.Fatalf("runtime repair limit unexpectedly read a global fallback: %+v", withoutLoader)
+	}
+}
+
 func TestSealedRunProviderTargetDoesNotDriftAfterWorkspacePreferenceChanges(t *testing.T) {
 	ctx := context.Background()
 	runs := memory.NewRunRepository()

@@ -34,7 +34,6 @@ func MapConvergenceStatus(snapshot readmodelcore.RunSnapshot) *readmodelcore.Con
 		focus := snapshot.Acceptance.CurrentFocus
 		ret.CurrentFocusID = firstNonEmptyString(ret.CurrentFocusID, focus.ID)
 		ret.CurrentSliceID = firstNonEmptyString(ret.CurrentSliceID, focus.SliceID)
-		ret.MissingEvidenceKinds = compactUniqueStrings(append(ret.MissingEvidenceKinds, focus.RequiredEvidenceKinds...))
 		if ret.AcceptedEvidenceCount == 0 {
 			ret.AcceptedEvidenceCount = len(compactUniqueStrings(focus.AcceptedEvidenceRefs))
 		}

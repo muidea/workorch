@@ -41,20 +41,22 @@ type runtimeCandidateActivationProjection struct {
 }
 
 type runtimeCandidateContextProjection struct {
-	WorkspaceID          common.WorkspaceID                      `json:"workspaceId"`
-	RunID                common.RunID                            `json:"runId"`
-	DefinitionRevision   string                                  `json:"definitionRevision"`
-	EvidenceRevision     string                                  `json:"evidenceRevision"`
-	Focus                runtimecontract.CoverageFocus           `json:"focus"`
-	MissingEvidenceKinds []string                                `json:"missingEvidenceKinds,omitempty"`
-	AllowedEvidenceRefs  []string                                `json:"allowedAcceptedEvidenceRefs,omitempty"`
-	Evidence             runtimecontract.EvidenceLedger          `json:"evidence"`
-	Assessments          []runtimecontract.RuntimeAssessmentFact `json:"assessments,omitempty"`
-	Failure              *runtimecontract.FailureFact            `json:"failure,omitempty"`
-	RepairHints          []runtimecontract.RuntimeRepairHint     `json:"repairHints,omitempty"`
-	Capabilities         runtimecontract.RuntimeCapabilities     `json:"capabilities"`
-	Resources            runtimeCandidateResourceProjection      `json:"resources"`
-	Activation           runtimeCandidateActivationProjection    `json:"activation"`
+	WorkspaceID              common.WorkspaceID                              `json:"workspaceId"`
+	RunID                    common.RunID                                    `json:"runId"`
+	DefinitionRevision       string                                          `json:"definitionRevision"`
+	EvidenceRevision         string                                          `json:"evidenceRevision"`
+	Focus                    runtimecontract.CoverageFocus                   `json:"focus"`
+	MissingEvidenceKinds     []string                                        `json:"missingEvidenceKinds,omitempty"`
+	AllowedEvidenceRefs      []string                                        `json:"allowedAcceptedEvidenceRefs,omitempty"`
+	Evidence                 runtimecontract.EvidenceLedger                  `json:"evidence"`
+	Assessments              []runtimecontract.RuntimeAssessmentFact         `json:"assessments,omitempty"`
+	Failure                  *runtimecontract.FailureFact                    `json:"failure,omitempty"`
+	RepairHints              []runtimecontract.RuntimeRepairHint             `json:"repairHints,omitempty"`
+	AdmissibleOperationKinds []string                                        `json:"admissibleOperationKinds,omitempty"`
+	RejectedOperationShapes  []runtimecontract.RuntimeRejectedOperationShape `json:"rejectedOperationShapes,omitempty"`
+	Capabilities             runtimecontract.RuntimeCapabilities             `json:"capabilities"`
+	Resources                runtimeCandidateResourceProjection              `json:"resources"`
+	Activation               runtimeCandidateActivationProjection            `json:"activation"`
 }
 
 type runtimeCandidateOutputContractProjection struct {
@@ -408,6 +410,7 @@ func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidat
 		Focus: context.Focus, MissingEvidenceKinds: runtimecontract.MissingRequiredEvidenceKinds(facts),
 		AllowedEvidenceRefs: runtimecontract.AcceptedEvidenceRefsForFocus(facts), Evidence: context.Evidence,
 		Assessments: context.Assessments, Failure: context.Failure, RepairHints: runtimecontract.DeriveRuntimeRepairHints(facts),
+		AdmissibleOperationKinds: context.AdmissibleOperationKinds, RejectedOperationShapes: context.RejectedOperationShapes,
 		Capabilities: context.Capabilities,
 		Resources: runtimeCandidateResourceProjection{
 			Manifest: context.Resources.Manifest, TargetSnapshots: context.Resources.TargetSnapshots,
@@ -474,6 +477,7 @@ func runtimeV2CandidateContractCatalog() string {
 		"When context.missingEvidenceKinds is present, produce only those missing evidence kinds.",
 		"Use operationContracts for allowed parameters of each kind. Dynamic fields are only valid where the contract permits them.",
 		"When context.repairHints is present, follow those domain-neutral hints and do not repeat an active rejected operation shape.",
+		"When context.rejectedOperationShapes is present, every listed operation hash and exact structural operation is forbidden until later accepted evidence supersedes it. Choose an admissible kind and change kind, targets, or execution-semantic parameters.",
 		"For a satisfied assessment, evidenceRefs is mandatory and every value must be copied exactly from context.allowedAcceptedEvidenceRefs. Satisfied item evidenceRefs must use the same allowed set.",
 	}, "\n")
 }

@@ -40,6 +40,10 @@ func TestValidateCandidateAgainstRejectedShapesBlocksOnlyActiveShapes(t *testing
 	if err := ValidateCandidateAgainstRejectedShapes(facts, dispatches, replay); err == nil || !strings.Contains(err.Error(), "replays active rejected operation shape") {
 		t.Fatalf("expected active replay rejection, got %v", err)
 	}
+	shapes := ActiveRejectedOperationShapes(facts, dispatches)
+	if len(shapes) != 1 || shapes[0].Operation.Kind != RuntimeBlockKindPatchApply || shapes[0].FailureSignature != "sig-1" || shapes[0].Hash == "" {
+		t.Fatalf("active rejected shapes = %+v", shapes)
+	}
 
 	// After a later accepted evidence, the old rejected shape is no longer active.
 	facts.Evidence.Accepted = []EvidenceFact{{

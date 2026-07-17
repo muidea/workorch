@@ -6,7 +6,49 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/muidea/workorch/internal/pkg/common"
 )
+
+// RuntimeRejectedOperationShape is the exact, typed operation structure that
+// remains rejected on the current focus. It is volatile candidate context, not
+// stable-prefix configuration or a new authority source.
+type RuntimeRejectedOperationShape struct {
+	Hash             string
+	Operation        RuntimeOperation
+	EvidenceID       common.EvidenceRecordID
+	FailureClass     FailureClass
+	FailureCode      string
+	FailureSignature string
+	FailureMessage   string
+}
+
+func NormalizeRuntimeRejectedOperationShapes(values []RuntimeRejectedOperationShape) []RuntimeRejectedOperationShape {
+	byHash := map[string]RuntimeRejectedOperationShape{}
+	for _, value := range values {
+		value.Operation = value.Operation.Normalized()
+		value.Hash = stableRuntimeOperationShape(value.Operation)
+		value.EvidenceID = common.EvidenceRecordID(strings.TrimSpace(string(value.EvidenceID)))
+		value.FailureClass = FailureClass(strings.TrimSpace(string(value.FailureClass)))
+		value.FailureCode = strings.TrimSpace(value.FailureCode)
+		value.FailureSignature = strings.TrimSpace(value.FailureSignature)
+		value.FailureMessage = strings.TrimSpace(value.FailureMessage)
+		if value.Hash == "" || value.Operation.Kind == "" {
+			continue
+		}
+		byHash[value.Hash] = value
+	}
+	hashes := make([]string, 0, len(byHash))
+	for hash := range byHash {
+		hashes = append(hashes, hash)
+	}
+	sort.Strings(hashes)
+	ret := make([]RuntimeRejectedOperationShape, 0, len(hashes))
+	for _, hash := range hashes {
+		ret = append(ret, byHash[hash])
+	}
+	return nilIfEmpty(ret)
+}
 
 // ValidateCandidateAgainstRejectedShapes rejects candidates that only replay
 // still-active rejected operation shapes on the current focus.
@@ -19,7 +61,7 @@ import (
 // distinguish corrected retries (args, oldText/newText/baseHash, dynamic input.*).
 func ValidateCandidateAgainstRejectedShapes(facts RuntimeFacts, completedDispatches []RuntimeDispatchRecord, candidate RuntimeCandidate) error {
 	facts = facts.Normalized()
-	rejectedShapes := activeRejectedOperationShapes(facts, completedDispatches)
+	rejectedShapes := activeRejectedOperationShapeSet(facts, completedDispatches)
 	if len(rejectedShapes) == 0 {
 		return nil
 	}
@@ -43,13 +85,13 @@ func ValidateCandidateAgainstRejectedShapes(facts RuntimeFacts, completedDispatc
 	return fmt.Errorf("runtime candidate includes %d operation(s) that replay active rejected shape(s); remove or rewrite those operations", replayCount)
 }
 
-func activeRejectedOperationShapes(facts RuntimeFacts, completedDispatches []RuntimeDispatchRecord) map[string]struct{} {
+func ActiveRejectedOperationShapes(facts RuntimeFacts, completedDispatches []RuntimeDispatchRecord) []RuntimeRejectedOperationShape {
 	dispatchByID := make(map[string]RuntimeDispatchRecord, len(completedDispatches))
 	for _, dispatch := range completedDispatches {
 		dispatchByID[strings.TrimSpace(dispatch.ID)] = dispatch
 	}
 	latestAcceptedRevision := latestAcceptedEvidenceRevision(facts)
-	ret := make(map[string]struct{})
+	ret := make([]RuntimeRejectedOperationShape, 0, len(facts.Evidence.Rejected))
 	for _, evidence := range facts.Evidence.Rejected {
 		if !EvidenceAppliesToCurrentFocus(facts, evidence) {
 			continue
@@ -66,8 +108,20 @@ func activeRejectedOperationShapes(facts RuntimeFacts, completedDispatches []Run
 			if operation.Normalized().ID != strings.TrimSpace(evidence.OperationID) {
 				continue
 			}
-			ret[stableRuntimeOperationShape(operation)] = struct{}{}
+			ret = append(ret, RuntimeRejectedOperationShape{
+				Hash: stableRuntimeOperationShape(operation), Operation: operation.Normalized(), EvidenceID: evidence.ID,
+				FailureClass: evidence.FailureClass, FailureCode: evidence.FailureCode,
+				FailureSignature: evidence.FailureSignature, FailureMessage: evidence.FailureMessage,
+			})
 		}
+	}
+	return NormalizeRuntimeRejectedOperationShapes(ret)
+}
+
+func activeRejectedOperationShapeSet(facts RuntimeFacts, completedDispatches []RuntimeDispatchRecord) map[string]struct{} {
+	ret := map[string]struct{}{}
+	for _, shape := range ActiveRejectedOperationShapes(facts, completedDispatches) {
+		ret[shape.Hash] = struct{}{}
 	}
 	return ret
 }

@@ -269,6 +269,9 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 	if len(focuses) == 0 {
 		return compiledCoverage{}, fmt.Errorf("runtime coverage focus compiler produced no focuses")
 	}
+	if len(focuses) > runtimecontract.RuntimeAcceptanceFocusMaxCount {
+		return compiledCoverage{}, fmt.Errorf("runtime coverage focus compiler produced %d focuses, exceeding neutral limit %d; configure bounded acceptance slices", len(focuses), runtimecontract.RuntimeAcceptanceFocusMaxCount)
+	}
 	return compiledCoverage{Focuses: focuses, Slices: slices, CoverageItems: coverageItems}, nil
 }
 

@@ -26,7 +26,7 @@ Last Updated: 2026-07-17
 
 ### A. Runtime 正向收敛
 
-RVC-1 Runtime V2 正向收敛闭环：**active**。schema/feasibility/item closure/projection 已开始收口；仍缺 typed policy seal、Result/continuation ledger authority 与真实 file-backed/双 workspace cross-focus E2E。见 [remediation](../70-roadmap/active/runtime-v2-positive-convergence-remediation.md)。
+RVC-1 Runtime V2 正向收敛闭环：**code-closed / deployed verification pending**。typed policy seal、rejected-shape context、Result/continuation ledger、restart/partial-slice/no-provider regression、read-model retry semantics 与 focus cost guard 已收口；仅剩真实 file-backed/双 workspace cross-focus E2E。见 [remediation](../70-roadmap/active/runtime-v2-positive-convergence-remediation.md)。
 
 ### B. 运维 / 生产切换
 
@@ -59,7 +59,7 @@ RVC-1 Runtime V2 正向收敛闭环：**active**。schema/feasibility/item closu
 - **代码主链**：Runtime V2 only；V1 authority 不再是问题来源。
 - **正向收敛**：RVC-1 remediation 进行中；历史 deployed evidence 不能代替 schema、ledger 和真实 cross-focus E2E 验收。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；不得再从已归档 plan 推导实现约束。
-- **Active roadmap**：OPS-1（+ 可选 OPT-1）；RVC-1 已迁 archive；其余历史切片在 archive / candidates 检索。
+- **Active roadmap**：RVC-1（仅剩 deployed verification）、OPS-1（+ 可选 OPT-1）；其余历史切片在 archive / candidates 检索。
 - **清理原则**：失效主链叙述、重复 audit、过程日记、live 产物一律归档或出库，不在 active 保留“假活跃”项。
 
 ## Navigation

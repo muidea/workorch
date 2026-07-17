@@ -4,7 +4,7 @@ Status: active
 
 Type: core-note
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-17
 
 ## Purpose
 
@@ -32,7 +32,7 @@ request 应按 cacheability 从高到低组织：
 
 - `C0` stable runtime prefix（中立 runtime 规则 / schema）
 - `C1` semi-stable workspace definition（Goal / DoD）
-- `C2` stable capability / governance / template stage-policy **声明**（语义输入，非 kernel 状态名）
+- `C2` stable capability / governance / validation / acceptance-slice / template stage-policy **声明**（语义输入，非 kernel 状态名）
 - `C3` current focus / requiredOutput / decision bundle
 - `C4` volatile execution tail（failure、recent evidence、attempt diagnostics）
 - `C5` large refs / trace
@@ -42,6 +42,7 @@ request 应按 cacheability 从高到低组织：
 - Goal / DoD 不被压缩
 - capability contract 声明式稳定
 - 当前失败、当前进展、latest validation、memory recall、requested action 位于易变尾部
+- current focus 的 active rejected operation shapes、shape hash、failure lineage 与 admissible operation kinds 位于 C3/C4 易变尾部，不得进入 C2
 - raw stream、full provider payload、large artifact 默认 ref-only
 
 ### Provider-Facing Stable Prefix

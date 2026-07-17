@@ -71,6 +71,27 @@ func TestRuntimeV2BootstrapAllowsValidationOnlyFocusWhenStateChangeIsOptional(t 
 	}
 }
 
+func TestRuntimeV2BootstrapSealsConfiguredConvergencePolicy(t *testing.T) {
+	bootstrap, err := RuntimeV2Bootstrap(
+		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
+		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"validate"}},
+		"definition-1",
+		nil,
+		runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{
+			MaxRepairAttemptsPerFocus: 7,
+			ValidationPolicies: []runtimecontract.RuntimeValidationPolicy{{
+				ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, MaxValidationOnlyRetriesPerFocus: 2,
+			}},
+		}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bootstrap.ConvergencePolicy.MaxRepairAttemptsPerFocus != 7 || bootstrap.ConvergencePolicy.MaxValidationOnlyRetriesPerFocus != 2 {
+		t.Fatalf("convergence policy = %+v", bootstrap.ConvergencePolicy)
+	}
+}
+
 func TestRuntimeV2BootstrapAppendsRequiredProfileFocusesWithTypedRequirements(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{
 		StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,

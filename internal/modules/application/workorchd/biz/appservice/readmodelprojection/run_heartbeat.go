@@ -86,10 +86,10 @@ func runtimeV2RetryExhaustedReason(reason string) bool {
 
 func heartbeatConvergenceBudgetEscalated(decision string) bool {
 	switch strings.TrimSpace(decision) {
-	case "", "continue":
-		return false
-	default:
+	case "fail", "retry_exhaustion", "no_progress_exhausted", "candidate_retry_exhausted", "budget_exhausted":
 		return true
+	default:
+		return false
 	}
 }
 

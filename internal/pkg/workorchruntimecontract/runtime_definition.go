@@ -27,6 +27,7 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 	writeHashStrings(h, definition.CapabilityContract)
 	writeRuntimeDefinitionChangeImpactHash(h, definition.ChangeImpact)
 	writeHashString(h, string(execution.StateChangePolicy))
+	writeHashString(h, fmt.Sprintf("%d", execution.MaxRepairAttemptsPerFocus))
 	writeHashString(h, fmt.Sprintf("%d", len(execution.CapabilityUsagePolicies)))
 	for _, policy := range execution.CapabilityUsagePolicies {
 		writeHashString(h, policy.ID)
@@ -39,6 +40,24 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 		writeHashStrings(h, policy.TriggerSignals)
 		writeHashStrings(h, policy.PreferredTools)
 		writeHashStrings(h, policy.RequiredAfterKinds)
+		writeHashStrings(h, policy.Notes)
+	}
+	writeHashString(h, fmt.Sprintf("%d", len(execution.ValidationPolicies)))
+	for _, policy := range execution.ValidationPolicies {
+		writeHashString(h, policy.ID)
+		writeHashString(h, policy.Scope)
+		writeHashStrings(h, policy.AppliesToEvidenceKinds)
+		writeHashString(h, policy.ValidationSafetyClass)
+		writeHashString(h, fmt.Sprintf("%t", policy.DiscoveryRequired))
+		writeHashStrings(h, policy.DiscoverySources)
+		writeHashStrings(h, policy.AllowedExecutionModes)
+		writeHashString(h, fmt.Sprintf("%t", policy.ValidationFailureImpliesStateChange))
+		writeHashStrings(h, policy.ImplementationGapDiagnosticClasses)
+		writeHashString(h, fmt.Sprintf("%d", policy.MaxValidationOnlyRetriesPerFocus))
+		writeHashString(h, fmt.Sprintf("%t", policy.PreferMinimalPatchBeforeRepeatedValidation))
+		writeHashString(h, policy.IfNoTargetRoute)
+		writeHashString(h, fmt.Sprintf("%t", policy.ValidationScratchRequired))
+		writeHashStrings(h, policy.AllowedValidationModes)
 		writeHashStrings(h, policy.Notes)
 	}
 	writeHashString(h, fmt.Sprintf("%d", len(execution.ProfileContracts)))
@@ -71,6 +90,29 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 			writeHashStrings(h, requirement.AcceptedOperations)
 			writeHashStrings(h, requirement.RejectedStepKinds)
 			writeHashString(h, requirement.Description)
+		}
+	}
+	if execution.AcceptanceSlicePolicy == nil {
+		writeHashString(h, "acceptance-slice-policy:absent")
+	} else {
+		policy := execution.AcceptanceSlicePolicy.Normalized()
+		writeHashString(h, "acceptance-slice-policy:present")
+		writeHashString(h, policy.SchemaVersion)
+		writeHashString(h, fmt.Sprintf("%d", policy.MaxWorkItems))
+		writeHashString(h, policy.CompletionPolicy)
+		writeHashString(h, policy.ResultPolicy)
+		writeHashString(h, fmt.Sprintf("%d", len(policy.Groups)))
+		for _, group := range policy.Groups {
+			writeHashString(h, group.ID)
+			writeHashString(h, group.Title)
+			writeHashString(h, group.Scope)
+			writeHashString(h, fmt.Sprintf("%d", group.Priority))
+			writeHashString(h, fmt.Sprintf("%d", group.MaxWorkItems))
+			writeHashStrings(h, group.Match.EvidenceRoles)
+			writeHashStrings(h, group.Match.MissingEvidenceKinds)
+			writeHashStrings(h, group.Match.SourceRequirementIDs)
+			writeHashStrings(h, group.Match.SourceScopes)
+			writeHashString(h, fmt.Sprintf("%t", group.Match.All))
 		}
 	}
 	if execution.TemplateStagePolicy == nil {

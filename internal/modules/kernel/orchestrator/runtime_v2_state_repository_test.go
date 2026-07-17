@@ -61,6 +61,47 @@ func TestRuntimeV2StateRepositoryPersistsAndLoadsThroughRunOwner(t *testing.T) {
 	}
 }
 
+func TestRuntimeV2StateRepositoryRestartsLegacyActiveAggregateWithoutReinitialize(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	runs := memory.NewRunRepository()
+	aggregate := runtimeV2Aggregate(t, 4)
+	record := runtimeStateRecordFromAggregate(aggregate)
+	record.SchemaVersion = runtimecontract.RuntimeStateSchemaVersionLegacy
+	record.Facts.Coverage = nil
+	bootstrap := runtimeV2Bootstrap()
+	if err := runs.Create(ctx, &runmodel.Run{
+		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2", DefinitionRevision: "definition-v2",
+		State: common.RunStateActive, RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2, RuntimeBootstrap: &bootstrap, RuntimeState: &record,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+	repository := runtimeV2StateRepository{hub: hub}
+	loaded, err := repository.Load(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.StateRevision != 4 || loaded.Decision.AuthoritySnapshot.ID != aggregate.Decision.AuthoritySnapshot.ID || len(loaded.Facts.Coverage) != 1 {
+		t.Fatalf("legacy restart load = %+v", loaded)
+	}
+	if err := repository.Save(ctx, loaded, 4); err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil || persisted.RuntimeState == nil || persisted.RuntimeState.SchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent || persisted.RuntimeState.StateRevision != 4 {
+		t.Fatalf("persisted migrated state = %+v err=%v", persisted, err)
+	}
+}
+
 func TestRuntimeV2InitializesFromPersistedRunBootstrap(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)

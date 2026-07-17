@@ -73,20 +73,6 @@ func mapRuntimeV2Progress(state runtimecontract.RuntimeStateRecord) readmodelcor
 	return ret
 }
 
-func runtimeV2RepairAttemptStats(attempts []runtimecontract.RuntimeCandidateAttemptRecord) (count int, lastAttempt int) {
-	for _, attempt := range attempts {
-		// Count only failed attempts and explicit retries (attempt > 0).
-		// Healthy first-pass attempt=0/accepted must not mark the run as repairing.
-		if attempt.State == runtimecontract.RuntimeCandidateAttemptStateFailed || attempt.Attempt > 0 {
-			count++
-			if attempt.Attempt+1 > lastAttempt {
-				lastAttempt = attempt.Attempt + 1
-			}
-		}
-	}
-	return count, lastAttempt
-}
-
 func applyRuntimeV2ProgressToMilestones(progress *readmodelcore.TaskProgress, summary readmodelcore.RuntimeV2Progress, runState string) {
 	if progress == nil {
 		return
@@ -141,13 +127,15 @@ func applyRuntimeV2ProgressToRepairLoop(progress *readmodelcore.TaskProgress, su
 		return
 	}
 	loop := progress.RepairLoop
-	repairAttempts, lastRepairAttempt := runtimeV2RepairAttemptStats(state.CandidateAttempts)
-	if repairAttempts > loop.AttemptCount {
-		loop.AttemptCount = repairAttempts
-	}
-	if lastRepairAttempt > loop.LastAttempt {
-		loop.LastAttempt = lastRepairAttempt
-	}
+	facts := state.Facts.Normalized()
+	repairAttempts := facts.Repair.RepairAttempts
+	loop.AttemptCount = repairAttempts
+	loop.LastAttempt = repairAttempts
+	loop.LastFailureClass = ""
+	loop.LastFailureSignature = ""
+	loop.RepeatedFailureReason = ""
+	loop.RecommendedNextSteps = nil
+	loop.Escalated = false
 	switch {
 	case progress.State == string(common.RunStateFailed):
 		if repairAttempts > 0 || strings.TrimSpace(summary.FailureClass) != "" {
@@ -162,12 +150,10 @@ func applyRuntimeV2ProgressToRepairLoop(progress *readmodelcore.TaskProgress, su
 		} else {
 			loop.State = "inactive"
 		}
-	case repairAttempts > 0:
+	case repairAttempts > 0 && (facts.Repair.ActiveGap != nil || facts.Failure != nil):
 		loop.State = "active"
 	default:
-		if loop.State == "" {
-			loop.State = "inactive"
-		}
+		loop.State = "inactive"
 	}
 	if strings.TrimSpace(summary.FailureClass) != "" {
 		loop.LastFailureClass = summary.FailureClass
@@ -178,9 +164,7 @@ func applyRuntimeV2ProgressToRepairLoop(progress *readmodelcore.TaskProgress, su
 	if strings.TrimSpace(summary.FailureMessage) != "" {
 		loop.RepeatedFailureReason = summary.FailureMessage
 	}
-	for _, code := range summary.RepairHintCodes {
-		loop.RecommendedNextSteps = compactUniqueStrings(append(loop.RecommendedNextSteps, code))
-	}
+	loop.RecommendedNextSteps = compactUniqueStrings(summary.RepairHintCodes)
 	progress.RepairLoop = loop
 }
 

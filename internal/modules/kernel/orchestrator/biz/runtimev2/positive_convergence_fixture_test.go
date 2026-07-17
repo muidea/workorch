@@ -487,6 +487,61 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 	}
 }
 
+func TestPositiveConvergenceFixture_PartialSlicePersistsAcrossControllerRestart(t *testing.T) {
+	ctx := context.Background()
+	repository := &controllerRepository{}
+	first, _ := NewRuntimeController(repository)
+	facts := controllerFacts()
+	facts.Focus = runtimecontract.CoverageFocus{
+		ID: "focus-v2", SliceID: "slice-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1", "cwi-2"},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, RequireAssessment: true,
+	}
+	facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{
+		{ID: "cwi-1", SliceID: "slice-v2", State: runtimecontract.RuntimeCoverageItemStateOpen},
+		{ID: "cwi-2", SliceID: "slice-v2", State: runtimecontract.RuntimeCoverageItemStateOpen},
+	}
+	facts.Evidence = runtimecontract.EvidenceLedger{Accepted: []runtimecontract.EvidenceFact{{
+		ID: "validation-1", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1", "cwi-2"}, Revision: "evidence-v2-00000000000000000001",
+	}}}
+	facts.EvidenceRevision = "evidence-v2-00000000000000000001"
+	if _, err := first.Initialize(ctx, facts, controllerDefinition(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "assessment-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
+		FocusID: "focus-v2", SliceID: "slice-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1", "cwi-2"},
+		Disposition: runtimecontract.AssessmentDispositionRepairableGap, Summary: "one item remains",
+		Items: []runtimecontract.RuntimeAssessmentItemFact{
+			{CoverageWorkItemID: "cwi-1", Satisfied: true, EvidenceRefs: []string{"validation-1"}},
+			{CoverageWorkItemID: "cwi-2", Satisfied: false, Reason: "missing evidence"},
+		},
+		Gap: &runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-2"}, MissingEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, Reason: "missing evidence"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	partial, err := first.CommitAssessment(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if partial.Decision.Action == runtimecontract.RuntimeActionComplete || partial.Decision.Action == runtimecontract.RuntimeActionFail {
+		t.Fatalf("partial slice terminalized: %+v", partial.Decision)
+	}
+	second, _ := NewRuntimeController(repository)
+	reloaded, err := second.Load(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	states := map[common.CoverageWorkItemID]runtimecontract.RuntimeCoverageItemState{}
+	for _, item := range reloaded.Facts.Coverage {
+		states[item.ID] = item.State
+	}
+	if states["cwi-1"] != runtimecontract.RuntimeCoverageItemStateSatisfied || states["cwi-2"] != runtimecontract.RuntimeCoverageItemStateUnsatisfied || reloaded.StateRevision != partial.StateRevision {
+		t.Fatalf("reloaded partial slice = %+v", reloaded.Facts.Coverage)
+	}
+}
+
 // RVC-17: multi-focus advance after satisfied assessment.
 func TestPositiveConvergenceFixture_FocusAdvanceAfterSatisfiedAssessment(t *testing.T) {
 	t.Parallel()

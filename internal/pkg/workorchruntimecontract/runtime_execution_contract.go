@@ -14,11 +14,13 @@ const (
 )
 
 type RuntimeExecutionContract struct {
-	StateChangePolicy       RuntimeStateChangePolicy
-	CapabilityUsagePolicies []RuntimeCapabilityUsagePolicy
-	ProfileContracts        []RuntimeProfileContract
-	AcceptanceSlicePolicy   *RuntimeAcceptanceSlicePolicy
-	TemplateStagePolicy     *RuntimeTemplateStagePolicy
+	StateChangePolicy         RuntimeStateChangePolicy
+	MaxRepairAttemptsPerFocus int
+	CapabilityUsagePolicies   []RuntimeCapabilityUsagePolicy
+	ValidationPolicies        []RuntimeValidationPolicy
+	ProfileContracts          []RuntimeProfileContract
+	AcceptanceSlicePolicy     *RuntimeAcceptanceSlicePolicy
+	TemplateStagePolicy       *RuntimeTemplateStagePolicy
 }
 
 type RuntimeCapabilityUsagePolicy struct {
@@ -41,6 +43,7 @@ func (c RuntimeExecutionContract) Normalized() RuntimeExecutionContract {
 		c.StateChangePolicy = RuntimeStateChangeAllowedButNotRequired
 	}
 	c.CapabilityUsagePolicies = normalizeRuntimeCapabilityUsagePolicies(c.CapabilityUsagePolicies)
+	c.ValidationPolicies = NormalizeRuntimeValidationPolicies(c.ValidationPolicies)
 	c.ProfileContracts = NormalizeRuntimeProfileContracts(c.ProfileContracts)
 	if c.AcceptanceSlicePolicy != nil {
 		policy := c.AcceptanceSlicePolicy.Normalized()
@@ -65,6 +68,12 @@ func (c RuntimeExecutionContract) Validate() error {
 			return fmt.Errorf("runtime capability usage policy requires id")
 		}
 	}
+	if c.MaxRepairAttemptsPerFocus < 0 || c.MaxRepairAttemptsPerFocus > MaxRepairAttemptsPerFocusLimit {
+		return fmt.Errorf("runtime execution contract max repair attempts must be in 0..%d", MaxRepairAttemptsPerFocusLimit)
+	}
+	if err := ValidateRuntimeValidationPolicies(c.ValidationPolicies); err != nil {
+		return err
+	}
 	if err := ValidateRuntimeProfileContracts(c.ProfileContracts); err != nil {
 		return err
 	}
@@ -84,7 +93,9 @@ func (c RuntimeExecutionContract) Validate() error {
 func SameRuntimeExecutionContract(left RuntimeExecutionContract, right RuntimeExecutionContract) bool {
 	left = left.Normalized()
 	right = right.Normalized()
-	if left.StateChangePolicy != right.StateChangePolicy || len(left.CapabilityUsagePolicies) != len(right.CapabilityUsagePolicies) ||
+	if left.StateChangePolicy != right.StateChangePolicy || left.MaxRepairAttemptsPerFocus != right.MaxRepairAttemptsPerFocus ||
+		len(left.CapabilityUsagePolicies) != len(right.CapabilityUsagePolicies) ||
+		!sameRuntimeValidationPolicies(left.ValidationPolicies, right.ValidationPolicies) ||
 		!SameRuntimeProfileContracts(left.ProfileContracts, right.ProfileContracts) || !SameRuntimeTemplateStagePolicy(left.TemplateStagePolicy, right.TemplateStagePolicy) ||
 		!sameRuntimeAcceptanceSlicePolicy(left.AcceptanceSlicePolicy, right.AcceptanceSlicePolicy) {
 		return false

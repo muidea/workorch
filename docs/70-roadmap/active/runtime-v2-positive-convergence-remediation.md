@@ -28,14 +28,23 @@ orchestrator readme remains the implementation SoT.
   empty/legacy diagnostics projection.
 - File default configuration no longer embeds the live-verifier provider or its
   test secret.
+- Typed validation policies now compile at the application boundary and seal
+  configured repair/validation-only limits into every new bootstrap.
+- Candidate context now includes exact active rejected operation shapes and
+  admissible operation kinds derived from persisted dispatch/evidence lineage.
+- Result closeout packages current-run evidence/coverage/assessment ledgers even
+  when terminal failure occurs before assessment; continuation prefers closeout.
+- Runtime V2 read models now separate candidate contract retry from focus repair
+  and clear superseded ineffective-retry state after focus advance.
+- Legacy active aggregate restart, partial-slice restart/CAS, and feasibility
+  no-provider paths have direct regression coverage.
+- Acceptance focus count is bounded and the software-dev profile batches direct
+  validation coverage in groups of up to 16 items.
 
 ## Remaining Blocking Work
 
 | ID | State-machine scope | Required closure |
 | --- | --- | --- |
-| RVC-R1 | SM-2/SM-3 | Complete typed validation-policy compilation and seal configured repair limits into every new bootstrap. |
-| RVC-R2 | SM-2/SM-4 | Make Result closeout and continuation consume the coverage ledger exclusively; remove residual compatibility reads of assessment booleans. |
-| RVC-R3 | SM-2/SM-4 | Add legacy active-Run restart, partial-slice CAS/restart and feasibility no-provider regression suites. |
 | RVC-R4 | SM-4 | Replace the test aggregation script with a real file-backed service E2E, then capture two real workspace cross-focus proofs without altering default provider configuration. |
 
 The archived completion record is historical evidence only and must not be used
