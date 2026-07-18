@@ -102,11 +102,11 @@ func (m *Module) Stop(ctx context.Context) error {
 
 func (m *Module) handleGitCapabilityState(event magicevent.Event, result magicevent.Result) {
 	command, ok := event.Data().(orchestratorevents.AcquireGitCapabilityStateCommand)
-	if !ok || m.runtimeAdapter == nil || m.capabilityReceipts == nil || command.PrerequisiteID == "" || command.AcquisitionKey == "" || command.WorkspaceDeliverableDirectory == "" || command.CapabilityStateKind != "repository_state" || command.SubjectRef == "" {
+	if !ok || m.runtimeAdapter == nil || m.capabilityReceipts == nil || command.WorkspaceID == "" || command.PrerequisiteID == "" || command.AcquisitionKey == "" || command.WorkspaceDeliverableDirectory == "" || command.CapabilityStateKind != "repository_state" || command.SubjectRef == "" {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	if snapshot, found, err := m.capabilityReceipts.Load(command.AcquisitionKey); err != nil {
+	if snapshot, found, err := m.capabilityReceipts.Load(command.WorkspaceID, command.AcquisitionKey); err != nil {
 		setCapabilityError(result, err)
 		return
 	} else if found {
@@ -121,7 +121,7 @@ func (m *Module) handleGitCapabilityState(event magicevent.Event, result magicev
 	snapshot.AcquisitionKey = command.AcquisitionKey
 	snapshot.QueryReceiptRef = "capability-state-receipt/" + command.AcquisitionKey
 	snapshot.SnapshotID = runtimecontract.StableRuntimeCapabilityStateSnapshotID(snapshot)
-	snapshot, err = m.capabilityReceipts.StoreIfAbsent(snapshot)
+	snapshot, err = m.capabilityReceipts.StoreIfAbsent(command.WorkspaceID, snapshot)
 	if err != nil {
 		setCapabilityError(result, err)
 		return

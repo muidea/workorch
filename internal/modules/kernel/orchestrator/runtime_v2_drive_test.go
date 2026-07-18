@@ -544,7 +544,7 @@ func TestRuntimeV2FileBackedGitQueryReceiptCrashBeforePrerequisiteCommitReusesSn
 		t.Fatalf("missing persisted capability-state prerequisite: %+v", crashed.RuntimeState.Facts.Prerequisites)
 	}
 	acquisitionKey := stableRuntimeV2CapabilityStateAcquisitionKey("ws-v2", "run-v2", prerequisiteID, 0)
-	queried, found, err := store.Load(acquisitionKey)
+	queried, found, err := store.Load("ws-v2", acquisitionKey)
 	if err != nil || !found {
 		t.Fatalf("durable query receipt found=%t err=%v", found, err)
 	}
@@ -652,7 +652,7 @@ func TestRuntimeV2FileBackedGitSnapshotCommitCrashBeforeCandidateReusesCommitted
 		t.Fatalf("snapshot/candidate boundary aggregate=%+v", aggregate)
 	}
 	committedSnapshot := aggregate.Facts.Resources.CapabilityStates[0]
-	if queried, found, err := store.Load(committedSnapshot.AcquisitionKey); err != nil || !found || queried.SnapshotID != committedSnapshot.SnapshotID {
+	if queried, found, err := store.Load("ws-v2", committedSnapshot.AcquisitionKey); err != nil || !found || queried.SnapshotID != committedSnapshot.SnapshotID {
 		t.Fatalf("committed snapshot has no durable owner query receipt: found=%t queried=%+v err=%v", found, queried, err)
 	}
 

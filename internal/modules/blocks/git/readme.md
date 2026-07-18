@@ -9,6 +9,7 @@
 - `kernel/orchestrator` 通过 Orchestrator 定义的 `ExecuteRuntimeOperationCommand/Result` 同步投递 Git 操作；本组件直接订阅 EventHub，不再启动通用 runtime executor 或发布 V1 执行通知。
 - Runtime V2 capability preflight 通过 Orchestrator 定义的 typed EventHub command 查询本 block 实际提供的 Git read/write kinds。
 - Git capability-state prerequisite 的 canonical owner identity 是 `blocks/git`；profile 只能通过该 identity 请求 `repository_state`，不得使用 `git` 等 EventHub destination 别名。
+- Git capability-state receipt 是 Git owner 的 durable prerequisite evidence，按 `<repository.dataDir>/internal/workspaces/<workspaceId>/runtime-v2/git-capability-state-receipts/` 分区；同一 workspace/acquisition key 只能对应同一快照。它不写入 deliverable，随 workspace internal directory 的受控删除一并清理。
 - Runtime V2 Git operation 将技术执行结果收口为 typed status、failure 和 evidence。
 - request 必须携带 workspace repository scope、run/step scope、operation 和结构化参数；result 返回状态、摘要、changed refs、错误分类和 raw ref。
 - Orchestrator 和 Approval 流程在写操作进入本 block 前完成策略准入和必要授权。

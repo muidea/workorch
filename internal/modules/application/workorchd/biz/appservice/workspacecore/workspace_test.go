@@ -1,6 +1,8 @@
 package workspacecore
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
@@ -71,5 +73,24 @@ func TestApplyTemplateToWorkspace(t *testing.T) {
 	kind, _ := got.EvidencePolicies[0].String("kind")
 	if kind != "validation" {
 		t.Fatalf("evidence policies were not cloned: %v", got.EvidencePolicies)
+	}
+}
+
+func TestPurgeDirectoriesRemovesWorkspaceRuntimeData(t *testing.T) {
+	dataRoot := t.TempDir()
+	workspaceID := "ws-runtime-data"
+	internalDirectory := filepath.Join(dataRoot, "internal", "workspaces", workspaceID)
+	receiptPath := filepath.Join(internalDirectory, "runtime-v2", "git-capability-state-receipts", "receipt.json")
+	if err := os.MkdirAll(filepath.Dir(receiptPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(receiptPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := PurgeDirectories("file", dataRoot, workspaceID, "", internalDirectory); err != nil {
+		t.Fatalf("PurgeDirectories: %v", err)
+	}
+	if _, err := os.Stat(internalDirectory); !os.IsNotExist(err) {
+		t.Fatalf("workspace internal directory still exists, err=%v", err)
 	}
 }

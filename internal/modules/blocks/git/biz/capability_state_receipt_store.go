@@ -17,35 +17,31 @@ import (
 )
 
 // CapabilityStateReceiptStore is Git-owner durable state for read-only
-// prerequisite acquisition. It deliberately lives outside the workspace so a
-// query cannot alter a deliverable.
+// prerequisite acquisition. It lives in the workspace internal directory, not
+// the deliverable, so a query cannot alter user-managed files.
 type CapabilityStateReceiptStore struct {
-	dir string
-	mu  sync.Mutex
+	dataDir string
+	mu      sync.Mutex
 }
 
 func NewCapabilityStateReceiptStore(dataDir string) (*CapabilityStateReceiptStore, error) {
-	dir := strings.TrimSpace(dataDir)
-	if dir == "" {
+	dataDir = strings.TrimSpace(dataDir)
+	if dataDir == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	dir = filepath.Join(dir, "runtime-v2", "git-capability-state-receipts")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, err
-	}
-	return &CapabilityStateReceiptStore{dir: dir}, nil
+	return &CapabilityStateReceiptStore{dataDir: filepath.Clean(dataDir)}, nil
 }
 
-func (s *CapabilityStateReceiptStore) Load(acquisitionKey string) (runtimecontract.RuntimeCapabilityStateSnapshot, bool, error) {
-	if s == nil || strings.TrimSpace(acquisitionKey) == "" {
+func (s *CapabilityStateReceiptStore) Load(workspaceID common.WorkspaceID, acquisitionKey string) (runtimecontract.RuntimeCapabilityStateSnapshot, bool, error) {
+	if s == nil {
 		return runtimecontract.RuntimeCapabilityStateSnapshot{}, false, common.ErrInvalidArgument
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.load(acquisitionKey)
+	return s.load(workspaceID, acquisitionKey)
 }
 
-func (s *CapabilityStateReceiptStore) StoreIfAbsent(snapshot runtimecontract.RuntimeCapabilityStateSnapshot) (runtimecontract.RuntimeCapabilityStateSnapshot, error) {
+func (s *CapabilityStateReceiptStore) StoreIfAbsent(workspaceID common.WorkspaceID, snapshot runtimecontract.RuntimeCapabilityStateSnapshot) (runtimecontract.RuntimeCapabilityStateSnapshot, error) {
 	if s == nil {
 		return runtimecontract.RuntimeCapabilityStateSnapshot{}, common.ErrInvalidArgument
 	}
@@ -54,13 +50,17 @@ func (s *CapabilityStateReceiptStore) StoreIfAbsent(snapshot runtimecontract.Run
 		return runtimecontract.RuntimeCapabilityStateSnapshot{}, common.ErrInvalidArgument
 	}
 	snapshot = normalized[0]
-	if snapshot.RequirementID == "" || snapshot.AcquisitionKey == "" || snapshot.SnapshotID == "" || snapshot.QueryReceiptRef == "" ||
+	if snapshot.RequirementID == "" || snapshot.SnapshotID == "" || snapshot.QueryReceiptRef == "" ||
 		snapshot.OwnerModuleID == "" || snapshot.CapabilityStateKind == "" || snapshot.SubjectRef == "" || snapshot.ObservedRevision == "" || snapshot.ContentHash == "" {
 		return runtimecontract.RuntimeCapabilityStateSnapshot{}, common.ErrInvalidArgument
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if existing, found, err := s.load(snapshot.AcquisitionKey); err != nil {
+	dir, err := s.workspaceDir(workspaceID, snapshot.AcquisitionKey)
+	if err != nil {
+		return runtimecontract.RuntimeCapabilityStateSnapshot{}, err
+	}
+	if existing, found, err := s.load(workspaceID, snapshot.AcquisitionKey); err != nil {
 		return runtimecontract.RuntimeCapabilityStateSnapshot{}, err
 	} else if found {
 		if !reflect.DeepEqual(existing, snapshot) {
@@ -72,8 +72,14 @@ func (s *CapabilityStateReceiptStore) StoreIfAbsent(snapshot runtimecontract.Run
 	if err != nil {
 		return runtimecontract.RuntimeCapabilityStateSnapshot{}, err
 	}
-	path := s.path(snapshot.AcquisitionKey)
-	file, err := os.CreateTemp(s.dir, ".capability-state-*")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return runtimecontract.RuntimeCapabilityStateSnapshot{}, err
+	}
+	path, err := s.path(workspaceID, snapshot.AcquisitionKey)
+	if err != nil {
+		return runtimecontract.RuntimeCapabilityStateSnapshot{}, err
+	}
+	file, err := os.CreateTemp(dir, ".capability-state-*")
 	if err != nil {
 		return runtimecontract.RuntimeCapabilityStateSnapshot{}, err
 	}
@@ -98,7 +104,7 @@ func (s *CapabilityStateReceiptStore) StoreIfAbsent(snapshot runtimecontract.Run
 	// observe a partially written JSON receipt.
 	err = os.Link(temporaryPath, path)
 	if errors.Is(err, os.ErrExist) {
-		value, found, loadErr := s.load(snapshot.AcquisitionKey)
+		value, found, loadErr := s.load(workspaceID, snapshot.AcquisitionKey)
 		if loadErr != nil {
 			return runtimecontract.RuntimeCapabilityStateSnapshot{}, loadErr
 		}
@@ -113,8 +119,12 @@ func (s *CapabilityStateReceiptStore) StoreIfAbsent(snapshot runtimecontract.Run
 	return snapshot, nil
 }
 
-func (s *CapabilityStateReceiptStore) load(acquisitionKey string) (runtimecontract.RuntimeCapabilityStateSnapshot, bool, error) {
-	data, err := os.ReadFile(s.path(acquisitionKey))
+func (s *CapabilityStateReceiptStore) load(workspaceID common.WorkspaceID, acquisitionKey string) (runtimecontract.RuntimeCapabilityStateSnapshot, bool, error) {
+	path, err := s.path(workspaceID, acquisitionKey)
+	if err != nil {
+		return runtimecontract.RuntimeCapabilityStateSnapshot{}, false, err
+	}
+	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return runtimecontract.RuntimeCapabilityStateSnapshot{}, false, nil
 	}
@@ -137,7 +147,23 @@ func (s *CapabilityStateReceiptStore) load(acquisitionKey string) (runtimecontra
 	return snapshot, true, nil
 }
 
-func (s *CapabilityStateReceiptStore) path(acquisitionKey string) string {
+func (s *CapabilityStateReceiptStore) path(workspaceID common.WorkspaceID, acquisitionKey string) (string, error) {
+	dir, err := s.workspaceDir(workspaceID, acquisitionKey)
+	if err != nil {
+		return "", err
+	}
 	sum := sha256.Sum256([]byte(acquisitionKey))
-	return filepath.Join(s.dir, hex.EncodeToString(sum[:])+".json")
+	return filepath.Join(dir, hex.EncodeToString(sum[:])+".json"), nil
+}
+
+func (s *CapabilityStateReceiptStore) workspaceDir(workspaceID common.WorkspaceID, acquisitionKey string) (string, error) {
+	workspace := strings.TrimSpace(string(workspaceID))
+	if s == nil || workspace == "" || workspace != string(workspaceID) || strings.ContainsAny(workspace, `/\\`) || filepath.Base(workspace) != workspace || strings.TrimSpace(acquisitionKey) == "" {
+		return "", common.ErrInvalidArgument
+	}
+	prefix := "capability-state/" + workspace + "/"
+	if !strings.HasPrefix(acquisitionKey, prefix) {
+		return "", common.ErrInvalidArgument
+	}
+	return filepath.Join(s.dataDir, "internal", "workspaces", workspace, "runtime-v2", "git-capability-state-receipts"), nil
 }
