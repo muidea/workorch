@@ -20,6 +20,7 @@ func Contracts() []eventcontract.Contract {
 		TopicRunCommandGet,
 		TopicRunCommandList,
 		TopicRunCommandListByWorkspace,
+		TopicRunCommandRuntimeV2RecoveryInventory,
 		TopicRunCommandGetStep,
 		TopicRunCommandListStepsByRun,
 		TopicRunCommandListStepSummariesByRun,

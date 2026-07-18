@@ -27,6 +27,7 @@ func TestReduceRuntimeStateLiveFailureFixtures(t *testing.T) {
 					RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},
 					TargetRefs:            []string{"server.go"},
 				},
+				Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-036", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 				Evidence: runtimecontract.EvidenceLedger{
 					Accepted: []runtimecontract.EvidenceFact{{ID: "e-state", Kind: runtimecontract.EvidenceKindStateChange}},
 					Rejected: []runtimecontract.EvidenceFact{{ID: "e-vet", Kind: runtimecontract.EvidenceKindValidation, FailureClass: runtimecontract.FailureClassBuildFailure, FailureMessage: "server.go:29:6: main redeclared in this block"}},
@@ -51,6 +52,7 @@ func TestReduceRuntimeStateLiveFailureFixtures(t *testing.T) {
 					RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},
 					TargetRefs:            []string{"gateway"},
 				},
+				Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-085", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 				Evidence: runtimecontract.EvidenceLedger{
 					Accepted: []runtimecontract.EvidenceFact{{ID: "e-validation", Kind: runtimecontract.EvidenceKindValidation}},
 				},
@@ -315,6 +317,7 @@ func TestReduceRuntimeStateKeepsStateChangeAfterRejectedRepair(t *testing.T) {
 			Class: runtimecontract.FailureClassExecutionFailure, Code: "conflict",
 			Signature: "sig-repair", Message: "conflict",
 		},
+		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-001", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Capabilities: runtimecontract.RuntimeCapabilities{
 			StateChangeKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
 			ValidationKinds:  []string{runtimecontract.StepKindShellCommand},
@@ -363,6 +366,7 @@ func TestReduceRuntimeStateAllowsValidationAfterAcceptedRepair(t *testing.T) {
 			ID: "focus-001", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},
 		},
+		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-001", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Evidence: runtimecontract.EvidenceLedger{
 			Accepted: []runtimecontract.EvidenceFact{
 				{
@@ -402,6 +406,7 @@ func TestReduceRuntimeStateForcesStateChangeOnlyForUnresolvedValidationFailure(t
 			ID: "focus-001", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},
 		},
+		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-001", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Evidence: runtimecontract.EvidenceLedger{
 			Accepted: []runtimecontract.EvidenceFact{{
 				ID: "acc-state", Kind: runtimecontract.EvidenceKindStateChange, Revision: "evidence-v2-00000000000000000001",
@@ -439,6 +444,7 @@ func validationFacts() runtimecontract.RuntimeFacts {
 			CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-1"},
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
 		},
+		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Capabilities: runtimecontract.RuntimeCapabilities{
 			StateChangeKinds: []string{"patch/apply"},
 			ValidationKinds:  []string{"validation/managed_session"},
@@ -488,7 +494,7 @@ func TestReduceRuntimeStateRepairableAssessmentDoesNotTerminal(t *testing.T) {
 		Revision: facts.EvidenceRevision,
 	}}
 	facts.Assessments = []runtimecontract.RuntimeAssessmentFact{{
-		FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		ID: "assessment-repairable", FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		Disposition: runtimecontract.AssessmentDispositionRepairableGap,
 		Summary:     "implementation incomplete",
 		Gap: &runtimecontract.RuntimeAssessmentGap{
@@ -518,9 +524,10 @@ func TestReduceRuntimeStateTerminalAssessmentWithoutPersistedGovernanceRejection
 		Revision: facts.EvidenceRevision,
 	}}
 	facts.Assessments = []runtimecontract.RuntimeAssessmentFact{{
-		FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		ID: "assessment-terminal", FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		Disposition: runtimecontract.AssessmentDispositionTerminalRejection,
 		Summary:     "irrecoverable acceptance failure",
+		Gap:         &runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Reason: "irrecoverable acceptance failure"},
 	}}
 	facts = facts.Normalized()
 	decision, err := ReduceRuntimeState(facts, nil)
@@ -556,11 +563,12 @@ func TestReduceRuntimeStateSameFocusRepairThenReassess(t *testing.T) {
 
 	// Satisfied assessment then completes.
 	facts.Assessments = []runtimecontract.RuntimeAssessmentFact{{
-		FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
-		Disposition: runtimecontract.AssessmentDispositionSatisfied, Satisfied: true,
-		Summary: "coverage satisfied", EvidenceRefs: []string{"val-1"},
+		ID: "assessment-1", FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		Disposition: runtimecontract.AssessmentDispositionSatisfied,
+		Summary:     "coverage satisfied", EvidenceRefs: []string{"val-1"},
 	}}
 	facts.StateChange = runtimecontract.NewRuntimeStateChangeLedger(runtimecontract.RuntimeRunStateChangeRequirement{Required: false})
+	facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateSatisfied, EvidenceRefs: []string{"val-1"}}}
 	facts = facts.Normalized()
 	decision, err = ReduceRuntimeState(facts, nil)
 	if err != nil {
@@ -573,9 +581,9 @@ func TestReduceRuntimeStateSameFocusRepairThenReassess(t *testing.T) {
 
 func TestInvalidateNonSatisfiedAssessmentsForFocus(t *testing.T) {
 	values := []runtimecontract.RuntimeAssessmentFact{
-		{FocusID: "focus-1", Disposition: runtimecontract.AssessmentDispositionRepairableGap, Summary: "gap"},
-		{FocusID: "focus-1", Disposition: runtimecontract.AssessmentDispositionSatisfied, Satisfied: true, Summary: "ok"},
-		{FocusID: "focus-2", Disposition: runtimecontract.AssessmentDispositionRepairableGap, Summary: "other"},
+		{ID: "assessment-gap", FocusID: "focus-1", Disposition: runtimecontract.AssessmentDispositionRepairableGap, Summary: "gap"},
+		{ID: "assessment-ok", FocusID: "focus-1", Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "ok"},
+		{ID: "assessment-other", FocusID: "focus-2", Disposition: runtimecontract.AssessmentDispositionRepairableGap, Summary: "other"},
 	}
 	got := invalidateNonSatisfiedAssessmentsForFocus(values, "focus-1")
 	if len(got) != 2 {
@@ -596,7 +604,7 @@ func TestReduceRuntimeStateRepairBudgetExhausted(t *testing.T) {
 		Revision: facts.EvidenceRevision,
 	}}
 	facts.Assessments = []runtimecontract.RuntimeAssessmentFact{{
-		FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		ID: "assessment-exhausted", FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		Disposition: runtimecontract.AssessmentDispositionRepairableGap,
 		Summary:     "still broken",
 		Gap: &runtimecontract.RuntimeAssessmentGap{
@@ -630,7 +638,7 @@ func TestReduceRuntimeStateValidationOnlyCapEscalatesToStateChange(t *testing.T)
 		Revision: facts.EvidenceRevision,
 	}}
 	facts.Assessments = []runtimecontract.RuntimeAssessmentFact{{
-		FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		ID: "assessment-validation-cap", FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		Disposition: runtimecontract.AssessmentDispositionRepairableGap,
 		Summary:     "validation still failing",
 		Gap: &runtimecontract.RuntimeAssessmentGap{
@@ -646,5 +654,38 @@ func TestReduceRuntimeStateValidationOnlyCapEscalatesToStateChange(t *testing.T)
 	}
 	if decision.Action != runtimecontract.RuntimeActionProduceStateChange {
 		t.Fatalf("decision = %+v, want escalate to state-change after validation-only cap", decision)
+	}
+}
+
+func TestReduceRuntimeStateGovernanceRequiredOpensGovernance(t *testing.T) {
+	facts := controllerFacts()
+	facts.Failure = &runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassGovernanceRequired, Code: "approval_required",
+		Signature: "governance-approval-web", Message: "web operation requires approval before side effects",
+		TargetRefs: []string{"https://example.com"},
+	}
+	facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindApprovalRequest}
+	decision, err := ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionRequestGovernance {
+		t.Fatalf("action = %s, want request_governance (not execution repair)", decision.Action)
+	}
+}
+
+func TestReduceRuntimeStateProviderAuthenticationOpensConfigurationGovernance(t *testing.T) {
+	facts := controllerFacts()
+	facts.Failure = &runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassProviderAuthentication, Code: "provider_authentication",
+		Message: "provider rejected the configured credential",
+	}
+	facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindDecisionRequest}
+	decision, err := ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionRequestGovernance || decision.RequiredOutput.Kind != runtimecontract.RequiredOutputKindGovernance {
+		t.Fatalf("provider authentication decision = %+v", decision)
 	}
 }

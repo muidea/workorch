@@ -19,12 +19,10 @@ type RuntimeBootstrap struct {
 	Requirements           []RuntimeRequirement
 	StateChangeRequirement RuntimeRunStateChangeRequirement
 	ConvergencePolicy      RuntimeConvergencePolicy
+	RecoveryPolicy         RuntimeRecoveryPolicy
 }
 
 func (b RuntimeBootstrap) Normalized() RuntimeBootstrap {
-	if b.SchemaVersion == RuntimeStateSchemaVersionLegacy {
-		b.SchemaVersion = RuntimeStateSchemaVersionCurrent
-	}
 	b.Definition = b.Definition.Normalized()
 	b.Activation = b.Activation.Normalized()
 	b.Focuses = normalizeCoverageFocusQueue(b.Focuses)
@@ -33,6 +31,7 @@ func (b RuntimeBootstrap) Normalized() RuntimeBootstrap {
 	b.Requirements = normalizeRuntimeRequirements(b.Requirements)
 	b.StateChangeRequirement = b.StateChangeRequirement.Normalized()
 	b.ConvergencePolicy = b.ConvergencePolicy.Normalized()
+	b.RecoveryPolicy = b.RecoveryPolicy.Normalized()
 	return b
 }
 
@@ -47,8 +46,21 @@ func (b RuntimeBootstrap) Validate() error {
 	if err := b.Activation.Validate(); err != nil {
 		return err
 	}
+	if err := b.ConvergencePolicy.Validate(); err != nil {
+		return err
+	}
+	if err := b.RecoveryPolicy.Validate(); err != nil {
+		return err
+	}
 	if len(b.Focuses) == 0 {
 		return fmt.Errorf("runtime bootstrap requires at least one coverage focus")
+	}
+	if len(b.CoverageItems) == 0 {
+		return fmt.Errorf("runtime bootstrap requires explicit coverage items")
+	}
+	coverageItems := make(map[common.CoverageWorkItemID]struct{}, len(b.CoverageItems))
+	for _, item := range b.CoverageItems {
+		coverageItems[item.ID] = struct{}{}
 	}
 	seen := map[string]struct{}{}
 	for _, focus := range b.Focuses {
@@ -57,6 +69,11 @@ func (b RuntimeBootstrap) Validate() error {
 		}
 		if _, ok := seen[focus.ID]; ok {
 			return fmt.Errorf("runtime bootstrap focus %s is duplicated", focus.ID)
+		}
+		for _, id := range focus.CoverageWorkItemIDs {
+			if _, ok := coverageItems[id]; !ok {
+				return fmt.Errorf("runtime bootstrap focus %s coverage item %s is not declared", focus.ID, id)
+			}
 		}
 		seen[focus.ID] = struct{}{}
 	}
@@ -98,8 +115,10 @@ func (b RuntimeBootstrap) InitialFacts(workspaceID common.WorkspaceID, runID com
 		Activation:        b.Activation.Clone(),
 		StateChange:       NewRuntimeStateChangeLedger(b.StateChangeRequirement),
 		ConvergencePolicy: b.ConvergencePolicy.Normalized(),
+		RecoveryPolicy:    b.RecoveryPolicy.Normalized(),
+		Recovery:          RuntimeRecoveryLedger{},
 		Repair:            RuntimeRepairLedger{},
-		Coverage:          InitialRuntimeCoverageFacts(b.CoverageItems, b.Focuses),
+		Coverage:          InitialRuntimeCoverageFacts(b.CoverageItems),
 		Slices:            append([]RuntimeAcceptanceSlice(nil), b.Slices...),
 	}, nil
 }
@@ -112,7 +131,7 @@ func SameRuntimeBootstrap(left RuntimeBootstrap, right RuntimeBootstrap) bool {
 		len(left.Requirements) != len(right.Requirements) ||
 		left.StateChangeRequirement.Required != right.StateChangeRequirement.Required ||
 		!sameCoverageWorkItemIDs(left.StateChangeRequirement.CoverageWorkItemIDs, right.StateChangeRequirement.CoverageWorkItemIDs) ||
-		left.ConvergencePolicy != right.ConvergencePolicy {
+		left.ConvergencePolicy != right.ConvergencePolicy || left.RecoveryPolicy != right.RecoveryPolicy {
 		return false
 	}
 	for idx := range left.Focuses {

@@ -80,17 +80,9 @@ type RuntimeCoverageItemFact struct {
 }
 
 // InitialRuntimeCoverageFacts materializes the item closure ledger from the
-// sealed bootstrap. Legacy bootstraps without CoverageItems retain one item per
-// focus membership so that an active Run can be migrated without replaying it.
-func InitialRuntimeCoverageFacts(items []RuntimeCoverageItem, focuses []CoverageFocus) []RuntimeCoverageItemFact {
+// explicit sealed bootstrap inventory.
+func InitialRuntimeCoverageFacts(items []RuntimeCoverageItem) []RuntimeCoverageItemFact {
 	items = NormalizeRuntimeCoverageItems(items)
-	if len(items) == 0 {
-		for _, focus := range focuses {
-			for _, id := range focus.Normalized().CoverageWorkItemIDs {
-				items = append(items, RuntimeCoverageItem{ID: id, SliceID: focus.SliceID})
-			}
-		}
-	}
 	ret := make([]RuntimeCoverageItemFact, 0, len(items))
 	seen := map[common.CoverageWorkItemID]struct{}{}
 	for _, item := range items {

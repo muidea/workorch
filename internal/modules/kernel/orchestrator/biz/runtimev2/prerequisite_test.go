@@ -20,6 +20,7 @@ func TestGatewayPreflightAcquiresSnapshotsBeforeStateChange(t *testing.T) {
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 			TargetRefs:            []string{"go.mod", "cmd/gateway/main.go"},
 		},
+		Coverage:     []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-085", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Capabilities: runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{"patch/apply"}},
 	}
 	requirements := []RuntimeRequirement{

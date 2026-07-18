@@ -20,13 +20,13 @@ Last Updated: 2026-07-17
 | 2026-07-14：约 146 份 completed/code-closed/V1-absorbed active plan | 已迁 `90-archive/completed/` |
 | 2026-07-16：active 假活跃产品/审计/收口日记 + verification 过程记录 + artifacts | 已迁 archive 或移出仓库 |
 | 2026-07-16：TUI workspace provider/model 选择与持久化 | MODEL-01～18、全量 gate 与 deployed e2e 已通过，计划已迁 `90-archive/completed/` |
-| 2026-07-17：Runtime V2 正向收敛闭环（RVC-1） | completion record 已复核作废；remediation active |
+| 2026-07-17：Runtime V2 正向收敛闭环（RVC-1） | RVC-R5～R15 code closure verified；剩余 RVC-R16 deployed dual-workspace Live |
 
 ## Residual Open
 
 ### A. Runtime 正向收敛
 
-RVC-1 Runtime V2 正向收敛闭环：**code-closed / deployed verification pending**。typed policy seal、rejected-shape context、Result/continuation ledger、restart/partial-slice/no-provider regression、read-model retry semantics 与 focus cost guard 已收口；仅剩真实 file-backed/双 workspace cross-focus E2E。见 [remediation](../70-roadmap/active/runtime-v2-positive-convergence-remediation.md)。
+RVC-1 Runtime V2 正向收敛闭环：**active — code closure verified, deployed Live pending**。RVC-R5～R15 已完成：包含 crash matrix、operation-scoped governance continuation、independent budgets、typed recovery/delivery inventory/read model 与真实 file-backed 双 focus E2E。剩余只执行 RVC-R16 deployed dual-workspace Live。完整批次和验收见 [remediation](../70-roadmap/active/runtime-v2-positive-convergence-remediation.md)。
 
 ### B. 运维 / 生产切换
 
@@ -57,9 +57,9 @@ RVC-1 Runtime V2 正向收敛闭环：**code-closed / deployed verification pend
 ## Judgment
 
 - **代码主链**：Runtime V2 only；V1 authority 不再是问题来源。
-- **正向收敛**：RVC-1 remediation 进行中；历史 deployed evidence 不能代替 schema、ledger 和真实 cross-focus E2E 验收。
+- **正向收敛**：RVC-R5～R15 已完成代码收口与门禁；当前进入 RVC-R16 dual-workspace Live。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；不得再从已归档 plan 推导实现约束。
-- **Active roadmap**：RVC-1（仅剩 deployed verification）、OPS-1（+ 可选 OPT-1）；其余历史切片在 archive / candidates 检索。
+- **Active roadmap**：RVC-1（代码与 deployed verification）、OPS-1（+ 可选 OPT-1）；其余历史切片在 archive / candidates 检索。
 - **清理原则**：失效主链叙述、重复 audit、过程日记、live 产物一律归档或出库，不在 active 保留“假活跃”项。
 
 ## Navigation

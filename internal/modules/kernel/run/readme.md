@@ -6,6 +6,8 @@
 
 ## 组件交互及合同
 
+- Run owner 通过 `TopicRunCommandRuntimeV2RecoveryInventory` 提供分页 typed recovery inventory，分类 active/no-dispatch、active/sealed、blocked governance 与 terminal delivery pending；Orchestrator 只消费该分类，不直接扫描 Run repository。
+
 - Run 自身的 create/ensure/get/list/update/delete、Step 查询和 Checkpoint 查询由 `kernel/run/pkg/events` 定义具体 command 与 `RunCommandResult`。
 - workspace/run purge 通过 `PurgeRuntimeResourcesCommand` 由 Run owner 删除该 scope 下的 Step 与 RuntimeCheckpoint；命令必须先确认 Run 属于指定 workspace，并返回实际删除数量。
 - Runtime V2 正式状态使用 typed `RuntimeStateRecord` 随 Run 持久化，其中包含 facts、authority、dispatch、candidate attempt 及初始化时封存的 Goal/DoD definition context；update command 可携带 expected runtime revision，Run owner 在同一 EventHub lane 内执行 CAS 后写入。

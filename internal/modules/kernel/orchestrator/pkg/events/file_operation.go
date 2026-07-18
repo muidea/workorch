@@ -85,6 +85,32 @@ func FileEditOperationDataFromRuntimeOperation(operation runtimecontract.Runtime
 	return ret, nil
 }
 
+func FileWriteOperationDataFromRuntimeOperation(operation runtimecontract.RuntimeOperation) (FileWriteOperationData, error) {
+	operation = operation.Normalized()
+	if operation.Kind != runtimecontract.StepKindFileWrite {
+		return FileWriteOperationData{}, fmt.Errorf("operation kind %q is not file/write", operation.Kind)
+	}
+	if err := runtimecontract.ValidateRuntimeOperationContract(operation); err != nil {
+		return FileWriteOperationData{}, err
+	}
+	ret := FileWriteOperationData{}
+	for _, parameter := range operation.Parameters {
+		switch parameter.Name {
+		case "path", "targetRef":
+			if ret.TargetRef == "" {
+				ret.TargetRef = *parameter.String
+			}
+		case "content":
+			ret.Content = *parameter.String
+			ret.ContentPresent = true
+		}
+	}
+	if ret.TargetRef == "" && len(operation.TargetRefs) == 1 {
+		ret.TargetRef = operation.TargetRefs[0]
+	}
+	return ret, nil
+}
+
 func PatchApplyOperationDataFromRuntimeOperation(operation runtimecontract.RuntimeOperation) (PatchApplyOperationData, error) {
 	operation = operation.Normalized()
 	if operation.Kind != runtimecontract.RuntimeBlockKindPatchApply {

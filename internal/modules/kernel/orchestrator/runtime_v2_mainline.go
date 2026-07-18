@@ -163,7 +163,27 @@ func (m *Module) requestAndSealRuntimeV2Candidate(
 		})
 	}
 	if response.Failure != nil {
-		return m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, *response.Failure)
+		if response.Failure.Class == runtimecontract.RuntimeCandidateFailureClassProviderTransient {
+			recovered, consumed, budgetErr := m.bizPtr.ConsumeRuntimeV2RecoveryBudget(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeRecoveryBudgetProviderTransport)
+			if budgetErr != nil {
+				return runtimev2.RuntimeAggregate{}, budgetErr
+			}
+			if consumed {
+				return recovered, nil
+			}
+			return m.bizPtr.RecordRuntimeV2FailureFact(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.FailureFact{
+				Class: runtimecontract.FailureClassProviderTransient, Code: "provider_transport_exhausted",
+				Signature: "provider-transport-exhausted", Message: strings.TrimSpace(response.Failure.Reason),
+			})
+		}
+		failed, failErr := m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, *response.Failure)
+		if failErr != nil {
+			return runtimev2.RuntimeAggregate{}, failErr
+		}
+		if fact, ok := runtimeV2ProviderGovernanceFailure(*response.Failure); ok {
+			return m.bizPtr.RecordRuntimeV2FailureFact(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, fact)
+		}
+		return failed, nil
 	}
 	accepted, err := m.bizPtr.AcceptRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, response.Candidate)
 	if err != nil {
@@ -233,6 +253,14 @@ func (m *Module) requestAndSealRuntimeV2CandidateWithRetry(
 		if aggregate.Decision.Action == runtimecontract.RuntimeActionFail || aggregate.Decision.Action == runtimecontract.RuntimeActionComplete {
 			return aggregate, nil
 		}
+		if aggregate.Decision.Action == runtimecontract.RuntimeActionRequestGovernance {
+			next, err := m.sealRuntimeV2GovernanceCandidate(ctx, aggregate, stablePrefixHash)
+			if err != nil {
+				return runtimev2.RuntimeAggregate{}, err
+			}
+			aggregate = next
+			continue
+		}
 		attempt, ok := nextRuntimeV2CandidateAttempt(aggregate)
 		if !ok {
 			if runtimeV2CandidateContractExhausted(aggregate) {
@@ -250,6 +278,82 @@ func (m *Module) requestAndSealRuntimeV2CandidateWithRetry(
 		aggregate = next
 	}
 	return aggregate, nil
+}
+
+func runtimeV2ProviderGovernanceFailure(failure runtimecontract.RuntimeCandidateFailure) (runtimecontract.FailureFact, bool) {
+	class := runtimecontract.FailureClass("")
+	code := ""
+	switch failure.Class {
+	case runtimecontract.RuntimeCandidateFailureClassProviderAuthentication:
+		class = runtimecontract.FailureClassProviderAuthentication
+		code = "provider_authentication"
+	case runtimecontract.RuntimeCandidateFailureClassProviderConfiguration:
+		class = runtimecontract.FailureClassProviderConfiguration
+		code = "provider_configuration"
+	default:
+		return runtimecontract.FailureFact{}, false
+	}
+	return runtimecontract.FailureFact{Class: class, Code: code, Signature: code, Message: strings.TrimSpace(failure.Reason)}, true
+}
+
+func (m *Module) sealRuntimeV2GovernanceCandidate(ctx context.Context, aggregate runtimev2.RuntimeAggregate, stablePrefixHash string) (runtimev2.RuntimeAggregate, error) {
+	attempt, ok := nextRuntimeV2CandidateAttempt(aggregate)
+	if !ok {
+		return runtimev2.RuntimeAggregate{}, fmt.Errorf("%w: no governance candidate attempt is available", common.ErrConflict)
+	}
+	dependency := runtimeV2GovernanceDependency(aggregate)
+	if strings.TrimSpace(dependency.Kind) == "" || strings.TrimSpace(dependency.Reason) == "" {
+		return runtimev2.RuntimeAggregate{}, fmt.Errorf("runtime governance decision has no typed dependency")
+	}
+	pending, err := m.bizPtr.BeginRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, attempt, stablePrefixHash)
+	if err != nil {
+		return runtimev2.RuntimeAggregate{}, err
+	}
+	return m.bizPtr.AcceptRuntimeV2CandidateAttempt(ctx, pending.Facts.WorkspaceID, pending.Facts.RunID, attempt, runtimecontract.RuntimeCandidate{
+		Governance: &runtimecontract.GovernanceCandidate{ExternalDependency: dependency},
+	})
+}
+
+func runtimeV2GovernanceDependency(aggregate runtimev2.RuntimeAggregate) runtimecontract.ExternalDependency {
+	facts := aggregate.Facts.Normalized()
+	reason := "runtime requires governance"
+	kind := string(runtimecontract.GovernanceDecision)
+	subject := facts.Focus.ID
+	// Operation-scoped governance already has an exact persisted dependency in
+	// the suspended binding. Preserve it when sealing the governance candidate;
+	// falling back to the generic decision kind would make the ticket impossible
+	// to bind back to the suspended approval/config/external operation.
+	for idx := len(aggregate.OperationGovernanceBindings) - 1; idx >= 0; idx-- {
+		binding := aggregate.OperationGovernanceBindings[idx].Normalized()
+		if binding.State != runtimecontract.RuntimeOperationGovernanceBindingSuspended {
+			continue
+		}
+		if facts.Failure != nil {
+			reason = firstNonEmptyString(facts.Failure.Message, reason)
+		}
+		return runtimecontract.ExternalDependency{
+			Kind: strings.TrimSpace(binding.DependencyKind), SubjectRef: strings.TrimSpace(binding.SubjectRef), Reason: strings.TrimSpace(reason),
+		}
+	}
+	if facts.Failure != nil {
+		reason = firstNonEmptyString(facts.Failure.Message, reason)
+		if len(facts.Failure.TargetRefs) > 0 {
+			subject = facts.Failure.TargetRefs[0]
+		}
+		switch facts.Failure.Class {
+		case runtimecontract.FailureClassProviderAuthentication, runtimecontract.FailureClassProviderConfiguration:
+			kind = string(runtimecontract.GovernanceConfiguration)
+			if facts.Resources.ProviderCeiling != nil {
+				target := facts.Resources.ProviderCeiling.Target.Normalized()
+				subject = target.ProviderID + "/" + target.ModelID
+			}
+		case runtimecontract.FailureClassOperationOutcomeUnknown:
+			kind = string(runtimecontract.GovernanceExternal)
+		}
+	} else if facts.Feasibility != nil {
+		reason = firstNonEmptyString(facts.Feasibility.Reason, reason)
+	}
+	return runtimecontract.ExternalDependency{Kind: kind, SubjectRef: strings.TrimSpace(subject), Reason: strings.TrimSpace(reason)}
 }
 
 func nextRuntimeV2CandidateAttempt(aggregate runtimev2.RuntimeAggregate) (int, bool) {
@@ -341,7 +445,7 @@ func runtimeV2FeasibilityFact(aggregate runtimev2.RuntimeAggregate) (*runtimecon
 			Reason: fmt.Sprintf("runtime action %s has no accepted operation kinds", aggregate.Decision.Action),
 		}, nil
 	}
-	feasible := runtimecontract.FeasibleOperationKinds(required, aggregate.Facts.Capabilities)
+	feasible := runtimecontract.FeasibleOperationKindsWithActivation(required, aggregate.Facts.Capabilities, aggregate.Facts.Activation.MCPCapabilities)
 	if len(feasible) == 0 {
 		return &runtimecontract.RuntimeFeasibilityFact{
 			FocusID: aggregate.Facts.Focus.ID, Action: aggregate.Decision.Action,

@@ -134,3 +134,160 @@ func governanceResolution(aggregate RuntimeAggregate, outcome runtimecontract.Ru
 		Summary: "治理已完成", EvidenceRefs: []string{"decision://resolution-1"},
 	}
 }
+
+func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, _ := NewRuntimeController(repository)
+	facts := controllerFacts()
+	facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindApprovalRequest}
+	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
+		t.Fatal(err)
+	}
+	// Seed an active sealed dispatch with operation execution ledger.
+	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{
+		Operation: runtimecontract.RuntimeOperation{
+			ID: "write-1", Kind: "file/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("governed"),
+		},
+	}}}}
+	sealed, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sealed.ActiveDispatch == nil {
+		t.Fatal("expected active dispatch")
+	}
+	claimed, err := controller.claimOperationExecution(context.Background(), "ws-v2", "run-v2", "write-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, ok := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, "write-1")
+	if !ok {
+		t.Fatal("expected claimed operation execution")
+	}
+	requirement := runtimecontract.RuntimeGovernanceRequirement{
+		Kind: runtimecontract.GovernanceApproval, SubjectRef: "target.txt",
+		Reason: "patch apply requires approval before side effects", RequestedAction: "patch/apply", RiskLevel: "high",
+	}
+	receipt := runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: execution.ExecutionKey, OperationID: execution.OperationID,
+		Outcome: runtimecontract.RuntimeOperationOutcomeGovernanceRequired, ObservedEffectScope: runtimecontract.RuntimeEffectGovernanceOnly,
+		Governance: &requirement,
+	}
+	_, committed, err := controller.CommitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := controller.recordOperationGovernanceRequired(context.Background(), "ws-v2", "run-v2", "write-1", RuntimeOperationExecutionResult{
+		EventID: "gov-event-1", OperationID: "write-1", Receipt: committed, Governance: &requirement,
+	})
+	if err != nil {
+		t.Fatalf("recordOperationGovernanceRequired: %v", err)
+	}
+	if next.ActiveDispatch != nil {
+		t.Fatal("active dispatch must close when governance is required")
+	}
+	if next.Facts.Failure == nil || next.Facts.Failure.Class != runtimecontract.FailureClassGovernanceRequired {
+		t.Fatalf("failure = %+v, want governance_required", next.Facts.Failure)
+	}
+	if next.Decision.Action != runtimecontract.RuntimeActionRequestGovernance {
+		t.Fatalf("decision action = %s, want request_governance", next.Decision.Action)
+	}
+	if len(next.CompletedDispatches) != 1 || len(next.CompletedDispatches[0].OperationExecutions) != 1 ||
+		next.CompletedDispatches[0].OperationExecutions[0].OwnerReceiptHash != runtimecontract.StableRuntimeOperationReceiptHash(committed) {
+		t.Fatalf("governance closeout lost owner receipt authority: %+v", next.CompletedDispatches)
+	}
+	if len(next.OperationGovernanceBindings) != 1 {
+		t.Fatalf("operation governance bindings = %+v", next.OperationGovernanceBindings)
+	}
+	binding := next.OperationGovernanceBindings[0]
+	if binding.State != runtimecontract.RuntimeOperationGovernanceBindingSuspended || binding.OperationDispatchID != sealed.ActiveDispatch.ID ||
+		binding.ExecutionKey != execution.ExecutionKey || binding.Fence != execution.Fence || binding.GovernanceReceiptHash != runtimecontract.StableRuntimeOperationReceiptHash(committed) {
+		t.Fatalf("suspended operation governance binding = %+v", binding)
+	}
+	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "governance-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	governed, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
+		Governance: &runtimecontract.GovernanceCandidate{ExternalDependency: runtimecontract.ExternalDependency{
+			Kind: string(requirement.Kind), SubjectRef: requirement.SubjectRef, Reason: requirement.Reason,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, err := controller.BindGovernanceRequest(context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeGovernanceRequestRecord{
+		TicketID: "ticket-operation-1", AuthoritySnapshotID: governed.ActiveDispatch.Transaction.AuthoritySnapshotID,
+		DispatchID: governed.ActiveDispatch.ID, DependencyKind: string(requirement.Kind), SubjectRef: requirement.SubjectRef,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bound.OperationGovernanceBindings) != 1 || bound.OperationGovernanceBindings[0].State != runtimecontract.RuntimeOperationGovernanceBindingTicketBound ||
+		bound.OperationGovernanceBindings[0].TicketID != "ticket-operation-1" || bound.OperationGovernanceBindings[0].GovernanceDispatchID != governed.ActiveDispatch.ID {
+		t.Fatalf("ticket-bound operation governance binding = %+v", bound.OperationGovernanceBindings)
+	}
+	operationResolution := runtimecontract.RuntimeGovernanceResolution{
+		ResolutionID: "operation-resolution-1", TicketID: "ticket-operation-1", WorkspaceID: "ws-v2", RunID: "run-v2",
+		AuthoritySnapshotID: governed.ActiveDispatch.Transaction.AuthoritySnapshotID, DispatchID: governed.ActiveDispatch.ID,
+		DependencyKind: string(requirement.Kind), SubjectRef: requirement.SubjectRef,
+		Outcome: runtimecontract.RuntimeGovernanceResolutionOutcomeContinue, Summary: "approval granted",
+	}
+	continued, err := controller.CommitGovernanceResolution(context.Background(), operationResolution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(continued.Aggregate.OperationGovernanceBindings) != 1 || continued.Aggregate.OperationGovernanceBindings[0].State != runtimecontract.RuntimeOperationGovernanceBindingGranted {
+		t.Fatalf("granted operation governance binding = %+v", continued.Aggregate.OperationGovernanceBindings)
+	}
+	if continued.Aggregate.ActiveDispatch == nil {
+		t.Fatal("governance continue must create resume dispatch")
+	}
+	duplicate, err := controller.CommitGovernanceResolution(context.Background(), operationResolution)
+	if err != nil || duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.ActiveDispatch == nil ||
+		duplicate.Aggregate.ActiveDispatch.ID != continued.Aggregate.ActiveDispatch.ID {
+		t.Fatalf("duplicate operation governance resolution = %+v err=%v", duplicate, err)
+	}
+	resumeExecution, ok := operationExecutionRecord(continued.Aggregate.ActiveDispatch.OperationExecutions, "write-1")
+	if !ok || resumeExecution.ExecutionKey != execution.ExecutionKey || resumeExecution.Fence != execution.Fence+1 || resumeExecution.State != runtimecontract.OperationExecutionClaimed {
+		t.Fatalf("resume execution = %+v", resumeExecution)
+	}
+	grant := continued.Aggregate.OperationGovernanceBindings[0].Grant
+	if grant == nil || grant.ExecutionKey != execution.ExecutionKey || grant.GovernanceFence != execution.Fence || grant.ResumeFence != execution.Fence+1 {
+		t.Fatalf("governance grant = %+v", grant)
+	}
+	if _, found, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", continued.Aggregate.ActiveDispatch.ID,
+		"write-1", execution.ExecutionKey, execution.Fence+1, grant); err != nil || found {
+		t.Fatalf("authorized resume receipt preflight found=%v err=%v", found, err)
+	}
+	driftedGrant := grant.Normalized()
+	driftedGrant.SubjectRef = "other.txt"
+	if _, _, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", continued.Aggregate.ActiveDispatch.ID,
+		"write-1", execution.ExecutionKey, execution.Fence+1, &driftedGrant); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("drifted governance grant err=%v, want conflict", err)
+	}
+	restarted, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &recordingOperationExecutor{owner: restarted}
+	resumed, err := restarted.ExecuteActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(executor.requests) != 1 || executor.requests[0].GovernanceGrant == nil ||
+		!runtimecontract.SameRuntimeOperationGovernanceGrant(*executor.requests[0].GovernanceGrant, *grant) {
+		t.Fatalf("resume executor requests = %+v", executor.requests)
+	}
+	if len(resumed.OperationReceipts) != 2 {
+		t.Fatalf("governance/resume receipts = %+v", resumed.OperationReceipts)
+	}
+	if _, ok := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(resumed.OperationReceipts, execution.ExecutionKey, execution.Fence); !ok {
+		t.Fatal("governance receipt was not preserved")
+	}
+	if receipt, ok := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(resumed.OperationReceipts, execution.ExecutionKey, execution.Fence+1); !ok || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted {
+		t.Fatalf("resume receipt = %+v found=%v", receipt, ok)
+	}
+}

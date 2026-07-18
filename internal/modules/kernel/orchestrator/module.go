@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	orchestratorservice "github.com/muidea/workorch/internal/modules/kernel/orchestrator/service"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -127,18 +129,97 @@ func (m *Module) Start() error {
 		}
 		m.rawTopics = append(m.rawTopics,
 			orchestratorevents.TopicOrchestratorDriveRuntimeV2,
+			orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt,
+			orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt,
 			orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution,
 			orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
 			decisionevents.TopicDecisionCommandRecordEvidence,
 			approvalevents.TopicApprovalCommandRecordEvidence,
 		)
 		m.rawObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, m.handleRuntimeV2Drive)
+		m.rawObserver.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, m.handleRuntimeV2OperationReceipt)
+		m.rawObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, m.handleRuntimeV2OperationReceipt)
 		m.rawObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution, m.handleRuntimeV2GovernanceResolution)
 		m.rawObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, m.handleRuntimeV2GovernanceTicketResolution)
 		m.rawObserver.Subscribe(decisionevents.TopicDecisionCommandRecordEvidence, m.handleDecisionEvidenceCommand)
 		m.rawObserver.Subscribe(approvalevents.TopicApprovalCommandRecordEvidence, m.handleApprovalEvidenceCommand)
 	}
+	// RVC-R14: inventory active V2 aggregates and schedule safe re-drive. Projection
+	// and application do not choose recovery actions.
+	m.scheduleRuntimeV2StartupRecovery()
 	return nil
+}
+
+func (m *Module) scheduleRuntimeV2StartupRecovery() {
+	if m == nil || m.bizPtr == nil || m.rawEventHub == nil {
+		return
+	}
+	runRecovery := func() {
+		ctx := context.Background()
+		items, err := queryRuntimeV2RecoveryInventory(ctx, m.rawEventHub)
+		if err != nil {
+			slog.Warn("workorch Runtime V2 startup recovery inventory failed", "err", err)
+			return
+		}
+		recovered := 0
+		for _, item := range items {
+			switch item.Class {
+			case runevents.RuntimeV2RecoveryBlockedGovernance:
+				if _, loadErr := m.bizPtr.LoadRuntimeV2(ctx, item.WorkspaceID, item.RunID); loadErr != nil {
+					slog.Warn("workorch Runtime V2 blocked governance binding verification failed", "workspaceID", item.WorkspaceID, "runID", item.RunID, "err", loadErr)
+				}
+				continue
+			case runevents.RuntimeV2RecoveryActiveNoDispatch, runevents.RuntimeV2RecoveryActiveSealedDispatch,
+				runevents.RuntimeV2RecoveryTerminalDeliveryPending:
+			default:
+				continue
+			}
+			if err := m.scheduleRuntimeV2Drive(ctx, item.WorkspaceID, item.RunID, "startup_recovery:"+string(item.Class)); err != nil {
+				slog.Warn("workorch Runtime V2 startup recovery schedule failed", "workspaceID", item.WorkspaceID, "runID", item.RunID, "class", item.Class, "err", err)
+				continue
+			}
+			recovered++
+		}
+		slog.Info("workorch Runtime V2 startup recovery inventory complete", "recovered", recovered)
+	}
+	if m.backgroundRoutine == nil {
+		runRecovery()
+		return
+	}
+	_ = m.backgroundRoutine.AsyncFunction(runRecovery)
+}
+
+func queryRuntimeV2RecoveryInventory(ctx context.Context, hub magicevent.Hub) ([]runevents.RuntimeV2RecoveryInventoryItem, error) {
+	if hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	ret := make([]runevents.RuntimeV2RecoveryInventoryItem, 0)
+	cursor := ""
+	for {
+		result := hub.Send(magicevent.NewEventWithContext(
+			runevents.TopicRunCommandRuntimeV2RecoveryInventory, ModuleID, runevents.CommandDestination,
+			magicevent.NewHeader(), ctx, runevents.QueryRuntimeV2RecoveryInventoryCommand{Cursor: cursor, Limit: 100},
+		))
+		if result == nil {
+			return nil, common.ErrInvalidArgument
+		}
+		data, magicErr := result.Get()
+		if magicErr != nil {
+			return nil, magicErr
+		}
+		page, ok := data.(runevents.QueryRuntimeV2RecoveryInventoryResult)
+		if !ok {
+			return nil, common.ErrInvalidArgument
+		}
+		ret = append(ret, page.Items...)
+		if strings.TrimSpace(page.NextCursor) == "" {
+			return ret, nil
+		}
+		if page.NextCursor == cursor {
+			return nil, common.ErrConflict
+		}
+		cursor = page.NextCursor
+	}
 }
 
 func (m *Module) Stop(ctx context.Context) error {
@@ -299,21 +380,45 @@ func (m *Module) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.
 		defer func() {
 			m.endRuntimeV2Drive(driveKey)
 			if retryDelivery {
-				m.scheduleRuntimeV2DeliveryRetry(driveCtx, workspaceID, runID)
+				m.scheduleRuntimeV2RecoveryRetry(driveCtx, workspaceID, runID)
 			}
 		}()
 		if err := m.driveAndProjectRuntimeV2(driveCtx, workspaceID, runID); err != nil && !errors.Is(err, context.Canceled) {
 			var projectionErr *runtimeV2ProjectionError
 			if errors.As(err, &projectionErr) {
 				slog.Warn("workorch Runtime V2 projection failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", err)
-				retryDelivery = true
+				_, consumed, budgetErr := m.bizPtr.ConsumeRuntimeV2RecoveryBudget(driveCtx, workspaceID, runID, runtimecontract.RuntimeRecoveryBudgetTerminalDelivery)
+				if budgetErr != nil {
+					slog.Warn("workorch Runtime V2 terminal delivery budget commit failed", "workspaceID", workspaceID, "runID", runID, "err", budgetErr)
+					return
+				}
+				retryDelivery = consumed
 				return
 			}
 			slog.Warn("workorch Runtime V2 drive failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", err)
-			aggregate, recordErr := m.bizPtr.RecordRuntimeV2FailureFact(driveCtx, workspaceID, runID, runtimecontract.FailureFact{
-				Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_v2_drive_failed",
-				Signature: "runtime-v2-drive-failed", Message: err.Error(),
-			})
+			// RVC-R13: CAS conflict / owner transient / delivery failures must not
+			// terminal a business Run as runtime contract defect.
+			failure := classifyRuntimeV2DriveFailure(err)
+			if !runtimecontract.FailureClassIsBusinessTerminal(failure.Class) {
+				slog.Warn("workorch Runtime V2 drive non-terminal failure", "source", source, "workspaceID", workspaceID, "runID", runID, "class", failure.Class, "err", err)
+				if budgetKind, ok := runtimeV2RecoveryBudgetKind(failure.Class); ok {
+					_, consumed, budgetErr := m.bizPtr.ConsumeRuntimeV2RecoveryBudget(driveCtx, workspaceID, runID, budgetKind)
+					if budgetErr != nil {
+						slog.Warn("workorch Runtime V2 recovery budget commit failed", "workspaceID", workspaceID, "runID", runID, "kind", budgetKind, "err", budgetErr)
+						return
+					}
+					retryDelivery = consumed
+					if !consumed && failure.Class == runtimecontract.FailureClassOwnerTransientUnavailable {
+						if _, recordErr := m.bizPtr.RecordRuntimeV2FailureFact(driveCtx, workspaceID, runID, failure); recordErr != nil {
+							slog.Warn("workorch Runtime V2 exhausted operation recovery fact commit failed", "workspaceID", workspaceID, "runID", runID, "err", recordErr)
+						} else {
+							retryDelivery = true
+						}
+					}
+				}
+				return
+			}
+			aggregate, recordErr := m.bizPtr.RecordRuntimeV2FailureFact(driveCtx, workspaceID, runID, failure)
 			if recordErr != nil {
 				slog.Warn("workorch Runtime V2 drive failure fact commit failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", recordErr)
 				return
@@ -324,7 +429,12 @@ func (m *Module) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.
 			}
 			if projectErr := m.deliverRuntimeV2Terminal(driveCtx, aggregate); projectErr != nil {
 				slog.Warn("workorch Runtime V2 drive failure delivery failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", projectErr)
-				retryDelivery = true
+				_, consumed, budgetErr := m.bizPtr.ConsumeRuntimeV2RecoveryBudget(driveCtx, workspaceID, runID, runtimecontract.RuntimeRecoveryBudgetTerminalDelivery)
+				if budgetErr != nil {
+					slog.Warn("workorch Runtime V2 terminal delivery budget commit failed", "workspaceID", workspaceID, "runID", runID, "err", budgetErr)
+					return
+				}
+				retryDelivery = consumed
 			}
 		}
 	}
@@ -340,7 +450,7 @@ func (m *Module) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.
 	return nil
 }
 
-func (m *Module) scheduleRuntimeV2DeliveryRetry(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) {
+func (m *Module) scheduleRuntimeV2RecoveryRetry(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) {
 	if m == nil || m.backgroundRoutine == nil || workspaceID == "" || runID == "" {
 		return
 	}
@@ -353,11 +463,26 @@ func (m *Module) scheduleRuntimeV2DeliveryRetry(ctx context.Context, workspaceID
 			return
 		case <-timer.C:
 		}
-		if err := m.scheduleRuntimeV2Drive(retryCtx, workspaceID, runID, "terminal_delivery_retry"); err != nil && !errors.Is(err, context.Canceled) {
+		if err := m.scheduleRuntimeV2Drive(retryCtx, workspaceID, runID, "recovery_retry"); err != nil && !errors.Is(err, context.Canceled) {
 			slog.Warn("workorch Runtime V2 delivery retry scheduling failed", "workspaceID", workspaceID, "runID", runID, "err", err)
 		}
 	}); err != nil {
 		slog.Warn("workorch Runtime V2 delivery retry was not accepted", "workspaceID", workspaceID, "runID", runID, "err", err)
+	}
+}
+
+func runtimeV2RecoveryBudgetKind(class runtimecontract.FailureClass) (runtimecontract.RuntimeRecoveryBudgetKind, bool) {
+	switch runtimecontract.FailureClassDisposition(class) {
+	case runtimecontract.RuntimeFailureDispositionProviderRetry:
+		return runtimecontract.RuntimeRecoveryBudgetProviderTransport, true
+	case runtimecontract.RuntimeFailureDispositionOperationRecovery:
+		return runtimecontract.RuntimeRecoveryBudgetOperationRecovery, true
+	case runtimecontract.RuntimeFailureDispositionCASReload:
+		return runtimecontract.RuntimeRecoveryBudgetCASReload, true
+	case runtimecontract.RuntimeFailureDispositionDeliveryRetry:
+		return runtimecontract.RuntimeRecoveryBudgetTerminalDelivery, true
+	default:
+		return "", false
 	}
 }
 
@@ -443,5 +568,33 @@ func (m *Module) readEvidenceMagicCommand(ev magicevent.Event) (orchestratoreven
 		return orchestratorevents.OrchestratorCommandResult{ArtifactContinuations: items}, err
 	default:
 		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
+	}
+}
+
+func runtimeV2RunIsTerminal(state common.RunState) bool {
+	switch state {
+	case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
+		return true
+	default:
+		return false
+	}
+}
+
+func classifyRuntimeV2DriveFailure(err error) runtimecontract.FailureFact {
+	if err == nil {
+		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeInvariantDefect, Code: "runtime_v2_drive_failed", Signature: "runtime-v2-drive-failed", Message: "unknown drive failure"}
+	}
+	msg := err.Error()
+	switch {
+	case errors.Is(err, common.ErrConflict):
+		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassCASConflict, Code: "cas_conflict", Signature: "cas-conflict", Message: msg}
+	case strings.Contains(msg, "outcome_unknown"):
+		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassOperationOutcomeUnknown, Code: "operation_outcome_unknown", Signature: "operation-outcome-unknown", Message: msg}
+	case strings.Contains(msg, "owner") && (strings.Contains(msg, "unavailable") || strings.Contains(msg, "timeout") || strings.Contains(msg, "temporarily")):
+		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassOwnerTransientUnavailable, Code: "owner_transient", Signature: "owner-transient", Message: msg}
+	case strings.Contains(msg, "projection"):
+		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassProjectionDeliveryFailure, Code: "projection_delivery_failure", Signature: "projection-delivery", Message: msg}
+	default:
+		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_v2_drive_failed", Signature: "runtime-v2-drive-failed", Message: msg}
 	}
 }

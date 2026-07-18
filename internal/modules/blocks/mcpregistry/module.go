@@ -238,7 +238,8 @@ func mcpCapabilityContractCommand(cmd mcpevents.CreateCapabilityCommand) mcpcont
 		ID: cmd.ID, ServerID: cmd.ServerID, Kind: cmd.Kind, Name: cmd.Name, DisplayName: cmd.DisplayName,
 		Description: cmd.Description, Category: cmd.Category, Tags: append([]string(nil), cmd.Tags...),
 		UsageHint: cmd.UsageHint, InputSummary: cmd.InputSummary, OutputSummary: cmd.OutputSummary,
-		StageHints: append([]string(nil), cmd.StageHints...), RiskLevel: cmd.RiskLevel, Schema: cmd.Schema.Clone(),
+		StageHints: append([]string(nil), cmd.StageHints...), RiskLevel: cmd.RiskLevel,
+		EffectScope: cmd.EffectScope, IdempotencyClass: cmd.IdempotencyClass, Schema: cmd.Schema.Clone(),
 		URI: cmd.URI, Enabled: cmd.Enabled, ApprovalPolicy: cmd.ApprovalPolicy, Status: cmd.Status,
 	}
 }

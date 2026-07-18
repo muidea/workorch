@@ -5,15 +5,29 @@ import (
 	"strings"
 	"testing"
 
+	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func TestRuntimeCandidateProviderClassifiesAuthenticationConfigurationAndTransientFailures(t *testing.T) {
+	if got := runtimeCandidateProviderFailureClass(&llmbiz.ProviderHTTPStatusError{StatusCode: 401, Body: "authentication_failed"}, true); got != runtimecontract.RuntimeCandidateFailureClassProviderAuthentication {
+		t.Fatalf("401 class = %s", got)
+	}
+	if got := runtimeCandidateProviderFailureClass(&llmbiz.ProviderHTTPStatusError{StatusCode: 404, Body: "model not found"}, true); got != runtimecontract.RuntimeCandidateFailureClassProviderConfiguration {
+		t.Fatalf("404 class = %s", got)
+	}
+	if got := runtimeCandidateProviderFailureClass(&llmbiz.ProviderHTTPStatusError{StatusCode: 503, Body: "unavailable"}, true); got != runtimecontract.RuntimeCandidateFailureClassProviderTransient {
+		t.Fatalf("503 class = %s", got)
+	}
+}
+
 func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: runtimecontract.InitialRuntimeEvidenceRevision,
-		Focus: runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
+		Focus:    runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
+		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Resources: runtimecontract.RuntimeResourceFacts{ProviderCeiling: &runtimecontract.ProviderCeiling{
 			Target:                   runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 			ContextWindowTokens:      128000,
@@ -59,7 +73,12 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 	}
 	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedStateChange, Action: runtimecontract.RuntimeActionProduceStateChange, Focus: facts.Focus,
-		RequiredOutput: runtimecontract.RequiredOutputContract{Kind: runtimecontract.RequiredOutputKindStateChange, AcceptedKinds: []string{"file/edit"}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs},
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			Kind: runtimecontract.RequiredOutputKindStateChange, AcceptedKinds: []string{"file/edit"},
+			AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
+			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
+			CoverageWorkItemIDs:  facts.Focus.CoverageWorkItemIDs,
+		},
 	}, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +118,7 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 	}
 	dynamicSection := request.PromptContext.Sections[3].Content
 	for _, value := range []string{
-		`"outputContract"`, `"requiredTopLevelExample":"{\"operations\":[...]}"`, `"schema":{"type":"object"`, `"forbiddenTopLevelFields"`,
+		`"outputContract"`, `"requiredTopLevelExample":"{\"operations\":[...]}"`, `"$id":"workorch.runtime_candidate.state_change.v2"`, `"forbiddenTopLevelFields"`,
 		`"operationContracts":[{"kind":"file/edit"`, `"name":"path"`, `"name":"oldText"`, `"name":"newText"`,
 		`"forbiddenParameters":["filePath","fileContent","targetRef","targetRefs"]`,
 	} {
@@ -162,6 +181,60 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 	}
 }
 
+func TestRuntimeV2CandidateContextProjectionPreservesRepairDirectiveAuthority(t *testing.T) {
+	directive := runtimecontract.RuntimeRepairDirective{
+		ID: "repair-1", FocusID: "focus-1", Trigger: runtimecontract.RuntimeRepairTriggerRejectedValidation,
+		RequiredAction:        runtimecontract.RuntimeActionProduceStateChange,
+		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite},
+		CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
+		CurrentFailure: &runtimecontract.FailureFact{Class: runtimecontract.FailureClassExecutionRejected, Message: "validation failed"},
+	}
+	context := runtimecontract.RuntimeCandidateContext{
+		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: runtimecontract.InitialRuntimeEvidenceRevision,
+		Focus:          runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}},
+		RequiredAction: directive.RequiredAction, RequiredEffectScopes: directive.RequiredEffectScopes,
+		RequiredEvidenceKinds: directive.RequiredEvidenceKinds, RepairDirective: &directive,
+		AdmissibleOperationKinds: []string{runtimecontract.StepKindFileWrite},
+	}
+	projection := runtimeV2CandidateContextProjection(context, runtimecontract.RuntimeActionProduceStateChange)
+	if projection.RequiredAction != runtimecontract.RuntimeActionProduceStateChange || projection.RepairDirective == nil {
+		t.Fatalf("projection lost repair authority: %+v", projection)
+	}
+	if len(projection.RequiredEffectScopes) != 1 || projection.RequiredEffectScopes[0] != runtimecontract.RuntimeEffectWorkspaceDurable {
+		t.Fatalf("projection required effects = %v", projection.RequiredEffectScopes)
+	}
+	if len(projection.RequiredEvidenceKinds) != 1 || projection.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange {
+		t.Fatalf("projection required evidence = %v", projection.RequiredEvidenceKinds)
+	}
+	hints := projection.RepairHints
+	if len(hints) == 0 || hints[0].Code != "obey_repair_directive" {
+		t.Fatalf("projection repair hints = %+v", hints)
+	}
+}
+
+func TestRuntimeV2CandidateSchemasAreActionSpecific(t *testing.T) {
+	stateChange := runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceStateChange)
+	validation := runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceValidation)
+	if stateChange == validation {
+		t.Fatal("state-change and validation candidate schemas must be distinct")
+	}
+	if !strings.Contains(stateChange, "workorch.runtime_candidate.state_change.v2") || !strings.Contains(stateChange, "durable") {
+		t.Fatalf("state-change schema = %s", stateChange)
+	}
+	if !strings.Contains(validation, "workorch.runtime_candidate.validation.v2") || !strings.Contains(validation, "non-durable") {
+		t.Fatalf("validation schema = %s", validation)
+	}
+	catalog := runtimeV2CandidateContractCatalog()
+	if strings.Contains(catalog, "produce_state_change or produce_validation") || strings.Contains(catalog, "produce only those missing evidence kinds") {
+		t.Fatalf("candidate catalog retains conflicting action guidance: %s", catalog)
+	}
+	if !strings.Contains(catalog, "sole next-action authority") || !strings.Contains(catalog, "completion-audit information only") {
+		t.Fatalf("candidate catalog lost repair authority rules: %s", catalog)
+	}
+}
+
 func TestRuntimeV2AssessmentRequestPublishesCanonicalEvidenceRefContract(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
 		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
@@ -170,6 +243,7 @@ func TestRuntimeV2AssessmentRequestPublishesCanonicalEvidenceRefContract(t *test
 			ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequireAssessment: true,
 		},
+		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Evidence: runtimecontract.EvidenceLedger{Accepted: []runtimecontract.EvidenceFact{{
 			ID: "runtime-operation-1", Kind: runtimecontract.EvidenceKindStateChange, SourceRef: "workorch://runtime-operations/dispatch-1/op-1",
 			EvidenceRefs: []string{"workorch://workspace/main.go"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
@@ -240,6 +314,7 @@ func TestRuntimeV2CandidateContextPublishesExactRejectedShapes(t *testing.T) {
 		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-v2-00000000000000000001",
 		Focus:        runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}},
+		Coverage:     []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Capabilities: runtimecontract.RuntimeCapabilities{ValidationKinds: []string{runtimecontract.StepKindFileRead}},
 		Evidence: runtimecontract.EvidenceLedger{Rejected: []runtimecontract.EvidenceFact{{
 			ID: "rejected-1", Kind: runtimecontract.EvidenceKindValidation, DispatchID: "dispatch-1", OperationID: "validate-1",

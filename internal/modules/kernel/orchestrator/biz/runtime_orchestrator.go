@@ -71,11 +71,32 @@ func (o *RuntimeOrchestrator) RecordRuntimeV2FailureFact(ctx context.Context, wo
 	return o.runtimeV2Controller.RecordFailureFact(ctx, workspaceID, runID, fact)
 }
 
+func (o *RuntimeOrchestrator) ConsumeRuntimeV2RecoveryBudget(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, kind runtimemodel.RuntimeRecoveryBudgetKind) (runtimev2.RuntimeAggregate, bool, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, false, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.ConsumeRecoveryBudget(ctx, workspaceID, runID, kind)
+}
+
 func (o *RuntimeOrchestrator) BeginRuntimeV2CandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string) (runtimev2.RuntimeAggregate, error) {
 	if o == nil || o.runtimeV2Controller == nil {
 		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	return o.runtimeV2Controller.BeginCandidateAttempt(ctx, workspaceID, runID, attempt, stablePrefixHash)
+}
+
+func (o *RuntimeOrchestrator) QueryRuntimeV2OperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID, operationID, executionKey string, fence uint64, grant *runtimemodel.RuntimeOperationGovernanceGrant) (runtimemodel.RuntimeOperationReceipt, bool, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimemodel.RuntimeOperationReceipt{}, false, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.QueryOperationReceipt(ctx, workspaceID, runID, dispatchID, operationID, executionKey, fence, grant)
+}
+
+func (o *RuntimeOrchestrator) CommitRuntimeV2OperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID string, fence uint64, receipt runtimemodel.RuntimeOperationReceipt) (runtimev2.RuntimeAggregate, runtimemodel.RuntimeOperationReceipt, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, runtimemodel.RuntimeOperationReceipt{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.CommitOperationReceipt(ctx, workspaceID, runID, dispatchID, fence, receipt)
 }
 
 func (o *RuntimeOrchestrator) AcceptRuntimeV2CandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimemodel.RuntimeCandidate) (runtimev2.RuntimeAggregate, error) {

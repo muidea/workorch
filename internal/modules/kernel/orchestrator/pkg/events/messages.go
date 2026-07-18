@@ -133,6 +133,41 @@ type DriveRuntimeV2Result struct {
 	Terminal            *runtimecontract.TerminalOutcome
 }
 
+type RuntimeOperationExecutionEnvelope struct {
+	ExecutionKey        string
+	Fence               uint64
+	ExpectedEffectScope runtimecontract.RuntimeEffectScope
+	GovernanceGrant     *runtimecontract.RuntimeOperationGovernanceGrant
+}
+
+type QueryRuntimeOperationReceiptCommand struct {
+	WorkspaceID     common.WorkspaceID
+	RunID           common.RunID
+	DispatchID      string
+	OperationID     string
+	ExecutionKey    string
+	Fence           uint64
+	GovernanceGrant *runtimecontract.RuntimeOperationGovernanceGrant
+}
+
+type QueryRuntimeOperationReceiptResult struct {
+	Found   bool
+	Receipt *runtimecontract.RuntimeOperationReceipt
+}
+
+type CommitRuntimeOperationReceiptCommand struct {
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	DispatchID  string
+	Fence       uint64
+	Receipt     runtimecontract.RuntimeOperationReceipt
+}
+
+type CommitRuntimeOperationReceiptResult struct {
+	Receipt       runtimecontract.RuntimeOperationReceipt
+	StateRevision uint64
+}
+
 type RuntimeGovernanceResolutionDisposition string
 
 const (
@@ -214,6 +249,12 @@ type FileEditOperationData struct {
 	NewText    string
 	BaseHash   string
 	Occurrence int64
+}
+
+type FileWriteOperationData struct {
+	TargetRef      string
+	Content        string
+	ContentPresent bool
 }
 
 type PatchApplyOperationData struct {
@@ -305,6 +346,7 @@ type WebOperationData struct {
 }
 
 type ExecuteFileListOperationCommand struct {
+	Execution                     RuntimeOperationExecutionEnvelope
 	WorkspaceID                   common.WorkspaceID
 	RunID                         common.RunID
 	DispatchID                    string
@@ -320,6 +362,7 @@ type ExecuteFileListOperationCommand struct {
 }
 
 type ExecuteFileReadOperationCommand struct {
+	Execution                     RuntimeOperationExecutionEnvelope
 	WorkspaceID                   common.WorkspaceID
 	RunID                         common.RunID
 	DispatchID                    string
@@ -335,6 +378,7 @@ type ExecuteFileReadOperationCommand struct {
 }
 
 type ExecuteFileEditOperationCommand struct {
+	Execution                     RuntimeOperationExecutionEnvelope
 	WorkspaceID                   common.WorkspaceID
 	RunID                         common.RunID
 	DispatchID                    string
@@ -349,7 +393,24 @@ type ExecuteFileEditOperationCommand struct {
 	Data                          FileEditOperationData
 }
 
+type ExecuteFileWriteOperationCommand struct {
+	Execution                     RuntimeOperationExecutionEnvelope
+	WorkspaceID                   common.WorkspaceID
+	RunID                         common.RunID
+	DispatchID                    string
+	Transaction                   runtimecontract.AuthorityTransaction
+	OperationID                   string
+	CoverageWorkItemIDs           []common.CoverageWorkItemID
+	TargetRefs                    []string
+	EvidenceKind                  string
+	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
+	WorkspaceDeliverableDirectory string
+	WorkspaceInternalDirectory    string
+	Data                          FileWriteOperationData
+}
+
 type ExecutePatchApplyOperationCommand struct {
+	Execution                     RuntimeOperationExecutionEnvelope
 	WorkspaceID                   common.WorkspaceID
 	RunID                         common.RunID
 	DispatchID                    string
@@ -365,6 +426,7 @@ type ExecutePatchApplyOperationCommand struct {
 }
 
 type ExecutePatchPreviewOperationCommand struct {
+	Execution                     RuntimeOperationExecutionEnvelope
 	WorkspaceID                   common.WorkspaceID
 	RunID                         common.RunID
 	DispatchID                    string
@@ -380,6 +442,7 @@ type ExecutePatchPreviewOperationCommand struct {
 }
 
 type ExecuteShellOperationCommand struct {
+	Execution                     RuntimeOperationExecutionEnvelope
 	WorkspaceID                   common.WorkspaceID
 	RunID                         common.RunID
 	DispatchID                    string
@@ -395,6 +458,7 @@ type ExecuteShellOperationCommand struct {
 }
 
 type ExecuteGitOperationCommand struct {
+	Execution                     RuntimeOperationExecutionEnvelope
 	WorkspaceID                   common.WorkspaceID
 	RunID                         common.RunID
 	DispatchID                    string
@@ -411,6 +475,7 @@ type ExecuteGitOperationCommand struct {
 }
 
 type ExecuteMCPOperationCommand struct {
+	Execution                     RuntimeOperationExecutionEnvelope
 	WorkspaceID                   common.WorkspaceID
 	RunID                         common.RunID
 	DispatchID                    string
@@ -427,6 +492,7 @@ type ExecuteMCPOperationCommand struct {
 }
 
 type ExecuteSSHOperationCommand struct {
+	Execution                     RuntimeOperationExecutionEnvelope
 	WorkspaceID                   common.WorkspaceID
 	RunID                         common.RunID
 	DispatchID                    string
@@ -442,6 +508,7 @@ type ExecuteSSHOperationCommand struct {
 }
 
 type ExecuteWebOperationCommand struct {
+	Execution                     RuntimeOperationExecutionEnvelope
 	WorkspaceID                   common.WorkspaceID
 	RunID                         common.RunID
 	DispatchID                    string
@@ -458,6 +525,18 @@ type ExecuteWebOperationCommand struct {
 }
 
 type ExecuteFileEditOperationResult struct {
+	Receipt      runtimecontract.RuntimeOperationReceipt
+	EventID      string
+	OperationID  string
+	EvidenceKind string
+	Status       runtimecontract.RuntimeOperationExecutionStatus
+	SourceRef    string
+	Evidence     runtimecontract.RuntimeOperationEvidence
+	Failure      *runtimecontract.FailureFact
+}
+
+type ExecuteFileWriteOperationResult struct {
+	Receipt      runtimecontract.RuntimeOperationReceipt
 	EventID      string
 	OperationID  string
 	EvidenceKind string
@@ -468,6 +547,7 @@ type ExecuteFileEditOperationResult struct {
 }
 
 type ExecuteFileListOperationResult struct {
+	Receipt      runtimecontract.RuntimeOperationReceipt
 	EventID      string
 	OperationID  string
 	EvidenceKind string
@@ -490,6 +570,7 @@ type FileListOperationResultData struct {
 }
 
 type ExecuteFileReadOperationResult struct {
+	Receipt      runtimecontract.RuntimeOperationReceipt
 	EventID      string
 	OperationID  string
 	EvidenceKind string
@@ -522,6 +603,7 @@ type FileReadOperationResultData struct {
 }
 
 type ExecutePatchApplyOperationResult struct {
+	Receipt      runtimecontract.RuntimeOperationReceipt
 	EventID      string
 	OperationID  string
 	EvidenceKind string
@@ -532,6 +614,7 @@ type ExecutePatchApplyOperationResult struct {
 }
 
 type ExecutePatchPreviewOperationResult struct {
+	Receipt      runtimecontract.RuntimeOperationReceipt
 	EventID      string
 	OperationID  string
 	EvidenceKind string
@@ -565,6 +648,7 @@ type PatchPreviewOperationResultData struct {
 }
 
 type ExecuteShellOperationResult struct {
+	Receipt      runtimecontract.RuntimeOperationReceipt
 	EventID      string
 	OperationID  string
 	EvidenceKind string
@@ -643,6 +727,7 @@ type GitBranchData struct {
 }
 
 type ExecuteGitOperationResult struct {
+	Receipt      runtimecontract.RuntimeOperationReceipt
 	EventID      string
 	OperationID  string
 	EvidenceKind string
@@ -693,6 +778,7 @@ type GitOperationResultData struct {
 }
 
 type ExecuteMCPOperationResult struct {
+	Receipt      runtimecontract.RuntimeOperationReceipt
 	EventID      string
 	OperationID  string
 	EvidenceKind string
@@ -734,6 +820,7 @@ type MCPFailureDiagnosticsData struct {
 }
 
 type ExecuteSSHOperationResult struct {
+	Receipt      runtimecontract.RuntimeOperationReceipt
 	EventID      string
 	OperationID  string
 	EvidenceKind string
@@ -766,6 +853,7 @@ type SSHOperationResultData struct {
 }
 
 type ExecuteWebOperationResult struct {
+	Receipt      runtimecontract.RuntimeOperationReceipt
 	EventID      string
 	OperationID  string
 	EvidenceKind string
@@ -919,10 +1007,13 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[AcquireProviderCeilingCommand, AcquireProviderCeilingResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireProviderCeiling).MessageContract(),
 		eventcontract.CommandTopic[AcquireRuntimeCapabilitiesCommand, AcquireRuntimeCapabilitiesResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireRuntimeCapabilities).MessageContract(),
 		eventcontract.CommandTopic[DriveRuntimeV2Command, DriveRuntimeV2Result]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorDriveRuntimeV2).MessageContract(),
+		eventcontract.CommandTopic[QueryRuntimeOperationReceiptCommand, QueryRuntimeOperationReceiptResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorQueryRuntimeOperationReceipt).MessageContract(),
+		eventcontract.CommandTopic[CommitRuntimeOperationReceiptCommand, CommitRuntimeOperationReceiptResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommitRuntimeOperationReceipt).MessageContract(),
 		eventcontract.CommandTopic[RequestRuntimeCandidateCommand, RequestRuntimeCandidateResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorRequestRuntimeCandidate).MessageContract(),
 		eventcontract.CommandTopic[ExecuteFileListOperationCommand, ExecuteFileListOperationResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorExecuteFileListOperation).MessageContract(),
 		eventcontract.CommandTopic[ExecuteFileReadOperationCommand, ExecuteFileReadOperationResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorExecuteFileReadOperation).MessageContract(),
 		eventcontract.CommandTopic[ExecuteFileEditOperationCommand, ExecuteFileEditOperationResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorExecuteFileEditOperation).MessageContract(),
+		eventcontract.CommandTopic[ExecuteFileWriteOperationCommand, ExecuteFileWriteOperationResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorExecuteFileWriteOperation).MessageContract(),
 		eventcontract.CommandTopic[ExecutePatchApplyOperationCommand, ExecutePatchApplyOperationResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorExecutePatchApplyOperation).MessageContract(),
 		eventcontract.CommandTopic[ExecutePatchPreviewOperationCommand, ExecutePatchPreviewOperationResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorExecutePatchPreviewOperation).MessageContract(),
 		eventcontract.CommandTopic[ExecuteShellOperationCommand, ExecuteShellOperationResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorExecuteShellOperation).MessageContract(),

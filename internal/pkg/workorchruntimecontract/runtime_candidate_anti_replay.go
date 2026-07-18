@@ -279,6 +279,11 @@ func ValidateCandidateAgainstMissingValidationGap(facts RuntimeFacts, decision R
 	if decision.Action != RuntimeActionProduceStateChange {
 		return nil
 	}
+	// INV-05: anti-replay must not switch action when a repair directive requires state-change.
+	if facts.RepairDirective != nil && facts.RepairDirective.FocusID == facts.Focus.ID &&
+		facts.RepairDirective.RequiredAction == RuntimeActionProduceStateChange {
+		return nil
+	}
 	missing := MissingRequiredEvidenceKinds(facts)
 	if !(len(missing) == 1 && missing[0] == EvidenceKindValidation) {
 		return nil

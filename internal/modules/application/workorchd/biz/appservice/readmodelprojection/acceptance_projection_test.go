@@ -17,13 +17,29 @@ func TestMapAcceptanceProjectionReadsPersistedRuntimeFacts(t *testing.T) {
 			{ID: "cwi-2", SliceID: "slice-1", State: runtimecontract.RuntimeCoverageItemStateOpen},
 		},
 		ConvergencePolicy: runtimecontract.DefaultRuntimeConvergencePolicy(),
+		RecoveryPolicy:    runtimecontract.DefaultRuntimeRecoveryPolicy(),
+		Recovery:          runtimecontract.RuntimeRecoveryLedger{CASReloadAttempts: 1},
 		Repair:            runtimecontract.RuntimeRepairLedger{FocusID: "focus-1", SliceID: "slice-1", RepairAttempts: 2},
-	}, Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedValidation, Action: runtimecontract.RuntimeActionProduceValidation}}
+		RepairDirective: &runtimecontract.RuntimeRepairDirective{ID: "repair-1", FocusID: "focus-1", RequiredAction: runtimecontract.RuntimeActionProduceValidation,
+			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}},
+	}, Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedValidation, Action: runtimecontract.RuntimeActionProduceValidation},
+		ActiveDispatch: &runtimecontract.RuntimeDispatchRecord{ID: "dispatch-1", OperationExecutions: []runtimecontract.RuntimeOperationExecutionRecord{{
+			OperationID: "validate-1", ExecutionKey: "exec-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
+			State: runtimecontract.OperationExecutionOwnerCommitted, OwnerReceiptRef: "runtime-receipt/exec-1", OwnerReceiptHash: "hash-1",
+		}}},
+		OperationReceipts: []runtimecontract.RuntimeOperationReceipt{{ExecutionKey: "exec-1", Fence: 1, OperationID: "validate-1",
+			Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: runtimecontract.RuntimeEffectNone}},
+	}
 	projection := MapAcceptanceProjection(readmodelcore.Run{ID: "run-1", RuntimeState: &state})
 	if projection.ActiveSliceID != "slice-1" || projection.CurrentFocus == nil || projection.CurrentFocus.ID != "focus-1" || projection.Budget == nil || projection.Budget.RepairAttempts != 2 {
 		t.Fatalf("acceptance projection = %+v", projection)
 	}
 	if len(projection.Slices) != 1 || projection.Slices[0].State != "active" {
 		t.Fatalf("slice projection = %+v", projection.Slices)
+	}
+	if projection.RepairDirective == nil || projection.RepairDirective.RequiredAction != string(runtimecontract.RuntimeActionProduceValidation) ||
+		len(projection.Operations) != 1 || projection.Operations[0].Fence != 1 || projection.Operations[0].Outcome != string(runtimecontract.RuntimeOperationOutcomeAccepted) ||
+		projection.Budget.CASReloadAttempts != 1 {
+		t.Fatalf("runtime remediation projection = %+v", projection)
 	}
 }

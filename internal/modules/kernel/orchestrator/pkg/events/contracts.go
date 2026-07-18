@@ -14,6 +14,7 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorAcquireWorkspaceManifest,
 		TopicOrchestratorAcquireProviderCeiling,
 		TopicOrchestratorAcquireRuntimeCapabilities,
+		TopicOrchestratorQueryRuntimeOperationReceipt,
 	)...)
 	ret = append(ret, eventcontract.Build("orchestrator", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
 		TopicOrchestratorCommandStartRun,
@@ -27,6 +28,7 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorCommitRuntimeGovernanceResolution,
 		TopicOrchestratorCommitRuntimeGovernanceTicket,
 		TopicOrchestratorOpenRuntimeGovernanceRequest,
+		TopicOrchestratorCommitRuntimeOperationReceipt,
 	)...)
 	ret = append(ret, eventcontract.Build("orchestrator", eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute,
 		TopicOrchestratorDriveRuntimeV2,
@@ -34,6 +36,7 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorExecuteFileListOperation,
 		TopicOrchestratorExecuteFileReadOperation,
 		TopicOrchestratorExecuteFileEditOperation,
+		TopicOrchestratorExecuteFileWriteOperation,
 		TopicOrchestratorExecutePatchApplyOperation,
 		TopicOrchestratorExecutePatchPreviewOperation,
 		TopicOrchestratorExecuteShellOperation,

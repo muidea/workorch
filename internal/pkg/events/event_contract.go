@@ -84,13 +84,7 @@ func EventHubDeliveryModeForTopic(topic string) EventHubDeliveryMode {
 	}
 }
 
-type EventHubLaneScope struct {
-	SubjectType string
-	SubjectID   string
-	WorkspaceID string
-	RunID       string
-	StepID      string
-}
+type EventHubLaneScope = eventcontract.LaneScope
 
 func EventHubLaneKeyFor(topic string, scope EventHubLaneScope) string {
 	topic = strings.TrimSpace(topic)
@@ -180,87 +174,19 @@ func buildEventHubMessageContracts() map[string]eventcontract.MessageContract {
 }
 
 func fallbackEventLaneKey(topic string) string {
-	topic = strings.TrimSpace(topic)
-	if topic != "" {
-		return topicLaneKey(topic)
-	}
-	return "topic/unknown"
+	return eventcontract.TopicLaneKey(topic)
 }
 
 func topicLaneKey(topic string) string {
-	topic = strings.TrimSpace(topic)
-	if topic == "" {
-		return "topic/unknown"
-	}
-	return "topic/" + topic
+	return eventcontract.TopicLaneKey(topic)
 }
 
 func queryLaneKey(topic string, scope EventHubLaneScope) string {
-	topicPart := strings.Trim(strings.TrimSpace(topic), "/")
-	if topicPart == "" {
-		topicPart = "unknown"
-	}
-	workspaceID := strings.TrimSpace(scope.WorkspaceID)
-	if runID := strings.TrimSpace(scope.RunID); runID != "" {
-		if workspaceID != "" {
-			return "query/" + topicPart + "/workspace/" + workspaceID + "/run/" + runID
-		}
-		return "query/" + topicPart + "/run/" + runID
-	}
-	if stepID := strings.TrimSpace(scope.StepID); stepID != "" {
-		if workspaceID != "" {
-			return "query/" + topicPart + "/workspace/" + workspaceID + "/step/" + stepID
-		}
-		return "query/" + topicPart + "/step/" + stepID
-	}
-	if workspaceID != "" {
-		return "query/" + topicPart + "/workspace/" + workspaceID
-	}
-	if subjectID := strings.TrimSpace(scope.SubjectID); subjectID != "" {
-		return "query/" + topicPart + "/subject/" + subjectID
-	}
-	return "query/" + topicPart
+	return eventcontract.QueryLaneKey(topic, scope)
 }
 
 func stateLaneKey(owner string, scope EventHubLaneScope) string {
-	owner = lanePart(owner, "owner")
-	workspaceID := strings.TrimSpace(scope.WorkspaceID)
-	switch owner {
-	case "run":
-		if runID := strings.TrimSpace(scope.RunID); runID != "" {
-			if workspaceID != "" {
-				return "state/run/" + workspaceID + "/" + runID
-			}
-			return "state/run/" + runID
-		}
-	case "orchestrator":
-		if runID := strings.TrimSpace(scope.RunID); runID != "" {
-			if workspaceID != "" {
-				return "state/orchestrator/workspace/" + workspaceID + "/run/" + runID
-			}
-			return "state/orchestrator/run/" + runID
-		}
-	case "workspace":
-		if workspaceID != "" {
-			return "state/workspace/" + workspaceID
-		}
-	}
-	if subjectID := strings.TrimSpace(scope.SubjectID); subjectID != "" {
-		if workspaceID != "" {
-			return "state/" + owner + "/workspace/" + workspaceID + "/subject/" + subjectID
-		}
-		return "state/" + owner + "/" + subjectID
-	}
-	if runID := strings.TrimSpace(scope.RunID); runID != "" {
-		if workspaceID != "" {
-			return "state/" + owner + "/workspace/" + workspaceID + "/run/" + runID
-		}
-		return "state/" + owner + "/run/" + runID
-	}
-	if workspaceID != "" {
-		return "state/" + owner + "/workspace/" + workspaceID
-	}
-	return "state/" + owner
+	return eventcontract.StateLaneKey(owner, scope)
 }
 
 func executeLaneKey(contract EventHubContract, scope EventHubLaneScope) string {

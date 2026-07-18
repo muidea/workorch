@@ -61,47 +61,6 @@ func TestRuntimeV2StateRepositoryPersistsAndLoadsThroughRunOwner(t *testing.T) {
 	}
 }
 
-func TestRuntimeV2StateRepositoryRestartsLegacyActiveAggregateWithoutReinitialize(t *testing.T) {
-	ctx := context.Background()
-	hub := magicevent.NewHub(16)
-	t.Cleanup(func() { hub.Terminate(ctx) })
-	runs := memory.NewRunRepository()
-	aggregate := runtimeV2Aggregate(t, 4)
-	record := runtimeStateRecordFromAggregate(aggregate)
-	record.SchemaVersion = runtimecontract.RuntimeStateSchemaVersionLegacy
-	record.Facts.Coverage = nil
-	bootstrap := runtimeV2Bootstrap()
-	if err := runs.Create(ctx, &runmodel.Run{
-		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2", DefinitionRevision: "definition-v2",
-		State: common.RunStateActive, RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2, RuntimeBootstrap: &bootstrap, RuntimeState: &record,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
-		t.Fatal(err)
-	}
-	if err := runOwner.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
-	repository := runtimeV2StateRepository{hub: hub}
-	loaded, err := repository.Load(ctx, "ws-v2", "run-v2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loaded.StateRevision != 4 || loaded.Decision.AuthoritySnapshot.ID != aggregate.Decision.AuthoritySnapshot.ID || len(loaded.Facts.Coverage) != 1 {
-		t.Fatalf("legacy restart load = %+v", loaded)
-	}
-	if err := repository.Save(ctx, loaded, 4); err != nil {
-		t.Fatal(err)
-	}
-	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
-	if err != nil || persisted.RuntimeState == nil || persisted.RuntimeState.SchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent || persisted.RuntimeState.StateRevision != 4 {
-		t.Fatalf("persisted migrated state = %+v err=%v", persisted, err)
-	}
-}
-
 func TestRuntimeV2InitializesFromPersistedRunBootstrap(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
@@ -236,6 +195,7 @@ func TestRuntimeV2MainlineRequestsAndSealsTypedCandidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+	startRuntimeV2ReceiptTestOwner(t, hub)
 
 	var requestedDefinition runtimecontract.RuntimeDefinitionContext
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
@@ -259,7 +219,14 @@ func TestRuntimeV2MainlineRequestsAndSealsTypedCandidate(t *testing.T) {
 	fileObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
 	fileObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteFileEditOperation, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.ExecuteFileEditOperationCommand)
+		receipt := orchestratorevents.NewRuntimeOperationReceipt(command.Execution, command.OperationID, runtimecontract.RuntimeOperationExecutionStatusAccepted, command.TargetRefs, runtimecontract.RuntimeOperationEvidence{}, nil, nil)
+		committed, err := orchestratorevents.CommitPersistedRuntimeOperationReceipt(event.Context(), hub, runtimecontract.RuntimeModuleFile, command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+		if err != nil {
+			t.Errorf("commit owner receipt: %v", err)
+			return
+		}
 		result.Set(orchestratorevents.ExecuteFileEditOperationResult{
+			Receipt: committed,
 			EventID: "event-" + command.OperationID, OperationID: command.OperationID,
 			EvidenceKind: command.EvidenceKind, Status: runtimecontract.RuntimeOperationExecutionStatusAccepted,
 			SourceRef: "workorch://runtime-operations/" + command.DispatchID + "/" + command.OperationID,
@@ -454,6 +421,7 @@ func TestRuntimeV2MainlineStopsAfterSecondCandidateFailure(t *testing.T) {
 func TestNextRuntimeV2CandidateAttemptResumesPersistedPendingOrFailedState(t *testing.T) {
 	transaction := runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "snapshot-1", FocusID: "focus-v2", Action: runtimecontract.RuntimeActionProduceStateChange, RequiredOutputHash: "output-v2", DefinitionRevision: "definition-v2", EvidenceRevision: "evidence-v2"}
 	base := runtimev2.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: "ws-v2", RunID: "run-v2"}, Decision: runtimecontract.RuntimeDecision{AuthoritySnapshot: runtimecontract.AuthoritySnapshot{ID: "snapshot-1", FocusID: "focus-v2", Action: runtimecontract.RuntimeActionProduceStateChange, RequiredOutputHash: "output-v2", DefinitionRevision: "definition-v2", EvidenceRevision: "evidence-v2"}}}
+	contractID := runtimecontract.StableAuthorityContractID(base.Facts.WorkspaceID, base.Facts.RunID, transaction)
 	tests := []struct {
 		name     string
 		attempts []runtimecontract.RuntimeCandidateAttemptRecord
@@ -461,10 +429,10 @@ func TestNextRuntimeV2CandidateAttemptResumesPersistedPendingOrFailedState(t *te
 		ok       bool
 	}{
 		{name: "new", want: 0, ok: true},
-		{name: "pending zero", attempts: []runtimecontract.RuntimeCandidateAttemptRecord{{Transaction: transaction, Attempt: 0, State: runtimecontract.RuntimeCandidateAttemptStatePending}}, want: 0, ok: true},
-		{name: "failed zero", attempts: []runtimecontract.RuntimeCandidateAttemptRecord{{Transaction: transaction, Attempt: 0, State: runtimecontract.RuntimeCandidateAttemptStateFailed}}, want: 1, ok: true},
-		{name: "pending one", attempts: []runtimecontract.RuntimeCandidateAttemptRecord{{Transaction: transaction, Attempt: 0, State: runtimecontract.RuntimeCandidateAttemptStateFailed}, {Transaction: transaction, Attempt: 1, State: runtimecontract.RuntimeCandidateAttemptStatePending}}, want: 1, ok: true},
-		{name: "accepted", attempts: []runtimecontract.RuntimeCandidateAttemptRecord{{Transaction: transaction, Attempt: 0, State: runtimecontract.RuntimeCandidateAttemptStateAccepted}}, ok: false},
+		{name: "pending zero", attempts: []runtimecontract.RuntimeCandidateAttemptRecord{{AuthorityContractID: contractID, Transaction: transaction, Attempt: 0, State: runtimecontract.RuntimeCandidateAttemptStatePending}}, want: 0, ok: true},
+		{name: "failed zero", attempts: []runtimecontract.RuntimeCandidateAttemptRecord{{AuthorityContractID: contractID, Transaction: transaction, Attempt: 0, State: runtimecontract.RuntimeCandidateAttemptStateFailed}}, want: 1, ok: true},
+		{name: "pending one", attempts: []runtimecontract.RuntimeCandidateAttemptRecord{{AuthorityContractID: contractID, Transaction: transaction, Attempt: 0, State: runtimecontract.RuntimeCandidateAttemptStateFailed}, {AuthorityContractID: contractID, Transaction: transaction, Attempt: 1, State: runtimecontract.RuntimeCandidateAttemptStatePending}}, want: 1, ok: true},
+		{name: "accepted", attempts: []runtimecontract.RuntimeCandidateAttemptRecord{{AuthorityContractID: contractID, Transaction: transaction, Attempt: 0, State: runtimecontract.RuntimeCandidateAttemptStateAccepted}}, ok: false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -478,24 +446,25 @@ func TestNextRuntimeV2CandidateAttemptResumesPersistedPendingOrFailedState(t *te
 	}
 }
 
-func TestNextRuntimeV2CandidateAttemptRejectsLegacyResealRunaway(t *testing.T) {
+func TestNextRuntimeV2CandidateAttemptRejectsResealRunaway(t *testing.T) {
 	aggregate := runtimeV2Aggregate(t, 100)
 	transaction := aggregate.Decision.AuthorityTransaction()
+	contractID := runtimecontract.StableAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction)
 	for idx := 0; idx < 3; idx++ {
-		legacy := transaction
-		legacy.AuthoritySnapshotID = fmt.Sprintf("legacy-snapshot-%d", idx)
-		legacy.Attempt = idx
+		resealed := transaction
+		resealed.AuthoritySnapshotID = fmt.Sprintf("resealed-snapshot-%d", idx)
+		resealed.Attempt = idx
 		aggregate.CandidateAttempts = append(aggregate.CandidateAttempts, runtimecontract.RuntimeCandidateAttemptRecord{
-			Transaction: legacy, Attempt: 0, StablePrefixHash: "stable-prefix-v2",
+			AuthorityContractID: contractID, Transaction: resealed, Attempt: 0, StablePrefixHash: "stable-prefix-v2",
 			State:   runtimecontract.RuntimeCandidateAttemptStateFailed,
 			Failure: &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: "invalid candidate"},
 		})
 	}
 	if attempt, ok := nextRuntimeV2CandidateAttempt(aggregate); ok {
-		t.Fatalf("legacy runaway offered candidate attempt %d", attempt)
+		t.Fatalf("reseal runaway offered candidate attempt %d", attempt)
 	}
 	if !runtimeV2CandidateContractExhausted(aggregate) {
-		t.Fatal("legacy runaway was not recognized as exhausted")
+		t.Fatal("reseal runaway was not recognized as exhausted")
 	}
 }
 
@@ -508,6 +477,7 @@ func runtimeV2Aggregate(t *testing.T, revision uint64) runtimev2.RuntimeAggregat
 			ID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, TargetRefs: []string{"target.txt"},
 		},
+		Coverage:     []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-v2", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Capabilities: runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{runtimecontract.StepKindFileEdit}},
 	}
 	decision, err := runtimev2.ReduceRuntimeState(facts, nil)
@@ -526,12 +496,14 @@ func runtimeV2Definition() runtimecontract.RuntimeDefinitionContext {
 
 func runtimeV2Bootstrap() runtimecontract.RuntimeBootstrap {
 	return runtimecontract.RuntimeBootstrap{
-		Definition: runtimeV2Definition(),
-		Activation: runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
+		Definition:    runtimeV2Definition(),
+		Activation:    runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		Focuses: []runtimecontract.CoverageFocus{{
 			ID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, TargetRefs: []string{"target.txt"},
 		}},
+		CoverageItems: []runtimecontract.RuntimeCoverageItem{{ID: "cwi-v2"}},
 		Requirements: []runtimecontract.RuntimeRequirement{{
 			Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 			CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.StepKindFileEdit},

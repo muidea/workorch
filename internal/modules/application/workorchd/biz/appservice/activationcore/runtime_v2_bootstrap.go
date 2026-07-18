@@ -81,7 +81,8 @@ func RuntimeV2Bootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defi
 		}
 	}
 	bootstrap := runtimecontract.RuntimeBootstrap{
-		Activation: activation,
+		SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
+		Activation:    activation,
 		Definition: runtimecontract.RuntimeDefinitionContext{
 			Revision: definitionRevision, GoalID: goal.ID, GoalDefinition: goal.Text,
 			DoDID: dod.ID, DoDDefinition: strings.Join(dodLines, "\n"),
@@ -94,6 +95,7 @@ func RuntimeV2Bootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defi
 		Requirements:           requirements,
 		StateChangeRequirement: stateChangeRequirement,
 		ConvergencePolicy:      convergencePolicy,
+		RecoveryPolicy:         runtimecontract.DefaultRuntimeRecoveryPolicy(),
 	}
 	bootstrap = bootstrap.Normalized()
 	if err := bootstrap.Validate(); err != nil {

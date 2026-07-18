@@ -16,7 +16,7 @@ func TestRuntimeOperationDescriptorsAreStableCompleteAndUnique(t *testing.T) {
 	kinds := make([]string, 0, len(descriptors))
 	seen := map[string]struct{}{}
 	for _, descriptor := range descriptors {
-		if descriptor.Kind == "" || descriptor.OwnerModuleID == "" || descriptor.EffectClass == "" || descriptor.CapabilityClass == "" {
+		if descriptor.Kind == "" || descriptor.OwnerModuleID == "" || descriptor.DefaultEffectScope == "" || descriptor.CapabilityClass == "" {
 			t.Fatalf("descriptor incomplete: %+v", descriptor)
 		}
 		if len(descriptor.AllowedActions) == 0 {
@@ -51,8 +51,8 @@ func TestRuntimeOperationDescriptorForKindCanonicalAndUnknown(t *testing.T) {
 	if descriptor.OwnerModuleID != RuntimeModuleShell {
 		t.Fatalf("managed validation owner = %q, want %s", descriptor.OwnerModuleID, RuntimeModuleShell)
 	}
-	if descriptor.EffectClass != RuntimeOperationEffectNonMutating {
-		t.Fatalf("managed validation effect = %q, want non_mutating", descriptor.EffectClass)
+	if descriptor.DefaultEffectScope != RuntimeEffectNone {
+		t.Fatalf("managed validation effect = %q, want none", descriptor.DefaultEffectScope)
 	}
 	if descriptor.CapabilityClass != RuntimeCapabilityClassValidation {
 		t.Fatalf("managed validation capability class = %q", descriptor.CapabilityClass)
@@ -104,14 +104,17 @@ func TestFeasibleOperationKindsIntersectAcceptedCapabilitiesAndEffect(t *testing
 		ValidationKinds: []string{StepKindShellCommand, RuntimeBlockKindManagedValidationSession, StepKindFileRead},
 	}
 	got := FeasibleOperationKinds(required, capabilities)
+	// shell/command has no activation-sealed concrete non-durable effect, so it is
+	// absent from the candidate request. Validation uses a descriptor explicitly
+	// marked non-durable or a concrete sealed capability instead.
 	want := []string{StepKindFileRead, RuntimeBlockKindManagedValidationSession}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("FeasibleOperationKinds = %v, want %v", got, want)
 	}
 
-	// shell/command remains non-feasible for validation despite being sealed into ValidationKinds.
-	if OperationHasWorkspaceSideEffects(RuntimeOperation{Kind: StepKindShellCommand}) == false {
-		t.Fatal("shell feasibility exclusion depends on side-effecting kind effect")
+	// Default shell (no stateChanging=false) remains side-effecting at resolve time.
+	if !OperationHasWorkspaceSideEffects(RuntimeOperation{Kind: StepKindShellCommand}) {
+		t.Fatal("default shell/command must remain side-effecting until stateChanging=false")
 	}
 
 	stateRequired := RequiredOutputContract{
@@ -128,6 +131,29 @@ func TestFeasibleOperationKindsIntersectAcceptedCapabilitiesAndEffect(t *testing
 
 	if kinds := FeasibleOperationKinds(required, RuntimeCapabilities{}); kinds != nil {
 		t.Fatalf("empty capabilities must yield no feasible kinds, got %v", kinds)
+	}
+
+	mcpRequired := RequiredOutputContract{
+		Kind: RequiredOutputKindValidation, AcceptedKinds: []string{StepKindMCPToolCall},
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+	}
+	mcpCaps := RuntimeCapabilities{ValidationKinds: []string{StepKindMCPToolCall}}
+	if got := FeasibleOperationKindsWithActivation(mcpRequired, mcpCaps, []RuntimeMCPCapabilityContext{{
+		ID: "missing", ServerID: "srv", Kind: "tool", OperationKind: StepKindMCPToolCall, Name: "inspect", Enabled: true,
+	}}); len(got) != 0 {
+		t.Fatalf("MCP without explicit effect must not be feasible, got %v", got)
+	}
+	if got := FeasibleOperationKindsWithActivation(mcpRequired, mcpCaps, []RuntimeMCPCapabilityContext{{
+		ID: "read", ServerID: "srv", Kind: "tool", OperationKind: StepKindMCPToolCall, Name: "inspect", Enabled: true,
+		EffectScope: string(RuntimeEffectNone), IdempotencyClass: string(RuntimeOperationIdempotencySafeToReplay),
+	}}); !reflect.DeepEqual(got, []string{StepKindMCPToolCall}) {
+		t.Fatalf("explicit non-durable MCP capability must be feasible, got %v", got)
+	}
+	if got := FeasibleOperationKindsWithActivation(mcpRequired, mcpCaps, []RuntimeMCPCapabilityContext{{
+		ID: "write", ServerID: "srv", Kind: "tool", OperationKind: StepKindMCPToolCall, Name: "apply", Enabled: true,
+		EffectScope: string(RuntimeEffectWorkspaceDurable), IdempotencyClass: string(RuntimeOperationIdempotencyAtMostOnce),
+	}}); len(got) != 0 {
+		t.Fatalf("durable MCP capability must not be validation feasible, got %v", got)
 	}
 }
 

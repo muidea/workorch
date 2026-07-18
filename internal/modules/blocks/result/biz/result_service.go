@@ -112,6 +112,11 @@ func validateResult(item *resultmodel.Result) error {
 	if item == nil || item.ID == "" || item.WorkspaceID == "" || item.RunID == "" || !isSupportedResultState(item.State) {
 		return common.ErrInvalidArgument
 	}
+	if item.RuntimeCloseout != nil {
+		if err := item.RuntimeCloseout.Validate(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

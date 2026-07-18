@@ -33,13 +33,17 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 	}
 	generation, err := provider.GenerateCandidate(ctx, request)
 	if err != nil {
+		failureClass := runtimecontract.RuntimeCandidateFailureClass(strings.TrimSpace(generation.FailureClass))
+		if failureClass == "" {
+			failureClass = CandidateFailureClassProvider
+		}
 		return llmmodels.RuntimeCandidateResponse{
 			Transaction: request.Transaction,
 			Audit:       generation.Audit,
 			Usage:       generation.Usage,
 			RequestID:   generation.RequestID,
 			Status:      firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusFailed),
-		}, candidateRequestError(CandidateFailureClassProvider, err, generation.Audit, generation.RequestID, generation.Status)
+		}, candidateRequestError(failureClass, err, generation.Audit, generation.RequestID, generation.Status)
 	}
 	candidate, err := DecodeCandidatePayload(request.Decision.Action, generation.Payload)
 	if err != nil {
@@ -139,10 +143,13 @@ const (
 type CandidateFailureClass = runtimecontract.RuntimeCandidateFailureClass
 
 const (
-	CandidateFailureClassSchema   = runtimecontract.RuntimeCandidateFailureClassSchema
-	CandidateFailureClassContract = runtimecontract.RuntimeCandidateFailureClassContract
-	CandidateFailureClassProvider = runtimecontract.RuntimeCandidateFailureClassProvider
-	CandidateFailureClassInternal = runtimecontract.RuntimeCandidateFailureClassInternal
+	CandidateFailureClassSchema                 = runtimecontract.RuntimeCandidateFailureClassSchema
+	CandidateFailureClassContract               = runtimecontract.RuntimeCandidateFailureClassContract
+	CandidateFailureClassProvider               = runtimecontract.RuntimeCandidateFailureClassProvider
+	CandidateFailureClassProviderTransient      = runtimecontract.RuntimeCandidateFailureClassProviderTransient
+	CandidateFailureClassProviderAuthentication = runtimecontract.RuntimeCandidateFailureClassProviderAuthentication
+	CandidateFailureClassProviderConfiguration  = runtimecontract.RuntimeCandidateFailureClassProviderConfiguration
+	CandidateFailureClassInternal               = runtimecontract.RuntimeCandidateFailureClassInternal
 )
 
 type CandidateAttemptOutcome struct {
@@ -250,8 +257,8 @@ func DecodeCandidatePayload(action runtimecontract.RuntimeAction, payload []byte
 		}
 		return runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
 			FocusID: value.FocusID, SliceID: value.SliceID, CoverageWorkItemIDs: value.CoverageWorkItemIDs,
-			Satisfied: value.Satisfied, Disposition: runtimecontract.AssessmentDisposition(value.Disposition),
-			Items: items, Gap: gap, Summary: value.Summary, EvidenceRefs: value.EvidenceRefs, ArtifactRefs: value.ArtifactRefs,
+			Disposition: runtimecontract.AssessmentDisposition(value.Disposition),
+			Items:       items, Gap: gap, Summary: value.Summary, EvidenceRefs: value.EvidenceRefs, ArtifactRefs: value.ArtifactRefs,
 		}}, nil
 	case runtimecontract.RuntimeActionRequestGovernance:
 		var value governanceCandidateDTO
@@ -383,7 +390,6 @@ type assessmentCandidateDTO struct {
 	FocusID             string                      `json:"focusId"`
 	SliceID             string                      `json:"sliceId,omitempty"`
 	CoverageWorkItemIDs []common.CoverageWorkItemID `json:"coverageWorkItemIds"`
-	Satisfied           bool                        `json:"satisfied"`
 	Disposition         string                      `json:"disposition,omitempty"`
 	Items               []assessmentItemDTO         `json:"items,omitempty"`
 	Gap                 *assessmentGapDTO           `json:"gap,omitempty"`

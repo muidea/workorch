@@ -184,7 +184,7 @@ func TestDecodeTypedAssessmentCandidate(t *testing.T) {
 	candidate, err := DecodeCandidatePayload(request.Decision.Action, []byte(`{
 		"focusId":"focus-1",
 		"coverageWorkItemIds":["cwi-1"],
-		"satisfied":true,
+		"disposition":"satisfied",
 		"summary":"current focus is satisfied",
 		"evidenceRefs":["evidence-1"]
 	}`))
@@ -194,7 +194,7 @@ func TestDecodeTypedAssessmentCandidate(t *testing.T) {
 	if err := candidate.Validate(request.Decision); err != nil {
 		t.Fatal(err)
 	}
-	if candidate.Assessment == nil || !candidate.Assessment.Satisfied || candidate.Assessment.FocusID != "focus-1" {
+	if candidate.Assessment == nil || candidate.Assessment.Disposition != runtimecontract.AssessmentDispositionSatisfied || candidate.Assessment.FocusID != "focus-1" {
 		t.Fatalf("assessment candidate = %+v", candidate)
 	}
 }
@@ -204,6 +204,7 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 	facts := runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
 		Focus:      runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
+		Coverage:   []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Activation: runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 	}
 	decision := runtimecontract.RuntimeDecision{State: state, Focus: facts.Focus}
@@ -211,12 +212,18 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 	case runtimecontract.ConvergenceStateNeedStateChange:
 		decision.Action = runtimecontract.RuntimeActionProduceStateChange
 		decision.RequiredOutput = runtimecontract.RequiredOutputContract{
-			Kind: runtimecontract.RequiredOutputKindStateChange, AcceptedKinds: []string{"patch/apply"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+			Kind: runtimecontract.RequiredOutputKindStateChange, AcceptedKinds: []string{"patch/apply"},
+			AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
+			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
+			CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
 		}
 	case runtimecontract.ConvergenceStateNeedValidation:
 		decision.Action = runtimecontract.RuntimeActionProduceValidation
 		decision.RequiredOutput = runtimecontract.RequiredOutputContract{
-			Kind: runtimecontract.RequiredOutputKindValidation, AcceptedKinds: []string{"validation/managed_session"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+			Kind: runtimecontract.RequiredOutputKindValidation, AcceptedKinds: []string{"validation/managed_session"},
+			AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession},
+			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
+			CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
 		}
 	case runtimecontract.ConvergenceStateNeedAssessment:
 		decision.Action = runtimecontract.RuntimeActionProduceAssessment

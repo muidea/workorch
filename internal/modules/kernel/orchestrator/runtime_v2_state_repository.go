@@ -28,11 +28,9 @@ func (r runtimeV2StateRepository) Load(ctx context.Context, workspaceID common.W
 		return runtimev2.RuntimeAggregate{}, common.ErrNotFound
 	}
 	record := run.RuntimeState.Clone()
-	if record.SchemaVersion > runtimecontract.RuntimeStateSchemaVersionCurrent {
-		return runtimev2.RuntimeAggregate{}, fmt.Errorf("unsupported future Runtime V2 state schema %d", record.SchemaVersion)
+	if record.SchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent {
+		return runtimev2.RuntimeAggregate{}, fmt.Errorf("unsupported Runtime V2 state schema %d", record.SchemaVersion)
 	}
-	// Legacy records are normalized purely in memory. The next successful CAS
-	// writes the current schema; load itself never mutates a Run.
 	aggregate := runtimeAggregateFromRecord(record)
 	if err := aggregate.Validate(); err != nil {
 		return runtimev2.RuntimeAggregate{}, err
@@ -67,16 +65,22 @@ func (r runtimeV2StateRepository) Save(ctx context.Context, aggregate runtimev2.
 
 func runtimeStateRecordFromAggregate(aggregate runtimev2.RuntimeAggregate) runtimecontract.RuntimeStateRecord {
 	ret := runtimecontract.RuntimeStateRecord{
-		SchemaVersion:         runtimecontract.RuntimeStateSchemaVersionCurrent,
-		StateRevision:         aggregate.StateRevision,
-		EvidenceSequence:      aggregate.EvidenceSequence,
-		Definition:            aggregate.Definition,
-		Facts:                 aggregate.Facts,
-		Decision:              aggregate.Decision,
-		ProcessedEventIDs:     append([]string(nil), aggregate.ProcessedEventIDs...),
-		CandidateAttempts:     append([]runtimecontract.RuntimeCandidateAttemptRecord(nil), aggregate.CandidateAttempts...),
-		GovernanceRequests:    append([]runtimecontract.RuntimeGovernanceRequestRecord(nil), aggregate.GovernanceRequests...),
-		GovernanceResolutions: append([]runtimecontract.RuntimeGovernanceResolutionRecord(nil), aggregate.GovernanceResolutions...),
+		SchemaVersion:               runtimecontract.RuntimeStateSchemaVersionCurrent,
+		StateRevision:               aggregate.StateRevision,
+		EvidenceSequence:            aggregate.EvidenceSequence,
+		Definition:                  aggregate.Definition,
+		Facts:                       aggregate.Facts,
+		Decision:                    aggregate.Decision,
+		ProcessedEventIDs:           append([]string(nil), aggregate.ProcessedEventIDs...),
+		CandidateAttempts:           append([]runtimecontract.RuntimeCandidateAttemptRecord(nil), aggregate.CandidateAttempts...),
+		GovernanceRequests:          append([]runtimecontract.RuntimeGovernanceRequestRecord(nil), aggregate.GovernanceRequests...),
+		GovernanceResolutions:       append([]runtimecontract.RuntimeGovernanceResolutionRecord(nil), aggregate.GovernanceResolutions...),
+		OperationGovernanceBindings: cloneRuntimeOperationGovernanceBindings(aggregate.OperationGovernanceBindings),
+		OperationReceipts:           runtimecontract.NormalizeRuntimeOperationReceipts(aggregate.OperationReceipts),
+	}
+	if aggregate.Termination != nil {
+		term := aggregate.Termination.Clone()
+		ret.Termination = &term
 	}
 	if aggregate.ActiveDispatch != nil {
 		value := runtimeDispatchRecordFromAggregate(*aggregate.ActiveDispatch)
@@ -97,17 +101,22 @@ func runtimeStateRecordFromAggregate(aggregate runtimev2.RuntimeAggregate) runti
 }
 
 func runtimeAggregateFromRecord(record runtimecontract.RuntimeStateRecord) runtimev2.RuntimeAggregate {
-	record = record.Normalized()
 	ret := runtimev2.RuntimeAggregate{
-		StateRevision:         record.StateRevision,
-		EvidenceSequence:      record.EvidenceSequence,
-		Definition:            record.Definition,
-		Facts:                 record.Facts,
-		Decision:              record.Decision,
-		ProcessedEventIDs:     append([]string(nil), record.ProcessedEventIDs...),
-		CandidateAttempts:     append([]runtimecontract.RuntimeCandidateAttemptRecord(nil), record.CandidateAttempts...),
-		GovernanceRequests:    append([]runtimecontract.RuntimeGovernanceRequestRecord(nil), record.GovernanceRequests...),
-		GovernanceResolutions: append([]runtimecontract.RuntimeGovernanceResolutionRecord(nil), record.GovernanceResolutions...),
+		StateRevision:               record.StateRevision,
+		EvidenceSequence:            record.EvidenceSequence,
+		Definition:                  record.Definition,
+		Facts:                       record.Facts,
+		Decision:                    record.Decision,
+		ProcessedEventIDs:           append([]string(nil), record.ProcessedEventIDs...),
+		CandidateAttempts:           append([]runtimecontract.RuntimeCandidateAttemptRecord(nil), record.CandidateAttempts...),
+		GovernanceRequests:          append([]runtimecontract.RuntimeGovernanceRequestRecord(nil), record.GovernanceRequests...),
+		GovernanceResolutions:       append([]runtimecontract.RuntimeGovernanceResolutionRecord(nil), record.GovernanceResolutions...),
+		OperationGovernanceBindings: cloneRuntimeOperationGovernanceBindings(record.OperationGovernanceBindings),
+		OperationReceipts:           runtimecontract.NormalizeRuntimeOperationReceipts(record.OperationReceipts),
+	}
+	if record.Termination != nil {
+		term := record.Termination.Clone()
+		ret.Termination = &term
 	}
 	if record.ActiveDispatch != nil {
 		value := runtimeDispatchFromRecord(*record.ActiveDispatch)
@@ -127,11 +136,23 @@ func runtimeAggregateFromRecord(record runtimecontract.RuntimeStateRecord) runti
 	return ret
 }
 
+func cloneRuntimeOperationGovernanceBindings(values []runtimecontract.RuntimeOperationGovernanceBinding) []runtimecontract.RuntimeOperationGovernanceBinding {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]runtimecontract.RuntimeOperationGovernanceBinding, len(values))
+	for idx := range values {
+		ret[idx] = values[idx].Clone()
+	}
+	return ret
+}
+
 func runtimeDispatchRecordFromAggregate(dispatch runtimev2.SealedDispatch) runtimecontract.RuntimeDispatchRecord {
 	return runtimecontract.RuntimeDispatchRecord{
 		ID: dispatch.ID, WorkspaceID: dispatch.WorkspaceID, RunID: dispatch.RunID,
 		Transaction: dispatch.Transaction, CandidateHash: dispatch.CandidateHash, Candidate: dispatch.Candidate,
 		State: runtimecontract.RuntimeDispatchState(dispatch.State), CompletedOperationIDs: append([]string(nil), dispatch.CompletedOperationIDs...),
+		OperationExecutions: runtimecontract.NormalizeRuntimeOperationExecutionRecords(dispatch.OperationExecutions),
 	}
 }
 
@@ -140,5 +161,6 @@ func runtimeDispatchFromRecord(dispatch runtimecontract.RuntimeDispatchRecord) r
 		ID: dispatch.ID, WorkspaceID: dispatch.WorkspaceID, RunID: dispatch.RunID,
 		Transaction: dispatch.Transaction, CandidateHash: dispatch.CandidateHash, Candidate: dispatch.Candidate,
 		State: runtimev2.DispatchState(dispatch.State), CompletedOperationIDs: append([]string(nil), dispatch.CompletedOperationIDs...),
+		OperationExecutions: runtimecontract.NormalizeRuntimeOperationExecutionRecords(dispatch.OperationExecutions),
 	}
 }

@@ -54,6 +54,17 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 			ForbiddenParameters: []string{"input", "output", "payload"},
 			Rules:               []string{"path must be non-empty", "maxBytes must be between 1 and 65536 when provided", "line bounds must be positive and ordered when provided"},
 		}, true
+	case StepKindFileWrite:
+		return RuntimeOperationContract{
+			Kind: StepKindFileWrite,
+			Parameters: []RuntimeOperationParameterContract{
+				{Name: "path", Type: RuntimeOperationParameterTypeString, Description: "workspace-relative file path"},
+				{Name: "targetRef", Type: RuntimeOperationParameterTypeString, Description: "workspace-relative target path"},
+				{Name: "content", Type: RuntimeOperationParameterTypeString, Required: true, Description: "complete file content; an empty string is allowed"},
+			},
+			ForbiddenParameters: []string{"input", "output", "payload"},
+			Rules:               []string{"target must be identified by path, targetRef, or operation targetRefs when provided"},
+		}, true
 	case StepKindFileEdit:
 		return RuntimeOperationContract{
 			Kind: StepKindFileEdit,
@@ -251,6 +262,25 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 		end, hasEnd := parameterInteger(values["endLine"])
 		if (hasStart && start <= 0) || (hasEnd && end <= 0) || (hasStart && hasEnd && end < start) {
 			return fmt.Errorf("kind %q requires positive ordered line bounds", operation.Kind)
+		}
+	case StepKindFileWrite:
+		path := parameterString(values["path"])
+		targetRef := parameterString(values["targetRef"])
+		if path != "" && targetRef != "" && path != targetRef {
+			return fmt.Errorf("kind %q path and targetRef must identify the same target", operation.Kind)
+		}
+		target := targetRef
+		if target == "" {
+			target = path
+		}
+		if target == "" && len(operation.TargetRefs) == 1 {
+			target = operation.TargetRefs[0]
+		}
+		if target == "" {
+			return fmt.Errorf("kind %q requires one target via path, targetRef, or targetRefs", operation.Kind)
+		}
+		if len(operation.TargetRefs) > 0 && !containsString(operation.TargetRefs, target) {
+			return fmt.Errorf("kind %q targetRefs must contain target %q", operation.Kind, target)
 		}
 	case StepKindFileEdit:
 		path := parameterString(values["path"])

@@ -25,6 +25,8 @@ type RuntimeDispatchRecord struct {
 	Candidate             RuntimeCandidate
 	State                 RuntimeDispatchState
 	CompletedOperationIDs []string
+	// OperationExecutions is the required per-operation claim/fence ledger.
+	OperationExecutions []RuntimeOperationExecutionRecord
 }
 
 type RuntimeDiagnosticRecord struct {
@@ -54,38 +56,39 @@ type RuntimeCandidateAttemptRecord struct {
 
 // RuntimeStateRecord 是 Runtime V2 在 Run owner 中持久化的唯一正式状态。
 type RuntimeStateRecord struct {
-	// SchemaVersion is the persisted Runtime V2 aggregate schema. Zero is the
-	// legacy additive schema and is normalized in-memory on load before any
-	// reducer/drive work is performed.
-	SchemaVersion         uint32
-	StateRevision         uint64
-	EvidenceSequence      uint64
-	Definition            RuntimeDefinitionContext
-	Facts                 RuntimeFacts
-	Decision              RuntimeDecision
-	ActiveDispatch        *RuntimeDispatchRecord
-	CompletedDispatches   []RuntimeDispatchRecord
-	ProcessedEventIDs     []string
-	Diagnostics           []RuntimeDiagnosticRecord
-	CandidateAttempts     []RuntimeCandidateAttemptRecord
-	GovernanceRequests    []RuntimeGovernanceRequestRecord
-	GovernanceResolutions []RuntimeGovernanceResolutionRecord
+	// SchemaVersion is the persisted Runtime V2 aggregate schema. Production
+	// persistence accepts only SchemaVersionCurrent.
+	SchemaVersion               uint32
+	StateRevision               uint64
+	EvidenceSequence            uint64
+	Definition                  RuntimeDefinitionContext
+	Facts                       RuntimeFacts
+	Decision                    RuntimeDecision
+	ActiveDispatch              *RuntimeDispatchRecord
+	CompletedDispatches         []RuntimeDispatchRecord
+	ProcessedEventIDs           []string
+	Diagnostics                 []RuntimeDiagnosticRecord
+	CandidateAttempts           []RuntimeCandidateAttemptRecord
+	GovernanceRequests          []RuntimeGovernanceRequestRecord
+	GovernanceResolutions       []RuntimeGovernanceResolutionRecord
+	OperationGovernanceBindings []RuntimeOperationGovernanceBinding
+	// OperationReceipts are owner-authored terminal receipts persisted before
+	// capability owners return execution results (schema v2 / INV-03/INV-04).
+	OperationReceipts []RuntimeOperationReceipt
+	// Termination is the SM-1 administrative cancel/supersede record (schema v2).
+	// completed/failed do not use this field.
+	Termination *RuntimeTerminationRecord
 }
 
 const (
-	RuntimeStateSchemaVersionLegacy  uint32 = 0
-	RuntimeStateSchemaVersionCurrent uint32 = 1
+	RuntimeStateSchemaVersionV2 uint32 = 2
+	// RuntimeStateSchemaVersionCurrent is the only production Runtime V2 schema.
+	// Every other version fails fast; no in-place migration or semantic inference is allowed.
+	RuntimeStateSchemaVersionCurrent uint32 = 2
 )
 
-func (r RuntimeStateRecord) Normalized() RuntimeStateRecord {
-	if r.SchemaVersion == RuntimeStateSchemaVersionLegacy {
-		r.SchemaVersion = RuntimeStateSchemaVersionCurrent
-	}
-	return r
-}
-
 func (r RuntimeStateRecord) Validate() error {
-	if r.SchemaVersion != RuntimeStateSchemaVersionLegacy && r.SchemaVersion != RuntimeStateSchemaVersionCurrent {
+	if r.SchemaVersion != RuntimeStateSchemaVersionCurrent {
 		return fmt.Errorf("unsupported runtime state schema version %d", r.SchemaVersion)
 	}
 	if r.Facts.WorkspaceID == "" || r.Facts.RunID == "" {
@@ -120,6 +123,12 @@ func (r RuntimeStateRecord) Validate() error {
 	if err := ValidateRuntimeGovernanceRequestRecords(r.GovernanceRequests); err != nil {
 		return err
 	}
+	if err := ValidateRuntimeOperationGovernanceBindings(r.OperationGovernanceBindings); err != nil {
+		return err
+	}
+	if err := ValidateRuntimeOperationReceipts(r.OperationReceipts); err != nil {
+		return err
+	}
 	for _, request := range r.GovernanceRequests {
 		matched := r.ActiveDispatch != nil && r.ActiveDispatch.ID == request.DispatchID &&
 			r.ActiveDispatch.Transaction.AuthoritySnapshotID == request.AuthoritySnapshotID && r.ActiveDispatch.Candidate.Governance != nil
@@ -133,6 +142,50 @@ func (r RuntimeStateRecord) Validate() error {
 		}
 		if !matched {
 			return fmt.Errorf("runtime governance request has no governed dispatch")
+		}
+	}
+	for _, rawBinding := range r.OperationGovernanceBindings {
+		binding := rawBinding.Normalized()
+		var source *RuntimeDispatchRecord
+		for idx := range r.CompletedDispatches {
+			if r.CompletedDispatches[idx].ID == binding.OperationDispatchID {
+				value := r.CompletedDispatches[idx]
+				source = &value
+				break
+			}
+		}
+		if source == nil {
+			return fmt.Errorf("operation governance binding source dispatch %q is not completed", binding.OperationDispatchID)
+		}
+		var execution *RuntimeOperationExecutionRecord
+		for idx := range source.OperationExecutions {
+			if source.OperationExecutions[idx].OperationID == binding.OperationID {
+				value := source.OperationExecutions[idx].Normalized()
+				execution = &value
+				break
+			}
+		}
+		if execution == nil || execution.ExecutionKey != binding.ExecutionKey || execution.Fence != binding.Fence ||
+			execution.OwnerReceiptHash != binding.GovernanceReceiptHash || execution.State != OperationExecutionOwnerCommitted {
+			return fmt.Errorf("operation governance binding source execution does not match sealed receipt")
+		}
+		receipt, found := RuntimeOperationReceiptForExecutionKeyFence(r.OperationReceipts, binding.ExecutionKey, binding.Fence)
+		if !found || receipt.Outcome != RuntimeOperationOutcomeGovernanceRequired || StableRuntimeOperationReceiptHash(receipt) != binding.GovernanceReceiptHash {
+			return fmt.Errorf("operation governance binding has no matching governance receipt")
+		}
+		if binding.State == RuntimeOperationGovernanceBindingSuspended {
+			continue
+		}
+		bound := false
+		for _, request := range r.GovernanceRequests {
+			if request.TicketID == binding.TicketID && request.DispatchID == binding.GovernanceDispatchID &&
+				request.AuthoritySnapshotID == binding.GovernanceSnapshotID && request.DependencyKind == binding.DependencyKind && request.SubjectRef == binding.SubjectRef {
+				bound = true
+				break
+			}
+		}
+		if !bound {
+			return fmt.Errorf("operation governance binding has no matching ticket request")
 		}
 	}
 	for _, attempt := range r.CandidateAttempts {
@@ -170,6 +223,21 @@ func (r RuntimeStateRecord) Validate() error {
 		}
 		if !matched || !bound {
 			return fmt.Errorf("runtime governance resolution has no completed governed dispatch")
+		}
+	}
+	if r.Termination != nil {
+		if err := r.Termination.Validate(); err != nil {
+			return fmt.Errorf("runtime state termination: %w", err)
+		}
+	}
+	if r.ActiveDispatch != nil {
+		if err := ValidateRuntimeOperationExecutionRecords(r.ActiveDispatch.OperationExecutions); err != nil {
+			return fmt.Errorf("runtime state active dispatch executions: %w", err)
+		}
+	}
+	for idx, dispatch := range r.CompletedDispatches {
+		if err := ValidateRuntimeOperationExecutionRecords(dispatch.OperationExecutions); err != nil {
+			return fmt.Errorf("runtime state completed dispatch[%d] executions: %w", idx, err)
 		}
 	}
 	return nil
@@ -214,32 +282,24 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 	return nil
 }
 
-// ValidateRuntimeCandidateAttemptRecordsForScope validates new records against
-// their stable authority contract identity while preserving read compatibility
-// for legacy records that predate AuthorityContractID.
+// ValidateRuntimeCandidateAttemptRecordsForScope validates every persisted record
+// against its explicit stable authority contract identity.
 func ValidateRuntimeCandidateAttemptRecordsForScope(workspaceID common.WorkspaceID, runID common.RunID, values []RuntimeCandidateAttemptRecord) error {
 	if err := ValidateRuntimeCandidateAttemptRecords(values); err != nil {
 		return err
 	}
 	byContract := map[string][]RuntimeCandidateAttemptRecord{}
-	explicitContract := map[string]bool{}
 	for _, value := range values {
+		if strings.TrimSpace(value.AuthorityContractID) == "" {
+			return fmt.Errorf("runtime candidate attempt requires authority contract id")
+		}
 		contractID := CandidateAttemptAuthorityContractID(workspaceID, runID, value)
 		byContract[contractID] = append(byContract[contractID], value)
-		if strings.TrimSpace(value.AuthorityContractID) == "" {
-			continue
-		}
-		explicitContract[contractID] = true
 		if value.AuthorityContractID != contractID || value.AuthorityContractID != StableAuthorityContractID(workspaceID, runID, value.Transaction) {
 			return fmt.Errorf("runtime candidate authority contract id mismatch")
 		}
 	}
 	for contractID, attempts := range byContract {
-		// Legacy-only groups remain loadable even if an old bug re-sealed the
-		// same contract repeatedly. Drive detects and formally exhausts them.
-		if !explicitContract[contractID] {
-			continue
-		}
 		attemptCounts := [2]int{}
 		for _, attempt := range attempts {
 			attemptCounts[attempt.Attempt]++
@@ -257,8 +317,7 @@ func ValidateRuntimeCandidateAttemptRecordsForScope(workspaceID common.Workspace
 }
 
 // StableAuthorityContractID identifies the candidate retry contract without
-// reducer bookkeeping identity. It remains stable if legacy data re-sealed an
-// equivalent authority snapshot with a different snapshot attempt.
+// reducer bookkeeping identity.
 func StableAuthorityContractID(workspaceID common.WorkspaceID, runID common.RunID, transaction AuthorityTransaction) string {
 	h := sha256.New()
 	writeHashString(h, string(workspaceID))
@@ -280,10 +339,7 @@ func SameAuthorityContract(left AuthorityTransaction, right AuthorityTransaction
 }
 
 func CandidateAttemptAuthorityContractID(workspaceID common.WorkspaceID, runID common.RunID, record RuntimeCandidateAttemptRecord) string {
-	if value := strings.TrimSpace(record.AuthorityContractID); value != "" {
-		return value
-	}
-	return StableAuthorityContractID(workspaceID, runID, record.Transaction)
+	return strings.TrimSpace(record.AuthorityContractID)
 }
 
 func runtimeCandidateAttemptByNumber(values []RuntimeCandidateAttemptRecord, attempt int) (RuntimeCandidateAttemptRecord, bool) {
@@ -320,6 +376,15 @@ func (r RuntimeStateRecord) Clone() RuntimeStateRecord {
 	}
 	ret.GovernanceRequests = append([]RuntimeGovernanceRequestRecord(nil), r.GovernanceRequests...)
 	ret.GovernanceResolutions = append([]RuntimeGovernanceResolutionRecord(nil), r.GovernanceResolutions...)
+	ret.OperationGovernanceBindings = make([]RuntimeOperationGovernanceBinding, len(r.OperationGovernanceBindings))
+	for idx := range r.OperationGovernanceBindings {
+		ret.OperationGovernanceBindings[idx] = r.OperationGovernanceBindings[idx].Clone()
+	}
+	ret.OperationReceipts = NormalizeRuntimeOperationReceipts(r.OperationReceipts)
+	if r.Termination != nil {
+		term := r.Termination.Clone()
+		ret.Termination = &term
+	}
 	return ret
 }
 
@@ -373,6 +438,14 @@ func (d RuntimeDispatchRecord) ValidateWithActivation(decision RuntimeDecision, 
 		}
 		seen[operationID] = struct{}{}
 	}
+	if err := ValidateRuntimeOperationExecutionRecords(d.OperationExecutions); err != nil {
+		return err
+	}
+	for _, exec := range NormalizeRuntimeOperationExecutionRecords(d.OperationExecutions) {
+		if _, ok := available[exec.OperationID]; !ok {
+			return fmt.Errorf("runtime dispatch operation execution %q is not present in candidate", exec.OperationID)
+		}
+	}
 	return nil
 }
 
@@ -380,6 +453,12 @@ func (d RuntimeDispatchRecord) Clone() RuntimeDispatchRecord {
 	ret := d
 	ret.Candidate = cloneRuntimeCandidate(d.Candidate)
 	ret.CompletedOperationIDs = append([]string(nil), d.CompletedOperationIDs...)
+	ret.OperationExecutions = NormalizeRuntimeOperationExecutionRecords(d.OperationExecutions)
+	if len(ret.OperationExecutions) > 0 {
+		execs := make([]RuntimeOperationExecutionRecord, len(ret.OperationExecutions))
+		copy(execs, ret.OperationExecutions)
+		ret.OperationExecutions = execs
+	}
 	return ret
 }
 

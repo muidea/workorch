@@ -11,7 +11,9 @@ func TestRuntimeCandidateRequiresAcceptedOperationWhenDeclared(t *testing.T) {
 	decision := validDecisionForState(ConvergenceStateNeedStateChange)
 	decision.RequiredOutput = RequiredOutputContract{
 		Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{"git/write"}, AcceptedOperations: []string{"commit"},
-		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
+		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
+		CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
 	}.Normalized()
 	decision.AuthoritySnapshot.RequiredOutputHash = StableRequiredOutputHash(decision.RequiredOutput)
 	decision.AuthoritySnapshot.ID = stableAuthoritySnapshotID(decision.AuthoritySnapshot)
@@ -40,6 +42,8 @@ func TestRuntimeCandidateRejectsFileOperationAliasesAndNoOpBeforeDispatch(t *tes
 	decision := validDecisionForState(ConvergenceStateNeedStateChange)
 	decision.RequiredOutput = RequiredOutputContract{
 		Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{StepKindFileEdit}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
+		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
 	}.Normalized()
 	decision.AuthoritySnapshot.RequiredOutputHash = StableRequiredOutputHash(decision.RequiredOutput)
 	decision.AuthoritySnapshot.ID = stableAuthoritySnapshotID(decision.AuthoritySnapshot)
@@ -67,6 +71,8 @@ func TestRuntimeCandidateAcceptsConcretePatchApplyContract(t *testing.T) {
 	decision := validDecisionForState(ConvergenceStateNeedStateChange)
 	decision.RequiredOutput = RequiredOutputContract{
 		Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{RuntimeBlockKindPatchApply}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
+		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
 	}.Normalized()
 	decision.AuthoritySnapshot.RequiredOutputHash = StableRequiredOutputHash(decision.RequiredOutput)
 	decision.AuthoritySnapshot.ID = stableAuthoritySnapshotID(decision.AuthoritySnapshot)
@@ -90,9 +96,11 @@ func TestValidateRuntimeOperationsRejectsMutatingKindForValidation(t *testing.T)
 	decision := validDecisionForState(ConvergenceStateNeedValidation)
 	decision.Action = RuntimeActionProduceValidation
 	decision.RequiredOutput = RequiredOutputContract{
-		Kind:                RequiredOutputKindValidation,
-		AcceptedKinds:       []string{RuntimeBlockKindPatchApply, RuntimeBlockKindPatchPreview, StepKindShellCommand},
-		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		Kind:                 RequiredOutputKindValidation,
+		AcceptedKinds:        []string{RuntimeBlockKindPatchApply, RuntimeBlockKindPatchPreview, StepKindShellCommand},
+		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession},
+		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone},
+		CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
 	}.Normalized()
 	decision.AuthoritySnapshot.RequiredOutputHash = StableRequiredOutputHash(decision.RequiredOutput)
 	decision.AuthoritySnapshot.ID = stableAuthoritySnapshotID(decision.AuthoritySnapshot)
@@ -155,6 +163,9 @@ func TestValidateRuntimeOperationsRejectsMutatingKindForValidation(t *testing.T)
 		t.Fatalf("expected stateChanging shell rejection under validation, got %v", err)
 	}
 
+	// RVC-R6: explicit stateChanging=false narrows shell to non-durable and is
+	// admissible under produce_validation. Candidate cannot self-declare durable
+	// effect away without the parameter; default shell remains rejected above.
 	stateChanging = false
 	shellDeclaredReadOnly := RuntimeCandidate{Validation: &ValidationCandidate{Operations: []ValidationOperation{{
 		Operation: RuntimeOperation{
@@ -167,8 +178,8 @@ func TestValidateRuntimeOperationsRejectsMutatingKindForValidation(t *testing.T)
 			},
 		},
 	}}}}
-	if err := shellDeclaredReadOnly.Validate(decision); err == nil || !strings.Contains(err.Error(), "cannot satisfy produce_validation") {
-		t.Fatalf("candidate-declared read-only shell validation must be rejected, got %v", err)
+	if err := shellDeclaredReadOnly.Validate(decision); err != nil {
+		t.Fatalf("stateChanging=false shell under validation must be accepted, got %v", err)
 	}
 }
 
@@ -264,7 +275,7 @@ func TestOperationHasWorkspaceSideEffectsDefaultsSSHAndMCP(t *testing.T) {
 
 	readOnlyCaps := []RuntimeMCPCapabilityContext{{
 		ID: "cap-1", ServerID: common.MCPServerID(serverID), Kind: StepKindMCPToolCall, Name: tool,
-		DisplayName: tool, Enabled: true, RiskLevel: "read_only",
+		DisplayName: tool, Enabled: true, RiskLevel: "read_only", EffectScope: string(RuntimeEffectNone),
 	}}
 	if OperationHasWorkspaceSideEffectsWithCapabilities(mcpOp, readOnlyCaps) {
 		t.Fatalf("sealed read_only MCP capability should be non-mutating")
@@ -272,7 +283,7 @@ func TestOperationHasWorkspaceSideEffectsDefaultsSSHAndMCP(t *testing.T) {
 
 	mutatingCaps := []RuntimeMCPCapabilityContext{{
 		ID: "cap-2", ServerID: common.MCPServerID(serverID), Kind: StepKindMCPToolCall, Name: tool,
-		DisplayName: tool, Enabled: true, RiskLevel: "write",
+		DisplayName: tool, Enabled: true, RiskLevel: "write", EffectScope: string(RuntimeEffectWorkspaceDurable),
 	}}
 	if !OperationHasWorkspaceSideEffectsWithCapabilities(mcpOp, mutatingCaps) {
 		t.Fatalf("write MCP capability must remain side-effecting")
@@ -282,7 +293,9 @@ func TestOperationHasWorkspaceSideEffectsDefaultsSSHAndMCP(t *testing.T) {
 	decision.Action = RuntimeActionProduceValidation
 	decision.RequiredOutput = RequiredOutputContract{
 		Kind: RequiredOutputKindValidation, AcceptedKinds: []string{StepKindSSHCommand, StepKindMCPToolCall},
-		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession},
+		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone},
+		CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
 	}.Normalized()
 	decision.AuthoritySnapshot.RequiredOutputHash = StableRequiredOutputHash(decision.RequiredOutput)
 	decision.AuthoritySnapshot.ID = stableAuthoritySnapshotID(decision.AuthoritySnapshot)

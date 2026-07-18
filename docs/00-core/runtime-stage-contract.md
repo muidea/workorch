@@ -4,7 +4,7 @@ Status: active
 
 Type: core-contract
 
-Last Updated: 2026-07-16
+Last Updated: 2026-07-17
 
 本文定义 WorkOrch 面向长流程任务的唯一核心运行设计合约。目标是解决反复单点修复后仍无法稳定推进的问题，同时明确核心框架必须保持功能中立：runtime 只能治理阶段语义、约束、证据、结果、上下文和恢复策略，不得内置软件开发、代码 patch、具体技术栈或具体业务领域规则。
 
@@ -139,11 +139,13 @@ Runtime V2 的长期稳定收敛**不是**一张扁平状态图，而是四个�
 ```text
 pending
   -> active
-       <-> blocked_on_governance
+       <-> blocked_on_decision / blocked_on_approval
        -> completed
        -> failed
+       -> cancelled
+       -> superseded
 
-completed / failed = immutable terminal
+all terminal states are immutable
 需要继续未完成工作 = 产品层显式创建新 typed activation / 新 Run
 ```
 
@@ -152,10 +154,12 @@ completed / failed = immutable terminal
 - Run owner 持久化 Run state、Runtime V2 aggregate、definition revision 和 lineage；不选择 RuntimeAction。
 - `StartRunCommand` 只允许 `pending -> active`，随后触发 SM-4 drive。
 - `ResumeRunCommand` 只允许 active 或已解决 blocker 的同一 Run；不得携带 definition、provider/model patch、ExecutionContextPatch 或 loaded Run。
-- `request_governance` 成功打开 ticket 后，Orchestrator 投影 `active -> blocked_on_governance`；resolution commit 后由 Orchestrator 投影 `blocked_on_governance -> active` 并回到同一 reducer/drive。
+- `request_governance` 成功打开 ticket 后，Orchestrator 投影 `active -> blocked_on_decision` 或 `blocked_on_approval`；resolution commit 后由 Orchestrator 投影回 `active` 并回到同一 reducer/drive。
 - `complete` / `fail` 只能来自 SM-2 sealed terminal decision；application、Result、projection、TUI/Web、owner block 均不得直接终态化 Run。
-- `completed` / `failed` 不得 Resume、修改 aggregate 或回退 active；后续继续只能新建独立 V2 Run。
-- 新 Run 若承接 predecessor，必须持久化 `PredecessorRunID` / result lineage；旧 Run 保持终态不可变。是否创建新 Run由产品层显式 activation 决定，不存在自动 successor lifecycle。
+- `cancelled` / `superseded` 属于 SM-1 显式行政终态：active V2 Run 必须先在 aggregate 中 CAS 持久化 `RuntimeTerminationRecord`，再由 SM-1 投影 Run/Workspace；禁止直接 `closeRun` 绕过 termination record。
+- pending 且尚无 aggregate 的 activation failure 可以直接 failed，但必须保留明确 administrative source。
+- 所有 terminal（completed/failed/cancelled/superseded）不得 Resume、修改 aggregate 或回退 active；后续继续只能新建独立 V2 Run。
+- 新 Run 若承接 predecessor，必须持久化 `PredecessorRunID` / result lineage；旧 Run 保持终态不可变。是否创建新 Run 由产品层显式 activation 决定，不存在自动 successor lifecycle。
 - terminal projection 必须最终释放 workspace active-run；单边投影失败只允许重试，不得更改 SM-2 terminal authority。
 
 禁止迁移：
@@ -163,6 +167,7 @@ completed / failed = immutable terminal
 - terminal -> active；
 - blocked -> active 但没有匹配 persisted governance resolution；
 - application/HTTP/TUI 直接写 Run terminal；
+- active V2 在无 `RuntimeTerminationRecord` 时直接 cancelled/superseded；
 - Resume 注入新 definition、focus、provider/model 或 repair patch；
 - projection 状态反向驱动 Run lifecycle。
 
@@ -212,7 +217,9 @@ current focus
 - “required evidence 齐备”必须同时满足 kind、coverage binding、current-run、freshness、quality、claim alignment、accepted/rejected operation contract 等适用门禁；不能只按 evidence 数量判断。
 - Run 级 `must_produce_state_change` 表示整个 Run 必须产生至少一次与 active coverage 对齐的 primary state-change evidence，不表示每个 DoD focus 都必须修改 workspace。
 - focus/slice 必须保留 item-level coverage identity；partial assessment 只能关闭明确 satisfied 的 item，未满足 item 留在 current/remaining queue。
-- `repairable_gap` 不得直接终态化；必须结构化记录 missing evidence kinds、coverage work item IDs、target refs、reason、evidence refs 和 disposition，再由 reducer选择同 focus repair action。
+- `repairable_gap` 不得直接终态化；必须结构化记录 missing evidence kinds、coverage work item IDs、target refs、reason、evidence refs 和 disposition，再由 reducer 选择同 focus repair action。
+- 同一 persisted revision 下只能存在一个 `RuntimeRepairDirective.RequiredAction`（INV-05）。candidate renderer、anti-replay、capability owner 与 projection 均不得建议或切换另一个 RuntimeAction。原始 `MissingRequiredEvidenceKinds` 只能作为 completion audit 字段，不能覆盖 repair directive。
+- `produce_state_change` 的 sealed candidate 至少包含一个与 `RequiredOutput.AcceptedEffectScopes` 相容的 durable effect operation；`produce_validation` 的所有 operation 必须为 `none` 或显式允许的 `ephemeral_session`，不得包含 workspace/remote durable effect。
 - candidate contract retry budget 与 focus repair budget必须分离；repair budget 按 focus/failure signature 计算，并在有效新 evidence 或 focus advance 后按合同重置。
 - validation policy 必须在 application activation boundary 从 template/profile map 编译为 typed `RuntimeValidationPolicy`，并将 matched validation-only retry limit 与系统 repair limit 封存进新 Run 的 `RuntimeBootstrap.ConvergencePolicy`；Resume/restart 只读取封存值。
 - acceptance slice compiler 必须有中立 focus-count guard；profile 应通过 bounded slice 合并共享 evidence/assessment 的 coverage item，不得无界生成一 item 一 LLM loop。
@@ -269,6 +276,13 @@ accepted candidate
 - operation rejected 必须形成 typed rejected evidence/failure fact，再交 SM-2 决定 repair、governance 或 terminal；executor 不选择下一 action。
 - assessment candidate 通过同一 attempt/seal 规则；assessment commit 后写 ledger 并回 SM-2。
 - governance candidate seal 后打开确定性 ticket，ticket/snapshot/dispatch/dependency binding 必须持久化。
+- 每个 sealed operation 必须有 per-operation execution transaction（`sealed -> claimed -> owner_committed -> evidence_committed`，或 `outcome_unknown`）。`ExecutionKey` 稳定绑定 workspace/run/dispatch/operation，receipt identity 为 exact `ExecutionKey + Fence`。
+- capability owner 必须在返回前持久化 `RuntimeOperationReceipt`（ObservedEffectScope / outcome / no-op / governance）。Orchestrator 只能根据 sealed expectation + owner receipt 提交 evidence，不能把 decision action 直接当成 EvidenceKind。
+- owner receipt 已提交但响应丢失时，executor 必须先重新加载 exact fence receipt；存在 terminal receipt 则继续 evidence/governance commit，不得覆盖为 `outcome_unknown`。
+- operation-scoped governance 必须保留 suspended binding 的 dependency kind/subject；continue 以同一 ExecutionKey 和下一 Fence 建立 typed grant。owner 只有在 exact grant preflight 通过后才能消费 grant 并绕过对应 approval gate，不能用调用方布尔声明替代。
+- evidence class 由 `RequiredOutput` + sealed `ExpectedEffectScope` + owner receipt 联合裁决；`no_op` 与 `ephemeral_session` 不得关闭 durable state-change requirement；`unknown` effect 不得作为 accepted state-change 或 accepted validation。
+- 进程崩溃发生在 owner side effect 完成与 aggregate evidence CAS 之间时，重启不得盲目重复副作用：有 receipt 只重提 evidence；结果未知且不可安全重放时进入治理或 bounded failure。
+- claimed 且 exact fence receipt 缺失时，只有 sealed idempotency 为 `safe_to_replay` 或 `owner_managed` 的 operation 才可在消耗 operation-recovery budget 后继续；`at_most_once` 与 `unknown` 必须进入 `outcome_unknown`。单 operation 的 evidence commit 与 dispatch close 属于同一 aggregate CAS，不存在可观察的半关闭状态。
 
 禁止迁移：
 
@@ -277,7 +291,11 @@ accepted candidate
 - accepted candidate 不 seal 直接执行；
 - executor/block 直接推进 focus、Run terminal 或 Result；
 - stale/duplicate evidence 增加 accepted evidence 或推进 StateRevision；
-- candidate failure通过修改 transaction 伪装成 same-contract retry。
+- candidate failure通过修改 transaction 伪装成 same-contract retry；
+- 仅因 `CompletedOperationIDs` 缺失就重放 operation；
+- 对 unknown/non-idempotent shell/git/MCP/SSH operation 自动重放；
+- owner 已返回 receipt 后再次执行相同 ExecutionKey；
+- owner 回显 Orchestrator 指定 EvidenceKind 而不报告 ObservedEffectScope。
 
 #### SM-4 Drive, Recovery And Projection Delivery State Machine
 
@@ -422,6 +440,48 @@ SM-1 Start/Resume admission
 | governance | `request_governance` → Decision ticket → resolution commit → 回 reducer |
 
 Template stage policy 若存在，仅作为 typed C2 / activation 输入进入 candidate 上下文，**不是** kernel reducer 状态名。
+
+## 中立 Effect / Receipt / Repair Directive 模型
+
+本模型是 SM-2/SM-3 交界合同的类型权威，实现落点在 `internal/pkg/workorchruntimecontract`。
+
+### Effect scopes
+
+| Scope | 含义 | 可否关闭 durable state-change |
+| --- | --- | --- |
+| `none` | 无副作用读/观察 | 否 |
+| `ephemeral_session` | 会话/缓存初始化等瞬时副作用 | 否 |
+| `workspace_durable` | workspace 持久变更 | 是（若 AcceptedEffectScopes 允许） |
+| `remote_durable` | 远端持久变更 | 是（若 AcceptedEffectScopes 允许） |
+| `governance_only` | 仅触发治理，无业务副作用 | 否 |
+| `unknown` | 元数据不足，不可证明 | 否；不得 accepted |
+
+core 不按业务领域（软件开发、LSP、测试框架）推断 effect。`shell/command`、`mcp/tool_call`、`ssh/command` 必须结合 sealed capability metadata、operation parameters 与 owner contract 得到 concrete `ExpectedEffectScope`。
+
+### Evidence derivation
+
+```text
+sealed RequiredOutput
+  + sealed operation ExpectedEffectScope
+  + owner receipt ObservedEffectScope / outcome
+  + coverage/target binding
+  = committed EvidenceFact.Kind / status
+```
+
+### Repair directive
+
+- rejected validation 若 policy 表明 implementation repair，生成 `RequiredAction=produce_state_change`。
+- durable state-change accepted 前，directive 不得被 raw missing evidence kinds 覆盖。
+- durable state-change accepted 后，原子更新 directive 为 `produce_validation`。
+- anti-replay 只能更新 forbidden shapes 或返回 candidate contract failure，不得返回另一 action 的自然语言指令。
+- focus advance 时清除旧 directive、failure、shape 与 per-focus budget；历史记录保留审计。
+
+### Schema
+
+- `RuntimeBootstrap`、`RuntimeStateRecord` 与 `RuntimeResultCloseout` 的生产 schema 均为 v2；任何其他版本均 fail-fast。
+- 不允许 schema 0/1 原位升级、旧 evidence 语义推断、缺失 `AuthorityContractID` 回填或旧 stable hash 保持。
+- state-change / validation `RequiredOutput` 必须显式封存 `RequiredEffectScopes` 与 `AcceptedEffectScopes`；缺失即合同错误，不允许按 action 自动补默认值。
+- persisted assessment 只以显式 `Disposition` 为顶层权威，不持久化或推断并列 `Satisfied` 投影；coverage ledger 必须由 bootstrap 显式提供，不能从 focus 队列重建。
 
 ## V1 废止清单（不得再作为并列约束）
 

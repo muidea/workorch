@@ -8,6 +8,18 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+type receiptAwarePositiveConvergenceController struct {
+	*RuntimeController
+	repository *controllerRepository
+	t          *testing.T
+}
+
+func (c *receiptAwarePositiveConvergenceController) CommitEvidence(ctx context.Context, evidence ExecutionEvidence) (EvidenceCommitResult, error) {
+	c.t.Helper()
+	attachRuntimeV2TestOwnerReceipt(c.t, c.repository.aggregate, &evidence)
+	return c.RuntimeController.CommitEvidence(ctx, evidence)
+}
+
 // RVC-17 deterministic positive-convergence fixture.
 // Sequence (controller-level, no public LLM):
 //  1. candidate attempt 0 schema failure
@@ -23,7 +35,8 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	t.Parallel()
 	ctx := context.Background()
 	repository := &controllerRepository{}
-	controller, _ := NewRuntimeController(repository)
+	rawController, _ := NewRuntimeController(repository)
+	controller := &receiptAwarePositiveConvergenceController{RuntimeController: rawController, repository: repository, t: t}
 
 	facts := controllerFacts()
 	facts.Focus.RequireAssessment = true
@@ -62,6 +75,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 				ID: "write-1", Kind: "file/write",
 				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 				TargetRefs:          []string{"target.txt"},
+				Parameters:          runtimeV2FileWriteParameters("state"),
 			},
 		}}},
 	})
@@ -140,7 +154,6 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 		Assessment: &runtimecontract.AssessmentCandidate{
 			FocusID:             "focus-v2",
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
-			Satisfied:           false,
 			Disposition:         runtimecontract.AssessmentDispositionRepairableGap,
 			Summary:             "implementation incomplete for cwi-v2",
 			Items: []runtimecontract.RuntimeAssessmentItemFact{
@@ -185,6 +198,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 					ID: "write-repair", Kind: "file/write",
 					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 					TargetRefs:          []string{"target.txt"},
+					Parameters:          runtimeV2FileWriteParameters("repair"),
 				},
 			}}},
 		})
@@ -250,7 +264,6 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 		Assessment: &runtimecontract.AssessmentCandidate{
 			FocusID:             "focus-v2",
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
-			Satisfied:           true,
 			Disposition:         runtimecontract.AssessmentDispositionSatisfied,
 			Summary:             "all coverage items satisfied after repair",
 			Items: []runtimecontract.RuntimeAssessmentItemFact{
@@ -291,7 +304,8 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	repository := &controllerRepository{}
-	controller, _ := NewRuntimeController(repository)
+	rawController, _ := NewRuntimeController(repository)
+	controller := &receiptAwarePositiveConvergenceController{RuntimeController: rawController, repository: repository, t: t}
 
 	facts := controllerFacts()
 	facts.Focus.RequireAssessment = true
@@ -313,6 +327,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 			Operation: runtimecontract.RuntimeOperation{
 				ID: "write-1", Kind: "file/write",
 				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+				TargetRefs:          []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("state"),
 			},
 		}}},
 	})
@@ -373,9 +388,9 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 	if _, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
 		Assessment: &runtimecontract.AssessmentCandidate{
 			FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
-			Satisfied: false, Disposition: runtimecontract.AssessmentDispositionRepairableGap,
-			Summary: "still broken",
-			Gap:     &runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Reason: "still broken"},
+			Disposition: runtimecontract.AssessmentDispositionRepairableGap,
+			Summary:     "still broken",
+			Gap:         &runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Reason: "still broken"},
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -402,6 +417,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 				Operation: runtimecontract.RuntimeOperation{
 					ID: "wr", Kind: "file/write",
 					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+					TargetRefs:          []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("repair"),
 				},
 			}}},
 		})
@@ -465,9 +481,9 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 	if _, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
 		Assessment: &runtimecontract.AssessmentCandidate{
 			FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
-			Satisfied: false, Disposition: runtimecontract.AssessmentDispositionRepairableGap,
-			Summary: "still broken after repair",
-			Gap:     &runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Reason: "still broken"},
+			Disposition: runtimecontract.AssessmentDispositionRepairableGap,
+			Summary:     "still broken after repair",
+			Gap:         &runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Reason: "still broken"},
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -547,7 +563,8 @@ func TestPositiveConvergenceFixture_FocusAdvanceAfterSatisfiedAssessment(t *test
 	t.Parallel()
 	ctx := context.Background()
 	repository := &controllerRepository{}
-	controller, _ := NewRuntimeController(repository)
+	rawController, _ := NewRuntimeController(repository)
+	controller := &receiptAwarePositiveConvergenceController{RuntimeController: rawController, repository: repository, t: t}
 
 	facts := controllerFacts()
 	facts.Focus.RequireAssessment = true
@@ -560,6 +577,7 @@ func TestPositiveConvergenceFixture_FocusAdvanceAfterSatisfiedAssessment(t *test
 			RequireAssessment:     true,
 		},
 	}
+	facts.Coverage = append(facts.Coverage, runtimecontract.RuntimeCoverageItemFact{ID: "cwi-v2-next", State: runtimecontract.RuntimeCoverageItemStateOpen})
 	if _, err := controller.Initialize(ctx, facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
@@ -573,6 +591,7 @@ func TestPositiveConvergenceFixture_FocusAdvanceAfterSatisfiedAssessment(t *test
 			Operation: runtimecontract.RuntimeOperation{
 				ID: "write-1", Kind: "file/write",
 				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+				TargetRefs:          []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("state"),
 			},
 		}}},
 	})
@@ -634,7 +653,7 @@ func TestPositiveConvergenceFixture_FocusAdvanceAfterSatisfiedAssessment(t *test
 	if _, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
 		Assessment: &runtimecontract.AssessmentCandidate{
 			FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
-			Satisfied: true, Disposition: runtimecontract.AssessmentDispositionSatisfied,
+			Disposition:  runtimecontract.AssessmentDispositionSatisfied,
 			Summary:      "focus-v2 done",
 			Items:        []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-v2", Satisfied: true}},
 			EvidenceRefs: []string{"ev-1"},

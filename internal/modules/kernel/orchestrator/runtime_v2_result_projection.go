@@ -117,6 +117,9 @@ func runtimeV2ResultCloseout(aggregate runtimev2.RuntimeAggregate, accepted bool
 		DefinitionRevision: aggregate.Facts.DefinitionRevision,
 		EvidenceRefs:       append([]string(nil), evidenceRefs...),
 		ArtifactRefs:       runtimeV2TerminalArtifactRefs(aggregate.Facts),
+		OperationOutcomes:  runtimeV2OperationCloseouts(aggregate),
+		RecoveryPolicy:     aggregate.Facts.RecoveryPolicy.Normalized(),
+		RecoveryLedger:     aggregate.Facts.Recovery,
 	}
 	satisfied := map[common.CoverageWorkItemID]struct{}{}
 	unsatisfied := map[common.CoverageWorkItemID]struct{}{}
@@ -219,6 +222,31 @@ func runtimeV2ResultCloseout(aggregate runtimev2.RuntimeAggregate, accepted bool
 	}
 	value := closeout.Normalized()
 	return &value
+}
+
+func runtimeV2OperationCloseouts(aggregate runtimev2.RuntimeAggregate) []runtimecontract.RuntimeOperationCloseout {
+	dispatches := append([]runtimev2.SealedDispatch(nil), aggregate.CompletedDispatches...)
+	if aggregate.ActiveDispatch != nil {
+		dispatches = append(dispatches, *aggregate.ActiveDispatch)
+	}
+	ret := make([]runtimecontract.RuntimeOperationCloseout, 0)
+	for _, dispatch := range dispatches {
+		for _, execution := range dispatch.OperationExecutions {
+			execution = execution.Normalized()
+			outcome := runtimecontract.RuntimeOperationCloseout{
+				DispatchID: dispatch.ID, OperationID: execution.OperationID, ExecutionKey: execution.ExecutionKey,
+				Fence:               execution.Fence,
+				ExpectedEffectScope: execution.ExpectedEffectScope, ExecutionState: execution.State,
+				ReceiptRef: execution.OwnerReceiptRef, ReceiptHash: execution.OwnerReceiptHash,
+			}
+			if receipt, ok := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(aggregate.OperationReceipts, execution.ExecutionKey, execution.Fence); ok {
+				outcome.ObservedEffectScope = receipt.ObservedEffectScope
+				outcome.Outcome = receipt.Outcome
+			}
+			ret = append(ret, outcome.Normalized())
+		}
+	}
+	return ret
 }
 
 func runtimeV2TerminalEvidenceRefs(facts runtimecontract.RuntimeFacts) []string {

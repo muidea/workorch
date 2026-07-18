@@ -31,6 +31,26 @@ var defaultProviderStreamLimits = providerStreamLimits{
 	MaxDataEvents:   maxProviderStreamDataEvents,
 }
 
+// ProviderHTTPStatusError preserves the provider status code across adapter
+// boundaries while keeping the response body sanitized.
+type ProviderHTTPStatusError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *ProviderHTTPStatusError) Error() string {
+	if e == nil {
+		return "llm provider http status error"
+	}
+	return fmt.Sprintf("llm provider http status %d: %s", e.StatusCode, e.Body)
+}
+
+func (e *ProviderHTTPStatusError) Unwrap() error { return common.ErrInvalidArgument }
+
+func providerHTTPStatusError(statusCode int, body []byte, apiKey string) error {
+	return &ProviderHTTPStatusError{StatusCode: statusCode, Body: sanitizeProviderBody(body, apiKey)}
+}
+
 type providerStreamGuard struct {
 	limits       providerStreamLimits
 	contentBytes int
@@ -145,7 +165,7 @@ func (p *HTTPProvider) completeOpenAICompatible(ctx context.Context, request llm
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxProviderErrorBodyBytes))
-		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider http status %d: %s", common.ErrInvalidArgument, resp.StatusCode, sanitizeProviderBody(body, p.config.APIKey))
+		return llmmodels.ProviderCompletionResult{}, providerHTTPStatusError(resp.StatusCode, body, p.config.APIKey)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -223,7 +243,7 @@ func (p *HTTPProvider) streamOpenAICompatible(ctx context.Context, request llmmo
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxProviderErrorBodyBytes))
-		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider http status %d: %s", common.ErrInvalidArgument, resp.StatusCode, sanitizeProviderBody(body, p.config.APIKey))
+		return llmmodels.ProviderCompletionResult{}, providerHTTPStatusError(resp.StatusCode, body, p.config.APIKey)
 	}
 	content, usage, err := readChatCompletionStream(resp.Body, emit)
 	if err != nil {
@@ -280,7 +300,7 @@ func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbe
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxProviderErrorBodyBytes))
-		return llmmodels.ProviderEmbeddingResult{}, fmt.Errorf("%w: llm provider http status %d: %s", common.ErrInvalidArgument, resp.StatusCode, sanitizeProviderBody(body, p.config.APIKey))
+		return llmmodels.ProviderEmbeddingResult{}, providerHTTPStatusError(resp.StatusCode, body, p.config.APIKey)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -416,7 +436,7 @@ func (p *HTTPProvider) completeAnthropicCompatible(ctx context.Context, request 
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxProviderErrorBodyBytes))
-		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider http status %d: %s", common.ErrInvalidArgument, resp.StatusCode, sanitizeProviderBody(body, p.config.APIKey))
+		return llmmodels.ProviderCompletionResult{}, providerHTTPStatusError(resp.StatusCode, body, p.config.APIKey)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -463,7 +483,7 @@ func (p *HTTPProvider) streamAnthropicCompatible(ctx context.Context, request ll
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxProviderErrorBodyBytes))
-		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider http status %d: %s", common.ErrInvalidArgument, resp.StatusCode, sanitizeProviderBody(body, p.config.APIKey))
+		return llmmodels.ProviderCompletionResult{}, providerHTTPStatusError(resp.StatusCode, body, p.config.APIKey)
 	}
 	content, usage, err := readAnthropicHTTPStream(resp.Body, emit)
 	if err != nil {

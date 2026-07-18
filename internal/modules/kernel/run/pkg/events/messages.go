@@ -38,6 +38,36 @@ type ListRunsByWorkspaceCommand struct {
 	Compact     bool
 }
 
+type RuntimeV2RecoveryClass string
+
+const (
+	RuntimeV2RecoveryActiveNoDispatch        RuntimeV2RecoveryClass = "active_no_dispatch"
+	RuntimeV2RecoveryActiveSealedDispatch    RuntimeV2RecoveryClass = "active_sealed_dispatch"
+	RuntimeV2RecoveryBlockedGovernance       RuntimeV2RecoveryClass = "blocked_governance"
+	RuntimeV2RecoveryTerminalDeliveryPending RuntimeV2RecoveryClass = "terminal_delivery_pending"
+)
+
+type QueryRuntimeV2RecoveryInventoryCommand struct {
+	Cursor string
+	Limit  int
+}
+
+type RuntimeV2RecoveryInventoryItem struct {
+	WorkspaceID              common.WorkspaceID
+	RunID                    common.RunID
+	StateRevision            uint64
+	Class                    RuntimeV2RecoveryClass
+	ActiveDispatchID         string
+	BlockingTicketID         common.TicketID
+	BlockingApprovalID       common.ApprovalID
+	TerminalDeliveryAttempts int
+}
+
+type QueryRuntimeV2RecoveryInventoryResult struct {
+	Items      []RuntimeV2RecoveryInventoryItem
+	NextCursor string
+}
+
 type GetStepCommand struct {
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
@@ -124,6 +154,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[GetRunCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandGet).MessageContract(),
 		eventcontract.CommandTopic[ListRunsCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandList).MessageContract(),
 		eventcontract.CommandTopic[ListRunsByWorkspaceCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandListByWorkspace).MessageContract(),
+		eventcontract.CommandTopic[QueryRuntimeV2RecoveryInventoryCommand, QueryRuntimeV2RecoveryInventoryResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandRuntimeV2RecoveryInventory).MessageContract(),
 		eventcontract.CommandTopic[GetStepCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandGetStep).MessageContract(),
 		eventcontract.CommandTopic[ListStepsByRunCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandListStepsByRun).MessageContract(),
 		eventcontract.CommandTopic[ListStepSummariesByRunCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandListStepSummariesByRun).MessageContract(),

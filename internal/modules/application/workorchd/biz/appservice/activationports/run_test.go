@@ -94,6 +94,7 @@ func TestCreateAndStartWorkspaceExecutionRunContinuesWorkspaceRunSequence(t *tes
 
 func activationRunTestBootstrap(goalID common.GoalID, dodID common.DoDID) *runtimecontract.RuntimeBootstrap {
 	return &runtimecontract.RuntimeBootstrap{
+		SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 		Definition: runtimecontract.RuntimeDefinitionContext{
 			Revision: "goal:" + string(goalID) + "|dod:" + string(dodID), GoalID: goalID, GoalDefinition: "goal",
 			DoDID: dodID, DoDDefinition: "1. dod", CapabilityContract: []string{runtimecontract.StepKindShellCommand},
@@ -102,6 +103,7 @@ func activationRunTestBootstrap(goalID common.GoalID, dodID common.DoDID) *runti
 		Focuses: []runtimecontract.CoverageFocus{{
 			ID: "focus-001", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
 		}},
+		CoverageItems: []runtimecontract.RuntimeCoverageItem{{ID: "cwi-001"}},
 	}
 }
 

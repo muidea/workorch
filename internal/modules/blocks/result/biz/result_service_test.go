@@ -8,6 +8,7 @@ import (
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestServiceRejectsInvalidResultAndArtifact(t *testing.T) {
@@ -18,6 +19,11 @@ func TestServiceRejectsInvalidResultAndArtifact(t *testing.T) {
 	}
 	if err := service.CreateArtifact(ctx, &resultmodel.Artifact{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("CreateArtifact err = %v, want invalid argument", err)
+	}
+	invalidCloseout := validTestResult()
+	invalidCloseout.RuntimeCloseout = &runtimecontract.RuntimeResultCloseout{SchemaVersion: 1}
+	if err := service.CreateResult(ctx, invalidCloseout); err == nil {
+		t.Fatal("Result owner accepted unsupported Runtime closeout schema")
 	}
 }
 

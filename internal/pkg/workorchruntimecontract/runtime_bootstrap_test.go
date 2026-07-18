@@ -8,6 +8,7 @@ import (
 
 func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 	bootstrap := RuntimeBootstrap{
+		SchemaVersion: RuntimeStateSchemaVersionCurrent,
 		Definition: RuntimeDefinitionContext{
 			Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod",
 			CapabilityContract: []string{"file/edit", "shell/command"},

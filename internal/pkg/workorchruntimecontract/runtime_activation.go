@@ -64,23 +64,31 @@ type RuntimeSkillContext struct {
 }
 
 type RuntimeMCPCapabilityContext struct {
-	ID             common.MCPCapabilityID
-	ServerID       common.MCPServerID
-	Kind           string
-	Name           string
-	DisplayName    string
-	Description    string
-	Category       string
-	Tags           []string
-	UsageHint      string
-	InputSummary   string
-	OutputSummary  string
-	StageHints     []string
-	RiskLevel      string
-	URI            string
-	Enabled        bool
-	ApprovalPolicy string
-	Status         string
+	ID       common.MCPCapabilityID
+	ServerID common.MCPServerID
+	// Kind is the registry wire kind (e.g. "tool"). OperationKind is the Runtime
+	// operation kind (e.g. "mcp/tool_call"). Empty OperationKind is derived from Kind.
+	Kind          string
+	OperationKind string
+	Name          string
+	DisplayName   string
+	Description   string
+	Category      string
+	Tags          []string
+	UsageHint     string
+	InputSummary  string
+	OutputSummary string
+	StageHints    []string
+	RiskLevel     string
+	// EffectScope and IdempotencyClass are explicit capability-owner metadata sealed
+	// at activation. Empty/invalid input normalizes to unknown; Runtime V2 never
+	// derives either value from RiskLevel or a tool name.
+	EffectScope      string
+	IdempotencyClass string
+	URI              string
+	Enabled          bool
+	ApprovalPolicy   string
+	Status           string
 }
 
 type RuntimeMemoryContext struct {
@@ -281,6 +289,10 @@ func normalizeRuntimeMCPCapabilities(values []RuntimeMCPCapabilityContext) []Run
 	byID := map[string]RuntimeMCPCapabilityContext{}
 	for _, value := range values {
 		value.Kind = strings.TrimSpace(value.Kind)
+		value.OperationKind = strings.TrimSpace(value.OperationKind)
+		if value.OperationKind == "" {
+			value.OperationKind = normalizeMCPRegistryKindToOperationKind(value.Kind)
+		}
 		value.Name = strings.TrimSpace(value.Name)
 		value.DisplayName = strings.TrimSpace(value.DisplayName)
 		value.Description = strings.TrimSpace(value.Description)
@@ -291,6 +303,8 @@ func normalizeRuntimeMCPCapabilities(values []RuntimeMCPCapabilityContext) []Run
 		value.OutputSummary = strings.TrimSpace(value.OutputSummary)
 		value.StageHints = normalizeStrings(value.StageHints)
 		value.RiskLevel = strings.TrimSpace(value.RiskLevel)
+		value.EffectScope = string(NormalizeRuntimeEffectScope(RuntimeEffectScope(value.EffectScope)))
+		value.IdempotencyClass = string(NormalizeRuntimeOperationIdempotencyClass(RuntimeOperationIdempotencyClass(value.IdempotencyClass)))
 		value.URI = strings.TrimSpace(value.URI)
 		value.ApprovalPolicy = strings.TrimSpace(value.ApprovalPolicy)
 		value.Status = strings.TrimSpace(value.Status)
@@ -373,9 +387,9 @@ func sameRuntimeMCPCapability(left RuntimeMCPCapabilityContext, right RuntimeMCP
 		return len(leftValues) == len(rightValues)
 	}
 	left, right = leftValues[0], rightValues[0]
-	return left.ID == right.ID && left.ServerID == right.ServerID && left.Kind == right.Kind && left.Name == right.Name && left.DisplayName == right.DisplayName &&
+	return left.ID == right.ID && left.ServerID == right.ServerID && left.Kind == right.Kind && left.OperationKind == right.OperationKind && left.Name == right.Name && left.DisplayName == right.DisplayName &&
 		left.Description == right.Description && left.Category == right.Category && left.UsageHint == right.UsageHint && left.InputSummary == right.InputSummary &&
-		left.OutputSummary == right.OutputSummary && left.RiskLevel == right.RiskLevel && left.URI == right.URI && left.Enabled == right.Enabled &&
+		left.OutputSummary == right.OutputSummary && left.RiskLevel == right.RiskLevel && left.EffectScope == right.EffectScope && left.IdempotencyClass == right.IdempotencyClass && left.URI == right.URI && left.Enabled == right.Enabled &&
 		left.ApprovalPolicy == right.ApprovalPolicy && left.Status == right.Status && sameStrings(left.Tags, right.Tags) && sameStrings(left.StageHints, right.StageHints)
 }
 
@@ -389,4 +403,28 @@ func sameRuntimeMemory(left RuntimeMemoryContext, right RuntimeMemoryContext) bo
 	return left.ID == right.ID && left.MemoryType == right.MemoryType && left.Summary == right.Summary && left.Content == right.Content &&
 		left.Importance == right.Importance && left.Confidence == right.Confidence && left.Visibility == right.Visibility && left.Provenance == right.Provenance &&
 		left.VectorScore == right.VectorScore && sameStrings(left.Tags, right.Tags)
+}
+
+// normalizeMCPRegistryKindToOperationKind maps registry wire kinds to Runtime operation kinds.
+// Registry "tool" -> mcp/tool_call; already-canonical kinds pass through.
+func normalizeMCPRegistryKindToOperationKind(kind string) string {
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		return ""
+	}
+	// Prefer known Runtime operation kinds / aliases from the descriptor inventory.
+	canonical := CanonicalRuntimeBlockKind(kind)
+	if _, ok := RuntimeOperationDescriptorForKind(canonical); ok {
+		return canonical
+	}
+	switch strings.ToLower(kind) {
+	case "tool", "tools":
+		return StepKindMCPToolCall
+	case "resource", "resources":
+		return StepKindMCPResourceRead
+	case "prompt", "prompts":
+		return StepKindMCPPromptGet
+	default:
+		return kind
+	}
 }

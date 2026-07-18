@@ -7,17 +7,12 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func TestDeriveAssessmentDispositionLegacyAndPartial(t *testing.T) {
-	d, err := DeriveAssessmentDisposition(true, "", nil, nil)
-	if err != nil || d != AssessmentDispositionSatisfied {
-		t.Fatalf("legacy satisfied = %q err=%v", d, err)
-	}
-	d, err = DeriveAssessmentDisposition(false, "", nil, nil)
-	if err != nil || d != AssessmentDispositionRepairableGap {
-		t.Fatalf("legacy unsatisfied = %q err=%v", d, err)
+func TestValidateAssessmentDispositionRequiresExplicitAuthorityAndValidatesPartial(t *testing.T) {
+	if _, err := ValidateAssessmentDisposition("", nil, nil); err == nil {
+		t.Fatal("missing assessment disposition was accepted")
 	}
 	// partial items with satisfied disposition normalize to repairable_gap
-	d, err = DeriveAssessmentDisposition(true, AssessmentDispositionSatisfied, []RuntimeAssessmentItemFact{
+	d, err := ValidateAssessmentDisposition(AssessmentDispositionSatisfied, []RuntimeAssessmentItemFact{
 		{CoverageWorkItemID: "cwi-1", Satisfied: true},
 		{CoverageWorkItemID: "cwi-2", Satisfied: false, Reason: "missing validation"},
 	}, nil)
@@ -25,11 +20,11 @@ func TestDeriveAssessmentDispositionLegacyAndPartial(t *testing.T) {
 		t.Fatalf("partial = %q err=%v", d, err)
 	}
 	// repairable gap requires structure
-	_, err = DeriveAssessmentDisposition(false, AssessmentDispositionRepairableGap, nil, nil)
+	_, err = ValidateAssessmentDisposition(AssessmentDispositionRepairableGap, nil, nil)
 	if err == nil {
 		t.Fatal("expected repairable_gap without structure to fail")
 	}
-	d, err = DeriveAssessmentDisposition(false, AssessmentDispositionRepairableGap, nil, &RuntimeAssessmentGap{
+	d, err = ValidateAssessmentDisposition(AssessmentDispositionRepairableGap, nil, &RuntimeAssessmentGap{
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Reason: "implementation incomplete",
 	})
 	if err != nil || d != AssessmentDispositionRepairableGap {

@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -14,14 +15,40 @@ func (o *RuntimeOrchestrator) CancelRun(ctx context.Context, runID common.RunID)
 	if runID == "" {
 		return common.ErrInvalidArgument
 	}
-	return o.closeRun(ctx, runID, common.RunStateCancelled, "")
+	return o.closeRunAdministrative(ctx, runID, common.RunStateCancelled, runtimecontract.RuntimeTerminationCancelled, "operator cancel")
 }
 
 func (o *RuntimeOrchestrator) SupersedeRun(ctx context.Context, runID common.RunID) error {
 	if runID == "" {
 		return common.ErrInvalidArgument
 	}
-	return o.closeRun(ctx, runID, common.RunStateSuperseded, "")
+	return o.closeRunAdministrative(ctx, runID, common.RunStateSuperseded, runtimecontract.RuntimeTerminationSuperseded, "operator supersede")
+}
+
+// closeRunAdministrative applies SM-1 administrative terminal states.
+// Active V2 aggregates must first CAS-persist RuntimeTerminationRecord (INV-08);
+// direct closeRun bypass of termination is prohibited for active V2.
+func (o *RuntimeOrchestrator) closeRunAdministrative(ctx context.Context, runID common.RunID, state common.RunState, termKind runtimecontract.RuntimeTerminationKind, reason string) error {
+	run, err := o.runtimeEventRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if run.RuntimeContractVersion == runtimecontract.RuntimeContractVersionV2 && run.RuntimeState != nil {
+		if o.runtimeV2Controller == nil {
+			return common.ErrInvalidArgument
+		}
+		if _, err := o.runtimeV2Controller.RequestTermination(ctx, run.WorkspaceID, run.ID, termKind, "administrative", reason); err != nil {
+			return err
+		}
+		run, err = o.runtimeEventRun(ctx, runID)
+		if err != nil {
+			return err
+		}
+		if run.RuntimeState == nil || run.RuntimeState.Termination == nil {
+			return fmt.Errorf("%w: active V2 cancel/supersede requires persisted termination record", common.ErrConflict)
+		}
+	}
+	return o.closeLoadedRun(ctx, run, state, reason)
 }
 
 func (o *RuntimeOrchestrator) FailRun(ctx context.Context, runID common.RunID, reason string) error {

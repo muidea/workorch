@@ -60,6 +60,21 @@ func TestConcretePatchPreviewOperationData(t *testing.T) {
 	}
 }
 
+func TestConcreteFileWriteOperationData(t *testing.T) {
+	target := "README.md"
+	content := "typed file write\n"
+	data, err := FileWriteOperationDataFromRuntimeOperation(runtimecontract.RuntimeOperation{
+		ID: "write-1", Kind: runtimecontract.StepKindFileWrite, TargetRefs: []string{target},
+		Parameters: []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "content", String: &content}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.TargetRef != target || data.Content != content || !data.ContentPresent {
+		t.Fatalf("file/write data = %+v", data)
+	}
+}
+
 func TestConcreteSSHandWebOperationData(t *testing.T) {
 	host := "example.internal"
 	username := "operator"

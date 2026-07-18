@@ -30,23 +30,31 @@ type CoverageFocus struct {
 }
 
 type ConvergenceBudget struct {
-	FocusID                     string `json:"focusId,omitempty"`
-	SliceID                     string `json:"sliceId,omitempty"`
-	State                       string `json:"state,omitempty"`
-	Decision                    string `json:"decision,omitempty"`
-	MaxRepairAttemptsPerFocus   int    `json:"maxRepairAttemptsPerFocus,omitempty"`
-	MaxLLMRoundsPerSlice        int    `json:"maxLLMRoundsPerSlice,omitempty"`
-	MaxRepeatedFailureSignature int    `json:"maxRepeatedFailureSignature,omitempty"`
-	MaxValidationOnlyRetries    int    `json:"maxValidationOnlyRetries,omitempty"`
-	MaxNoCoverageDeltaRounds    int    `json:"maxNoCoverageDeltaRounds,omitempty"`
-	MaxContextBytesPerRepair    int    `json:"maxContextBytesPerRepair,omitempty"`
-	RepairAttempts              int    `json:"repairAttempts,omitempty"`
-	LLMRounds                   int    `json:"llmRounds,omitempty"`
-	RepeatedFailureSignatures   int    `json:"repeatedFailureSignatures,omitempty"`
-	ValidationOnlyRetries       int    `json:"validationOnlyRetries,omitempty"`
-	NoCoverageDeltaRounds       int    `json:"noCoverageDeltaRounds,omitempty"`
-	LastNoDeltaReason           string `json:"lastNoDeltaReason,omitempty"`
-	LastDecisionReason          string `json:"lastDecisionReason,omitempty"`
+	FocusID                      string `json:"focusId,omitempty"`
+	SliceID                      string `json:"sliceId,omitempty"`
+	State                        string `json:"state,omitempty"`
+	Decision                     string `json:"decision,omitempty"`
+	MaxRepairAttemptsPerFocus    int    `json:"maxRepairAttemptsPerFocus,omitempty"`
+	MaxLLMRoundsPerSlice         int    `json:"maxLLMRoundsPerSlice,omitempty"`
+	MaxRepeatedFailureSignature  int    `json:"maxRepeatedFailureSignature,omitempty"`
+	MaxValidationOnlyRetries     int    `json:"maxValidationOnlyRetries,omitempty"`
+	MaxNoCoverageDeltaRounds     int    `json:"maxNoCoverageDeltaRounds,omitempty"`
+	MaxContextBytesPerRepair     int    `json:"maxContextBytesPerRepair,omitempty"`
+	RepairAttempts               int    `json:"repairAttempts,omitempty"`
+	LLMRounds                    int    `json:"llmRounds,omitempty"`
+	RepeatedFailureSignatures    int    `json:"repeatedFailureSignatures,omitempty"`
+	ValidationOnlyRetries        int    `json:"validationOnlyRetries,omitempty"`
+	NoCoverageDeltaRounds        int    `json:"noCoverageDeltaRounds,omitempty"`
+	LastNoDeltaReason            string `json:"lastNoDeltaReason,omitempty"`
+	LastDecisionReason           string `json:"lastDecisionReason,omitempty"`
+	MaxProviderTransportAttempts int    `json:"maxProviderTransportAttempts,omitempty"`
+	ProviderTransportAttempts    int    `json:"providerTransportAttempts,omitempty"`
+	MaxOperationRecoveryAttempts int    `json:"maxOperationRecoveryAttempts,omitempty"`
+	OperationRecoveryAttempts    int    `json:"operationRecoveryAttempts,omitempty"`
+	MaxCASReloadAttempts         int    `json:"maxCasReloadAttempts,omitempty"`
+	CASReloadAttempts            int    `json:"casReloadAttempts,omitempty"`
+	MaxTerminalDeliveryAttempts  int    `json:"maxTerminalDeliveryAttempts,omitempty"`
+	TerminalDeliveryAttempts     int    `json:"terminalDeliveryAttempts,omitempty"`
 }
 
 type AcceptanceSummary struct {
@@ -57,9 +65,36 @@ type AcceptanceSummary struct {
 }
 
 type AcceptanceProjection struct {
-	ActiveSliceID string             `json:"activeSliceId,omitempty"`
-	Slices        []AcceptanceSlice  `json:"slices,omitempty"`
-	CurrentFocus  *CoverageFocus     `json:"currentFocus,omitempty"`
-	Budget        *ConvergenceBudget `json:"budget,omitempty"`
-	Summary       AcceptanceSummary  `json:"summary"`
+	ActiveSliceID   string                   `json:"activeSliceId,omitempty"`
+	Slices          []AcceptanceSlice        `json:"slices,omitempty"`
+	CurrentFocus    *CoverageFocus           `json:"currentFocus,omitempty"`
+	Budget          *ConvergenceBudget       `json:"budget,omitempty"`
+	RepairDirective *RuntimeRepairDirective  `json:"repairDirective,omitempty"`
+	Operations      []RuntimeOperationStatus `json:"operations,omitempty"`
+	Summary         AcceptanceSummary        `json:"summary"`
+}
+
+type RuntimeRepairDirective struct {
+	ID                    string   `json:"id,omitempty"`
+	RequiredAction        string   `json:"requiredAction,omitempty"`
+	RequiredEffectScopes  []string `json:"requiredEffectScopes,omitempty"`
+	RequiredEvidenceKinds []string `json:"requiredEvidenceKinds,omitempty"`
+	TargetRefs            []string `json:"targetRefs,omitempty"`
+	RepairAttempt         int      `json:"repairAttempt,omitempty"`
+}
+
+type RuntimeOperationStatus struct {
+	DispatchID          string `json:"dispatchId,omitempty"`
+	OperationID         string `json:"operationId,omitempty"`
+	ExecutionKey        string `json:"executionKey,omitempty"`
+	Fence               uint64 `json:"fence,omitempty"`
+	ExpectedEffectScope string `json:"expectedEffectScope,omitempty"`
+	ObservedEffectScope string `json:"observedEffectScope,omitempty"`
+	ExecutionState      string `json:"executionState,omitempty"`
+	Outcome             string `json:"outcome,omitempty"`
+	ReceiptRef          string `json:"receiptRef,omitempty"`
+	ReceiptHash         string `json:"receiptHash,omitempty"`
+	GovernanceState     string `json:"governanceState,omitempty"`
+	GovernanceTicketID  string `json:"governanceTicketId,omitempty"`
+	OutcomeUnknown      bool   `json:"outcomeUnknown,omitempty"`
 }

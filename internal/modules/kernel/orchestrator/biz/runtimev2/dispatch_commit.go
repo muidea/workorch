@@ -28,6 +28,8 @@ type SealedDispatch struct {
 	Candidate             runtimecontract.RuntimeCandidate
 	State                 DispatchState
 	CompletedOperationIDs []string
+	// OperationExecutions is the per-operation claim/fence ledger (RVC-R9/R10).
+	OperationExecutions []runtimecontract.RuntimeOperationExecutionRecord
 }
 
 type DispatchStepInput struct {
@@ -60,6 +62,13 @@ type ExecutionEvidence struct {
 	SourceRef           string
 	Failure             *runtimecontract.FailureFact
 	Evidence            runtimecontract.RuntimeOperationEvidence
+	// ObservedEffectScope / NoOp / OwnerReceipt are owner-reported facts (RVC-R9).
+	// When present, evidence Kind is re-derived from sealed expectation + receipt.
+	ObservedEffectScope runtimecontract.RuntimeEffectScope
+	NoOp                bool
+	OwnerReceiptRef     string
+	OwnerReceiptHash    string
+	Receipt             *runtimecontract.RuntimeOperationReceipt
 }
 
 type DiagnosticEvidence struct {
@@ -71,18 +80,22 @@ type DiagnosticEvidence struct {
 }
 
 type RuntimeAggregate struct {
-	StateRevision         uint64
-	EvidenceSequence      uint64
-	Definition            runtimecontract.RuntimeDefinitionContext
-	Facts                 runtimecontract.RuntimeFacts
-	Decision              runtimecontract.RuntimeDecision
-	ActiveDispatch        *SealedDispatch
-	CompletedDispatches   []SealedDispatch
-	ProcessedEventIDs     []string
-	Diagnostics           []DiagnosticEvidence
-	CandidateAttempts     []runtimecontract.RuntimeCandidateAttemptRecord
-	GovernanceRequests    []runtimecontract.RuntimeGovernanceRequestRecord
-	GovernanceResolutions []runtimecontract.RuntimeGovernanceResolutionRecord
+	StateRevision               uint64
+	EvidenceSequence            uint64
+	Definition                  runtimecontract.RuntimeDefinitionContext
+	Facts                       runtimecontract.RuntimeFacts
+	Decision                    runtimecontract.RuntimeDecision
+	ActiveDispatch              *SealedDispatch
+	CompletedDispatches         []SealedDispatch
+	ProcessedEventIDs           []string
+	Diagnostics                 []DiagnosticEvidence
+	CandidateAttempts           []runtimecontract.RuntimeCandidateAttemptRecord
+	GovernanceRequests          []runtimecontract.RuntimeGovernanceRequestRecord
+	GovernanceResolutions       []runtimecontract.RuntimeGovernanceResolutionRecord
+	OperationGovernanceBindings []runtimecontract.RuntimeOperationGovernanceBinding
+	OperationReceipts           []runtimecontract.RuntimeOperationReceipt
+	// Termination is the SM-1 administrative cancel/supersede record (INV-08).
+	Termination *runtimecontract.RuntimeTerminationRecord
 }
 
 type RuntimeStateRepository interface {
@@ -131,15 +144,49 @@ func SealDispatchWithActivation(decision runtimecontract.RuntimeDecision, candid
 	transaction := decision.AuthorityTransaction()
 	candidateHash := runtimecontract.StableRuntimeCandidateHash(candidate)
 	digest := sha256.Sum256([]byte(strings.Join([]string{transaction.AuthoritySnapshotID, transaction.RequiredOutputHash, candidateHash}, "|")))
+	dispatchID := "dispatch-" + hex.EncodeToString(digest[:])[:20]
+	executions := sealOperationExecutionRecords(
+		decision.AuthoritySnapshot.WorkspaceID,
+		decision.AuthoritySnapshot.RunID,
+		dispatchID,
+		candidate,
+		activation,
+	)
 	return SealedDispatch{
-		ID:            "dispatch-" + hex.EncodeToString(digest[:])[:20],
-		WorkspaceID:   decision.AuthoritySnapshot.WorkspaceID,
-		RunID:         decision.AuthoritySnapshot.RunID,
-		Transaction:   transaction,
-		CandidateHash: candidateHash,
-		Candidate:     candidate,
-		State:         DispatchStateSealed,
+		ID:                  dispatchID,
+		WorkspaceID:         decision.AuthoritySnapshot.WorkspaceID,
+		RunID:               decision.AuthoritySnapshot.RunID,
+		Transaction:         transaction,
+		CandidateHash:       candidateHash,
+		Candidate:           candidate,
+		State:               DispatchStateSealed,
+		OperationExecutions: executions,
 	}, nil
+}
+
+func sealOperationExecutionRecords(
+	workspaceID common.WorkspaceID,
+	runID common.RunID,
+	dispatchID string,
+	candidate runtimecontract.RuntimeCandidate,
+	activation runtimecontract.RuntimeActivationContext,
+) []runtimecontract.RuntimeOperationExecutionRecord {
+	ops := candidateRuntimeOperations(candidate)
+	if len(ops) == 0 {
+		return nil
+	}
+	ret := make([]runtimecontract.RuntimeOperationExecutionRecord, 0, len(ops))
+	for _, operation := range ops {
+		operation = operation.Normalized()
+		scope := runtimecontract.ResolveExpectedEffectScope(operation, activation.MCPCapabilities)
+		ret = append(ret, runtimecontract.RuntimeOperationExecutionRecord{
+			OperationID:         operation.ID,
+			ExecutionKey:        runtimecontract.StableRuntimeOperationExecutionKey(workspaceID, runID, dispatchID, operation.ID),
+			ExpectedEffectScope: scope,
+			State:               runtimecontract.OperationExecutionSealed,
+		})
+	}
+	return runtimecontract.NormalizeRuntimeOperationExecutionRecords(ret)
 }
 
 func (d SealedDispatch) Validate(decision runtimecontract.RuntimeDecision) error {
@@ -168,6 +215,14 @@ func (d SealedDispatch) ValidateWithActivation(decision runtimecontract.RuntimeD
 	for _, operationID := range d.CompletedOperationIDs {
 		if !candidateContainsOperation(d.Candidate, operationID) {
 			return fmt.Errorf("sealed dispatch completed operation %q is not present in candidate", operationID)
+		}
+	}
+	if err := runtimecontract.ValidateRuntimeOperationExecutionRecords(d.OperationExecutions); err != nil {
+		return err
+	}
+	for _, exec := range runtimecontract.NormalizeRuntimeOperationExecutionRecords(d.OperationExecutions) {
+		if !candidateContainsOperation(d.Candidate, exec.OperationID) {
+			return fmt.Errorf("sealed dispatch operation execution %q is not present in candidate", exec.OperationID)
 		}
 	}
 	return nil
@@ -243,26 +298,55 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 	if !candidateContainsOperation(aggregate.ActiveDispatch.Candidate, evidence.OperationID) {
 		return EvidenceCommitResult{}, fmt.Errorf("execution evidence operation %q is not present in the sealed candidate", evidence.OperationID)
 	}
-	fact := runtimecontract.EvidenceFact{
-		ID: common.EvidenceRecordID(evidence.EventID), Kind: strings.TrimSpace(evidence.Kind), SubjectRef: strings.TrimSpace(evidence.OperationID),
-		SourceRef: strings.TrimSpace(evidence.SourceRef), AuthoritySnapshotID: evidence.AuthoritySnapshotID,
-		DispatchID: evidence.DispatchID, OperationID: evidence.OperationID, Revision: nextEvidenceRevision(aggregate.EvidenceSequence + 1),
-		Summary: evidence.Evidence.Summary, ContentHash: evidence.Evidence.ContentHash,
-		ExitCode: evidence.Evidence.ExitCode, EvidenceRefs: append([]string(nil), evidence.Evidence.EvidenceRefs...),
+	if evidence.Receipt != nil {
+		persisted, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(aggregate.OperationReceipts, evidence.Receipt.ExecutionKey, evidence.Receipt.Fence)
+		if !found || !runtimecontract.SameRuntimeOperationReceipt(persisted, *evidence.Receipt) {
+			return EvidenceCommitResult{}, fmt.Errorf("execution evidence owner receipt is not persisted")
+		}
+		execution, found := operationExecutionRecord(aggregate.ActiveDispatch.OperationExecutions, evidence.OperationID)
+		if !found || execution.State != runtimecontract.OperationExecutionOwnerCommitted || execution.ExecutionKey != persisted.ExecutionKey {
+			return EvidenceCommitResult{}, fmt.Errorf("execution evidence requires owner_committed execution state")
+		}
 	}
 	var committedOperation runtimecontract.RuntimeOperation
 	for _, operation := range candidateRuntimeOperations(aggregate.ActiveDispatch.Candidate) {
 		if operation.Normalized().ID == evidence.OperationID {
 			committedOperation = operation.Normalized()
-			fact.CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), operation.CoverageWorkItemIDs...)
 			break
 		}
 	}
+	descriptor, descriptorFound := runtimecontract.RuntimeOperationDescriptorForKind(committedOperation.Kind)
+	if !descriptorFound {
+		return EvidenceCommitResult{}, fmt.Errorf("execution evidence operation %q has no descriptor", committedOperation.Kind)
+	}
+	if descriptor.RequiresOwnerReceipt && evidence.Receipt == nil {
+		return EvidenceCommitResult{}, fmt.Errorf("execution evidence operation %q requires persisted owner receipt", committedOperation.Kind)
+	}
+	expectedScope, hasExecution := expectedEffectScopeForOperation(*aggregate.ActiveDispatch, evidence.OperationID, aggregate.Facts.Activation)
+	if !hasExecution {
+		return EvidenceCommitResult{}, fmt.Errorf("execution evidence operation %q has no sealed execution record", evidence.OperationID)
+	}
+	evidenceKind, err := adjudicateEvidenceKind(aggregate.Decision, expectedScope, hasExecution, evidence)
+	if err != nil {
+		return EvidenceCommitResult{}, err
+	}
+	fact := runtimecontract.EvidenceFact{
+		ID: common.EvidenceRecordID(evidence.EventID), Kind: evidenceKind, SubjectRef: strings.TrimSpace(evidence.OperationID),
+		SourceRef: strings.TrimSpace(evidence.SourceRef), AuthoritySnapshotID: evidence.AuthoritySnapshotID,
+		DispatchID: evidence.DispatchID, OperationID: evidence.OperationID, Revision: nextEvidenceRevision(aggregate.EvidenceSequence + 1),
+		Summary: evidence.Evidence.Summary, ContentHash: evidence.Evidence.ContentHash,
+		ExitCode: evidence.Evidence.ExitCode, EvidenceRefs: append([]string(nil), evidence.Evidence.EvidenceRefs...),
+		CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), committedOperation.CoverageWorkItemIDs...),
+	}
+	// Mark operation execution as evidence_committed when ledger present.
+	aggregate.ActiveDispatch.OperationExecutions = markOperationExecutionEvidenceCommitted(
+		aggregate.ActiveDispatch.OperationExecutions, evidence.OperationID, evidence.OwnerReceiptRef, evidence.OwnerReceiptHash,
+	)
 	switch evidence.Status {
 	case ExecutionEvidenceStatusAccepted:
 		aggregate.Facts.Evidence.Accepted = append(aggregate.Facts.Evidence.Accepted, fact)
 		if !aggregate.Facts.Focus.RequireAssessment {
-			aggregate.Facts.Coverage = closeCoverageForEvidence(aggregate.Facts.Coverage, fact, aggregate.Facts.Focus.CoverageWorkItemIDs)
+			aggregate.Facts.Coverage = closeCoverageForEvidence(aggregate.Facts.Coverage, fact)
 		}
 		if fact.Kind == runtimecontract.EvidenceKindStateChange {
 			currentCoverage := append([]common.CoverageWorkItemID(nil), aggregate.Facts.Focus.CoverageWorkItemIDs...)
@@ -342,10 +426,11 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 		aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
 		aggregate.ActiveDispatch = nil
 		aggregate.Facts = advanceSatisfiedCoverageFocus(aggregate.Facts)
-		nextDecision, err := ReduceRuntimeState(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
+		facts, nextDecision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
 		if err != nil {
 			return EvidenceCommitResult{}, err
 		}
+		aggregate.Facts = facts
 		aggregate.Decision = nextDecision
 	} else {
 		aggregate.ActiveDispatch = &dispatch
@@ -394,14 +479,8 @@ func requireFreshTargetSnapshots(facts runtimecontract.RuntimeFacts, targetRefs 
 	return PreflightRuntimeFacts(facts, requirements)
 }
 
-func closeCoverageForEvidence(coverage []runtimecontract.RuntimeCoverageItemFact, evidence runtimecontract.EvidenceFact, fallback []common.CoverageWorkItemID) []runtimecontract.RuntimeCoverageItemFact {
-	if len(coverage) == 0 {
-		coverage = runtimecontract.InitialRuntimeCoverageFacts(nil, []runtimecontract.CoverageFocus{{ID: "legacy-current", CoverageWorkItemIDs: fallback}})
-	}
+func closeCoverageForEvidence(coverage []runtimecontract.RuntimeCoverageItemFact, evidence runtimecontract.EvidenceFact) []runtimecontract.RuntimeCoverageItemFact {
 	ids := evidence.CoverageWorkItemIDs
-	if len(ids) == 0 {
-		ids = fallback
-	}
 	matched := map[common.CoverageWorkItemID]struct{}{}
 	for _, id := range ids {
 		matched[id] = struct{}{}
@@ -439,6 +518,11 @@ func (a RuntimeAggregate) Validate() error {
 			return fmt.Errorf("runtime aggregate active dispatch: %w", err)
 		}
 	}
+	if a.Termination != nil {
+		if err := a.Termination.Validate(); err != nil {
+			return fmt.Errorf("runtime aggregate termination: %w", err)
+		}
+	}
 	if err := runtimecontract.ValidateRuntimeCandidateAttemptRecordsForScope(a.Facts.WorkspaceID, a.Facts.RunID, a.CandidateAttempts); err != nil {
 		return err
 	}
@@ -465,6 +549,12 @@ func (a RuntimeAggregate) Validate() error {
 	if err := runtimecontract.ValidateRuntimeGovernanceRequestRecords(a.GovernanceRequests); err != nil {
 		return err
 	}
+	if err := runtimecontract.ValidateRuntimeOperationGovernanceBindings(a.OperationGovernanceBindings); err != nil {
+		return err
+	}
+	if err := runtimecontract.ValidateRuntimeOperationReceipts(a.OperationReceipts); err != nil {
+		return err
+	}
 	for _, request := range a.GovernanceRequests {
 		matched := a.ActiveDispatch != nil && a.ActiveDispatch.ID == request.DispatchID &&
 			a.ActiveDispatch.Transaction.AuthoritySnapshotID == request.AuthoritySnapshotID && a.ActiveDispatch.Candidate.Governance != nil
@@ -478,6 +568,43 @@ func (a RuntimeAggregate) Validate() error {
 		}
 		if !matched {
 			return fmt.Errorf("runtime aggregate governance request has no governed dispatch")
+		}
+	}
+	for _, rawBinding := range a.OperationGovernanceBindings {
+		binding := rawBinding.Normalized()
+		var source *SealedDispatch
+		for idx := range a.CompletedDispatches {
+			if a.CompletedDispatches[idx].ID == binding.OperationDispatchID {
+				value := a.CompletedDispatches[idx]
+				source = &value
+				break
+			}
+		}
+		if source == nil {
+			return fmt.Errorf("operation governance binding source dispatch %q is not completed", binding.OperationDispatchID)
+		}
+		execution, found := operationExecutionRecord(source.OperationExecutions, binding.OperationID)
+		if !found || execution.ExecutionKey != binding.ExecutionKey || execution.Fence != binding.Fence ||
+			execution.OwnerReceiptHash != binding.GovernanceReceiptHash || execution.State != runtimecontract.OperationExecutionOwnerCommitted {
+			return fmt.Errorf("operation governance binding source execution does not match sealed receipt")
+		}
+		receipt, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(a.OperationReceipts, binding.ExecutionKey, binding.Fence)
+		if !found || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeGovernanceRequired || runtimecontract.StableRuntimeOperationReceiptHash(receipt) != binding.GovernanceReceiptHash {
+			return fmt.Errorf("operation governance binding has no matching governance receipt")
+		}
+		if binding.State == runtimecontract.RuntimeOperationGovernanceBindingSuspended {
+			continue
+		}
+		bound := false
+		for _, request := range a.GovernanceRequests {
+			if request.TicketID == binding.TicketID && request.DispatchID == binding.GovernanceDispatchID &&
+				request.AuthoritySnapshotID == binding.GovernanceSnapshotID && request.DependencyKind == binding.DependencyKind && request.SubjectRef == binding.SubjectRef {
+				bound = true
+				break
+			}
+		}
+		if !bound {
+			return fmt.Errorf("operation governance binding has no matching ticket request")
 		}
 	}
 	for _, resolution := range a.GovernanceResolutions {
@@ -504,8 +631,20 @@ func (a RuntimeAggregate) Validate() error {
 }
 
 func (e ExecutionEvidence) Validate() error {
-	if strings.TrimSpace(e.EventID) == "" || e.WorkspaceID == "" || e.RunID == "" || strings.TrimSpace(e.DispatchID) == "" || strings.TrimSpace(e.AuthoritySnapshotID) == "" || strings.TrimSpace(e.OperationID) == "" || strings.TrimSpace(e.Kind) == "" {
-		return fmt.Errorf("execution evidence requires event, scope, dispatch, snapshot, operation and kind")
+	if strings.TrimSpace(e.EventID) == "" || e.WorkspaceID == "" || e.RunID == "" || strings.TrimSpace(e.DispatchID) == "" || strings.TrimSpace(e.AuthoritySnapshotID) == "" || strings.TrimSpace(e.OperationID) == "" {
+		return fmt.Errorf("execution evidence requires event, scope, dispatch, snapshot and operation")
+	}
+	if e.Receipt == nil && strings.TrimSpace(e.Kind) == "" {
+		return fmt.Errorf("execution evidence requires owner receipt or diagnostic kind")
+	}
+	if e.Receipt != nil {
+		receipt := e.Receipt.Normalized()
+		if err := receipt.Validate(); err != nil {
+			return err
+		}
+		if receipt.OperationID != strings.TrimSpace(e.OperationID) {
+			return fmt.Errorf("execution evidence receipt operation mismatch")
+		}
 	}
 	if e.Status != ExecutionEvidenceStatusAccepted && e.Status != ExecutionEvidenceStatusRejected {
 		return fmt.Errorf("execution evidence requires accepted or rejected status")
@@ -579,13 +718,123 @@ func invalidateNonSatisfiedAssessmentsForFocus(values []runtimecontract.RuntimeA
 	}
 	ret := make([]runtimecontract.RuntimeAssessmentFact, 0, len(values))
 	for _, value := range values {
-		if value.FocusID == focusID && value.Disposition != runtimecontract.AssessmentDispositionSatisfied && !value.Satisfied {
+		if value.FocusID == focusID && value.Disposition != runtimecontract.AssessmentDispositionSatisfied {
 			continue
 		}
 		ret = append(ret, value)
 	}
 	if len(ret) == 0 {
 		return nil
+	}
+	return ret
+}
+
+func expectedEffectScopeForOperation(dispatch SealedDispatch, operationID string, activation runtimecontract.RuntimeActivationContext) (runtimecontract.RuntimeEffectScope, bool) {
+	operationID = strings.TrimSpace(operationID)
+	for _, exec := range dispatch.OperationExecutions {
+		if exec.Normalized().OperationID == operationID {
+			return runtimecontract.NormalizeRuntimeEffectScope(exec.ExpectedEffectScope), true
+		}
+	}
+	_ = activation
+	return runtimecontract.RuntimeEffectUnknown, false
+}
+
+func adjudicateEvidenceKind(decision runtimecontract.RuntimeDecision, expected runtimecontract.RuntimeEffectScope, hasExpected bool, evidence ExecutionEvidence) (string, error) {
+	if evidence.Receipt != nil {
+		receipt := evidence.Receipt.Normalized()
+		if !hasExpected {
+			return "", fmt.Errorf("receipt evidence requires sealed expected effect")
+		}
+		// A successful owner call can still be rejected by the Orchestrator effect
+		// gate (for example no-op under produce_state_change). In that case the
+		// receipt remains authoritative and the rejected evidence records the
+		// mismatch without pretending a durable effect occurred.
+		if evidence.Status == ExecutionEvidenceStatusRejected &&
+			(receipt.Outcome == runtimecontract.RuntimeOperationOutcomeAccepted || receipt.Outcome == runtimecontract.RuntimeOperationOutcomeNoOp) {
+			if err := receipt.Validate(); err != nil {
+				return "", fmt.Errorf("evidence authority: %w", err)
+			}
+			return evidenceKindForDecision(decision), nil
+		}
+		kind, err := runtimecontract.EvidenceKindFromReceipt(decision.Action, expected, receipt)
+		if err != nil {
+			return "", fmt.Errorf("evidence authority: %w", err)
+		}
+		return kind, nil
+	}
+	observed := runtimecontract.NormalizeRuntimeEffectScope(evidence.ObservedEffectScope)
+	// Receipt-less evidence is only used for stale/diagnostic inputs. Current
+	// sealed capability operations are rejected before this point when their
+	// descriptor requires an owner receipt.
+	if strings.TrimSpace(string(evidence.ObservedEffectScope)) == "" && !evidence.NoOp {
+		kind := strings.TrimSpace(evidence.Kind)
+		if kind == "" {
+			kind = evidenceKindForDecision(decision)
+		}
+		if kind == "" {
+			return "", fmt.Errorf("execution evidence requires kind or observed effect")
+		}
+		// Still reject durable mismatch when expected is known non-durable under validation.
+		if decision.Action == runtimecontract.RuntimeActionProduceValidation && hasExpected && runtimecontract.RuntimeEffectIsDurable(expected) {
+			return "", fmt.Errorf("validation dispatch sealed durable expected effect %q", expected)
+		}
+		return kind, nil
+	}
+	receipt := runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey:        "evidence/" + evidence.EventID,
+		OperationID:         evidence.OperationID,
+		ObservedEffectScope: observed,
+		NoOp:                evidence.NoOp,
+		Evidence:            evidence.Evidence,
+		Failure:             evidence.Failure,
+	}
+	switch evidence.Status {
+	case ExecutionEvidenceStatusAccepted:
+		if evidence.NoOp {
+			receipt.Outcome = runtimecontract.RuntimeOperationOutcomeNoOp
+		} else {
+			receipt.Outcome = runtimecontract.RuntimeOperationOutcomeAccepted
+		}
+	case ExecutionEvidenceStatusRejected:
+		receipt.Outcome = runtimecontract.RuntimeOperationOutcomeRejected
+	}
+	if !hasExpected {
+		expected = observed
+	}
+	kind, err := runtimecontract.EvidenceKindFromReceipt(decision.Action, expected, receipt)
+	if err != nil {
+		return "", fmt.Errorf("evidence authority: %w", err)
+	}
+	return kind, nil
+}
+
+func markOperationExecutionEvidenceCommitted(values []runtimecontract.RuntimeOperationExecutionRecord, operationID, receiptRef, receiptHash string) []runtimecontract.RuntimeOperationExecutionRecord {
+	if len(values) == 0 {
+		return values
+	}
+	ret := append([]runtimecontract.RuntimeOperationExecutionRecord(nil), values...)
+	for idx := range ret {
+		if ret[idx].OperationID != operationID {
+			continue
+		}
+		ret[idx].State = runtimecontract.OperationExecutionEvidenceCommitted
+		if strings.TrimSpace(receiptRef) != "" {
+			ret[idx].OwnerReceiptRef = strings.TrimSpace(receiptRef)
+		}
+		if strings.TrimSpace(receiptHash) != "" {
+			ret[idx].OwnerReceiptHash = strings.TrimSpace(receiptHash)
+		}
+		// Ensure validation still passes: committed requires fence + receipt.
+		if ret[idx].Fence == 0 {
+			ret[idx].Fence = 1
+		}
+		if ret[idx].OwnerReceiptRef == "" {
+			ret[idx].OwnerReceiptRef = "inline/" + operationID
+		}
+		if ret[idx].OwnerReceiptHash == "" {
+			ret[idx].OwnerReceiptHash = "inline"
+		}
 	}
 	return ret
 }

@@ -14,9 +14,12 @@ func TestRuntimeActivationContextCloneAndEqualityPreserveTypedSelections(t *test
 		StageSoulBindings: []RuntimeStageSoulBinding{{Stage: "execution", Source: "workspace_stage_binding", Soul: RuntimeSoulContext{ID: "soul-execution", Instructions: "执行阶段指令"}}},
 		Skills:            []RuntimeSkillContext{{ID: "skill-go", Name: "Go", Instruction: "执行 Go 验证", RequiredToolKinds: []string{"shell/command"}}},
 		MCPServerIDs:      []common.MCPServerID{"mcp-main"},
-		MCPCapabilities:   []RuntimeMCPCapabilityContext{{ID: "cap-read", ServerID: "mcp-main", Kind: "tool", Name: "read", Enabled: true}},
-		Memories:          []RuntimeMemoryContext{{ID: "memory-1", MemoryType: "fact", Summary: "历史约束", Content: "保持 typed contract"}},
-		EvidencePolicies:  []RuntimeEvidencePolicy{{ID: "policy-1", AppliesTo: "shell/command", ZeroWorkMarkers: []string{"no tests"}, QualityOnZeroWork: "inconclusive"}},
+		MCPCapabilities: []RuntimeMCPCapabilityContext{{
+			ID: "cap-read", ServerID: "mcp-main", Kind: "tool", OperationKind: StepKindMCPToolCall, Name: "read", Enabled: true,
+			EffectScope: string(RuntimeEffectNone), IdempotencyClass: string(RuntimeOperationIdempotencySafeToReplay),
+		}},
+		Memories:         []RuntimeMemoryContext{{ID: "memory-1", MemoryType: "fact", Summary: "历史约束", Content: "保持 typed contract"}},
+		EvidencePolicies: []RuntimeEvidencePolicy{{ID: "policy-1", AppliesTo: "shell/command", ZeroWorkMarkers: []string{"no tests"}, QualityOnZeroWork: "inconclusive"}},
 		Continuation: RuntimeContinuationContext{
 			GovernanceHistory: []RuntimeGovernanceHistoryEntry{{
 				TicketID: "ticket-1", RunID: "run-old", StepID: "step-old", ResolutionID: "resolution-1", ResolutionType: "replan", RecoveryAction: "replan",
@@ -69,6 +72,25 @@ func TestRuntimeActivationContextCloneAndEqualityPreserveTypedSelections(t *test
 	cloned.Continuation.GovernanceHistory[0].Failure.TargetRefs[0] = "mutated"
 	if SameRuntimeActivationContext(activation, cloned) {
 		t.Fatal("continuation drift was not detected")
+	}
+	for name, mutate := range map[string]func(*RuntimeActivationContext){
+		"operation kind": func(value *RuntimeActivationContext) {
+			value.MCPCapabilities[0].OperationKind = StepKindMCPResourceRead
+		},
+		"effect scope": func(value *RuntimeActivationContext) {
+			value.MCPCapabilities[0].EffectScope = string(RuntimeEffectEphemeralSession)
+		},
+		"idempotency": func(value *RuntimeActivationContext) {
+			value.MCPCapabilities[0].IdempotencyClass = string(RuntimeOperationIdempotencyAtMostOnce)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := activation.Clone()
+			mutate(&changed)
+			if SameRuntimeActivationContext(activation, changed) {
+				t.Fatalf("MCP %s drift was not detected", name)
+			}
+		})
 	}
 }
 

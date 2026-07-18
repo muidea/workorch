@@ -18,6 +18,7 @@ const (
 	StepKindFileList                         = "file/list"
 	StepKindFileRead                         = "file/read"
 	StepKindFileEdit                         = "file/edit"
+	StepKindFileWrite                        = "file/write"
 	StepKindGitRead                          = "git/read"
 	StepKindGitWrite                         = "git/write"
 	StepKindLLMWorkspaceExecution            = "llm/workspace_execution"
@@ -45,6 +46,8 @@ func CanonicalRuntimeBlockKind(kind string) string {
 		return StepKindLLMWorkspaceExecution
 	case "patchRequests", "patch/request":
 		return RuntimeBlockKindPatchApply
+	case "file/write_file":
+		return "file/write"
 	default:
 		return strings.TrimSpace(kind)
 	}
@@ -69,54 +72,19 @@ func OperationHasWorkspaceSideEffects(operation RuntimeOperation) bool {
 }
 
 // OperationHasWorkspaceSideEffectsWithCapabilities is the capability-aware side-effect
-// gate. Descriptor EffectClass is the kind-level authority. Unknown kinds default to
-// mutating. MCP tool calls may be narrowed to non-mutating only when owner-sealed
-// RiskLevel=read_only capability metadata matches. Candidate-declared stateChanging is
-// never consulted as a side-effect safety authority.
+// gate based on ResolveExpectedEffectScope. Unknown kinds default to mutating. MCP tool
+// calls may be narrowed only by owner-sealed EffectScope. Shell/SSH may be narrowed by
+// explicit stateChanging=false at seal time; missing stateChanging keeps the durable
+// kind default.
 func OperationHasWorkspaceSideEffectsWithCapabilities(operation RuntimeOperation, capabilities []RuntimeMCPCapabilityContext) bool {
-	operation = operation.Normalized()
-	kind := CanonicalRuntimeBlockKind(operation.Kind)
-	descriptor, ok := RuntimeOperationDescriptorForKind(kind)
-	if !ok {
-		// Unknown kinds must not enter validation as "pure".
-		return true
-	}
-	if kind == StepKindMCPToolCall {
-		return mcpToolCallHasWorkspaceSideEffects(operation, capabilities)
-	}
-	return operationEffectHasWorkspaceSideEffects(descriptor.EffectClass)
-}
-
-func mcpToolCallHasWorkspaceSideEffects(operation RuntimeOperation, capabilities []RuntimeMCPCapabilityContext) bool {
-	serverID := strings.TrimSpace(operationStringParameter(operation.Parameters, "serverId"))
-	tool := strings.TrimSpace(operationStringParameter(operation.Parameters, "tool"))
-	if serverID == "" || tool == "" || len(capabilities) == 0 {
-		// Unknown / unmatched capability: deny validation entry.
-		return true
-	}
-	for _, capability := range capabilities {
-		if !capability.Enabled {
-			continue
-		}
-		if strings.TrimSpace(string(capability.ServerID)) != serverID {
-			continue
-		}
-		if strings.TrimSpace(capability.Kind) != "" && CanonicalRuntimeBlockKind(capability.Kind) != StepKindMCPToolCall {
-			continue
-		}
-		if strings.TrimSpace(capability.Name) != tool {
-			continue
-		}
-		return !mcpCapabilityRiskIsReadOnly(capability.RiskLevel)
-	}
-	return true
-}
-
-func mcpCapabilityRiskIsReadOnly(riskLevel string) bool {
-	switch strings.ToLower(strings.TrimSpace(riskLevel)) {
-	case "read_only", "readonly", "read-only", "l0":
+	// Prefer concrete ExpectedEffectScope (descriptor + params + sealed MCP metadata).
+	scope := ResolveExpectedEffectScope(operation, capabilities)
+	switch scope {
+	case RuntimeEffectNone, RuntimeEffectEphemeralSession, RuntimeEffectGovernanceOnly:
+		return false
+	case RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable, RuntimeEffectUnknown:
 		return true
 	default:
-		return false
+		return true
 	}
 }

@@ -24,6 +24,31 @@ func newRunModuleTestHub(t *testing.T) magicevent.Hub {
 	return hub
 }
 
+func TestBuildRuntimeV2RecoveryInventoryClassifiesAuthorityState(t *testing.T) {
+	runs := []*runmodel.Run{
+		{ID: "run-active", WorkspaceID: "ws-1", State: common.RunStateActive, RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
+			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 1, Decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceStateChange}}},
+		{ID: "run-sealed", WorkspaceID: "ws-1", State: common.RunStateActive, RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
+			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 2, Decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceStateChange}, ActiveDispatch: &runtimecontract.RuntimeDispatchRecord{ID: "dispatch-1"}}},
+		{ID: "run-blocked", WorkspaceID: "ws-2", State: common.RunStateBlockedOnDecision, BlockingTicketID: "ticket-1", RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
+			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 3, Decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionRequestGovernance}}},
+		{ID: "run-terminal-pending", WorkspaceID: "ws-3", State: common.RunStateActive, RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
+			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 4, Decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionComplete}, Facts: runtimecontract.RuntimeFacts{Recovery: runtimecontract.RuntimeRecoveryLedger{TerminalDeliveryAttempts: 2}}}},
+	}
+	result := buildRuntimeV2RecoveryInventory(runs, runevents.QueryRuntimeV2RecoveryInventoryCommand{Limit: 10})
+	if len(result.Items) != 4 {
+		t.Fatalf("recovery items = %+v", result.Items)
+	}
+	classes := map[common.RunID]runevents.RuntimeV2RecoveryClass{}
+	for _, item := range result.Items {
+		classes[item.RunID] = item.Class
+	}
+	if classes["run-active"] != runevents.RuntimeV2RecoveryActiveNoDispatch || classes["run-sealed"] != runevents.RuntimeV2RecoveryActiveSealedDispatch ||
+		classes["run-blocked"] != runevents.RuntimeV2RecoveryBlockedGovernance || classes["run-terminal-pending"] != runevents.RuntimeV2RecoveryTerminalDeliveryPending {
+		t.Fatalf("recovery classes = %+v", classes)
+	}
+}
+
 func sendRunTestCommand[Command any](ctx context.Context, rawHub magicevent.Hub, topic string, command Command) (runevents.RunCommandResult, error) {
 	ev := magicevent.NewEventWithContext(topic, "run/module_test", runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	result := rawHub.Send(ev)

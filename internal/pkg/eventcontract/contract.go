@@ -1,5 +1,7 @@
 package eventcontract
 
+import "strings"
+
 type CommandClass string
 
 const (
@@ -25,6 +27,101 @@ type Contract struct {
 	Owner        string
 	CommandClass CommandClass
 	LanePolicy   LanePolicy
+}
+
+// LaneScope identifies the authority object that a command lane serializes.
+// It lives with the lane policy contract so topic packages can bind their own
+// events without importing the repository-wide event catalog.
+type LaneScope struct {
+	SubjectType string
+	SubjectID   string
+	WorkspaceID string
+	RunID       string
+	StepID      string
+}
+
+func TopicLaneKey(topic string) string {
+	topic = strings.TrimSpace(topic)
+	if topic == "" {
+		return "topic/unknown"
+	}
+	return "topic/" + topic
+}
+
+func QueryLaneKey(topic string, scope LaneScope) string {
+	topicPart := strings.Trim(strings.TrimSpace(topic), "/")
+	if topicPart == "" {
+		topicPart = "unknown"
+	}
+	workspaceID := strings.TrimSpace(scope.WorkspaceID)
+	if runID := strings.TrimSpace(scope.RunID); runID != "" {
+		if workspaceID != "" {
+			return "query/" + topicPart + "/workspace/" + workspaceID + "/run/" + runID
+		}
+		return "query/" + topicPart + "/run/" + runID
+	}
+	if stepID := strings.TrimSpace(scope.StepID); stepID != "" {
+		if workspaceID != "" {
+			return "query/" + topicPart + "/workspace/" + workspaceID + "/step/" + stepID
+		}
+		return "query/" + topicPart + "/step/" + stepID
+	}
+	if workspaceID != "" {
+		return "query/" + topicPart + "/workspace/" + workspaceID
+	}
+	if subjectID := strings.TrimSpace(scope.SubjectID); subjectID != "" {
+		return "query/" + topicPart + "/subject/" + subjectID
+	}
+	return "query/" + topicPart
+}
+
+func StateLaneKey(owner string, scope LaneScope) string {
+	owner = lanePart(owner, "owner")
+	workspaceID := strings.TrimSpace(scope.WorkspaceID)
+	switch owner {
+	case "run":
+		if runID := strings.TrimSpace(scope.RunID); runID != "" {
+			if workspaceID != "" {
+				return "state/run/" + workspaceID + "/" + runID
+			}
+			return "state/run/" + runID
+		}
+	case "orchestrator":
+		if runID := strings.TrimSpace(scope.RunID); runID != "" {
+			if workspaceID != "" {
+				return "state/orchestrator/workspace/" + workspaceID + "/run/" + runID
+			}
+			return "state/orchestrator/run/" + runID
+		}
+	case "workspace":
+		if workspaceID != "" {
+			return "state/workspace/" + workspaceID
+		}
+	}
+	if subjectID := strings.TrimSpace(scope.SubjectID); subjectID != "" {
+		if workspaceID != "" {
+			return "state/" + owner + "/workspace/" + workspaceID + "/subject/" + subjectID
+		}
+		return "state/" + owner + "/" + subjectID
+	}
+	if runID := strings.TrimSpace(scope.RunID); runID != "" {
+		if workspaceID != "" {
+			return "state/" + owner + "/workspace/" + workspaceID + "/run/" + runID
+		}
+		return "state/" + owner + "/run/" + runID
+	}
+	if workspaceID != "" {
+		return "state/" + owner + "/workspace/" + workspaceID
+	}
+	return "state/" + owner
+}
+
+func lanePart(value string, fallback string) string {
+	value = strings.Trim(strings.TrimSpace(value), "/")
+	if value == "" {
+		return fallback
+	}
+	return strings.ReplaceAll(value, "/", "-")
 }
 
 type MessageContract struct {

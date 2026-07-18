@@ -106,6 +106,43 @@ func TestFileModuleExecutesConcreteFileEditEventAndWritesState(t *testing.T) {
 	}
 }
 
+func TestFileModuleExecutesConcreteFileWriteEventAndWritesState(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	module := New()
+	if err := module.Configure(Dependencies{EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+	workspace := t.TempDir()
+	transaction := runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1", RequiredOutputHash: "required-output-1"}
+	result := hub.Send(magicevent.NewEventWithContext(
+		orchestratorevents.TopicOrchestratorExecuteFileWriteOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
+		orchestratorevents.ExecuteFileWriteOperationCommand{
+			WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1", Transaction: transaction,
+			OperationID: "write-1", TargetRefs: []string{"README.md"}, EvidenceKind: runtimecontract.EvidenceKindStateChange,
+			WorkspaceDeliverableDirectory: workspace,
+			Data:                          orchestratorevents.FileWriteOperationData{TargetRef: "README.md", Content: "durable\n", ContentPresent: true},
+		},
+	))
+	data, magicErr := result.Get()
+	if magicErr != nil {
+		t.Fatal(magicErr)
+	}
+	response := data.(orchestratorevents.ExecuteFileWriteOperationResult)
+	if response.Status != runtimecontract.RuntimeOperationExecutionStatusAccepted || response.Evidence.ContentHash == "" {
+		t.Fatalf("file/write response = %+v", response)
+	}
+	content, err := os.ReadFile(filepath.Join(workspace, "README.md"))
+	if err != nil || string(content) != "durable\n" {
+		t.Fatalf("file/write content = %q err=%v", string(content), err)
+	}
+}
+
 func TestFileModuleExecutesConcreteInspectionAndPreviewEvents(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)

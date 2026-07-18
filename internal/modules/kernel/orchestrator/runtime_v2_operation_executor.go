@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
@@ -34,6 +35,8 @@ func (e eventRuntimeV2OperationExecutor) ExecuteRuntimeOperation(ctx context.Con
 		return e.executeFileRead(ctx, request, workspace.DeliverableDirectory, workspace.InternalDirectory)
 	case runtimecontract.StepKindFileEdit:
 		return e.executeFileEdit(ctx, request, workspace.DeliverableDirectory, workspace.InternalDirectory)
+	case runtimecontract.StepKindFileWrite:
+		return e.executeFileWrite(ctx, request, workspace.DeliverableDirectory, workspace.InternalDirectory)
 	case runtimecontract.RuntimeBlockKindPatchApply:
 		return e.executePatchApply(ctx, request, workspace.DeliverableDirectory, workspace.InternalDirectory)
 	case runtimecontract.RuntimeBlockKindPatchPreview:
@@ -58,6 +61,7 @@ func (e eventRuntimeV2OperationExecutor) executeFileList(ctx context.Context, re
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
 	command := orchestratorevents.ExecuteFileListOperationCommand{
+		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
 		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
@@ -69,7 +73,7 @@ func (e eventRuntimeV2OperationExecutor) executeFileList(ctx context.Context, re
 	if err != nil {
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence), nil
+	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt), nil
 }
 
 func (e eventRuntimeV2OperationExecutor) executeFileRead(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtimev2.RuntimeOperationExecutionResult, error) {
@@ -78,6 +82,7 @@ func (e eventRuntimeV2OperationExecutor) executeFileRead(ctx context.Context, re
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
 	command := orchestratorevents.ExecuteFileReadOperationCommand{
+		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
 		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
@@ -89,7 +94,7 @@ func (e eventRuntimeV2OperationExecutor) executeFileRead(ctx context.Context, re
 	if err != nil {
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence), nil
+	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt), nil
 }
 
 func (e eventRuntimeV2OperationExecutor) executeSSH(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtimev2.RuntimeOperationExecutionResult, error) {
@@ -98,6 +103,7 @@ func (e eventRuntimeV2OperationExecutor) executeSSH(ctx context.Context, request
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
 	command := orchestratorevents.ExecuteSSHOperationCommand{
+		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
 		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
@@ -109,7 +115,7 @@ func (e eventRuntimeV2OperationExecutor) executeSSH(ctx context.Context, request
 	if err != nil {
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence), nil
+	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt), nil
 }
 
 func (e eventRuntimeV2OperationExecutor) executeWeb(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtimev2.RuntimeOperationExecutionResult, error) {
@@ -118,6 +124,7 @@ func (e eventRuntimeV2OperationExecutor) executeWeb(ctx context.Context, request
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
 	command := orchestratorevents.ExecuteWebOperationCommand{
+		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID, OperationKind: request.Operation.Kind,
 		CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
@@ -130,7 +137,29 @@ func (e eventRuntimeV2OperationExecutor) executeWeb(ctx context.Context, request
 	if err != nil {
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence), nil
+	ret := runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt)
+	// RVC-R11: pre-effect approval must surface as governance, not execution repair.
+	if response.Data.ApprovalNeeded || (response.Failure != nil && strings.Contains(strings.ToLower(response.Failure.Code+response.Failure.Message), "approval")) {
+		subject := firstNonEmptyString(response.Data.URL, response.Data.Query, request.Operation.Kind)
+		ret.Governance = &runtimecontract.RuntimeGovernanceRequirement{
+			Kind: runtimecontract.GovernanceApproval, SubjectRef: subject,
+			Reason:          firstNonEmptyString(response.Data.FailureMessage, "web operation requires approval before side effects"),
+			RequestedAction: request.Operation.Kind, RiskLevel: "external",
+		}
+		// Clear ordinary rejected failure so executor path does not treat as execution_rejected.
+		ret.Failure = nil
+		ret.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
+	}
+	return ret, nil
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func (e eventRuntimeV2OperationExecutor) executeMCP(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtimev2.RuntimeOperationExecutionResult, error) {
@@ -139,6 +168,7 @@ func (e eventRuntimeV2OperationExecutor) executeMCP(ctx context.Context, request
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
 	command := orchestratorevents.ExecuteMCPOperationCommand{
+		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID, OperationKind: request.Operation.Kind,
 		CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
@@ -151,7 +181,7 @@ func (e eventRuntimeV2OperationExecutor) executeMCP(ctx context.Context, request
 	if err != nil {
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence), nil
+	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt), nil
 }
 
 func (e eventRuntimeV2OperationExecutor) executeGit(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtimev2.RuntimeOperationExecutionResult, error) {
@@ -160,6 +190,7 @@ func (e eventRuntimeV2OperationExecutor) executeGit(ctx context.Context, request
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
 	command := orchestratorevents.ExecuteGitOperationCommand{
+		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID, OperationKind: request.Operation.Kind,
 		CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
@@ -172,7 +203,7 @@ func (e eventRuntimeV2OperationExecutor) executeGit(ctx context.Context, request
 	if err != nil {
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence), nil
+	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt), nil
 }
 
 func (e eventRuntimeV2OperationExecutor) executeShell(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtimev2.RuntimeOperationExecutionResult, error) {
@@ -181,6 +212,7 @@ func (e eventRuntimeV2OperationExecutor) executeShell(ctx context.Context, reque
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
 	command := orchestratorevents.ExecuteShellOperationCommand{
+		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
 		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
@@ -192,7 +224,7 @@ func (e eventRuntimeV2OperationExecutor) executeShell(ctx context.Context, reque
 	if err != nil {
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence), nil
+	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt), nil
 }
 
 func (e eventRuntimeV2OperationExecutor) executeFileEdit(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtimev2.RuntimeOperationExecutionResult, error) {
@@ -201,6 +233,7 @@ func (e eventRuntimeV2OperationExecutor) executeFileEdit(ctx context.Context, re
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
 	command := orchestratorevents.ExecuteFileEditOperationCommand{
+		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
 		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
@@ -212,7 +245,28 @@ func (e eventRuntimeV2OperationExecutor) executeFileEdit(ctx context.Context, re
 	if err != nil {
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence), nil
+	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt), nil
+}
+
+func (e eventRuntimeV2OperationExecutor) executeFileWrite(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtimev2.RuntimeOperationExecutionResult, error) {
+	data, err := orchestratorevents.FileWriteOperationDataFromRuntimeOperation(request.Operation)
+	if err != nil {
+		return runtimev2.RuntimeOperationExecutionResult{}, err
+	}
+	command := orchestratorevents.ExecuteFileWriteOperationCommand{
+		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
+		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
+		OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
+		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
+		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
+		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
+	}
+	result := e.hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorExecuteFileWriteOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
+	response, err := fileWriteOperationResponse(result)
+	if err != nil {
+		return runtimev2.RuntimeOperationExecutionResult{}, err
+	}
+	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt), nil
 }
 
 func (e eventRuntimeV2OperationExecutor) executePatchApply(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtimev2.RuntimeOperationExecutionResult, error) {
@@ -221,6 +275,7 @@ func (e eventRuntimeV2OperationExecutor) executePatchApply(ctx context.Context, 
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
 	command := orchestratorevents.ExecutePatchApplyOperationCommand{
+		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
 		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
@@ -232,7 +287,19 @@ func (e eventRuntimeV2OperationExecutor) executePatchApply(ctx context.Context, 
 	if err != nil {
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence), nil
+	ret := runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt)
+	// RVC-R11: owner blocked apply before side effects for approval.
+	if response.Failure != nil && strings.Contains(strings.ToLower(response.Failure.Code+" "+response.Failure.Message), "approval_required") {
+		subject := firstNonEmptyString(strings.Join(request.Operation.TargetRefs, ","), request.Operation.Kind)
+		ret.Governance = &runtimecontract.RuntimeGovernanceRequirement{
+			Kind: runtimecontract.GovernanceApproval, SubjectRef: subject,
+			Reason:          firstNonEmptyString(response.Failure.Message, "patch apply requires approval before side effects"),
+			RequestedAction: request.Operation.Kind, RiskLevel: "high",
+		}
+		ret.Failure = nil
+		ret.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
+	}
+	return ret, nil
 }
 
 func (e eventRuntimeV2OperationExecutor) executePatchPreview(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtimev2.RuntimeOperationExecutionResult, error) {
@@ -241,6 +308,7 @@ func (e eventRuntimeV2OperationExecutor) executePatchPreview(ctx context.Context
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
 	command := orchestratorevents.ExecutePatchPreviewOperationCommand{
+		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
 		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
@@ -252,14 +320,31 @@ func (e eventRuntimeV2OperationExecutor) executePatchPreview(ctx context.Context
 	if err != nil {
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence), nil
+	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt), nil
 }
 
-func runtimeOperationExecutionResult(eventID string, operationID string, evidenceKind string, status runtimecontract.RuntimeOperationExecutionStatus, sourceRef string, failure *runtimecontract.FailureFact, evidence runtimecontract.RuntimeOperationEvidence) runtimev2.RuntimeOperationExecutionResult {
-	return runtimev2.RuntimeOperationExecutionResult{
+func runtimeOperationExecutionResult(eventID string, operationID string, evidenceKind string, status runtimecontract.RuntimeOperationExecutionStatus, sourceRef string, failure *runtimecontract.FailureFact, evidence runtimecontract.RuntimeOperationEvidence, receipt runtimecontract.RuntimeOperationReceipt) runtimev2.RuntimeOperationExecutionResult {
+	ret := runtimev2.RuntimeOperationExecutionResult{
 		EventID: eventID, OperationID: operationID, EvidenceKind: evidenceKind,
-		Status: status, SourceRef: sourceRef, Failure: failure, Evidence: evidence,
+		Status: status, SourceRef: sourceRef, Failure: failure, Evidence: evidence, Receipt: receipt,
 	}
+	if receipt.Governance != nil {
+		governance := receipt.Governance.Clone()
+		ret.Governance = &governance
+	}
+	return ret
+}
+
+func runtimeOperationExecutionEnvelope(execution runtimecontract.RuntimeOperationExecutionRecord, grant *runtimecontract.RuntimeOperationGovernanceGrant) orchestratorevents.RuntimeOperationExecutionEnvelope {
+	execution = execution.Normalized()
+	ret := orchestratorevents.RuntimeOperationExecutionEnvelope{
+		ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, ExpectedEffectScope: execution.ExpectedEffectScope,
+	}
+	if grant != nil {
+		value := grant.Normalized()
+		ret.GovernanceGrant = &value
+	}
+	return ret
 }
 
 func (m *Module) executeRuntimeV2ActiveDispatch(ctx context.Context, aggregate runtimev2.RuntimeAggregate) (runtimev2.RuntimeAggregate, error) {

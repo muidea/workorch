@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func MapAcceptanceProjection(run readmodelcore.Run) readmodelcore.AcceptanceProjection {
@@ -62,9 +63,59 @@ func MapAcceptanceProjection(run readmodelcore.Run) readmodelcore.AcceptanceProj
 		MaxValidationOnlyRetries:  facts.ConvergencePolicy.MaxValidationOnlyRetriesPerFocus,
 		RepairAttempts:            facts.Repair.RepairAttempts, ValidationOnlyRetries: facts.Repair.ValidationOnlyRetries,
 		RepeatedFailureSignatures: len(facts.Repair.SignatureCounts), NoCoverageDeltaRounds: facts.Repair.NoProgressCount,
+		MaxProviderTransportAttempts: facts.RecoveryPolicy.MaxProviderTransportAttempts,
+		ProviderTransportAttempts:    facts.Recovery.ProviderTransportAttempts,
+		MaxOperationRecoveryAttempts: facts.RecoveryPolicy.MaxOperationRecoveryAttempts,
+		OperationRecoveryAttempts:    facts.Recovery.OperationRecoveryAttempts,
+		MaxCASReloadAttempts:         facts.RecoveryPolicy.MaxCASReloadAttempts, CASReloadAttempts: facts.Recovery.CASReloadAttempts,
+		MaxTerminalDeliveryAttempts: facts.RecoveryPolicy.MaxTerminalDeliveryAttempts,
+		TerminalDeliveryAttempts:    facts.Recovery.TerminalDeliveryAttempts,
 	}
+	if facts.RepairDirective != nil {
+		directive := facts.RepairDirective.Normalized()
+		projection.RepairDirective = &readmodelcore.RuntimeRepairDirective{
+			ID: directive.ID, RequiredAction: string(directive.RequiredAction),
+			RequiredEffectScopes:  runtimecontract.RuntimeEffectScopesAsStrings(directive.RequiredEffectScopes),
+			RequiredEvidenceKinds: append([]string(nil), directive.RequiredEvidenceKinds...),
+			TargetRefs:            append([]string(nil), directive.TargetRefs...), RepairAttempt: directive.RepairAttempt,
+		}
+	}
+	projection.Operations = runtimeOperationStatuses(*run.RuntimeState)
 	projection.Summary = summarizeAcceptanceSlices(projection.Slices)
 	return projection
+}
+
+func runtimeOperationStatuses(state runtimecontract.RuntimeStateRecord) []readmodelcore.RuntimeOperationStatus {
+	dispatches := append([]runtimecontract.RuntimeDispatchRecord(nil), state.CompletedDispatches...)
+	if state.ActiveDispatch != nil {
+		dispatches = append(dispatches, state.ActiveDispatch.Clone())
+	}
+	ret := make([]readmodelcore.RuntimeOperationStatus, 0)
+	for _, dispatch := range dispatches {
+		for _, rawExecution := range dispatch.OperationExecutions {
+			execution := rawExecution.Normalized()
+			status := readmodelcore.RuntimeOperationStatus{
+				DispatchID: dispatch.ID, OperationID: execution.OperationID, ExecutionKey: execution.ExecutionKey, Fence: execution.Fence,
+				ExpectedEffectScope: string(execution.ExpectedEffectScope), ExecutionState: string(execution.State),
+				ReceiptRef: execution.OwnerReceiptRef, ReceiptHash: execution.OwnerReceiptHash,
+				OutcomeUnknown: execution.State == runtimecontract.OperationExecutionOutcomeUnknown,
+			}
+			if receipt, ok := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(state.OperationReceipts, execution.ExecutionKey, execution.Fence); ok {
+				status.ObservedEffectScope = string(receipt.ObservedEffectScope)
+				status.Outcome = string(receipt.Outcome)
+			}
+			for _, rawBinding := range state.OperationGovernanceBindings {
+				binding := rawBinding.Normalized()
+				if binding.ExecutionKey != execution.ExecutionKey || (binding.Fence != execution.Fence && (binding.Grant == nil || binding.Grant.ResumeFence != execution.Fence)) {
+					continue
+				}
+				status.GovernanceState = string(binding.State)
+				status.GovernanceTicketID = string(binding.TicketID)
+			}
+			ret = append(ret, status)
+		}
+	}
+	return ret
 }
 
 func MapWorkspaceAcceptanceProjection(snapshot readmodelcore.WorkspaceSnapshot) readmodelcore.AcceptanceProjection {

@@ -2,21 +2,25 @@ package workorchruntimecontract
 
 import "testing"
 
-func TestRuntimeCandidateAttemptScopeValidationSupportsLegacyRetryButRejectsNewDuplicate(t *testing.T) {
+func TestRuntimeCandidateAttemptScopeValidationRequiresExplicitContractAndRejectsDuplicate(t *testing.T) {
 	facts := testRuntimeFacts()
 	decision := validDecisionForState(ConvergenceStateNeedStateChange)
 	current := decision.AuthorityTransaction()
-	legacy := current
-	legacy.AuthoritySnapshotID = "legacy-resealed-snapshot"
-	legacy.Attempt = 7
+	resealed := current
+	resealed.AuthoritySnapshotID = "resealed-snapshot"
+	resealed.Attempt = 7
 	contractID := StableAuthorityContractID(facts.WorkspaceID, facts.RunID, current)
 	failure := &RuntimeCandidateFailure{Class: RuntimeCandidateFailureClassContract, Reason: "invalid candidate"}
 	values := []RuntimeCandidateAttemptRecord{
-		{Transaction: legacy, Attempt: 0, StablePrefixHash: "stable-prefix", State: RuntimeCandidateAttemptStateFailed, Failure: failure},
+		{Transaction: resealed, Attempt: 0, StablePrefixHash: "stable-prefix", State: RuntimeCandidateAttemptStateFailed, Failure: failure},
 		{AuthorityContractID: contractID, Transaction: current, Attempt: 1, StablePrefixHash: "stable-prefix", State: RuntimeCandidateAttemptStatePending},
 	}
+	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, values); err == nil {
+		t.Fatal("candidate attempt without authority contract id was accepted")
+	}
+	values[0].AuthorityContractID = contractID
 	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, values); err != nil {
-		t.Fatalf("legacy same-contract retry rejected: %v", err)
+		t.Fatalf("explicit same-contract retry rejected: %v", err)
 	}
 	duplicate := current
 	duplicate.AuthoritySnapshotID = "duplicate-snapshot"
@@ -30,21 +34,22 @@ func TestRuntimeCandidateAttemptScopeValidationSupportsLegacyRetryButRejectsNewD
 	}
 }
 
-func TestRuntimeCandidateAttemptScopeValidationKeepsLegacyRunawayLoadable(t *testing.T) {
+func TestRuntimeCandidateAttemptScopeValidationRejectsRunawayAttempts(t *testing.T) {
 	facts := testRuntimeFacts()
 	transaction := validDecisionForState(ConvergenceStateNeedStateChange).AuthorityTransaction()
 	failure := &RuntimeCandidateFailure{Class: RuntimeCandidateFailureClassContract, Reason: "invalid candidate"}
 	values := make([]RuntimeCandidateAttemptRecord, 0, 3)
+	contractID := StableAuthorityContractID(facts.WorkspaceID, facts.RunID, transaction)
 	for attempt := 0; attempt < 3; attempt++ {
-		legacy := transaction
-		legacy.AuthoritySnapshotID = "legacy-snapshot-" + string(rune('a'+attempt))
-		legacy.Attempt = attempt
+		resealed := transaction
+		resealed.AuthoritySnapshotID = "resealed-snapshot-" + string(rune('a'+attempt))
+		resealed.Attempt = attempt
 		values = append(values, RuntimeCandidateAttemptRecord{
-			Transaction: legacy, Attempt: 0, StablePrefixHash: "stable-prefix",
+			AuthorityContractID: contractID, Transaction: resealed, Attempt: 0, StablePrefixHash: "stable-prefix",
 			State: RuntimeCandidateAttemptStateFailed, Failure: failure,
 		})
 	}
-	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, values); err != nil {
-		t.Fatalf("legacy runaway must remain loadable for formal exhaustion: %v", err)
+	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, values); err == nil {
+		t.Fatal("runaway candidate attempts were accepted")
 	}
 }

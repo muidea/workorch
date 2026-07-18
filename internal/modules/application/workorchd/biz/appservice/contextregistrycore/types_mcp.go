@@ -33,24 +33,26 @@ type MCPPrompt struct {
 }
 
 type MCPCapability struct {
-	ID             string         `json:"id"`
-	ServerID       string         `json:"serverId"`
-	Kind           string         `json:"kind"`
-	Name           string         `json:"name"`
-	DisplayName    string         `json:"displayName"`
-	Description    string         `json:"description,omitempty"`
-	Category       string         `json:"category,omitempty"`
-	Tags           []string       `json:"tags,omitempty"`
-	UsageHint      string         `json:"usageHint,omitempty"`
-	InputSummary   string         `json:"inputSummary,omitempty"`
-	OutputSummary  string         `json:"outputSummary,omitempty"`
-	StageHints     []string       `json:"stageHints,omitempty"`
-	RiskLevel      string         `json:"riskLevel,omitempty"`
-	Schema         map[string]any `json:"schema,omitempty"`
-	URI            string         `json:"uri,omitempty"`
-	Enabled        bool           `json:"enabled"`
-	ApprovalPolicy string         `json:"approvalPolicy,omitempty"`
-	Status         string         `json:"status,omitempty"`
+	ID               string         `json:"id"`
+	ServerID         string         `json:"serverId"`
+	Kind             string         `json:"kind"`
+	Name             string         `json:"name"`
+	DisplayName      string         `json:"displayName"`
+	Description      string         `json:"description,omitempty"`
+	Category         string         `json:"category,omitempty"`
+	Tags             []string       `json:"tags,omitempty"`
+	UsageHint        string         `json:"usageHint,omitempty"`
+	InputSummary     string         `json:"inputSummary,omitempty"`
+	OutputSummary    string         `json:"outputSummary,omitempty"`
+	StageHints       []string       `json:"stageHints,omitempty"`
+	RiskLevel        string         `json:"riskLevel,omitempty"`
+	EffectScope      string         `json:"effectScope,omitempty"`
+	IdempotencyClass string         `json:"idempotencyClass,omitempty"`
+	Schema           map[string]any `json:"schema,omitempty"`
+	URI              string         `json:"uri,omitempty"`
+	Enabled          bool           `json:"enabled"`
+	ApprovalPolicy   string         `json:"approvalPolicy,omitempty"`
+	Status           string         `json:"status,omitempty"`
 }
 
 type MCPCapabilityQuery struct {

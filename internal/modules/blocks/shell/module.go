@@ -81,6 +81,14 @@ func (m *Module) handleShellOperation(event magicevent.Event, result magicevent.
 		setCapabilityError(result, err)
 		return
 	}
+	if receipt, found, err := orchestratorevents.QueryPersistedRuntimeOperationReceipt(event.Context(), m.eventHub, ModuleID, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution); err != nil {
+		setCapabilityError(result, err)
+		return
+	} else if found {
+		status, evidence, failure, _ := orchestratorevents.RuntimeOperationResultFromReceipt(receipt)
+		result.Set(orchestratorevents.ExecuteShellOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, Status: status, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: evidence, Failure: failure}, nil)
+		return
+	}
 	operationResult, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), shellbiz.RuntimeCommandRequest{
 		WorkspaceID: command.WorkspaceID, RunID: command.RunID,
 		StepID:                        common.StepID(command.DispatchID + "/" + command.OperationID),
@@ -121,6 +129,21 @@ func (m *Module) handleShellOperation(event magicevent.Event, result magicevent.
 		response.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
 		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindShellCommand, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
 	}
+	observation := orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectNone}
+	if command.Data.StateChanging {
+		observation.ObservedEffectScope = runtimecontract.RuntimeEffectUnknown
+		if response.Status == runtimecontract.RuntimeOperationExecutionStatusAccepted {
+			observation.ObservedEffectScope = runtimecontract.RuntimeEffectWorkspaceDurable
+			observation.Changed = true
+		}
+	}
+	receipt := orchestratorevents.NewRuntimeOperationReceiptWithObservation(command.Execution, command.OperationID, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, nil, observation)
+	committed, err := orchestratorevents.CommitPersistedRuntimeOperationReceipt(event.Context(), m.eventHub, ModuleID, command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	response.Receipt = committed
 	result.Set(response, nil)
 }
 

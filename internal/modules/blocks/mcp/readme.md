@@ -18,3 +18,4 @@
 - 参数和输出必须有界，并受 runtime policy 与 approval 准入约束。
 - credential 和 secret 只能使用安全引用，不得进入事件或日志。
 - MCP 输出只作为 context/evidence candidate，不能直接创建 accepted Result。
+- 对 `mcp/tool_call`，Orchestrator 仅依据 activation 已密封的 exact capability `effectScope` 判定 action 相容性；本 block 不得以 risk label 或 tool 名称补推断为 read-only/session/durable。

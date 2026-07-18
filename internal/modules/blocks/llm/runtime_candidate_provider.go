@@ -3,10 +3,12 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -46,6 +48,10 @@ type runtimeCandidateContextProjection struct {
 	DefinitionRevision       string                                          `json:"definitionRevision"`
 	EvidenceRevision         string                                          `json:"evidenceRevision"`
 	Focus                    runtimecontract.CoverageFocus                   `json:"focus"`
+	RequiredAction           runtimecontract.RuntimeAction                   `json:"requiredAction"`
+	RequiredEffectScopes     []runtimecontract.RuntimeEffectScope            `json:"requiredEffectScopes,omitempty"`
+	RequiredEvidenceKinds    []string                                        `json:"requiredEvidenceKinds,omitempty"`
+	RepairDirective          *runtimecontract.RuntimeRepairDirective         `json:"repairDirective,omitempty"`
 	MissingEvidenceKinds     []string                                        `json:"missingEvidenceKinds,omitempty"`
 	AllowedEvidenceRefs      []string                                        `json:"allowedAcceptedEvidenceRefs,omitempty"`
 	Evidence                 runtimecontract.EvidenceLedger                  `json:"evidence"`
@@ -150,13 +156,14 @@ func (m *Module) GenerateCandidate(ctx context.Context, request llmmodels.Runtim
 		if budgetSnapshot != nil {
 			budgetSnapshot.ProviderSubmitted = submitted
 		}
-		audit := sealedAuditFromRequest(request, requestID, budgetSnapshot, startedAt, completedAt, submitted, llmmodels.RuntimeCandidateStatusFailed, "provider", len(providerRequest.Schema))
+		failureClass := runtimeCandidateProviderFailureClass(err, submitted)
+		audit := sealedAuditFromRequest(request, requestID, budgetSnapshot, startedAt, completedAt, submitted, llmmodels.RuntimeCandidateStatusFailed, string(failureClass), len(providerRequest.Schema))
 		if budgetSnapshot != nil {
 			audit.RequestBytes = budgetSnapshot.ActualBytes
 		}
 		return llmmodels.RuntimeCandidateGenerationResult{
 			RequestID: requestID, Audit: audit, Status: llmmodels.RuntimeCandidateStatusFailed,
-			FailureClass: "provider", FailureReason: err.Error(),
+			FailureClass: string(failureClass), FailureReason: err.Error(),
 		}, err
 	}
 	if budgetSnapshot != nil {
@@ -182,6 +189,31 @@ func (m *Module) GenerateCandidate(ctx context.Context, request llmmodels.Runtim
 		Audit:     audit,
 		Status:    llmmodels.RuntimeCandidateStatusCompleted,
 	}, nil
+}
+
+func runtimeCandidateProviderFailureClass(err error, submitted bool) runtimecontract.RuntimeCandidateFailureClass {
+	if err == nil {
+		return runtimecontract.RuntimeCandidateFailureClassProviderTransient
+	}
+	var statusErr *llmbiz.ProviderHTTPStatusError
+	if errors.As(err, &statusErr) {
+		switch {
+		case statusErr.StatusCode == 401 || statusErr.StatusCode == 403:
+			return runtimecontract.RuntimeCandidateFailureClassProviderAuthentication
+		case statusErr.StatusCode == 408 || statusErr.StatusCode == 409 || statusErr.StatusCode == 425 || statusErr.StatusCode == 429 || statusErr.StatusCode >= 500:
+			return runtimecontract.RuntimeCandidateFailureClassProviderTransient
+		default:
+			return runtimecontract.RuntimeCandidateFailureClassProviderConfiguration
+		}
+	}
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "authentication_failed") || strings.Contains(message, "invalid api key") || strings.Contains(message, "unauthorized") || strings.Contains(message, "forbidden") {
+		return runtimecontract.RuntimeCandidateFailureClassProviderAuthentication
+	}
+	if !submitted || strings.Contains(message, "configuration") || strings.Contains(message, "provider client is not configured") || strings.Contains(message, "model not found") {
+		return runtimecontract.RuntimeCandidateFailureClassProviderConfiguration
+	}
+	return runtimecontract.RuntimeCandidateFailureClassProviderTransient
 }
 
 func newProviderRequestID(request llmmodels.RuntimeCandidateRequest) string {
@@ -359,7 +391,7 @@ func runtimeV2ProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmod
 		WorkspaceID: string(candidateContext.WorkspaceID), RunID: string(candidateContext.RunID),
 		StepID: request.Transaction.AuthoritySnapshotID, Kind: "runtime_v2_candidate",
 		Schema: runtimeV2CandidateSchema(request.Decision.Action),
-		PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.runtime_candidate_prompt.v1", Sections: []llmmodels.PromptSection{
+		PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.runtime_candidate_prompt.v2", Sections: []llmmodels.PromptSection{
 			{ID: "C0.runtime-candidate-contract", Name: "Runtime candidate contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, Content: runtimeV2CandidateContractCatalog()},
 			{ID: "C1.goal-dod", Name: "Goal and DoD", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 1, DefinitionRevision: definitionContext.Revision, Content: string(definitionJSON)},
 			{ID: "C2.capability-contract", Name: "Capability contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 2, Content: string(capabilityJSON)},
@@ -403,12 +435,16 @@ func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidat
 		EvidenceRevision: context.EvidenceRevision, Focus: context.Focus, RemainingFocuses: context.RemainingFocuses,
 		Evidence: context.Evidence, Assessments: context.Assessments, Failure: context.Failure,
 		Capabilities: context.Capabilities, Resources: context.Resources, Activation: context.Activation,
+		RepairDirective: context.RepairDirective,
 	}.Normalized()
 	return runtimeCandidateContextProjection{
 		WorkspaceID: context.WorkspaceID, RunID: context.RunID,
 		DefinitionRevision: context.DefinitionRevision, EvidenceRevision: context.EvidenceRevision,
-		Focus: context.Focus, MissingEvidenceKinds: runtimecontract.MissingRequiredEvidenceKinds(facts),
-		AllowedEvidenceRefs: runtimecontract.AcceptedEvidenceRefsForFocus(facts), Evidence: context.Evidence,
+		Focus:          context.Focus,
+		RequiredAction: context.RequiredAction, RequiredEffectScopes: append([]runtimecontract.RuntimeEffectScope(nil), context.RequiredEffectScopes...),
+		RequiredEvidenceKinds: append([]string(nil), context.RequiredEvidenceKinds...), RepairDirective: context.RepairDirective,
+		MissingEvidenceKinds: runtimecontract.MissingRequiredEvidenceKinds(facts),
+		AllowedEvidenceRefs:  runtimecontract.AcceptedEvidenceRefsForFocus(facts), Evidence: context.Evidence,
 		Assessments: context.Assessments, Failure: context.Failure, RepairHints: runtimecontract.DeriveRuntimeRepairHints(facts),
 		AdmissibleOperationKinds: context.AdmissibleOperationKinds, RejectedOperationShapes: context.RejectedOperationShapes,
 		Capabilities: context.Capabilities,
@@ -418,8 +454,9 @@ func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidat
 		},
 		Activation: runtimeCandidateActivationProjection{
 			DialogLanguage: activation.DialogLanguage, CurrentStage: stage, Soul: runtimeV2CandidateSoul(activation, stage),
-			Skills: activation.Skills, MCPServerIDs: activation.MCPServerIDs, MCPCapabilities: activation.MCPCapabilities,
-			Memories: activation.Memories, EvidencePolicies: activation.EvidencePolicies, Continuation: activation.Continuation,
+			Skills: activation.Skills, MCPServerIDs: activation.MCPServerIDs,
+			MCPCapabilities: runtimecontract.RuntimeMCPCapabilitiesForAction(activation.MCPCapabilities, action),
+			Memories:        activation.Memories, EvidencePolicies: activation.EvidencePolicies, Continuation: activation.Continuation,
 		},
 	}
 }
@@ -454,10 +491,12 @@ func runtimeV2CandidateSoul(activation runtimecontract.RuntimeActivationContext,
 
 func runtimeV2CandidateSchema(action runtimecontract.RuntimeAction) string {
 	switch action {
-	case runtimecontract.RuntimeActionProduceStateChange, runtimecontract.RuntimeActionProduceValidation:
-		return `{"type":"object","additionalProperties":false,"required":["operations"],"properties":{"operations":{"type":"array","minItems":1,"items":{"type":"object","additionalProperties":false,"required":["id","kind","coverageWorkItemIds"],"properties":{"id":{"type":"string"},"kind":{"type":"string"},"dependsOn":{"type":"array","items":{"type":"string"}},"coverageWorkItemIds":{"type":"array","minItems":1,"items":{"type":"string"}},"targetRefs":{"type":"array","items":{"type":"string"}},"parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["name"],"properties":{"name":{"type":"string"},"string":{"type":"string"},"integer":{"type":"integer"},"boolean":{"type":"boolean"},"stringList":{"type":"array","items":{"type":"string"}}}}}}}}}}`
+	case runtimecontract.RuntimeActionProduceStateChange:
+		return runtimeV2OperationCandidateSchema("workorch.runtime_candidate.state_change.v2", "Runtime V2 durable state-change candidate", "At least one operation must have a sealed durable effect compatible with requiredEffectScopes.")
+	case runtimecontract.RuntimeActionProduceValidation:
+		return runtimeV2OperationCandidateSchema("workorch.runtime_candidate.validation.v2", "Runtime V2 non-durable validation candidate", "Every operation must have a sealed none or explicitly accepted ephemeral_session effect; durable and unknown effects are forbidden.")
 	case runtimecontract.RuntimeActionProduceAssessment:
-		return `{"type":"object","additionalProperties":false,"required":["focusId","coverageWorkItemIds","disposition","summary"],"properties":{"focusId":{"type":"string"},"sliceId":{"type":"string"},"coverageWorkItemIds":{"type":"array","minItems":1,"items":{"type":"string"}},"satisfied":{"type":"boolean"},"disposition":{"type":"string","enum":["satisfied","repairable_gap","governance_required","terminal_rejection"]},"items":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["coverageWorkItemId","satisfied"],"properties":{"coverageWorkItemId":{"type":"string"},"satisfied":{"type":"boolean"},"reason":{"type":"string"},"evidenceRefs":{"type":"array","items":{"type":"string"}}}}},"gap":{"type":"object","additionalProperties":false,"properties":{"coverageWorkItemIds":{"type":"array","items":{"type":"string"}},"missingEvidenceKinds":{"type":"array","items":{"type":"string"}},"targetRefs":{"type":"array","items":{"type":"string"}},"evidenceRefs":{"type":"array","items":{"type":"string"}},"reason":{"type":"string"},"failureClass":{"type":"string"},"failureCode":{"type":"string"},"failureSignature":{"type":"string"}}},"summary":{"type":"string"},"evidenceRefs":{"type":"array","items":{"type":"string"}},"artifactRefs":{"type":"array","items":{"type":"string"}}},"allOf":[{"if":{"properties":{"disposition":{"const":"satisfied"}},"required":["disposition"]},"then":{"required":["evidenceRefs"],"properties":{"evidenceRefs":{"type":"array","minItems":1,"items":{"type":"string"}}}}}]}`
+		return `{"type":"object","additionalProperties":false,"required":["focusId","coverageWorkItemIds","disposition","summary"],"properties":{"focusId":{"type":"string"},"sliceId":{"type":"string"},"coverageWorkItemIds":{"type":"array","minItems":1,"items":{"type":"string"}},"disposition":{"type":"string","enum":["satisfied","repairable_gap","governance_required","terminal_rejection"]},"items":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["coverageWorkItemId","satisfied"],"properties":{"coverageWorkItemId":{"type":"string"},"satisfied":{"type":"boolean"},"reason":{"type":"string"},"evidenceRefs":{"type":"array","items":{"type":"string"}}}}},"gap":{"type":"object","additionalProperties":false,"properties":{"coverageWorkItemIds":{"type":"array","items":{"type":"string"}},"missingEvidenceKinds":{"type":"array","items":{"type":"string"}},"targetRefs":{"type":"array","items":{"type":"string"}},"evidenceRefs":{"type":"array","items":{"type":"string"}},"reason":{"type":"string"},"failureClass":{"type":"string"},"failureCode":{"type":"string"},"failureSignature":{"type":"string"}}},"summary":{"type":"string"},"evidenceRefs":{"type":"array","items":{"type":"string"}},"artifactRefs":{"type":"array","items":{"type":"string"}}},"allOf":[{"if":{"properties":{"disposition":{"const":"satisfied"}},"required":["disposition"]},"then":{"required":["evidenceRefs"],"properties":{"evidenceRefs":{"type":"array","minItems":1,"items":{"type":"string"}}}}}]}`
 	case runtimecontract.RuntimeActionRequestGovernance:
 		return `{"type":"object","additionalProperties":false,"required":["externalDependency"],"properties":{"externalDependency":{"type":"object","additionalProperties":false,"required":["kind","reason"],"properties":{"kind":{"type":"string"},"subjectRef":{"type":"string"},"reason":{"type":"string"}}}}}`
 	default:
@@ -465,16 +504,53 @@ func runtimeV2CandidateSchema(action runtimecontract.RuntimeAction) string {
 	}
 }
 
+func runtimeV2OperationCandidateSchema(id, title, description string) string {
+	value := map[string]any{
+		"$id": id, "title": title, "description": description,
+		"type": "object", "additionalProperties": false, "required": []string{"operations"},
+		"properties": map[string]any{
+			"operations": map[string]any{
+				"type": "array", "minItems": 1,
+				"items": map[string]any{
+					"type": "object", "additionalProperties": false,
+					"required": []string{"id", "kind", "coverageWorkItemIds"},
+					"properties": map[string]any{
+						"id": map[string]any{"type": "string"}, "kind": map[string]any{"type": "string"},
+						"dependsOn":           map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						"coverageWorkItemIds": map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}},
+						"targetRefs":          map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						"parameters": map[string]any{"type": "array", "items": map[string]any{
+							"type": "object", "additionalProperties": false, "required": []string{"name"},
+							"properties": map[string]any{
+								"name": map[string]any{"type": "string"}, "string": map[string]any{"type": "string"},
+								"integer": map[string]any{"type": "integer"}, "boolean": map[string]any{"type": "boolean"},
+								"stringList": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+							},
+						}},
+					},
+				},
+			},
+		},
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	return string(encoded)
+}
+
 func runtimeV2CandidateContractCatalog() string {
 	return strings.Join([]string{
 		"Return exactly one JSON object for the requested Runtime V2 action. The JSON object itself is the candidate; never wrap it in another object.",
 		"The only legal top-level shapes are:",
-		"produce_state_change or produce_validation: " + runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceStateChange),
+		"produce_state_change: " + runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceStateChange),
+		"produce_validation: " + runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceValidation),
 		"produce_assessment: " + runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceAssessment),
 		"request_governance: " + runtimeV2CandidateSchema(runtimecontract.RuntimeActionRequestGovernance),
 		"Forbidden top-level fields include candidate, candidates, executionGraph, convergenceState, focus, authority, transaction, outputMode, result, and runtimeState.",
 		"Use the requested action, required output kinds, coverage work item IDs, and available capabilities from the current runtime authority. Do not invent or modify convergence state, focus, authority, transaction, or output mode. Do not use markdown fences or explanatory text.",
-		"When context.missingEvidenceKinds is present, produce only those missing evidence kinds.",
+		"context.requiredAction is the sole next-action authority. When context.repairDirective is present, obey its requiredAction, requiredEffectScopes, requiredEvidenceKinds, allowedOperationKinds, targetRefs, and rejectedOperationShapes.",
+		"context.missingEvidenceKinds is completion-audit information only and must never override context.requiredAction or context.repairDirective.",
 		"Use operationContracts for allowed parameters of each kind. Dynamic fields are only valid where the contract permits them.",
 		"When context.repairHints is present, follow those domain-neutral hints and do not repeat an active rejected operation shape.",
 		"When context.rejectedOperationShapes is present, every listed operation hash and exact structural operation is forbidden until later accepted evidence supersedes it. Choose an admissible kind and change kind, targets, or execution-semantic parameters.",

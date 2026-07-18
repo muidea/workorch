@@ -15,24 +15,26 @@ const CommandDestination = modulecommon.ModuleID
 type CreateServerCommand = mcpcontracts.CreateServerCommand
 type UpdateServerCommand = mcpcontracts.UpdateServerCommand
 type CreateCapabilityCommand struct {
-	ID             common.MCPCapabilityID
-	ServerID       common.MCPServerID
-	Kind           string
-	Name           string
-	DisplayName    string
-	Description    string
-	Category       string
-	Tags           []string
-	UsageHint      string
-	InputSummary   string
-	OutputSummary  string
-	StageHints     []string
-	RiskLevel      string
-	Schema         workorcheventpayload.Payload
-	URI            string
-	Enabled        bool
-	ApprovalPolicy string
-	Status         string
+	ID               common.MCPCapabilityID
+	ServerID         common.MCPServerID
+	Kind             string
+	Name             string
+	DisplayName      string
+	Description      string
+	Category         string
+	Tags             []string
+	UsageHint        string
+	InputSummary     string
+	OutputSummary    string
+	StageHints       []string
+	RiskLevel        string
+	EffectScope      string
+	IdempotencyClass string
+	Schema           workorcheventpayload.Payload
+	URI              string
+	Enabled          bool
+	ApprovalPolicy   string
+	Status           string
 }
 
 type UpdateCapabilityCommand = CreateCapabilityCommand

@@ -15,7 +15,7 @@ Last Updated: 2026-07-17
 | 主题 | 状态 |
 | --- | --- |
 | Runtime V2 生产主链 | **代码已收口**（Start/Resume → `DriveRuntimeV2` only） |
-| Runtime V2 正向收敛闭环 | **code-closed / deployed verification pending**（见 [remediation](runtime-v2-positive-convergence-remediation.md)） |
+| Runtime V2 正向收敛闭环 | **active — code closure verified, deployed Live pending**；RVC-R5～R15 已通过 file-backed/full gates，待 RVC-R16 dual-workspace Live（见 [remediation](runtime-v2-positive-convergence-remediation.md)） |
 | V1 StagePacket / NextAction / graph dispatch 主链 | **已删除** |
 | 设计结论上提 | 见 [00-core/runtime-stage-contract.md](../../00-core/runtime-stage-contract.md)、[current-state.md](../../01-overview/current-state.md) |
 
@@ -25,7 +25,7 @@ Last Updated: 2026-07-17
 | --- | --- | --- | --- |
 | OPS-1 | 生产目录 V1 retirement 正式 apply | 代码/live 已 complete；等待 clean build + 真实生产目录维护窗口执行 `runtime-v1-retirement --apply` | [deployed-workspace-progress-blocker-component-closure-plan.md](../../90-archive/completed/deployed-workspace-progress-blocker-component-closure-plan.md) |
 | OPT-1 | file-patch deployed live（可选） | 代码迁移已完成；可选补一次 `patch apply + validation + DoD closeout` 的 deployed live | [file-patch-side-effect-owner-migration-plan.md](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
-| RVC-1 | Runtime V2 positive convergence remediation | typed policy、rejected-shape、Result ledger、restart/CAS/no-provider、read-model 与 focus cost 已 code-closed；剩余 deployed file-backed 双 workspace cross-focus E2E | [runtime-v2-positive-convergence-remediation.md](runtime-v2-positive-convergence-remediation.md) |
+| RVC-1 | Runtime V2 positive convergence systemic closure | RVC-R5～R15 code-landed；effect/receipt/governance/budgets/recovery inventory 与真实 file-backed crash/E2E 已通过，剩余 RVC-R16 deployed dual-workspace Live | [runtime-v2-positive-convergence-remediation.md](runtime-v2-positive-convergence-remediation.md) |
 
 延期产品候选（**不占 active**）：LLM context budget 高级项（failover / tokenizer / 原生 usage 精度 / context-too-large 差异化）→ [candidates/next-stage-demand-candidates.md](../candidates/next-stage-demand-candidates.md)。
 

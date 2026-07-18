@@ -145,6 +145,23 @@ func fileEditOperationResponse(result magicevent.Result) (orchestratorevents.Exe
 	}
 	return response, nil
 }
+func fileWriteOperationResponse(result magicevent.Result) (orchestratorevents.ExecuteFileWriteOperationResult, error) {
+	if result == nil {
+		return orchestratorevents.ExecuteFileWriteOperationResult{}, common.ErrInvalidArgument
+	}
+	if err := runtimeOperationResultError(result); err != nil {
+		return orchestratorevents.ExecuteFileWriteOperationResult{}, err
+	}
+	data, magicErr := result.Get()
+	if err := runtimeOperationMagicError(magicErr); err != nil {
+		return orchestratorevents.ExecuteFileWriteOperationResult{}, err
+	}
+	response, ok := data.(orchestratorevents.ExecuteFileWriteOperationResult)
+	if !ok {
+		return orchestratorevents.ExecuteFileWriteOperationResult{}, fmt.Errorf("runtime file write returned invalid result type %T", data)
+	}
+	return response, nil
+}
 func patchApplyOperationResponse(result magicevent.Result) (orchestratorevents.ExecutePatchApplyOperationResult, error) {
 	if result == nil {
 		return orchestratorevents.ExecutePatchApplyOperationResult{}, common.ErrInvalidArgument

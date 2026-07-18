@@ -89,9 +89,9 @@ Last Updated: 2026-07-17
 
 ## Remaining Open Work
 
-Runtime V2-only 主链已收口；正向收敛 remediation 的代码项已完成，等待最新实例 deployed/file-backed 双 workspace cross-focus 复核。当前剩余主要是：
+Runtime V2-only 主链骨架及 RVC-R5～R15 结构化代码收口已完成并通过真实 file-backed crash/双 focus/full gates。2026-07-17 Live 暴露的 SM-2 action、SM-3 effect/receipt/evidence 与 SM-4 recovery/delivery 交界偏差已进入主路径回归；当前剩余主要是：
 
-1. **Runtime 正向收敛（RVC-1）**：**code-closed / deployed verification pending**；typed validation policy、rejected-shape context、Result ledger、restart/CAS/no-provider tests、read-model retry semantics 与 focus cost guard 已收口，剩余 RVC-R4 live 复核见 [active remediation](../70-roadmap/active/runtime-v2-positive-convergence-remediation.md)。
+1. **Runtime 正向收敛（RVC-1）**：**active — code closure verified, deployed Live pending**；effect/receipt/directive、exact-fence governance grant、独立预算、typed startup/delivery inventory、schema v2-only 与真实 file-backed crash/双 focus E2E 均已通过。下一步只进入 RVC-R16 dual-workspace Live。详见 [active remediation](../70-roadmap/active/runtime-v2-positive-convergence-remediation.md)。
 2. **运维切换（OPS-1）**：真实生产目录 `runtime-v1-retirement --apply` + clean build 维护窗口（过程日记已归档，不在 active 放长文）。
 3. **可选验证（OPT-1）**：file-patch `apply + validation + DoD closeout` 的 deployed live 一次。
 4. **延期候选**：LLM context budget 高级项见 `70-roadmap/candidates/`，**不占 active**。

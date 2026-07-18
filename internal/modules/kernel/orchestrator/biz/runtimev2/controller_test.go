@@ -101,6 +101,27 @@ func TestRuntimeControllerInitializeRejectsPersistedDefinitionContentDrift(t *te
 	}
 }
 
+func TestRuntimeControllerInitializeAcceptsAdvancedFocusOnRestart(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, _ := NewRuntimeController(repository)
+	facts := controllerFacts()
+	definition := controllerDefinition()
+	initialized, err := controller.Initialize(context.Background(), facts, definition, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository.aggregate.Facts.Focus.ID = "focus-v2-next"
+	repository.aggregate.Decision.Focus.ID = "focus-v2-next"
+
+	restarted, err := controller.Initialize(context.Background(), facts, definition, nil)
+	if err != nil {
+		t.Fatalf("advanced-focus restart: %v", err)
+	}
+	if restarted.Facts.Focus.ID != "focus-v2-next" || restarted.StateRevision != initialized.StateRevision {
+		t.Fatalf("restart replaced progressed aggregate: %+v", restarted)
+	}
+}
+
 func TestRuntimeControllerCommitsPrerequisiteAndReducesAtomically(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
@@ -179,7 +200,7 @@ func TestRuntimeControllerOwnsDispatchAndEvidenceCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
-		ID: "write-1", Kind: "file/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"},
+		ID: "write-1", Kind: "file/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("state"),
 	}}}}}
 	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
@@ -188,11 +209,13 @@ func TestRuntimeControllerOwnsDispatchAndEvidenceCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AcceptCandidateAttempt: %v", err)
 	}
-	result, err := controller.CommitEvidence(context.Background(), ExecutionEvidence{
+	commitEvidence := ExecutionEvidence{
 		EventID: "event-1", WorkspaceID: "ws-v2", RunID: "run-v2",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
 		OperationID: "write-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
-	})
+	}
+	attachRuntimeV2TestOwnerReceipt(t, repository.aggregate, &commitEvidence)
+	result, err := controller.CommitEvidence(context.Background(), commitEvidence)
 	if err != nil || result.Disposition != CommitDispositionCommitted {
 		t.Fatalf("CommitEvidence = %+v err=%v", result, err)
 	}
@@ -213,16 +236,18 @@ func TestRuntimeControllerCommitsTypedAssessmentBeforeCompletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	sealed, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
-		ID: "write-1", Kind: "file/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+		ID: "write-1", Kind: "file/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("state"),
 	}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	evidence, err := controller.CommitEvidence(context.Background(), ExecutionEvidence{
+	commitEvidence := ExecutionEvidence{
 		EventID: "event-1", WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: sealed.ActiveDispatch.ID,
 		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "write-1",
 		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
-	})
+	}
+	attachRuntimeV2TestOwnerReceipt(t, repository.aggregate, &commitEvidence)
+	evidence, err := controller.CommitEvidence(context.Background(), commitEvidence)
 	if err != nil || evidence.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
 		t.Fatalf("assessment authority = %+v err=%v", evidence.Aggregate.Decision, err)
 	}
@@ -230,7 +255,7 @@ func TestRuntimeControllerCommitsTypedAssessmentBeforeCompletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
-		FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Satisfied: true,
+		FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Disposition: runtimecontract.AssessmentDispositionSatisfied,
 		Summary: "current focus is satisfied", EvidenceRefs: []string{"event-1"},
 	}}); err != nil {
 		t.Fatal(err)
@@ -239,7 +264,7 @@ func TestRuntimeControllerCommitsTypedAssessmentBeforeCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if completed.Decision.Action != runtimecontract.RuntimeActionComplete || len(completed.Facts.Assessments) != 1 || !completed.Facts.Assessments[0].Satisfied {
+	if completed.Decision.Action != runtimecontract.RuntimeActionComplete || len(completed.Facts.Assessments) != 1 || completed.Facts.Assessments[0].Disposition != runtimecontract.AssessmentDispositionSatisfied {
 		t.Fatalf("completed assessment aggregate = %+v", completed)
 	}
 }
@@ -288,16 +313,18 @@ func prepareAssessmentController(t *testing.T, assessment runtimecontract.Assess
 		t.Fatal(err)
 	}
 	sealed, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
-		ID: "write-1", Kind: "file/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+		ID: "write-1", Kind: "file/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("state"),
 	}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	evidence, err := controller.CommitEvidence(context.Background(), ExecutionEvidence{
+	commitEvidence := ExecutionEvidence{
 		EventID: "event-1", WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: sealed.ActiveDispatch.ID,
 		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "write-1",
 		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
-	})
+	}
+	attachRuntimeV2TestOwnerReceipt(t, repository.aggregate, &commitEvidence)
+	evidence, err := controller.CommitEvidence(context.Background(), commitEvidence)
 	if err != nil || evidence.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
 		t.Fatalf("prepare assessment evidence = %+v err=%v", evidence, err)
 	}
@@ -395,7 +422,7 @@ func TestRuntimeControllerCandidateFailureDoesNotResealPreExistingExecutionFailu
 	}
 }
 
-func TestRuntimeControllerAllowsOneLegacySameContractRetryAfterReseal(t *testing.T) {
+func TestRuntimeControllerRejectsRetryWhenPersistedContractIDIsMissing(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
 	if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
@@ -405,7 +432,7 @@ func TestRuntimeControllerAllowsOneLegacySameContractRetryAfterReseal(t *testing
 		t.Fatal(err)
 	}
 	failed, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
-		Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: "legacy invalid candidate",
+		Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: "invalid candidate",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -418,12 +445,8 @@ func TestRuntimeControllerAllowsOneLegacySameContractRetryAfterReseal(t *testing
 	failed.Decision = resealed
 	failed.StateRevision++
 	repository.aggregate = &failed
-	retried, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(retried.CandidateAttempts) != 2 || retried.CandidateAttempts[1].AuthorityContractID == "" {
-		t.Fatalf("legacy retry = %+v", retried.CandidateAttempts)
+	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err == nil {
+		t.Fatal("candidate retry accepted persisted attempt without authority contract id")
 	}
 }
 
@@ -503,6 +526,7 @@ func controllerFacts() runtimecontract.RuntimeFacts {
 			ID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, TargetRefs: []string{"target.txt"},
 		},
+		Coverage:     []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-v2", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Capabilities: runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{"file/write"}},
 	}
 }

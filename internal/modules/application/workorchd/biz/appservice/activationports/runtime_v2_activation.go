@@ -391,12 +391,15 @@ func runtimeV2MCPCapabilityContexts(items []*mcpmodel.Capability) []runtimecontr
 		if item == nil {
 			continue
 		}
-		ret = append(ret, runtimecontract.RuntimeMCPCapabilityContext{
+		cap := runtimecontract.RuntimeMCPCapabilityContext{
 			ID: item.ID, ServerID: item.ServerID, Kind: item.Kind, Name: item.Name, DisplayName: item.DisplayName,
 			Description: item.Description, Category: item.Category, Tags: append([]string(nil), item.Tags...), UsageHint: item.UsageHint,
 			InputSummary: item.InputSummary, OutputSummary: item.OutputSummary, StageHints: append([]string(nil), item.StageHints...),
-			RiskLevel: item.RiskLevel, URI: item.URI, Enabled: item.Enabled, ApprovalPolicy: item.ApprovalPolicy, Status: item.Status,
-		})
+			RiskLevel: item.RiskLevel, EffectScope: item.EffectScope, IdempotencyClass: item.IdempotencyClass,
+			URI: item.URI, Enabled: item.Enabled, ApprovalPolicy: item.ApprovalPolicy, Status: item.Status,
+		}
+		// RVC-R8: registry Kind=tool is not a Runtime operation kind; seal OperationKind + EffectScope.
+		ret = append(ret, runtimecontract.SealMCPCapabilityEffect(cap))
 	}
 	return ret
 }

@@ -19,17 +19,32 @@ type RuntimeRepairHint struct {
 func DeriveRuntimeRepairHints(facts RuntimeFacts) []RuntimeRepairHint {
 	facts = facts.Normalized()
 	ret := make([]RuntimeRepairHint, 0, 4)
-	missing := MissingRequiredEvidenceKinds(facts)
-	if len(missing) > 0 {
+	// INV-05: repair directive is the sole next-action authority. Do not emit hints
+	// that tell the model to produce only missing kinds when a directive is active.
+	if facts.RepairDirective != nil && facts.RepairDirective.FocusID == facts.Focus.ID {
+		directive := facts.RepairDirective.Normalized()
 		ret = append(ret, RuntimeRepairHint{
-			Code:    "produce_missing_evidence",
-			Message: fmt.Sprintf("current focus is missing required evidence kinds: %s; produce only the missing kinds", strings.Join(missing, ", ")),
+			Code: "obey_repair_directive",
+			Message: fmt.Sprintf(
+				"requiredAction=%s; requiredEffectScopes=%s; requiredEvidenceKinds=%s; produce only operations compatible with this directive",
+				directive.RequiredAction,
+				strings.Join(RuntimeEffectScopesAsStrings(directive.RequiredEffectScopes), ","),
+				strings.Join(directive.RequiredEvidenceKinds, ","),
+			),
 		})
-		if containsStringValue(missing, EvidenceKindValidation) && !containsStringValue(missing, EvidenceKindStateChange) {
+	} else {
+		missing := MissingRequiredEvidenceKinds(facts)
+		if len(missing) > 0 {
 			ret = append(ret, RuntimeRepairHint{
-				Code:    "prefer_validation_over_state_change",
-				Message: "accepted state_change evidence already exists for this focus; prefer produce_validation instead of another unrelated state_change",
+				Code:    "produce_missing_evidence",
+				Message: fmt.Sprintf("current focus is missing required evidence kinds: %s; produce only the missing kinds", strings.Join(missing, ", ")),
 			})
+			if containsStringValue(missing, EvidenceKindValidation) && !containsStringValue(missing, EvidenceKindStateChange) {
+				ret = append(ret, RuntimeRepairHint{
+					Code:    "prefer_validation_over_state_change",
+					Message: "accepted state_change evidence already exists for this focus; prefer produce_validation instead of another unrelated state_change",
+				})
+			}
 		}
 	}
 	if facts.Failure != nil {

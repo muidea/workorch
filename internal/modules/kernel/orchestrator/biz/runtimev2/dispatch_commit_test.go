@@ -51,6 +51,7 @@ func TestDispatchCommitAdvancesEvidenceAndReducerExactlyOnce(t *testing.T) {
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
 		OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted, SourceRef: "patch/1",
 	}
+	attachRuntimeV2TestOwnerReceipt(t, &repository.aggregate, &evidence)
 	committed, err := coordinator.CommitEvidence(context.Background(), evidence)
 	if err != nil {
 		t.Fatal(err)
@@ -103,12 +104,14 @@ func TestRejectedValidationEvidenceAtomicallyReturnsToStateChange(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := coordinator.CommitEvidence(context.Background(), ExecutionEvidence{
+	commitEvidence := ExecutionEvidence{
 		EventID: "event-validation-failed", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
 		OperationID: "validate-1", Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusRejected,
 		Failure: &runtimecontract.FailureFact{Class: runtimecontract.FailureClassBuildFailure, Signature: "build-failed", Message: "main redeclared", TargetRefs: []string{"main.go"}},
-	})
+	}
+	attachRuntimeV2TestOwnerReceipt(t, &repository.aggregate, &commitEvidence)
+	result, err := coordinator.CommitEvidence(context.Background(), commitEvidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,6 +153,7 @@ func TestRejectedTextReplaceConsumesRepairBudgetAndRequiresFreshTargetSnapshot(t
 			Signature: "patch-text-replace-not-found", Message: "oldText not found", TargetRefs: []string{"main.go"},
 		},
 	}
+	attachRuntimeV2TestOwnerReceipt(t, &repository.aggregate, &evidence)
 	rejected, err := coordinator.CommitEvidence(context.Background(), evidence)
 	if err != nil {
 		t.Fatal(err)
@@ -199,11 +203,13 @@ func TestCoordinatorRestartRecoversPersistedDispatchWithoutProcessState(t *testi
 		t.Fatal(err)
 	}
 	second, _ := NewDispatchCoordinator(repository)
-	result, err := second.CommitEvidence(context.Background(), ExecutionEvidence{
+	commitEvidence := ExecutionEvidence{
 		EventID: "event-after-restart", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
 		OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
-	})
+	}
+	attachRuntimeV2TestOwnerReceipt(t, &repository.aggregate, &commitEvidence)
+	result, err := second.CommitEvidence(context.Background(), commitEvidence)
 	if err != nil || result.Disposition != CommitDispositionCommitted {
 		t.Fatalf("restart commit = %+v err=%v", result, err)
 	}
@@ -224,11 +230,13 @@ func TestDispatchCoordinatorCommitsMultiOperationDispatchOnlyAfterAllOperations(
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := coordinator.CommitEvidence(context.Background(), ExecutionEvidence{
+	firstEvidence := ExecutionEvidence{
 		EventID: "event-write-1", WorkspaceID: "ws-1", RunID: "run-1", DispatchID: sealed.ActiveDispatch.ID,
 		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "write-1",
 		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
-	})
+	}
+	attachRuntimeV2TestOwnerReceipt(t, &repository.aggregate, &firstEvidence)
+	first, err := coordinator.CommitEvidence(context.Background(), firstEvidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,11 +246,13 @@ func TestDispatchCoordinatorCommitsMultiOperationDispatchOnlyAfterAllOperations(
 	if first.Aggregate.Decision.AuthoritySnapshot.ID != sealed.Decision.AuthoritySnapshot.ID {
 		t.Fatalf("decision changed before dispatch completion")
 	}
-	second, err := coordinator.CommitEvidence(context.Background(), ExecutionEvidence{
+	secondEvidence := ExecutionEvidence{
 		EventID: "event-write-2", WorkspaceID: "ws-1", RunID: "run-1", DispatchID: sealed.ActiveDispatch.ID,
 		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "write-2",
 		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
-	})
+	}
+	attachRuntimeV2TestOwnerReceipt(t, &repository.aggregate, &secondEvidence)
+	second, err := coordinator.CommitEvidence(context.Background(), secondEvidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +268,7 @@ func TestDispatchCommitAdvancesToNextCoverageFocusDeterministically(t *testing.T
 		ID: "focus-2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-2"},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, TargetRefs: []string{"other.go"},
 	}}
-	aggregate.Facts.Coverage = runtimecontract.InitialRuntimeCoverageFacts(nil, append([]runtimecontract.CoverageFocus{aggregate.Facts.Focus}, aggregate.Facts.RemainingFocuses...))
+	aggregate.Facts.Coverage = runtimecontract.InitialRuntimeCoverageFacts([]runtimecontract.RuntimeCoverageItem{{ID: "cwi-1"}, {ID: "cwi-2"}})
 	decision, err := ReduceRuntimeState(aggregate.Facts, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -270,11 +280,13 @@ func TestDispatchCommitAdvancesToNextCoverageFocusDeterministically(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := coordinator.CommitEvidence(context.Background(), ExecutionEvidence{
+	commitEvidence := ExecutionEvidence{
 		EventID: "event-focus-1", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
 		OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
-	})
+	}
+	attachRuntimeV2TestOwnerReceipt(t, &repository.aggregate, &commitEvidence)
+	result, err := coordinator.CommitEvidence(context.Background(), commitEvidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,6 +336,7 @@ func baseDispatchFacts() runtimecontract.RuntimeFacts {
 			ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}, TargetRefs: []string{"main.go"},
 		},
+		Coverage:     []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Capabilities: runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{"patch/apply"}, ValidationKinds: []string{"validation/managed_session"}},
 	}
 }
@@ -357,4 +370,45 @@ func validationCandidate() runtimecontract.RuntimeCandidate {
 		ID: "validate-1", Kind: "validation/managed_session", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
 		Parameters: []runtimecontract.OperationParameter{{Name: "command", String: &command}},
 	}}}}}
+}
+
+func TestAdjudicateEvidenceKindRejectsDurableMismatch(t *testing.T) {
+	decision := runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceStateChange}
+	// Owner reports none while seal expected durable.
+	_, err := adjudicateEvidenceKind(decision, runtimecontract.RuntimeEffectWorkspaceDurable, true, ExecutionEvidence{
+		EventID: "e1", OperationID: "op-1", Status: ExecutionEvidenceStatusAccepted,
+		ObservedEffectScope: runtimecontract.RuntimeEffectNone, Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "noop"},
+	})
+	if err == nil {
+		t.Fatal("non-durable observed under state-change must fail adjudication")
+	}
+}
+
+func TestSealDispatchCreatesOperationExecutionRecords(t *testing.T) {
+	facts := controllerFacts()
+	decision, err := ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{
+		Operation: runtimecontract.RuntimeOperation{
+			ID: "write-1", Kind: "file/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("state"),
+		},
+	}}}}
+	dispatch, err := SealDispatchWithActivation(decision, candidate, facts.Activation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dispatch.OperationExecutions) != 1 {
+		t.Fatalf("executions = %+v", dispatch.OperationExecutions)
+	}
+	if dispatch.OperationExecutions[0].State != runtimecontract.OperationExecutionSealed {
+		t.Fatalf("state = %s", dispatch.OperationExecutions[0].State)
+	}
+	if dispatch.OperationExecutions[0].ExpectedEffectScope != runtimecontract.RuntimeEffectWorkspaceDurable {
+		t.Fatalf("expected scope = %s", dispatch.OperationExecutions[0].ExpectedEffectScope)
+	}
+	if dispatch.OperationExecutions[0].ExecutionKey == "" {
+		t.Fatal("execution key required")
+	}
 }

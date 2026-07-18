@@ -2,6 +2,8 @@ package run
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"sync"
 
 	cd "github.com/muidea/magicCommon/def"
@@ -107,7 +109,97 @@ func (m *Module) Start() error {
 	for _, topic := range m.topics {
 		m.observer.Subscribe(topic, m.handleCommand)
 	}
+	m.topics = append(m.topics, runevents.TopicRunCommandRuntimeV2RecoveryInventory)
+	m.observer.Subscribe(runevents.TopicRunCommandRuntimeV2RecoveryInventory, m.handleRuntimeV2RecoveryInventory)
 	return nil
+}
+
+func (m *Module) handleRuntimeV2RecoveryInventory(ev magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
+	cmd, ok := ev.Data().(runevents.QueryRuntimeV2RecoveryInventoryCommand)
+	if !ok || m == nil {
+		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
+		return
+	}
+	m.commandMu.RLock()
+	defer m.commandMu.RUnlock()
+	if m.stopping || m.runs == nil {
+		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
+		return
+	}
+	runs, err := m.runs.List(ev.Context())
+	if err != nil {
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		return
+	}
+	result.Set(buildRuntimeV2RecoveryInventory(runs, cmd), nil)
+}
+
+func buildRuntimeV2RecoveryInventory(runs []*runmodel.Run, cmd runevents.QueryRuntimeV2RecoveryInventoryCommand) runevents.QueryRuntimeV2RecoveryInventoryResult {
+	limit := cmd.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	cursor := strings.TrimSpace(cmd.Cursor)
+	items := make([]runevents.RuntimeV2RecoveryInventoryItem, 0)
+	for _, run := range runs {
+		if run == nil || run.RuntimeContractVersion != runtimemodel.RuntimeContractVersionV2 || run.RuntimeState == nil {
+			continue
+		}
+		key := string(run.WorkspaceID) + "\x00" + string(run.ID)
+		if cursor != "" && key <= cursor {
+			continue
+		}
+		state := run.RuntimeState
+		item := runevents.RuntimeV2RecoveryInventoryItem{
+			WorkspaceID: run.WorkspaceID, RunID: run.ID, StateRevision: state.StateRevision,
+			BlockingTicketID: run.BlockingTicketID, BlockingApprovalID: run.BlockingApprovalID,
+			TerminalDeliveryAttempts: state.Facts.Recovery.TerminalDeliveryAttempts,
+		}
+		if state.ActiveDispatch != nil {
+			item.ActiveDispatchID = state.ActiveDispatch.ID
+		}
+		switch {
+		case state.Decision.Action == runtimemodel.RuntimeActionComplete || state.Decision.Action == runtimemodel.RuntimeActionFail:
+			if !runStateIsTerminal(run.State) {
+				item.Class = runevents.RuntimeV2RecoveryTerminalDeliveryPending
+			}
+		case run.State == common.RunStateBlockedOnDecision || run.State == common.RunStateBlockedOnApproval:
+			item.Class = runevents.RuntimeV2RecoveryBlockedGovernance
+		case run.State == common.RunStateActive && state.ActiveDispatch != nil:
+			item.Class = runevents.RuntimeV2RecoveryActiveSealedDispatch
+		case run.State == common.RunStateActive:
+			item.Class = runevents.RuntimeV2RecoveryActiveNoDispatch
+		}
+		if item.Class != "" {
+			items = append(items, item)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		left := string(items[i].WorkspaceID) + "\x00" + string(items[i].RunID)
+		right := string(items[j].WorkspaceID) + "\x00" + string(items[j].RunID)
+		return left < right
+	})
+	ret := runevents.QueryRuntimeV2RecoveryInventoryResult{}
+	if len(items) <= limit {
+		ret.Items = items
+		return ret
+	}
+	ret.Items = items[:limit]
+	last := ret.Items[len(ret.Items)-1]
+	ret.NextCursor = string(last.WorkspaceID) + "\x00" + string(last.RunID)
+	return ret
+}
+
+func runStateIsTerminal(state common.RunState) bool {
+	switch state {
+	case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
+		return true
+	default:
+		return false
+	}
 }
 
 func (m *Module) Stop(ctx context.Context) error {

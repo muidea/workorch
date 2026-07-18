@@ -15,5 +15,6 @@
 
 - 本 block 只访问 MCPServer 与 MCPCapability repository，不执行 MCP tool/resource/prompt 调用。
 - Capability 必须绑定存在的 Server，并保持 ID、kind、schema、risk 和 provenance 一致。
+- 可执行 tool capability 的 `effectScope` 与 `idempotencyClass` 是本 block owner 明确维护的运行时元数据；缺失值在 activation 中只能密封为 `unknown`。`riskLevel`、tool 名称（包括初始化名称）不得被用来推断 effect 或 replay 安全性。
 - secret 和 credential 只能使用安全引用，不得进入事件、投影或日志。
 - 未注册或无效 capability 不能被 runtime invocation 使用。

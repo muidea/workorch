@@ -84,9 +84,9 @@ func TestRuntimeV2ResultProjectionBuildsAcceptedDoDAssessment(t *testing.T) {
 			Focus:              runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
 			Coverage:           []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateSatisfied, EvidenceRefs: []string{"event-1"}}},
 			Assessments: []runtimecontract.RuntimeAssessmentFact{{
-				FocusID: "focus-1", Scope: "dodItem", RequirementID: "dod-001", RequirementText: "行为已验证",
-				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Satisfied: true,
-				Disposition: runtimecontract.AssessmentDispositionSatisfied, EvidenceRefs: []string{"event-1"}, ArtifactRefs: []string{"artifact-assessment"},
+				ID: "assessment-1", FocusID: "focus-1", Scope: "dodItem", RequirementID: "dod-001", RequirementText: "行为已验证",
+				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+				Disposition:         runtimecontract.AssessmentDispositionSatisfied, EvidenceRefs: []string{"event-1"}, ArtifactRefs: []string{"artifact-assessment"},
 				Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-1", Satisfied: true, EvidenceRefs: []string{"event-1"}, ArtifactRefs: []common.ArtifactID{"artifact-item"}}},
 			}}},
 		Decision: runtimecontract.RuntimeDecision{
@@ -103,6 +103,9 @@ func TestRuntimeV2ResultProjectionBuildsAcceptedDoDAssessment(t *testing.T) {
 	if item.RuntimeCloseout == nil || item.RuntimeCloseout.Disposition != runtimecontract.AssessmentDispositionSatisfied ||
 		len(item.RuntimeCloseout.SatisfiedCoverageWorkItemIDs) != 1 || item.RuntimeCloseout.SatisfiedCoverageWorkItemIDs[0] != "cwi-1" {
 		t.Fatalf("runtime closeout = %+v", item.RuntimeCloseout)
+	}
+	if item.RuntimeCloseout.SchemaVersion != runtimecontract.RuntimeResultCloseoutSchemaVersionCurrent {
+		t.Fatalf("runtime closeout schema = %d", item.RuntimeCloseout.SchemaVersion)
 	}
 	if len(item.ArtifactRefs) != 2 || item.ArtifactRefs[0] != "artifact-assessment" || item.ArtifactRefs[1] != "artifact-item" ||
 		len(item.SummaryDetail.ArtifactRefs) != 2 || len(item.RuntimeCloseout.ArtifactRefs) != 2 {

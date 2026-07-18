@@ -59,7 +59,7 @@ func (o *RuntimeOrchestrator) ProjectRuntimeV2Terminal(ctx context.Context, work
 		if run.RuntimeContractVersion != runtimecontract.RuntimeContractVersionV2 || run.RuntimeState == nil {
 			return common.ErrConflict
 		}
-		state := run.RuntimeState.Normalized()
+		state := run.RuntimeState.Clone()
 		if err := state.Validate(); err != nil || state.Decision.Action != action || state.Decision.Terminal == nil ||
 			strings.TrimSpace(state.Decision.Terminal.Code) != strings.TrimSpace(terminal.Code) ||
 			strings.TrimSpace(state.Decision.Terminal.Summary) != strings.TrimSpace(terminal.Summary) {

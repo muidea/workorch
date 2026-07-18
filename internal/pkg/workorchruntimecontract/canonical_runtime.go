@@ -81,14 +81,12 @@ type RuntimeAssessmentFact struct {
 	RequirementID       string
 	RequirementText     string
 	CoverageWorkItemIDs []common.CoverageWorkItemID
-	// Satisfied is a compatibility projection of Disposition==satisfied. Reducer/Result must not use it as authority.
-	Satisfied    bool
-	Disposition  AssessmentDisposition
-	Items        []RuntimeAssessmentItemFact
-	Gap          *RuntimeAssessmentGap
-	Summary      string
-	EvidenceRefs []string
-	ArtifactRefs []string
+	Disposition         AssessmentDisposition
+	Items               []RuntimeAssessmentItemFact
+	Gap                 *RuntimeAssessmentGap
+	Summary             string
+	EvidenceRefs        []string
+	ArtifactRefs        []string
 }
 
 type EvidenceFact struct {
@@ -199,10 +197,16 @@ type RuntimeFacts struct {
 	Activation         RuntimeActivationContext
 	StateChange        RuntimeStateChangeLedger
 	ConvergencePolicy  RuntimeConvergencePolicy
+	RecoveryPolicy     RuntimeRecoveryPolicy
+	Recovery           RuntimeRecoveryLedger
 	Repair             RuntimeRepairLedger
-	Coverage           []RuntimeCoverageItemFact
-	Feasibility        *RuntimeFeasibilityFact
-	Slices             []RuntimeAcceptanceSlice
+	// RepairDirective is the single persisted next-action authority for the current
+	// focus. When set it overrides raw MissingRequiredEvidenceKinds for candidate
+	// action selection (INV-05).
+	RepairDirective *RuntimeRepairDirective
+	Coverage        []RuntimeCoverageItemFact
+	Feasibility     *RuntimeFeasibilityFact
+	Slices          []RuntimeAcceptanceSlice
 }
 
 // RuntimeFeasibilityFact is the persisted result of the pre-candidate
@@ -333,9 +337,13 @@ func SameProviderCeiling(left *ProviderCeiling, right *ProviderCeiling) bool {
 }
 
 type RequiredOutputContract struct {
-	Kind                  RequiredOutputKind
-	AcceptedKinds         []string
-	AcceptedOperations    []string
+	Kind               RequiredOutputKind
+	AcceptedKinds      []string
+	AcceptedOperations []string
+	// AcceptedEffectScopes are the effect scopes that may appear in a sealed candidate.
+	// RequiredEffectScopes must be satisfied by at least one operation for state-change.
+	AcceptedEffectScopes  []RuntimeEffectScope
+	RequiredEffectScopes  []RuntimeEffectScope
 	RequiredEvidenceKinds []string
 	CoverageWorkItemIDs   []common.CoverageWorkItemID
 	TargetRefs            []string
@@ -398,12 +406,10 @@ func (f RuntimeFacts) Normalized() RuntimeFacts {
 	f.Activation = f.Activation.Normalized()
 	f.StateChange = f.StateChange.Normalized()
 	f.ConvergencePolicy = f.ConvergencePolicy.Normalized()
+	f.RecoveryPolicy = f.RecoveryPolicy.Normalized()
 	f.Repair = f.Repair.Normalized()
 	f.Coverage = NormalizeRuntimeCoverageFacts(f.Coverage)
 	f.Slices = NormalizeRuntimeAcceptanceSlices(f.Slices)
-	if len(f.Coverage) == 0 {
-		f.Coverage = InitialRuntimeCoverageFacts(nil, append([]CoverageFocus{f.Focus}, f.RemainingFocuses...))
-	}
 	if f.Feasibility != nil {
 		value := *f.Feasibility
 		value.FocusID = strings.TrimSpace(value.FocusID)
@@ -423,6 +429,10 @@ func (f RuntimeFacts) Normalized() RuntimeFacts {
 		failure.TargetRefs = normalizeStrings(failure.TargetRefs)
 		f.Failure = &failure
 	}
+	if f.RepairDirective != nil {
+		directive := f.RepairDirective.Normalized()
+		f.RepairDirective = &directive
+	}
 	return f
 }
 
@@ -439,6 +449,12 @@ func (f RuntimeFacts) Validate() error {
 	}
 	if err := f.Activation.Validate(); err != nil {
 		return err
+	}
+	if err := f.RecoveryPolicy.Validate(); err != nil {
+		return fmt.Errorf("runtime facts recovery policy: %w", err)
+	}
+	if err := f.Recovery.Validate(f.RecoveryPolicy); err != nil {
+		return fmt.Errorf("runtime facts recovery ledger: %w", err)
 	}
 	seenFocus := map[string]struct{}{f.Focus.ID: {}}
 	for _, focus := range f.RemainingFocuses {
@@ -459,6 +475,22 @@ func (f RuntimeFacts) Validate() error {
 			if _, ok := coverage[id]; !ok {
 				return fmt.Errorf("runtime facts focus coverage item %s has no coverage ledger entry", id)
 			}
+		}
+	}
+	if f.RepairDirective != nil {
+		if err := f.RepairDirective.Validate(); err != nil {
+			return fmt.Errorf("runtime facts repair directive: %w", err)
+		}
+		if f.RepairDirective.FocusID != f.Focus.ID {
+			return fmt.Errorf("runtime facts repair directive focus %s does not match current focus %s", f.RepairDirective.FocusID, f.Focus.ID)
+		}
+	}
+	for _, assessment := range f.Assessments {
+		if assessment.ID == "" || assessment.FocusID == "" {
+			return fmt.Errorf("runtime assessment fact requires identity and focus")
+		}
+		if _, err := ValidateAssessmentDisposition(assessment.Disposition, assessment.Items, assessment.Gap); err != nil {
+			return fmt.Errorf("runtime assessment fact %s: %w", assessment.ID, err)
 		}
 	}
 	return nil
@@ -526,18 +558,19 @@ func (r RuntimeResourceFacts) Normalized() RuntimeResourceFacts {
 func (c RequiredOutputContract) Normalized() RequiredOutputContract {
 	c.AcceptedKinds = normalizeStrings(c.AcceptedKinds)
 	c.AcceptedOperations = normalizeStrings(c.AcceptedOperations)
+	c.AcceptedEffectScopes = NormalizeRuntimeEffectScopes(c.AcceptedEffectScopes)
+	c.RequiredEffectScopes = NormalizeRuntimeEffectScopes(c.RequiredEffectScopes)
 	c.RequiredEvidenceKinds = normalizeStrings(c.RequiredEvidenceKinds)
 	c.CoverageWorkItemIDs = normalizeCoverageWorkItemIDs(c.CoverageWorkItemIDs)
 	c.TargetRefs = normalizeStrings(c.TargetRefs)
 	c.PrerequisiteIDs = normalizeStrings(c.PrerequisiteIDs)
 	return c
 }
-
 func (c RequiredOutputContract) Validate() error {
 	c = c.Normalized()
 	switch c.Kind {
 	case RequiredOutputKindNone:
-		if len(c.AcceptedKinds)+len(c.AcceptedOperations)+len(c.RequiredEvidenceKinds)+len(c.CoverageWorkItemIDs)+len(c.TargetRefs)+len(c.PrerequisiteIDs) != 0 {
+		if len(c.AcceptedKinds)+len(c.AcceptedOperations)+len(c.RequiredEvidenceKinds)+len(c.CoverageWorkItemIDs)+len(c.TargetRefs)+len(c.PrerequisiteIDs)+len(c.AcceptedEffectScopes)+len(c.RequiredEffectScopes) != 0 {
 			return fmt.Errorf("empty required output kind cannot carry output requirements")
 		}
 	case RequiredOutputKindPrerequisite:
@@ -550,6 +583,19 @@ func (c RequiredOutputContract) Validate() error {
 		}
 		if len(c.CoverageWorkItemIDs) == 0 {
 			return fmt.Errorf("%s required output requires coverage work items", c.Kind)
+		}
+		if len(c.RequiredEffectScopes) == 0 || len(c.AcceptedEffectScopes) == 0 {
+			return fmt.Errorf("%s required output requires explicit required and accepted effect scopes", c.Kind)
+		}
+		action, ok := runtimeActionForRequiredOutput(c.Kind)
+		if !ok {
+			return fmt.Errorf("%s required output has no runtime action", c.Kind)
+		}
+		if err := ValidateEffectScopesCompatibleWithAction(action, c.RequiredEffectScopes); err != nil {
+			return fmt.Errorf("%s required effect scopes: %w", c.Kind, err)
+		}
+		if err := ValidateEffectScopesCompatibleWithAction(action, c.AcceptedEffectScopes); err != nil {
+			return fmt.Errorf("%s accepted effect scopes: %w", c.Kind, err)
 		}
 	case RequiredOutputKindGovernance:
 		if len(c.AcceptedKinds) == 0 {
@@ -571,6 +617,8 @@ func StableRequiredOutputHash(contract RequiredOutputContract) string {
 	writeHashString(h, string(contract.Kind))
 	writeHashStrings(h, contract.AcceptedKinds)
 	writeHashStrings(h, contract.AcceptedOperations)
+	writeHashStrings(h, RuntimeEffectScopesAsStrings(contract.AcceptedEffectScopes))
+	writeHashStrings(h, RuntimeEffectScopesAsStrings(contract.RequiredEffectScopes))
 	writeHashStrings(h, contract.RequiredEvidenceKinds)
 	coverageIDs := make([]string, 0, len(contract.CoverageWorkItemIDs))
 	for _, id := range contract.CoverageWorkItemIDs {
@@ -918,15 +966,6 @@ func normalizeRuntimeAssessmentFacts(values []RuntimeAssessmentFact) []RuntimeAs
 		value.RequirementText = strings.TrimSpace(value.RequirementText)
 		value.CoverageWorkItemIDs = normalizeCoverageWorkItemIDs(value.CoverageWorkItemIDs)
 		value.Disposition = value.Disposition.Normalized()
-		if value.Disposition == "" {
-			if value.Satisfied {
-				value.Disposition = AssessmentDispositionSatisfied
-			} else {
-				// legacy unsatisfied assessments remain repairable for active runs
-				value.Disposition = AssessmentDispositionRepairableGap
-			}
-		}
-		value.Satisfied = value.Disposition == AssessmentDispositionSatisfied
 		if len(value.Items) > 0 {
 			items := make([]RuntimeAssessmentItemFact, 0, len(value.Items))
 			for _, item := range value.Items {

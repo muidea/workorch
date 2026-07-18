@@ -41,6 +41,28 @@ func TestValidateRuntimeOperationContractMCPDynamicInputAllowed(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeOperationContractFileWriteRequiresTargetAndContent(t *testing.T) {
+	target := "README.md"
+	content := ""
+	valid := RuntimeOperation{
+		ID: "write-1", Kind: StepKindFileWrite, TargetRefs: []string{target},
+		Parameters: []OperationParameter{{Name: "content", String: &content}},
+	}
+	if err := ValidateRuntimeOperationContract(valid); err != nil {
+		t.Fatalf("valid file/write: %v", err)
+	}
+	missingContent := valid
+	missingContent.Parameters = nil
+	if err := ValidateRuntimeOperationContract(missingContent); err == nil {
+		t.Fatal("file/write without content must fail")
+	}
+	missingTarget := valid
+	missingTarget.TargetRefs = nil
+	if err := ValidateRuntimeOperationContract(missingTarget); err == nil {
+		t.Fatal("file/write without target must fail")
+	}
+}
+
 func TestRuntimeOperationRequiresCurrentTargetSnapshot(t *testing.T) {
 	tests := []struct {
 		name      string

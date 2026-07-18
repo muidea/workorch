@@ -16,8 +16,8 @@ func TestRuntimeDecisionActionStateMatrix(t *testing.T) {
 		terminal      *TerminalOutcome
 	}{
 		{name: "prerequisite", state: ConvergenceStateNeedPrerequisite, action: RuntimeActionAcquirePrerequisite, output: RequiredOutputContract{Kind: RequiredOutputKindPrerequisite, PrerequisiteIDs: []string{"snapshot"}}, prerequisites: []RuntimePrerequisite{{ID: "snapshot", Kind: "target_snapshot"}}},
-		{name: "state change", state: ConvergenceStateNeedStateChange, action: RuntimeActionProduceStateChange, output: RequiredOutputContract{Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{"patch/apply"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}},
-		{name: "validation", state: ConvergenceStateNeedValidation, action: RuntimeActionProduceValidation, output: RequiredOutputContract{Kind: RequiredOutputKindValidation, AcceptedKinds: []string{"validation/managed_session"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}},
+		{name: "state change", state: ConvergenceStateNeedStateChange, action: RuntimeActionProduceStateChange, output: RequiredOutputContract{Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{"patch/apply"}, AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}},
+		{name: "validation", state: ConvergenceStateNeedValidation, action: RuntimeActionProduceValidation, output: RequiredOutputContract{Kind: RequiredOutputKindValidation, AcceptedKinds: []string{"validation/managed_session"}, AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}},
 		{name: "governance", state: ConvergenceStateNeedGovernance, action: RuntimeActionRequestGovernance, output: RequiredOutputContract{Kind: RequiredOutputKindGovernance, AcceptedKinds: []string{"decision/resolution"}}},
 		{name: "complete", state: ConvergenceStateComplete, action: RuntimeActionComplete, terminal: &TerminalOutcome{Code: "satisfied"}},
 		{name: "fail", state: ConvergenceStateFailed, action: RuntimeActionFail, terminal: &TerminalOutcome{Code: "unrecoverable"}},
@@ -83,9 +83,11 @@ func TestRuntimeDecisionRejectsEveryMismatchedAction(t *testing.T) {
 func TestRuntimeDecisionRejectsOutputAuthorityMismatch(t *testing.T) {
 	d := validDecisionForState(ConvergenceStateNeedValidation)
 	d.RequiredOutput = RequiredOutputContract{
-		Kind:                RequiredOutputKindStateChange,
-		AcceptedKinds:       []string{"patch/apply"},
-		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		Kind:                 RequiredOutputKindStateChange,
+		AcceptedKinds:        []string{"patch/apply"},
+		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
+		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
+		CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
 	}
 	d.AuthoritySnapshot.RequiredOutputHash = StableRequiredOutputHash(d.RequiredOutput)
 	d.AuthoritySnapshot.ID = stableAuthoritySnapshotID(d.AuthoritySnapshot)
@@ -99,6 +101,8 @@ func TestStableRequiredOutputHashNormalizesOrderAndDetectsSemanticChange(t *test
 		Kind:                  RequiredOutputKindStateChange,
 		AcceptedKinds:         []string{"git/write", "patch/apply", "patch/apply"},
 		AcceptedOperations:    []string{"commit", "add", "commit"},
+		AcceptedEffectScopes:  []RuntimeEffectScope{RuntimeEffectRemoteDurable, RuntimeEffectWorkspaceDurable},
+		RequiredEffectScopes:  []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
 		RequiredEvidenceKinds: []string{"validation", "state_change"},
 		CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-2", "cwi-1"},
 		TargetRefs:            []string{"b.go", "a.go"},
@@ -107,6 +111,8 @@ func TestStableRequiredOutputHashNormalizesOrderAndDetectsSemanticChange(t *test
 		Kind:                  RequiredOutputKindStateChange,
 		AcceptedKinds:         []string{"patch/apply", "git/write"},
 		AcceptedOperations:    []string{"add", "commit"},
+		AcceptedEffectScopes:  []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
+		RequiredEffectScopes:  []RuntimeEffectScope{RuntimeEffectRemoteDurable, RuntimeEffectWorkspaceDurable},
 		RequiredEvidenceKinds: []string{"state_change", "validation"},
 		CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-1", "cwi-2"},
 		TargetRefs:            []string{"a.go", "b.go"},
@@ -143,9 +149,13 @@ func validDecisionForState(state ConvergenceState) RuntimeDecision {
 		prerequisites = []RuntimePrerequisite{{ID: "snapshot", Kind: "target_snapshot"}}
 	case RequiredOutputKindStateChange:
 		output.AcceptedKinds = []string{"patch/apply"}
+		output.AcceptedEffectScopes = []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable}
+		output.RequiredEffectScopes = []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable}
 		output.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-1"}
 	case RequiredOutputKindValidation:
 		output.AcceptedKinds = []string{"validation/managed_session"}
+		output.AcceptedEffectScopes = []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession}
+		output.RequiredEffectScopes = []RuntimeEffectScope{RuntimeEffectNone}
 		output.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-1"}
 	case RequiredOutputKindGovernance:
 		output.AcceptedKinds = []string{"decision/resolution"}
@@ -179,5 +189,6 @@ func testRuntimeFacts() RuntimeFacts {
 			ID:                  "focus-1",
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		},
+		Coverage: []RuntimeCoverageItemFact{{ID: "cwi-1", State: RuntimeCoverageItemStateOpen}},
 	}
 }

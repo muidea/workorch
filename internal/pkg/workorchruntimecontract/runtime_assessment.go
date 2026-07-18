@@ -96,16 +96,12 @@ func (i RuntimeAssessmentItemFact) Normalized() RuntimeAssessmentItemFact {
 	return i
 }
 
-// DeriveAssessmentDisposition maps legacy Satisfied-only assessments and validates
-// disposition consistency with item facts / gap payloads.
-func DeriveAssessmentDisposition(satisfied bool, disposition AssessmentDisposition, items []RuntimeAssessmentItemFact, gap *RuntimeAssessmentGap) (AssessmentDisposition, error) {
+// ValidateAssessmentDisposition validates explicit disposition consistency with
+// item facts and gap payloads. Runtime V2 never infers it from another field.
+func ValidateAssessmentDisposition(disposition AssessmentDisposition, items []RuntimeAssessmentItemFact, gap *RuntimeAssessmentGap) (AssessmentDisposition, error) {
 	disposition = disposition.Normalized()
 	if disposition == "" {
-		if satisfied {
-			return AssessmentDispositionSatisfied, nil
-		}
-		// Active legacy unsatisfied assessments are repairable, not terminal.
-		return AssessmentDispositionRepairableGap, nil
+		return "", fmt.Errorf("assessment disposition is required")
 	}
 	if err := disposition.Validate(); err != nil {
 		return "", err

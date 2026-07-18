@@ -1,0 +1,466 @@
+package workorchruntimecontract
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/muidea/workorch/internal/pkg/common"
+)
+
+// RuntimeOperationExecutionState is the per-operation execution transaction state (SM-3).
+type RuntimeOperationExecutionState string
+
+const (
+	OperationExecutionSealed            RuntimeOperationExecutionState = "sealed"
+	OperationExecutionClaimed           RuntimeOperationExecutionState = "claimed"
+	OperationExecutionOwnerCommitted    RuntimeOperationExecutionState = "owner_committed"
+	OperationExecutionEvidenceCommitted RuntimeOperationExecutionState = "evidence_committed"
+	OperationExecutionOutcomeUnknown    RuntimeOperationExecutionState = "outcome_unknown"
+)
+
+// RuntimeOperationOutcome is the owner-reported terminal outcome for an execution key.
+type RuntimeOperationOutcome string
+
+const (
+	RuntimeOperationOutcomeAccepted           RuntimeOperationOutcome = "accepted"
+	RuntimeOperationOutcomeRejected           RuntimeOperationOutcome = "rejected"
+	RuntimeOperationOutcomeGovernanceRequired RuntimeOperationOutcome = "governance_required"
+	RuntimeOperationOutcomeNoOp               RuntimeOperationOutcome = "no_op"
+	RuntimeOperationOutcomeUnknown            RuntimeOperationOutcome = "unknown"
+)
+
+// RuntimeOperationExecutionRecord is the persisted per-operation claim/fence record
+// inside a sealed dispatch. ExecutionKey must be stable for workspace/run/dispatch/operation.
+type RuntimeOperationExecutionRecord struct {
+	OperationID         string
+	ExecutionKey        string
+	ExpectedEffectScope RuntimeEffectScope
+	State               RuntimeOperationExecutionState
+	Fence               uint64
+	OwnerReceiptRef     string
+	OwnerReceiptHash    string
+	ClaimedAt           string
+}
+
+// RuntimeOperationReceipt is the owner-persisted receipt for one ExecutionKey.
+// Orchestrator commits evidence only from sealed expectation + this receipt (INV-03).
+type RuntimeOperationReceipt struct {
+	ExecutionKey        string
+	Fence               uint64
+	OperationID         string
+	Outcome             RuntimeOperationOutcome
+	ObservedEffectScope RuntimeEffectScope
+	Changed             bool
+	NoOp                bool
+	TargetRefs          []string
+	BeforeHash          string
+	AfterHash           string
+	Evidence            RuntimeOperationEvidence
+	Failure             *FailureFact
+	Governance          *RuntimeGovernanceRequirement
+	IdempotentReplay    bool
+	CompletedAt         string
+}
+
+// StableRuntimeOperationExecutionKey binds workspace/run/dispatch/operation into one key.
+func StableRuntimeOperationExecutionKey(workspaceID common.WorkspaceID, runID common.RunID, dispatchID, operationID string) string {
+	workspaceID = common.WorkspaceID(strings.TrimSpace(string(workspaceID)))
+	runID = common.RunID(strings.TrimSpace(string(runID)))
+	dispatchID = strings.TrimSpace(dispatchID)
+	operationID = strings.TrimSpace(operationID)
+	return fmt.Sprintf("exec/%s/%s/%s/%s", workspaceID, runID, dispatchID, operationID)
+}
+
+func (s RuntimeOperationExecutionState) Normalized() RuntimeOperationExecutionState {
+	return RuntimeOperationExecutionState(strings.TrimSpace(string(s)))
+}
+
+func ValidRuntimeOperationExecutionState(state RuntimeOperationExecutionState) bool {
+	switch state.Normalized() {
+	case OperationExecutionSealed, OperationExecutionClaimed, OperationExecutionOwnerCommitted,
+		OperationExecutionEvidenceCommitted, OperationExecutionOutcomeUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+func (o RuntimeOperationOutcome) Normalized() RuntimeOperationOutcome {
+	return RuntimeOperationOutcome(strings.TrimSpace(string(o)))
+}
+
+func ValidRuntimeOperationOutcome(outcome RuntimeOperationOutcome) bool {
+	switch outcome.Normalized() {
+	case RuntimeOperationOutcomeAccepted, RuntimeOperationOutcomeRejected,
+		RuntimeOperationOutcomeGovernanceRequired, RuntimeOperationOutcomeNoOp,
+		RuntimeOperationOutcomeUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+func (r RuntimeOperationExecutionRecord) Normalized() RuntimeOperationExecutionRecord {
+	r.OperationID = strings.TrimSpace(r.OperationID)
+	r.ExecutionKey = strings.TrimSpace(r.ExecutionKey)
+	r.ExpectedEffectScope = NormalizeRuntimeEffectScope(r.ExpectedEffectScope)
+	r.State = r.State.Normalized()
+	r.OwnerReceiptRef = strings.TrimSpace(r.OwnerReceiptRef)
+	r.OwnerReceiptHash = strings.TrimSpace(r.OwnerReceiptHash)
+	r.ClaimedAt = strings.TrimSpace(r.ClaimedAt)
+	return r
+}
+
+func (r RuntimeOperationExecutionRecord) Validate() error {
+	r = r.Normalized()
+	if r.OperationID == "" || r.ExecutionKey == "" {
+		return fmt.Errorf("operation execution record requires operation id and execution key")
+	}
+	if !ValidRuntimeOperationExecutionState(r.State) {
+		return fmt.Errorf("operation execution record has invalid state %q", r.State)
+	}
+	if !ValidRuntimeEffectScope(r.ExpectedEffectScope) {
+		return fmt.Errorf("operation execution record has invalid expected effect scope %q", r.ExpectedEffectScope)
+	}
+	switch r.State {
+	case OperationExecutionSealed:
+		if r.Fence != 0 || r.OwnerReceiptRef != "" || r.OwnerReceiptHash != "" {
+			return fmt.Errorf("sealed operation execution cannot carry fence or receipt")
+		}
+	case OperationExecutionClaimed:
+		if r.Fence == 0 {
+			return fmt.Errorf("claimed operation execution requires fence")
+		}
+	case OperationExecutionOwnerCommitted, OperationExecutionEvidenceCommitted:
+		if r.Fence == 0 || r.OwnerReceiptRef == "" || r.OwnerReceiptHash == "" {
+			return fmt.Errorf("committed operation execution requires fence and owner receipt ref/hash")
+		}
+	case OperationExecutionOutcomeUnknown:
+		if r.Fence == 0 {
+			return fmt.Errorf("outcome_unknown operation execution requires fence")
+		}
+	}
+	return nil
+}
+
+func (r RuntimeOperationExecutionRecord) Clone() RuntimeOperationExecutionRecord {
+	return r.Normalized()
+}
+
+func NormalizeRuntimeOperationExecutionRecords(values []RuntimeOperationExecutionRecord) []RuntimeOperationExecutionRecord {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]RuntimeOperationExecutionRecord, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = value.Normalized()
+		if value.OperationID == "" {
+			continue
+		}
+		if _, ok := seen[value.OperationID]; ok {
+			continue
+		}
+		seen[value.OperationID] = struct{}{}
+		ret = append(ret, value)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func ValidateRuntimeOperationExecutionRecords(values []RuntimeOperationExecutionRecord) error {
+	// Detect duplicates on the raw input before Normalize collapses them.
+	seenOps := map[string]struct{}{}
+	seenKeys := map[string]struct{}{}
+	for _, raw := range values {
+		value := raw.Normalized()
+		if value.OperationID == "" {
+			continue
+		}
+		if err := value.Validate(); err != nil {
+			return err
+		}
+		if _, ok := seenOps[value.OperationID]; ok {
+			return fmt.Errorf("operation execution operation id %s is duplicated", value.OperationID)
+		}
+		seenOps[value.OperationID] = struct{}{}
+		if _, ok := seenKeys[value.ExecutionKey]; ok {
+			return fmt.Errorf("operation execution key %s is duplicated", value.ExecutionKey)
+		}
+		seenKeys[value.ExecutionKey] = struct{}{}
+	}
+	return nil
+}
+
+func SameRuntimeOperationExecutionRecords(left []RuntimeOperationExecutionRecord, right []RuntimeOperationExecutionRecord) bool {
+	left = NormalizeRuntimeOperationExecutionRecords(left)
+	right = NormalizeRuntimeOperationExecutionRecords(right)
+	if len(left) != len(right) {
+		return false
+	}
+	for idx := range left {
+		if left[idx] != right[idx] {
+			return false
+		}
+	}
+	return true
+}
+
+func (r RuntimeOperationReceipt) Normalized() RuntimeOperationReceipt {
+	r.ExecutionKey = strings.TrimSpace(r.ExecutionKey)
+	r.OperationID = strings.TrimSpace(r.OperationID)
+	r.Outcome = r.Outcome.Normalized()
+	r.ObservedEffectScope = NormalizeRuntimeEffectScope(r.ObservedEffectScope)
+	r.TargetRefs = normalizeStrings(r.TargetRefs)
+	r.BeforeHash = strings.TrimSpace(r.BeforeHash)
+	r.AfterHash = strings.TrimSpace(r.AfterHash)
+	r.Evidence.Summary = strings.TrimSpace(r.Evidence.Summary)
+	r.Evidence.ContentHash = strings.TrimSpace(r.Evidence.ContentHash)
+	r.Evidence.EvidenceRefs = normalizeStrings(r.Evidence.EvidenceRefs)
+	if r.Failure != nil {
+		failure := *r.Failure
+		failure.Class = FailureClass(strings.TrimSpace(string(failure.Class)))
+		failure.Code = strings.TrimSpace(failure.Code)
+		failure.Signature = strings.TrimSpace(failure.Signature)
+		failure.Message = strings.TrimSpace(failure.Message)
+		failure.TargetRefs = normalizeStrings(failure.TargetRefs)
+		r.Failure = &failure
+	}
+	if r.Governance != nil {
+		gov := r.Governance.Normalized()
+		r.Governance = &gov
+	}
+	r.CompletedAt = strings.TrimSpace(r.CompletedAt)
+	if r.NoOp {
+		r.Changed = false
+	}
+	return r
+}
+
+func (r RuntimeOperationReceipt) Validate() error {
+	r = r.Normalized()
+	if r.ExecutionKey == "" || r.Fence == 0 || r.OperationID == "" {
+		return fmt.Errorf("operation receipt requires execution key, fence and operation id")
+	}
+	if !ValidRuntimeOperationOutcome(r.Outcome) {
+		return fmt.Errorf("operation receipt has invalid outcome %q", r.Outcome)
+	}
+	if !ValidRuntimeEffectScope(r.ObservedEffectScope) {
+		return fmt.Errorf("operation receipt has invalid observed effect scope %q", r.ObservedEffectScope)
+	}
+	switch r.Outcome {
+	case RuntimeOperationOutcomeAccepted:
+		if r.NoOp {
+			return fmt.Errorf("accepted operation receipt cannot be no_op")
+		}
+		if r.ObservedEffectScope == RuntimeEffectUnknown {
+			return fmt.Errorf("accepted operation receipt cannot observe unknown effect")
+		}
+	case RuntimeOperationOutcomeNoOp:
+		if r.Changed {
+			return fmt.Errorf("no_op operation receipt cannot report changed=true")
+		}
+		if r.ObservedEffectScope != RuntimeEffectNone && r.ObservedEffectScope != RuntimeEffectEphemeralSession {
+			return fmt.Errorf("no_op operation receipt must observe none or ephemeral_session")
+		}
+	case RuntimeOperationOutcomeGovernanceRequired:
+		if r.Governance == nil {
+			return fmt.Errorf("governance_required operation receipt requires governance requirement")
+		}
+		if err := r.Governance.Validate(); err != nil {
+			return err
+		}
+	case RuntimeOperationOutcomeRejected:
+		if r.Failure == nil || r.Failure.Class == "" || strings.TrimSpace(r.Failure.Message) == "" {
+			return fmt.Errorf("rejected operation receipt requires typed failure")
+		}
+	case RuntimeOperationOutcomeUnknown:
+		// unknown is intentionally sparse; recovery path decides governance vs fail.
+	}
+	if r.CompletedAt != "" {
+		if _, err := time.Parse(time.RFC3339, r.CompletedAt); err != nil {
+			if _, err2 := time.Parse(time.RFC3339Nano, r.CompletedAt); err2 != nil {
+				return fmt.Errorf("operation receipt completedAt must be RFC3339: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+func (r RuntimeOperationReceipt) Clone() RuntimeOperationReceipt {
+	ret := r.Normalized()
+	if r.Failure != nil {
+		failure := *ret.Failure
+		ret.Failure = &failure
+	}
+	if r.Governance != nil {
+		gov := *ret.Governance
+		ret.Governance = &gov
+	}
+	if r.Evidence.ExitCode != nil {
+		code := *r.Evidence.ExitCode
+		ret.Evidence.ExitCode = &code
+	}
+	return ret
+}
+
+func NormalizeRuntimeOperationReceipts(values []RuntimeOperationReceipt) []RuntimeOperationReceipt {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]RuntimeOperationReceipt, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = value.Normalized()
+		if value.ExecutionKey == "" {
+			continue
+		}
+		key := runtimeOperationReceiptIdentity(value.ExecutionKey, value.Fence)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		ret = append(ret, value.Clone())
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func ValidateRuntimeOperationReceipts(values []RuntimeOperationReceipt) error {
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = value.Normalized()
+		if err := value.Validate(); err != nil {
+			return err
+		}
+		key := runtimeOperationReceiptIdentity(value.ExecutionKey, value.Fence)
+		if _, ok := seen[key]; ok {
+			return fmt.Errorf("operation receipt identity %s is duplicated", key)
+		}
+		seen[key] = struct{}{}
+	}
+	return nil
+}
+
+func RuntimeOperationReceiptForExecutionKeyFence(values []RuntimeOperationReceipt, executionKey string, fence uint64) (RuntimeOperationReceipt, bool) {
+	for _, value := range values {
+		value = value.Normalized()
+		if value.ExecutionKey == strings.TrimSpace(executionKey) && value.Fence == fence {
+			return value.Clone(), true
+		}
+	}
+	return RuntimeOperationReceipt{}, false
+}
+
+func runtimeOperationReceiptIdentity(executionKey string, fence uint64) string {
+	return strings.TrimSpace(executionKey) + "|" + fmt.Sprintf("%d", fence)
+}
+
+func SameRuntimeOperationReceipt(left RuntimeOperationReceipt, right RuntimeOperationReceipt) bool {
+	return StableRuntimeOperationReceiptHash(left) == StableRuntimeOperationReceiptHash(right)
+}
+
+func StableRuntimeOperationReceiptHash(receipt RuntimeOperationReceipt) string {
+	receipt = receipt.Normalized()
+	h := sha256.New()
+	writeHashString(h, receipt.ExecutionKey)
+	writeHashString(h, fmt.Sprintf("%d", receipt.Fence))
+	writeHashString(h, receipt.OperationID)
+	writeHashString(h, string(receipt.Outcome))
+	writeHashString(h, string(receipt.ObservedEffectScope))
+	writeHashString(h, fmt.Sprintf("%t", receipt.Changed))
+	writeHashString(h, fmt.Sprintf("%t", receipt.NoOp))
+	writeHashStrings(h, receipt.TargetRefs)
+	writeHashString(h, receipt.BeforeHash)
+	writeHashString(h, receipt.AfterHash)
+	writeHashString(h, receipt.Evidence.Summary)
+	writeHashString(h, receipt.Evidence.ContentHash)
+	writeHashStrings(h, receipt.Evidence.EvidenceRefs)
+	if receipt.Evidence.ExitCode == nil {
+		writeHashString(h, "exit:nil")
+	} else {
+		writeHashString(h, fmt.Sprintf("exit:%d", *receipt.Evidence.ExitCode))
+	}
+	if receipt.Failure == nil {
+		writeHashString(h, "failure:nil")
+	} else {
+		writeHashString(h, string(receipt.Failure.Class))
+		writeHashString(h, receipt.Failure.Code)
+		writeHashString(h, receipt.Failure.Signature)
+		writeHashString(h, receipt.Failure.Message)
+		writeHashStrings(h, receipt.Failure.TargetRefs)
+	}
+	if receipt.Governance == nil {
+		writeHashString(h, "governance:nil")
+	} else {
+		writeHashString(h, string(receipt.Governance.Kind))
+		writeHashString(h, receipt.Governance.SubjectRef)
+		writeHashString(h, receipt.Governance.Reason)
+		writeHashString(h, receipt.Governance.RequestedAction)
+		writeHashString(h, receipt.Governance.RiskLevel)
+	}
+	writeHashString(h, fmt.Sprintf("%t", receipt.IdempotentReplay))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// EvidenceKindFromReceipt derives committed evidence kind from sealed action expectation
+// and owner receipt. Decision action alone is never sufficient (INV-03).
+func EvidenceKindFromReceipt(action RuntimeAction, expected RuntimeEffectScope, receipt RuntimeOperationReceipt) (string, error) {
+	receipt = receipt.Normalized()
+	expected = NormalizeRuntimeEffectScope(expected)
+	if err := receipt.Validate(); err != nil {
+		return "", err
+	}
+	switch receipt.Outcome {
+	case RuntimeOperationOutcomeRejected:
+		// rejected still forms evidence of the expected kind with failure facts
+		return evidenceKindForAction(action), nil
+	case RuntimeOperationOutcomeGovernanceRequired:
+		return "", fmt.Errorf("governance_required receipt cannot commit ordinary evidence")
+	case RuntimeOperationOutcomeUnknown:
+		return "", fmt.Errorf("unknown outcome receipt cannot commit evidence")
+	case RuntimeOperationOutcomeNoOp:
+		// no-op may be diagnostic/validation observation only
+		if action == RuntimeActionProduceValidation && RuntimeEffectIsNonDurable(receipt.ObservedEffectScope) {
+			return EvidenceKindValidation, nil
+		}
+		return "", fmt.Errorf("no_op receipt cannot close durable state-change or non-validation actions")
+	case RuntimeOperationOutcomeAccepted:
+		if receipt.ObservedEffectScope == RuntimeEffectUnknown {
+			return "", fmt.Errorf("accepted receipt with unknown effect cannot commit evidence")
+		}
+		// durable mismatch: owner observed non-durable while seal expected durable
+		if RuntimeEffectIsDurable(expected) && !RuntimeEffectIsDurable(receipt.ObservedEffectScope) {
+			return "", fmt.Errorf("receipt observed effect %q cannot satisfy expected durable effect %q", receipt.ObservedEffectScope, expected)
+		}
+		// validation cannot accept durable observed effect
+		if action == RuntimeActionProduceValidation && RuntimeEffectIsDurable(receipt.ObservedEffectScope) {
+			return "", fmt.Errorf("validation action cannot commit durable observed effect %q", receipt.ObservedEffectScope)
+		}
+		// ephemeral cannot close durable state-change requirement
+		if action == RuntimeActionProduceStateChange && !RuntimeEffectIsDurable(receipt.ObservedEffectScope) {
+			return "", fmt.Errorf("state-change action cannot commit non-durable observed effect %q", receipt.ObservedEffectScope)
+		}
+		return evidenceKindForAction(action), nil
+	default:
+		return "", fmt.Errorf("unsupported receipt outcome %q", receipt.Outcome)
+	}
+}
+
+func evidenceKindForAction(action RuntimeAction) string {
+	switch action {
+	case RuntimeActionProduceStateChange:
+		return EvidenceKindStateChange
+	case RuntimeActionProduceValidation:
+		return EvidenceKindValidation
+	default:
+		return ""
+	}
+}

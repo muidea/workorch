@@ -11,15 +11,21 @@ import (
 )
 
 type RuntimeCandidateContext struct {
-	WorkspaceID              common.WorkspaceID
-	RunID                    common.RunID
-	DefinitionRevision       string
-	EvidenceRevision         string
-	Focus                    CoverageFocus
-	RemainingFocuses         []CoverageFocus
-	Evidence                 EvidenceLedger
-	Assessments              []RuntimeAssessmentFact
-	Failure                  *FailureFact
+	WorkspaceID        common.WorkspaceID
+	RunID              common.RunID
+	DefinitionRevision string
+	EvidenceRevision   string
+	Focus              CoverageFocus
+	RemainingFocuses   []CoverageFocus
+	Evidence           EvidenceLedger
+	Assessments        []RuntimeAssessmentFact
+	Failure            *FailureFact
+	// RequiredAction is the sole next-action authority for this candidate attempt.
+	// When RepairDirective is set it mirrors directive.RequiredAction (INV-05).
+	RequiredAction           RuntimeAction
+	RequiredEffectScopes     []RuntimeEffectScope
+	RequiredEvidenceKinds    []string
+	RepairDirective          *RuntimeRepairDirective
 	AdmissibleOperationKinds []string
 	RejectedOperationShapes  []RuntimeRejectedOperationShape
 	Capabilities             RuntimeCapabilities
@@ -29,18 +35,32 @@ type RuntimeCandidateContext struct {
 
 func RuntimeCandidateContextFromFacts(facts RuntimeFacts) RuntimeCandidateContext {
 	facts = facts.Normalized()
-	return RuntimeCandidateContext{
+	ctx := RuntimeCandidateContext{
 		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID,
 		DefinitionRevision: facts.DefinitionRevision, EvidenceRevision: facts.EvidenceRevision,
 		Focus: facts.Focus, RemainingFocuses: facts.RemainingFocuses, Evidence: facts.Evidence,
 		Assessments: facts.Assessments, Failure: facts.Failure,
 		Capabilities: facts.Capabilities, Resources: facts.Resources, Activation: facts.Activation,
-	}.Normalized()
+	}
+	if facts.RepairDirective != nil && facts.RepairDirective.FocusID == facts.Focus.ID {
+		directive := facts.RepairDirective.Clone()
+		ctx.RepairDirective = &directive
+		ctx.RequiredAction = directive.RequiredAction
+		ctx.RequiredEffectScopes = append([]RuntimeEffectScope(nil), directive.RequiredEffectScopes...)
+		ctx.RequiredEvidenceKinds = append([]string(nil), directive.RequiredEvidenceKinds...)
+		if len(directive.AllowedOperationKinds) > 0 {
+			ctx.AdmissibleOperationKinds = append([]string(nil), directive.AllowedOperationKinds...)
+		}
+		if len(directive.RejectedOperationShapes) > 0 {
+			ctx.RejectedOperationShapes = append([]RuntimeRejectedOperationShape(nil), directive.RejectedOperationShapes...)
+		}
+	}
+	return ctx.Normalized()
 }
 
 func RuntimeCandidateContextForDecision(facts RuntimeFacts, decision RuntimeDecision, completedDispatches []RuntimeDispatchRecord) RuntimeCandidateContext {
 	context := RuntimeCandidateContextFromFacts(facts)
-	context.AdmissibleOperationKinds = FeasibleOperationKinds(decision.RequiredOutput, facts.Capabilities)
+	context.AdmissibleOperationKinds = FeasibleOperationKindsWithActivation(decision.RequiredOutput, facts.Capabilities, facts.Activation.MCPCapabilities)
 	context.RejectedOperationShapes = ActiveRejectedOperationShapes(facts, completedDispatches)
 	return context.Normalized()
 }
@@ -60,6 +80,22 @@ func (c RuntimeCandidateContext) Normalized() RuntimeCandidateContext {
 	c.Evidence = facts.Evidence
 	c.Assessments = facts.Assessments
 	c.Failure = facts.Failure
+	c.RequiredAction = RuntimeAction(strings.TrimSpace(string(c.RequiredAction)))
+	c.RequiredEffectScopes = NormalizeRuntimeEffectScopes(c.RequiredEffectScopes)
+	c.RequiredEvidenceKinds = normalizeStrings(c.RequiredEvidenceKinds)
+	if c.RepairDirective != nil {
+		directive := c.RepairDirective.Normalized()
+		c.RepairDirective = &directive
+		if c.RequiredAction == "" {
+			c.RequiredAction = directive.RequiredAction
+		}
+		if len(c.RequiredEffectScopes) == 0 {
+			c.RequiredEffectScopes = append([]RuntimeEffectScope(nil), directive.RequiredEffectScopes...)
+		}
+		if len(c.RequiredEvidenceKinds) == 0 {
+			c.RequiredEvidenceKinds = append([]string(nil), directive.RequiredEvidenceKinds...)
+		}
+	}
 	c.AdmissibleOperationKinds = normalizeStrings(c.AdmissibleOperationKinds)
 	c.RejectedOperationShapes = NormalizeRuntimeRejectedOperationShapes(c.RejectedOperationShapes)
 	c.Capabilities = facts.Capabilities
@@ -87,10 +123,13 @@ func (c RuntimeCandidateContext) Validate(decision RuntimeDecision) error {
 type RuntimeCandidateFailureClass string
 
 const (
-	RuntimeCandidateFailureClassSchema   RuntimeCandidateFailureClass = "schema"
-	RuntimeCandidateFailureClassContract RuntimeCandidateFailureClass = "contract"
-	RuntimeCandidateFailureClassProvider RuntimeCandidateFailureClass = "provider"
-	RuntimeCandidateFailureClassInternal RuntimeCandidateFailureClass = "internal"
+	RuntimeCandidateFailureClassSchema                 RuntimeCandidateFailureClass = "schema"
+	RuntimeCandidateFailureClassContract               RuntimeCandidateFailureClass = "contract"
+	RuntimeCandidateFailureClassProvider               RuntimeCandidateFailureClass = "provider"
+	RuntimeCandidateFailureClassProviderTransient      RuntimeCandidateFailureClass = "provider_transient"
+	RuntimeCandidateFailureClassProviderAuthentication RuntimeCandidateFailureClass = "provider_authentication"
+	RuntimeCandidateFailureClassProviderConfiguration  RuntimeCandidateFailureClass = "provider_configuration"
+	RuntimeCandidateFailureClassInternal               RuntimeCandidateFailureClass = "internal"
 )
 
 type RuntimeCandidateFailure struct {
@@ -116,7 +155,6 @@ func StableRuntimeCandidateHash(candidate RuntimeCandidate) string {
 			coverage = append(coverage, string(id))
 		}
 		writeHashStrings(h, coverage)
-		writeHashString(h, fmt.Sprintf("%t", value.Satisfied))
 		writeHashString(h, string(value.Disposition))
 		writeHashString(h, value.Summary)
 		writeHashStrings(h, value.EvidenceRefs)
@@ -205,14 +243,12 @@ type AssessmentCandidate struct {
 	FocusID             string
 	SliceID             string
 	CoverageWorkItemIDs []common.CoverageWorkItemID
-	// Satisfied remains for legacy readers; authority is Disposition.
-	Satisfied    bool
-	Disposition  AssessmentDisposition
-	Items        []RuntimeAssessmentItemFact
-	Gap          *RuntimeAssessmentGap
-	Summary      string
-	EvidenceRefs []string
-	ArtifactRefs []string
+	Disposition         AssessmentDisposition
+	Items               []RuntimeAssessmentItemFact
+	Gap                 *RuntimeAssessmentGap
+	Summary             string
+	EvidenceRefs        []string
+	ArtifactRefs        []string
 }
 
 func (c AssessmentCandidate) Normalized() AssessmentCandidate {
@@ -236,11 +272,6 @@ func (c AssessmentCandidate) Normalized() AssessmentCandidate {
 	if c.Gap != nil {
 		gap := c.Gap.Normalized()
 		c.Gap = &gap
-	}
-	if c.Disposition == AssessmentDispositionSatisfied {
-		c.Satisfied = true
-	} else if c.Disposition != "" {
-		c.Satisfied = false
 	}
 	return c
 }
@@ -326,12 +357,11 @@ func (c RuntimeCandidate) ValidateWithActivation(decision RuntimeDecision, activ
 				}
 			}
 		}
-		disposition, err := DeriveAssessmentDisposition(assessment.Satisfied, assessment.Disposition, assessment.Items, assessment.Gap)
+		disposition, err := ValidateAssessmentDisposition(assessment.Disposition, assessment.Items, assessment.Gap)
 		if err != nil {
 			return err
 		}
 		assessment.Disposition = disposition
-		assessment.Satisfied = disposition == AssessmentDispositionSatisfied
 		if assessment.Disposition == AssessmentDispositionSatisfied {
 			if len(assessment.Items) > 0 {
 				for id := range requiredCoverage {
@@ -382,7 +412,7 @@ func validateRuntimeOperations(operations []RuntimeOperation, required RequiredO
 	if len(operations) == 0 {
 		return fmt.Errorf("runtime candidate requires at least one operation")
 	}
-	accepted := stringSet(required.AcceptedKinds)
+	accepted := stringSet(canonicalizeOperationKinds(required.AcceptedKinds))
 	acceptedOperations := stringSet(required.AcceptedOperations)
 	acceptedOperationObserved := len(acceptedOperations) == 0
 	requiredCoverage := coverageIDSet(required.CoverageWorkItemIDs)
@@ -396,9 +426,11 @@ func validateRuntimeOperations(operations []RuntimeOperation, required RequiredO
 			return fmt.Errorf("runtime candidate operation id %q is duplicated", operation.ID)
 		}
 		ids[operation.ID] = struct{}{}
-		if _, ok := accepted[operation.Kind]; !ok {
+		canonicalKind := CanonicalRuntimeBlockKind(operation.Kind)
+		if _, ok := accepted[canonicalKind]; !ok {
 			return fmt.Errorf("runtime candidate operation kind %q is not accepted", operation.Kind)
 		}
+		operation.Kind = canonicalKind
 		if required.Kind == RequiredOutputKindValidation && OperationHasWorkspaceSideEffectsWithCapabilities(operation, capabilities) {
 			return fmt.Errorf("runtime candidate operation %q has workspace side effects and cannot satisfy produce_validation; emit a non-mutating validation operation or request produce_state_change first", operation.ID)
 		}
@@ -427,6 +459,11 @@ func validateRuntimeOperations(operations []RuntimeOperation, required RequiredO
 	}
 	if !acceptedOperationObserved {
 		return fmt.Errorf("runtime candidate requires one accepted operation: %s", strings.Join(required.AcceptedOperations, ","))
+	}
+	// Forward/reverse effect gate before seal (INV-02). Failures here must not
+	// consume execution/repair budget — they are candidate contract failures.
+	if err := ValidateCandidateEffectCompatibility(operations, required, capabilities); err != nil {
+		return err
 	}
 	return nil
 }

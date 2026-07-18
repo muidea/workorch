@@ -121,11 +121,15 @@ type PatchApplyRequest struct {
 	Occurrence         int64
 	CoverageTargets    []string
 	Summary            string
+	// ApprovalGranted is set only after the File owner has validated the persisted
+	// Runtime V2 governance grant for this exact ExecutionKey + resume Fence.
+	ApprovalGranted bool
 }
 
 type RuntimeFileOperationResult struct {
 	Stage          string
 	Summary        string
+	BeforeHash     string
 	ContentHash    string
 	AfterHash      string
 	DiffHash       string
@@ -418,8 +422,9 @@ func (a *RuntimeAdapter) ApplyFileEdit(request FileEditRequest) (RuntimeFileOper
 		return runtimeFileFailure("file_edit_write_failed", err, rel), err
 	}
 	ref := filepath.ToSlash(rel)
+	afterHash := sha256Hex([]byte(nextContent))
 	return RuntimeFileOperationResult{
-		Summary: "file/edit applied", ContentHash: sha256Hex([]byte(nextContent)), TargetRefs: []string{ref},
+		Summary: "file/edit applied", BeforeHash: beforeHash, AfterHash: afterHash, ContentHash: afterHash, TargetRefs: []string{ref},
 		EvidenceRefs: []string{"workorch://workspace/" + ref},
 	}, nil
 }
@@ -439,13 +444,24 @@ func (a *RuntimeAdapter) ApplyPatch(request PatchApplyRequest) (RuntimeFileOpera
 	if request.PatchType == patchTypeTextReplace && (!request.NewTextPresent || request.OldText == "" || request.OldText == request.NewText) {
 		return runtimeFileFailure("patch_invalid_input", common.ErrInvalidArgument, request.TargetRef), common.ErrInvalidArgument
 	}
+	// RVC-R11 INV-06: preview first; if approval is required, do not apply side effects.
+	previewRequest := patchRequest
+	previewRequest.Operation = "preview"
+	preview, previewErr := a.executePatchRequest(request.WorkspaceDirectory, previewRequest, false)
+	if previewErr == nil && preview.ApprovalRequired && !request.ApprovalGranted {
+		err := fmt.Errorf("%w: patch apply requires approval before side effects", common.ErrInvalidArgument)
+		ret := runtimeFileOperationResultFromExecution(preview, request.TargetRef, err)
+		ret.FailureCode = "approval_required"
+		ret.FailureMessage = err.Error()
+		return ret, err
+	}
 	result, err := a.executePatchRequest(request.WorkspaceDirectory, patchRequest, true)
 	return runtimeFileOperationResultFromExecution(result, request.TargetRef, err), err
 }
 
 func runtimeFileOperationResultFromExecution(result patchExecutionResult, fallbackTarget string, executeErr error) RuntimeFileOperationResult {
 	ret := RuntimeFileOperationResult{
-		Stage: result.Stage, ContentHash: result.ContentHash, AfterHash: result.AfterHash, DiffHash: result.DiffHash,
+		Stage: result.Stage, BeforeHash: result.BeforeHash, ContentHash: result.ContentHash, AfterHash: result.AfterHash, DiffHash: result.DiffHash,
 		AddedLines: result.AddedLines, DeletedLines: result.DeletedLines,
 		TargetRefs: []string{strings.TrimSpace(fallbackTarget)},
 	}

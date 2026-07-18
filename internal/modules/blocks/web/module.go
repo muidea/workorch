@@ -76,6 +76,14 @@ func (m *Module) handleWebOperation(event magicevent.Event, result magicevent.Re
 		setCapabilityError(result, err)
 		return
 	}
+	if receipt, found, err := orchestratorevents.QueryPersistedRuntimeOperationReceipt(event.Context(), m.eventHub, ModuleID, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution); err != nil {
+		setCapabilityError(result, err)
+		return
+	} else if found {
+		status, evidence, failure, _ := orchestratorevents.RuntimeOperationResultFromReceipt(receipt)
+		result.Set(orchestratorevents.ExecuteWebOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, Status: status, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: evidence, Failure: failure}, nil)
+		return
+	}
 	operationResult, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), webbiz.RuntimeOperationRequest{
 		WorkspaceID: command.WorkspaceID, RunID: command.RunID, StepID: common.StepID(command.DispatchID + "/" + command.OperationID),
 		Kind: command.OperationKind, WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
@@ -105,6 +113,36 @@ func (m *Module) handleWebOperation(event magicevent.Event, result magicevent.Re
 		response.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
 		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, command.OperationKind, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
 	}
+	var governance *runtimecontract.RuntimeGovernanceRequirement
+	if operationResult.ApprovalNeeded || (response.Failure != nil && response.Failure.Code == "approval_required") {
+		subject := operationResult.URL
+		if subject == "" {
+			subject = operationResult.Query
+		}
+		if subject == "" {
+			subject = command.OperationKind
+		}
+		reason := operationResult.FailureMessage
+		if reason == "" {
+			reason = "web operation requires approval before side effects"
+		}
+		governance = &runtimecontract.RuntimeGovernanceRequirement{Kind: runtimecontract.GovernanceApproval, SubjectRef: subject, Reason: reason, RequestedAction: command.OperationKind, RiskLevel: "external"}
+	}
+	observation := orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectNone}
+	if runtimecontract.RuntimeEffectIsDurable(command.Execution.ExpectedEffectScope) {
+		observation.ObservedEffectScope = runtimecontract.RuntimeEffectUnknown
+		if response.Status == runtimecontract.RuntimeOperationExecutionStatusAccepted {
+			observation.ObservedEffectScope = command.Execution.ExpectedEffectScope
+			observation.Changed = true
+		}
+	}
+	receipt := orchestratorevents.NewRuntimeOperationReceiptWithObservation(command.Execution, command.OperationID, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, governance, observation)
+	committed, err := orchestratorevents.CommitPersistedRuntimeOperationReceipt(event.Context(), m.eventHub, ModuleID, command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	response.Receipt = committed
 	result.Set(response, nil)
 }
 

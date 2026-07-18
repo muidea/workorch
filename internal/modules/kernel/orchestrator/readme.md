@@ -31,6 +31,19 @@
 - 本模块不得恢复 V1 mainline、application continuation queue、通用 RuntimeAdapter registry、projection authority 或自动 successor。
 
 
+
+## Effect / Receipt / Repair Directive（RVC-R5～R10, 2026-07-17）
+
+- `RuntimeEffectScope` 是 operation 的中立 effect 合同；`ResolveExpectedEffectScope` 由 descriptor + shell `stateChanging` + sealed MCP risk/EffectScope 解析 concrete scope。
+- seal 前 `ValidateCandidateEffectCompatibility` 强制：`produce_state_change` 至少一个 durable effect；`produce_validation` 不得含 durable/unknown；`stateChanging=false` shell 与 read-only/session MCP 不能关闭 durable state-change。
+- `SealedDispatch.OperationExecutions` 在 seal 时写入 per-operation `ExecutionKey` + `ExpectedEffectScope`；execute 前 claim fence，owner 返回后 `owner_committed`，evidence CAS 后 `evidence_committed`；owner error 记 `outcome_unknown`，禁止盲重放。
+- owner 已持久化 exact `ExecutionKey + Fence` receipt 但响应丢失时，executor 必须先重新加载 aggregate：存在 terminal receipt 则继续 governance/evidence commit，不得把 `owner_committed` 覆盖为 `outcome_unknown`。
+- claimed/no-receipt recovery 只允许 sealed idempotency=`safe_to_replay|owner_managed`，并先消耗独立 operation-recovery budget；`at_most_once|unknown` 一律转 `outcome_unknown`。单 operation evidence 与 dispatch close 在同一 CAS 中原子提交。
+- current-schema evidence commit 必须携带已持久化 owner receipt，并按 sealed expectation + `ObservedEffectScope` 联合裁决 Kind；declared Kind 不构成 authority。
+- `Facts.RepairDirective` 是同 focus 唯一 next-action 权威（INV-05）；`ReduceRuntimeStateWithDirective` 同步 directive；anti-replay 与 repair hints 不得覆盖 directive action。
+- active V2 Cancel/Supersede 必须先 `RequestTermination` CAS 持久化 `RuntimeTerminationRecord`，再投影 SM-1 terminal。
+- drive failure 经 `classifyRuntimeV2DriveFailure` 分类：CAS/owner-transient/projection 不终态化业务 Run。
+
 ## 组件交互及合同
 
 - 通过 EventHub 读取 `blocks/workspace` 和 `kernel/run` 的权威快照，并通过 Run owner command 推进 Run/Step/Checkpoint。
@@ -47,6 +60,7 @@
 - Runtime V2 初始化时封存 typed Goal/DoD definition context；后续 candidate request 与重启恢复只能读取 Run owner 中持久化的定义快照，不能由调用方临时重建。
 - `InitializeRuntimeV2FromRun` 只读取 Run owner 已持久化的 typed bootstrap，生成 initial facts 并执行 preflight/reducer；Orchestrator 不解析 V1 execution context map 来重建定义或 focus。
 - Runtime V2 controller 统一负责 initialize、prerequisite commit、candidate seal 和 evidence commit；服务重启只加载既有 aggregate，不得因重复 Start/Resume 再次执行 reducer 或增加 attempt。
+- initialize/restart identity 只比较不可变 workspace/run、definition revision/content 与 activation；`Facts.Focus` 是 SM-2 persisted cursor，合法 focus advance 后不得被拿来与 bootstrap 首 focus 比较并误判 definition drift。
 - prerequisite mainline 按 typed requirement 的 owner module 调用 EventHub，并在每个结果提交后原子执行 reducer；多个 capability owner 的结果必须合并，不能互相覆盖。
 - sealed candidate 通过 `ExecuteRuntimeOperationCommand/Result` 按 operation kind 投递到 File、Git、Shell、MCP、Web 或 SSH owner；跨组件 command/result 只包含具体 operation、transaction、status、failure 和 evidence 类型。
 - 多 operation dispatch 按 dependency graph 确定性执行；每个 operation 独立提交 evidence，全部成功或任一失败后才结束 dispatch 并再次 reducer。
@@ -55,7 +69,7 @@
 - 最后一个 assessment 关闭或 typed terminal failure 形成后，Orchestrator 从 current-run evidence/coverage/assessment ledger 稳定打包 Result/closeout，再通过 Result owner 的具体 EventHub create command写入 accepted/rejected outcome，最后投影 Run/Workspace terminal；Result block 不参与 acceptance 裁决。
 - CoverageFocus 可携带 evidence role、accepted/rejected step kinds 与 accepted operations；reducer 只在 owner 已确认的 capability kinds 中做中立交集/排除，并把结果封入 `RequiredOutputContract`。若声明 accepted operations，candidate 至少包含一个匹配的具体 operation 参数，不能用同 step kind 的其他动作替代。
 - candidate attempt 0/1 的 pending、failed、accepted 状态随 aggregate 持久化；attempt 1 必须复用相同 transaction 和 stable prefix，第二次失败后只能进入 governance 或 terminal。
-- candidate retry 预算按稳定 `AuthorityContractID` 计算；identity 绑定 workspace/run、focus、action、definition/evidence revision 与 requiredOutput hash，不包含 snapshot/authority attempt。旧记录缺少该字段时仅作读兼容并按同一 semantic contract 聚合，发现历史重复 reseal 已超过 0/1 时直接写入 typed `candidate_retry_exhausted` fact，禁止再次请求 provider。
+- candidate retry 预算按稳定且显式持久化的 `AuthorityContractID` 计算；identity 绑定 workspace/run、focus、action、definition/evidence revision 与 requiredOutput hash，不包含 snapshot/authority attempt。缺失或不匹配该字段属于 current-schema invariant violation；同一 contract 超过 attempt 0/1 必须 fail-fast，禁止再次请求 provider。
 - candidate attempt 0 的 schema/contract/provider failure 只更新本次 attempt record；只有本次失败新建 internal terminal failure 或 attempt 1 exhaustion 时才允许重新 reducer。历史 execution failure 不得触发 authority reseal。
 - governance candidate 作为 sealed dispatch 持久化；治理结果通过 `CommitRuntimeGovernanceResolutionCommand/Result` typed owner command 提交，同一 resolution ID 与 authority snapshot 最多消费一次。
 - Decision owner 可通过 `CommitRuntimeGovernanceTicketResolutionCommand` 只提交 ticket resolution；Orchestrator 从 persisted binding 补齐 authority snapshot、dispatch 与 dependency 后进入同一 resolution commit。
@@ -104,8 +118,12 @@
 - retirement resource command 必须拒绝任何带 Runtime V2 bootstrap/state 或 V2 contract 的 Run；历史 evidence、terminal Step、completed ToolCall 和已应用 ArtifactContinuation 不得被修改。
 - governance continue 必须写入 accepted governance evidence、递增 evidence revision 并回到同一 reducer；governance fail 直接生成 `governance_rejected` terminal，stale resolution 只能进入 diagnostic lineage。
 - resolution 必须携带并匹配已绑定 ticket；不存在绑定、同一 dispatch 绑定不同 ticket、或 dependency 漂移都必须返回 conflict。
+- operation-scoped governance continue 保持原 ExecutionKey，通过 CAS 将 governance fence `N` 推进到 resume fence `N+1`；typed grant 必须绑定 ticket、resolution、dependency、subject 与治理 receipt hash。各 concrete owner 在 receipt preflight 时验证 grant，禁止复用 `Receipt(K,N)=governance_required` 作为普通 evidence。
+- operation-scoped governance candidate 必须保留 suspended binding 的 dependency kind/subject；不得把 persisted `approval/configuration/external` 退化为默认 `decision`，否则 ticket 无法回绑 source operation。
 - `runtime_v2_governance` resolution committed 后由 Orchestrator 自行投影 terminal 或调度 drive continuation；application resolved watcher 不得再次发送 Resume。
 - 相同 governance resolution 的 duplicate commit 必须重试幂等 continuation/projection；singleflight gate 负责与仍在执行的 drive 合并，避免“aggregate 已提交但 Run 仍 blocked”的单边状态。
+- provider transport、operation recovery、CAS reload、terminal delivery 使用独立 persisted recovery policy/ledger；candidate attempt 0/1 与 per-focus repair budget 不得消费这些预算。
+- startup recovery 必须通过 Run owner concrete typed inventory 获取 `active_no_dispatch`、`active_sealed_dispatch`、`blocked_governance`、`terminal_delivery_pending`，不得由 Orchestrator 使用通用 Run List 自行推断。
 - definition revision、Goal/DoD identity、正文或 capability contract 任一漂移都必须返回 conflict；definition context revision 必须与 facts 和 authority transaction 一致。
 - LLM dispatch 前必须先完成 manifest、target snapshot、failure target、capability、validation scratch 和 provider ceiling preflight；缺失资源只能进入 deterministic `AcquirePrerequisite`，不得混入 LLM state-changing requiredOutput。
 - block 输出只是 candidate；evidence quality、coverage binding、next action 和 accepted Result 只能由 Orchestrator 判定。

@@ -15,8 +15,8 @@ func (o *RuntimeOrchestrator) InitializeRuntimeV2FromRun(ctx context.Context, ru
 		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	bootstrap := run.RuntimeBootstrap.Clone()
-	if bootstrap.SchemaVersion > runtimecontract.RuntimeStateSchemaVersionCurrent {
-		return runtimev2.RuntimeAggregate{}, fmt.Errorf("unsupported future Runtime V2 bootstrap schema %d", bootstrap.SchemaVersion)
+	if bootstrap.SchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent {
+		return runtimev2.RuntimeAggregate{}, fmt.Errorf("unsupported Runtime V2 bootstrap schema %d", bootstrap.SchemaVersion)
 	}
 	if bootstrap.Definition.GoalID != run.GoalID || bootstrap.Definition.DoDID != run.DoDID || bootstrap.Definition.Revision != run.DefinitionRevision {
 		return runtimev2.RuntimeAggregate{}, fmt.Errorf("%w: run identity does not match runtime bootstrap definition", common.ErrConflict)

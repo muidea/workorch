@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -54,7 +55,7 @@ func (c *RuntimeController) Initialize(ctx context.Context, facts runtimecontrac
 		return RuntimeAggregate{}, err
 	}
 	facts = PreflightRuntimeFacts(facts, requirements)
-	decision, err := ReduceRuntimeState(facts, nil)
+	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -103,10 +104,11 @@ func (c *RuntimeController) RecordFeasibilityFact(ctx context.Context, workspace
 	}
 	expectedRevision := aggregate.StateRevision
 	aggregate.Facts.Feasibility = &fact
-	decision, err := ReduceRuntimeState(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
+	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
+	aggregate.Facts = facts
 	aggregate.Decision = decision
 	aggregate.StateRevision++
 	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
@@ -134,12 +136,51 @@ func (c *RuntimeController) RecordFailureFact(ctx context.Context, workspaceID c
 	fact.Signature = strings.TrimSpace(fact.Signature)
 	fact.Message = strings.TrimSpace(fact.Message)
 	aggregate.Facts.Failure = &fact
-	decision, err := ReduceRuntimeState(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
+	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
+	aggregate.Facts = facts
 	aggregate.Decision = decision
 	aggregate.StateRevision++
+	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return aggregate, nil
+}
+
+// RequestTermination CAS-persists an administrative termination record on an active V2
+// aggregate (INV-08). SM-1 may project cancelled/superseded only after this record exists.
+func (c *RuntimeController) RequestTermination(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, kind runtimecontract.RuntimeTerminationKind, requestedBy, reason string) (RuntimeAggregate, error) {
+	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || reason == "" {
+		return RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if aggregate.Decision.Action == runtimecontract.RuntimeActionComplete || aggregate.Decision.Action == runtimecontract.RuntimeActionFail {
+		return RuntimeAggregate{}, fmt.Errorf("%w: terminal runtime cannot accept administrative termination", common.ErrConflict)
+	}
+	if aggregate.Termination != nil {
+		if aggregate.Termination.Kind == kind {
+			return aggregate, nil
+		}
+		return RuntimeAggregate{}, fmt.Errorf("%w: termination already recorded as %s", common.ErrConflict, aggregate.Termination.Kind)
+	}
+	expectedRevision := aggregate.StateRevision
+	term := runtimecontract.RuntimeTerminationRecord{
+		Kind: kind, RequestedBy: strings.TrimSpace(requestedBy), Reason: strings.TrimSpace(reason),
+		Revision: expectedRevision + 1, RequestedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := term.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	aggregate.Termination = &term
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
 	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -162,7 +203,7 @@ func (c *RuntimeController) CommitPrerequisite(ctx context.Context, workspaceID 
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	decision, err := ReduceRuntimeState(facts, &aggregate.Decision.AuthoritySnapshot)
+	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -292,10 +333,11 @@ func (c *RuntimeController) FailCandidateAttempt(ctx context.Context, workspaceI
 		createdTerminalFailure = true
 	}
 	if createdTerminalFailure {
-		decision, reduceErr := ReduceRuntimeState(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
+		facts, decision, reduceErr := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
 		if reduceErr != nil {
 			return RuntimeAggregate{}, reduceErr
 		}
+		aggregate.Facts = facts
 		aggregate.Decision = decision
 	}
 	aggregate.StateRevision++
@@ -355,14 +397,13 @@ func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID co
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime dispatch does not carry assessment", common.ErrConflict)
 	}
 	assessment := aggregate.ActiveDispatch.Candidate.Assessment.Normalized()
-	disposition, err := runtimecontract.DeriveAssessmentDisposition(assessment.Satisfied, assessment.Disposition, assessment.Items, assessment.Gap)
+	disposition, err := runtimecontract.ValidateAssessmentDisposition(assessment.Disposition, assessment.Items, assessment.Gap)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
 	assessment.Disposition = disposition
-	assessment.Satisfied = disposition == runtimecontract.AssessmentDispositionSatisfied
 	known := stringSet(runtimecontract.AcceptedEvidenceRefsForFocus(aggregate.Facts))
-	if assessment.Satisfied {
+	if assessment.Disposition == runtimecontract.AssessmentDispositionSatisfied {
 		for _, ref := range assessment.EvidenceRefs {
 			if _, ok := known[ref]; !ok {
 				return RuntimeAggregate{}, fmt.Errorf("assessment evidence ref %q is not accepted current-focus evidence", ref)
@@ -405,7 +446,6 @@ func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID co
 	if assessment.Disposition == runtimecontract.AssessmentDispositionSatisfied {
 		if open := openCoverageIDs(aggregate.Facts.Coverage, aggregate.Facts.Focus.CoverageWorkItemIDs); len(open) > 0 {
 			assessment.Disposition = runtimecontract.AssessmentDispositionRepairableGap
-			assessment.Satisfied = false
 			assessment.Gap = &runtimecontract.RuntimeAssessmentGap{
 				CoverageWorkItemIDs: open,
 				Reason:              "assessment did not close every current slice coverage item",
@@ -417,7 +457,7 @@ func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID co
 		ID: aggregate.ActiveDispatch.ID, FocusID: assessment.FocusID, SliceID: firstNonEmpty(assessment.SliceID, aggregate.Facts.Focus.SliceID),
 		Scope: aggregate.Facts.Focus.AssessmentScope, RequirementID: aggregate.Facts.Focus.AssessmentID,
 		RequirementText: aggregate.Facts.Focus.AssessmentText, CoverageWorkItemIDs: assessment.CoverageWorkItemIDs,
-		Satisfied: assessment.Satisfied, Disposition: assessment.Disposition, Items: append([]runtimecontract.RuntimeAssessmentItemFact(nil), assessment.Items...),
+		Disposition: assessment.Disposition, Items: append([]runtimecontract.RuntimeAssessmentItemFact(nil), assessment.Items...),
 		Summary: assessment.Summary, EvidenceRefs: assessment.EvidenceRefs, ArtifactRefs: assessment.ArtifactRefs,
 	}
 	if assessment.Gap != nil {
@@ -463,10 +503,11 @@ func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID co
 	aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
 	aggregate.ActiveDispatch = nil
 	aggregate.Facts = advanceSatisfiedCoverageFocus(aggregate.Facts)
-	nextDecision, err := ReduceRuntimeState(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
+	facts, nextDecision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
+	aggregate.Facts = facts
 	aggregate.Decision = nextDecision
 	aggregate.StateRevision++
 	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
@@ -551,10 +592,13 @@ func openCoverageIDs(coverage []runtimecontract.RuntimeCoverageItemFact, ids []c
 func sameRuntimeDefinition(left runtimecontract.RuntimeFacts, right runtimecontract.RuntimeFacts) bool {
 	left = left.Normalized()
 	right = right.Normalized()
+	// Focus is the persisted SM-2 cursor and legitimately changes as coverage
+	// advances. Restart identity is limited to immutable run definition and
+	// activation fields; comparing the current cursor with bootstrap focus 0
+	// would reject every multi-focus run after its first atomic advance.
 	return left.WorkspaceID == right.WorkspaceID &&
 		left.RunID == right.RunID &&
 		left.DefinitionRevision == right.DefinitionRevision &&
-		left.Focus.ID == right.Focus.ID &&
 		runtimecontract.SameRuntimeActivationContext(left.Activation, right.Activation)
 }
 

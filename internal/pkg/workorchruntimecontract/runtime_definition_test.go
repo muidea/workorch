@@ -19,7 +19,7 @@ func TestRuntimeStateRejectsDefinitionRevisionMismatch(t *testing.T) {
 	facts := testRuntimeFacts()
 	decision, err := SealRuntimeDecision(facts, RuntimeDecision{
 		State: ConvergenceStateNeedStateChange, Action: RuntimeActionProduceStateChange, Focus: facts.Focus,
-		RequiredOutput: RequiredOutputContract{Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{"file/write"}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs},
+		RequiredOutput: RequiredOutputContract{Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{"file/write"}, AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs},
 	}, 0)
 	if err != nil {
 		t.Fatal(err)

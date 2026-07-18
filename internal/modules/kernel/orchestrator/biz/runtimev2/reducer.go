@@ -29,6 +29,17 @@ func ReduceRuntimeState(facts runtimecontract.RuntimeFacts, previous *runtimecon
 	return runtimecontract.SealRuntimeDecision(facts, decision, attempt)
 }
 
+// ReduceRuntimeStateWithDirective reduces facts and returns the decision plus facts
+// with RepairDirective synchronized to the sealed decision (INV-05).
+func ReduceRuntimeStateWithDirective(facts runtimecontract.RuntimeFacts, previous *runtimecontract.AuthoritySnapshot) (runtimecontract.RuntimeFacts, runtimecontract.RuntimeDecision, error) {
+	decision, err := ReduceRuntimeState(facts, previous)
+	if err != nil {
+		return facts, runtimecontract.RuntimeDecision{}, err
+	}
+	facts = runtimecontract.SyncRepairDirective(facts, decision)
+	return facts, decision, nil
+}
+
 func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision, error) {
 	base := runtimecontract.RuntimeDecision{Focus: facts.Focus}
 	if len(facts.Prerequisites.Pending) > 0 {
@@ -51,7 +62,25 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "no_progress_exhausted", facts.Failure.Message), nil
 		}
 		switch facts.Failure.Class {
-		case runtimecontract.FailureClassGovernanceDependency:
+		case runtimecontract.FailureClassProviderTransient:
+			if facts.Recovery.ProviderTransportAttempts < facts.RecoveryPolicy.MaxProviderTransportAttempts {
+				break
+			}
+			if len(facts.Capabilities.GovernanceKinds) > 0 {
+				return governanceDecision(base, facts, facts.Failure.Message)
+			}
+			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "provider_transport_exhausted", facts.Failure.Message), nil
+		case runtimecontract.FailureClassOwnerTransientUnavailable:
+			if facts.Recovery.OperationRecoveryAttempts < facts.RecoveryPolicy.MaxOperationRecoveryAttempts {
+				break
+			}
+			if len(facts.Capabilities.GovernanceKinds) > 0 {
+				return governanceDecision(base, facts, facts.Failure.Message)
+			}
+			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "operation_recovery_exhausted", facts.Failure.Message), nil
+		case runtimecontract.FailureClassGovernanceDependency, runtimecontract.FailureClassGovernanceRequired,
+			runtimecontract.FailureClassProviderAuthentication, runtimecontract.FailureClassProviderConfiguration,
+			runtimecontract.FailureClassOperationOutcomeUnknown:
 			return governanceDecision(base, facts, facts.Failure.Message)
 		case runtimecontract.FailureClassRuntimeContractMisalignment:
 			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "runtime_contract_defect", facts.Failure.Message), nil
@@ -66,6 +95,13 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "capability_unavailable", firstNonEmpty(facts.Feasibility.Reason, "current focus has no feasible operation under sealed capabilities")), nil
 		}
 		return governanceDecision(base, facts, firstNonEmpty(facts.Feasibility.Reason, "current focus has no feasible operation under sealed capabilities"))
+	}
+	// INV-05: persisted RepairDirective is the sole next-action authority for the focus.
+	// Raw MissingRequiredEvidenceKinds and anti-replay must not override it.
+	if decision, ok, err := runtimecontract.ApplyRepairDirectiveAction(facts, base); err != nil {
+		return runtimecontract.RuntimeDecision{}, err
+	} else if ok {
+		return decision, nil
 	}
 	if needsStateChangeAfterRejectedValidation(facts) {
 		return stateChangeDecision(base, facts)
@@ -124,13 +160,6 @@ func feasibilityBlocksCurrentAction(facts runtimecontract.RuntimeFacts) bool {
 }
 
 func currentFocusCoverageSatisfied(facts runtimecontract.RuntimeFacts) bool {
-	assessment, assessed := assessmentForCurrentFocus(facts)
-	// Legacy records did not have an item ledger. A satisfied disposition is a
-	// compatibility source only for those records; new controller commits always
-	// materialize Coverage before this reducer runs.
-	if assessed && assessment.Disposition == runtimecontract.AssessmentDispositionSatisfied {
-		return true
-	}
 	for _, id := range facts.Focus.CoverageWorkItemIDs {
 		for _, item := range facts.Coverage {
 			if item.ID == id && item.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
@@ -166,6 +195,8 @@ func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecont
 		Kind:                  runtimecontract.RequiredOutputKindStateChange,
 		AcceptedKinds:         acceptedKinds,
 		AcceptedOperations:    facts.Focus.AcceptedOperations,
+		AcceptedEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
+		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		CoverageWorkItemIDs:   facts.Focus.CoverageWorkItemIDs,
 		TargetRefs:            facts.Focus.TargetRefs,
@@ -187,6 +218,8 @@ func validationDecision(base runtimecontract.RuntimeDecision, facts runtimecontr
 		Kind:                  runtimecontract.RequiredOutputKindValidation,
 		AcceptedKinds:         acceptedKinds,
 		AcceptedOperations:    facts.Focus.AcceptedOperations,
+		AcceptedEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession},
+		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
 		CoverageWorkItemIDs:   facts.Focus.CoverageWorkItemIDs,
 		TargetRefs:            facts.Focus.TargetRefs,
@@ -313,6 +346,7 @@ func advanceSatisfiedCoverageFocus(facts runtimecontract.RuntimeFacts) runtimeco
 	facts.Failure = nil
 	facts.Feasibility = nil
 	facts.Repair = facts.Repair.ResetForFocus(facts.Focus.ID, facts.Focus.SliceID, facts.EvidenceRevision)
+	facts = runtimecontract.ClearRepairDirectiveForFocusAdvance(facts)
 	return facts.Normalized()
 }
 

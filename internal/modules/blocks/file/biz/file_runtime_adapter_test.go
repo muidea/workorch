@@ -490,6 +490,29 @@ func TestRuntimeAdapterPatchApplyRejectsMissingParentConflict(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterPatchApplyConsumesValidatedApprovalGrant(t *testing.T) {
+	workspace := t.TempDir()
+	request := PatchApplyRequest{
+		WorkspaceDirectory: workspace, PatchType: "file_write", TargetRef: ".env",
+		Content: "TOKEN=granted\n", ContentPresent: true,
+	}
+	if _, err := NewRuntimeAdapter().ApplyPatch(request); err == nil {
+		t.Fatal("sensitive patch/apply must require approval before side effects")
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".env")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("approval-required preview changed file: %v", err)
+	}
+	request.ApprovalGranted = true
+	result, err := NewRuntimeAdapter().ApplyPatch(request)
+	if err != nil {
+		t.Fatalf("granted patch/apply: %v", err)
+	}
+	content, readErr := os.ReadFile(filepath.Join(workspace, ".env"))
+	if readErr != nil || string(content) != "TOKEN=granted\n" || result.AfterHash == "" {
+		t.Fatalf("granted patch result=%+v content=%q err=%v", result, string(content), readErr)
+	}
+}
+
 func TestRuntimeAdapterPatchApplyUnifiedDiffSuccess(t *testing.T) {
 	workspace := t.TempDir()
 	path := filepath.Join(workspace, "main.txt")
