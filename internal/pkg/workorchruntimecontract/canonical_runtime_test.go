@@ -98,33 +98,33 @@ func TestRuntimeDecisionRejectsOutputAuthorityMismatch(t *testing.T) {
 
 func TestStableRequiredOutputHashNormalizesOrderAndDetectsSemanticChange(t *testing.T) {
 	left := RequiredOutputContract{
-		Kind:                  RequiredOutputKindStateChange,
-		AcceptedKinds:         []string{"git/write", "patch/apply", "patch/apply"},
-		AcceptedOperations:    []string{"commit", "add", "commit"},
-		AcceptedEffectScopes:  []RuntimeEffectScope{RuntimeEffectRemoteDurable, RuntimeEffectWorkspaceDurable},
-		RequiredEffectScopes:  []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
-		RequiredEvidenceKinds: []string{"validation", "state_change"},
-		CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-2", "cwi-1"},
-		TargetRefs:            []string{"b.go", "a.go"},
+		Kind:                      RequiredOutputKindStateChange,
+		AcceptedKinds:             []string{"git/write", "patch/apply", "patch/apply"},
+		AcceptedOperationVariants: []RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "commit"}, {Kind: "git/write", VariantID: "add"}, {Kind: "git/write", VariantID: "commit"}},
+		AcceptedEffectScopes:      []RuntimeEffectScope{RuntimeEffectRemoteDurable, RuntimeEffectWorkspaceDurable},
+		RequiredEffectScopes:      []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
+		RequiredEvidenceKinds:     []string{"validation", "state_change"},
+		CoverageWorkItemIDs:       []common.CoverageWorkItemID{"cwi-2", "cwi-1"},
+		TargetRefs:                []string{"b.go", "a.go"},
 	}
 	right := RequiredOutputContract{
-		Kind:                  RequiredOutputKindStateChange,
-		AcceptedKinds:         []string{"patch/apply", "git/write"},
-		AcceptedOperations:    []string{"add", "commit"},
-		AcceptedEffectScopes:  []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
-		RequiredEffectScopes:  []RuntimeEffectScope{RuntimeEffectRemoteDurable, RuntimeEffectWorkspaceDurable},
-		RequiredEvidenceKinds: []string{"state_change", "validation"},
-		CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-1", "cwi-2"},
-		TargetRefs:            []string{"a.go", "b.go"},
+		Kind:                      RequiredOutputKindStateChange,
+		AcceptedKinds:             []string{"patch/apply", "git/write"},
+		AcceptedOperationVariants: []RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "add"}, {Kind: "git/write", VariantID: "commit"}},
+		AcceptedEffectScopes:      []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
+		RequiredEffectScopes:      []RuntimeEffectScope{RuntimeEffectRemoteDurable, RuntimeEffectWorkspaceDurable},
+		RequiredEvidenceKinds:     []string{"state_change", "validation"},
+		CoverageWorkItemIDs:       []common.CoverageWorkItemID{"cwi-1", "cwi-2"},
+		TargetRefs:                []string{"a.go", "b.go"},
 	}
 	if StableRequiredOutputHash(left) != StableRequiredOutputHash(right) {
 		t.Fatal("hash changed with set ordering")
 	}
-	right.AcceptedOperations = []string{"push"}
+	right.AcceptedOperationVariants = []RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "push"}}
 	if StableRequiredOutputHash(left) == StableRequiredOutputHash(right) {
-		t.Fatal("hash did not change with accepted operation")
+		t.Fatal("hash did not change with accepted operation variant")
 	}
-	right.AcceptedOperations = []string{"add", "commit"}
+	right.AcceptedOperationVariants = []RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "add"}, {Kind: "git/write", VariantID: "commit"}}
 	right.TargetRefs = []string{"a.go", "c.go"}
 	if StableRequiredOutputHash(left) == StableRequiredOutputHash(right) {
 		t.Fatal("hash did not change with semantic target change")

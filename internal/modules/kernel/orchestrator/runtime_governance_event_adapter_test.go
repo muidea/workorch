@@ -121,9 +121,10 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 		decisionevents.EnsureResolvedCommand{
 			ResolutionID: "resolution-1", TicketID: governanceRequest.TicketID,
 			WorkspaceID: facts.WorkspaceID, RunID: facts.RunID,
-			StepID:  common.StepID("runtime-v2/" + sealed.ActiveDispatch.ID),
-			Type:    decisioncommon.ResolutionTypeProvideMissingInfo,
-			Payload: mustRuntimeGovernancePayload(t, map[string]any{"summary": "治理已完成"}),
+			StepID:       common.StepID("runtime-v2/" + sealed.ActiveDispatch.ID),
+			DecisionKind: "runtime_v2_governance",
+			Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
+			Payload:      mustRuntimeGovernancePayload(t, map[string]any{"summary": "治理已完成"}),
 		},
 	))
 	if resolutionResult == nil || resolutionResult.Error() != nil {

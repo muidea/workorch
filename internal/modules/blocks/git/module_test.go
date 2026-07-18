@@ -10,6 +10,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func useModuleTestConfig(t *testing.T) {
@@ -73,6 +74,29 @@ operations = ["chat_completions"]
 	t.Cleanup(func() { _ = workorchconfig.Close() })
 	if _, err := workorchconfig.Current(); err != nil {
 		t.Fatalf("current config: %v", err)
+	}
+}
+
+func TestValidateGitCapabilityStatePredecessorReceiptsRequiresExactDurableBinding(t *testing.T) {
+	snapshot := runtimecontract.RuntimeCapabilityStateSnapshot{RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{
+		{RequirementID: "repo-init", Kind: runtimecontract.StepKindGitWrite, VariantID: "init"},
+		{RequirementID: "stage", Kind: runtimecontract.StepKindGitWrite, VariantID: "add", DependsOnRequirementIDs: []string{"repo-init"}},
+	}}
+	required := snapshot.RequiredOperationSequence[1]
+	binding := runtimecontract.RuntimeRequiredOperationReceiptBinding{
+		RequirementID: "repo-init", OperationID: "git-init", Kind: runtimecontract.StepKindGitWrite, VariantID: "init",
+		ExecutionKey: "exec/ws/run/dispatch/git-init", Fence: 1, ReceiptRef: "receipt/git-init", ReceiptHash: "receipt-hash",
+		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedScope: runtimecontract.RuntimeEffectWorkspaceDurable, Changed: true,
+	}
+	if err := validateGitCapabilityStatePredecessorReceipts(snapshot, required, []runtimecontract.RuntimeRequiredOperationReceiptBinding{binding}); err != nil {
+		t.Fatalf("accepted predecessor binding: %v", err)
+	}
+	if err := validateGitCapabilityStatePredecessorReceipts(snapshot, required, nil); err == nil {
+		t.Fatal("missing predecessor binding was accepted")
+	}
+	binding.VariantID = "commit"
+	if err := validateGitCapabilityStatePredecessorReceipts(snapshot, required, []runtimecontract.RuntimeRequiredOperationReceiptBinding{binding}); err == nil {
+		t.Fatal("variant-mismatched predecessor binding was accepted")
 	}
 }
 

@@ -82,6 +82,22 @@ type AcquireRuntimeCapabilitiesResult struct {
 	Capabilities   runtimecontract.RuntimeCapabilities
 }
 
+type AcquireGitCapabilityStateCommand struct {
+	WorkspaceID                   common.WorkspaceID
+	RunID                         common.RunID
+	AuthoritySnapshotID           string
+	PrerequisiteID                string
+	WorkspaceDeliverableDirectory string
+	CapabilityStateKind           string
+	SubjectRef                    string
+	AcquisitionKey                string
+}
+
+type AcquireGitCapabilityStateResult struct {
+	PrerequisiteID string
+	Snapshot       runtimecontract.RuntimeCapabilityStateSnapshot
+}
+
 type RequestRuntimeCandidateCommand struct {
 	WorkspaceID       common.WorkspaceID
 	RunID             common.RunID
@@ -458,20 +474,23 @@ type ExecuteShellOperationCommand struct {
 }
 
 type ExecuteGitOperationCommand struct {
-	Execution                     RuntimeOperationExecutionEnvelope
-	WorkspaceID                   common.WorkspaceID
-	RunID                         common.RunID
-	DispatchID                    string
-	Transaction                   runtimecontract.AuthorityTransaction
-	OperationID                   string
-	OperationKind                 string
-	CoverageWorkItemIDs           []common.CoverageWorkItemID
-	TargetRefs                    []string
-	EvidenceKind                  string
-	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
-	WorkspaceDeliverableDirectory string
-	WorkspaceInternalDirectory    string
-	Data                          GitOperationData
+	Execution                          RuntimeOperationExecutionEnvelope
+	WorkspaceID                        common.WorkspaceID
+	RunID                              common.RunID
+	DispatchID                         string
+	Transaction                        runtimecontract.AuthorityTransaction
+	OperationID                        string
+	OperationKind                      string
+	RequiredOperationRef               string
+	CapabilityStates                   []runtimecontract.RuntimeCapabilityStateSnapshot
+	CompletedRequiredOperationReceipts []runtimecontract.RuntimeRequiredOperationReceiptBinding
+	CoverageWorkItemIDs                []common.CoverageWorkItemID
+	TargetRefs                         []string
+	EvidenceKind                       string
+	EvidencePolicies                   []runtimecontract.RuntimeEvidencePolicy
+	WorkspaceDeliverableDirectory      string
+	WorkspaceInternalDirectory         string
+	Data                               GitOperationData
 }
 
 type ExecuteMCPOperationCommand struct {
@@ -1006,6 +1025,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[AcquireWorkspaceManifestCommand, AcquireWorkspaceManifestResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireWorkspaceManifest).MessageContract(),
 		eventcontract.CommandTopic[AcquireProviderCeilingCommand, AcquireProviderCeilingResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireProviderCeiling).MessageContract(),
 		eventcontract.CommandTopic[AcquireRuntimeCapabilitiesCommand, AcquireRuntimeCapabilitiesResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireRuntimeCapabilities).MessageContract(),
+		eventcontract.CommandTopic[AcquireGitCapabilityStateCommand, AcquireGitCapabilityStateResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireGitCapabilityState).MessageContract(),
 		eventcontract.CommandTopic[DriveRuntimeV2Command, DriveRuntimeV2Result]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorDriveRuntimeV2).MessageContract(),
 		eventcontract.CommandTopic[QueryRuntimeOperationReceiptCommand, QueryRuntimeOperationReceiptResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorQueryRuntimeOperationReceipt).MessageContract(),
 		eventcontract.CommandTopic[CommitRuntimeOperationReceiptCommand, CommitRuntimeOperationReceiptResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommitRuntimeOperationReceipt).MessageContract(),

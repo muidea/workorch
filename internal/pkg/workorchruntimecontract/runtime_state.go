@@ -327,6 +327,8 @@ func StableAuthorityContractID(workspaceID common.WorkspaceID, runID common.RunI
 	writeHashString(h, transaction.RequiredOutputHash)
 	writeHashString(h, transaction.DefinitionRevision)
 	writeHashString(h, transaction.EvidenceRevision)
+	writeHashString(h, transaction.CapabilityStateHash)
+	writeHashString(h, transaction.OperationContractRevision)
 	return "authority-contract-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
 
@@ -335,7 +337,9 @@ func SameAuthorityContract(left AuthorityTransaction, right AuthorityTransaction
 		left.Action == right.Action &&
 		left.RequiredOutputHash == right.RequiredOutputHash &&
 		left.DefinitionRevision == right.DefinitionRevision &&
-		left.EvidenceRevision == right.EvidenceRevision
+		left.EvidenceRevision == right.EvidenceRevision &&
+		left.CapabilityStateHash == right.CapabilityStateHash &&
+		left.OperationContractRevision == right.OperationContractRevision
 }
 
 func CandidateAttemptAuthorityContractID(workspaceID common.WorkspaceID, runID common.RunID, record RuntimeCandidateAttemptRecord) string {

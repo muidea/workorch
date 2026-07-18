@@ -15,7 +15,7 @@ Last Updated: 2026-07-18
 | 主题 | 状态 |
 | --- | --- |
 | Runtime V2 生产主链 | **代码已收口**（Start/Resume → `DriveRuntimeV2` only） |
-| Runtime V2 正向收敛闭环 | **active — code reopened by deployed Live**；RVC-R5～R15 作为已落地 foundation 保持，RVC-R17～R22 依次收口后最终重跑 RVC-R16（见 [remediation](runtime-v2-positive-convergence-remediation.md)） |
+| Runtime V2 正向收敛闭环 | **completed**；RVC-R17～R26 已 code-landed，RVC-R16 bounded terminal 与 canonical canary liveness 已通过；完成记录迁入 archive |
 | V1 StagePacket / NextAction / graph dispatch 主链 | **已删除** |
 | 设计结论上提 | 见 [00-core/runtime-stage-contract.md](../../00-core/runtime-stage-contract.md)、[current-state.md](../../01-overview/current-state.md) |
 
@@ -25,7 +25,6 @@ Last Updated: 2026-07-18
 | --- | --- | --- | --- |
 | OPS-1 | 生产目录 V1 retirement 正式 apply | 代码/live 已 complete；等待 clean build + 真实生产目录维护窗口执行 `runtime-v1-retirement --apply` | [deployed-workspace-progress-blocker-component-closure-plan.md](../../90-archive/completed/deployed-workspace-progress-blocker-component-closure-plan.md) |
 | OPT-1 | file-patch deployed live（可选） | 代码迁移已完成；可选补一次 `patch apply + validation + DoD closeout` 的 deployed live | [file-patch-side-effect-owner-migration-plan.md](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
-| RVC-1 | Runtime V2 positive convergence systemic closure | RVC-R17～R21 已 code-landed，RVC-R22 terminal/liveness 脚本已 code-landed；仍待创建 clean bounded 双 fixture 并最终重跑 RVC-R16，真实 canary 仅作独立 liveness evidence | [runtime-v2-positive-convergence-remediation.md](runtime-v2-positive-convergence-remediation.md) |
 
 延期产品候选（**不占 active**）：LLM context budget 高级项（failover / tokenizer / 原生 usage 精度 / context-too-large 差异化）→ [candidates/next-stage-demand-candidates.md](../candidates/next-stage-demand-candidates.md)。
 

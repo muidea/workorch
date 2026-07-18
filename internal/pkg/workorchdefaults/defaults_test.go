@@ -880,11 +880,25 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 				t.Fatalf("version_control_snapshot rejectedStepKinds = %+v, want list", item["rejectedStepKinds"])
 			}
 			assertStringListContains(t, accepted, "git/write")
-			operations, ok := item["acceptedOperations"].([]any)
+			variants, ok := item["acceptedOperationVariants"].([]any)
 			if !ok {
-				t.Fatalf("version_control_snapshot acceptedOperations = %+v, want list", item["acceptedOperations"])
+				t.Fatalf("version_control_snapshot acceptedOperationVariants = %+v, want list", item["acceptedOperationVariants"])
 			}
-			assertStringListContains(t, operations, "commit")
+			var variant map[string]any
+			if len(variants) == 1 {
+				variant, ok = variants[0].(map[string]any)
+			}
+			if !ok || variant["kind"] != "git/write" || variant["variantId"] != "commit" {
+				t.Fatalf("version_control_snapshot acceptedOperationVariants = %+v, want git/write commit", variants)
+			}
+			capabilityStates, ok := item["capabilityStateRequirements"].([]any)
+			if !ok || len(capabilityStates) != 1 {
+				t.Fatalf("version_control_snapshot capabilityStateRequirements = %+v, want one canonical Git state requirement", item["capabilityStateRequirements"])
+			}
+			capabilityState, ok := capabilityStates[0].(map[string]any)
+			if !ok || capabilityState["ownerModuleId"] != "blocks/git" || capabilityState["capabilityStateKind"] != "repository_state" || capabilityState["subjectRef"] != "workspace_deliverable" {
+				t.Fatalf("version_control_snapshot capabilityStateRequirements = %+v, want blocks/git repository_state workspace_deliverable", capabilityStates)
+			}
 			assertStringListContains(t, rejected, "shell/command")
 			assertStringListContains(t, rejected, "file/read")
 			versionControlEvidenceFound = true

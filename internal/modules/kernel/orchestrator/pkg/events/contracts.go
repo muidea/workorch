@@ -14,6 +14,7 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorAcquireWorkspaceManifest,
 		TopicOrchestratorAcquireProviderCeiling,
 		TopicOrchestratorAcquireRuntimeCapabilities,
+		TopicOrchestratorAcquireGitCapabilityState,
 		TopicOrchestratorQueryRuntimeOperationReceipt,
 	)...)
 	ret = append(ret, eventcontract.Build("orchestrator", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,

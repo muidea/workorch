@@ -13,6 +13,7 @@ import (
 	decisionmodule "github.com/muidea/workorch/internal/modules/blocks/decision"
 	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
 	gitmodule "github.com/muidea/workorch/internal/modules/blocks/git"
+	gitbiz "github.com/muidea/workorch/internal/modules/blocks/git/biz"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
 	mcpblockmodule "github.com/muidea/workorch/internal/modules/blocks/mcp"
 	mcpmodule "github.com/muidea/workorch/internal/modules/blocks/mcpregistry"
@@ -131,7 +132,17 @@ func startOwnerModules(exports Exports, rawHub magicevent.Hub) ([]lifecycle, err
 		return nil, err
 	}
 	gitModule := gitmodule.New()
-	if err := configure(gitModule, gitModule.Configure(gitmodule.Dependencies{EventHub: rawHub})); err != nil {
+	// Test runtimes must not depend on a process-global repository.dataDir.
+	// Capability-state query receipts are owner-private durable state, so give
+	// the Git owner an explicit local store rather than projecting a global
+	// configuration value into the test session.
+	gitReceipts, err := gitbiz.NewCapabilityStateReceiptStore(".workorch-testkit-git-receipts")
+	if err != nil {
+		return nil, err
+	}
+	if err := configure(gitModule, gitModule.Configure(gitmodule.Dependencies{
+		EventHub: rawHub, RuntimeAdapter: gitbiz.NewRuntimeAdapter(true), CapabilityStateReceipts: gitReceipts,
+	})); err != nil {
 		return nil, err
 	}
 	shellModule := shellmodule.New()

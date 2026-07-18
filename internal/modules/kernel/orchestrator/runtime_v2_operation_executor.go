@@ -192,9 +192,11 @@ func (e eventRuntimeV2OperationExecutor) executeGit(ctx context.Context, request
 	command := orchestratorevents.ExecuteGitOperationCommand{
 		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
-		OperationID: request.Operation.ID, OperationKind: request.Operation.Kind,
-		CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
-		TargetRefs:          append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
+		OperationID: request.Operation.ID, OperationKind: request.Operation.Kind, RequiredOperationRef: request.Operation.RequiredOperationRef,
+		CapabilityStates:                   append([]runtimecontract.RuntimeCapabilityStateSnapshot(nil), request.CapabilityStates...),
+		CompletedRequiredOperationReceipts: append([]runtimecontract.RuntimeRequiredOperationReceiptBinding(nil), request.CompletedRequiredOperationReceipts...),
+		CoverageWorkItemIDs:                append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
+		TargetRefs:                         append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
 	}

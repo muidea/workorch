@@ -176,6 +176,7 @@ func writeCandidateOperations(h hashStringWriter, operations []RuntimeOperation)
 		operation := value.Normalized()
 		writeHashString(h, operation.ID)
 		writeHashString(h, operation.Kind)
+		writeHashString(h, operation.RequiredOperationRef)
 		writeHashStrings(h, operation.DependsOn)
 		coverage := make([]string, 0, len(operation.CoverageWorkItemIDs))
 		for _, id := range operation.CoverageWorkItemIDs {
@@ -215,12 +216,13 @@ type OperationParameter struct {
 }
 
 type RuntimeOperation struct {
-	ID                  string
-	Kind                string
-	DependsOn           []string
-	CoverageWorkItemIDs []common.CoverageWorkItemID
-	TargetRefs          []string
-	Parameters          []OperationParameter
+	ID                   string
+	Kind                 string
+	RequiredOperationRef string
+	DependsOn            []string
+	CoverageWorkItemIDs  []common.CoverageWorkItemID
+	TargetRefs           []string
+	Parameters           []OperationParameter
 }
 
 type StateChangingOperation struct {
@@ -413,8 +415,11 @@ func validateRuntimeOperations(operations []RuntimeOperation, required RequiredO
 		return fmt.Errorf("runtime candidate requires at least one operation")
 	}
 	accepted := stringSet(canonicalizeOperationKinds(required.AcceptedKinds))
-	acceptedOperations := stringSet(required.AcceptedOperations)
-	acceptedOperationObserved := len(acceptedOperations) == 0
+	acceptedVariants := make(map[string]struct{}, len(required.AcceptedOperationVariants))
+	for _, variant := range required.AcceptedOperationVariants {
+		acceptedVariants[variant.Kind+"|"+variant.VariantID] = struct{}{}
+	}
+	acceptedVariantObserved := len(acceptedVariants) == 0
 	requiredCoverage := coverageIDSet(required.CoverageWorkItemIDs)
 	ids := make(map[string]struct{}, len(operations))
 	for idx := range operations {
@@ -443,9 +448,17 @@ func validateRuntimeOperations(operations []RuntimeOperation, required RequiredO
 		if err := ValidateRuntimeOperationContract(operation); err != nil {
 			return fmt.Errorf("runtime candidate operation %q: %w", operation.ID, err)
 		}
-		if operationName := operationStringParameter(operation.Parameters, "operation"); operationName != "" {
-			if _, ok := acceptedOperations[operationName]; ok {
-				acceptedOperationObserved = true
+		if len(acceptedVariants) > 0 {
+			contract, known := RuntimeOperationContractForKind(operation.Kind)
+			if !known {
+				return fmt.Errorf("runtime candidate operation %q has no variant contract", operation.ID)
+			}
+			variant, err := MatchRuntimeOperationVariant(operation, contract)
+			if err != nil {
+				return fmt.Errorf("runtime candidate operation %q: %w", operation.ID, err)
+			}
+			if _, ok := acceptedVariants[operation.Kind+"|"+variant.ID]; ok {
+				acceptedVariantObserved = true
 			}
 		}
 		operations[idx] = operation
@@ -457,13 +470,54 @@ func validateRuntimeOperations(operations []RuntimeOperation, required RequiredO
 			}
 		}
 	}
-	if !acceptedOperationObserved {
-		return fmt.Errorf("runtime candidate requires one accepted operation: %s", strings.Join(required.AcceptedOperations, ","))
+	if err := ValidateRequiredOperationBindings(operations, required.RequiredOperationSequence); err != nil {
+		return err
+	}
+	if !acceptedVariantObserved {
+		return fmt.Errorf("runtime candidate requires one accepted operation variant")
 	}
 	// Forward/reverse effect gate before seal (INV-02). Failures here must not
 	// consume execution/repair budget — they are candidate contract failures.
 	if err := ValidateCandidateEffectCompatibility(operations, required, capabilities); err != nil {
 		return err
+	}
+	return nil
+}
+
+func ValidateRequiredOperationBindings(operations []RuntimeOperation, requirements []RuntimeRequiredOperationVariant) error {
+	if len(requirements) == 0 {
+		return nil
+	}
+	bound := map[string]RuntimeOperation{}
+	for _, operation := range operations {
+		ref := strings.TrimSpace(operation.RequiredOperationRef)
+		if ref == "" {
+			continue
+		}
+		if _, exists := bound[ref]; exists {
+			return fmt.Errorf("required operation ref %q is bound more than once", ref)
+		}
+		bound[ref] = operation
+	}
+	for _, requirement := range requirements {
+		operation, ok := bound[requirement.RequirementID]
+		if !ok {
+			return fmt.Errorf("runtime candidate requires operation ref %q", requirement.RequirementID)
+		}
+		contract, known := RuntimeOperationContractForKind(operation.Kind)
+		if !known {
+			return fmt.Errorf("operation ref %q has unknown kind %q", requirement.RequirementID, operation.Kind)
+		}
+		variant, err := MatchRuntimeOperationVariant(operation, contract)
+		if err != nil || variant.ID != requirement.VariantID || CanonicalRuntimeBlockKind(operation.Kind) != requirement.Kind {
+			return fmt.Errorf("operation ref %q does not match required variant %s:%s", requirement.RequirementID, requirement.Kind, requirement.VariantID)
+		}
+		for _, dependency := range requirement.DependsOnRequirementIDs {
+			dep, ok := bound[dependency]
+			if !ok || !containsString(operation.DependsOn, dep.ID) {
+				return fmt.Errorf("operation ref %q must depend on %q", requirement.RequirementID, dependency)
+			}
+		}
 	}
 	return nil
 }
@@ -480,6 +534,7 @@ func operationStringParameter(parameters []OperationParameter, name string) stri
 func (o RuntimeOperation) Normalized() RuntimeOperation {
 	o.ID = strings.TrimSpace(o.ID)
 	o.Kind = strings.TrimSpace(o.Kind)
+	o.RequiredOperationRef = strings.TrimSpace(o.RequiredOperationRef)
 	o.DependsOn = normalizeStrings(o.DependsOn)
 	o.CoverageWorkItemIDs = normalizeCoverageWorkItemIDs(o.CoverageWorkItemIDs)
 	o.TargetRefs = normalizeStrings(o.TargetRefs)

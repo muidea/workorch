@@ -246,12 +246,15 @@ func (m *Module) executeCommand(ev magicevent.Event) (decisionevents.DecisionCom
 			cmd.StepID = ticket.StepID
 			ctx = common.ContextWithRuntimeWorkspaceID(ctx, ticket.WorkspaceID)
 		}
-		currentTicket, err := m.tickets.Get(ctx, cmd.TicketID)
-		if err != nil {
-			return decisionevents.DecisionCommandResult{}, err
-		}
 		resolveCommand := resolveTicketContract(cmd)
-		if currentTicket.DecisionKind == "runtime_v2_governance" {
+		if cmd.DecisionKind == "runtime_v2_governance" {
+			currentTicket, err := m.tickets.Get(ctx, cmd.TicketID)
+			if err != nil {
+				return decisionevents.DecisionCommandResult{}, err
+			}
+			if currentTicket.DecisionKind != cmd.DecisionKind {
+				return decisionevents.DecisionCommandResult{}, common.ErrConflict
+			}
 			ticket, proposal, err := m.bizPtr.EnsureRuntimeGovernanceResolutionProposal(ctx, resolveCommand)
 			if err != nil {
 				return decisionevents.DecisionCommandResult{}, err

@@ -21,32 +21,29 @@ Last Updated: 2026-07-18
 | 2026-07-16：active 假活跃产品/审计/收口日记 + verification 过程记录 + artifacts | 已迁 archive 或移出仓库 |
 | 2026-07-16：TUI workspace provider/model 选择与持久化 | MODEL-01～18、全量 gate 与 deployed e2e 已通过，计划已迁 `90-archive/completed/` |
 | 2026-07-17：Runtime V2 正向收敛 foundation（RVC-R5～R15） | effect/receipt/directive、exact-fence governance grant、独立预算、typed recovery inventory、schema v2-only 与 file-backed crash/E2E 已落地；2026-07-18 deployed Live 已重新打开后续代码收口 |
+| 2026-07-18：Runtime V2 正向收敛 RVC-R17～R26 | fresh bounded Git/general terminal gate 与 canonical LSP-Bridge/ai-proxy liveness verifier 已通过；pre-R25 alias aggregate 保留历史诊断，不做兼容迁移 |
 
 ## Residual Open
 
-### A. Runtime 正向收敛
-
-RVC-1 Runtime V2 正向收敛闭环：**active — final bounded deployed acceptance pending**。RVC-R5～R21 已落地；RVC-R22 已落实 terminal fixture 预检、timeout 完整取证和 real-workspace liveness 分层。当前唯一 Runtime 收口项是创建 clean bounded 双 fixture 并最终重跑 RVC-R16；普通真实 workspace 仅提供独立 liveness evidence，不得继续被误作 180 秒 terminal SLA。完整批次、依赖顺序和验收见 [remediation](../70-roadmap/active/runtime-v2-positive-convergence-remediation.md)。
-
-### B. 运维 / 生产切换
+### A. 运维 / 生产切换
 
 | ID | 项 | 说明 | 历史过程稿 |
 | --- | --- | --- | --- |
 | OPS-1 | 生产目录 V1 retirement 正式 apply | 代码/live complete；等待 clean build + 真实生产目录维护窗口执行 `runtime-v1-retirement --apply` | [deployed-workspace-progress-blocker…](../90-archive/completed/deployed-workspace-progress-blocker-component-closure-plan.md) |
 
-### C. 可选验证
+### B. 可选验证
 
 | ID | 项 | 说明 | 历史过程稿 |
 | --- | --- | --- | --- |
 | OPT-1 | file-patch deployed live | 可选：`patch apply + validation + DoD closeout` 一次 deployed live | [file-patch-side-effect-owner-migration-plan.md](../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
 
-### D. 延期候选（非 active）
+### C. 延期候选（非 active）
 
 | ID | 项 | 说明 |
 | --- | --- | --- |
 | CAND-LLM-BUDGET | LLM context budget 高级项 | provider failover、真实 tokenizer/原生 usage 精度、context-too-large 差异化等 → [candidates](../70-roadmap/candidates/next-stage-demand-candidates.md) |
 
-### E. 文档维护
+### D. 文档维护
 
 | ID | 项 | 说明 |
 | --- | --- | --- |
@@ -57,9 +54,9 @@ RVC-1 Runtime V2 正向收敛闭环：**active — final bounded deployed accept
 ## Judgment
 
 - **代码主链**：Runtime V2 only；V1 authority 不再是问题来源。
-- **正向收敛**：RVC-R5～R15 foundation 已落地；deployed Live 已反证整体闭环，当前按 RVC-R17～R22 进行代码收口，之后最终重跑 RVC-R16。
+- **正向收敛**：RVC-R5～R26 本地代码、file-backed matrix、RVC-R16 fresh bounded terminal 与 canonical real canary liveness 均已通过。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；不得再从已归档 plan 推导实现约束。
-- **Active roadmap**：RVC-1（RVC-R17～R22 代码收口 + RVC-R16 final rerun）、OPS-1（+ 可选 OPT-1）；其余历史切片在 archive / candidates 检索。
+- **Active roadmap**：OPS-1（+ 可选 OPT-1）；RVC-1 已归 archive，其余历史切片在 archive / candidates 检索。
 - **清理原则**：失效主链叙述、重复 audit、过程日记、live 产物一律归档或出库，不在 active 保留“假活跃”项。
 
 ## Navigation

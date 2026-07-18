@@ -18,6 +18,15 @@ func (o *RuntimeOrchestrator) InitializeRuntimeV2FromRun(ctx context.Context, ru
 	if bootstrap.SchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent {
 		return runtimev2.RuntimeAggregate{}, fmt.Errorf("unsupported Runtime V2 bootstrap schema %d", bootstrap.SchemaVersion)
 	}
+	// A first Runtime V2 aggregate may only be created from an activation that
+	// already sealed this binary's executable operation catalog. Do not repair
+	// an old bootstrap here: persisted nonterminal state is checked by the
+	// controller's typed fence, and a fresh Run must be explicitly activated.
+	if run.RuntimeState == nil {
+		if err := runtimecontract.ValidateRuntimeOperationContractRevision(bootstrap.Activation.ExecutionContract.OperationContractRevision); err != nil {
+			return runtimev2.RuntimeAggregate{}, err
+		}
+	}
 	if bootstrap.Definition.GoalID != run.GoalID || bootstrap.Definition.DoDID != run.DoDID || bootstrap.Definition.Revision != run.DefinitionRevision {
 		return runtimev2.RuntimeAggregate{}, fmt.Errorf("%w: run identity does not match runtime bootstrap definition", common.ErrConflict)
 	}

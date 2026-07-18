@@ -27,6 +27,7 @@ func ResolveDecision(ctx context.Context, hub magicevent.Hub, ticket *decisionmo
 		WorkspaceID:        ticket.WorkspaceID,
 		RunID:              ticket.RunID,
 		StepID:             ticket.StepID,
+		DecisionKind:       ticket.DecisionKind,
 		Type:               resolutionType,
 		Payload:            payload.Clone().Fields,
 		ContinuationAction: stringPayloadValue(payload, "continuationAction"),

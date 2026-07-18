@@ -57,6 +57,8 @@ func RuntimeV2Bootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defi
 		return nil, err
 	}
 	requirements = append(requirements, profileRequirements...)
+	stateRequirements := runtimeV2ProfileCapabilityStateRequirements(activation.ExecutionContract.ProfileContracts)
+	requirements = append(requirements, stateRequirements...)
 	stateChangeRequirement := runtimecontract.RuntimeRunStateChangeRequirement{
 		Required: activation.ExecutionContract.Normalized().StateChangePolicy == runtimecontract.RuntimeStateChangeMustProduce,
 	}
@@ -104,6 +106,24 @@ func RuntimeV2Bootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defi
 	return &bootstrap, nil
 }
 
+func runtimeV2ProfileCapabilityStateRequirements(profiles []runtimecontract.RuntimeProfileContract) []runtimecontract.RuntimeRequirement {
+	ret := []runtimecontract.RuntimeRequirement{}
+	seen := map[string]struct{}{}
+	for _, profile := range runtimecontract.NormalizeRuntimeProfileContracts(profiles) {
+		for _, evidence := range profile.EvidenceRequirements {
+			for _, state := range evidence.CapabilityStateRequirements {
+				key := state.OwnerModuleID + "|" + state.CapabilityStateKind + "|" + state.SubjectRef
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				ret = append(ret, runtimecontract.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindCapabilityState, OwnerModuleID: state.OwnerModuleID, CapabilityStateKind: state.CapabilityStateKind, SubjectRef: state.SubjectRef, Reason: "profile capability state required"})
+			}
+		}
+	}
+	return ret
+}
+
 func runtimeV2ProfileCapabilityKinds(profiles []runtimecontract.RuntimeProfileContract) ([]string, error) {
 	ret := []string{}
 	seen := map[string]struct{}{}
@@ -144,9 +164,9 @@ func runtimeV2ProfileCapabilityRequirements(profiles []runtimecontract.RuntimePr
 				}
 				// Descriptor CapabilityClass is the inventory authority. Evidence role may only
 				// tighten a validation kind into a state-change requirement when the profile
-				// explicitly treats the evidence as primary_state_change / accepted operations.
+				// explicitly treats the evidence as primary_state_change / accepted variants.
 				capabilityClass := descriptor.CapabilityClass
-				if requirement.EvidenceRole == "primary_state_change" || len(requirement.AcceptedOperations) > 0 {
+				if requirement.EvidenceRole == "primary_state_change" || len(requirement.AcceptedOperationVariants) > 0 {
 					capabilityClass = runtimecontract.RuntimeCapabilityClassStateChange
 				}
 				key := descriptor.OwnerModuleID + "|" + string(capabilityClass) + "|" + canonical

@@ -50,6 +50,18 @@ func TestRuntimeCandidatePrefixChangesWithExecutionContract(t *testing.T) {
 	}
 }
 
+func TestRuntimeCandidatePrefixChangesWithOperationContractRevision(t *testing.T) {
+	definition := RuntimeDefinitionContext{
+		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/edit"},
+	}
+	base := RuntimeExecutionContract{OperationContractRevision: "operation-contract-a"}
+	changed := base
+	changed.OperationContractRevision = "operation-contract-b"
+	if StableRuntimeCandidatePrefixHashWithExecutionContract(definition, base) == StableRuntimeCandidatePrefixHashWithExecutionContract(definition, changed) {
+		t.Fatal("candidate prefix did not change with operation contract revision")
+	}
+}
+
 func TestRuntimeCandidatePrefixChangesWithProfileContract(t *testing.T) {
 	definition := RuntimeDefinitionContext{
 		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"git/write"},
@@ -58,12 +70,12 @@ func TestRuntimeCandidatePrefixChangesWithProfileContract(t *testing.T) {
 		ID:                      "software-dev",
 		AcceptanceDimensions:    []RuntimeAcceptanceDimension{{ID: "runtime_entrypoint", Required: true}},
 		DeliverableExpectations: []RuntimeDeliverableExpectation{{ID: "version_control_snapshot", Required: true, EvidenceRole: "supplemental_evidence"}},
-		EvidenceRequirements:    []RuntimeProfileEvidenceRequirement{{ID: "version_control_snapshot", Scope: "deliverable", AcceptedStepKinds: []string{"git/write"}, AcceptedOperations: []string{"commit"}}},
+		EvidenceRequirements:    []RuntimeProfileEvidenceRequirement{{ID: "version_control_snapshot", Scope: "deliverable", AcceptedStepKinds: []string{"git/write"}, AcceptedOperationVariants: []RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "commit"}}}},
 	}}}
 	changed := base
 	changed.ProfileContracts = append([]RuntimeProfileContract(nil), base.ProfileContracts...)
 	changed.ProfileContracts[0].EvidenceRequirements = append([]RuntimeProfileEvidenceRequirement(nil), base.ProfileContracts[0].EvidenceRequirements...)
-	changed.ProfileContracts[0].EvidenceRequirements[0].AcceptedOperations = []string{"push"}
+	changed.ProfileContracts[0].EvidenceRequirements[0].AcceptedOperationVariants = []RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "push"}}
 	baseHash := StableRuntimeCandidatePrefixHashWithExecutionContract(definition, base)
 	changedHash := StableRuntimeCandidatePrefixHashWithExecutionContract(definition, changed)
 	if baseHash == changedHash {

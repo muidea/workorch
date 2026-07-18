@@ -169,6 +169,30 @@ func TestCommitPrerequisiteResultMergesCapabilitiesFromMultipleOwners(t *testing
 	}
 }
 
+func TestCapabilityStatePrerequisiteRequiresOwnerConfirmedSnapshot(t *testing.T) {
+	requirement := RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindCapabilityState, OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable"}
+	facts := PreflightRuntimeFacts(validationFacts(), []RuntimeRequirement{requirement})
+	if len(facts.Prerequisites.Pending) != 1 || facts.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindCapabilityState {
+		t.Fatalf("pending prerequisites = %+v", facts.Prerequisites.Pending)
+	}
+	prerequisite := facts.Prerequisites.Pending[0]
+	snapshot := runtimecontract.RuntimeCapabilityStateSnapshot{
+		RequirementID: prerequisite.ID, OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable",
+		ObservedRevision: "repo=absent", ContentHash: "state-hash", Disposition: runtimecontract.RuntimeCapabilityStateSequenceRequired,
+		RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{
+			{RequirementID: "repo-init", Kind: runtimecontract.StepKindGitWrite, VariantID: "init"},
+			{RequirementID: "stage", Kind: runtimecontract.StepKindGitWrite, VariantID: "add", DependsOnRequirementIDs: []string{"repo-init"}},
+		},
+	}
+	committed, err := CommitPrerequisiteResult(facts, PrerequisiteResult{PrerequisiteID: prerequisite.ID, CapabilityState: &snapshot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(committed.Prerequisites.Pending) != 0 || len(committed.Resources.CapabilityStates) != 1 || committed.Resources.CapabilityStates[0].ContentHash != "state-hash" {
+		t.Fatalf("committed capability state = %+v", committed)
+	}
+}
+
 func TestMergeCapabilityKindsDoesNotOverwrite(t *testing.T) {
 	existing := []string{"file/read", "validation/managed_session"}
 	incoming := []string{"validation/managed_session", "shell/command"}

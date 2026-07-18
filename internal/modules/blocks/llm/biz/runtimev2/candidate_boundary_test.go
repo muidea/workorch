@@ -52,6 +52,27 @@ func TestDecodeCandidatePayloadRejectsLegacyCandidateWrappers(t *testing.T) {
 	}
 }
 
+func TestDecodeCandidatePayloadPreservesRequiredOperationRef(t *testing.T) {
+	candidate, err := DecodeCandidatePayload(runtimecontract.RuntimeActionProduceStateChange, []byte(`{
+		"operations":[{
+			"id":"git-init",
+			"kind":"git/write",
+			"requiredOperationRef":"repo-init",
+			"coverageWorkItemIds":["cwi-1"],
+			"parameters":[{"name":"operation","string":"init"}]
+		}]
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if candidate.StateChange == nil || len(candidate.StateChange.Operations) != 1 {
+		t.Fatalf("state-change candidate = %+v", candidate)
+	}
+	if got := candidate.StateChange.Operations[0].Operation.RequiredOperationRef; got != "repo-init" {
+		t.Fatalf("required operation ref = %q, want repo-init", got)
+	}
+}
+
 func TestValidateCandidateAttemptAcceptsOnlyCurrentActionCandidate(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
 	candidate, err := DecodeCandidatePayload(request.Decision.Action, []byte(`{

@@ -269,7 +269,7 @@ func TestReduceRuntimeStateFiltersCapabilitiesByFocusContract(t *testing.T) {
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
 	facts.Focus.EvidenceRole = "supplemental_evidence"
 	facts.Focus.AcceptedStepKinds = []string{"git/write"}
-	facts.Focus.AcceptedOperations = []string{"commit"}
+	facts.Focus.AcceptedOperationVariants = []runtimecontract.RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "commit"}}
 	facts.Focus.RejectedStepKinds = []string{"patch/apply"}
 	facts.Capabilities.StateChangeKinds = []string{"patch/apply", "git/write", "file/edit"}
 	decision, err := ReduceRuntimeState(facts, nil)
@@ -277,7 +277,7 @@ func TestReduceRuntimeStateFiltersCapabilitiesByFocusContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(decision.RequiredOutput.AcceptedKinds) != 1 || decision.RequiredOutput.AcceptedKinds[0] != "git/write" ||
-		len(decision.RequiredOutput.AcceptedOperations) != 1 || decision.RequiredOutput.AcceptedOperations[0] != "commit" ||
+		len(decision.RequiredOutput.AcceptedOperationVariants) != 1 || decision.RequiredOutput.AcceptedOperationVariants[0] != (runtimecontract.RuntimeOperationVariantRef{Kind: "git/write", VariantID: "commit"}) ||
 		decision.Focus.EvidenceRole != "supplemental_evidence" {
 		t.Fatalf("focus-specific required output = %+v focus=%+v", decision.RequiredOutput, decision.Focus)
 	}

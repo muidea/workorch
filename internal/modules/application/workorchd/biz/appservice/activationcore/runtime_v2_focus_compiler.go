@@ -29,7 +29,7 @@ type workUnit struct {
 type compiledEvidencePolicy struct {
 	RequiredEvidenceKinds             []string
 	AcceptedStepKinds                 []string
-	AcceptedOperations                []string
+	AcceptedOperationVariants         []runtimecontract.RuntimeOperationVariantRef
 	RejectedStepKinds                 []string
 	EvidenceRole                      string
 	RequireDirectEvidence             bool
@@ -211,7 +211,8 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 			ids := make([]common.CoverageWorkItemID, 0, len(chunk))
 			requiredKinds := []string{}
 			// Focus-level accepted/rejected kinds: first item's non-empty values; rejected/required kinds union.
-			var acceptedKinds, acceptedOps, rejectedKinds []string
+			var acceptedKinds, rejectedKinds []string
+			var acceptedVariants []runtimecontract.RuntimeOperationVariantRef
 			var evidenceRole string
 			requireDirect, requireClaim, requireExec, requireTargets, requireAssessment := false, false, false, false, false
 			texts := make([]string, 0, len(chunk))
@@ -222,8 +223,8 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 				if len(acceptedKinds) == 0 && len(item.policy.AcceptedStepKinds) > 0 {
 					acceptedKinds = append([]string(nil), item.policy.AcceptedStepKinds...)
 				}
-				if len(acceptedOps) == 0 && len(item.policy.AcceptedOperations) > 0 {
-					acceptedOps = append([]string(nil), item.policy.AcceptedOperations...)
+				if len(acceptedVariants) == 0 && len(item.policy.AcceptedOperationVariants) > 0 {
+					acceptedVariants = append([]runtimecontract.RuntimeOperationVariantRef(nil), item.policy.AcceptedOperationVariants...)
 				}
 				if evidenceRole == "" && item.policy.EvidenceRole != "" {
 					evidenceRole = item.policy.EvidenceRole
@@ -253,7 +254,7 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 				CoverageWorkItemIDs:   ids,
 				RequiredEvidenceKinds: requiredKinds,
 				EvidenceRole:          evidenceRole,
-				AcceptedStepKinds:     acceptedKinds, AcceptedOperations: acceptedOps, RejectedStepKinds: rejectedKinds,
+				AcceptedStepKinds:     acceptedKinds, AcceptedOperationVariants: acceptedVariants, RejectedStepKinds: rejectedKinds,
 				RequireDirectEvidence: requireDirect, RequireClaimEvidence: requireClaim,
 				RequireExecutableBehaviorEvidence: requireExec, RequireCoverageTargets: requireTargets,
 				RequireAssessment: requireAssessment,
@@ -492,21 +493,21 @@ func mergeCompiledEvidencePolicy(base compiledEvidencePolicy, requirements []run
 		base.RequireClaimEvidence = base.RequireClaimEvidence || requirement.RequireClaimEvidence
 		base.RequireExecutableBehaviorEvidence = base.RequireExecutableBehaviorEvidence || requirement.RequireExecutableBehaviorEvidence
 		base.RequireCoverageTargets = base.RequireCoverageTargets || requirement.RequireCoverageTargets
-		// First non-empty highest-priority value wins for role / accepted kinds / operations.
+		// First non-empty highest-priority value wins for role / accepted kinds / variants.
 		if base.EvidenceRole == "" && strings.TrimSpace(requirement.EvidenceRole) != "" {
 			base.EvidenceRole = strings.TrimSpace(requirement.EvidenceRole)
 		}
 		if len(base.AcceptedStepKinds) == 0 && len(requirement.AcceptedStepKinds) > 0 {
 			base.AcceptedStepKinds = append([]string(nil), requirement.AcceptedStepKinds...)
 		}
-		if len(base.AcceptedOperations) == 0 && len(requirement.AcceptedOperations) > 0 {
-			base.AcceptedOperations = append([]string(nil), requirement.AcceptedOperations...)
+		if len(base.AcceptedOperationVariants) == 0 && len(requirement.AcceptedOperationVariants) > 0 {
+			base.AcceptedOperationVariants = append([]runtimecontract.RuntimeOperationVariantRef(nil), requirement.AcceptedOperationVariants...)
 		}
 		if base.Description == "" && strings.TrimSpace(requirement.Description) != "" {
 			base.Description = strings.TrimSpace(requirement.Description)
 		}
 		// Profile explicit primary_state_change implies state-change evidence.
-		if requirement.EvidenceRole == "primary_state_change" || len(requirement.AcceptedOperations) > 0 {
+		if requirement.EvidenceRole == "primary_state_change" || len(requirement.AcceptedOperationVariants) > 0 {
 			base.RequiredEvidenceKinds = stableStringUnion(base.RequiredEvidenceKinds, []string{runtimecontract.EvidenceKindStateChange})
 		}
 	}
@@ -516,7 +517,7 @@ func mergeCompiledEvidencePolicy(base compiledEvidencePolicy, requirements []run
 func applyCompiledEvidencePolicy(focus runtimecontract.CoverageFocus, policy compiledEvidencePolicy) runtimecontract.CoverageFocus {
 	focus.RequiredEvidenceKinds = append([]string(nil), policy.RequiredEvidenceKinds...)
 	focus.AcceptedStepKinds = append([]string(nil), policy.AcceptedStepKinds...)
-	focus.AcceptedOperations = append([]string(nil), policy.AcceptedOperations...)
+	focus.AcceptedOperationVariants = append([]runtimecontract.RuntimeOperationVariantRef(nil), policy.AcceptedOperationVariants...)
 	focus.RejectedStepKinds = append([]string(nil), policy.RejectedStepKinds...)
 	if policy.EvidenceRole != "" {
 		focus.EvidenceRole = policy.EvidenceRole

@@ -106,7 +106,7 @@ func TestRuntimeV2BootstrapAppendsRequiredProfileFocusesWithTypedRequirements(t 
 			EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
 				{ID: "runtime_entrypoint", Scope: "acceptanceDimension", AcceptedStepKinds: []string{"shell/command"}},
 				{ID: "source_change", Scope: "deliverable", EvidenceRole: "primary_state_change", AcceptedStepKinds: []string{"patch/apply"}},
-				{ID: "version_control_snapshot", Scope: "deliverable", AcceptedStepKinds: []string{"git/write"}, AcceptedOperations: []string{"commit"}},
+				{ID: "version_control_snapshot", Scope: "deliverable", AcceptedStepKinds: []string{"git/write"}, AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "commit"}}},
 			},
 		}},
 	}}
@@ -125,7 +125,7 @@ func TestRuntimeV2BootstrapAppendsRequiredProfileFocusesWithTypedRequirements(t 
 	if entrypoint.AssessmentScope != "acceptanceDimension" || len(entrypoint.RequiredEvidenceKinds) != 1 || entrypoint.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindValidation ||
 		sourceChange.EvidenceRole != "primary_state_change" || sourceChange.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange ||
 		len(coverageMap.RequiredEvidenceKinds) != 0 || !coverageMap.RequireAssessment ||
-		len(snapshot.AcceptedOperations) != 1 || snapshot.AcceptedOperations[0] != "commit" || snapshot.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange {
+		len(snapshot.AcceptedOperationVariants) != 1 || snapshot.AcceptedOperationVariants[0] != (runtimecontract.RuntimeOperationVariantRef{Kind: "git/write", VariantID: "commit"}) || snapshot.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange {
 		t.Fatalf("typed profile focuses = %+v", bootstrap.Focuses)
 	}
 	foundGit := false
@@ -137,6 +137,53 @@ func TestRuntimeV2BootstrapAppendsRequiredProfileFocusesWithTypedRequirements(t 
 	}
 	if !foundGit {
 		t.Fatalf("profile capability requirements = %+v, want git/write state-change", bootstrap.Requirements)
+	}
+}
+
+func TestRuntimeV2BootstrapBuildsBoundedGitCapabilityStateFixture(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{
+		StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
+		ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+			ID: "bounded-git",
+			DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{
+				ID: "version_control_snapshot", Required: true, EvidenceRole: "primary_state_change", Description: "local checkpoint",
+			}},
+			EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
+				ID: "version_control_snapshot", Scope: "deliverable", EvidenceRole: "primary_state_change",
+				RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindGitWrite},
+				AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindGitWrite, VariantID: "commit"}},
+				CapabilityStateRequirements: []runtimecontract.RuntimeProfileCapabilityStateRequirement{{
+					OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable",
+				}},
+			}},
+		}},
+	}}
+	bootstrap, err := RuntimeV2Bootstrap(
+		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "create a local checkpoint and validate fixture content"},
+		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"fixture content is validated"}},
+		"definition-1", nil, activation,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bootstrap.Focuses) != 2 || len(bootstrap.Slices) != 2 || len(bootstrap.Focuses[0].CoverageWorkItemIDs) != 1 || len(bootstrap.Focuses[1].CoverageWorkItemIDs) != 1 {
+		t.Fatalf("bounded Git fixture focuses/slices = %+v / %+v", bootstrap.Focuses, bootstrap.Slices)
+	}
+	validation, gitFocus := bootstrap.Focuses[0], bootstrap.Focuses[1]
+	if validation.AssessmentScope != "dodItem" || len(validation.RequiredEvidenceKinds) != 1 || validation.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindValidation ||
+		gitFocus.AssessmentScope != "deliverable" || len(gitFocus.RequiredEvidenceKinds) != 1 || gitFocus.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange ||
+		len(gitFocus.AcceptedOperationVariants) != 1 || gitFocus.AcceptedOperationVariants[0] != (runtimecontract.RuntimeOperationVariantRef{Kind: runtimecontract.StepKindGitWrite, VariantID: "commit"}) {
+		t.Fatalf("bounded Git fixture focus contracts = %+v", bootstrap.Focuses)
+	}
+	foundStateRequirement := false
+	for _, requirement := range bootstrap.Requirements {
+		if requirement.Kind == runtimecontract.PrerequisiteKindCapabilityState && requirement.OwnerModuleID == runtimecontract.RuntimeModuleGit &&
+			requirement.CapabilityStateKind == "repository_state" && requirement.SubjectRef == "workspace_deliverable" {
+			foundStateRequirement = true
+		}
+	}
+	if !foundStateRequirement {
+		t.Fatalf("bounded Git fixture lacks capability-state prerequisite: %+v", bootstrap.Requirements)
 	}
 }
 

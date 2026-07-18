@@ -174,7 +174,7 @@ func sameCoverageFocus(left CoverageFocus, right CoverageFocus) bool {
 		left.RequireDirectEvidence == right.RequireDirectEvidence && left.RequireClaimEvidence == right.RequireClaimEvidence &&
 		left.RequireExecutableBehaviorEvidence == right.RequireExecutableBehaviorEvidence && left.RequireCoverageTargets == right.RequireCoverageTargets &&
 		sameStrings(left.RequiredEvidenceKinds, right.RequiredEvidenceKinds) && sameStrings(left.TargetRefs, right.TargetRefs) &&
-		sameStrings(left.AcceptedStepKinds, right.AcceptedStepKinds) && sameStrings(left.AcceptedOperations, right.AcceptedOperations) &&
+		sameStrings(left.AcceptedStepKinds, right.AcceptedStepKinds) && SameRuntimeOperationVariantRefs(left.AcceptedOperationVariants, right.AcceptedOperationVariants) &&
 		sameStrings(left.RejectedStepKinds, right.RejectedStepKinds)
 }
 

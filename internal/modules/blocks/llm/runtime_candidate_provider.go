@@ -24,10 +24,11 @@ type runtimeCandidateDefinitionProjection struct {
 }
 
 type runtimeCandidateResourceProjection struct {
-	Manifest          *runtimecontract.WorkspaceManifest `json:"manifest,omitempty"`
-	TargetSnapshots   []runtimecontract.TargetSnapshot   `json:"targetSnapshots,omitempty"`
-	FailureTarget     *runtimecontract.FailureTarget     `json:"failureTarget,omitempty"`
-	ValidationScratch *runtimecontract.ValidationScratch `json:"validationScratch,omitempty"`
+	Manifest          *runtimecontract.WorkspaceManifest               `json:"manifest,omitempty"`
+	TargetSnapshots   []runtimecontract.TargetSnapshot                 `json:"targetSnapshots,omitempty"`
+	FailureTarget     *runtimecontract.FailureTarget                   `json:"failureTarget,omitempty"`
+	ValidationScratch *runtimecontract.ValidationScratch               `json:"validationScratch,omitempty"`
+	CapabilityStates  []runtimecontract.RuntimeCapabilityStateSnapshot `json:"capabilityStates,omitempty"`
 }
 
 type runtimeCandidateActivationProjection struct {
@@ -79,6 +80,7 @@ type runtimeCandidateOperationContractProjection struct {
 	RequireOneOfParameters []string                                       `json:"requireOneOfParameters,omitempty"`
 	RequireTargetRefs      bool                                           `json:"requireTargetRefs,omitempty"`
 	ForbiddenParameters    []string                                       `json:"forbiddenParameters,omitempty"`
+	Variants               []runtimeCandidateOperationVariantProjection   `json:"variants,omitempty"`
 	Rules                  []string                                       `json:"rules,omitempty"`
 }
 
@@ -87,6 +89,16 @@ type runtimeCandidateOperationParameterProjection struct {
 	Type        string `json:"type"`
 	Required    bool   `json:"required"`
 	Description string `json:"description"`
+}
+
+type runtimeCandidateOperationVariantProjection struct {
+	ID                  string                                               `json:"id"`
+	Discriminators      []runtimecontract.RuntimeOperationParameterPredicate `json:"discriminators"`
+	RequiredParameters  []string                                             `json:"requiredParameters,omitempty"`
+	RequiredNonEmpty    []string                                             `json:"requiredNonEmpty,omitempty"`
+	ForbiddenParameters []string                                             `json:"forbiddenParameters,omitempty"`
+	EffectScope         runtimecontract.RuntimeEffectScope                   `json:"effectScope"`
+	IdempotencyClass    runtimecontract.RuntimeOperationIdempotencyClass     `json:"idempotencyClass"`
 }
 
 type runtimeCandidateRetryProjection struct {
@@ -453,6 +465,7 @@ func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidat
 		Resources: runtimeCandidateResourceProjection{
 			Manifest: context.Resources.Manifest, TargetSnapshots: context.Resources.TargetSnapshots,
 			FailureTarget: context.Resources.FailureTarget, ValidationScratch: context.Resources.ValidationScratch,
+			CapabilityStates: context.Resources.CapabilityStates,
 		},
 		Activation: runtimeCandidateActivationProjection{
 			DialogLanguage: activation.DialogLanguage, CurrentStage: stage, Soul: runtimeV2CandidateSoul(activation, stage),
@@ -530,11 +543,26 @@ func runtimeV2CandidateSchemaForDecision(decision runtimecontract.RuntimeDecisio
 	if !ok {
 		return base
 	}
-	conditions := runtimeV2OperationSchemaConditions(decision.RequiredOutput.AcceptedKinds)
-	if len(conditions) == 0 {
-		return base
+	conditions := runtimeV2OperationSchemaConditions(
+		decision.RequiredOutput.AcceptedKinds,
+		decision.RequiredOutput.AcceptedOperationVariants,
+		decision.RequiredOutput.RequiredOperationSequence,
+	)
+	if len(conditions) > 0 {
+		items["allOf"] = conditions
 	}
-	items["allOf"] = conditions
+	if len(decision.RequiredOutput.RequiredOperationSequence) > 0 {
+		requirements := make([]any, 0, len(decision.RequiredOutput.RequiredOperationSequence))
+		for _, requirement := range decision.RequiredOutput.RequiredOperationSequence {
+			requirements = append(requirements, map[string]any{"contains": map[string]any{
+				"type": "object", "properties": map[string]any{
+					"requiredOperationRef": map[string]any{"const": requirement.RequirementID},
+					"kind":                 map[string]any{"const": requirement.Kind},
+				}, "required": []string{"requiredOperationRef", "kind"},
+			}})
+		}
+		operations["allOf"] = requirements
+	}
 	encoded, err := json.Marshal(schema)
 	if err != nil {
 		return base
@@ -542,7 +570,29 @@ func runtimeV2CandidateSchemaForDecision(decision runtimecontract.RuntimeDecisio
 	return string(encoded)
 }
 
-func runtimeV2OperationSchemaConditions(kinds []string) []any {
+func runtimeV2OperationSchemaConditions(
+	kinds []string,
+	acceptedVariants []runtimecontract.RuntimeOperationVariantRef,
+	requiredSequence []runtimecontract.RuntimeRequiredOperationVariant,
+) []any {
+	allowedVariants := make(map[string]map[string]struct{}, len(acceptedVariants)+len(requiredSequence))
+	for _, ref := range runtimecontract.NormalizeRuntimeOperationVariantRefs(acceptedVariants) {
+		if allowedVariants[ref.Kind] == nil {
+			allowedVariants[ref.Kind] = map[string]struct{}{}
+		}
+		allowedVariants[ref.Kind][ref.VariantID] = struct{}{}
+	}
+	for _, requirement := range requiredSequence {
+		kind := runtimecontract.CanonicalRuntimeBlockKind(requirement.Kind)
+		variantID := strings.TrimSpace(requirement.VariantID)
+		if kind == "" || variantID == "" {
+			continue
+		}
+		if allowedVariants[kind] == nil {
+			allowedVariants[kind] = map[string]struct{}{}
+		}
+		allowedVariants[kind][variantID] = struct{}{}
+	}
 	seen := map[string]struct{}{}
 	ret := make([]any, 0, len(kinds))
 	for _, requestedKind := range kinds {
@@ -576,6 +626,24 @@ func runtimeV2OperationSchemaConditions(kinds []string) []any {
 		if len(parameterRequirements) > 0 {
 			parameterSchema["allOf"] = parameterRequirements
 		}
+		if len(contract.Variants) > 0 {
+			variantSchemas := make([]any, 0, len(contract.Variants))
+			constrained := allowedVariants[contract.Kind]
+			for _, variant := range contract.Variants {
+				if len(constrained) > 0 {
+					if _, allowed := constrained[variant.ID]; !allowed {
+						continue
+					}
+				}
+				variantSchemas = append(variantSchemas, runtimeV2OperationVariantParameterSchema(contract.Kind, variant))
+			}
+			// A sealed ref unknown to the descriptor must fail closed at the
+			// provider boundary too. Omitting oneOf here would silently widen the
+			// schema back to every descriptor variant.
+			if len(constrained) > 0 || len(variantSchemas) > 0 {
+				parameterSchema["oneOf"] = variantSchemas
+			}
+		}
 		thenProperties := map[string]any{"parameters": parameterSchema}
 		then := map[string]any{"properties": thenProperties}
 		if contract.RequireTargetRefs {
@@ -596,6 +664,48 @@ func runtimeV2ParameterContainsSchema(name string) map[string]any {
 	}
 }
 
+func runtimeV2OperationVariantParameterSchema(kind string, variant runtimecontract.RuntimeOperationVariantContract) map[string]any {
+	conditions := make([]any, 0, len(variant.Discriminators)+len(variant.RequiredParameters)+len(variant.RequiredNonEmpty)+len(variant.ForbiddenParameters))
+	for _, discriminator := range variant.Discriminators {
+		conditions = append(conditions, map[string]any{
+			"contains": map[string]any{
+				"type": "object", "properties": map[string]any{
+					"name":   map[string]any{"const": discriminator.Name},
+					"string": map[string]any{"const": discriminator.EqualsString},
+				},
+				"required": []string{"name", "string"},
+			},
+		})
+	}
+	for _, name := range variant.RequiredParameters {
+		conditions = append(conditions, runtimeV2ParameterContainsSchema(name))
+	}
+	for _, name := range variant.RequiredNonEmpty {
+		conditions = append(conditions, map[string]any{
+			"contains": map[string]any{
+				"type": "object", "allOf": []any{
+					map[string]any{"properties": map[string]any{"name": map[string]any{"const": name}}, "required": []string{"name"}},
+					map[string]any{"anyOf": []any{
+						map[string]any{"properties": map[string]any{"string": map[string]any{"type": "string", "minLength": 1}}, "required": []string{"string"}},
+						map[string]any{"properties": map[string]any{"stringList": map[string]any{"type": "array", "minItems": 1}}, "required": []string{"stringList"}},
+					}},
+				},
+			},
+		})
+	}
+	for _, name := range variant.ForbiddenParameters {
+		conditions = append(conditions, map[string]any{
+			"not": map[string]any{"contains": map[string]any{
+				"type": "object", "properties": map[string]any{"name": map[string]any{"const": name}}, "required": []string{"name"},
+			}},
+		})
+	}
+	return map[string]any{
+		"title": "operation variant contract: " + runtimecontract.RuntimeOperationVariantRuleID(kind, variant.ID, "contract", ""),
+		"allOf": conditions,
+	}
+}
+
 func runtimeV2OperationCandidateSchema(id, title, description string) string {
 	value := map[string]any{
 		"$id": id, "title": title, "description": description,
@@ -608,9 +718,10 @@ func runtimeV2OperationCandidateSchema(id, title, description string) string {
 					"required": []string{"id", "kind", "coverageWorkItemIds"},
 					"properties": map[string]any{
 						"id": map[string]any{"type": "string"}, "kind": map[string]any{"type": "string"},
-						"dependsOn":           map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-						"coverageWorkItemIds": map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}},
-						"targetRefs":          map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						"requiredOperationRef": map[string]any{"type": "string"},
+						"dependsOn":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						"coverageWorkItemIds":  map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}},
+						"targetRefs":           map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 						"parameters": map[string]any{"type": "array", "items": map[string]any{
 							"type": "object", "additionalProperties": false, "required": []string{"name"},
 							"properties": map[string]any{
@@ -671,6 +782,16 @@ func runtimeV2CandidateOperationContracts(kinds []string) []runtimeCandidateOper
 			Kind: contract.Kind, RequireOneOfParameters: append([]string(nil), contract.RequireOneOfParameters...), RequireTargetRefs: contract.RequireTargetRefs,
 			ForbiddenParameters: append([]string(nil), contract.ForbiddenParameters...), Rules: append([]string(nil), contract.Rules...),
 			Parameters: make([]runtimeCandidateOperationParameterProjection, 0, len(contract.Parameters)),
+		}
+		if len(contract.Variants) > 0 {
+			projection.Variants = make([]runtimeCandidateOperationVariantProjection, 0, len(contract.Variants))
+			for _, variant := range contract.Variants {
+				projection.Variants = append(projection.Variants, runtimeCandidateOperationVariantProjection{
+					ID: variant.ID, Discriminators: append([]runtimecontract.RuntimeOperationParameterPredicate(nil), variant.Discriminators...),
+					RequiredParameters: append([]string(nil), variant.RequiredParameters...), RequiredNonEmpty: append([]string(nil), variant.RequiredNonEmpty...),
+					ForbiddenParameters: append([]string(nil), variant.ForbiddenParameters...), EffectScope: variant.EffectScope, IdempotencyClass: variant.IdempotencyClass,
+				})
+			}
 		}
 		for _, parameter := range contract.Parameters {
 			projection.Parameters = append(projection.Parameters, runtimeCandidateOperationParameterProjection{

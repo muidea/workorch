@@ -18,6 +18,7 @@ type PrerequisiteResult struct {
 	Capabilities      *runtimecontract.RuntimeCapabilities
 	ValidationScratch *runtimecontract.ValidationScratch
 	ProviderCeiling   *runtimecontract.ProviderCeiling
+	CapabilityState   *runtimecontract.RuntimeCapabilityStateSnapshot
 }
 
 func PreflightRuntimeFacts(facts runtimecontract.RuntimeFacts, requirements []RuntimeRequirement) runtimecontract.RuntimeFacts {
@@ -34,6 +35,7 @@ func PreflightRuntimeFacts(facts runtimecontract.RuntimeFacts, requirements []Ru
 			SubjectRef:           requirement.SubjectRef,
 			CapabilityClass:      requirement.CapabilityClass,
 			RequiredCapabilities: requirement.RequiredCapabilities,
+			CapabilityStateKind:  requirement.CapabilityStateKind,
 			MinimumBytes:         requirement.MinimumBytes,
 			Reason:               requirement.Reason,
 		})
@@ -98,6 +100,11 @@ func applyPrerequisiteResult(facts *runtimecontract.RuntimeFacts, prerequisite r
 		facts.Capabilities.StateChangeKinds = mergeCapabilityKinds(facts.Capabilities.StateChangeKinds, result.Capabilities.StateChangeKinds)
 		facts.Capabilities.ValidationKinds = mergeCapabilityKinds(facts.Capabilities.ValidationKinds, result.Capabilities.ValidationKinds)
 		facts.Capabilities.GovernanceKinds = mergeCapabilityKinds(facts.Capabilities.GovernanceKinds, result.Capabilities.GovernanceKinds)
+	case runtimecontract.PrerequisiteKindCapabilityState:
+		if result.CapabilityState == nil || result.CapabilityState.RequirementID != prerequisite.ID || result.CapabilityState.OwnerModuleID != prerequisite.OwnerModuleID || result.CapabilityState.CapabilityStateKind != prerequisite.CapabilityStateKind || result.CapabilityState.SubjectRef != prerequisite.SubjectRef {
+			return fmt.Errorf("capability-state prerequisite returned a mismatched snapshot")
+		}
+		facts.Resources.CapabilityStates = append(facts.Resources.CapabilityStates, *result.CapabilityState)
 	case runtimecontract.PrerequisiteKindValidationScratch:
 		if result.ValidationScratch == nil || strings.TrimSpace(result.ValidationScratch.Reference) == "" || strings.TrimSpace(result.ValidationScratch.Revision) == "" {
 			return fmt.Errorf("validation scratch prerequisite returned no scratch reference")
@@ -140,6 +147,13 @@ func runtimeRequirementSatisfied(facts runtimecontract.RuntimeFacts, requirement
 		return facts.Resources.FailureTarget != nil && len(facts.Resources.FailureTarget.TargetRefs) > 0
 	case runtimecontract.PrerequisiteKindCapability:
 		return capabilitiesSatisfy(facts.Capabilities, requirement.CapabilityClass, requirement.RequiredCapabilities)
+	case runtimecontract.PrerequisiteKindCapabilityState:
+		for _, snapshot := range facts.Resources.CapabilityStates {
+			if snapshot.OwnerModuleID == requirement.OwnerModuleID && snapshot.CapabilityStateKind == requirement.CapabilityStateKind && snapshot.SubjectRef == requirement.SubjectRef {
+				return true
+			}
+		}
+		return false
 	case runtimecontract.PrerequisiteKindValidationScratch:
 		return facts.Resources.ValidationScratch != nil && facts.Resources.ValidationScratch.Reference != "" && facts.Resources.ValidationScratch.Revision != ""
 	case runtimecontract.PrerequisiteKindProviderCeiling:
@@ -202,6 +216,7 @@ func normalizeRuntimeRequirements(values []RuntimeRequirement) []RuntimeRequirem
 		value.OwnerModuleID = strings.TrimSpace(value.OwnerModuleID)
 		value.CapabilityClass = runtimecontract.RuntimeCapabilityClass(strings.TrimSpace(string(value.CapabilityClass)))
 		value.RequiredCapabilities = normalizeRequirementStrings(value.RequiredCapabilities)
+		value.CapabilityStateKind = strings.TrimSpace(value.CapabilityStateKind)
 		value.Reason = strings.TrimSpace(value.Reason)
 		if value.Kind == "" {
 			continue
@@ -221,7 +236,7 @@ func normalizeRuntimeRequirements(values []RuntimeRequirement) []RuntimeRequirem
 }
 
 func runtimePrerequisiteID(requirement RuntimeRequirement) string {
-	parts := []string{string(requirement.Kind), requirement.OwnerModuleID, requirement.SubjectRef, string(requirement.CapabilityClass), strings.Join(requirement.RequiredCapabilities, ","), fmt.Sprintf("%d", requirement.MinimumBytes)}
+	parts := []string{string(requirement.Kind), requirement.OwnerModuleID, requirement.SubjectRef, string(requirement.CapabilityClass), strings.Join(requirement.RequiredCapabilities, ","), requirement.CapabilityStateKind, fmt.Sprintf("%d", requirement.MinimumBytes)}
 	return strings.Join(parts, ":")
 }
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const (
@@ -16,6 +17,19 @@ const (
 	patchTypeTextReplace = "text_replace"
 	patchTypeUnifiedDiff = "unified_diff"
 )
+
+// SupportedRuntimeOperationVariants enumerates the patch owner's concrete
+// switch surface. Parameter/effect rules remain in RuntimeOperationContract.
+func SupportedRuntimeOperationVariants() []runtimecontract.RuntimeOperationVariantRef {
+	return []runtimecontract.RuntimeOperationVariantRef{
+		{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: patchTypeFileWrite},
+		{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: patchTypeTextReplace},
+		{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: patchTypeUnifiedDiff},
+		{Kind: runtimecontract.RuntimeBlockKindPatchPreview, VariantID: patchTypeFileWrite},
+		{Kind: runtimecontract.RuntimeBlockKindPatchPreview, VariantID: patchTypeTextReplace},
+		{Kind: runtimecontract.RuntimeBlockKindPatchPreview, VariantID: patchTypeUnifiedDiff},
+	}
+}
 
 var patchUnifiedDiffHunkHeaderPattern = regexp.MustCompile(`^@@ -([0-9]+)(?:,([0-9]+))? \+([0-9]+)(?:,([0-9]+))? @@`)
 

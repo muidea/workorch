@@ -1,6 +1,6 @@
 # Runtime V2 Positive Convergence Systemic Closure Plan
 
-Status: active — code reopened by 2026-07-18 deployed Live; RVC-R17～R22 pending before final RVC-R16 rerun
+Status: completed — RVC-R17～R26 code-landed; RVC-R16 bounded terminal and canonical canary liveness passed
 
 Type: roadmap / implementation closure specification
 
@@ -8,7 +8,7 @@ Last Updated: 2026-07-18
 
 ## 1. Purpose
 
-本文是 Runtime V2 正向收敛的唯一 active 实现收口计划。它承接最新 deployed/file-backed 双 workspace Live 证据，对四状态机交界处暴露的系统性偏差进行整体收口，避免继续通过 prompt、单一 operation kind、单一 workspace 或单一失败文本做片面堵漏。2026-07-18 Live 已证明 RVC-R5～R15 的 effect/receipt/recovery 主链成立，但同时暴露 governance resolution 跨 owner 提交、blocked Resume 权威门禁、端侧 allowed action、candidate parameter contract 和 Live fixture 边界仍未关闭；因此“只剩 RVC-R16 Live”的旧判断正式作废。
+本文是 Runtime V2 正向收敛的唯一 active 实现收口计划。它承接最新 deployed/file-backed 双 workspace Live 证据，对四状态机交界处暴露的系统性偏差进行整体收口，避免继续通过 prompt、单一 operation kind、单一 workspace 或单一失败文本做片面堵漏。RVC-R5～R22 已关闭 effect/receipt/recovery、governance saga、blocked Resume、allowed action、基础 candidate parameter schema、typed LLM audit 与 Live 分层；2026-07-18 `run-024` 进一步证明，capability 执行前状态与 operation 子操作变体仍未成为 sealed authority，因此最终 RVC-R16 之前新增 RVC-R23/R24。
 
 核心语义权威仍是：
 
@@ -59,6 +59,82 @@ Last Updated: 2026-07-18
 5. action-specific candidate schema 必须在 provider 输出边界尽量消除机械参数缺失；
 6. deployed terminal gate 与真实长任务 liveness observation 必须分层。
 
+### 2.3 2026-07-18 post-RVC-R22 capability-state / variant evidence
+
+| Workspace | Run | 已验证正确 | 新暴露偏差 |
+| --- | --- | --- | --- |
+| `ws-1138d6b3bfddb4fd` / LSP-Bridge | `run-024` | focus-001 已 satisfied 并原子推进；Git owner 对每次执行持久化 exact receipt；`not_git_repository`、effect mismatch、candidate attempt 0/1 与 typed rejected terminal 均按合同收敛；activeRun 已释放 | version-control focus 要求 `git/write` 的 `commit`，但 candidate 前没有 owner-confirmed repository state；模型连续生成 `add/commit`，直到执行后才发现 workspace 未初始化。最后 attempt 0 的 `commit` 非法携带 `pathspecs`，attempt 1 又缺少 `commit`，说明 provider schema 只有 kind 级参数集合，没有 sub-operation variant 条件 |
+| `ws-bea4fee67e459bcc` / ai-proxy | `run-024` | validation → state-change repair → assessment → repair budget terminal 全链合法；Result rejected、Run failed、activeRun release 与 projection 对齐 | 大型真实任务证明 liveness/terminal 分层有效；其实现/测试失败属于 workspace 交付结果，不应反向触发 core 特判 |
+
+本轮结论：
+
+1. SM-1、SM-3 receipt/evidence、SM-4 terminal delivery 均按预期工作；合法 rejected terminal 不构成 Runtime 停滞。
+2. SM-2 prerequisite 目前只确认“能力存在”，没有确认“能力执行所需的当前 owner state 已获取”。这使可在 candidate 前确定的环境状态延迟到 execution failure。
+3. `RuntimeOperationContract` 可列出 kind 的通用参数，却不能用同一权威描述 `patchType=file_write/text_replace/unified_diff`、`operation=init/add/commit` 等 discriminated variants；LLM schema 与 final validator 因而存在双份、强弱不一致的规则。
+4. 修复必须抽象为 owner-neutral capability-state snapshot + descriptor-driven operation variants；禁止在 reducer、prompt 或 Git executor 中增加 workspace/错误文本特判。
+
+### 2.4 2026-07-18 RVC-R16 terminal rerun: profile owner identity drift
+
+| Fixture | 已验证正确 | 新暴露偏差 |
+| --- | --- | --- |
+| bounded general | system default target corrected to `ai-proxy/DeepSeek-V4-Flash` 后，双 focus 的 validation → assessment → durable state change → accepted Result 正常完成 | 无 |
+| bounded Git | activation、reducer `acquire_prerequisite`、Run 及 projection 均可观测 | profile 将 capability-state owner 写作 `git`，但 canonical Git block owner 为 `blocks/git`；sealed prerequisite 因而投递到不存在的 EventHub destination，停在 revision 7，180 秒 terminal gate 超时 |
+
+该偏差不能通过在 Git block 注册 `git` 别名修复：profile 直接持久化 owner identity，别名会重新引入双合同和不可审计的 authority 路由。RVC-R25 必须：
+
+1. 在 `RuntimeProfileContract` validation 中验证每个 capability-state owner 等于其 accepted operation descriptor 的 canonical owner；
+2. 将内置 `software-dev` profile 与 bounded live fixture 统一为 `blocks/git`；
+3. fixture creator 在创建 workspace/template 前验证将被 activation 封存的 system/explicit `providerId/modelId` 是 fresh、ready 的 chat target，避免坏系统默认产生 HTTP 500 后留下无效 fixture；
+4. 不迁移或默认投影已经持久化的 `git` owner；旧 workspace 必须通过显式的新 activation/新 workspace 采用 current profile contract。
+
+RVC-R25 exit gate：legacy `git` owner 在 activation contract validation 前被拒绝；canonical `blocks/git` 通过；内置模板与 live fixture 均不再含 legacy owner；file matrix 与 fresh deployed Git fixture 能取得 owner snapshot，并按 `init → add → commit` 继续。
+
+### 2.5 2026-07-18 RVC-R16 rerun: candidate DTO/JSON schema drift
+
+RVC-R25 修复部署后，fresh bounded general fixture 再次 accepted；Git fixture 已正确取得 canonical owner snapshot，
+但第二个 focus 的 `produce_state_change` 在 candidate 边界以
+`json: unknown field "requiredOperationRef"` 耗尽同合同 retry。
+
+根因不是 Git owner、provider 或 reducer：provider-facing action schema 已声明该字段，sealed
+`RuntimeOperation`、required-sequence matcher 与 Git EventHub command 也都持有该字段；唯独 LLM
+candidate strict-decode DTO 漏了它。因 `DisallowUnknownFields` 正确 fail-closed，合法的 required
+sequence candidate 被错误归类为 schema failure。
+
+RVC-R26 收口要求：
+
+1. strict DTO 显式声明并将 `requiredOperationRef` 映射到 typed `RuntimeOperation`；不得放宽
+   strict unknown-field policy；
+2. 回归测试覆盖 JSON candidate → typed operation 的字段保持；
+3. positive-convergence file verifier 必须执行该回归，避免 schema、DTO、seal、owner contract
+   再次只在 deployed terminal gate 才发现断裂；
+4. 不为已失败 workspace 做兼容投影；fresh fixture 必须用于下一次 RVC-R16 gate。
+
+RVC-R26 exit gate：DTO mapping、focused/full Go tests、boundary verifier 与 file-backed
+positive-convergence verifier 均通过；带该代码的新部署随后通过 fresh bounded terminal gate 与
+独立 canonical canary liveness。
+
+### 2.6 2026-07-18 RVC-R16 rerun result: terminal passed, legacy canary excluded
+
+带 RVC-R26 的新部署已通过 fresh bounded dual-fixture terminal gate：general 与 Git fixture 都跨越
+两个 focus 并写入 accepted Result；Git fixture 在 candidate 前取得 canonical `blocks/git`
+snapshot，并完成 sealed `init → add → commit`（每项都有 required-operation ref）。
+
+同次 liveness 观察不能使用现有 `LSP-Bridge` / `ai-proxy` 的 `run-025` 作为通过证据：它们在
+RVC-R25 前已持久化 destination `git`，30 秒观察保持 `stateRevision=10`、dispatch/evidence=0，
+且报历史 `missing observer ... destination-git`。按 schema v2-only 与 canonical-owner 规约，
+不得为它们注册 alias、重写 aggregate 或 Resume 以掩盖该历史错误。
+
+随后以当前 canonical profile 和隔离 `/tmp` 交付目录创建 LSP-Bridge/ai-proxy 的真实定义副本。
+官方 liveness verifier 从无 Run baseline 观察到两者进入 `run-001/focus-001/produce_state_change`，
+并通过 readiness、scope、lifecycle 与 governance assertions。该路径也修复了观察器把无 Run baseline
+的 `acceptedEvidence=null` 与数值比较而触发 Python `TypeError` 的边界问题。
+
+首组副本随后都以 `candidate_retry_exhausted: unexpected EOF` 安全终态化：attempt 0/1、typed
+rejected Result、Run failed 与 workspace active-run release 均完整，证明大型真实 DoD 的 provider
+输出失败不会伪装成状态机停滞。第二组官方 liveness gate 已通过，运行中 provider 候选仍可继续由
+其自身预算/终态收敛。旧 `run-025` 保留为 nonconforming historical diagnostic，不参与 RVC-R16
+positive liveness gate。
+
 ## 3. Scope And Non-Goals
 
 ### 3.1 In scope
@@ -70,6 +146,8 @@ Last Updated: 2026-07-18
 - Application activation、LLM candidate renderer、MCP/Shell/File/Git/SSH/Web owner、Run/Result/read model 的 typed contract 联动。
 - Runtime state/bootstrap/result closeout schema v2 固化与版本门禁。
 - deterministic file-backed、crash injection、双 workspace deployed Live。
+- owner-confirmed capability-state prerequisite、freshness/invalidation 与 candidate projection。
+- discriminated operation variant contract，同时驱动 provider schema、candidate validation、seal 与 owner adapter preflight。
 
 ### 3.2 Out of scope
 
@@ -78,6 +156,8 @@ Last Updated: 2026-07-18
 - 引入通用 RuntimeAdapter registry、map-based authority rebuild 或 projection-driven reducer。
 - 把 provider base URL、credential、client 或动态路由状态序列化进 workspace/run authority。
 - 修改已终态历史 Run 使其重新 active。
+- 让 prerequisite acquisition 自动执行 `git init`、创建文件、修改配置或产生其他副作用；prerequisite 只能读取 owner state。
+- 在 Orchestrator core 识别 Git repository、commit、patchType、语言栈或具体业务语义。
 
 ## 4. Current Architecture Judgment
 
@@ -93,6 +173,8 @@ Last Updated: 2026-07-18
 | Governance | 不完整 | Decision/Approval/config/external dependency 必须统一为 typed governance outcome |
 | Restart recovery | 不完整 | 有 load/re-drive，无 startup inventory；active sealed dispatch 会盲目重执行 |
 | Terminal delivery/projection | 符合 | 保留；补重启 delivery inventory 和新观测字段 |
+| Capability-state prerequisite | 未落地 | 需由 owner 返回持久化、可校验 freshness 的 typed state snapshot；core 只验证 identity/revision，不解释 condition 名称 |
+| Operation variant schema | 部分落地 | kind 级 contract 已有；需把 discriminator、required/forbidden parameters、effect/idempotency 与 sequence requirements 统一为 descriptor authority |
 
 ## 5. Target Invariants
 
@@ -134,6 +216,21 @@ Capability owner 必须在返回前持久化 execution receipt。Orchestrator �
 - completed/failed 只来自 SM-2 sealed terminal。
 - cancelled/superseded 属于 SM-1 显式行政终态，但 active V2 Run 必须先在 aggregate 中 CAS 持久化 termination record，禁止直接修改 Run owner 状态。
 - terminal Run 不 Resume、不改 aggregate、不回退 active。
+
+### INV-09 Owner state before candidate
+
+- 某 operation kind 的可执行性依赖 owner 当前状态时，activation/profile 必须声明 typed capability-state prerequisite。
+- profile capability-state `OwnerModuleID` 必须等于其 `AcceptedStepKinds` 所对应 operation descriptor 的 canonical owner；不得把 EventHub destination alias 当作 persisted owner identity。
+- SM-2 只能在 matching owner state snapshot 已 acquisition 并持久化后请求 candidate；snapshot 缺失、stale 或 identity 不匹配时只能 `acquire_prerequisite`。
+- acquisition 是只读观察，不得隐式执行初始化、修复或其他 side effect。
+- candidate、seal、restart 必须引用同一 snapshot revision/hash；owner state 变化后必须失效并重新获取，不能依赖 LLM 根据失败文本猜测。
+
+### INV-10 One variant contract authority
+
+- 同一 operation kind 的 discriminator variants 必须由 `RuntimeOperationContract` 单一描述；provider schema、candidate validator、seal、owner adapter preflight 均从该描述派生。
+- variant 必须定义 discriminator、required/forbidden parameters、effect scope、idempotency class 与可选 dependency/sequence requirement。
+- profile/focus/RequiredOutput 使用 typed `AcceptedOperationVariants{Kind, VariantID}`，不得继续用脱离 kind 的 `AcceptedOperations=["commit"]`；声明 required variant 时 candidate 至少包含一条匹配并绑定 requirement identity 的 operation。
+- provider schema 可以提前拒绝机械错误，但 final seal 仍是最终权威；二者不得维护独立的手写规则集合。
 
 ## 6. Canonical Effect And Evidence Model
 
@@ -206,6 +303,213 @@ sealed RequiredOutput
 ```
 
 Owner receipt 为 `no_op` 时可以作为 diagnostic/validation observation，但不能关闭 required durable state-change。
+
+### 6.5 Capability-state prerequisite
+
+当 capability 是否可执行或需要哪些 preparatory operation 可以由 owner 在调用 LLM 前确定时，使用新的只读 prerequisite：
+
+```go
+const PrerequisiteKindCapabilityState PrerequisiteKind = "capability_state"
+
+type RuntimeCapabilityStateRequirement struct {
+    ID             string
+    OwnerModuleID  string
+    CapabilityKind string
+    SubjectRef     string
+    Reason         string
+}
+
+type RuntimeCapabilityStateSnapshot struct {
+    SchemaVersion             string
+    SnapshotID                string
+    AcquisitionKey            string
+    OwnerModuleID             string
+    CapabilityKind            string
+    SubjectRef                string
+    ObservedRevision          string
+    ContentHash               string
+    Disposition               RuntimeCapabilityStateDisposition
+    Conditions                []RuntimeCapabilityCondition
+    RequiredOperationSequence []RuntimeRequiredOperationVariant
+    QueryReceiptRef           string
+    ObservedAt                string
+    InvalidatedByReceiptRefs  []string
+}
+
+type RuntimeCapabilityStateDisposition string
+
+const (
+    RuntimeCapabilityStateReady             RuntimeCapabilityStateDisposition = "ready"
+    RuntimeCapabilityStateSequenceRequired  RuntimeCapabilityStateDisposition = "operation_sequence_required"
+    RuntimeCapabilityStateGovernanceRequired RuntimeCapabilityStateDisposition = "governance_required"
+    RuntimeCapabilityStateUnavailable       RuntimeCapabilityStateDisposition = "unavailable"
+    RuntimeCapabilityStateUnknown           RuntimeCapabilityStateDisposition = "unknown"
+)
+
+type RuntimeCapabilityCondition struct {
+    ID           string
+    State        RuntimeConditionState // satisfied / unsatisfied / unknown
+    Reason       string
+    EvidenceRefs []string
+}
+
+type RuntimeRequiredOperationVariant struct {
+    RequirementID             string
+    Kind                      string
+    VariantID                 string
+    DependsOnRequirementIDs   []string
+    Reason                    string
+}
+
+type RuntimeCapabilityStateRef struct {
+    OwnerModuleID  string
+    CapabilityKind string
+    SubjectRef     string
+}
+
+type RuntimeCapabilityStateStaleDetail struct {
+    StateRef        RuntimeCapabilityStateRef
+    SnapshotID      string
+    ExpectedHash    string
+    ObservedRevision string
+    ObservedHash    string
+    Reason          string
+}
+```
+
+约束：
+
+- `RuntimeRequirement` 只声明 owner/kind/subject；具体 condition 与 required sequence 只能由 owner 查询结果产生，application、LLM、Orchestrator 不得构造。
+- `RuntimeFacts.Resources` 持久化 normalized active snapshot 与 immutable history；snapshot identity、acquisition key、owner revision、content hash、query receipt 和 required sequence 纳入 aggregate validation/clone/same/hash。
+- SM-2 只解释“required snapshot 是否存在、fresh、scope matching”；不解释 `repository_initialized` 等 condition ID。
+- SM-2 可以解释 owner-neutral disposition：`ready` 允许继续且 sequence 必须为空；
+  `operation_sequence_required` 允许继续且 sequence 必须非空；`governance_required` 进入
+  typed governance；`unavailable/unknown` 进入独立 refresh/governance/bounded failure。core
+  不得自行从 conditions 推导 disposition。
+- snapshot 中的 `RequiredOperationSequence` 是 owner 给 core 的中立 variant 约束。每项使用稳定 `RequirementID`，依赖也引用 requirement identity，禁止只以可能重复的 `VariantID` 作为图节点。SM-3 必须证明 candidate 中存在一对一 matching operation，且 dependency graph 满足顺序。
+- prerequisite acquisition 只读；`init/add/commit`、创建目录或修改配置仍必须作为 candidate operation 经 seal/claim/receipt 执行。
+
+Git owner 的实例映射仅存在于 Git block：
+
+```text
+repository_initialized=false + unstaged_changes=true
+  -> required sequence: repo-init(git/write:init)
+                        -> stage-changes(git/write:add)
+                        -> create-commit(git/write:commit)
+
+repository_initialized=true + unstaged_changes=true
+  -> required sequence: stage-changes(git/write:add)
+                        -> create-commit(git/write:commit)
+
+repository_initialized=true + staged_changes=true
+  -> required sequence: create-commit(git/write:commit)
+```
+
+core 只看到 variant ID 与依赖，不包含 Git 分支。
+
+### 6.6 Operation variant contract
+
+`RuntimeOperationContract` 扩展为 discriminated variant authority：
+
+```go
+type RuntimeOperationVariantContract struct {
+    ID                              string
+    Discriminators                  []RuntimeOperationParameterPredicate
+    RequiredParameters              []string
+    RequireOneOfParameters          []string
+    ForbiddenParameters             []string
+    EffectScope                     RuntimeEffectScope
+    IdempotencyClass                RuntimeOperationIdempotencyClass
+    InvalidatesCapabilityStateKinds []string
+}
+
+type RuntimeOperationParameterPredicate struct {
+    Name         string
+    EqualsString string
+}
+
+type RuntimeOperationContract struct {
+    Kind                   string
+    Parameters             []RuntimeOperationParameterContract
+    RequireOneOfParameters []string
+    RequireTargetRefs      bool
+    ForbiddenParameters    []string
+    Variants               []RuntimeOperationVariantContract
+    Rules                  []string
+}
+
+type RuntimeOperationVariantRef struct {
+    Kind      string
+    VariantID string
+}
+```
+
+normalized operation catalog 必须有稳定 hash/revision：kind、parameter type、variant
+discriminator、required/forbidden、effect、idempotency、invalidation metadata 任一变化都必须
+改变 `OperationContractRevision`。描述文案若不参与 executable rule 可以不进入 revision，
+但 provider schema 与 final matcher 不得依赖未入 hash 的自由文本 `Rules`。
+
+首批必须迁移：
+
+| Kind | Variants |
+| --- | --- |
+| `git/write` | `init`、`add`、`commit`；`add` requires `pathspecs`，`commit` requires `message` and forbids `pathspecs` |
+| `git/read` | `status`、`diff`、`log`、`show`、`branch` |
+| `patch/apply` / `patch/preview` | `file_write`、`text_replace`、`unified_diff`，各自复用当前参数规则 |
+
+每个 concrete operation 必须匹配且只匹配一个 variant；zero/multiple match 都在 provider output decode 后、seal 前拒绝。discriminator 参数仍保留在 operation parameters 中，variant ID 由 matcher 派生，不允许 LLM 另报一个可与参数冲突的 variant 字段。
+
+profile → focus → `RequiredOutputContract` 的正式约束统一改为
+`AcceptedOperationVariants []RuntimeOperationVariantRef`。旧的脱离 kind 的
+`AcceptedOperations []string` 不做运行时默认投影或按 kind 猜测；仓库内当前 profile/
+fixture 必须原位改为 typed variant ref，非终态旧 activation 若缺少新 contract revision，
+只能 typed fail 并创建新 activation，不能在 Resume 时补字段。
+
+`RuntimeOperation` 增加可选 `RequiredOperationRef`。当 capability-state snapshot 声明
+required sequence 时：
+
+- 每个 requirement ID 必须且只能被一个 candidate operation 引用；
+- 引用 operation 的 kind/derived variant 必须与 requirement 完全相同；
+- 一个 operation 不得同时满足多个 requirement；
+- 无 required sequence 的普通 operation 不得伪造 requirement ref；
+- requirement dependency `A -> B` 必须由 operation `B.DependsOn` 直接包含 operation A，
+  final DAG validation 仍负责 cycle/unknown dependency 拒绝。
+
+### 6.7 Provider schema and final seal
+
+```text
+static RuntimeOperationContract.Variants
+  -> C2 declarative operation catalog
+
+current RequiredOutput + capability-state required sequence
+  -> C3 JSON schema oneOf/if-then branches
+  -> candidate attempt 0/1
+  -> final variant validation + sequence/dependency validation
+  -> SealedDispatch
+```
+
+- provider schema 必须为每个 variant 生成 discriminator `const`、required parameters 与 forbidden parameters，不能只限制 parameter name 总集合。
+- required sequence 必须生成 array-level `contains` 约束；每个分支同时固定 requirement ref、kind 与 discriminator。例如当前 state 要求 `init/add/commit` 时，schema 必须要求三个不同 requirement ref 的 matching operations。
+- final seal 复用同一 variant matcher，再验证 operation dependency graph；provider 是否严格支持 JSON Schema 不能成为安全前提。
+- attempt 1 的 retry context 必须包含 exact variant validation failure，例如 `git/write:commit forbids pathspecs`，而不是只给出自然语言 wrapper 提示。
+- static variant catalog 属于稳定 C2；owner state snapshot、required sequence、failure 与 rejected shape 属于 C3/C4。capability state 变化不得造成 C0～C2 `stablePrefixHash` 漂移。
+
+### 6.8 Freshness, invalidation and recovery
+
+- capability-state query 使用 `workspace/run/requirement/refresh-generation` 组成的 deterministic `AcquisitionKey`。owner 在返回前持久化 query receipt；同 key duplicate 返回同 snapshot/receipt，不同 refresh generation 才允许观察新 revision。
+- `AuthoritySnapshot` / `AuthorityTransaction` 增加 normalized `CapabilityStateHash`，绑定 candidate、seal 与 execution 使用的 state snapshot 集合；`StableAuthorityContractID` / same-contract 必须包含该 hash，但 C0～C2 `stablePrefixHash` 不包含动态 snapshot。
+- variant descriptor 可声明其成功 receipt 允许使哪些 capability-state kinds 失效；owner
+  accepted receipt 必须返回 exact `RuntimeCapabilityStateRef{owner, kind, subject}`，且只能是
+  descriptor 声明集合的子集。Orchestrator 按 exact ref 失效 matching snapshot，禁止只按 kind
+  粗暴清除其他 subject。失效只影响下一次 reducer/candidate，不中断同一 sealed dispatch 内的依赖执行。
+- owner 在 execution preflight 发现实际状态与 sealed snapshot 不一致时返回 typed
+  `capability_state_stale` receipt + exact stale detail；但同一 sealed dispatch 内由已 accepted
+  predecessor receipt 造成的预期状态变化不是 stale，owner 必须按 sealed dependency +
+  predecessor receipt 验证预期推进。Orchestrator 只有在 stale detail 匹配 exact
+  transaction/snapshot/state ref/hash 时才失效 matching snapshot 并回到
+  `acquire_prerequisite`，不得按普通 implementation repair 消耗 focus repair budget。
+- capability-state refresh 使用独立 persisted recovery ledger；超过上限进入 governance 或 typed bounded failure，禁止无限 query/candidate 循环。
+- restart 必须从 aggregate 中恢复 snapshot、hash、required sequence 与 active dispatch；已完成 `init` receipt 后不得重复初始化，后续 `add/commit` 按原 ExecutionKey/fence 继续。
 
 ## 7. Per-Operation Execution Transaction
 
@@ -495,6 +799,8 @@ type RuntimeTerminationRecord struct {
 | `provider_transient` | LLM adapter bounded transport retry；耗尽后 typed provider failure |
 | `provider_authentication` / `provider_configuration` | configuration governance，不进入普通 repair |
 | `capability_unavailable` | governance 或 bounded fail，不请求 LLM 猜测 |
+| `capability_state_stale` | 校验 exact snapshot/state ref/hash 后失效并走独立 refresh；不进入普通 repair/attempt 1 |
+| `capability_state_refresh_exhausted` | capability/external governance 或 typed bounded fail |
 | `owner_transient_unavailable` | operation recovery budget，不立即标 contract defect |
 | `execution_rejected` | structured same-focus repair |
 | `operation_outcome_unknown` | governance 或 bounded fail，禁止盲重放 |
@@ -510,6 +816,7 @@ type RuntimeTerminationRecord struct {
 - per-focus repair attempts；
 - validation-only retries；
 - operation receipt/recovery attempts；
+- capability-state query/refresh attempts；
 - CAS reload attempts；
 - terminal delivery attempts。
 
@@ -555,7 +862,10 @@ Application server 和 projection 不负责扫描或选择 action。
 - `RuntimeBootstrap.SchemaVersion = 2`
 - `RuntimeStateRecord.SchemaVersion = 2`
 - `RuntimeResultCloseout.SchemaVersion = 2`
-- candidate runtime contract version 显式升级
+- Runtime V2 persisted schema 继续为 v2，不因 RVC-R23/R24 新增 schema-1 compatibility
+- activation/definition 增加 sealed `OperationContractRevision`
+- provider prompt/schema ID 从 `workorch.runtime_candidate*.v2` 显式升级为
+  `workorch.runtime_candidate*.v3`
 
 ### 15.2 Version gate
 
@@ -563,26 +873,38 @@ Application server 和 projection 不负责扫描或选择 action。
 
 - production persistence 只写入并接受 schema v2；
 - schema 0/1 与 future schema 均 fail-fast，不原位升级、不推断 effect、不重写 evidence；
+- current schema v2 但缺少 RVC-R23/R24 必需 `OperationContractRevision` 的非终态 Run 不做
+  default projection；以 typed contract-revision failure 终止并创建新 activation；
 - 测试与开发环境若存在旧 fixture，直接重建当前 schema 的 Run，不把兼容逻辑写入 production core；
 - provider target 仍来自 Run activation 时封存的 provider/model identity，版本门禁不得重新读取系统配置覆盖旧 Run。
+
+`OperationContractRevision` 必须由 normalized static descriptor/variant catalog 计算，不是手工
+配置字符串。activation、authority transaction、provider C2 projection、seal 与 owner preflight
+必须核对同一 revision；binary catalog 变化时旧非终态 Run 不允许静默采用新规则。
 
 ## 16. Component Change Matrix
 
 | Component | Required changes |
 | --- | --- |
-| `internal/pkg/workorchruntimecontract` | effect scope、descriptor、RequiredOutput、repair directive、operation receipt/state、governance、termination、failure taxonomy、schema v2 |
-| `kernel/orchestrator/biz/runtimev2/reducer.go` | directive-driven action；删除 raw missing/anti-replay action 冲突 |
-| `controller.go` / `dispatch_commit.go` | operation claim/receipt/evidence CAS；effect compatibility；schema gate |
-| `executor.go` | 不再按 action 注入最终 EvidenceKind；先 claim/query receipt |
-| `runtime_v2_mainline.go` | action-specific seal、receipt recovery、typed provider/owner error routing |
-| `module.go` | startup recovery inventory；CAS conflict 分类；delivery retry |
-| `kernel/run` | schema v2 validation、execution fence、termination record、recovery inventory query |
-| `application/workorchd/activationports` | effect/governance/retry policy 编译；MCP kind normalization；不得参与 recovery action；blocked Runtime V2 Resume 不得只依据 ticket owner state 清 blocker |
-| `blocks/llm` | action-specific schema/prompt；repair directive projection；stable contract version |
-| File/Git/Shell/MCP/SSH/Web owners | concrete execute/query receipt command；ObservedEffectScope；governance-required preflight；ExecutionKey 幂等 |
+| `internal/pkg/workorchruntimecontract/canonical_runtime.go` | capability-state requirement/snapshot/ledger、typed accepted variant refs、required variant sequence、`CapabilityStateHash`、clone/normalize/validate/hash/same contract |
+| `internal/pkg/workorchruntimecontract/runtime_operation_contract.go` | discriminated variants、唯一 matcher、variant required/forbidden parameters、effect/idempotency、state invalidation metadata；删除 kind 与 variant 双份规则 |
+| `internal/pkg/workorchruntimecontract/runtime_candidate.go` / `runtime_state.go` | candidate operation requirement binding、variant/sequence/DAG seal、authority contract identity、attempt 0/1 exact failure、restart invariant |
+| `internal/pkg/workorchruntimecontract/runtime_recovery_budget.go` | 独立 capability-state refresh policy/ledger/budget kind，不复用 focus repair、candidate、provider 或 operation recovery 预算 |
+| `kernel/orchestrator/biz/runtimev2/prerequisite.go` / `reducer.go` | capability-state 缺失/失效只进入 `acquire_prerequisite`；core 只判断 identity/freshness/hash，不解释 owner condition |
+| `controller.go` / `dispatch_commit.go` | operation claim/receipt/evidence CAS；variant requirement 一对一绑定；sequence/DAG/effect compatibility；seal 前 state hash gate |
+| `executor.go` / `runtime_v2_mainline.go` | exact receipt recovery、typed `capability_state_stale` routing、同 sealed dispatch 已完成 predecessor 不重放、refresh 不消耗普通 repair |
+| `prerequisite_event_adapter.go` / owner event contracts | 通过 EventHub 调用 concrete typed capability-state query；禁止通用 owner service/repository 或 map bridge |
+| `module.go` | startup recovery inventory；CAS conflict 分类；capability-state refresh 与 terminal delivery retry 调度 |
+| `kernel/run` aggregate/state repository | schema v2 validation、snapshot/sequence/refresh ledger 持久化、execution fence、termination record、recovery inventory query |
+| `application/workorchd/biz/appservice/activationcore/runtime_v2_bootstrap.go` / activation ports | 从 profile 显式 capability-state requirement 编译 prerequisite；封存 refresh policy/operation contract revision；不从 accepted operation、错误文本或旧 Run 默认推断 |
+| `blocks/llm/runtime_candidate_provider.go` / candidate boundary | C2 静态 variant catalog；C3 state snapshot summary/required sequence；按同一 descriptor 生成 JSON Schema；attempt 1 投影 exact variant failure；稳定前缀不漂移 |
+| Git owner（首批） | concrete query command/result、owner-persisted query receipt、repository state → opaque conditions/required sequence 映射、variant preflight、state stale receipt、init/add/commit receipt 幂等 |
+| File/Patch owner（首批） | `file_write` / `text_replace` / `unified_diff` 统一迁移到 variant matcher；apply/preview 复用同一参数合同并保持 effect 差异 |
+| Shell/MCP/SSH/Web owners | 保持 concrete execute/query receipt、ObservedEffectScope、governance preflight 与 ExecutionKey 幂等；后续有 discriminator 时只能扩展同一 variant authority |
 | Decision/Approval | operation-scoped governance binding/resolution；Runtime V2 resolution proposal/commit saga；allowed action owner validation；禁止先 resolved 后提交 aggregate |
 | Result | closeout v2，包含 expected/observed effect、receipt refs、unknown outcomes |
-| read model/TUI/Web | 展示 current directive、effect mismatch、operation recovery、separate budgets；动作从 `AllowedRecoveryActions` 派生；不产生 authority |
+| `application/workorchd/.../readmodelprojection` / TUI/Web | 展示 snapshot identity/freshness、required variant sequence、operation→requirement binding、stale refresh 与 separate budgets；只读 projection，不产生 authority |
+| `scripts/verify-runtime-v2-positive-convergence-{file,live}.sh` | 增加 absent/unstaged/staged Git fixture、variant schema negative case、restart/stale/prefix assertions；产物仍只写 `/tmp` |
 | `blocks/llm/pkg/events` / eventstream | usage/context/cache audit 使用 concrete typed DTO，清除跨 owner `map[string]any` |
 
 ## Implementation Progress (2026-07-18)
@@ -597,20 +919,24 @@ Application server 和 projection 不负责扫描或选择 action。
 | RVC-R10 | code-landed | 真实 file-backed crash matrix 已覆盖 claim CAS 前/后、execute 前、owner receipt 后、evidence/dispatch-close 原子 CAS 前/后、governance grant CAS 后、terminal delivery；safe replay 消耗 operation budget，at-most-once/unknown 保持 outcome_unknown |
 | RVC-R11 | code-landed | exact-fence receipt、typed grant、continue resume dispatch、owner preflight grant verification/consumption、suspended binding dependency 保真与 restart/duplicate/stale 回归已落地 |
 | RVC-R12 | code-landed | Cancel/Supersede require CAS TerminationRecord for active V2 |
-| RVC-R13 | code-landed | provider/operation/CAS/terminal-delivery 独立 policy/ledger 已封存并接入 retry routing、Result closeout 与 read model |
+| RVC-R13 | code-landed foundation | provider/operation/CAS/terminal-delivery 独立 policy/ledger 已封存；RVC-R23 在同一模型上新增 capability-state refresh budget，不回退既有语义 |
 | RVC-R14 | code-landed | Run owner typed recovery inventory、blocked binding verification、terminal delivery retry inventory、schema v2-only 与 read model 已落地 |
 | RVC-R15 | code-landed | 真实 file-backed 主场景与 crash matrix 已覆盖两 focus、provider transient、CAS reload、File approval/grant、same key/next fence、stale/duplicate、validation、assessment、focus advance、terminal delivery retry、accepted Result、Run completed 与 Workspace release |
-| RVC-R16 | failed / reopened | 2026-07-18 dual-workspace Live 暴露 resolved-ticket/uncommitted-aggregate split、blocked Resume bypass、candidate patch target omission 与 180s fixture sizing 偏差；不得以超时或合法 terminal 代替 accepted-result gate |
+| RVC-R16 | verified | 2026-07-18 Live 先后暴露 governance/Resume/parameter/fixture 偏差；`run-024` 又暴露 capability-state 与 variant authority 缺口。RVC-R23～R26、file-backed matrix 与 bounded fixture creator 已完成本地收口；带 RVC-R26 的 fresh bounded Git/general terminal gate 已 passed。新的 canonical LSP-Bridge/ai-proxy canary 以无 Run baseline 通过官方 liveness verifier；pre-R25 `run-025` 保持不可迁移 historical diagnostic。 |
 | RVC-R17 | code-landed | Decision ticket 内 durable pending proposal → Orchestrator typed commit → formal Resolution/ticket finalize；启动 reconciliation 只重放同一 commit |
 | RVC-R18 | code-landed | blocked Runtime V2 Resume/Activate 均要求 aggregate matching resolution + request binding，普通 ticket resolved 不再清 blocker |
 | RVC-R19 | code-landed | Decision owner server-first allowed-action gate；read model/TUI 提供并预检同一集合，batch 仍以服务端全量预检为准 |
-| RVC-R20 | code-landed | provider output schema 在 C3 从 sealed RuntimeOperationContract 动态生成 patch target/parameter constraint；final seal 保留最终一致性裁决 |
+| RVC-R20 | code-landed | provider output schema 已从 sealed RuntimeOperationContract 动态生成 patch target/parameter constraint；RVC-R24 已将 discriminator variant、stable rule ID 与 owner enumeration 收口为同一 descriptor authority。 |
 | RVC-R21 | code-landed | ContextBudget/CacheUsage 改为 owner-neutral concrete audit DTO，LLM candidate/usage EventHub 与 eventstream payload 无 `map[string]any` bridge |
-| RVC-R22 | code-landed / fixture pending | terminal gate 已强制 ≤2 focus、每 focus ≤4 coverage items，timeout 保留 full final evidence；real-workspace liveness mode 已独立。仍待创建全新 bounded 双 workspace fixture 并最终重跑 RVC-R16 |
+| RVC-R22 | code-landed / deployed-live pending | terminal gate 已强制恰好 2 focus、每 focus ≤4 coverage items，activation 后会再次读取权威 slice，避免 pre-activation 空 projection 绕过 bound，并核对两 slice 全部 accepted 与至少一个 accepted durable owner receipt；`create-runtime-v2-bounded-positive-fixtures.sh` 默认创建两个 script-owned 最小 `must_produce_state_change` template：A 通过一个 DoD validation focus 加一个 `git/write:commit` deliverable focus，显式要求 Git capability-state snapshot 并从 repository absent 开始；B 为通用 durable state-change/validation 双 focus。live verifier 现同时保存 snapshot/required sequence 观察，并对 A 的 sealed `init/add/commit`、required-operation ref、单一 capability-state hash、receipt fence 唯一性、outcome-unknown 和 blocked ticket/aggregate governance binding 做失败闭合；所有 template/workspace/deliverable/artifact 仅由脚本创建且可选清理，deliverable/artifact 均落在 `/tmp`。real-workspace liveness mode 已独立。仍待在最新部署实例创建 fixture 并最终重跑 RVC-R16。 |
+| RVC-R23 | code-landed / deployed-live pending | capability-state prerequisite、Git read-only snapshot、owner-private durable/idempotent query receipt、C3 projection、required sequence/seal binding、authority state hash、typed stale receipt → atomic prerequisite refresh、独立 refresh budget 与 refresh-exhausted terminal routing 已落地；acceptance/read-model projection 只暴露 snapshot metadata、required sequence 和 sealed operation capability-state hash，不暴露 owner-private content，并供 live verifier 验证。query receipt 采用临时文件 fsync 后的 no-replace 原子发布，不会暴露半写 JSON；同一 query acquisition key 只有 exact snapshot payload 可幂等重放，不同 payload typed conflict，双 store 并发竞争也恰有一个 durable winner；Git stale preflight 要求每个前序 requirement 携带同一 sealed dispatch 的 exact accepted/durable/changed receipt binding。file-backed matrix 覆盖 absent/unstaged/staged sequence、query receipt 与 snapshot commit 的 restart、init receipt 后仅继续 add/commit、stale refresh CAS restart，以及 exact duplicate、late stale、mismatched stale receipt 的幂等/冲突路径；stale detail 已进入 receipt identity hash，refresh 不污染 candidate 或 focus repair budget。 |
+| RVC-R24 | code-landed / deployed-live pending | Git/Patch discriminated descriptor、candidate seal、typed accepted variant refs 全量迁移、raw authority 删除及 Git/Patch owner enumeration 已落地；provider schema 按 sealed `AcceptedOperationVariants` 与 required sequence 的并集收窄 variant，且用 descriptor-derived stable rule ID 与 final seal 诊断对齐。descriptor 现在也拒绝 Git/Patch owner 会忽略的跨变体参数，避免在 schema/seal 后留下无语义输入；新 Run bootstrap 封存 `OperationContractRevision`，旧非终态 persisted Run 以 typed revision mismatch fail-fast，revision 纳入 C2 stable prefix/authority identity。file-backed matrix 覆盖 Git absent/unstaged/staged 的 `init/add/commit` sequence、Patch `file_write/text_replace/unified_diff`，以及三种 Patch variant 在 owner receipt 已提交、evidence 尚未提交时崩溃重启：复用 execution key/fence/receipt，不重放 durable apply。 |
+| RVC-R25 | code-landed | RVC-R16 terminal rerun 发现 profile capability-state `OwnerModuleID` 使用 `git` EventHub alias 而非 descriptor canonical `blocks/git`，导致 sealed prerequisite 无 observer；已收口为 profile contract owner/accepted-kind validation、内置模板和 bounded fixture canonical asset、fixture 创建前 provider target preflight。不得为旧 owner 注册别名或迁移旧 aggregate。 |
+| RVC-R26 | code-landed | RVC-R25 后 fresh Git fixture 证明 provider schema、sealed operation 和 Git command 均有 `requiredOperationRef`，但 strict candidate DTO 漏字段导致合法 candidate 被 `DisallowUnknownFields` 拒绝。DTO 现已显式映射该 typed field，保持 fail-closed policy；focused/full tests 与 positive-convergence file verifier 已覆盖。 |
 
 ## 17. Implementation Batches
 
-已有 completed foundations 保留，但 RVC-1 正式重新打开。后续按以下批次执行，禁止跨批次只改 prompt 或只改某个 owner。
+本记录保留已完成 foundations 和批次依赖，用于审计，不再作为 active implementation backlog。
 
 ### RVC-R5 — Core contract and schema gate
 
@@ -833,17 +1159,19 @@ Scope: SM-2/SM-4/LLM/owners
 
 ```go
 type RuntimeRecoveryPolicy struct {
-    MaxProviderTransportAttempts int
-    MaxOperationRecoveryAttempts int
-    MaxCASReloadAttempts         int
-    MaxTerminalDeliveryAttempts  int
+    MaxProviderTransportAttempts      int
+    MaxOperationRecoveryAttempts      int
+    MaxCapabilityStateRefreshAttempts int
+    MaxCASReloadAttempts              int
+    MaxTerminalDeliveryAttempts       int
 }
 
 type RuntimeRecoveryLedger struct {
-    ProviderTransportAttempts int
-    OperationRecoveryAttempts int
-    CASReloadAttempts         int
-    TerminalDeliveryAttempts  int
+    ProviderTransportAttempts      int
+    OperationRecoveryAttempts      int
+    CapabilityStateRefreshAttempts int
+    CASReloadAttempts              int
+    TerminalDeliveryAttempts       int
 }
 ```
 
@@ -853,6 +1181,8 @@ type RuntimeRecoveryLedger struct {
 - CAS conflict 只消耗 CAS reload budget，不写业务 failure/evidence。
 - terminal delivery failure 只消耗 delivery budget，不改变 reducer terminal。
 - provider auth/configuration 直接进入 configuration governance，不消耗普通 repair。
+- capability-state query transient/stale 只消耗 state refresh budget；该字段由 RVC-R23 扩展，
+  不改变 RVC-R13 已落地的其他预算语义。
 - operation recovery 耗尽后才进入 structured governance/fail，禁止直接标记
   runtime contract defect。
 
@@ -1221,21 +1551,270 @@ Exit gate:
 - LSP/ai-proxy observation 无非法迁移、无 authority split、无 projection lag、无重复副作用；
 - 最终重新执行 RVC-R16，两个指定 positive fixtures 均 accepted，真实 canary 另行记录 liveness 结论。
 
+### RVC-R23 — Owner-confirmed capability-state prerequisite
+
+Scope: Activation、SM-2/SM-3/SM-4、Run owner、Git owner（首批）、read model
+
+目标：把“能力存在”与“能力在当前 subject state 下怎样合法执行”拆为两个 typed
+prerequisite。capability inventory 继续证明 owner 支持某 kind；capability-state snapshot
+只读确认该 kind 当前所需的 operation variant sequence。任何 side effect 仍只能在 sealed
+dispatch 中发生。
+
+#### RVC-R23.1 Contract and authority
+
+- `PrerequisiteKindCapabilityState` 进入 `RuntimeRequirement` / `RuntimePrerequisite`，至少
+  封存 owner module、capability kind、subject ref 与 stable requirement ID；
+- profile/activation 增加显式 typed capability-state requirement；application compiler 只
+  canonicalize/seal 该声明，不从 accepted variant、`commit` 文本、workspace 名称、历史
+  失败或 owner implementation 猜测；
+- RVC-R23 contract foundation 同时提供最小 `RuntimeOperationVariantRef{Kind, VariantID}`，
+  供 owner required sequence 引用；profile/focus 的 accepted-operation authority 全量迁移仍
+  属于 RVC-R24；
+- owner 通过 concrete EventHub query 返回 canonical `RuntimeCapabilityStateSnapshot` 与
+  durable query receipt。共享 snapshot value 可以位于 runtime contract 包，但 Git/File 等
+  command/result 必须属于各 owner，禁止通用 `QueryCapabilityStateEnvelope`；
+- Orchestrator aggregate 是“当前 Run 采用哪个 snapshot”的权威；owner query receipt 是
+  “owner 实际观察了什么”的权威；read model 只投影二者；
+- `RuntimeResourceFacts`、`AuthoritySnapshot`、`AuthorityTransaction`、state clone/hash/
+  validation、Result closeout audit 必须完整携带 snapshot/sequence/state hash identity。
+- snapshot validation 必须联合检查 disposition/sequence：`ready` 不得带 required sequence，
+  `operation_sequence_required` 必须有非空 acyclic sequence，治理/不可用/未知 disposition
+  不得进入 candidate。
+
+Git 首批 state query 至少观察：deliverable scope、repository initialized、staged/
+unstaged state、HEAD/unborn identity。Git block 自行把这些 owner conditions 转为
+`repo-init` / `stage-changes` / `create-commit` required sequence；core 不读取这些 condition
+名称，也不把 `git init` 当 prerequisite acquisition。
+
+#### RVC-R23.2 Legal transitions
+
+```text
+capability-state requirement pending
+  -> acquire_prerequisite
+  -> owner query receipt persisted
+  -> snapshot committed to Run aggregate
+  -> reducer evaluates owner-neutral disposition
+       ready / operation_sequence_required -> recompute RequiredOutput -> candidate allowed
+       governance_required                 -> request_governance
+       unavailable / unknown               -> refresh or typed bounded routing
+
+sealed operation preflight reports capability_state_stale
+  -> persist stale receipt/diagnostic
+  -> invalidate exact active snapshot
+  -> increment capability-state refresh ledger
+  -> acquire_prerequisite with next refresh generation
+  -> new snapshot/required sequence
+  -> new authority transaction and candidate attempt 0
+```
+
+合法状态变化必须满足：
+
+- initial acquisition 成功后才允许 candidate；query transient 可按独立 budget 重试；
+- snapshot commit 必须匹配 workspace/run/requirement/subject/acquisition key 与 owner receipt；
+- stale refresh 后 `CapabilityStateHash` 与 authority contract 必须更新，旧 candidate/dispatch
+  不得 reseal；
+- 同一 sealed dispatch 中，前序 accepted receipt 造成的预期 owner state 变化继续执行剩余
+  dependency，不触发 refresh；
+- dispatch 完成后，按 variant invalidation metadata 使 active snapshot 失效，下一次 reducer
+  需要相关 state 时重新 acquisition；owner receipt 必须携带 exact owner/kind/subject ref，
+  Orchestrator 只失效精确匹配项。
+
+#### RVC-R23.3 Forbidden transitions
+
+- capability-state pending/stale → candidate；
+- prerequisite query → `git init`、file write、configuration mutation 或任何 effect receipt；
+- execution failure 文本 `not_git_repository` → reducer 直接插入 Git operation；
+- owner query result 未持久化/identity 不匹配 → aggregate snapshot commit；
+- `ready` + non-empty sequence、`operation_sequence_required` + empty sequence 或 core 根据
+  condition 文本重算 disposition → candidate；
+- stale snapshot → 普通 focus repair、candidate attempt 1 或第三次 candidate；
+- external state drift → 继续使用旧 `CapabilityStateHash` reseal；
+- projection/TUI/Web 改写 snapshot freshness、required sequence 或 refresh decision；
+- Resume 为旧 activation 补 capability-state requirement/default snapshot。
+
+#### RVC-R23.4 Duplicate, restart and recovery
+
+- `AcquisitionKey = workspace/run/requirement/refresh-generation`；same key duplicate query
+  返回相同 query receipt/snapshot，different payload 必须 conflict；
+- crash after owner query receipt / before aggregate commit：restart 查询 same key 并提交同一
+  snapshot，不创建下一 generation；
+- crash after snapshot commit / before candidate：restart 直接 reducer，不重复 query；
+- crash after `init` receipt / before `add`：SM-3 exact receipt recovery 关闭已完成 node，只继续
+  remaining dependency；不得因 snapshot 已被 init 改变而把预期推进误判为 stale；
+- stale/duplicate query receipt 只进入 diagnostic/idempotent path，不得推进 evidence revision；
+- old dispatch 返回 `capability_state_stale` 时必须同时匹配 exact transaction/state hash、
+  snapshot ID、state ref 与 observed detail，否则只是 stale receipt diagnostic，不能失效当前新 snapshot。
+
+#### RVC-R23.5 Budget and terminal routing
+
+`RuntimeRecoveryPolicy/Ledger` 增加独立 capability-state refresh budget。initial successful
+acquisition 不消耗预算；query transient retry、execution preflight 的 confirmed external stale
+各消耗一次。成功 refresh 只重置当前 requirement 的 failure signature/no-progress window，
+不清零历史 used count；focus 原子 advance 或 requirement 不再 active 时建立新 ledger scope。
+
+- owner auth/configuration failure → configuration governance；
+- capability unavailable/subject inaccessible → capability/external governance 或 typed bounded fail；
+- owner disposition `governance_required` → typed dependency/ticket，不先请求 candidate；
+- refresh budget exhausted → `capability_state_refresh_exhausted` governance/failure；
+- 以上均不得消耗 candidate attempt、focus repair、provider transport 或 operation recovery budget。
+
+#### RVC-R23.6 Implementation order and exit gate
+
+实现顺序固定为：shared value/validation/hash → activation compiler → owner concrete query +
+receipt → prerequisite adapter/mainline → reducer/state hash → stale routing/recovery budget →
+read model → file-backed/restart tests。
+
+Exit gate:
+
+- repository absent 时 candidate 前已持久化 snapshot，并要求 sealed `init -> add -> commit`；
+- initialized + unstaged 只要求 `add -> commit`；initialized + staged 只要求 `commit`；
+- prerequisite acquisition 零副作用，`git init` 只出现在 sealed operation receipt；
+- stale snapshot 能有界 refresh，且不污染 candidate/focus repair budgets；
+- ready/sequence-required/governance/unavailable/unknown disposition 的合法与禁止迁移测试齐备；
+- crash after query、snapshot commit、init receipt 均可自动恢复且无重复 side effect；
+- core test/scan 不出现 repository、Git condition、commit message 等领域分支。
+
+### RVC-R24 — Discriminated operation variant contract and schema
+
+Scope: SM-2/SM-3、`workorchruntimecontract`、activation/profile、LLM provider boundary、
+Git/File/Patch owners、read model
+
+目标：把当前 kind-level 参数 catalog 升级为 variant-level executable authority，使
+descriptor → provider schema → candidate validation → final seal → owner preflight 全部调用
+同一 matcher，消除 `commit + pathspecs` 这类直到 final validation 才暴露的机械偏差。
+
+#### RVC-R24.1 Type migration
+
+- `RuntimeOperationContract.Variants` 定义 discriminator、required/one-of/forbidden
+  parameters、effect、idempotency 与允许失效的 capability-state kinds；owner receipt 再给出
+  exact owner/kind/subject invalidation refs；
+- `RuntimeOperationVariantRef{Kind, VariantID}` 成为 profile evidence requirement、
+  CoverageFocus、RequiredOutput 的 typed authority；
+- `AcceptedOperations []string` 从当前 activation/profile/aggregate authority 删除，仓库内
+  current fixtures/config 全量迁移为 `AcceptedOperationVariants`，不提供 `commit ->
+  git/write:commit` 默认推断；
+- `RuntimeOperation.RequiredOperationRef` 绑定 capability-state sequence requirement；variant
+  ID 只能由 parameters + descriptor matcher 派生；
+- normalized hash/same/clone 必须覆盖 variant catalog revision、accepted refs、required refs
+  与 operation binding，且无业务顺序语义的 catalog stable sort，有依赖语义的 sequence 保序。
+
+candidate prompt/schema ID 必须升级到 `workorch.runtime_candidate*.v3`，activation/definition
+必须封存新的 `OperationContractRevision`。新代码遇到缺少该 revision、仍携带 raw
+`AcceptedOperations`、或 required sequence 无 requirement identity 的非终态 Run，必须 typed
+fail 并要求创建新 activation；禁止 compatibility/default projection。
+
+#### RVC-R24.2 Single matcher and seal order
+
+单一 executable matcher 位于 `workorchruntimecontract`，至少暴露：
+
+```text
+MatchRuntimeOperationVariant(operation, contract)
+ValidateRuntimeOperationVariant(operation, variant)
+ValidateRequiredOperationBindings(operations, requiredSequence)
+```
+
+正式 seal 顺序：
+
+```text
+operation kind canonicalization
+  -> kind-level parameter name/type validation
+  -> exactly-one variant match
+  -> variant required/one-of/forbidden validation
+  -> RequiredOutput accepted variant gate
+  -> required-operation one-to-one binding
+  -> dependency graph / requirement order / cycle validation
+  -> expected effect + idempotency resolution
+  -> CapabilityStateHash / authority transaction match
+  -> persist SealedDispatch
+```
+
+provider schema 与 owner adapter 都调用或投影此 matcher 的数据；允许 owner 保留具体执行
+switch，但必须有 enumeration regression 证明 owner supported operations 与 descriptor variants
+完全相等，不能维护另一份参数合法性表。
+
+#### RVC-R24.3 Provider schema and retry
+
+- C2 只包含 stable static variant catalog、parameter types 与 declarative rules；
+- C3 包含 current accepted variant refs、snapshot identity/hash、required operation refs/
+  sequence；C4 包含 exact rejected variant failure 与 shape hash；
+- schema 对每个 variant 生成 discriminator `const` 和 variant parameter constraints；required
+  sequence 对 operations array 生成不同 requirement ref 的 `contains` 分支；
+- attempt 0/1 使用相同 authority transaction 与 C0～C2 stable prefix；attempt 1 只更新 C4；
+- attempt 1 failure 必须包含 operation ID、kind、derived/expected variant、requirement ref、
+  missing/forbidden/conflicting parameter 与 descriptor rule ID；
+- provider 不完整支持 `if/then/contains` 时仍可返回 candidate，但 final seal 必须一致拒绝，
+  不允许放宽为 prompt-only 安全。
+
+#### RVC-R24.4 Initial variant catalog
+
+| Kind | Required variants and executable constraints |
+| --- | --- |
+| `git/write` | `init`：`operation=init`，forbid `pathspecs/message/ref/baseRef`；`add`：`operation=add`，require non-empty `pathspecs`，forbid `message/ref/baseRef`；`commit`：`operation=commit`，require non-empty `message`，forbid `pathspecs/ref/baseRef` |
+| `git/read` | `status/diff/log/show/branch`；每个 variant 明确 `ref/baseRef/pathspecs/limit` 的 required/allowed/forbidden 集合 |
+| `patch/apply` | `file_write` require `content`；`text_replace` require non-empty `oldText` + `newText`；`unified_diff` require non-empty `diff`；三者均复用 canonical target/baseHash gate |
+| `patch/preview` | 与 apply 使用同一 discriminator/parameter variant，但 effect scope 为 none/ephemeral observation，禁止复用 apply durable effect |
+
+表中未写出的细节必须由现有 owner contract 盘点后显式进入 descriptor；不得把当前 switch
+中的隐含默认继续留在 owner 内。Patch `file_write` 与独立 `file/write` 仍是不同 kind/owner
+合同，不得因 variant 同名重新合并。
+
+#### RVC-R24.5 Legal/forbidden transitions and recovery
+
+合法：attempt 0 variant contract failure → same transaction attempt 1；attempt 1 合法 → seal；
+两次失败 → `candidate_retry_exhausted`；sealed execution state stale → RVC-R23 refresh/new
+transaction，而不是复用 attempt 1。
+
+禁止：
+
+- zero/multiple variant match → seal；
+- `git/write:commit` 携带 `pathspecs`；`git/write:add` 无 pathspecs；
+- required operation ref 缺失、重复、绑定错误 kind/variant 或 dependency 不满足 → seal；
+- LLM 显式 variant 字段覆盖 parameters 派生结果；
+- provider schema、final validator、Git/Patch owner 各维护一套不一致规则；
+- attempt 1 改变 accepted variants、required sequence、state hash 或 stable prefix；
+- owner adapter 用 execution failure 修补/重写已 sealed operation parameters。
+
+duplicate/restart 继续使用 sealed operation ID + ExecutionKey/fence；variant ID、requirement ref、
+state hash 都是 sealed identity 的一部分。duplicate receipt 必须与这些字段相同才幂等；
+不同 variant/binding 使用同 execution identity 必须 conflict。
+
+#### RVC-R24.6 Implementation order and exit gate
+
+实现顺序固定为：variant/ref types → current profile/fixture typed migration → matcher + canonical
+tests → RequiredOutput/candidate/seal → provider schema/retry projection → Git owner → Patch owner →
+read model → full file-backed matrix。
+
+Exit gate:
+
+- provider schema 在 attempt 0 即拒绝 `commit + pathspecs`，final seal 对同 shape 给出同一
+  typed rule ID；
+- attempt 0 非法、attempt 1 精确修正后可 seal；两次非法严格 bounded terminal；
+- required `init/add/commit` 三项各绑定一次且 DAG 顺序正确，漏项/重复/错绑均拒绝；
+- Git/Patch descriptor、provider schema、seal、owner preflight enumeration 一致；
+- Patch 三 variants 与独立 `file/write` 全量回归通过；
+- capability-state C3 变化、attempt 0/1、restart 均不造成 C0～C2 stable prefix drift。
+
 ### 17.1 Mandatory closure order
 
 后续代码必须按以下依赖顺序逐项收口，前一项 exit gate 未通过时不得把后一项标记
 completed：
 
-1. RVC-R17：Decision durable proposal → Orchestrator commit → owner finalize/reconcile；
-2. RVC-R18：blocked Resume aggregate proof gate 与 projection-only continuation；
-3. RVC-R19：server-first allowed action validation，再收口 TUI/Web/CLI/batch；
-4. RVC-R20：descriptor-driven candidate schema 与 exact attempt-1 contract failure；
-5. RVC-R21：LLM audit typed EventHub DTO；
-6. RVC-R22：bounded deployed fixture 与 real-workspace liveness 分层；
+1. RVC-R23 contract foundation：capability-state types、acquisition identity、snapshot/hash、
+   typed owner query；
+2. RVC-R23 mainline/recovery：activation compiler、prerequisite/reducer、stale routing、独立
+   refresh budget、restart/read model；
+3. RVC-R24 contract migration：typed accepted variant refs、descriptor variants、single matcher、
+   current profile/fixture 全量迁移；
+4. RVC-R24 boundary/owners：provider schema + exact attempt 1、final seal、Git/Patch owner
+   preflight/enumeration；
+5. deterministic file-backed matrix：absent/unstaged/staged、stale、crash、duplicate、Patch
+   variants、stable prefix；
+6. RVC-R22 clean bounded 双 fixture 创建与 terminal gate 预检；
 7. RVC-R16 final rerun：先 bounded dual terminal gate，再真实 canary observation。
 
-RVC-R11～R15 保持 code-landed foundation；RVC-R17～R22 不得回退 exact fence、typed
-grant、independent budget、startup inventory、terminal delivery lane 或 schema v2-only。
+RVC-R11～R15、RVC-R17～R22 保持 code-landed foundation；后续不得回退 exact fence、typed
+grant、independent budget、startup inventory、terminal delivery lane、schema v2-only、server-first
+allowed action 或 terminal/liveness 分层。
 
 每批完成后依次运行 focused package tests、boundary verifier、全量测试及对应 file/live
 gate，并同步第 21 节列出的 SoT。单纯 `go test ./...` 通过不等于该批完成。
@@ -1259,6 +1838,10 @@ gate，并同步第 21 节列出的 SoT。单纯 `go test ./...` 通过不等于
 - session/no-op evidence 不算 repair progress。
 - repair/candidate/provider/operation budgets 互不污染。
 - partial assessment 原子关闭 item 并 advance focus。
+- capability-state requirement missing/stale 时只能 acquire prerequisite，不能请求 candidate。
+- owner snapshot required sequence 只按 requirement/variant identity解释，不按 Git condition 名称分支。
+- owner-neutral ready/sequence-required/governance/unavailable/unknown disposition 迁移与 sequence cardinality 联合校验。
+- capability-state refresh 与 focus repair、candidate/provider/operation budgets 互不污染。
 
 ### 18.3 SM-3
 
@@ -1274,6 +1857,15 @@ gate，并同步第 21 节列出的 SoT。单纯 `go test ./...` 通过不等于
 - crash after proposal、after aggregate commit、before ticket update、after Resolution create 的逐点恢复。
 - invalid/unallowed resolution 零正式写入；same proposal duplicate 幂等、different payload conflict。
 - `patch/apply` attempt 0 缺 target、attempt 1 修正；两次缺失 bounded terminal。
+- repository absent → snapshot → sealed `init/add/commit`，每项绑定唯一 requirement ref。
+- initialized + unstaged → `add/commit`；initialized + staged → `commit`。
+- `git/write:commit + pathspecs` 在 provider schema/final seal 使用同一 typed rule 拒绝。
+- attempt 0 variant failure、attempt 1 exact correction；两次 variant failure bounded terminal。
+- required variant 漏项、重复 ref、wrong kind/variant binding、dependency cycle/缺边均拒绝。
+- stale state receipt 失效旧 snapshot 后必须新 transaction/candidate attempt 0，不得复用 attempt 1。
+- crash after `init` receipt 只继续 `add/commit`，不重复 init。
+- duplicate/stale query/operation receipt 不增加 accepted evidence 或重复副作用。
+- accepted receipt 的 capability-state invalidation refs 必须是 descriptor allowed kinds 子集且 exact subject matching。
 
 ### 18.4 SM-4
 
@@ -1285,6 +1877,9 @@ gate，并同步第 21 节列出的 SoT。单纯 `go test ./...` 通过不等于
 - provider/operation/CAS/delivery budget 各自独立消耗与耗尽。
 - projection high-watermark/readiness 不反向驱动 reducer。
 - pending governance proposal startup reconciliation 不依赖 application Resume watcher。
+- crash after capability-state query receipt / before aggregate commit 使用 same acquisition key 恢复。
+- crash after snapshot commit / before candidate 不重复 owner query。
+- capability-state refresh budget exhausted 进入 typed governance/failure，不形成 query/candidate 空转。
 
 ### 18.5 Cross-component regressions
 
@@ -1299,6 +1894,11 @@ gate，并同步第 21 节列出的 SoT。单纯 `go test ./...` 通过不等于
 - Runtime V2 `replan` 只能进入显式 activation/restart，不能 resolve current governance ticket。
 - LLM usage ContextBudget/CacheUsage typed EventHub round-trip，无 `map[string]any`。
 - bounded deployed fixture terminal SLA 与 real-workspace liveness policy 分离。
+- capability-state snapshot/required sequence 只进入 C3/C4；C0～C2 hash 在 state refresh 前后不漂移。
+- attempt 0/1 的 static variant catalog 与 stable prefix 完全一致。
+- Git owner supported sub-operations 与 descriptor variants 双向 enumeration 一致。
+- Patch apply/preview 的 `file_write/text_replace/unified_diff` variants 与独立 `file/write` 均回归。
+- pre-R23/R24 nonterminal activation 缺 contract revision 时 typed fail；无 compatibility/default projection。
 
 ## 19. Verification Commands
 
@@ -1309,6 +1909,10 @@ go test ./internal/pkg/workorchruntimecontract -count=1
 go test ./internal/modules/kernel/orchestrator/biz/runtimev2 -count=1
 go test ./internal/modules/kernel/orchestrator/... -count=1
 go test ./internal/modules/kernel/run/... -count=1
+go test ./internal/modules/application/workorchd/biz/appservice/activationcore -count=1
+go test ./internal/modules/blocks/git/... -count=1
+go test ./internal/modules/blocks/file/... -count=1
+go test ./internal/modules/blocks/llm/... -count=1
 go test ./internal/modules/blocks/{file,git,shell,mcp,ssh,web,llm}/... -count=1
 go test ./internal/modules/blocks/decision/... -count=1
 go test ./internal/modules/kernel/governance/... -count=1
@@ -1339,9 +1943,14 @@ make observe-runtime-v2-positive-convergence-live
 rg -n 'ContextBudget map\[string\]any|CacheUsage map\[string\]any' internal/modules/blocks/llm/pkg/events
 rg -n 'case "replan"|batchResolve\(.replan' internal/services/workorch/service/tui web/workorch-console/src
 rg -n 'ActivateRuntimeV2Run|CanResumeRun' internal/modules/kernel/orchestrator
+rg -n 'AcceptedOperations' internal/pkg/workorchruntimecontract internal/modules/application/workorchd internal/modules/kernel/orchestrator internal/modules/blocks/llm
+rg -n 'not_git_repository|repository_initialized|case .*commit' internal/modules/kernel/orchestrator/biz/runtimev2
+rg -n 'RuntimeOperationContractForKind|MatchRuntimeOperationVariant|ValidateRuntimeOperationVariant' internal/pkg/workorchruntimecontract internal/modules/blocks/{llm,git,file}
 ```
 
-扫描命中不直接代表失败，但每处必须由新 typed gate/test 证明不会绕过 authority。
+既有 LLM/治理/Resume 扫描命中不直接代表失败，但每处必须由 typed gate/test 证明不会绕过 authority。
+RVC-R24 完成后，生产 authority 中的 raw `AcceptedOperations` 必须为零；variant matcher 扫描
+必须证明 executable rules 只定义在 contract 包，LLM/owner 仅消费/投影，不复制规则表。
 
 ## 20. Deployed Live Acceptance
 
@@ -1352,7 +1961,8 @@ rg -n 'ActivateRuntimeV2Run|CanResumeRun' internal/modules/kernel/orchestrator
 - source/projected revision 追平；
 - ai-proxy catalog fresh；
 - workspace target 为预期 `providerId/modelId`；
-- credential/base URL 未进入 workspace/run persisted authority。
+- credential/base URL 未进入 workspace/run persisted authority；
+- candidate runtime contract revision 已包含 capability-state/operation-variant closure，fixture 不复用 pre-R23/R24 nonterminal Run。
 
 ### 20.2 Bounded terminal fixture proof
 
@@ -1367,14 +1977,17 @@ rg -n 'ActivateRuntimeV2Run|CanResumeRun' internal/modules/kernel/orchestrator
 7. focus 原子 advance；
 8. 最终 accepted Result；
 9. Run terminal、workspace activeRun 释放；
-10. projection revision 追平。
+10. projection revision 追平；
+11. 双 fixture 至少一个覆盖 owner-confirmed capability-state prerequisite；snapshot 必须早于首个 candidate attempt；
+12. 若 snapshot 声明 required sequence，sealed operation、receipt 与 requirement binding 数量/顺序完全一致。
 
 fixture 额外限制：
 
 - ≤2 focuses；
 - 每 focus ≤4 coverage items；
 - 使用全新 Run，不 Resume 历史 terminal/invalid governance Run；
-- 180 秒 terminal SLA 只适用于该 bounded fixture。
+- 180 秒 terminal SLA 只适用于该 bounded fixture；
+- 至少一个 fixture 从 repository absent 或等价 owner-state 前置条件开始，证明 prerequisite 只读且 preparatory mutation 经过 sealed dispatch。
 
 ### 20.3 Real-workspace liveness proof
 
@@ -1385,7 +1998,9 @@ fixture 额外限制：
 3. blocked governance 的 ticket action 与 aggregate binding 一致；
 4. resolved ticket 必须有 matching aggregate resolution，或明确处于 pending proposal reconciliation；
 5. candidate contract failure、execution failure、provider transient 各自进入正确预算/终态；
-6. 不把大型 DoD 未在 180 秒完成误判为状态机死锁。
+6. 不把大型 DoD 未在 180 秒完成误判为状态机死锁；
+7. 需要 owner state 的 focus 在 candidate 前已有 matching snapshot/required sequence；
+8. state refresh 只生成新 authority transaction，不复用旧 candidate/dispatch。
 
 ### 20.4 Negative assertions
 
@@ -1395,20 +2010,26 @@ fixture 额外限制：
 - 无相同 ExecutionKey 重复副作用；
 - 无 CAS/owner transient 被误记为 runtime contract defect；
 - 无 terminal Run Resume；
-- 无 stable prefix unexpected drift。
+- 无 stable prefix unexpected drift；
 - 无 ticket resolved / aggregate unresolved split；
 - 无 blocked Runtime V2 被普通 Resume 清 blocker；
 - 无端侧提交不在 allowed actions 中的 resolution；
-- 无 typed rejected terminal 被误报为 positive accepted pass。
+- 无 typed rejected terminal 被误报为 positive accepted pass；
+- 无 capability-state prerequisite 产生 side effect；
+- 无 stale snapshot 继续 seal，且无预期 predecessor state change 被误判为 external stale；
+- 无 raw `AcceptedOperations` 默认推断 variant；
+- 无 operation requirement ref 漏绑/重复/错绑后进入 owner；
+- 无 `git/write:commit` 携带 `pathspecs` 到达 execution；
+- 无 capability-state C3/C4 变化导致 C0～C2 `stablePrefixHash` 漂移。
 
 ## 21. Documentation Closure
 
 代码收口期间必须同步：
 
 - `docs/00-core/runtime-stage-contract.md`：四状态机正式语义、effect/receipt/recovery/lifecycle。
-- `docs/00-core/runtime-request-cache-note.md`：candidate contract version 与 prefix stability。
-- `internal/modules/kernel/orchestrator/readme.md`：实现落点与 EventHub topic。
-- capability owner `readme.md`：receipt/effect/governance contract。
+- `docs/00-core/runtime-request-cache-note.md`：static variant catalog=C2、dynamic state/sequence=C3/C4、candidate contract version 与 prefix stability。
+- `internal/modules/kernel/orchestrator/readme.md`：capability-state prerequisite、state hash、variant seal、stale/restart 与 EventHub topic。
+- capability owner `readme.md`：state query receipt、condition/sequence mapping、variant preflight、invalidation 与 stale contract。
 - `docs/01-overview/current-state.md`、`current-unclosed-matrix.md`、active overview：真实进度。
 
 任何批次未同步上述 SoT，不得标记 completed。
@@ -1431,12 +2052,17 @@ fixture 额外限制：
 - 将所有 owner/provider/CAS 错误统一终态化。
 - 对任何非 current-schema aggregate/evidence 做语义升级或默认回填。
 - 用单 workspace 单 focus dispatch 证明“正向收敛完成”。
+- prerequisite acquisition 中自动执行 `git init`、file write 或其他 preparatory mutation。
+- 在 reducer 中根据 `not_git_repository`、`commit`、`patchType` 或 workspace 名称选择 operation。
+- 继续以 `AcceptedOperations=["commit"]` 脱离 kind 地匹配任意 parameters。
+- 只在 provider JSON schema 增加 variant 规则，final seal/owner preflight 仍保留另一套手写判断。
+- state stale 后继续 attempt 1、消耗 focus repair budget或复用旧 `CapabilityStateHash`。
 
 ## 23. Definition Of Done
 
 RVC-1 只有同时满足以下条件才能关闭：
 
-1. RVC-R5～R15 foundation 保持通过，RVC-R17～R22 全部完成，并最终重新通过 RVC-R16；
+1. RVC-R5～R15 foundation 保持通过，RVC-R17～R26 全部完成，并最终重新通过 RVC-R16；
 2. core contract、module readme、contract types 与代码一致；
 3. effect、receipt、repair directive、governance、termination 和 recovery 均为 persisted typed authority；
 4. 四状态机合法/禁止迁移、幂等、restart、stale/duplicate、budget/guard 测试齐备；
@@ -1446,6 +2072,9 @@ RVC-1 只有同时满足以下条件才能关闭：
 8. active roadmap、current-state 和 unclosed matrix 不再保留虚假 code-closed 状态；
 9. Runtime V2 governance 不存在 resolved-ticket/uncommitted-aggregate 或 aggregate-committed/unrecoverable-owner-projection 状态；
 10. 普通 Resume、TUI/Web/CLI/HTTP/batch 均不能绕过 aggregate authority 与 allowed action contract；
-11. bounded deployed terminal gate 与真实长任务 liveness observation 均有独立证据。
+11. bounded deployed terminal gate 与真实长任务 liveness observation 均有独立证据；
+12. capability-state acquisition 在 candidate 前完成、只读、可审计、可失效、可有界 refresh，restart 不重复 owner query receipt 或 sealed operation side effect；
+13. typed accepted variant refs 与 required operation refs 已替代 raw `AcceptedOperations` authority，descriptor/provider schema/candidate/seal/owner preflight 使用同一 matcher；
+14. repository absent/unstaged/staged、variant attempt 0/1、stale refresh、crash after init receipt、duplicate/stale receipt、Patch variants 与 stable prefix file-backed matrix 全部通过。
 
-在上述条件满足前，本项状态保持：**active — code reopened**。
+上述条件均已满足；本项已完成，应迁入 completed archive，后续实现不得再将本计划作为 active 约束。

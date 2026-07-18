@@ -54,6 +54,9 @@ func TestRuntimeControllerInitializeRunsPreflightReduceAndPersistOnce(t *testing
 	if initialized.StateRevision != 1 || initialized.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite {
 		t.Fatalf("initialized aggregate = %+v", initialized)
 	}
+	if got, want := initialized.Facts.Activation.ExecutionContract.OperationContractRevision, runtimecontract.RuntimeOperationContractRevision(); got != want {
+		t.Fatalf("operation contract revision = %q, want %q", got, want)
+	}
 	if len(initialized.Facts.Prerequisites.Pending) != 1 || repository.saves != 1 {
 		t.Fatalf("pending=%+v saves=%d", initialized.Facts.Prerequisites.Pending, repository.saves)
 	}
@@ -67,6 +70,39 @@ func TestRuntimeControllerInitializeRunsPreflightReduceAndPersistOnce(t *testing
 	}
 	if restarted.Decision.AuthoritySnapshot.ID != initialized.Decision.AuthoritySnapshot.ID || restarted.Decision.AuthoritySnapshot.Attempt != 0 {
 		t.Fatalf("restart changed authority: before=%+v after=%+v", initialized.Decision.AuthoritySnapshot, restarted.Decision.AuthoritySnapshot)
+	}
+}
+
+func TestRuntimeControllerInitializeRejectsPersistedOperationContractRevisionMismatch(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, _ := NewRuntimeController(repository)
+	if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
+		t.Fatal(err)
+	}
+	repository.aggregate.Facts.Activation.ExecutionContract.OperationContractRevision = "operation-contract-obsolete"
+
+	_, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	var mismatch *runtimecontract.RuntimeOperationContractRevisionMismatchError
+	if !errors.As(err, &mismatch) || !errors.Is(err, runtimecontract.ErrRuntimeOperationContractRevisionMismatch) {
+		t.Fatalf("revision mismatch err = %v", err)
+	}
+	if mismatch.PersistedRevision != "operation-contract-obsolete" || repository.saves != 1 {
+		t.Fatalf("mismatch=%+v saves=%d", mismatch, repository.saves)
+	}
+}
+
+func TestRuntimeControllerInitializeRejectsPersistedMissingOperationContractRevision(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, _ := NewRuntimeController(repository)
+	if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
+		t.Fatal(err)
+	}
+	repository.aggregate.Facts.Activation.ExecutionContract.OperationContractRevision = ""
+
+	_, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	var mismatch *runtimecontract.RuntimeOperationContractRevisionMismatchError
+	if !errors.As(err, &mismatch) || mismatch.PersistedRevision != "" || repository.saves != 1 {
+		t.Fatalf("missing revision err=%v mismatch=%+v saves=%d", err, mismatch, repository.saves)
 	}
 }
 

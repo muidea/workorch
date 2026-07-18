@@ -1,6 +1,7 @@
 package readmodelprojection
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
@@ -81,6 +82,8 @@ func MapAcceptanceProjection(run readmodelcore.Run) readmodelcore.AcceptanceProj
 		}
 	}
 	projection.Operations = runtimeOperationStatuses(*run.RuntimeState)
+	projection.CapabilityStates = runtimeCapabilityStateStatuses(facts)
+	projection.Governance = runtimeGovernanceStatuses(*run.RuntimeState)
 	projection.Summary = summarizeAcceptanceSlices(projection.Slices)
 	return projection
 }
@@ -92,13 +95,24 @@ func runtimeOperationStatuses(state runtimecontract.RuntimeStateRecord) []readmo
 	}
 	ret := make([]readmodelcore.RuntimeOperationStatus, 0)
 	for _, dispatch := range dispatches {
+		operations := runtimeDispatchOperations(dispatch.Candidate)
 		for _, rawExecution := range dispatch.OperationExecutions {
 			execution := rawExecution.Normalized()
 			status := readmodelcore.RuntimeOperationStatus{
 				DispatchID: dispatch.ID, OperationID: execution.OperationID, ExecutionKey: execution.ExecutionKey, Fence: execution.Fence,
+				CapabilityStateHash: dispatch.Transaction.CapabilityStateHash,
 				ExpectedEffectScope: string(execution.ExpectedEffectScope), ExecutionState: string(execution.State),
 				ReceiptRef: execution.OwnerReceiptRef, ReceiptHash: execution.OwnerReceiptHash,
 				OutcomeUnknown: execution.State == runtimecontract.OperationExecutionOutcomeUnknown,
+			}
+			if operation, ok := operations[execution.OperationID]; ok {
+				status.Kind = operation.Kind
+				status.RequiredOperationRef = operation.RequiredOperationRef
+				if contract, found := runtimecontract.RuntimeOperationContractForKind(operation.Kind); found {
+					if variant, err := runtimecontract.MatchRuntimeOperationVariant(operation, contract); err == nil {
+						status.VariantID = variant.ID
+					}
+				}
 			}
 			if receipt, ok := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(state.OperationReceipts, execution.ExecutionKey, execution.Fence); ok {
 				status.ObservedEffectScope = string(receipt.ObservedEffectScope)
@@ -115,6 +129,74 @@ func runtimeOperationStatuses(state runtimecontract.RuntimeStateRecord) []readmo
 			ret = append(ret, status)
 		}
 	}
+	return ret
+}
+
+func runtimeDispatchOperations(candidate runtimecontract.RuntimeCandidate) map[string]runtimecontract.RuntimeOperation {
+	ret := map[string]runtimecontract.RuntimeOperation{}
+	if candidate.StateChange != nil {
+		for _, item := range candidate.StateChange.Operations {
+			operation := item.Operation.Normalized()
+			if operation.ID != "" {
+				ret[operation.ID] = operation
+			}
+		}
+	}
+	if candidate.Validation != nil {
+		for _, item := range candidate.Validation.Operations {
+			operation := item.Operation.Normalized()
+			if operation.ID != "" {
+				ret[operation.ID] = operation
+			}
+		}
+	}
+	return ret
+}
+
+func runtimeCapabilityStateStatuses(facts runtimecontract.RuntimeFacts) []readmodelcore.RuntimeCapabilityState {
+	ret := make([]readmodelcore.RuntimeCapabilityState, 0, len(facts.Resources.CapabilityStates))
+	for _, snapshot := range facts.Resources.CapabilityStates {
+		state := readmodelcore.RuntimeCapabilityState{
+			RequirementID: snapshot.RequirementID, SnapshotID: snapshot.SnapshotID, AcquisitionKey: snapshot.AcquisitionKey,
+			OwnerModuleID: snapshot.OwnerModuleID, CapabilityStateKind: snapshot.CapabilityStateKind, SubjectRef: snapshot.SubjectRef,
+			ObservedRevision: snapshot.ObservedRevision, ContentHash: snapshot.ContentHash, Disposition: string(snapshot.Disposition),
+			QueryReceiptRef: snapshot.QueryReceiptRef, ObservedAt: snapshot.ObservedAt,
+			InvalidatedByReceiptRefs: append([]string(nil), snapshot.InvalidatedByReceiptRefs...),
+		}
+		for _, requirement := range snapshot.RequiredOperationSequence {
+			state.RequiredOperationSequence = append(state.RequiredOperationSequence, readmodelcore.RuntimeRequiredOperationState{
+				RequirementID: requirement.RequirementID, Kind: requirement.Kind, VariantID: requirement.VariantID,
+				DependsOnRequirementIDs: append([]string(nil), requirement.DependsOnRequirementIDs...), Reason: requirement.Reason,
+			})
+		}
+		ret = append(ret, state)
+	}
+	return ret
+}
+
+func runtimeGovernanceStatuses(state runtimecontract.RuntimeStateRecord) []readmodelcore.RuntimeGovernanceState {
+	resolutions := make(map[string]runtimecontract.RuntimeGovernanceResolutionRecord, len(state.GovernanceResolutions))
+	for _, resolution := range state.GovernanceResolutions {
+		resolutions[string(resolution.TicketID)] = resolution
+	}
+	ret := make([]readmodelcore.RuntimeGovernanceState, 0, len(state.GovernanceRequests))
+	for _, request := range state.GovernanceRequests {
+		value := readmodelcore.RuntimeGovernanceState{
+			TicketID: string(request.TicketID), AuthoritySnapshotID: request.AuthoritySnapshotID,
+			DispatchID: request.DispatchID, DependencyKind: request.DependencyKind, SubjectRef: request.SubjectRef,
+		}
+		if resolution, found := resolutions[value.TicketID]; found {
+			value.ResolutionID = string(resolution.ResolutionID)
+			value.Outcome = string(resolution.Outcome)
+		}
+		ret = append(ret, value)
+	}
+	sort.Slice(ret, func(left, right int) bool {
+		if ret[left].TicketID != ret[right].TicketID {
+			return ret[left].TicketID < ret[right].TicketID
+		}
+		return ret[left].AuthoritySnapshotID < ret[right].AuthoritySnapshotID
+	})
 	return ret
 }
 

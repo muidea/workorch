@@ -46,6 +46,17 @@ func (c *RuntimeController) Initialize(ctx context.Context, facts runtimecontrac
 	}
 	existing, err := c.repository.Load(ctx, facts.WorkspaceID, facts.RunID)
 	if err == nil {
+		if !isTerminalRuntimeAction(existing.Decision.Action) {
+			if err := runtimecontract.ValidateRuntimeOperationContractRevision(existing.Facts.Activation.ExecutionContract.OperationContractRevision); err != nil {
+				return RuntimeAggregate{}, err
+			}
+			// The controller's direct callers do not own a persisted bootstrap.
+			// Align their restart identity with the executable catalog only after
+			// checking the persisted aggregate; this never writes a default into
+			// existing authority.
+			facts.Activation.ExecutionContract.OperationContractRevision = runtimecontract.RuntimeOperationContractRevision()
+			facts = facts.Normalized()
+		}
 		if !sameRuntimeDefinition(existing.Facts, facts) || !runtimecontract.SameRuntimeDefinitionContext(existing.Definition, definition) {
 			return RuntimeAggregate{}, fmt.Errorf("%w: runtime v2 state already exists with a different definition", common.ErrConflict)
 		}
@@ -54,6 +65,11 @@ func (c *RuntimeController) Initialize(ctx context.Context, facts runtimecontrac
 	if !errors.Is(err, common.ErrNotFound) {
 		return RuntimeAggregate{}, err
 	}
+	// Bootstrap construction is the only point that seals the operation catalog
+	// compiled into this binary. Existing persisted aggregates are never
+	// defaulted or rewritten.
+	facts.Activation.ExecutionContract.OperationContractRevision = runtimecontract.RuntimeOperationContractRevision()
+	facts = facts.Normalized()
 	facts = PreflightRuntimeFacts(facts, requirements)
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
 	if err != nil {
@@ -72,6 +88,10 @@ func (c *RuntimeController) Initialize(ctx context.Context, facts runtimecontrac
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
+}
+
+func isTerminalRuntimeAction(action runtimecontract.RuntimeAction) bool {
+	return action == runtimecontract.RuntimeActionComplete || action == runtimecontract.RuntimeActionFail
 }
 
 func (c *RuntimeController) Load(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {

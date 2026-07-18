@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -48,21 +49,84 @@ type RuntimeOperationExecutionRecord struct {
 // RuntimeOperationReceipt is the owner-persisted receipt for one ExecutionKey.
 // Orchestrator commits evidence only from sealed expectation + this receipt (INV-03).
 type RuntimeOperationReceipt struct {
-	ExecutionKey        string
-	Fence               uint64
-	OperationID         string
-	Outcome             RuntimeOperationOutcome
-	ObservedEffectScope RuntimeEffectScope
-	Changed             bool
-	NoOp                bool
-	TargetRefs          []string
-	BeforeHash          string
-	AfterHash           string
-	Evidence            RuntimeOperationEvidence
-	Failure             *FailureFact
-	Governance          *RuntimeGovernanceRequirement
-	IdempotentReplay    bool
-	CompletedAt         string
+	ExecutionKey         string
+	Fence                uint64
+	OperationID          string
+	Outcome              RuntimeOperationOutcome
+	ObservedEffectScope  RuntimeEffectScope
+	Changed              bool
+	NoOp                 bool
+	TargetRefs           []string
+	BeforeHash           string
+	AfterHash            string
+	Evidence             RuntimeOperationEvidence
+	Failure              *FailureFact
+	Governance           *RuntimeGovernanceRequirement
+	CapabilityStateStale *RuntimeCapabilityStateStaleDetail
+	IdempotentReplay     bool
+	CompletedAt          string
+}
+
+// RuntimeRequiredOperationReceiptBinding is the typed, bounded proof that a
+// required predecessor has already completed in the same sealed dispatch. It
+// is carried to a capability owner only for stale-preflight adjudication; it
+// is not a second owner-state store.
+type RuntimeRequiredOperationReceiptBinding struct {
+	RequirementID string
+	OperationID   string
+	Kind          string
+	VariantID     string
+	ExecutionKey  string
+	Fence         uint64
+	ReceiptRef    string
+	ReceiptHash   string
+	Outcome       RuntimeOperationOutcome
+	ObservedScope RuntimeEffectScope
+	Changed       bool
+}
+
+func (b RuntimeRequiredOperationReceiptBinding) Normalized() RuntimeRequiredOperationReceiptBinding {
+	b.RequirementID = strings.TrimSpace(b.RequirementID)
+	b.OperationID = strings.TrimSpace(b.OperationID)
+	b.Kind = CanonicalRuntimeBlockKind(b.Kind)
+	b.VariantID = strings.TrimSpace(b.VariantID)
+	b.ExecutionKey = strings.TrimSpace(b.ExecutionKey)
+	b.ReceiptRef = strings.TrimSpace(b.ReceiptRef)
+	b.ReceiptHash = strings.TrimSpace(b.ReceiptHash)
+	b.Outcome = b.Outcome.Normalized()
+	b.ObservedScope = NormalizeRuntimeEffectScope(b.ObservedScope)
+	return b
+}
+
+func (b RuntimeRequiredOperationReceiptBinding) Validate() error {
+	b = b.Normalized()
+	if b.RequirementID == "" || b.OperationID == "" || b.Kind == "" || b.VariantID == "" || b.ExecutionKey == "" || b.Fence == 0 || b.ReceiptRef == "" || b.ReceiptHash == "" {
+		return fmt.Errorf("required operation receipt binding requires requirement, operation, variant and receipt identity")
+	}
+	if !ValidRuntimeOperationOutcome(b.Outcome) || !ValidRuntimeEffectScope(b.ObservedScope) {
+		return fmt.Errorf("required operation receipt binding has invalid receipt outcome or observed scope")
+	}
+	return nil
+}
+
+func NormalizeRuntimeRequiredOperationReceiptBindings(values []RuntimeRequiredOperationReceiptBinding) []RuntimeRequiredOperationReceiptBinding {
+	byRequirement := map[string]RuntimeRequiredOperationReceiptBinding{}
+	for _, value := range values {
+		value = value.Normalized()
+		if value.RequirementID != "" {
+			byRequirement[value.RequirementID] = value
+		}
+	}
+	keys := make([]string, 0, len(byRequirement))
+	for key := range byRequirement {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	ret := make([]RuntimeRequiredOperationReceiptBinding, 0, len(keys))
+	for _, key := range keys {
+		ret = append(ret, byRequirement[key])
+	}
+	return nilIfEmpty(ret)
 }
 
 // StableRuntimeOperationExecutionKey binds workspace/run/dispatch/operation into one key.
@@ -235,6 +299,18 @@ func (r RuntimeOperationReceipt) Normalized() RuntimeOperationReceipt {
 		gov := r.Governance.Normalized()
 		r.Governance = &gov
 	}
+	if r.CapabilityStateStale != nil {
+		value := *r.CapabilityStateStale
+		value.StateRef.OwnerModuleID = strings.TrimSpace(value.StateRef.OwnerModuleID)
+		value.StateRef.CapabilityStateKind = strings.TrimSpace(value.StateRef.CapabilityStateKind)
+		value.StateRef.SubjectRef = strings.TrimSpace(value.StateRef.SubjectRef)
+		value.SnapshotID = strings.TrimSpace(value.SnapshotID)
+		value.ExpectedHash = strings.TrimSpace(value.ExpectedHash)
+		value.ObservedRevision = strings.TrimSpace(value.ObservedRevision)
+		value.ObservedHash = strings.TrimSpace(value.ObservedHash)
+		value.Reason = strings.TrimSpace(value.Reason)
+		r.CapabilityStateStale = &value
+	}
 	r.CompletedAt = strings.TrimSpace(r.CompletedAt)
 	if r.NoOp {
 		r.Changed = false
@@ -282,6 +358,14 @@ func (r RuntimeOperationReceipt) Validate() error {
 	case RuntimeOperationOutcomeUnknown:
 		// unknown is intentionally sparse; recovery path decides governance vs fail.
 	}
+	if r.CapabilityStateStale != nil {
+		detail := r.CapabilityStateStale
+		if r.Outcome != RuntimeOperationOutcomeRejected || r.Failure == nil || r.Failure.Code != "capability_state_stale" ||
+			detail.StateRef.OwnerModuleID == "" || detail.StateRef.CapabilityStateKind == "" || detail.StateRef.SubjectRef == "" ||
+			detail.SnapshotID == "" || detail.ExpectedHash == "" || detail.ObservedRevision == "" || detail.ObservedHash == "" {
+			return fmt.Errorf("capability-state stale receipt requires rejected exact stale detail")
+		}
+	}
 	if r.CompletedAt != "" {
 		if _, err := time.Parse(time.RFC3339, r.CompletedAt); err != nil {
 			if _, err2 := time.Parse(time.RFC3339Nano, r.CompletedAt); err2 != nil {
@@ -301,6 +385,10 @@ func (r RuntimeOperationReceipt) Clone() RuntimeOperationReceipt {
 	if r.Governance != nil {
 		gov := *ret.Governance
 		ret.Governance = &gov
+	}
+	if r.CapabilityStateStale != nil {
+		detail := *r.CapabilityStateStale
+		ret.CapabilityStateStale = &detail
 	}
 	if r.Evidence.ExitCode != nil {
 		code := *r.Evidence.ExitCode
@@ -405,6 +493,19 @@ func StableRuntimeOperationReceiptHash(receipt RuntimeOperationReceipt) string {
 		writeHashString(h, receipt.Governance.Reason)
 		writeHashString(h, receipt.Governance.RequestedAction)
 		writeHashString(h, receipt.Governance.RiskLevel)
+	}
+	if receipt.CapabilityStateStale == nil {
+		writeHashString(h, "capability-state-stale:nil")
+	} else {
+		detail := receipt.CapabilityStateStale
+		writeHashString(h, detail.StateRef.OwnerModuleID)
+		writeHashString(h, detail.StateRef.CapabilityStateKind)
+		writeHashString(h, detail.StateRef.SubjectRef)
+		writeHashString(h, detail.SnapshotID)
+		writeHashString(h, detail.ExpectedHash)
+		writeHashString(h, detail.ObservedRevision)
+		writeHashString(h, detail.ObservedHash)
+		writeHashString(h, detail.Reason)
 	}
 	writeHashString(h, fmt.Sprintf("%t", receipt.IdempotentReplay))
 	return hex.EncodeToString(h.Sum(nil))

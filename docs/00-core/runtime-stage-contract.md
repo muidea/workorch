@@ -211,7 +211,7 @@ current focus
 权威与约束：
 
 - reducer 是 `RuntimeFacts -> RuntimeDecision + AuthoritySnapshot + AuthorityTransaction` 的唯一权威。
-- prerequisite 未完成时不得请求 candidate；manifest、target snapshot、failure target、capability、validation scratch、provider ceiling 等只能通过 owner typed prerequisite acquisition 完成。
+- prerequisite 未完成时不得请求 candidate；manifest、target snapshot、failure target、capability、validation scratch、provider ceiling 等只能通过 owner typed prerequisite acquisition 完成。profile 声明 capability-state prerequisite 时，持久化 owner identity 必须等于该 profile accepted operation descriptor 的 canonical owner，禁止使用 EventHub destination alias。
 - `RequiredOutputContract` 必须由 current focus、owner-confirmed capabilities、evidence policy 与 side-effect compatibility 的中立交集产生。
 - authority feasibility gate 必须在请求 LLM 前证明至少存在一个可执行、action-compatible、side-effect-compatible 的 concrete operation kind；不存在时不得让 LLM 猜测。current focus 存在 active rejected operation shape 时，candidate volatile context 必须同时携带精确 typed operation、shape hash、failure lineage 与 admissible operation kinds，不能只给出自然语言“不要重复”。
 - “required evidence 齐备”必须同时满足 kind、coverage binding、current-run、freshness、quality、claim alignment、accepted/rejected operation contract 等适用门禁；不能只按 evidence 数量判断。
@@ -1130,8 +1130,8 @@ Runtime 必须拒绝：
 - `assessment_output_contract_repair` 属于非状态变更收敛路径：runtime 必须优先进入 assessment-only correction 或直接完成安全结构归一化，不能要求 `repairActionPackage.requiredOutput.acceptedKinds`、不能触发 `state_changing_current_action_missing_accepted_kind`，也不能为可机械修复的 assessment schema 缺口创建 decision ticket。若多次 correction 后仍无法得到结构完整的 assessment，应写入结构化 failed / rejected result 或继续受限 assessment repair；只有确实缺少人工信息、权限、外部配置或治理选择时，才允许进入 decision / approval。
 - completion gate 因 `goalCoverage`、`acceptanceDimensions` 或 `deliverableCoverage` 缺失、未满足或结构不完整失败时，runtime 必须保留对应 coverage 诊断，并在后续 repair 中进入 assessment-only coverage correction；不得把纯 assessment 合同缺口误升级为普通 execution repair。
 - completion gate 因 evidence quality、claim-to-evidence alignment、current-run evidence 或 profile evidenceRequirements 失败时，runtime 必须保留 `dod_evidence_quality_gap` 诊断，并在后续 repair 中进入 concrete validation evidence repair 或 profile 允许的等价验证路径；不得因为该失败发生在 runtime repair follow-up / assessment correction 之后就立即写 rejected result。repair 输入必须继承缺失 item、scope、claim-aligned evidence 标记、候选 evidence、最新成功/失败 evidence 摘要与原失败 reason，避免 LLM 在下一轮只看到泛化“证据不足”。
-- 若 profile evidenceRequirements 对某个未关闭 coverage / deliverable target 声明了 state-changing evidence（例如任意中立 state-changing capability kind 及其 operation），该声明优先于历史 `need_evidence` / `concreteFailureEvidenceRequired` 包装。即使上一轮因 schema invalid、provider repair 或 assessment correction 留下了 evidence-acquisition 标记，ConvergenceContract 也必须恢复为 `need_state_change`，并把 profile 声明的 `acceptedStepKinds` / `acceptedOperations` 写入 `repairActionPackage.requiredOutput`；不得继续要求 LLM 先获取泛化失败证据，也不得创建人工 ticket。该规则只读取 profile 的结构化 evidenceRequirements，不解释具体业务语义。
-- Profile evidenceRequirements 的读取来源必须以当前 run 的 `executionContract` 为准；当 repair / follow-up 恢复路径尚未把 contract 完整写回 run state 时，runtime 必须从 LLM input 的 `executionContextPackage.executionContract` 或等价 `executionContext.executionContract` 兜底恢复同一结构化合同。兜底只允许读取 `scope`、`id`、`acceptedStepKinds`、`acceptedOperations`、`rejectedStepKinds`、`requireDirectEvidence` 等中立字段，不得通过目标名称、业务关键词或 profile 名称推断规则。
+- 若 profile evidenceRequirements 对某个未关闭 coverage / deliverable target 声明了 state-changing evidence（例如任意中立 state-changing capability kind 及其 typed operation variant），该声明优先于历史 `need_evidence` / `concreteFailureEvidenceRequired` 包装。即使上一轮因 schema invalid、provider repair 或 assessment correction 留下了 evidence-acquisition 标记，ConvergenceContract 也必须恢复为 `need_state_change`，并把 profile 声明的 `acceptedStepKinds` / `acceptedOperationVariants` 写入 `repairActionPackage.requiredOutput`；不得继续要求 LLM 先获取泛化失败证据，也不得创建人工 ticket。该规则只读取 profile 的结构化 evidenceRequirements，不解释具体业务语义。
+- Profile evidenceRequirements 的读取来源必须以当前 run 的 `executionContract` 为准；当 repair / follow-up 恢复路径尚未把 contract 完整写回 run state 时，runtime 必须从 LLM input 的 `executionContextPackage.executionContract` 或等价 `executionContext.executionContract` 兜底恢复同一结构化合同。兜底只允许读取 `scope`、`id`、`acceptedStepKinds`、`acceptedOperationVariants`、`rejectedStepKinds`、`requireDirectEvidence` 等中立字段，不得通过目标名称、业务关键词或 profile 名称推断规则。
 - 当 ConvergenceContract 判定为 `need_evidence` 或 `need_state_change` 时，下一轮输入必须退出 `assessmentOnly`，并清理 `assessmentOnlyReason`。`assessmentOnly=true` 只能和 `need_assessment` 共存；不得与 evidence acquisition、profile-required state-changing evidence 或 concrete validation repair 的 executable `requiredOutput` 混用。
 - Coverage target 与 profile evidenceRequirements 匹配必须支持中立 scope 标注归一化。当 failed assessment 将某个子 coverage 写成 `目标文本（scope）` 或 `目标文本(scope)`，runtime 可以把括号内 scope 规范化为 `goalCoverage`、`deliverableCoverage`、`acceptanceDimensions` 或 `dodAssessment.items` 对应的中立 scope，并把括号前文本作为 requirement id / item alias 参与匹配。该规则只处理结构标签错位或 wrapper 输出造成的 scope 丢失，不得通过业务关键词推断 scope，也不得让无 scope 标注的 DoD item 跨 scope 匹配 deliverable / goal requirement。
 - 后续 repair 若出现新的 `missingDoDItems` / `missingGoalCoverage` / `missingDeliverableCoverage`，必须以当前缺口重建 `coverageTargetSet`，并覆盖旧 `repairActionPackage.coverageTargetSet`。旧 state-changing package 只有在其 profile evidenceRequirements 仍能匹配当前 coverage target 时才可继承；否则必须清理旧 `requiredOutput.mustIncludeStateChangingNode`、旧 evidenceKindRequirements 和旧 target evidence，避免已关闭 deliverable target 污染新的 Goal / DoD validation 缺口。
@@ -1189,12 +1189,14 @@ Goal 文本硬编码 Git 行为。Soul 的 `allowedToolKinds` 必须与提示词
   state-changing focus；`supplemental_evidence` 表示该 source 只是报告、账本、
   快照、提交或其他补充 evidence artifact。Core 只能读取该结构字段，不得通过
   deliverable id、文件名、语言、测试框架或业务关键词推断角色。
+
 - `profileContracts.<profile>.evidenceRequirements[]` 可声明该交付物的可接受证据
-  step kind，例如 `git/write`；必要时还可声明 `acceptedOperations`，例如
-  `commit`。core 只校验 evidenceRefs 是否可追踪、step kind / operation 是否匹配，
+  step kind，例如 `git/write`；必要时还可声明带 kind 的
+  `acceptedOperationVariants`，例如 `{kind:"git/write",variantId:"commit"}`。core 只校验 evidenceRefs 是否可追踪、step kind / operation variant 是否匹配，
   不判断提交内容是否满足具体业务。
-- `acceptedOperations` 只约束最终用于满足该 evidence requirement 的证据节点，不得
-  被解释为整条 graph 只能包含该 operation。若当前 Soul / capability contract 允许，
+
+- `acceptedOperationVariants` 只约束最终用于满足该 evidence requirement 的证据节点，不得
+  被解释为整条 graph 只能包含该 operation variant。若当前 Soul / capability contract 允许，
   LLM 可以在同一 graph 中使用必要的中立支撑节点准备或验证该证据；这些支撑节点只有在
   自身 kind / operation 同时匹配 requirement 时，才可作为满足该 requirement 的 evidenceRef。
 - 匹配 kind / operation 的证据节点仍必须是有效非零工作证据。若输出标记

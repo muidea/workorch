@@ -58,7 +58,7 @@ func (r runtimeV2StateRepository) Save(ctx context.Context, aggregate runtimev2.
 	bindOwnerCommandLane(event, runevents.TopicRunCommandUpdate, "run", string(run.ID), run.WorkspaceID, run.ID)
 	_, err = runCommandResponse(r.hub.Send(event), runevents.TopicRunCommandUpdate)
 	if errors.Is(err, common.ErrConflict) {
-		return common.ErrConflict
+		return fmt.Errorf("runtime state save at expected revision %d: %w", expectedRevision, common.ErrConflict)
 	}
 	return err
 }

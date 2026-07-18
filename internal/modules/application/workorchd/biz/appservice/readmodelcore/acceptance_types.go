@@ -65,13 +65,15 @@ type AcceptanceSummary struct {
 }
 
 type AcceptanceProjection struct {
-	ActiveSliceID   string                   `json:"activeSliceId,omitempty"`
-	Slices          []AcceptanceSlice        `json:"slices,omitempty"`
-	CurrentFocus    *CoverageFocus           `json:"currentFocus,omitempty"`
-	Budget          *ConvergenceBudget       `json:"budget,omitempty"`
-	RepairDirective *RuntimeRepairDirective  `json:"repairDirective,omitempty"`
-	Operations      []RuntimeOperationStatus `json:"operations,omitempty"`
-	Summary         AcceptanceSummary        `json:"summary"`
+	ActiveSliceID    string                   `json:"activeSliceId,omitempty"`
+	Slices           []AcceptanceSlice        `json:"slices,omitempty"`
+	CurrentFocus     *CoverageFocus           `json:"currentFocus,omitempty"`
+	Budget           *ConvergenceBudget       `json:"budget,omitempty"`
+	RepairDirective  *RuntimeRepairDirective  `json:"repairDirective,omitempty"`
+	CapabilityStates []RuntimeCapabilityState `json:"capabilityStates,omitempty"`
+	Governance       []RuntimeGovernanceState `json:"governance,omitempty"`
+	Operations       []RuntimeOperationStatus `json:"operations,omitempty"`
+	Summary          AcceptanceSummary        `json:"summary"`
 }
 
 type RuntimeRepairDirective struct {
@@ -84,17 +86,61 @@ type RuntimeRepairDirective struct {
 }
 
 type RuntimeOperationStatus struct {
+	DispatchID           string `json:"dispatchId,omitempty"`
+	OperationID          string `json:"operationId,omitempty"`
+	Kind                 string `json:"kind,omitempty"`
+	VariantID            string `json:"variantId,omitempty"`
+	RequiredOperationRef string `json:"requiredOperationRef,omitempty"`
+	ExecutionKey         string `json:"executionKey,omitempty"`
+	Fence                uint64 `json:"fence,omitempty"`
+	CapabilityStateHash  string `json:"capabilityStateHash,omitempty"`
+	ExpectedEffectScope  string `json:"expectedEffectScope,omitempty"`
+	ObservedEffectScope  string `json:"observedEffectScope,omitempty"`
+	ExecutionState       string `json:"executionState,omitempty"`
+	Outcome              string `json:"outcome,omitempty"`
+	ReceiptRef           string `json:"receiptRef,omitempty"`
+	ReceiptHash          string `json:"receiptHash,omitempty"`
+	GovernanceState      string `json:"governanceState,omitempty"`
+	GovernanceTicketID   string `json:"governanceTicketId,omitempty"`
+	OutcomeUnknown       bool   `json:"outcomeUnknown,omitempty"`
+}
+
+// RuntimeCapabilityState is an audit-safe, metadata-only projection of the
+// owner-confirmed prerequisite that was sealed into Runtime V2 authority. It
+// intentionally excludes owner-private/raw state content.
+type RuntimeCapabilityState struct {
+	RequirementID             string                          `json:"requirementId,omitempty"`
+	SnapshotID                string                          `json:"snapshotId,omitempty"`
+	AcquisitionKey            string                          `json:"acquisitionKey,omitempty"`
+	OwnerModuleID             string                          `json:"ownerModuleId,omitempty"`
+	CapabilityStateKind       string                          `json:"capabilityStateKind,omitempty"`
+	SubjectRef                string                          `json:"subjectRef,omitempty"`
+	ObservedRevision          string                          `json:"observedRevision,omitempty"`
+	ContentHash               string                          `json:"contentHash,omitempty"`
+	Disposition               string                          `json:"disposition,omitempty"`
+	RequiredOperationSequence []RuntimeRequiredOperationState `json:"requiredOperationSequence,omitempty"`
+	QueryReceiptRef           string                          `json:"queryReceiptRef,omitempty"`
+	ObservedAt                string                          `json:"observedAt,omitempty"`
+	InvalidatedByReceiptRefs  []string                        `json:"invalidatedByReceiptRefs,omitempty"`
+}
+
+type RuntimeRequiredOperationState struct {
+	RequirementID           string   `json:"requirementId,omitempty"`
+	Kind                    string   `json:"kind,omitempty"`
+	VariantID               string   `json:"variantId,omitempty"`
+	DependsOnRequirementIDs []string `json:"dependsOnRequirementIds,omitempty"`
+	Reason                  string   `json:"reason,omitempty"`
+}
+
+// RuntimeGovernanceState projects the aggregate's request/resolution binding.
+// The Decision owner remains authoritative for the ticket itself; this value
+// makes the Runtime V2 side of that cross-owner binding observable.
+type RuntimeGovernanceState struct {
+	TicketID            string `json:"ticketId,omitempty"`
+	AuthoritySnapshotID string `json:"authoritySnapshotId,omitempty"`
 	DispatchID          string `json:"dispatchId,omitempty"`
-	OperationID         string `json:"operationId,omitempty"`
-	ExecutionKey        string `json:"executionKey,omitempty"`
-	Fence               uint64 `json:"fence,omitempty"`
-	ExpectedEffectScope string `json:"expectedEffectScope,omitempty"`
-	ObservedEffectScope string `json:"observedEffectScope,omitempty"`
-	ExecutionState      string `json:"executionState,omitempty"`
+	DependencyKind      string `json:"dependencyKind,omitempty"`
+	SubjectRef          string `json:"subjectRef,omitempty"`
+	ResolutionID        string `json:"resolutionId,omitempty"`
 	Outcome             string `json:"outcome,omitempty"`
-	ReceiptRef          string `json:"receiptRef,omitempty"`
-	ReceiptHash         string `json:"receiptHash,omitempty"`
-	GovernanceState     string `json:"governanceState,omitempty"`
-	GovernanceTicketID  string `json:"governanceTicketId,omitempty"`
-	OutcomeUnknown      bool   `json:"outcomeUnknown,omitempty"`
 }

@@ -14,6 +14,7 @@ const (
 )
 
 type RuntimeExecutionContract struct {
+	OperationContractRevision string
 	StateChangePolicy         RuntimeStateChangePolicy
 	MaxRepairAttemptsPerFocus int
 	CapabilityUsagePolicies   []RuntimeCapabilityUsagePolicy
@@ -38,6 +39,7 @@ type RuntimeCapabilityUsagePolicy struct {
 }
 
 func (c RuntimeExecutionContract) Normalized() RuntimeExecutionContract {
+	c.OperationContractRevision = strings.TrimSpace(c.OperationContractRevision)
 	c.StateChangePolicy = RuntimeStateChangePolicy(strings.TrimSpace(string(c.StateChangePolicy)))
 	if c.StateChangePolicy == "" {
 		c.StateChangePolicy = RuntimeStateChangeAllowedButNotRequired
@@ -93,7 +95,7 @@ func (c RuntimeExecutionContract) Validate() error {
 func SameRuntimeExecutionContract(left RuntimeExecutionContract, right RuntimeExecutionContract) bool {
 	left = left.Normalized()
 	right = right.Normalized()
-	if left.StateChangePolicy != right.StateChangePolicy || left.MaxRepairAttemptsPerFocus != right.MaxRepairAttemptsPerFocus ||
+	if left.OperationContractRevision != right.OperationContractRevision || left.StateChangePolicy != right.StateChangePolicy || left.MaxRepairAttemptsPerFocus != right.MaxRepairAttemptsPerFocus ||
 		len(left.CapabilityUsagePolicies) != len(right.CapabilityUsagePolicies) ||
 		!sameRuntimeValidationPolicies(left.ValidationPolicies, right.ValidationPolicies) ||
 		!SameRuntimeProfileContracts(left.ProfileContracts, right.ProfileContracts) || !SameRuntimeTemplateStagePolicy(left.TemplateStagePolicy, right.TemplateStagePolicy) ||

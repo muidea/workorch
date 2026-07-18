@@ -10,7 +10,7 @@ import (
 func TestRuntimeCandidateRequiresAcceptedOperationWhenDeclared(t *testing.T) {
 	decision := validDecisionForState(ConvergenceStateNeedStateChange)
 	decision.RequiredOutput = RequiredOutputContract{
-		Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{"git/write"}, AcceptedOperations: []string{"commit"},
+		Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{"git/write"}, AcceptedOperationVariants: []RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "commit"}},
 		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
 		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
 		CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
@@ -23,8 +23,8 @@ func TestRuntimeCandidateRequiresAcceptedOperationWhenDeclared(t *testing.T) {
 	candidate := RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{Operation: RuntimeOperation{
 		ID: "git-add", Kind: "git/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Parameters: []OperationParameter{{Name: "operation", String: &add}, {Name: "pathspecs", StringList: pathspecs}},
 	}}}}}
-	if err := candidate.Validate(decision); err == nil || !strings.Contains(err.Error(), "requires one accepted operation") {
-		t.Fatalf("candidate error = %v, want accepted operation requirement", err)
+	if err := candidate.Validate(decision); err == nil || !strings.Contains(err.Error(), "requires one accepted operation variant") {
+		t.Fatalf("candidate error = %v, want accepted operation variant requirement", err)
 	}
 
 	commit := "commit"

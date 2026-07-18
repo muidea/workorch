@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +13,8 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	decisionmodule "github.com/muidea/workorch/internal/modules/blocks/decision"
 	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
+	gitmodule "github.com/muidea/workorch/internal/modules/blocks/git"
+	gitbiz "github.com/muidea/workorch/internal/modules/blocks/git/biz"
 	resultmodule "github.com/muidea/workorch/internal/modules/blocks/result"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
@@ -193,6 +196,1016 @@ func TestDriveRuntimeV2FileBackedRunExecutesDurableFileOwnerAndRestarts(t *testi
 	replayed, err := DriveRuntimeV2(ctx, hub, command)
 	if err != nil || replayed.StateRevision != completed.StateRevision || candidateCount != 1 {
 		t.Fatalf("file-backed restart replay=%+v complete=%+v candidates=%d err=%v", replayed, completed, candidateCount, err)
+	}
+}
+
+func TestRuntimeV2FileBackedGitCapabilityStateSequenceMatrix(t *testing.T) {
+	testCases := []struct {
+		name          string
+		prepare       func(*testing.T, string)
+		expectedRefs  []string
+		expectedCount int
+	}{
+		{
+			name: "repository_absent", expectedRefs: []string{"create-commit", "repo-init", "stage-changes"}, expectedCount: 3,
+			prepare: func(t *testing.T, deliverable string) {
+				t.Helper()
+				writeRuntimeV2GitFixtureFile(t, deliverable)
+			},
+		},
+		{
+			name: "initialized_unstaged", expectedRefs: []string{"create-commit", "stage-changes"}, expectedCount: 2,
+			prepare: func(t *testing.T, deliverable string) {
+				t.Helper()
+				runRuntimeV2Git(t, deliverable, "init", "-q")
+				runRuntimeV2Git(t, deliverable, "config", "user.name", "WorkOrch Test")
+				runRuntimeV2Git(t, deliverable, "config", "user.email", "workorch@example.test")
+				writeRuntimeV2GitFixtureFile(t, deliverable)
+			},
+		},
+		{
+			name: "initialized_staged", expectedRefs: []string{"create-commit"}, expectedCount: 1,
+			prepare: func(t *testing.T, deliverable string) {
+				t.Helper()
+				runRuntimeV2Git(t, deliverable, "init", "-q")
+				runRuntimeV2Git(t, deliverable, "config", "user.name", "WorkOrch Test")
+				runRuntimeV2Git(t, deliverable, "config", "user.email", "workorch@example.test")
+				writeRuntimeV2GitFixtureFile(t, deliverable)
+				runRuntimeV2Git(t, deliverable, "add", "target.txt")
+			},
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx := context.Background()
+			hub := magicevent.NewHub(32)
+			t.Cleanup(func() { hub.Terminate(ctx) })
+			root := t.TempDir()
+			deliverable := filepath.Join(root, "workspace")
+			internalDir := filepath.Join(root, "internal")
+			if err := os.MkdirAll(deliverable, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(internalDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			testCase.prepare(t, deliverable)
+
+			bootstrap := runtimeV2GitCapabilityStateBootstrap()
+			runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
+			if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2", DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, State: common.RunStateActive}); err != nil {
+				t.Fatal(err)
+			}
+			runOwner := runmodule.New()
+			if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+				t.Fatal(err)
+			}
+			if err := runOwner.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+			startRuntimeV2ReceiptTestOwner(t, hub)
+
+			workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+			workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+				result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+			})
+			t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+
+			receipts, err := gitbiz.NewCapabilityStateReceiptStore(filepath.Join(root, "git-owner-data"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			gitOwner := gitmodule.New()
+			if err := gitOwner.Configure(gitmodule.Dependencies{EventHub: hub, RuntimeAdapter: gitbiz.NewRuntimeAdapter(true), CapabilityStateReceipts: receipts}); err != nil {
+				t.Fatal(err)
+			}
+			if err := gitOwner.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = gitOwner.Stop(ctx) })
+
+			candidateCalls := 0
+			candidateRefsMatch := true
+			llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+			llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+				candidateCalls++
+				command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+				if got := requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence); !equalStrings(got, testCase.expectedRefs) {
+					candidateRefsMatch = false
+				}
+				result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: runtimeV2GitStateCandidate(testCase.expectedRefs)}, nil)
+			})
+			t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+
+			module := newRuntimeV2DriveTestModule(t, hub)
+			driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
+			driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, module.handleRuntimeV2Drive)
+			t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
+			completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 1 || !candidateRefsMatch {
+				t.Fatalf("completed=%+v candidateCalls=%d candidateRefsMatch=%t", completed, candidateCalls, candidateRefsMatch)
+			}
+			persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+			if err != nil || persisted.RuntimeState == nil || len(persisted.RuntimeState.OperationReceipts) != testCase.expectedCount {
+				t.Fatalf("persisted=%+v err=%v", persisted, err)
+			}
+			if len(persisted.RuntimeState.Facts.Resources.CapabilityStates) != 1 || !equalStrings(requiredOperationRefs(persisted.RuntimeState.Facts.Resources.CapabilityStates[0].RequiredOperationSequence), testCase.expectedRefs) {
+				t.Fatalf("capability state = %+v", persisted.RuntimeState.Facts.Resources.CapabilityStates)
+			}
+			if output := runtimeV2GitOutput(t, deliverable, "rev-list", "--count", "HEAD"); strings.TrimSpace(output) != "1" {
+				t.Fatalf("commit count = %q, want 1", output)
+			}
+		})
+	}
+}
+
+func TestRuntimeV2FileBackedGitRestartAfterInitEvidenceCommitContinuesSequence(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	root := t.TempDir()
+	deliverable, internalDir := filepath.Join(root, "workspace"), filepath.Join(root, "internal")
+	if err := os.MkdirAll(deliverable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(internalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRuntimeV2GitFixtureFile(t, deliverable)
+
+	bootstrap := runtimeV2GitCapabilityStateBootstrap()
+	runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
+	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2", DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, State: common.RunStateActive}); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+	startRuntimeV2ReceiptTestOwner(t, hub)
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+	receipts, err := gitbiz.NewCapabilityStateReceiptStore(filepath.Join(root, "git-owner-data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitOwner := gitmodule.New()
+	if err := gitOwner.Configure(gitmodule.Dependencies{EventHub: hub, RuntimeAdapter: gitbiz.NewRuntimeAdapter(true), CapabilityStateReceipts: receipts}); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = gitOwner.Stop(ctx) })
+
+	module := newRuntimeV2DriveTestModule(t, hub)
+	run, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err := module.bizPtr.InitializeRuntimeV2FromRun(ctx, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err = module.prepareRuntimeV2Prerequisites(ctx, aggregate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
+	if _, err := module.bizPtr.BeginRuntimeV2CandidateAttempt(ctx, "ws-v2", "run-v2", 0, prefix); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := module.bizPtr.AcceptRuntimeV2CandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimeV2GitStateCandidate([]string{"create-commit", "repo-init", "stage-changes"})); err != nil {
+		t.Fatal(err)
+	}
+	baseRepository := runtimeV2StateRepository{hub: hub}
+	crashRepository := &runtimeV2SaveCrashRepository{
+		delegate: baseRepository, after: true, marker: "git-init-evidence",
+		match: func(current runtimev2.RuntimeAggregate) bool {
+			if current.ActiveDispatch == nil || current.EvidenceSequence != 1 || len(current.OperationReceipts) != 1 {
+				return false
+			}
+			for _, execution := range current.ActiveDispatch.OperationExecutions {
+				if execution.OperationID == "git-repo-init" {
+					return execution.State == runtimecontract.OperationExecutionEvidenceCommitted
+				}
+			}
+			return false
+		},
+	}
+	crashingController, err := runtimev2.NewRuntimeController(crashRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != "git-init-evidence" {
+				t.Fatalf("unexpected crash marker: %v", recovered)
+			}
+		}()
+		_, _ = crashingController.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", eventRuntimeV2OperationExecutor{hub: hub})
+		t.Fatal("expected injected crash")
+	}()
+	crashed, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil || crashed.RuntimeState == nil || len(crashed.RuntimeState.OperationReceipts) != 1 {
+		t.Fatalf("crashed run=%+v err=%v", crashed, err)
+	}
+	initReceipt := crashed.RuntimeState.OperationReceipts[0]
+	if initReceipt.OperationID != "git-repo-init" {
+		t.Fatalf("first receipt=%+v", initReceipt)
+	}
+
+	restarted := newRuntimeV2DriveTestModule(t, hub)
+	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
+	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, restarted.handleRuntimeV2Drive)
+	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
+	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
+	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete {
+		t.Fatalf("restart completed=%+v err=%v", completed, err)
+	}
+	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil || persisted.RuntimeState == nil || len(persisted.RuntimeState.OperationReceipts) != 3 {
+		t.Fatalf("persisted=%+v err=%v", persisted, err)
+	}
+	countInit := 0
+	for _, receipt := range persisted.RuntimeState.OperationReceipts {
+		if receipt.OperationID == "git-repo-init" {
+			countInit++
+			if receipt.ExecutionKey != initReceipt.ExecutionKey || receipt.Fence != initReceipt.Fence {
+				t.Fatalf("init receipt was replaced: before=%+v after=%+v", initReceipt, receipt)
+			}
+		}
+	}
+	if countInit != 1 || strings.TrimSpace(runtimeV2GitOutput(t, deliverable, "rev-list", "--count", "HEAD")) != "1" {
+		t.Fatalf("init count=%d", countInit)
+	}
+}
+
+func TestRuntimeV2FileBackedGitQueryReceiptCrashBeforePrerequisiteCommitReusesSnapshot(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	root := t.TempDir()
+	deliverable, internalDir := filepath.Join(root, "workspace"), filepath.Join(root, "internal")
+	if err := os.MkdirAll(deliverable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(internalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRuntimeV2GitFixtureFile(t, deliverable)
+	bootstrap := runtimeV2GitCapabilityStateBootstrap()
+	runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
+	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2", DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, State: common.RunStateActive}); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+	startRuntimeV2ReceiptTestOwner(t, hub)
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+	storeRoot := filepath.Join(root, "git-owner-data")
+	store, err := gitbiz.NewCapabilityStateReceiptStore(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitOwner := gitmodule.New()
+	if err := gitOwner.Configure(gitmodule.Dependencies{EventHub: hub, RuntimeAdapter: gitbiz.NewRuntimeAdapter(true), CapabilityStateReceipts: store}); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	baseRepository := runtimeV2StateRepository{hub: hub}
+	crashRepository := &runtimeV2SaveCrashRepository{
+		delegate: baseRepository, marker: "git-query-before-prerequisite-commit",
+		match: func(current runtimev2.RuntimeAggregate) bool {
+			return len(current.Facts.Resources.CapabilityStates) == 1 && current.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite
+		},
+	}
+	crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	if err := crashingBiz.ConfigureRuntimeV2Repository(crashRepository); err != nil {
+		t.Fatal(err)
+	}
+	crashingModule := &Module{bizPtr: crashingBiz, rawEventHub: hub}
+	run, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err := crashingBiz.InitializeRuntimeV2FromRun(ctx, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != "git-query-before-prerequisite-commit" {
+				t.Fatalf("unexpected crash marker: %v", recovered)
+			}
+		}()
+		_, _ = crashingModule.prepareRuntimeV2Prerequisites(ctx, aggregate)
+		t.Fatal("expected injected crash")
+	}()
+	if !crashRepository.fired {
+		t.Fatal("query/prerequisite crash point was not reached")
+	}
+	crashed, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil || crashed.RuntimeState == nil || len(crashed.RuntimeState.Facts.Resources.CapabilityStates) != 0 {
+		t.Fatalf("crashed run=%+v err=%v", crashed, err)
+	}
+	var prerequisiteID string
+	for _, prerequisite := range crashed.RuntimeState.Facts.Prerequisites.Pending {
+		if prerequisite.Kind == runtimecontract.PrerequisiteKindCapabilityState {
+			prerequisiteID = prerequisite.ID
+			break
+		}
+	}
+	if prerequisiteID == "" {
+		t.Fatalf("missing persisted capability-state prerequisite: %+v", crashed.RuntimeState.Facts.Prerequisites)
+	}
+	acquisitionKey := stableRuntimeV2CapabilityStateAcquisitionKey("ws-v2", "run-v2", prerequisiteID, 0)
+	queried, found, err := store.Load(acquisitionKey)
+	if err != nil || !found {
+		t.Fatalf("durable query receipt found=%t err=%v", found, err)
+	}
+	if err := gitOwner.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	reopenedStore, err := gitbiz.NewCapabilityStateReceiptStore(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartedGitOwner := gitmodule.New()
+	if err := restartedGitOwner.Configure(gitmodule.Dependencies{EventHub: hub, RuntimeAdapter: gitbiz.NewRuntimeAdapter(true), CapabilityStateReceipts: reopenedStore}); err != nil {
+		t.Fatal(err)
+	}
+	if err := restartedGitOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = restartedGitOwner.Stop(ctx) })
+
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: runtimeV2GitStateCandidate([]string{"create-commit", "repo-init", "stage-changes"})}, nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	restarted := newRuntimeV2DriveTestModule(t, hub)
+	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
+	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, restarted.handleRuntimeV2Drive)
+	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
+	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
+	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete {
+		t.Fatalf("restart completed=%+v err=%v", completed, err)
+	}
+	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil || persisted.RuntimeState == nil || len(persisted.RuntimeState.Facts.Resources.CapabilityStates) != 1 {
+		t.Fatalf("persisted=%+v err=%v", persisted, err)
+	}
+	resumed := persisted.RuntimeState.Facts.Resources.CapabilityStates[0]
+	if resumed.AcquisitionKey != queried.AcquisitionKey || resumed.SnapshotID != queried.SnapshotID || resumed.QueryReceiptRef != queried.QueryReceiptRef {
+		t.Fatalf("restart did not reuse durable query receipt: before=%+v after=%+v", queried, resumed)
+	}
+}
+
+func TestRuntimeV2FileBackedGitSnapshotCommitCrashBeforeCandidateReusesCommittedSnapshot(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	root := t.TempDir()
+	deliverable, internalDir := filepath.Join(root, "workspace"), filepath.Join(root, "internal")
+	if err := os.MkdirAll(deliverable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(internalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRuntimeV2GitFixtureFile(t, deliverable)
+	bootstrap := runtimeV2GitCapabilityStateBootstrap()
+	runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
+	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2", DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, State: common.RunStateActive}); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+	startRuntimeV2ReceiptTestOwner(t, hub)
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+	storeRoot := filepath.Join(root, "git-owner-data")
+	store, err := gitbiz.NewCapabilityStateReceiptStore(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitOwner := gitmodule.New()
+	if err := gitOwner.Configure(gitmodule.Dependencies{EventHub: hub, RuntimeAdapter: gitbiz.NewRuntimeAdapter(true), CapabilityStateReceipts: store}); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	// This is the durable boundary under test: all prerequisite snapshots have
+	// committed, while no candidate attempt/dispatch has been persisted yet.
+	module := newRuntimeV2DriveTestModule(t, hub)
+	run, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err := module.bizPtr.InitializeRuntimeV2FromRun(ctx, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err = module.prepareRuntimeV2Prerequisites(ctx, aggregate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aggregate.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(aggregate.Facts.Resources.CapabilityStates) != 1 || len(aggregate.CandidateAttempts) != 0 || aggregate.ActiveDispatch != nil {
+		t.Fatalf("snapshot/candidate boundary aggregate=%+v", aggregate)
+	}
+	committedSnapshot := aggregate.Facts.Resources.CapabilityStates[0]
+	if queried, found, err := store.Load(committedSnapshot.AcquisitionKey); err != nil || !found || queried.SnapshotID != committedSnapshot.SnapshotID {
+		t.Fatalf("committed snapshot has no durable owner query receipt: found=%t queried=%+v err=%v", found, queried, err)
+	}
+
+	// Simulate process loss precisely after the Run aggregate CAS. Reopen the
+	// owner store and drive from the persisted aggregate; no prerequisite query
+	// may be scheduled because the matching snapshot is already authoritative.
+	if err := gitOwner.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	reopenedStore, err := gitbiz.NewCapabilityStateReceiptStore(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartedGitOwner := gitmodule.New()
+	if err := restartedGitOwner.Configure(gitmodule.Dependencies{EventHub: hub, RuntimeAdapter: gitbiz.NewRuntimeAdapter(true), CapabilityStateReceipts: reopenedStore}); err != nil {
+		t.Fatal(err)
+	}
+	if err := restartedGitOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = restartedGitOwner.Stop(ctx) })
+	candidateCalls := 0
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		candidateCalls++
+		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		if len(command.CandidateContext.Resources.CapabilityStates) != 1 || command.CandidateContext.Resources.CapabilityStates[0].SnapshotID != committedSnapshot.SnapshotID ||
+			command.CandidateContext.Resources.CapabilityStates[0].AcquisitionKey != committedSnapshot.AcquisitionKey {
+			t.Fatalf("candidate did not reuse committed capability snapshot: %+v", command.CandidateContext.Resources.CapabilityStates)
+		}
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: runtimeV2GitStateCandidate([]string{"create-commit", "repo-init", "stage-changes"})}, nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
+	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, newRuntimeV2DriveTestModule(t, hub).handleRuntimeV2Drive)
+	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
+	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
+	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 1 {
+		t.Fatalf("restart after snapshot commit completed=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
+	}
+	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil || persisted.RuntimeState == nil || len(persisted.RuntimeState.Facts.Resources.CapabilityStates) != 1 {
+		t.Fatalf("persisted state=%+v err=%v", persisted, err)
+	}
+	resumed := persisted.RuntimeState.Facts.Resources.CapabilityStates[0]
+	if resumed.SnapshotID != committedSnapshot.SnapshotID || resumed.AcquisitionKey != committedSnapshot.AcquisitionKey || resumed.QueryReceiptRef != committedSnapshot.QueryReceiptRef {
+		t.Fatalf("restart changed committed capability snapshot: before=%+v after=%+v", committedSnapshot, resumed)
+	}
+}
+
+func TestRuntimeV2FileBackedGitStaleRefreshCrashRestartDoesNotReplayOldDispatch(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	root := t.TempDir()
+	deliverable, internalDir := filepath.Join(root, "workspace"), filepath.Join(root, "internal")
+	if err := os.MkdirAll(deliverable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(internalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRuntimeV2GitFixtureFile(t, deliverable)
+	bootstrap := runtimeV2GitCapabilityStateBootstrap()
+	runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
+	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2", DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, State: common.RunStateActive}); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+	startRuntimeV2ReceiptTestOwner(t, hub)
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+	storeRoot := filepath.Join(root, "git-owner-data")
+	store, err := gitbiz.NewCapabilityStateReceiptStore(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitOwner := gitmodule.New()
+	if err := gitOwner.Configure(gitmodule.Dependencies{EventHub: hub, RuntimeAdapter: gitbiz.NewRuntimeAdapter(true), CapabilityStateReceipts: store}); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	module := newRuntimeV2DriveTestModule(t, hub)
+	run, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err := module.bizPtr.InitializeRuntimeV2FromRun(ctx, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err = module.prepareRuntimeV2Prerequisites(ctx, aggregate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
+	if _, err := module.bizPtr.BeginRuntimeV2CandidateAttempt(ctx, "ws-v2", "run-v2", 0, prefix); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := module.bizPtr.AcceptRuntimeV2CandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimeV2GitStateCandidate([]string{"create-commit", "repo-init", "stage-changes"})); err != nil {
+		t.Fatal(err)
+	}
+
+	// External owner state changes after the sealed absent-repository snapshot
+	// and before the first operation. The old init must become a typed stale
+	// receipt, never a replayable execution failure or an ordinary repair.
+	runRuntimeV2Git(t, deliverable, "init", "-q")
+	runRuntimeV2Git(t, deliverable, "config", "user.name", "WorkOrch Test")
+	runRuntimeV2Git(t, deliverable, "config", "user.email", "workorch@example.test")
+	baseRepository := runtimeV2StateRepository{hub: hub}
+	crashRepository := &runtimeV2SaveCrashRepository{
+		delegate: baseRepository, after: true, marker: "git-stale-refresh",
+		match: func(current runtimev2.RuntimeAggregate) bool {
+			return current.ActiveDispatch == nil && current.Decision.Action == runtimecontract.RuntimeActionAcquirePrerequisite &&
+				current.Facts.Recovery.CapabilityStateRefreshes == 1 && len(current.Facts.Resources.CapabilityStates) == 0
+		},
+	}
+	crashingController, err := runtimev2.NewRuntimeController(crashRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != "git-stale-refresh" {
+				t.Fatalf("unexpected stale-refresh crash marker: %v", recovered)
+			}
+		}()
+		_, _ = crashingController.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", eventRuntimeV2OperationExecutor{hub: hub})
+		t.Fatal("expected injected stale-refresh crash")
+	}()
+	crashed, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil || crashed.RuntimeState == nil || crashed.RuntimeState.ActiveDispatch != nil ||
+		crashed.RuntimeState.Facts.Recovery.CapabilityStateRefreshes != 1 || len(crashed.RuntimeState.Facts.Resources.CapabilityStates) != 0 ||
+		len(crashed.RuntimeState.OperationReceipts) != 1 || crashed.RuntimeState.OperationReceipts[0].CapabilityStateStale == nil || crashed.RuntimeState.EvidenceSequence != 0 {
+		t.Fatalf("stale refresh crash boundary=%+v err=%v", crashed, err)
+	}
+	if err := gitOwner.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	reopenedStore, err := gitbiz.NewCapabilityStateReceiptStore(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartedGitOwner := gitmodule.New()
+	if err := restartedGitOwner.Configure(gitmodule.Dependencies{EventHub: hub, RuntimeAdapter: gitbiz.NewRuntimeAdapter(true), CapabilityStateReceipts: reopenedStore}); err != nil {
+		t.Fatal(err)
+	}
+	if err := restartedGitOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = restartedGitOwner.Stop(ctx) })
+	candidateCalls := 0
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		candidateCalls++
+		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		refs := requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence)
+		if !equalStrings(refs, []string{"create-commit", "stage-changes"}) {
+			t.Fatalf("stale refresh reused old required sequence: %v", refs)
+		}
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: runtimeV2GitStateCandidate(refs)}, nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
+	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, newRuntimeV2DriveTestModule(t, hub).handleRuntimeV2Drive)
+	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
+	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
+	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 1 {
+		t.Fatalf("stale refresh restart completed=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
+	}
+	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil || persisted.RuntimeState == nil || len(persisted.RuntimeState.OperationReceipts) != 3 {
+		t.Fatalf("stale refresh restart persisted=%+v err=%v", persisted, err)
+	}
+	initReceipts := 0
+	for _, receipt := range persisted.RuntimeState.OperationReceipts {
+		if receipt.OperationID == "git-repo-init" {
+			initReceipts++
+			if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || receipt.CapabilityStateStale == nil {
+				t.Fatalf("old init was replayed or reclassified: %+v", receipt)
+			}
+		}
+	}
+	if initReceipts != 1 || strings.TrimSpace(runtimeV2GitOutput(t, deliverable, "rev-list", "--count", "HEAD")) != "1" {
+		t.Fatalf("old init dispatch was replayed, receipts=%d", initReceipts)
+	}
+}
+
+func runtimeV2GitCapabilityStateBootstrap() runtimecontract.RuntimeBootstrap {
+	bootstrap := runtimeV2Bootstrap()
+	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindGitWrite}
+	bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.StepKindGitWrite}
+	bootstrap.Requirements = []runtimecontract.RuntimeRequirement{
+		{Kind: runtimecontract.PrerequisiteKindCapabilityState, OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable", Reason: "repository state required"},
+		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.StepKindGitWrite}, Reason: "git write capability required"},
+	}
+	return bootstrap
+}
+
+func runtimeV2GitStateCandidate(requirementRefs []string) runtimecontract.RuntimeCandidate {
+	operations := make([]runtimecontract.StateChangingOperation, 0, len(requirementRefs))
+	for _, ref := range requirementRefs {
+		operation := runtimecontract.RuntimeOperation{ID: "git-" + ref, Kind: runtimecontract.StepKindGitWrite, RequiredOperationRef: ref, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}}
+		switch ref {
+		case "repo-init":
+			value := "init"
+			operation.Parameters = []runtimecontract.OperationParameter{{Name: "operation", String: &value}}
+		case "stage-changes":
+			value := "add"
+			operation.Parameters = []runtimecontract.OperationParameter{{Name: "operation", String: &value}, {Name: "pathspecs", StringList: []string{"target.txt"}}}
+		case "create-commit":
+			value, message := "commit", "runtime v2 fixture"
+			operation.Parameters = []runtimecontract.OperationParameter{{Name: "operation", String: &value}, {Name: "message", String: &message}}
+		}
+		switch ref {
+		case "stage-changes":
+			if containsRuntimeV2String(requirementRefs, "repo-init") {
+				operation.DependsOn = []string{"git-repo-init"}
+			}
+		case "create-commit":
+			if containsRuntimeV2String(requirementRefs, "stage-changes") {
+				operation.DependsOn = []string{"git-stage-changes"}
+			}
+		}
+		operations = append(operations, runtimecontract.StateChangingOperation{Operation: operation})
+	}
+	return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: operations}}
+}
+
+func containsRuntimeV2String(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func requiredOperationRefs(values []runtimecontract.RuntimeRequiredOperationVariant) []string {
+	ret := make([]string, 0, len(values))
+	for _, value := range values {
+		ret = append(ret, value.RequirementID)
+	}
+	return ret
+}
+
+func equalStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for idx := range left {
+		if left[idx] != right[idx] {
+			return false
+		}
+	}
+	return true
+}
+
+func writeRuntimeV2GitFixtureFile(t *testing.T, deliverable string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(deliverable, "target.txt"), []byte("runtime v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func runRuntimeV2Git(t *testing.T, directory string, args ...string) {
+	t.Helper()
+	command := exec.Command("git", args...)
+	command.Dir = directory
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, output)
+	}
+}
+
+func runtimeV2GitOutput(t *testing.T, directory string, args ...string) string {
+	t.Helper()
+	command := exec.Command("git", args...)
+	command.Dir = directory
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
+	}
+	return string(output)
+}
+
+func TestRuntimeV2FileBackedPatchVariantMatrix(t *testing.T) {
+	testCases := []struct {
+		name      string
+		target    string
+		initial   string
+		variant   string
+		candidate func() runtimecontract.RuntimeCandidate
+		want      string
+	}{
+		{
+			name: "file_write", target: "written.txt", variant: "file_write", want: "written\n",
+			candidate: func() runtimecontract.RuntimeCandidate {
+				patchType, content, target := "file_write", "written\n", "written.txt"
+				return runtimeV2PatchCandidate("patch-file-write", target, []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "content", String: &content}})
+			},
+		},
+		{
+			name: "text_replace", target: "replace.txt", initial: "old\n", variant: "text_replace", want: "new\n",
+			candidate: func() runtimecontract.RuntimeCandidate {
+				patchType, oldText, newText, target := "text_replace", "old\n", "new\n", "replace.txt"
+				return runtimeV2PatchCandidate("patch-text-replace", target, []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}})
+			},
+		},
+		{
+			name: "unified_diff", target: "diff.txt", initial: "one\ntwo\nthree\n", variant: "unified_diff", want: "one\nTWO\nthree\n",
+			candidate: func() runtimecontract.RuntimeCandidate {
+				patchType, target := "unified_diff", "diff.txt"
+				diff := "--- a/diff.txt\n+++ b/diff.txt\n@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n"
+				return runtimeV2PatchCandidate("patch-unified-diff", target, []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "diff", String: &diff}})
+			},
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx := context.Background()
+			hub := magicevent.NewHub(32)
+			t.Cleanup(func() { hub.Terminate(ctx) })
+			root := t.TempDir()
+			deliverable, internalDir := filepath.Join(root, "workspace"), filepath.Join(root, "internal")
+			if err := os.MkdirAll(deliverable, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(internalDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if testCase.initial != "" {
+				if err := os.WriteFile(filepath.Join(deliverable, testCase.target), []byte(testCase.initial), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			bootstrap := runtimeV2PatchVariantBootstrap(testCase.variant)
+			runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
+			if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2", DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, State: common.RunStateActive}); err != nil {
+				t.Fatal(err)
+			}
+			runOwner := runmodule.New()
+			if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+				t.Fatal(err)
+			}
+			if err := runOwner.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+			startRuntimeV2ReceiptTestOwner(t, hub)
+			workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+			workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+				result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+			})
+			t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+			fileOwner := filemodule.New()
+			if err := fileOwner.Configure(filemodule.Dependencies{EventHub: hub}); err != nil {
+				t.Fatal(err)
+			}
+			if err := fileOwner.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
+			llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+			llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+				command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+				result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: testCase.candidate()}, nil)
+			})
+			t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+			module := newRuntimeV2DriveTestModule(t, hub)
+			driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
+			driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, module.handleRuntimeV2Drive)
+			t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
+			completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
+			if err != nil || completed.Action != runtimecontract.RuntimeActionComplete {
+				t.Fatalf("completed=%+v err=%v", completed, err)
+			}
+			content, err := os.ReadFile(filepath.Join(deliverable, testCase.target))
+			if err != nil || string(content) != testCase.want {
+				t.Fatalf("content=%q err=%v want=%q", content, err, testCase.want)
+			}
+		})
+	}
+}
+
+func runtimeV2PatchVariantBootstrap(variant string) runtimecontract.RuntimeBootstrap {
+	bootstrap := runtimeV2Bootstrap()
+	bootstrap.Definition.CapabilityContract = []string{runtimecontract.RuntimeBlockKindPatchApply}
+	bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
+	bootstrap.Focuses[0].AcceptedOperationVariants = []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: variant}}
+	bootstrap.Requirements = []runtimecontract.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindPatchApply}, Reason: "patch capability required"}}
+	return bootstrap
+}
+
+func runtimeV2PatchCandidate(id, target string, parameters []runtimecontract.OperationParameter) runtimecontract.RuntimeCandidate {
+	return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{ID: id, Kind: runtimecontract.RuntimeBlockKindPatchApply, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target}, Parameters: parameters}}}}}
+}
+
+func TestRuntimeV2FileBackedPatchVariantRestartAfterOwnerReceipt(t *testing.T) {
+	testCases := []struct {
+		name      string
+		target    string
+		initial   string
+		variant   string
+		candidate func() runtimecontract.RuntimeCandidate
+		want      string
+	}{
+		{
+			name: "file_write", target: "written.txt", variant: "file_write", want: "written\n",
+			candidate: func() runtimecontract.RuntimeCandidate {
+				patchType, content, target := "file_write", "written\n", "written.txt"
+				return runtimeV2PatchCandidate("patch-file-write", target, []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "content", String: &content}})
+			},
+		},
+		{
+			name: "text_replace", target: "replace.txt", initial: "old\n", variant: "text_replace", want: "new\n",
+			candidate: func() runtimecontract.RuntimeCandidate {
+				patchType, oldText, newText, target := "text_replace", "old\n", "new\n", "replace.txt"
+				return runtimeV2PatchCandidate("patch-text-replace", target, []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}})
+			},
+		},
+		{
+			name: "unified_diff", target: "diff.txt", initial: "one\ntwo\nthree\n", variant: "unified_diff", want: "one\nTWO\nthree\n",
+			candidate: func() runtimecontract.RuntimeCandidate {
+				patchType, target := "unified_diff", "diff.txt"
+				diff := "--- a/diff.txt\n+++ b/diff.txt\n@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n"
+				return runtimeV2PatchCandidate("patch-unified-diff", target, []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "diff", String: &diff}})
+			},
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx := context.Background()
+			hub := magicevent.NewHub(32)
+			t.Cleanup(func() { hub.Terminate(ctx) })
+			root := t.TempDir()
+			deliverable, internalDir := filepath.Join(root, "workspace"), filepath.Join(root, "internal")
+			if err := os.MkdirAll(deliverable, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(internalDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if testCase.initial != "" {
+				if err := os.WriteFile(filepath.Join(deliverable, testCase.target), []byte(testCase.initial), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			bootstrap := runtimeV2PatchVariantBootstrap(testCase.variant)
+			runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
+			if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2", DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, State: common.RunStateActive}); err != nil {
+				t.Fatal(err)
+			}
+			runOwner := runmodule.New()
+			if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+				t.Fatal(err)
+			}
+			if err := runOwner.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+			startRuntimeV2ReceiptTestOwner(t, hub)
+			workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+			workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+				result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+			})
+			t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+			fileOwner := filemodule.New()
+			if err := fileOwner.Configure(filemodule.Dependencies{EventHub: hub}); err != nil {
+				t.Fatal(err)
+			}
+			if err := fileOwner.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
+			candidateCalls := 0
+			llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+			llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+				candidateCalls++
+				command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+				result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: testCase.candidate()}, nil)
+			})
+			t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+
+			module := newRuntimeV2DriveTestModule(t, hub)
+			run, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+			if err != nil {
+				t.Fatal(err)
+			}
+			aggregate, err := module.bizPtr.InitializeRuntimeV2FromRun(ctx, run)
+			if err != nil {
+				t.Fatal(err)
+			}
+			aggregate, err = module.prepareRuntimeV2Prerequisites(ctx, aggregate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
+			aggregate, err = module.requestAndSealRuntimeV2CandidateWithRetry(ctx, aggregate, prefix)
+			if err != nil || aggregate.ActiveDispatch == nil {
+				t.Fatalf("seal patch variant before crash aggregate=%+v err=%v", aggregate, err)
+			}
+			func() {
+				defer func() {
+					if recovered := recover(); recovered != "runtime-v2-test-crash-after-owner-receipt" {
+						t.Fatalf("unexpected patch variant crash marker: %v", recovered)
+					}
+				}()
+				_, _ = module.bizPtr.ExecuteRuntimeV2Dispatch(ctx, "ws-v2", "run-v2", panicAfterOwnerReceiptExecutor{delegate: eventRuntimeV2OperationExecutor{hub: hub}})
+				t.Fatal("expected injected patch variant crash after owner receipt")
+			}()
+			content, err := os.ReadFile(filepath.Join(deliverable, testCase.target))
+			if err != nil || string(content) != testCase.want {
+				t.Fatalf("side effect before patch restart content=%q err=%v want=%q", content, err, testCase.want)
+			}
+			crashed, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+			if err != nil || crashed.RuntimeState == nil || crashed.RuntimeState.ActiveDispatch == nil || len(crashed.RuntimeState.OperationReceipts) != 1 || crashed.RuntimeState.EvidenceSequence != 0 {
+				t.Fatalf("patch receipt crash boundary=%+v err=%v", crashed, err)
+			}
+			execution := crashed.RuntimeState.ActiveDispatch.OperationExecutions[0]
+			if execution.State != runtimecontract.OperationExecutionOwnerCommitted || execution.Fence == 0 {
+				t.Fatalf("patch receipt crash execution=%+v", execution)
+			}
+			restarted := newRuntimeV2DriveTestModule(t, hub)
+			driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
+			driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, restarted.handleRuntimeV2Drive)
+			t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
+			completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
+			if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 1 {
+				t.Fatalf("patch restart completion=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
+			}
+			persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+			if err != nil || persisted.RuntimeState == nil || len(persisted.RuntimeState.OperationReceipts) != 1 || len(persisted.RuntimeState.Facts.Evidence.Accepted) != 1 {
+				t.Fatalf("patch restart persisted=%+v err=%v", persisted, err)
+			}
+			receipt := persisted.RuntimeState.OperationReceipts[0]
+			if receipt.ExecutionKey != execution.ExecutionKey || receipt.Fence != execution.Fence || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted {
+				t.Fatalf("patch variant restart replaced receipt: before=%+v after=%+v", execution, receipt)
+			}
+		})
 	}
 }
 

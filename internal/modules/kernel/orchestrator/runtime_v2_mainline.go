@@ -110,9 +110,23 @@ func (m *Module) resolveRuntimeV2Prerequisite(
 		}
 		capabilities := facts.Capabilities
 		return runtimev2.PrerequisiteResult{PrerequisiteID: prerequisite.ID, Capabilities: &capabilities}, nil
+	case runtimecontract.PrerequisiteKindCapabilityState:
+		state, err := AcquireGitCapabilityStatePrerequisite(ctx, m.rawEventHub, prerequisite.OwnerModuleID, events.AcquireGitCapabilityStateCommand{
+			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
+			PrerequisiteID: prerequisite.ID, WorkspaceDeliverableDirectory: deliverableDirectory, CapabilityStateKind: prerequisite.CapabilityStateKind, SubjectRef: prerequisite.SubjectRef,
+			AcquisitionKey: stableRuntimeV2CapabilityStateAcquisitionKey(commandScope.workspaceID, commandScope.runID, prerequisite.ID, aggregate.Facts.Recovery.CapabilityStateRefreshes),
+		})
+		if err != nil {
+			return runtimev2.PrerequisiteResult{}, err
+		}
+		return runtimev2.PrerequisiteResult{PrerequisiteID: prerequisite.ID, CapabilityState: &state.Snapshot}, nil
 	default:
 		return runtimev2.PrerequisiteResult{}, fmt.Errorf("unsupported runtime prerequisite kind %q", prerequisite.Kind)
 	}
+}
+
+func stableRuntimeV2CapabilityStateAcquisitionKey(workspaceID common.WorkspaceID, runID common.RunID, prerequisiteID string, refreshGeneration int) string {
+	return fmt.Sprintf("capability-state/%s/%s/%s/%d", workspaceID, runID, strings.TrimSpace(prerequisiteID), refreshGeneration)
 }
 
 func (m *Module) requestAndSealRuntimeV2Candidate(

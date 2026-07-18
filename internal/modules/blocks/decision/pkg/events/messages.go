@@ -67,6 +67,7 @@ type EnsureResolvedCommand struct {
 	WorkspaceID        common.WorkspaceID
 	RunID              common.RunID
 	StepID             common.StepID
+	DecisionKind       string
 	Type               string
 	Payload            []DecisionEvidenceField
 	ContinuationAction string

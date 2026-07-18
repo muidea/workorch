@@ -264,14 +264,14 @@ func stateChangeDecisionFromFacts(base RuntimeDecision, facts RuntimeFacts, dire
 	base.State = ConvergenceStateNeedStateChange
 	base.Action = RuntimeActionProduceStateChange
 	base.RequiredOutput = RequiredOutputContract{
-		Kind:                  RequiredOutputKindStateChange,
-		AcceptedKinds:         acceptedKinds,
-		AcceptedOperations:    facts.Focus.AcceptedOperations,
-		AcceptedEffectScopes:  directive.RequiredEffectScopes,
-		RequiredEffectScopes:  directive.RequiredEffectScopes,
-		RequiredEvidenceKinds: []string{EvidenceKindStateChange},
-		CoverageWorkItemIDs:   firstNonEmptyCoverage(directive.CoverageWorkItemIDs, facts.Focus.CoverageWorkItemIDs),
-		TargetRefs:            firstNonEmptyStrings(directive.TargetRefs, facts.Focus.TargetRefs),
+		Kind:                      RequiredOutputKindStateChange,
+		AcceptedKinds:             acceptedKinds,
+		AcceptedOperationVariants: facts.Focus.AcceptedOperationVariants,
+		AcceptedEffectScopes:      directive.RequiredEffectScopes,
+		RequiredEffectScopes:      directive.RequiredEffectScopes,
+		RequiredEvidenceKinds:     []string{EvidenceKindStateChange},
+		CoverageWorkItemIDs:       firstNonEmptyCoverage(directive.CoverageWorkItemIDs, facts.Focus.CoverageWorkItemIDs),
+		TargetRefs:                firstNonEmptyStrings(directive.TargetRefs, facts.Focus.TargetRefs),
 	}
 	return base, nil
 }
@@ -287,14 +287,14 @@ func validationDecisionFromFacts(base RuntimeDecision, facts RuntimeFacts, direc
 	base.State = ConvergenceStateNeedValidation
 	base.Action = RuntimeActionProduceValidation
 	base.RequiredOutput = RequiredOutputContract{
-		Kind:                  RequiredOutputKindValidation,
-		AcceptedKinds:         acceptedKinds,
-		AcceptedOperations:    facts.Focus.AcceptedOperations,
-		AcceptedEffectScopes:  NormalizeRuntimeEffectScopes(append([]RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession}, directive.RequiredEffectScopes...)),
-		RequiredEffectScopes:  directive.RequiredEffectScopes,
-		RequiredEvidenceKinds: []string{EvidenceKindValidation},
-		CoverageWorkItemIDs:   firstNonEmptyCoverage(directive.CoverageWorkItemIDs, facts.Focus.CoverageWorkItemIDs),
-		TargetRefs:            firstNonEmptyStrings(directive.TargetRefs, facts.Focus.TargetRefs),
+		Kind:                      RequiredOutputKindValidation,
+		AcceptedKinds:             acceptedKinds,
+		AcceptedOperationVariants: facts.Focus.AcceptedOperationVariants,
+		AcceptedEffectScopes:      NormalizeRuntimeEffectScopes(append([]RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession}, directive.RequiredEffectScopes...)),
+		RequiredEffectScopes:      directive.RequiredEffectScopes,
+		RequiredEvidenceKinds:     []string{EvidenceKindValidation},
+		CoverageWorkItemIDs:       firstNonEmptyCoverage(directive.CoverageWorkItemIDs, facts.Focus.CoverageWorkItemIDs),
+		TargetRefs:                firstNonEmptyStrings(directive.TargetRefs, facts.Focus.TargetRefs),
 	}
 	return base, nil
 }

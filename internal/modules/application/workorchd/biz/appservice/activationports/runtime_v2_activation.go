@@ -94,6 +94,7 @@ func runtimeV2DefinitionChangeSet(input map[string]any, effectiveKey, latestKey,
 
 func runtimeV2ExecutionContract(input map[string]any) runtimecontract.RuntimeExecutionContract {
 	ret := runtimecontract.RuntimeExecutionContract{
+		OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
 		StateChangePolicy:         runtimecontract.RuntimeStateChangePolicy(runtimeV2String(input["stateChangePolicy"])),
 		MaxRepairAttemptsPerFocus: runtimeV2Int(input["maxRepairAttemptsPerFocus"]),
 	}
@@ -143,13 +144,23 @@ func runtimeV2ExecutionContract(input map[string]any) runtimecontract.RuntimeExe
 			})
 		}
 		for _, item := range runtimeV2MapSlice(profile["evidenceRequirements"]) {
+			acceptedVariants := make([]runtimecontract.RuntimeOperationVariantRef, 0)
+			for _, variant := range runtimeV2MapSlice(item["acceptedOperationVariants"]) {
+				acceptedVariants = append(acceptedVariants, runtimecontract.RuntimeOperationVariantRef{Kind: runtimeV2String(variant["kind"]), VariantID: runtimeV2String(variant["variantId"])})
+			}
+			stateRequirements := make([]runtimecontract.RuntimeProfileCapabilityStateRequirement, 0)
+			for _, state := range runtimeV2MapSlice(item["capabilityStateRequirements"]) {
+				stateRequirements = append(stateRequirements, runtimecontract.RuntimeProfileCapabilityStateRequirement{OwnerModuleID: runtimeV2String(state["ownerModuleId"]), CapabilityStateKind: runtimeV2String(state["capabilityStateKind"]), SubjectRef: runtimeV2String(state["subjectRef"])})
+			}
 			contract.EvidenceRequirements = append(contract.EvidenceRequirements, runtimecontract.RuntimeProfileEvidenceRequirement{
 				ID: runtimeV2String(item["id"]), Scope: runtimeV2String(item["scope"]), EvidenceRole: runtimeV2String(item["evidenceRole"]),
 				RequiredEvidenceKinds: runtimeV2Strings(item["requiredEvidenceKinds"]),
 				RequireDirectEvidence: runtimeV2Bool(item["requireDirectEvidence"]), RequireClaimEvidence: runtimeV2Bool(item["requireClaimEvidence"]),
 				RequireExecutableBehaviorEvidence: runtimeV2Bool(item["requireExecutableBehaviorEvidence"]), RequireCoverageTargets: runtimeV2Bool(item["requireCoverageTargets"]),
-				AcceptedStepKinds: runtimeV2Strings(item["acceptedStepKinds"]), AcceptedOperations: runtimeV2Strings(item["acceptedOperations"]),
-				RejectedStepKinds: runtimeV2Strings(item["rejectedStepKinds"]), Description: runtimeV2String(item["description"]),
+				AcceptedStepKinds:           runtimeV2Strings(item["acceptedStepKinds"]),
+				AcceptedOperationVariants:   acceptedVariants,
+				CapabilityStateRequirements: stateRequirements,
+				RejectedStepKinds:           runtimeV2Strings(item["rejectedStepKinds"]), Description: runtimeV2String(item["description"]),
 			})
 		}
 		ret.ProfileContracts = append(ret.ProfileContracts, contract)

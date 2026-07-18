@@ -7,16 +7,18 @@ const (
 	DefaultMaxOperationRecoveryAttempts = 3
 	DefaultMaxCASReloadAttempts         = 5
 	DefaultMaxTerminalDeliveryAttempts  = 5
+	DefaultMaxCapabilityStateRefreshes  = 3
 	RuntimeRecoveryBudgetLimit          = 100
 )
 
 type RuntimeRecoveryBudgetKind string
 
 const (
-	RuntimeRecoveryBudgetProviderTransport RuntimeRecoveryBudgetKind = "provider_transport"
-	RuntimeRecoveryBudgetOperationRecovery RuntimeRecoveryBudgetKind = "operation_recovery"
-	RuntimeRecoveryBudgetCASReload         RuntimeRecoveryBudgetKind = "cas_reload"
-	RuntimeRecoveryBudgetTerminalDelivery  RuntimeRecoveryBudgetKind = "terminal_delivery"
+	RuntimeRecoveryBudgetProviderTransport      RuntimeRecoveryBudgetKind = "provider_transport"
+	RuntimeRecoveryBudgetOperationRecovery      RuntimeRecoveryBudgetKind = "operation_recovery"
+	RuntimeRecoveryBudgetCASReload              RuntimeRecoveryBudgetKind = "cas_reload"
+	RuntimeRecoveryBudgetTerminalDelivery       RuntimeRecoveryBudgetKind = "terminal_delivery"
+	RuntimeRecoveryBudgetCapabilityStateRefresh RuntimeRecoveryBudgetKind = "capability_state_refresh"
 )
 
 type RuntimeRecoveryPolicy struct {
@@ -24,6 +26,7 @@ type RuntimeRecoveryPolicy struct {
 	MaxOperationRecoveryAttempts int
 	MaxCASReloadAttempts         int
 	MaxTerminalDeliveryAttempts  int
+	MaxCapabilityStateRefreshes  int
 }
 
 type RuntimeRecoveryLedger struct {
@@ -31,6 +34,7 @@ type RuntimeRecoveryLedger struct {
 	OperationRecoveryAttempts int
 	CASReloadAttempts         int
 	TerminalDeliveryAttempts  int
+	CapabilityStateRefreshes  int
 }
 
 func DefaultRuntimeRecoveryPolicy() RuntimeRecoveryPolicy {
@@ -39,6 +43,7 @@ func DefaultRuntimeRecoveryPolicy() RuntimeRecoveryPolicy {
 		MaxOperationRecoveryAttempts: DefaultMaxOperationRecoveryAttempts,
 		MaxCASReloadAttempts:         DefaultMaxCASReloadAttempts,
 		MaxTerminalDeliveryAttempts:  DefaultMaxTerminalDeliveryAttempts,
+		MaxCapabilityStateRefreshes:  DefaultMaxCapabilityStateRefreshes,
 	}
 }
 
@@ -56,6 +61,9 @@ func (p RuntimeRecoveryPolicy) Normalized() RuntimeRecoveryPolicy {
 	if p.MaxTerminalDeliveryAttempts <= 0 {
 		p.MaxTerminalDeliveryAttempts = defaults.MaxTerminalDeliveryAttempts
 	}
+	if p.MaxCapabilityStateRefreshes <= 0 {
+		p.MaxCapabilityStateRefreshes = defaults.MaxCapabilityStateRefreshes
+	}
 	return p
 }
 
@@ -66,6 +74,7 @@ func (p RuntimeRecoveryPolicy) Validate() error {
 		"MaxOperationRecoveryAttempts": p.MaxOperationRecoveryAttempts,
 		"MaxCASReloadAttempts":         p.MaxCASReloadAttempts,
 		"MaxTerminalDeliveryAttempts":  p.MaxTerminalDeliveryAttempts,
+		"MaxCapabilityStateRefreshes":  p.MaxCapabilityStateRefreshes,
 	} {
 		if value < 1 || value > RuntimeRecoveryBudgetLimit {
 			return fmt.Errorf("%s must be in 1..%d", name, RuntimeRecoveryBudgetLimit)
@@ -84,6 +93,7 @@ func (l RuntimeRecoveryLedger) Validate(policy RuntimeRecoveryPolicy) error {
 		"OperationRecoveryAttempts": l.OperationRecoveryAttempts,
 		"CASReloadAttempts":         l.CASReloadAttempts,
 		"TerminalDeliveryAttempts":  l.TerminalDeliveryAttempts,
+		"CapabilityStateRefreshes":  l.CapabilityStateRefreshes,
 	} {
 		if value < 0 {
 			return fmt.Errorf("%s cannot be negative", name)
@@ -102,6 +112,8 @@ func (l RuntimeRecoveryLedger) Used(kind RuntimeRecoveryBudgetKind) int {
 		return l.CASReloadAttempts
 	case RuntimeRecoveryBudgetTerminalDelivery:
 		return l.TerminalDeliveryAttempts
+	case RuntimeRecoveryBudgetCapabilityStateRefresh:
+		return l.CapabilityStateRefreshes
 	default:
 		return 0
 	}
@@ -118,6 +130,8 @@ func (p RuntimeRecoveryPolicy) Limit(kind RuntimeRecoveryBudgetKind) int {
 		return p.MaxCASReloadAttempts
 	case RuntimeRecoveryBudgetTerminalDelivery:
 		return p.MaxTerminalDeliveryAttempts
+	case RuntimeRecoveryBudgetCapabilityStateRefresh:
+		return p.MaxCapabilityStateRefreshes
 	default:
 		return 0
 	}
@@ -139,6 +153,8 @@ func (l RuntimeRecoveryLedger) Consume(kind RuntimeRecoveryBudgetKind, policy Ru
 		l.CASReloadAttempts++
 	case RuntimeRecoveryBudgetTerminalDelivery:
 		l.TerminalDeliveryAttempts++
+	case RuntimeRecoveryBudgetCapabilityStateRefresh:
+		l.CapabilityStateRefreshes++
 	}
 	return l, true, nil
 }

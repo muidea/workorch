@@ -36,9 +36,16 @@ type RuntimeProfileEvidenceRequirement struct {
 	RequireExecutableBehaviorEvidence bool
 	RequireCoverageTargets            bool
 	AcceptedStepKinds                 []string
-	AcceptedOperations                []string
+	AcceptedOperationVariants         []RuntimeOperationVariantRef
+	CapabilityStateRequirements       []RuntimeProfileCapabilityStateRequirement
 	RejectedStepKinds                 []string
 	Description                       string
+}
+
+type RuntimeProfileCapabilityStateRequirement struct {
+	OwnerModuleID       string
+	CapabilityStateKind string
+	SubjectRef          string
 }
 
 func NormalizeRuntimeProfileContracts(values []RuntimeProfileContract) []RuntimeProfileContract {
@@ -83,9 +90,33 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 			if item.ID == "" || item.Scope == "" {
 				return fmt.Errorf("runtime profile evidence requirement requires id and scope")
 			}
+			for _, state := range item.CapabilityStateRequirements {
+				if !runtimeProfileCapabilityStateOwnerMatchesAcceptedStepKind(state.OwnerModuleID, item.AcceptedStepKinds) {
+					return fmt.Errorf("runtime profile evidence requirement %q capability-state owner %q does not own an accepted operation kind", item.ID, state.OwnerModuleID)
+				}
+			}
 		}
 	}
 	return nil
+}
+
+// runtimeProfileCapabilityStateOwnerMatchesAcceptedStepKind keeps capability-state
+// prerequisites bound to the same canonical owner contract as the evidence they
+// unlock. Profiles declare operation kinds, not EventHub destinations; accepting
+// an arbitrary owner string here would otherwise create a sealed prerequisite
+// that no owner can receive at runtime.
+func runtimeProfileCapabilityStateOwnerMatchesAcceptedStepKind(ownerModuleID string, acceptedStepKinds []string) bool {
+	ownerModuleID = strings.TrimSpace(ownerModuleID)
+	if ownerModuleID == "" {
+		return false
+	}
+	for _, kind := range acceptedStepKinds {
+		descriptor, ok := RuntimeOperationDescriptorForKind(CanonicalRuntimeBlockKind(kind))
+		if ok && descriptor.OwnerModuleID == ownerModuleID {
+			return true
+		}
+	}
+	return false
 }
 
 func SameRuntimeProfileContracts(left []RuntimeProfileContract, right []RuntimeProfileContract) bool {
@@ -135,7 +166,8 @@ func normalizeRuntimeProfileEvidenceRequirements(values []RuntimeProfileEvidence
 		value.EvidenceRole = strings.TrimSpace(value.EvidenceRole)
 		value.RequiredEvidenceKinds = normalizeStrings(value.RequiredEvidenceKinds)
 		value.AcceptedStepKinds = normalizeStrings(value.AcceptedStepKinds)
-		value.AcceptedOperations = normalizeStrings(value.AcceptedOperations)
+		value.AcceptedOperationVariants = NormalizeRuntimeOperationVariantRefs(value.AcceptedOperationVariants)
+		value.CapabilityStateRequirements = normalizeRuntimeProfileCapabilityStateRequirements(value.CapabilityStateRequirements)
 		value.RejectedStepKinds = normalizeStrings(value.RejectedStepKinds)
 		value.Description = strings.TrimSpace(value.Description)
 		if value.ID != "" && value.Scope != "" {
@@ -152,6 +184,19 @@ func normalizeRuntimeProfileEvidenceRequirements(values []RuntimeProfileEvidence
 		ret = append(ret, byKey[key])
 	}
 	return nilIfEmpty(ret)
+}
+
+func normalizeRuntimeProfileCapabilityStateRequirements(values []RuntimeProfileCapabilityStateRequirement) []RuntimeProfileCapabilityStateRequirement {
+	byKey := map[string]RuntimeProfileCapabilityStateRequirement{}
+	for _, value := range values {
+		value.OwnerModuleID = strings.TrimSpace(value.OwnerModuleID)
+		value.CapabilityStateKind = strings.TrimSpace(value.CapabilityStateKind)
+		value.SubjectRef = strings.TrimSpace(value.SubjectRef)
+		if value.OwnerModuleID != "" && value.CapabilityStateKind != "" && value.SubjectRef != "" {
+			byKey[value.OwnerModuleID+"|"+value.CapabilityStateKind+"|"+value.SubjectRef] = value
+		}
+	}
+	return sortedMapValues(byKey)
 }
 
 func sameRuntimeProfileContract(left RuntimeProfileContract, right RuntimeProfileContract) bool {
@@ -180,8 +225,16 @@ func sameRuntimeProfileContract(left RuntimeProfileContract, right RuntimeProfil
 		if l.ID != r.ID || l.Scope != r.Scope || l.EvidenceRole != r.EvidenceRole || !sameStrings(l.RequiredEvidenceKinds, r.RequiredEvidenceKinds) || l.RequireDirectEvidence != r.RequireDirectEvidence ||
 			l.RequireClaimEvidence != r.RequireClaimEvidence || l.RequireExecutableBehaviorEvidence != r.RequireExecutableBehaviorEvidence ||
 			l.RequireCoverageTargets != r.RequireCoverageTargets || l.Description != r.Description ||
-			!sameStrings(l.AcceptedStepKinds, r.AcceptedStepKinds) || !sameStrings(l.AcceptedOperations, r.AcceptedOperations) || !sameStrings(l.RejectedStepKinds, r.RejectedStepKinds) {
+			!sameStrings(l.AcceptedStepKinds, r.AcceptedStepKinds) || !SameRuntimeOperationVariantRefs(l.AcceptedOperationVariants, r.AcceptedOperationVariants) || !sameStrings(l.RejectedStepKinds, r.RejectedStepKinds) {
 			return false
+		}
+		if len(l.CapabilityStateRequirements) != len(r.CapabilityStateRequirements) {
+			return false
+		}
+		for idx := range l.CapabilityStateRequirements {
+			if l.CapabilityStateRequirements[idx] != r.CapabilityStateRequirements[idx] {
+				return false
+			}
 		}
 	}
 	return true

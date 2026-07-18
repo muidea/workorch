@@ -89,12 +89,11 @@ Last Updated: 2026-07-18
 
 ## Remaining Open Work
 
-Runtime V2-only 主链骨架及 RVC-R5～R15 结构化 foundation 已完成并通过真实 file-backed crash/双 focus/full gates。2026-07-18 deployed Live 进一步证明 effect/receipt/focus 主链能够推进，同时暴露跨 owner governance 提交、blocked Resume 权威门禁、allowed action 端到端合同、candidate 参数合同、LLM audit 类型边界与 Live fixture 分层仍未闭环；当前剩余主要是：
+Runtime V2-only 主链骨架、RVC-R5～R15 foundation 与 RVC-R17～R26 已完成。2026-07-18 的 deployed rerun 已将 capability-state canonical owner 与 discriminated operation variant 进入 sealed authority；随后发现的 `requiredOperationRef` provider-schema/strict-DTO 字段漂移也已收口为 typed mapping 和 file-gate 回归。fresh bounded dual terminal 与 canonical real canary liveness 均已通过；当前剩余主要是：
 
-1. **Runtime 正向收敛（RVC-1）**：**active — final bounded deployed acceptance pending**。RVC-R5～R21 已落地；RVC-R22 已将 terminal fixture 预检、timeout 完整取证与 real-workspace liveness observation 分层落入脚本。剩余是创建 clean bounded fixture 并最终重跑 RVC-R16；真实长任务不再承担 180 秒 terminal SLA。详见 [active remediation](../70-roadmap/active/runtime-v2-positive-convergence-remediation.md)。
-2. **运维切换（OPS-1）**：真实生产目录 `runtime-v1-retirement --apply` + clean build 维护窗口（过程日记已归档，不在 active 放长文）。
-3. **可选验证（OPT-1）**：file-patch `apply + validation + DoD closeout` 的 deployed live 一次。
-4. **延期候选**：LLM context budget 高级项见 `70-roadmap/candidates/`，**不占 active**。
+1. **运维切换（OPS-1）**：真实生产目录 `runtime-v1-retirement --apply` + clean build 维护窗口（过程日记已归档，不在 active 放长文）。
+2. **可选验证（OPT-1）**：file-patch `apply + validation + DoD closeout` 的 deployed live 一次。
+3. **延期候选**：LLM context budget 高级项见 `70-roadmap/candidates/`，**不占 active**。
 5. **文档维护**：权威层术语抽查、个别 block readme 措辞、archive 索引（见 matrix D-*）。
 
 2026-07-16 已将 active 中假活跃产品/审计日记、dated live 记录与 `60-verification/artifacts` 清理出当前入口；检索见 [90-archive](../90-archive/completed/overview.md)。

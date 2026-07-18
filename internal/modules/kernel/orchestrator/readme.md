@@ -61,7 +61,7 @@
 - `InitializeRuntimeV2FromRun` 只读取 Run owner 已持久化的 typed bootstrap，生成 initial facts 并执行 preflight/reducer；Orchestrator 不解析 V1 execution context map 来重建定义或 focus。
 - Runtime V2 controller 统一负责 initialize、prerequisite commit、candidate seal 和 evidence commit；服务重启只加载既有 aggregate，不得因重复 Start/Resume 再次执行 reducer 或增加 attempt。
 - initialize/restart identity 只比较不可变 workspace/run、definition revision/content 与 activation；`Facts.Focus` 是 SM-2 persisted cursor，合法 focus advance 后不得被拿来与 bootstrap 首 focus 比较并误判 definition drift。
-- prerequisite mainline 按 typed requirement 的 owner module 调用 EventHub，并在每个结果提交后原子执行 reducer；多个 capability owner 的结果必须合并，不能互相覆盖。
+- prerequisite mainline 按 typed requirement 的 canonical owner module 调用 EventHub，并在每个结果提交后原子执行 reducer；profile capability-state owner 必须与 accepted operation descriptor owner 相同，不能使用 EventHub destination 别名；多个 capability owner 的结果必须合并，不能互相覆盖。
 - sealed candidate 通过 `ExecuteRuntimeOperationCommand/Result` 按 operation kind 投递到 File、Git、Shell、MCP、Web 或 SSH owner；跨组件 command/result 只包含具体 operation、transaction、status、failure 和 evidence 类型。
 - 多 operation dispatch 按 dependency graph 确定性执行；每个 operation 独立提交 evidence，全部成功或任一失败后才结束 dispatch 并再次 reducer。
 - RuntimeFacts 持久化当前 focus 与有序 remaining focus queue；当前 focus 的 required evidence 满足后，evidence commit 原子切换到下一 focus，再调用同一 reducer。

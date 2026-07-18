@@ -11,15 +11,17 @@ import (
 )
 
 type RuntimeOperationExecutionRequest struct {
-	WorkspaceID      common.WorkspaceID
-	RunID            common.RunID
-	DispatchID       string
-	Transaction      runtimecontract.AuthorityTransaction
-	Operation        runtimecontract.RuntimeOperation
-	Execution        runtimecontract.RuntimeOperationExecutionRecord
-	GovernanceGrant  *runtimecontract.RuntimeOperationGovernanceGrant
-	EvidenceKind     string
-	EvidencePolicies []runtimecontract.RuntimeEvidencePolicy
+	WorkspaceID                        common.WorkspaceID
+	RunID                              common.RunID
+	DispatchID                         string
+	Transaction                        runtimecontract.AuthorityTransaction
+	Operation                          runtimecontract.RuntimeOperation
+	Execution                          runtimecontract.RuntimeOperationExecutionRecord
+	GovernanceGrant                    *runtimecontract.RuntimeOperationGovernanceGrant
+	EvidenceKind                       string
+	EvidencePolicies                   []runtimecontract.RuntimeEvidencePolicy
+	CapabilityStates                   []runtimecontract.RuntimeCapabilityStateSnapshot
+	CompletedRequiredOperationReceipts []runtimecontract.RuntimeRequiredOperationReceiptBinding
 }
 
 type RuntimeOperationExecutionResult struct {
@@ -39,6 +41,44 @@ type RuntimeOperationExecutionResult struct {
 
 type RuntimeOperationExecutor interface {
 	ExecuteRuntimeOperation(context.Context, RuntimeOperationExecutionRequest) (RuntimeOperationExecutionResult, error)
+}
+
+func completedRequiredOperationReceiptBindings(dispatch SealedDispatch, receipts []runtimecontract.RuntimeOperationReceipt, completed map[string]struct{}) []runtimecontract.RuntimeRequiredOperationReceiptBinding {
+	operations, err := orderedCandidateOperations(dispatch.Candidate)
+	if err != nil {
+		return nil
+	}
+	ret := make([]runtimecontract.RuntimeRequiredOperationReceiptBinding, 0, len(operations))
+	for _, operation := range operations {
+		if operation.RequiredOperationRef == "" {
+			continue
+		}
+		if _, ok := completed[operation.ID]; !ok {
+			continue
+		}
+		execution, ok := operationExecutionRecord(dispatch.OperationExecutions, operation.ID)
+		if !ok || execution.State != runtimecontract.OperationExecutionEvidenceCommitted {
+			continue
+		}
+		receipt, ok := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(receipts, execution.ExecutionKey, execution.Fence)
+		if !ok {
+			continue
+		}
+		contract, known := runtimecontract.RuntimeOperationContractForKind(operation.Kind)
+		if !known {
+			continue
+		}
+		variant, variantErr := runtimecontract.MatchRuntimeOperationVariant(operation, contract)
+		if variantErr != nil {
+			continue
+		}
+		ret = append(ret, runtimecontract.RuntimeRequiredOperationReceiptBinding{
+			RequirementID: operation.RequiredOperationRef, OperationID: operation.ID, Kind: operation.Kind, VariantID: variant.ID,
+			ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, ReceiptRef: execution.OwnerReceiptRef, ReceiptHash: execution.OwnerReceiptHash,
+			Outcome: receipt.Outcome, ObservedScope: receipt.ObservedEffectScope, Changed: receipt.Changed,
+		})
+	}
+	return runtimecontract.NormalizeRuntimeRequiredOperationReceiptBindings(ret)
 }
 
 func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, executor RuntimeOperationExecutor) (RuntimeAggregate, error) {
@@ -144,9 +184,11 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 		result, executeErr := executor.ExecuteRuntimeOperation(ctx, RuntimeOperationExecutionRequest{
 			WorkspaceID: workspaceID, RunID: runID, DispatchID: dispatch.ID,
 			Transaction: dispatch.Transaction, Operation: operation, Execution: execution,
-			GovernanceGrant:  governanceGrant,
-			EvidenceKind:     evidenceKindForDecision(aggregate.Decision),
-			EvidencePolicies: aggregate.Facts.Activation.EvidencePolicies,
+			GovernanceGrant:                    governanceGrant,
+			EvidenceKind:                       evidenceKindForDecision(aggregate.Decision),
+			EvidencePolicies:                   aggregate.Facts.Activation.EvidencePolicies,
+			CapabilityStates:                   append([]runtimecontract.RuntimeCapabilityStateSnapshot(nil), aggregate.Facts.Resources.CapabilityStates...),
+			CompletedRequiredOperationReceipts: completedRequiredOperationReceiptBindings(*aggregate.ActiveDispatch, aggregate.OperationReceipts, completed),
 		})
 		if executeErr != nil {
 			// The owner may have committed its terminal receipt while the response was
@@ -169,6 +211,9 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 		}
 		if result.Receipt.ExecutionKey != execution.ExecutionKey || result.Receipt.OperationID != operation.ID {
 			return RuntimeAggregate{}, fmt.Errorf("owner receipt does not match claimed execution")
+		}
+		if result.Receipt.CapabilityStateStale != nil {
+			return c.RefreshCapabilityStateAfterStaleReceipt(ctx, workspaceID, runID, dispatch.ID, result.Receipt)
 		}
 		// RVC-R11: pre-effect governance must not enter ordinary execution repair.
 		if result.Governance != nil {

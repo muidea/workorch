@@ -39,6 +39,10 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 			ConfigurationRevision:    "config-1",
 		}, TargetSnapshots: []runtimecontract.TargetSnapshot{{
 			TargetRef: "main.go", Content: "package main", ContentHash: "hash-1", ContentState: runtimecontract.SnapshotContentStateComplete,
+		}}, CapabilityStates: []runtimecontract.RuntimeCapabilityStateSnapshot{{
+			RequirementID: "capability_state:git", SnapshotID: "capability-state-git", AcquisitionKey: "capability-state/ws-1/run-1/capability_state:git/0", QueryReceiptRef: "capability-state-receipt/ws-1/run-1/capability_state:git/0", OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable",
+			ObservedRevision: "repo-absent", ContentHash: "repo-state-hash", Disposition: runtimecontract.RuntimeCapabilityStateSequenceRequired,
+			RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{{RequirementID: "repo-init", Kind: runtimecontract.StepKindGitWrite, VariantID: "init"}},
 		}}},
 		Activation: runtimecontract.RuntimeActivationContext{
 			ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
@@ -62,7 +66,7 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 					ID:                      "software-dev",
 					AcceptanceDimensions:    []runtimecontract.RuntimeAcceptanceDimension{{ID: "runtime_entrypoint", Required: true}},
 					DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "version_control_snapshot", Required: true, EvidenceRole: "supplemental_evidence"}},
-					EvidenceRequirements:    []runtimecontract.RuntimeProfileEvidenceRequirement{{ID: "version_control_snapshot", Scope: "deliverable", AcceptedStepKinds: []string{"git/write"}, AcceptedOperations: []string{"commit"}}},
+					EvidenceRequirements:    []runtimecontract.RuntimeProfileEvidenceRequirement{{ID: "version_control_snapshot", Scope: "deliverable", AcceptedStepKinds: []string{"git/write"}, AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "commit"}}}},
 				}},
 				TemplateStagePolicy: &runtimecontract.RuntimeTemplateStagePolicy{SchemaVersion: runtimecontract.RuntimeTemplateStagePolicySchemaV1, Stages: []runtimecontract.RuntimeTemplateStage{{
 					ID: "execution", SoulBinding: "execution", Entry: runtimecontract.RuntimeTemplateStageEntry{NextAction: "state_change"},
@@ -75,9 +79,10 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 		State: runtimecontract.ConvergenceStateNeedStateChange, Action: runtimecontract.RuntimeActionProduceStateChange, Focus: facts.Focus,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
 			Kind: runtimecontract.RequiredOutputKindStateChange, AcceptedKinds: []string{"file/edit"},
-			AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
-			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
-			CoverageWorkItemIDs:  facts.Focus.CoverageWorkItemIDs,
+			RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{{RequirementID: "repo-init", Kind: runtimecontract.StepKindGitWrite, VariantID: "init"}},
+			AcceptedEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
+			RequiredEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
+			CoverageWorkItemIDs:       facts.Focus.CoverageWorkItemIDs,
 		},
 	}, 0)
 	if err != nil {
@@ -121,6 +126,7 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 		`"outputContract"`, `"requiredTopLevelExample":"{\"operations\":[...]}"`, `"$id":"workorch.runtime_candidate.state_change.v2"`, `"forbiddenTopLevelFields"`,
 		`"operationContracts":[{"kind":"file/edit"`, `"name":"path"`, `"name":"oldText"`, `"name":"newText"`,
 		`"forbiddenParameters":["filePath","fileContent","targetRef","targetRefs"]`,
+		`"RequirementID":"repo-init"`, `"capabilityStates"`, `"repo-state-hash"`,
 	} {
 		if !strings.Contains(dynamicSection, value) {
 			t.Fatalf("provider request dynamic output contract lost %q: %s", value, dynamicSection)
@@ -249,6 +255,70 @@ func TestRuntimeV2CandidateSchemaDerivesPatchTargetRequirementsFromOperationCont
 	}
 	if strings.Contains(runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceStateChange), `"const":"patch/apply"`) {
 		t.Fatal("volatile operation constraints leaked into the stable generic contract schema")
+	}
+}
+
+func TestRuntimeV2CandidateSchemaRestrictsVariantsToSealedAuthority(t *testing.T) {
+	patchSchema := runtimeV2CandidateSchemaForDecision(runtimecontract.RuntimeDecision{
+		Action: runtimecontract.RuntimeActionProduceStateChange,
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+			AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{
+				Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "file_write",
+			}},
+		},
+	})
+	if !strings.Contains(patchSchema, `"const":"file_write"`) || strings.Contains(patchSchema, `"const":"text_replace"`) || strings.Contains(patchSchema, `"const":"unified_diff"`) {
+		t.Fatalf("patch schema did not restrict variants to sealed file_write authority: %s", patchSchema)
+	}
+	if !strings.Contains(patchSchema, runtimecontract.RuntimeOperationVariantRuleID(runtimecontract.RuntimeBlockKindPatchApply, "file_write", "contract", "")) {
+		t.Fatalf("patch schema did not project the sealed variant rule id: %s", patchSchema)
+	}
+
+	commitSchema := runtimeV2CandidateSchemaForDecision(runtimecontract.RuntimeDecision{
+		Action: runtimecontract.RuntimeActionProduceStateChange,
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			AcceptedKinds: []string{runtimecontract.StepKindGitWrite},
+			AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{
+				Kind: runtimecontract.StepKindGitWrite, VariantID: "commit",
+			}},
+		},
+	})
+	if !strings.Contains(commitSchema, `"const":"commit"`) || strings.Contains(commitSchema, `"const":"add"`) || strings.Contains(commitSchema, `"const":"init"`) || !strings.Contains(commitSchema, `"const":"pathspecs"`) {
+		t.Fatalf("commit schema did not retain only commit rule including forbidden pathspecs: %s", commitSchema)
+	}
+
+	sequenceSchema := runtimeV2CandidateSchemaForDecision(runtimecontract.RuntimeDecision{
+		Action: runtimecontract.RuntimeActionProduceStateChange,
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			AcceptedKinds: []string{runtimecontract.StepKindGitWrite},
+			AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{
+				Kind: runtimecontract.StepKindGitWrite, VariantID: "commit",
+			}},
+			RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{
+				{RequirementID: "repo-init", Kind: runtimecontract.StepKindGitWrite, VariantID: "init"},
+				{RequirementID: "stage-changes", Kind: runtimecontract.StepKindGitWrite, VariantID: "add", DependsOnRequirementIDs: []string{"repo-init"}},
+				{RequirementID: "create-commit", Kind: runtimecontract.StepKindGitWrite, VariantID: "commit", DependsOnRequirementIDs: []string{"stage-changes"}},
+			},
+		},
+	})
+	for _, variant := range []string{"init", "add", "commit"} {
+		if !strings.Contains(sequenceSchema, `"const":"`+variant+`"`) {
+			t.Fatalf("required sequence schema lost variant %q: %s", variant, sequenceSchema)
+		}
+	}
+
+	unknownVariantSchema := runtimeV2CandidateSchemaForDecision(runtimecontract.RuntimeDecision{
+		Action: runtimecontract.RuntimeActionProduceStateChange,
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			AcceptedKinds: []string{runtimecontract.StepKindGitWrite},
+			AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{
+				Kind: runtimecontract.StepKindGitWrite, VariantID: "does-not-exist",
+			}},
+		},
+	})
+	if !strings.Contains(unknownVariantSchema, `"oneOf":[]`) {
+		t.Fatalf("unknown sealed variant widened provider schema instead of failing closed: %s", unknownVariantSchema)
 	}
 }
 

@@ -22,9 +22,7 @@ Runtime V2-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **�
 
 ## A. Runtime 正向收敛
 
-| # | 主题 | 状态 | 当前方案 / 历史记录 |
-| --- | --- | --- | --- |
-| A1 | Runtime V2 positive convergence | **active — code reopened by deployed Live**；RVC-R5～R15 foundation 保持，依次收口 RVC-R17～R22 后最终重跑 RVC-R16 | 当前：`70-roadmap/active/runtime-v2-positive-convergence-remediation.md`；历史：`90-archive/completed/runtime-v2-positive-convergence-closure-plan.md` |
+RVC-1 已完成并归档：[RVC-R17～R26 完成记录](../90-archive/completed/runtime-v2-positive-convergence-remediation-2026-07-18.md)；fresh bounded terminal 与 canonical real canary liveness 均已通过。它不再是 active 待办。
 
 ## B. 运维切换
 

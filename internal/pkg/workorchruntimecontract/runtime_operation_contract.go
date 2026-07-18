@@ -1,9 +1,93 @@
 package workorchruntimecontract
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"sort"
 	"strings"
 )
+
+// ErrRuntimeOperationContractRevisionMismatch identifies a persisted Runtime
+// V2 aggregate whose executable operation catalog is not the one compiled
+// into the current binary.
+var ErrRuntimeOperationContractRevisionMismatch = errors.New("runtime operation contract revision mismatch")
+
+// RuntimeOperationContractRevisionMismatchError preserves both sides of the
+// executable-catalog fence. It is deliberately an error rather than a
+// migration/default projection: a nonterminal Run must be activated again
+// under an explicitly sealed current contract.
+type RuntimeOperationContractRevisionMismatchError struct {
+	PersistedRevision string
+	CurrentRevision   string
+}
+
+func (e *RuntimeOperationContractRevisionMismatchError) Error() string {
+	if e == nil {
+		return ErrRuntimeOperationContractRevisionMismatch.Error()
+	}
+	return fmt.Sprintf("%s: persisted=%q current=%q", ErrRuntimeOperationContractRevisionMismatch, strings.TrimSpace(e.PersistedRevision), strings.TrimSpace(e.CurrentRevision))
+}
+
+func (e *RuntimeOperationContractRevisionMismatchError) Unwrap() error {
+	return ErrRuntimeOperationContractRevisionMismatch
+}
+
+// ValidateRuntimeOperationContractRevision checks the persisted revision
+// against this binary's executable operation catalog. An empty revision is a
+// mismatch as well; Runtime V2 intentionally has no schema-1/default bridge.
+func ValidateRuntimeOperationContractRevision(persistedRevision string) error {
+	persistedRevision = strings.TrimSpace(persistedRevision)
+	currentRevision := RuntimeOperationContractRevision()
+	if persistedRevision == currentRevision {
+		return nil
+	}
+	return &RuntimeOperationContractRevisionMismatchError{
+		PersistedRevision: persistedRevision,
+		CurrentRevision:   currentRevision,
+	}
+}
+
+// RuntimeOperationContractRevision identifies the executable catalog compiled
+// into this binary. It intentionally excludes prose descriptions and Rules:
+// only fields consumed by matcher/effect/idempotency authority participate.
+func RuntimeOperationContractRevision() string {
+	kinds := []string{StepKindFileList, StepKindFileRead, StepKindFileWrite, StepKindFileEdit, RuntimeBlockKindPatchApply, RuntimeBlockKindPatchPreview, StepKindShellCommand, RuntimeBlockKindManagedValidationSession, StepKindGitRead, StepKindGitWrite, StepKindMCPToolCall, StepKindMCPResourceRead, StepKindMCPPromptGet, StepKindSSHCommand, StepKindWebSearch, StepKindWebFetch}
+	h := sha256.New()
+	for _, kind := range kinds {
+		contract, ok := RuntimeOperationContractForKind(kind)
+		if !ok {
+			continue
+		}
+		writeHashString(h, contract.Kind)
+		for _, p := range contract.Parameters {
+			writeHashString(h, p.Name)
+			writeHashString(h, string(p.Type))
+			writeHashString(h, fmt.Sprintf("%t", p.Required))
+		}
+		writeHashStrings(h, contract.RequireOneOfParameters)
+		writeHashString(h, fmt.Sprintf("%t", contract.RequireTargetRefs))
+		writeHashStrings(h, contract.ForbiddenParameters)
+		for _, v := range contract.Variants {
+			writeHashString(h, v.ID)
+			for _, d := range v.Discriminators {
+				writeHashString(h, d.Name)
+				writeHashString(h, d.EqualsString)
+			}
+			writeHashStrings(h, v.RequiredParameters)
+			writeHashStrings(h, v.RequiredNonEmpty)
+			writeHashStrings(h, v.ForbiddenParameters)
+			for _, pair := range v.DistinctParameterPairs {
+				writeHashString(h, pair.Left)
+				writeHashString(h, pair.Right)
+			}
+			writeHashString(h, string(v.EffectScope))
+			writeHashString(h, string(v.IdempotencyClass))
+		}
+	}
+	return "operation-contract-" + hex.EncodeToString(h.Sum(nil))[:20]
+}
 
 type RuntimeOperationParameterType string
 
@@ -21,12 +105,103 @@ type RuntimeOperationParameterContract struct {
 	Description string
 }
 
+// RuntimeOperationParameterPredicate selects a concrete operation variant from
+// a typed operation parameter. The matcher compares string values
+// case-insensitively so provider formatting cannot create a second variant.
+type RuntimeOperationParameterPredicate struct {
+	Name         string
+	EqualsString string
+}
+
+// RuntimeOperationParameterPair expresses a generic value relation required by
+// a variant. It deliberately contains no domain terminology: concrete owners
+// define their own parameter names in their descriptor.
+type RuntimeOperationParameterPair struct {
+	Left  string
+	Right string
+}
+
+// RuntimeOperationVariantContract is the single executable authority for a
+// discriminated sub-operation. Provider schema rendering, candidate validation,
+// dispatch seal and concrete owner preflight must derive from this descriptor.
+type RuntimeOperationVariantContract struct {
+	ID                     string
+	Discriminators         []RuntimeOperationParameterPredicate
+	RequiredParameters     []string
+	RequiredNonEmpty       []string
+	ForbiddenParameters    []string
+	DistinctParameterPairs []RuntimeOperationParameterPair
+	EffectScope            RuntimeEffectScope
+	IdempotencyClass       RuntimeOperationIdempotencyClass
+}
+
+// RuntimeOperationVariantRef is the typed identity used by focus and required
+// output contracts. A variant is always scoped by its operation kind.
+type RuntimeOperationVariantRef struct {
+	Kind      string
+	VariantID string
+}
+
+// RuntimeOperationVariantRuleID is the stable, descriptor-derived identifier
+// shared by provider schema projection and final seal diagnostics. It carries
+// no owner/domain policy: kind, variant and generic rule shape are all the
+// authority needed to correlate a rejected candidate with its executable
+// contract.
+func RuntimeOperationVariantRuleID(kind, variantID, rule, parameter string) string {
+	parts := []string{
+		"operation_variant",
+		CanonicalRuntimeBlockKind(kind),
+		strings.TrimSpace(variantID),
+		strings.TrimSpace(rule),
+	}
+	if parameter = strings.TrimSpace(parameter); parameter != "" {
+		parts = append(parts, parameter)
+	}
+	return strings.Join(parts, "/")
+}
+
+func NormalizeRuntimeOperationVariantRefs(values []RuntimeOperationVariantRef) []RuntimeOperationVariantRef {
+	byKey := map[string]RuntimeOperationVariantRef{}
+	for _, value := range values {
+		value.Kind = CanonicalRuntimeBlockKind(value.Kind)
+		value.VariantID = strings.TrimSpace(value.VariantID)
+		if value.Kind != "" && value.VariantID != "" {
+			byKey[value.Kind+"|"+value.VariantID] = value
+		}
+	}
+	keys := make([]string, 0, len(byKey))
+	for key := range byKey {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	ret := make([]RuntimeOperationVariantRef, 0, len(keys))
+	for _, key := range keys {
+		ret = append(ret, byKey[key])
+	}
+	return ret
+}
+
+func SameRuntimeOperationVariantRefs(left []RuntimeOperationVariantRef, right []RuntimeOperationVariantRef) bool {
+	left = NormalizeRuntimeOperationVariantRefs(left)
+	right = NormalizeRuntimeOperationVariantRefs(right)
+	if len(left) != len(right) {
+		return false
+	}
+	for idx := range left {
+		if left[idx] != right[idx] {
+			return false
+		}
+	}
+	return true
+}
+
 type RuntimeOperationContract struct {
 	Kind                   string
 	Parameters             []RuntimeOperationParameterContract
 	RequireOneOfParameters []string
 	RequireTargetRefs      bool
 	ForbiddenParameters    []string
+	Variants               []RuntimeOperationVariantContract
 	Rules                  []string
 }
 
@@ -102,6 +277,11 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 			RequireOneOfParameters: []string{"targetRef", "path"},
 			RequireTargetRefs:      true,
 			ForbiddenParameters:    []string{"filePath", "fileContent", "targetRefs"},
+			Variants: []RuntimeOperationVariantContract{
+				{ID: "file_write", Discriminators: []RuntimeOperationParameterPredicate{{Name: "patchType", EqualsString: "file_write"}}, RequiredParameters: []string{"content"}, ForbiddenParameters: []string{"diff", "oldText", "newText", "occurrence"}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
+				{ID: "text_replace", Discriminators: []RuntimeOperationParameterPredicate{{Name: "patchType", EqualsString: "text_replace"}}, RequiredParameters: []string{"oldText", "newText"}, RequiredNonEmpty: []string{"oldText"}, ForbiddenParameters: []string{"content", "diff"}, DistinctParameterPairs: []RuntimeOperationParameterPair{{Left: "oldText", Right: "newText"}}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
+				{ID: "unified_diff", Discriminators: []RuntimeOperationParameterPredicate{{Name: "patchType", EqualsString: "unified_diff"}}, RequiredParameters: []string{"diff"}, RequiredNonEmpty: []string{"diff"}, ForbiddenParameters: []string{"content", "oldText", "newText", "occurrence"}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
+			},
 			Rules: []string{
 				"file_write must provide content",
 				"text_replace must provide non-empty oldText and a distinct newText",
@@ -113,6 +293,9 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 	case RuntimeBlockKindPatchPreview:
 		contract, _ := RuntimeOperationContractForKind(RuntimeBlockKindPatchApply)
 		contract.Kind = RuntimeBlockKindPatchPreview
+		for idx := range contract.Variants {
+			contract.Variants[idx].EffectScope = RuntimeEffectNone
+		}
 		return contract, true
 	case StepKindShellCommand, RuntimeBlockKindManagedValidationSession:
 		return RuntimeOperationContract{
@@ -138,7 +321,7 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 			},
 		}, true
 	case StepKindGitRead, StepKindGitWrite:
-		return RuntimeOperationContract{
+		contract := RuntimeOperationContract{
 			Kind: CanonicalRuntimeBlockKind(kind),
 			Parameters: []RuntimeOperationParameterContract{
 				{Name: "operation", Type: RuntimeOperationParameterTypeString, Required: true, Description: "git sub-operation"},
@@ -156,7 +339,23 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				"git/write accepts init, add, or commit",
 				"add requires pathspecs and commit requires message",
 			},
-		}, true
+		}
+		if contract.Kind == StepKindGitRead {
+			contract.Variants = []RuntimeOperationVariantContract{
+				{ID: "status", Discriminators: []RuntimeOperationParameterPredicate{{Name: "operation", EqualsString: "status"}}, ForbiddenParameters: []string{"ref", "baseRef", "limit", "message", "expectedHead"}, EffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
+				{ID: "diff", Discriminators: []RuntimeOperationParameterPredicate{{Name: "operation", EqualsString: "diff"}}, ForbiddenParameters: []string{"limit", "message", "expectedHead"}, EffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
+				{ID: "log", Discriminators: []RuntimeOperationParameterPredicate{{Name: "operation", EqualsString: "log"}}, ForbiddenParameters: []string{"baseRef", "message", "expectedHead"}, EffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
+				{ID: "show", Discriminators: []RuntimeOperationParameterPredicate{{Name: "operation", EqualsString: "show"}}, ForbiddenParameters: []string{"baseRef", "limit", "message", "expectedHead"}, EffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
+				{ID: "branch", Discriminators: []RuntimeOperationParameterPredicate{{Name: "operation", EqualsString: "branch"}}, ForbiddenParameters: []string{"pathspecs", "ref", "baseRef", "limit", "message", "expectedHead"}, EffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
+			}
+		} else {
+			contract.Variants = []RuntimeOperationVariantContract{
+				{ID: "init", Discriminators: []RuntimeOperationParameterPredicate{{Name: "operation", EqualsString: "init"}}, ForbiddenParameters: []string{"pathspecs", "message", "ref", "baseRef", "limit", "expectedHead"}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyOwnerManaged},
+				{ID: "add", Discriminators: []RuntimeOperationParameterPredicate{{Name: "operation", EqualsString: "add"}}, RequiredParameters: []string{"pathspecs"}, RequiredNonEmpty: []string{"pathspecs"}, ForbiddenParameters: []string{"message", "ref", "baseRef", "limit", "expectedHead"}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
+				{ID: "commit", Discriminators: []RuntimeOperationParameterPredicate{{Name: "operation", EqualsString: "commit"}}, RequiredParameters: []string{"message"}, RequiredNonEmpty: []string{"message"}, ForbiddenParameters: []string{"pathspecs", "ref", "baseRef", "limit"}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce},
+			}
+		}
+		return contract, true
 	case StepKindMCPToolCall, StepKindMCPResourceRead, StepKindMCPPromptGet:
 		return RuntimeOperationContract{
 			Kind: CanonicalRuntimeBlockKind(kind),
@@ -220,6 +419,7 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 
 func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 	operation = operation.Normalized()
+	operation.Kind = CanonicalRuntimeBlockKind(operation.Kind)
 	contract, known := RuntimeOperationContractForKind(operation.Kind)
 	if !known {
 		return nil
@@ -248,6 +448,15 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 			if _, ok := values[parameter.Name]; !ok {
 				return fmt.Errorf("kind %q requires parameter %q", operation.Kind, parameter.Name)
 			}
+		}
+	}
+	if len(contract.Variants) > 0 {
+		variant, err := MatchRuntimeOperationVariant(operation, contract)
+		if err != nil {
+			return err
+		}
+		if err := ValidateRuntimeOperationVariant(operation, variant); err != nil {
+			return err
 		}
 	}
 	switch operation.Kind {
@@ -307,27 +516,8 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 		} else if path != "" && path != targetRef {
 			return fmt.Errorf("kind %q targetRef and path must identify the same target", operation.Kind)
 		}
-		patchType := parameterString(values["patchType"])
 		if targetRef == "" || !containsString(operation.TargetRefs, targetRef) {
 			return fmt.Errorf("kind %q targetRefs must contain targetRef %q", operation.Kind, targetRef)
-		}
-		switch patchType {
-		case "file_write":
-			if _, ok := values["content"]; !ok {
-				return fmt.Errorf("kind %q file_write requires content", operation.Kind)
-			}
-		case "text_replace":
-			oldText := parameterRawString(values["oldText"])
-			newText, newTextPresent := values["newText"]
-			if oldText == "" || !newTextPresent || oldText == parameterRawString(newText) {
-				return fmt.Errorf("kind %q text_replace requires non-empty oldText and a distinct newText", operation.Kind)
-			}
-		case "unified_diff":
-			if parameterRawString(values["diff"]) == "" {
-				return fmt.Errorf("kind %q unified_diff requires diff", operation.Kind)
-			}
-		default:
-			return fmt.Errorf("kind %q patchType %q is unsupported", operation.Kind, patchType)
 		}
 		if occurrence, ok := parameterInteger(values["occurrence"]); ok && occurrence <= 0 {
 			return fmt.Errorf("kind %q occurrence must be positive", operation.Kind)
@@ -347,36 +537,11 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 			return fmt.Errorf("kind %q state-changing command requires target refs", operation.Kind)
 		}
 	case StepKindGitRead, StepKindGitWrite:
-		subOperation := strings.ToLower(parameterString(values["operation"]))
 		if timeout, ok := parameterInteger(values["timeoutMillis"]); ok && (timeout < 1000 || timeout > 600000) {
 			return fmt.Errorf("kind %q timeoutMillis must be between 1000 and 600000", operation.Kind)
 		}
 		if limit, ok := parameterInteger(values["limit"]); ok && limit <= 0 {
 			return fmt.Errorf("kind %q limit must be positive", operation.Kind)
-		}
-		if operation.Kind == StepKindGitRead {
-			switch subOperation {
-			case "status", "diff", "log", "show", "branch":
-			default:
-				return fmt.Errorf("kind %q does not accept git operation %q", operation.Kind, subOperation)
-			}
-		} else {
-			switch subOperation {
-			case "init":
-			case "add":
-				if len(values["pathspecs"].StringList) == 0 {
-					return fmt.Errorf("kind %q add requires pathspecs", operation.Kind)
-				}
-			case "commit":
-				if parameterString(values["message"]) == "" {
-					return fmt.Errorf("kind %q commit requires message", operation.Kind)
-				}
-				if len(values["pathspecs"].StringList) > 0 {
-					return fmt.Errorf("kind %q commit does not accept pathspecs", operation.Kind)
-				}
-			default:
-				return fmt.Errorf("kind %q does not accept git operation %q", operation.Kind, subOperation)
-			}
 		}
 	case StepKindMCPToolCall, StepKindMCPResourceRead, StepKindMCPPromptGet:
 		if parameterString(values["serverId"]) == "" {
@@ -426,6 +591,118 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 		}
 	}
 	return nil
+}
+
+// MatchRuntimeOperationVariant returns the one descriptor variant selected by a
+// concrete operation. Kinds without variants intentionally return an empty
+// variant and nil error so existing non-discriminated descriptors remain valid.
+func MatchRuntimeOperationVariant(operation RuntimeOperation, contract RuntimeOperationContract) (RuntimeOperationVariantContract, error) {
+	operation = operation.Normalized()
+	operation.Kind = CanonicalRuntimeBlockKind(operation.Kind)
+	if operation.Kind == "" || CanonicalRuntimeBlockKind(contract.Kind) != operation.Kind {
+		return RuntimeOperationVariantContract{}, fmt.Errorf("operation kind %q does not match variant contract kind %q", operation.Kind, contract.Kind)
+	}
+	if len(contract.Variants) == 0 {
+		return RuntimeOperationVariantContract{}, nil
+	}
+	values := operationParameterValues(operation.Parameters)
+	matches := make([]RuntimeOperationVariantContract, 0, 1)
+	for _, variant := range contract.Variants {
+		if runtimeOperationVariantMatches(values, variant) {
+			matches = append(matches, variant)
+		}
+	}
+	if len(matches) == 0 {
+		return RuntimeOperationVariantContract{}, fmt.Errorf("operation variant rule %q: kind %q does not match an operation variant", RuntimeOperationVariantRuleID(operation.Kind, "match", "no_match", ""), operation.Kind)
+	}
+	if len(matches) != 1 {
+		return RuntimeOperationVariantContract{}, fmt.Errorf("operation variant rule %q: kind %q matches multiple operation variants", RuntimeOperationVariantRuleID(operation.Kind, "match", "multiple", ""), operation.Kind)
+	}
+	return matches[0], nil
+}
+
+// ValidateRuntimeOperationVariant validates the generic executable rules of a
+// matched variant. Domain-specific execution still belongs to the concrete
+// owner, but parameter shape rules must not be duplicated there.
+func ValidateRuntimeOperationVariant(operation RuntimeOperation, variant RuntimeOperationVariantContract) error {
+	operation = operation.Normalized()
+	values := operationParameterValues(operation.Parameters)
+	variantID := strings.TrimSpace(variant.ID)
+	if variantID == "" {
+		return nil
+	}
+	for _, name := range variant.RequiredParameters {
+		name = strings.TrimSpace(name)
+		if _, ok := values[name]; !ok {
+			return fmt.Errorf("operation variant rule %q: kind %q variant %q requires parameter %q", RuntimeOperationVariantRuleID(operation.Kind, variantID, "required", name), operation.Kind, variantID, name)
+		}
+	}
+	for _, name := range variant.RequiredNonEmpty {
+		name = strings.TrimSpace(name)
+		value, ok := values[name]
+		if !ok || !operationParameterHasValue(value) {
+			return fmt.Errorf("operation variant rule %q: kind %q variant %q requires non-empty parameter %q", RuntimeOperationVariantRuleID(operation.Kind, variantID, "required_non_empty", name), operation.Kind, variantID, name)
+		}
+	}
+	for _, name := range variant.ForbiddenParameters {
+		name = strings.TrimSpace(name)
+		if _, ok := values[name]; ok {
+			return fmt.Errorf("operation variant rule %q: kind %q variant %q forbids parameter %q", RuntimeOperationVariantRuleID(operation.Kind, variantID, "forbidden", name), operation.Kind, variantID, name)
+		}
+	}
+	for _, pair := range variant.DistinctParameterPairs {
+		left, leftOK := values[strings.TrimSpace(pair.Left)]
+		right, rightOK := values[strings.TrimSpace(pair.Right)]
+		if leftOK && rightOK && operationParameterRawValue(left) == operationParameterRawValue(right) {
+			return fmt.Errorf("operation variant rule %q: kind %q variant %q requires distinct parameters %q and %q", RuntimeOperationVariantRuleID(operation.Kind, variantID, "distinct", strings.TrimSpace(pair.Left)+"-"+strings.TrimSpace(pair.Right)), operation.Kind, variantID, pair.Left, pair.Right)
+		}
+	}
+	return nil
+}
+
+func operationParameterValues(parameters []OperationParameter) map[string]OperationParameter {
+	values := make(map[string]OperationParameter, len(parameters))
+	for _, parameter := range parameters {
+		values[strings.TrimSpace(parameter.Name)] = parameter
+	}
+	return values
+}
+
+func runtimeOperationVariantMatches(values map[string]OperationParameter, variant RuntimeOperationVariantContract) bool {
+	if strings.TrimSpace(variant.ID) == "" || len(variant.Discriminators) == 0 {
+		return false
+	}
+	for _, predicate := range variant.Discriminators {
+		value, ok := values[strings.TrimSpace(predicate.Name)]
+		if !ok || value.String == nil || !strings.EqualFold(strings.TrimSpace(*value.String), strings.TrimSpace(predicate.EqualsString)) {
+			return false
+		}
+	}
+	return true
+}
+
+func operationParameterHasValue(value OperationParameter) bool {
+	switch {
+	case value.String != nil:
+		return strings.TrimSpace(*value.String) != ""
+	case value.Integer != nil, value.Boolean != nil:
+		return true
+	default:
+		return len(value.StringList) > 0
+	}
+}
+
+func operationParameterRawValue(value OperationParameter) string {
+	switch {
+	case value.String != nil:
+		return *value.String
+	case value.Integer != nil:
+		return fmt.Sprintf("%d", *value.Integer)
+	case value.Boolean != nil:
+		return fmt.Sprintf("%t", *value.Boolean)
+	default:
+		return strings.Join(value.StringList, "\x00")
+	}
 }
 
 // RuntimeOperationRequiresCurrentTargetSnapshot reports whether an operation's

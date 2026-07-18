@@ -192,16 +192,27 @@ func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecont
 	base.State = runtimecontract.ConvergenceStateNeedStateChange
 	base.Action = runtimecontract.RuntimeActionProduceStateChange
 	base.RequiredOutput = runtimecontract.RequiredOutputContract{
-		Kind:                  runtimecontract.RequiredOutputKindStateChange,
-		AcceptedKinds:         acceptedKinds,
-		AcceptedOperations:    facts.Focus.AcceptedOperations,
-		AcceptedEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
-		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
-		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
-		CoverageWorkItemIDs:   facts.Focus.CoverageWorkItemIDs,
-		TargetRefs:            facts.Focus.TargetRefs,
+		Kind:                      runtimecontract.RequiredOutputKindStateChange,
+		AcceptedKinds:             acceptedKinds,
+		AcceptedOperationVariants: facts.Focus.AcceptedOperationVariants,
+		AcceptedEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
+		RequiredEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
+		RequiredEvidenceKinds:     []string{runtimecontract.EvidenceKindStateChange},
+		CoverageWorkItemIDs:       facts.Focus.CoverageWorkItemIDs,
+		TargetRefs:                facts.Focus.TargetRefs,
+		RequiredOperationSequence: requiredCapabilityStateSequence(facts),
 	}
 	return base, nil
+}
+
+func requiredCapabilityStateSequence(facts runtimecontract.RuntimeFacts) []runtimecontract.RuntimeRequiredOperationVariant {
+	ret := []runtimecontract.RuntimeRequiredOperationVariant{}
+	for _, snapshot := range facts.Resources.CapabilityStates {
+		if snapshot.Disposition == runtimecontract.RuntimeCapabilityStateSequenceRequired {
+			ret = append(ret, snapshot.RequiredOperationSequence...)
+		}
+	}
+	return ret
 }
 
 func validationDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision, error) {
@@ -215,14 +226,14 @@ func validationDecision(base runtimecontract.RuntimeDecision, facts runtimecontr
 	base.State = runtimecontract.ConvergenceStateNeedValidation
 	base.Action = runtimecontract.RuntimeActionProduceValidation
 	base.RequiredOutput = runtimecontract.RequiredOutputContract{
-		Kind:                  runtimecontract.RequiredOutputKindValidation,
-		AcceptedKinds:         acceptedKinds,
-		AcceptedOperations:    facts.Focus.AcceptedOperations,
-		AcceptedEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession},
-		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
-		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
-		CoverageWorkItemIDs:   facts.Focus.CoverageWorkItemIDs,
-		TargetRefs:            facts.Focus.TargetRefs,
+		Kind:                      runtimecontract.RequiredOutputKindValidation,
+		AcceptedKinds:             acceptedKinds,
+		AcceptedOperationVariants: facts.Focus.AcceptedOperationVariants,
+		AcceptedEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession},
+		RequiredEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
+		RequiredEvidenceKinds:     []string{runtimecontract.EvidenceKindValidation},
+		CoverageWorkItemIDs:       facts.Focus.CoverageWorkItemIDs,
+		TargetRefs:                facts.Focus.TargetRefs,
 	}
 	return base, nil
 }

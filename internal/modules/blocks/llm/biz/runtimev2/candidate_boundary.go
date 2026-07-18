@@ -326,12 +326,13 @@ type operationCandidateDTO struct {
 }
 
 type operationDTO struct {
-	ID                  string                      `json:"id"`
-	Kind                string                      `json:"kind"`
-	DependsOn           []string                    `json:"dependsOn,omitempty"`
-	CoverageWorkItemIDs []common.CoverageWorkItemID `json:"coverageWorkItemIds,omitempty"`
-	TargetRefs          []string                    `json:"targetRefs,omitempty"`
-	Parameters          []operationParameterDTO     `json:"parameters,omitempty"`
+	ID                   string                      `json:"id"`
+	Kind                 string                      `json:"kind"`
+	RequiredOperationRef string                      `json:"requiredOperationRef,omitempty"`
+	DependsOn            []string                    `json:"dependsOn,omitempty"`
+	CoverageWorkItemIDs  []common.CoverageWorkItemID `json:"coverageWorkItemIds,omitempty"`
+	TargetRefs           []string                    `json:"targetRefs,omitempty"`
+	Parameters           []operationParameterDTO     `json:"parameters,omitempty"`
 }
 
 type operationParameterDTO struct {
@@ -376,7 +377,8 @@ func (d operationCandidateDTO) runtimeOperations() ([]runtimecontract.RuntimeOpe
 			})
 		}
 		ret = append(ret, runtimecontract.RuntimeOperation{
-			ID: value.ID, Kind: value.Kind, DependsOn: value.DependsOn, CoverageWorkItemIDs: value.CoverageWorkItemIDs, TargetRefs: value.TargetRefs, Parameters: parameters,
+			ID: value.ID, Kind: value.Kind, RequiredOperationRef: value.RequiredOperationRef, DependsOn: value.DependsOn,
+			CoverageWorkItemIDs: value.CoverageWorkItemIDs, TargetRefs: value.TargetRefs, Parameters: parameters,
 		})
 	}
 	return ret, nil

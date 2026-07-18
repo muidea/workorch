@@ -26,6 +26,7 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 	writeHashString(h, definition.DoDDefinition)
 	writeHashStrings(h, definition.CapabilityContract)
 	writeRuntimeDefinitionChangeImpactHash(h, definition.ChangeImpact)
+	writeHashString(h, execution.OperationContractRevision)
 	writeHashString(h, string(execution.StateChangePolicy))
 	writeHashString(h, fmt.Sprintf("%d", execution.MaxRepairAttemptsPerFocus))
 	writeHashString(h, fmt.Sprintf("%d", len(execution.CapabilityUsagePolicies)))
@@ -87,7 +88,10 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 			writeHashString(h, fmt.Sprintf("%t", requirement.RequireExecutableBehaviorEvidence))
 			writeHashString(h, fmt.Sprintf("%t", requirement.RequireCoverageTargets))
 			writeHashStrings(h, requirement.AcceptedStepKinds)
-			writeHashStrings(h, requirement.AcceptedOperations)
+			for _, variant := range requirement.AcceptedOperationVariants {
+				writeHashString(h, variant.Kind)
+				writeHashString(h, variant.VariantID)
+			}
 			writeHashStrings(h, requirement.RejectedStepKinds)
 			writeHashString(h, requirement.Description)
 		}

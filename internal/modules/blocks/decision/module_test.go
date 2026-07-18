@@ -912,6 +912,7 @@ func TestRuntimeGovernanceResolutionDoesNotResolveTicketBeforeAggregateCommit(t 
 		WorkspaceID:  "ws-runtime-commit-order",
 		RunID:        "run-runtime-commit-order",
 		StepID:       "runtime-v2/dispatch-1",
+		DecisionKind: "runtime_v2_governance",
 		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
 		Payload:      mustDecisionEventPayload(t, map[string]any{"summary": "provider is ready"}),
 	})

@@ -186,9 +186,17 @@ def detail_snapshot(ws, label, body):
     write_json(f"final-detail-{label}.json", detail)
     return detail
 
-def operation_receipt_errors(detail):
+def acceptance_from_detail(detail):
     observed = detail.get("observability") or {}
-    operations = (observed.get("observability") or {}).get("acceptance", {}).get("operations") or []
+    root = observed.get("observability") or {}
+    acceptance = root.get("acceptance") or {}
+    if acceptance:
+        return acceptance
+    snap = detail.get("snapshot") or {}
+    return snap.get("acceptance") or {}
+
+def operation_receipt_errors(detail):
+    operations = acceptance_from_detail(detail).get("operations") or []
     seen = set()
     errors = []
     for operation in operations:
@@ -200,12 +208,91 @@ def operation_receipt_errors(detail):
             errors.append(f"operation {operation.get('operationId')} has outcome_unknown")
     return errors
 
+def terminal_convergence_errors(detail):
+    acceptance = acceptance_from_detail(detail)
+    summary = acceptance.get("summary") or {}
+    operations = acceptance.get("operations") or []
+    errors = []
+    if int(summary.get("acceptedSlices") or 0) != 2:
+        errors.append(f"acceptedSlices={summary.get('acceptedSlices')}, want 2")
+    durable = any(
+        item.get("outcome") == "accepted" and item.get("observedEffectScope") in ("workspace_durable", "remote_durable")
+        for item in operations
+    )
+    if not durable:
+        errors.append("no accepted durable owner receipt")
+    return errors
+
+def bounded_git_sequence_errors(detail):
+    operations = acceptance_from_detail(detail).get("operations") or []
+    expected = {"init", "add", "commit"}
+    matched = [
+        item for item in operations
+        if item.get("kind") == "git/write" and item.get("variantId") in expected
+    ]
+    errors = []
+    found = {variant: [] for variant in expected}
+    for item in matched:
+        found[item.get("variantId")].append(item)
+    for variant in sorted(expected):
+        values = found[variant]
+        if len(values) != 1:
+            errors.append(f"git sequence variant {variant} count={len(values)}, want 1")
+            continue
+        if not values[0].get("requiredOperationRef"):
+            errors.append(f"git sequence variant {variant} lacks requiredOperationRef")
+    hashes = {item.get("capabilityStateHash") for item in matched if item.get("capabilityStateHash")}
+    if len(hashes) != 1:
+        errors.append(f"git sequence capabilityStateHash set={sorted(hashes)}, want exactly one non-empty sealed snapshot hash")
+    return errors
+
+def governance_binding_errors(detail):
+    snap = detail.get("snapshot") or {}
+    run = snap.get("run") or {}
+    task = snap.get("taskProgress") or {}
+    ticket_id = run.get("blockingTicketId") or task.get("blockingTicketId")
+    if not ticket_id:
+        return []
+    governance = acceptance_from_detail(detail).get("governance") or []
+    binding = next((item for item in governance if item.get("ticketId") == ticket_id), None)
+    if binding is None:
+        return [f"blocking ticket {ticket_id} has no Runtime V2 aggregate governance binding"]
+    decisions = (detail.get("governance") or {}).get("decisions") or []
+    decision = next((item for item in decisions if item.get("id") == ticket_id), None)
+    if decision is None:
+        return [f"blocking ticket {ticket_id} is absent from workspace governance projection"]
+    state = (decision.get("state") or "").lower()
+    if state in ("resolved", "completed"):
+        if not binding.get("resolutionId"):
+            return [f"ticket {ticket_id} is resolved but aggregate has no matching Runtime V2 resolution"]
+        decision_resolution = decision.get("resolutionId")
+        if decision_resolution and decision_resolution != binding.get("resolutionId"):
+            return [f"ticket {ticket_id} resolution mismatch decision={decision_resolution} aggregate={binding.get('resolutionId')}"]
+    return []
+
 initial_bodies = {}
 baseline = {}
+capability_state_observations = {ws_a: [], ws_b: []}
+
+def observe_capability_states(ws, body):
+    snap = body.get("snapshot") or body
+    acceptance = snap.get("acceptance") or {}
+    states = acceptance.get("capabilityStates") or []
+    for item in states:
+        value = {
+            "snapshotId": item.get("snapshotId"),
+            "requirementId": item.get("requirementId"),
+            "disposition": item.get("disposition"),
+            "requiredOperationSequence": item.get("requiredOperationSequence") or [],
+        }
+        if value not in capability_state_observations[ws]:
+            capability_state_observations[ws].append(value)
+
 for ws, label in ((ws_a, "a"), (ws_b, "b")):
     body = snapshot(ws)
     initial_bodies[ws] = body
     baseline[ws] = summarize(ws, body)
+    observe_capability_states(ws, body)
     write_json(f"fixture-preflight-{label}.json", {
         "summary": baseline[ws],
         "acceptanceBounds": acceptance_bounds(body),
@@ -215,6 +302,8 @@ if mode == "terminal":
     fixture_errors = []
     for ws, label in ((ws_a, "a"), (ws_b, "b")):
         bounds = acceptance_bounds(initial_bodies[ws])
+        if not do_activate and bounds["focusCount"] != 2:
+            fixture_errors.append(f"{label}: focusCount={bounds['focusCount']} must equal 2 for the bounded dual-focus terminal gate")
         if bounds["focusCount"] > 2:
             fixture_errors.append(f"{label}: focusCount={bounds['focusCount']} exceeds terminal fixture limit 2")
         if bounds["maxCoverageItemsPerFocus"] > 4:
@@ -256,6 +345,42 @@ if do_activate:
     activate_workspace(ws_a, "a")
     activate_workspace(ws_b, "b")
 
+# A workspace has no authoritative focus slices until its fresh Runtime V2 Run
+# is activated.  Recheck the bound after activation so terminal mode cannot
+# accidentally accept an uncompiled or oversized fixture merely because its
+# pre-activation snapshot had no slices yet.
+if mode == "terminal" and do_activate:
+    activated_fixture_errors = []
+    activated_bodies = {}
+    for ws, label in ((ws_a, "a"), (ws_b, "b")):
+        # Activation schedules the Run asynchronously.  Wait only for the
+        # authoritative acceptance slices to appear; this is a fixture
+        # compilation preflight, not part of the 180-second terminal SLA.
+        preflight_deadline = time.time() + min(30.0, max(5.0, timeout))
+        body = snapshot(ws)
+        while acceptance_bounds(body)["focusCount"] == 0 and time.time() < preflight_deadline:
+            time.sleep(min(poll, 1.0))
+            body = snapshot(ws)
+        observe_capability_states(ws, body)
+        activated_bodies[ws] = body
+        bounds = acceptance_bounds(body)
+        write_json(f"fixture-preflight-activated-{label}.json", {
+            "summary": summarize(ws, body),
+            "acceptanceBounds": bounds,
+        })
+        if bounds["focusCount"] != 2:
+            activated_fixture_errors.append(f"{label}: focusCount={bounds['focusCount']} after activation, want exactly 2 for the bounded dual-focus gate")
+        if bounds["maxCoverageItemsPerFocus"] > 4:
+            activated_fixture_errors.append(f"{label}: maxCoverageItemsPerFocus={bounds['maxCoverageItemsPerFocus']} exceeds terminal fixture limit 4 after activation")
+    if activated_fixture_errors:
+        write_json("summary.json", {
+            "mode": mode,
+            "baseline": baseline,
+            "errors": activated_fixture_errors,
+            "reason": "activated terminal fixtures must expose exactly two bounded focus slices",
+        })
+        raise SystemExit("terminal fixture activated preflight failed: " + "; ".join(activated_fixture_errors))
+
 deadline = time.time() + timeout
 results = {}
 last = {}
@@ -264,6 +389,7 @@ while time.time() < deadline:
     terminal = mode == "terminal"
     for ws, label in ((ws_a, "a"), (ws_b, "b")):
         body = snapshot(ws)
+        observe_capability_states(ws, body)
         s = summarize(ws, body)
         last[ws] = s
         with open(os.path.join(artifact_dir, f"progress-{label}.json"), "w") as f:
@@ -309,6 +435,7 @@ for ws, label in ((ws_a, "a"), (ws_b, "b")):
     s = summarize(ws, body)
     results[ws] = s
     errors.extend(f"{label}: {value}" for value in operation_receipt_errors(detail))
+    errors.extend(f"{label}: {value}" for value in governance_binding_errors(detail))
     if (s.get("projectionState") or "ready") not in ("ready", "ok", ""):
         errors.append(f"{label}: projectionState={s.get('projectionState')}")
     if mode == "terminal":
@@ -325,6 +452,9 @@ for ws, label in ((ws_a, "a"), (ws_b, "b")):
             errors.append(f"{label}: llmUsageSummary empty")
         if s.get("runState") == "completed" and s.get("action") not in ("complete", None, ""):
             errors.append(f"{label}: expected action=complete got {s.get('action')}")
+        errors.extend(f"{label}: {value}" for value in terminal_convergence_errors(detail))
+        if label == "a":
+            errors.extend(f"{label}: {value}" for value in bounded_git_sequence_errors(detail))
     else:
         before = baseline[ws]
         terminal_states = ("completed", "failed", "cancelled", "superseded")
@@ -334,7 +464,7 @@ for ws, label in ((ws_a, "a"), (ws_b, "b")):
             continue
         legal_wait_states = ("blocked_on_decision", "blocked_on_approval")
         effective_progress = (
-            s.get("acceptedEvidence", 0) > before.get("acceptedEvidence", 0) or
+            int(s.get("acceptedEvidence") or 0) > int(before.get("acceptedEvidence") or 0) or
             s.get("focusId") != before.get("focusId") or
             (s.get("runState") != before.get("runState") and s.get("runState") in terminal_states + legal_wait_states)
         )
@@ -358,6 +488,7 @@ write_json("summary.json", {
     "baseline": baseline,
     "results": results,
     "errors": errors,
+    "capabilityStateObservations": capability_state_observations,
     "projection": proj,
 })
 

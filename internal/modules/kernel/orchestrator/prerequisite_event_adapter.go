@@ -145,6 +145,31 @@ func AcquireAndCommitRuntimeCapabilitiesPrerequisite(ctx context.Context, hub ma
 	})
 }
 
+func AcquireGitCapabilityStatePrerequisite(ctx context.Context, hub magicevent.Hub, moduleID string, command orchestratorevents.AcquireGitCapabilityStateCommand) (orchestratorevents.AcquireGitCapabilityStateResult, error) {
+	if hub == nil || moduleID == "" || command.WorkspaceID == "" || command.RunID == "" || command.AuthoritySnapshotID == "" || command.PrerequisiteID == "" || command.WorkspaceDeliverableDirectory == "" || command.CapabilityStateKind == "" || command.SubjectRef == "" {
+		return orchestratorevents.AcquireGitCapabilityStateResult{}, common.ErrInvalidArgument
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorAcquireGitCapabilityState, ModuleID, moduleID, magicevent.NewHeader(), ctx, command))
+	if result == nil {
+		return orchestratorevents.AcquireGitCapabilityStateResult{}, common.ErrInvalidArgument
+	}
+	if err := prerequisiteResultError(result); err != nil {
+		return orchestratorevents.AcquireGitCapabilityStateResult{}, err
+	}
+	data, err := result.Get()
+	if err != nil {
+		return orchestratorevents.AcquireGitCapabilityStateResult{}, prerequisiteMagicError(err)
+	}
+	response, ok := data.(orchestratorevents.AcquireGitCapabilityStateResult)
+	if !ok || response.PrerequisiteID != command.PrerequisiteID {
+		return orchestratorevents.AcquireGitCapabilityStateResult{}, fmt.Errorf("git capability-state prerequisite %q returned an invalid result", command.PrerequisiteID)
+	}
+	return response, nil
+}
+
 func prerequisiteResultError(result magicevent.Result) error {
 	if err := result.Error(); err != nil {
 		return prerequisiteMagicError(err)

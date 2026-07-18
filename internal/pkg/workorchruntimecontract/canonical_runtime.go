@@ -59,7 +59,7 @@ type CoverageFocus struct {
 	TargetRefs                        []string
 	EvidenceRole                      string
 	AcceptedStepKinds                 []string
-	AcceptedOperations                []string
+	AcceptedOperationVariants         []RuntimeOperationVariantRef
 	RejectedStepKinds                 []string
 	RequireDirectEvidence             bool
 	RequireClaimEvidence              bool
@@ -156,6 +156,7 @@ const (
 	PrerequisiteKindTargetSnapshot    PrerequisiteKind = "target_snapshot"
 	PrerequisiteKindFailureTarget     PrerequisiteKind = "failure_target"
 	PrerequisiteKindCapability        PrerequisiteKind = "capability"
+	PrerequisiteKindCapabilityState   PrerequisiteKind = "capability_state"
 	PrerequisiteKindValidationScratch PrerequisiteKind = "validation_scratch"
 	PrerequisiteKindProviderCeiling   PrerequisiteKind = "provider_ceiling"
 )
@@ -167,6 +168,7 @@ type RuntimePrerequisite struct {
 	SubjectRef           string
 	CapabilityClass      RuntimeCapabilityClass
 	RequiredCapabilities []string
+	CapabilityStateKind  string
 	MinimumBytes         int
 	Reason               string
 }
@@ -177,6 +179,7 @@ type RuntimeRequirement struct {
 	SubjectRef           string
 	CapabilityClass      RuntimeCapabilityClass
 	RequiredCapabilities []string
+	CapabilityStateKind  string
 	MinimumBytes         int
 	Reason               string
 }
@@ -241,6 +244,60 @@ type RuntimeResourceFacts struct {
 	FailureTarget     *FailureTarget
 	ValidationScratch *ValidationScratch
 	ProviderCeiling   *ProviderCeiling
+	CapabilityStates  []RuntimeCapabilityStateSnapshot
+}
+
+type RuntimeCapabilityStateDisposition string
+
+const (
+	RuntimeCapabilityStateReady            RuntimeCapabilityStateDisposition = "ready"
+	RuntimeCapabilityStateSequenceRequired RuntimeCapabilityStateDisposition = "operation_sequence_required"
+	RuntimeCapabilityStateGovernance       RuntimeCapabilityStateDisposition = "governance_required"
+	RuntimeCapabilityStateUnavailable      RuntimeCapabilityStateDisposition = "unavailable"
+	RuntimeCapabilityStateUnknown          RuntimeCapabilityStateDisposition = "unknown"
+)
+
+type RuntimeRequiredOperationVariant struct {
+	RequirementID           string
+	Kind                    string
+	VariantID               string
+	DependsOnRequirementIDs []string
+	Reason                  string
+}
+
+type RuntimeCapabilityStateSnapshot struct {
+	RequirementID             string
+	SnapshotID                string
+	AcquisitionKey            string
+	OwnerModuleID             string
+	CapabilityStateKind       string
+	SubjectRef                string
+	ObservedRevision          string
+	ContentHash               string
+	Disposition               RuntimeCapabilityStateDisposition
+	RequiredOperationSequence []RuntimeRequiredOperationVariant
+	QueryReceiptRef           string
+	ObservedAt                string
+	InvalidatedByReceiptRefs  []string
+}
+
+// RuntimeCapabilityStateRef is the owner-neutral identity of one observed
+// capability state. It is the only identity used for invalidation.
+type RuntimeCapabilityStateRef struct {
+	OwnerModuleID       string
+	CapabilityStateKind string
+	SubjectRef          string
+}
+
+// RuntimeCapabilityStateStaleDetail is an owner receipt fact: a sealed state
+// observation no longer matches the state observed immediately before effect.
+type RuntimeCapabilityStateStaleDetail struct {
+	StateRef         RuntimeCapabilityStateRef
+	SnapshotID       string
+	ExpectedHash     string
+	ObservedRevision string
+	ObservedHash     string
+	Reason           string
 }
 
 type WorkspaceManifest struct {
@@ -337,31 +394,34 @@ func SameProviderCeiling(left *ProviderCeiling, right *ProviderCeiling) bool {
 }
 
 type RequiredOutputContract struct {
-	Kind               RequiredOutputKind
-	AcceptedKinds      []string
-	AcceptedOperations []string
+	Kind                      RequiredOutputKind
+	AcceptedKinds             []string
+	AcceptedOperationVariants []RuntimeOperationVariantRef
 	// AcceptedEffectScopes are the effect scopes that may appear in a sealed candidate.
 	// RequiredEffectScopes must be satisfied by at least one operation for state-change.
-	AcceptedEffectScopes  []RuntimeEffectScope
-	RequiredEffectScopes  []RuntimeEffectScope
-	RequiredEvidenceKinds []string
-	CoverageWorkItemIDs   []common.CoverageWorkItemID
-	TargetRefs            []string
-	PrerequisiteIDs       []string
+	AcceptedEffectScopes      []RuntimeEffectScope
+	RequiredEffectScopes      []RuntimeEffectScope
+	RequiredEvidenceKinds     []string
+	CoverageWorkItemIDs       []common.CoverageWorkItemID
+	TargetRefs                []string
+	PrerequisiteIDs           []string
+	RequiredOperationSequence []RuntimeRequiredOperationVariant
 }
 
 type AuthoritySnapshot struct {
-	ID                     string
-	WorkspaceID            common.WorkspaceID
-	RunID                  common.RunID
-	State                  ConvergenceState
-	Action                 RuntimeAction
-	FocusID                string
-	RequiredOutputHash     string
-	DefinitionRevision     string
-	EvidenceRevision       string
-	Attempt                int
-	RuntimeContractVersion string
+	ID                        string
+	WorkspaceID               common.WorkspaceID
+	RunID                     common.RunID
+	State                     ConvergenceState
+	Action                    RuntimeAction
+	FocusID                   string
+	RequiredOutputHash        string
+	DefinitionRevision        string
+	EvidenceRevision          string
+	CapabilityStateHash       string
+	OperationContractRevision string
+	Attempt                   int
+	RuntimeContractVersion    string
 }
 
 type TerminalOutcome struct {
@@ -380,13 +440,15 @@ type RuntimeDecision struct {
 }
 
 type AuthorityTransaction struct {
-	AuthoritySnapshotID string
-	FocusID             string
-	Action              RuntimeAction
-	RequiredOutputHash  string
-	DefinitionRevision  string
-	EvidenceRevision    string
-	Attempt             int
+	AuthoritySnapshotID       string
+	FocusID                   string
+	Action                    RuntimeAction
+	RequiredOutputHash        string
+	DefinitionRevision        string
+	EvidenceRevision          string
+	CapabilityStateHash       string
+	OperationContractRevision string
+	Attempt                   int
 }
 
 func (f RuntimeFacts) Normalized() RuntimeFacts {
@@ -456,6 +518,27 @@ func (f RuntimeFacts) Validate() error {
 	if err := f.Recovery.Validate(f.RecoveryPolicy); err != nil {
 		return fmt.Errorf("runtime facts recovery ledger: %w", err)
 	}
+	for _, snapshot := range f.Resources.CapabilityStates {
+		if snapshot.RequirementID == "" || snapshot.SnapshotID == "" || snapshot.AcquisitionKey == "" || snapshot.QueryReceiptRef == "" || snapshot.OwnerModuleID == "" || snapshot.CapabilityStateKind == "" || snapshot.SubjectRef == "" || snapshot.ObservedRevision == "" || snapshot.ContentHash == "" {
+			return fmt.Errorf("runtime capability-state snapshot requires identity, owner, subject and revision")
+		}
+		switch snapshot.Disposition {
+		case RuntimeCapabilityStateReady:
+			if len(snapshot.RequiredOperationSequence) != 0 {
+				return fmt.Errorf("ready capability-state snapshot cannot require operations")
+			}
+		case RuntimeCapabilityStateSequenceRequired:
+			if len(snapshot.RequiredOperationSequence) == 0 {
+				return fmt.Errorf("capability-state sequence disposition requires operations")
+			}
+		case RuntimeCapabilityStateGovernance, RuntimeCapabilityStateUnavailable, RuntimeCapabilityStateUnknown:
+			if len(snapshot.RequiredOperationSequence) != 0 {
+				return fmt.Errorf("non-ready capability-state snapshot cannot carry required operations")
+			}
+		default:
+			return fmt.Errorf("unknown capability-state disposition %q", snapshot.Disposition)
+		}
+	}
 	seenFocus := map[string]struct{}{f.Focus.ID: {}}
 	for _, focus := range f.RemainingFocuses {
 		if focus.ID == "" {
@@ -523,7 +606,7 @@ func (f CoverageFocus) Normalized() CoverageFocus {
 	f.TargetRefs = normalizeStrings(f.TargetRefs)
 	f.EvidenceRole = strings.TrimSpace(f.EvidenceRole)
 	f.AcceptedStepKinds = normalizeStrings(f.AcceptedStepKinds)
-	f.AcceptedOperations = normalizeStrings(f.AcceptedOperations)
+	f.AcceptedOperationVariants = NormalizeRuntimeOperationVariantRefs(f.AcceptedOperationVariants)
 	f.RejectedStepKinds = normalizeStrings(f.RejectedStepKinds)
 	return f
 }
@@ -552,25 +635,119 @@ func (r RuntimeResourceFacts) Normalized() RuntimeResourceFacts {
 		ceiling := r.ProviderCeiling.Normalized()
 		r.ProviderCeiling = &ceiling
 	}
+	r.CapabilityStates = NormalizeRuntimeCapabilityStateSnapshots(r.CapabilityStates)
 	return r
+}
+
+func NormalizeRuntimeCapabilityStateSnapshots(values []RuntimeCapabilityStateSnapshot) []RuntimeCapabilityStateSnapshot {
+	byRequirement := make(map[string]RuntimeCapabilityStateSnapshot, len(values))
+	for _, value := range values {
+		value.RequirementID = strings.TrimSpace(value.RequirementID)
+		value.SnapshotID = strings.TrimSpace(value.SnapshotID)
+		value.AcquisitionKey = strings.TrimSpace(value.AcquisitionKey)
+		value.OwnerModuleID = strings.TrimSpace(value.OwnerModuleID)
+		value.CapabilityStateKind = strings.TrimSpace(value.CapabilityStateKind)
+		value.SubjectRef = strings.TrimSpace(value.SubjectRef)
+		value.ObservedRevision = strings.TrimSpace(value.ObservedRevision)
+		value.ContentHash = strings.TrimSpace(value.ContentHash)
+		value.ObservedAt = strings.TrimSpace(value.ObservedAt)
+		value.QueryReceiptRef = strings.TrimSpace(value.QueryReceiptRef)
+		value.InvalidatedByReceiptRefs = normalizeStrings(value.InvalidatedByReceiptRefs)
+		value.Disposition = RuntimeCapabilityStateDisposition(strings.TrimSpace(string(value.Disposition)))
+		value.RequiredOperationSequence = normalizeRequiredOperationVariants(value.RequiredOperationSequence)
+		if value.RequirementID != "" {
+			byRequirement[value.RequirementID] = value
+		}
+	}
+	keys := make([]string, 0, len(byRequirement))
+	for key := range byRequirement {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	ret := make([]RuntimeCapabilityStateSnapshot, 0, len(keys))
+	for _, key := range keys {
+		ret = append(ret, byRequirement[key])
+	}
+	return nilIfEmpty(ret)
+}
+
+func StableRuntimeCapabilityStateHash(values []RuntimeCapabilityStateSnapshot) string {
+	values = NormalizeRuntimeCapabilityStateSnapshots(values)
+	h := sha256.New()
+	for _, value := range values {
+		writeHashString(h, value.RequirementID)
+		writeHashString(h, value.SnapshotID)
+		writeHashString(h, value.AcquisitionKey)
+		writeHashString(h, value.OwnerModuleID)
+		writeHashString(h, value.CapabilityStateKind)
+		writeHashString(h, value.SubjectRef)
+		writeHashString(h, value.ObservedRevision)
+		writeHashString(h, value.ContentHash)
+		writeHashString(h, string(value.Disposition))
+		writeHashString(h, value.QueryReceiptRef)
+		for _, required := range value.RequiredOperationSequence {
+			writeHashString(h, required.RequirementID)
+			writeHashString(h, required.Kind)
+			writeHashString(h, required.VariantID)
+			writeHashStrings(h, required.DependsOnRequirementIDs)
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func StableRuntimeCapabilityStateSnapshotID(value RuntimeCapabilityStateSnapshot) string {
+	value = NormalizeRuntimeCapabilityStateSnapshots([]RuntimeCapabilityStateSnapshot{value})[0]
+	h := sha256.New()
+	writeHashString(h, value.AcquisitionKey)
+	writeHashString(h, value.OwnerModuleID)
+	writeHashString(h, value.CapabilityStateKind)
+	writeHashString(h, value.SubjectRef)
+	writeHashString(h, value.ObservedRevision)
+	writeHashString(h, value.ContentHash)
+	return "capability-state-" + hex.EncodeToString(h.Sum(nil))[:20]
+}
+
+func normalizeRequiredOperationVariants(values []RuntimeRequiredOperationVariant) []RuntimeRequiredOperationVariant {
+	byID := make(map[string]RuntimeRequiredOperationVariant, len(values))
+	for _, value := range values {
+		value.RequirementID = strings.TrimSpace(value.RequirementID)
+		value.Kind = CanonicalRuntimeBlockKind(value.Kind)
+		value.VariantID = strings.TrimSpace(value.VariantID)
+		value.DependsOnRequirementIDs = normalizeStrings(value.DependsOnRequirementIDs)
+		value.Reason = strings.TrimSpace(value.Reason)
+		if value.RequirementID != "" {
+			byID[value.RequirementID] = value
+		}
+	}
+	keys := make([]string, 0, len(byID))
+	for key := range byID {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	ret := make([]RuntimeRequiredOperationVariant, 0, len(keys))
+	for _, key := range keys {
+		ret = append(ret, byID[key])
+	}
+	return nilIfEmpty(ret)
 }
 
 func (c RequiredOutputContract) Normalized() RequiredOutputContract {
 	c.AcceptedKinds = normalizeStrings(c.AcceptedKinds)
-	c.AcceptedOperations = normalizeStrings(c.AcceptedOperations)
+	c.AcceptedOperationVariants = NormalizeRuntimeOperationVariantRefs(c.AcceptedOperationVariants)
 	c.AcceptedEffectScopes = NormalizeRuntimeEffectScopes(c.AcceptedEffectScopes)
 	c.RequiredEffectScopes = NormalizeRuntimeEffectScopes(c.RequiredEffectScopes)
 	c.RequiredEvidenceKinds = normalizeStrings(c.RequiredEvidenceKinds)
 	c.CoverageWorkItemIDs = normalizeCoverageWorkItemIDs(c.CoverageWorkItemIDs)
 	c.TargetRefs = normalizeStrings(c.TargetRefs)
 	c.PrerequisiteIDs = normalizeStrings(c.PrerequisiteIDs)
+	c.RequiredOperationSequence = normalizeRequiredOperationVariants(c.RequiredOperationSequence)
 	return c
 }
 func (c RequiredOutputContract) Validate() error {
 	c = c.Normalized()
 	switch c.Kind {
 	case RequiredOutputKindNone:
-		if len(c.AcceptedKinds)+len(c.AcceptedOperations)+len(c.RequiredEvidenceKinds)+len(c.CoverageWorkItemIDs)+len(c.TargetRefs)+len(c.PrerequisiteIDs)+len(c.AcceptedEffectScopes)+len(c.RequiredEffectScopes) != 0 {
+		if len(c.AcceptedKinds)+len(c.AcceptedOperationVariants)+len(c.RequiredEvidenceKinds)+len(c.CoverageWorkItemIDs)+len(c.TargetRefs)+len(c.PrerequisiteIDs)+len(c.RequiredOperationSequence)+len(c.AcceptedEffectScopes)+len(c.RequiredEffectScopes) != 0 {
 			return fmt.Errorf("empty required output kind cannot carry output requirements")
 		}
 	case RequiredOutputKindPrerequisite:
@@ -616,7 +793,10 @@ func StableRequiredOutputHash(contract RequiredOutputContract) string {
 	h := sha256.New()
 	writeHashString(h, string(contract.Kind))
 	writeHashStrings(h, contract.AcceptedKinds)
-	writeHashStrings(h, contract.AcceptedOperations)
+	for _, variant := range contract.AcceptedOperationVariants {
+		writeHashString(h, variant.Kind)
+		writeHashString(h, variant.VariantID)
+	}
 	writeHashStrings(h, RuntimeEffectScopesAsStrings(contract.AcceptedEffectScopes))
 	writeHashStrings(h, RuntimeEffectScopesAsStrings(contract.RequiredEffectScopes))
 	writeHashStrings(h, contract.RequiredEvidenceKinds)
@@ -627,6 +807,12 @@ func StableRequiredOutputHash(contract RequiredOutputContract) string {
 	writeHashStrings(h, coverageIDs)
 	writeHashStrings(h, contract.TargetRefs)
 	writeHashStrings(h, contract.PrerequisiteIDs)
+	for _, requirement := range contract.RequiredOperationSequence {
+		writeHashString(h, requirement.RequirementID)
+		writeHashString(h, requirement.Kind)
+		writeHashString(h, requirement.VariantID)
+		writeHashStrings(h, requirement.DependsOnRequirementIDs)
+	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -646,16 +832,18 @@ func SealRuntimeDecision(facts RuntimeFacts, decision RuntimeDecision, attempt i
 	}
 	requiredOutputHash := StableRequiredOutputHash(decision.RequiredOutput)
 	decision.AuthoritySnapshot = AuthoritySnapshot{
-		WorkspaceID:            facts.WorkspaceID,
-		RunID:                  facts.RunID,
-		State:                  decision.State,
-		Action:                 decision.Action,
-		FocusID:                decision.Focus.ID,
-		RequiredOutputHash:     requiredOutputHash,
-		DefinitionRevision:     facts.DefinitionRevision,
-		EvidenceRevision:       facts.EvidenceRevision,
-		Attempt:                attempt,
-		RuntimeContractVersion: RuntimeContractVersionV2,
+		WorkspaceID:               facts.WorkspaceID,
+		RunID:                     facts.RunID,
+		State:                     decision.State,
+		Action:                    decision.Action,
+		FocusID:                   decision.Focus.ID,
+		RequiredOutputHash:        requiredOutputHash,
+		DefinitionRevision:        facts.DefinitionRevision,
+		EvidenceRevision:          facts.EvidenceRevision,
+		CapabilityStateHash:       StableRuntimeCapabilityStateHash(facts.Resources.CapabilityStates),
+		OperationContractRevision: facts.Activation.ExecutionContract.OperationContractRevision,
+		Attempt:                   attempt,
+		RuntimeContractVersion:    RuntimeContractVersionV2,
 	}
 	decision.AuthoritySnapshot.ID = stableAuthoritySnapshotID(decision.AuthoritySnapshot)
 	if err := decision.Validate(); err != nil {
@@ -701,13 +889,15 @@ func (d RuntimeDecision) Validate() error {
 func (d RuntimeDecision) AuthorityTransaction() AuthorityTransaction {
 	snapshot := d.AuthoritySnapshot
 	return AuthorityTransaction{
-		AuthoritySnapshotID: snapshot.ID,
-		FocusID:             snapshot.FocusID,
-		Action:              snapshot.Action,
-		RequiredOutputHash:  snapshot.RequiredOutputHash,
-		DefinitionRevision:  snapshot.DefinitionRevision,
-		EvidenceRevision:    snapshot.EvidenceRevision,
-		Attempt:             snapshot.Attempt,
+		AuthoritySnapshotID:       snapshot.ID,
+		FocusID:                   snapshot.FocusID,
+		Action:                    snapshot.Action,
+		RequiredOutputHash:        snapshot.RequiredOutputHash,
+		DefinitionRevision:        snapshot.DefinitionRevision,
+		EvidenceRevision:          snapshot.EvidenceRevision,
+		CapabilityStateHash:       snapshot.CapabilityStateHash,
+		OperationContractRevision: snapshot.OperationContractRevision,
+		Attempt:                   snapshot.Attempt,
 	}
 }
 
@@ -765,6 +955,8 @@ func stableAuthoritySnapshotID(snapshot AuthoritySnapshot) string {
 	writeHashString(h, snapshot.RequiredOutputHash)
 	writeHashString(h, snapshot.DefinitionRevision)
 	writeHashString(h, snapshot.EvidenceRevision)
+	writeHashString(h, snapshot.CapabilityStateHash)
+	writeHashString(h, snapshot.OperationContractRevision)
 	writeHashString(h, fmt.Sprintf("%d", snapshot.Attempt))
 	writeHashString(h, snapshot.RuntimeContractVersion)
 	return "authority-" + hex.EncodeToString(h.Sum(nil))[:20]

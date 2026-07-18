@@ -838,8 +838,18 @@
               "acceptedStepKinds": [
                 "git/write"
               ],
-              "acceptedOperations": [
-                "commit"
+              "acceptedOperationVariants": [
+                {
+                  "kind": "git/write",
+                  "variantId": "commit"
+                }
+              ],
+              "capabilityStateRequirements": [
+                {
+                  "ownerModuleId": "blocks/git",
+                  "capabilityStateKind": "repository_state",
+                  "subjectRef": "workspace_deliverable"
+                }
               ],
               "rejectedStepKinds": [
                 "file/read",

@@ -471,7 +471,12 @@ func TestNextRuntimeV2CandidateAttemptRejectsResealRunaway(t *testing.T) {
 func runtimeV2Aggregate(t *testing.T, revision uint64) runtimev2.RuntimeAggregate {
 	t.Helper()
 	facts := runtimecontract.RuntimeFacts{
-		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		Activation: runtimecontract.RuntimeActivationContext{
+			ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+			ExecutionContract: runtimecontract.RuntimeExecutionContract{
+				OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+			},
+		},
 		WorkspaceID: "ws-v2", RunID: "run-v2", DefinitionRevision: "definition-v2", EvidenceRevision: "evidence-v2-00000000000000000000",
 		Focus: runtimecontract.CoverageFocus{
 			ID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
@@ -498,7 +503,12 @@ func runtimeV2Bootstrap() runtimecontract.RuntimeBootstrap {
 	return runtimecontract.RuntimeBootstrap{
 		SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 		Definition:    runtimeV2Definition(),
-		Activation:    runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		Activation: runtimecontract.RuntimeActivationContext{
+			ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+			ExecutionContract: runtimecontract.RuntimeExecutionContract{
+				OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+			},
+		},
 		Focuses: []runtimecontract.CoverageFocus{{
 			ID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, TargetRefs: []string{"target.txt"},

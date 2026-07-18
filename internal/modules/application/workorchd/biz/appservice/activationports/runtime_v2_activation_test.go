@@ -46,7 +46,7 @@ func TestRuntimeV2ActivationContextUsesConcreteSelectionSnapshots(t *testing.T) 
 					"evidenceRequirements": []any{map[string]any{
 						"id": "version_control_snapshot", "scope": "deliverable", "evidenceRole": "supplemental_evidence",
 						"requireDirectEvidence": true, "requireClaimEvidence": true, "requireExecutableBehaviorEvidence": true, "requireCoverageTargets": true,
-						"acceptedStepKinds": []any{"git/write"}, "acceptedOperations": []any{"commit"}, "rejectedStepKinds": []any{"shell/read"},
+						"acceptedStepKinds": []any{"git/write"}, "acceptedOperationVariants": []any{map[string]any{"kind": "git/write", "variantId": "commit"}}, "rejectedStepKinds": []any{"shell/read"},
 					}},
 				},
 			},
@@ -82,7 +82,7 @@ func TestRuntimeV2ActivationContextUsesConcreteSelectionSnapshots(t *testing.T) 
 		len(profile.EvidenceRequirements) != 1 || profile.EvidenceRequirements[0].Scope != "deliverable" || !profile.EvidenceRequirements[0].RequireDirectEvidence ||
 		!profile.EvidenceRequirements[0].RequireClaimEvidence || !profile.EvidenceRequirements[0].RequireExecutableBehaviorEvidence || !profile.EvidenceRequirements[0].RequireCoverageTargets ||
 		len(profile.EvidenceRequirements[0].AcceptedStepKinds) != 1 || profile.EvidenceRequirements[0].AcceptedStepKinds[0] != "git/write" ||
-		len(profile.EvidenceRequirements[0].AcceptedOperations) != 1 || profile.EvidenceRequirements[0].AcceptedOperations[0] != "commit" ||
+		len(profile.EvidenceRequirements[0].AcceptedOperationVariants) != 1 || profile.EvidenceRequirements[0].AcceptedOperationVariants[0] != (runtimecontract.RuntimeOperationVariantRef{Kind: "git/write", VariantID: "commit"}) ||
 		len(profile.EvidenceRequirements[0].RejectedStepKinds) != 1 || profile.EvidenceRequirements[0].RejectedStepKinds[0] != "shell/read" {
 		t.Fatalf("runtime profile contract = %+v", profile)
 	}
