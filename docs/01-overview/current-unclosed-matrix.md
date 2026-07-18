@@ -26,7 +26,7 @@ Last Updated: 2026-07-18
 
 ### A. Runtime 正向收敛
 
-RVC-1 Runtime V2 正向收敛闭环：**active — code reopened by 2026-07-18 deployed Live**。RVC-R5～R15 保持为已落地 foundation；当前未关项为 RVC-R17 governance durable proposal/commit saga、RVC-R18 blocked Resume aggregate proof、RVC-R19 allowed action 全链路合同、RVC-R20 descriptor-driven candidate 参数合同、RVC-R21 typed LLM audit DTO、RVC-R22 bounded terminal gate / real-workspace liveness 分层。上述批次完成后最终重跑 RVC-R16，而不是继续把普通 Live 重试视为代码已收口证明。完整批次、依赖顺序和验收见 [remediation](../70-roadmap/active/runtime-v2-positive-convergence-remediation.md)。
+RVC-1 Runtime V2 正向收敛闭环：**active — final bounded deployed acceptance pending**。RVC-R5～R21 已落地；RVC-R22 已落实 terminal fixture 预检、timeout 完整取证和 real-workspace liveness 分层。当前唯一 Runtime 收口项是创建 clean bounded 双 fixture 并最终重跑 RVC-R16；普通真实 workspace 仅提供独立 liveness evidence，不得继续被误作 180 秒 terminal SLA。完整批次、依赖顺序和验收见 [remediation](../70-roadmap/active/runtime-v2-positive-convergence-remediation.md)。
 
 ### B. 运维 / 生产切换
 

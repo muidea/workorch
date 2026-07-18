@@ -25,7 +25,7 @@ Last Updated: 2026-07-18
 | --- | --- | --- | --- |
 | OPS-1 | 生产目录 V1 retirement 正式 apply | 代码/live 已 complete；等待 clean build + 真实生产目录维护窗口执行 `runtime-v1-retirement --apply` | [deployed-workspace-progress-blocker-component-closure-plan.md](../../90-archive/completed/deployed-workspace-progress-blocker-component-closure-plan.md) |
 | OPT-1 | file-patch deployed live（可选） | 代码迁移已完成；可选补一次 `patch apply + validation + DoD closeout` 的 deployed live | [file-patch-side-effect-owner-migration-plan.md](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
-| RVC-1 | Runtime V2 positive convergence systemic closure | 2026-07-18 deployed Live 反证“仅待 Live”结论；待按 RVC-R17 governance proposal/commit saga → RVC-R18 blocked Resume gate → RVC-R19 allowed actions → RVC-R20 candidate parameter contract → RVC-R21 typed LLM audit → RVC-R22 verification 分层完成代码收口，再最终重跑 RVC-R16 | [runtime-v2-positive-convergence-remediation.md](runtime-v2-positive-convergence-remediation.md) |
+| RVC-1 | Runtime V2 positive convergence systemic closure | RVC-R17～R21 已 code-landed，RVC-R22 terminal/liveness 脚本已 code-landed；仍待创建 clean bounded 双 fixture 并最终重跑 RVC-R16，真实 canary 仅作独立 liveness evidence | [runtime-v2-positive-convergence-remediation.md](runtime-v2-positive-convergence-remediation.md) |
 
 延期产品候选（**不占 active**）：LLM context budget 高级项（failover / tokenizer / 原生 usage 精度 / context-too-large 差异化）→ [candidates/next-stage-demand-candidates.md](../candidates/next-stage-demand-candidates.md)。
 

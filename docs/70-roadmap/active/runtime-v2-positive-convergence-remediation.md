@@ -606,7 +606,7 @@ Application server 和 projection 不负责扫描或选择 action。
 | RVC-R19 | code-landed | Decision owner server-first allowed-action gate；read model/TUI 提供并预检同一集合，batch 仍以服务端全量预检为准 |
 | RVC-R20 | code-landed | provider output schema 在 C3 从 sealed RuntimeOperationContract 动态生成 patch target/parameter constraint；final seal 保留最终一致性裁决 |
 | RVC-R21 | code-landed | ContextBudget/CacheUsage 改为 owner-neutral concrete audit DTO，LLM candidate/usage EventHub 与 eventstream payload 无 `map[string]any` bridge |
-| RVC-R22 | pending | deployed bounded terminal fixture + real-workspace liveness observation 分层；最终重跑 RVC-R16 |
+| RVC-R22 | code-landed / fixture pending | terminal gate 已强制 ≤2 focus、每 focus ≤4 coverage items，timeout 保留 full final evidence；real-workspace liveness mode 已独立。仍待创建全新 bounded 双 workspace fixture 并最终重跑 RVC-R16 |
 
 ## 17. Implementation Batches
 
@@ -1209,6 +1209,12 @@ Scope: verification scripts、deployed fixtures、RVC-R16 final rerun
 - large workspace 需声明 focus/coverage 规模和预计 observation policy，禁止用统一 180 秒 terminal SLA；
 - artifacts 只写 `/tmp`。
 
+Implementation closure:
+
+- `verify-runtime-v2-positive-convergence-live` 默认 `terminal` mode，启动前从 snapshot 校验每个 workspace 的 focus/coverage 上限；超限立即写出 `fixture-preflight-*.json` 和 `summary.json` 并拒绝调度。
+- `observe-runtime-v2-positive-convergence-live` 使用同一 verifier 的 `liveness` mode；禁止 activation，只将 accepted evidence、focus advance 或合法 blocked/terminal lifecycle 转移视为有效进展，避免把纯 revision/candidate/dispatch 重试误报为正向推进；同时检查 owner receipt 的 executionKey/fence 唯一性、无 `outcome_unknown` 及 projection 对齐。
+- terminal timeout 不再直接退出；会持久化 final snapshot、governance ticket/approval、run observability 中的 operation receipt、usage audit、readyz 和汇总错误。
+
 Exit gate:
 
 - bounded dual workspace terminal gate 连续通过；
@@ -1322,6 +1328,7 @@ make verify-runtime-v2-effect-contract
 make verify-runtime-v2-crash-recovery
 make verify-runtime-v2-positive-convergence-file
 make verify-runtime-v2-positive-convergence-live
+make observe-runtime-v2-positive-convergence-live
 ```
 
 `verify-runtime-v2-positive-convergence-file/live` 必须升级为本方案定义的真实行为验证，不得继续只聚合已有测试名称。
