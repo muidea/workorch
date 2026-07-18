@@ -56,6 +56,8 @@ func (m *Module) Start() error {
 	m.prerequisiteObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireWorkspaceManifest, m.handleAcquireWorkspaceManifest)
 	m.capabilityObserver = magicevent.NewSimpleObserver(ModuleID, m.eventHub)
 	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
+	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
+	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
 	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteFileListOperation, m.handleFileListOperation)
 	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteFileReadOperation, m.handleFileReadOperation)
 	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteFileEditOperation, m.handleFileEditOperation)
@@ -80,6 +82,8 @@ func (m *Module) Stop(ctx context.Context) error {
 		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteFileReadOperation)
 		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteFileListOperation)
 		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
+		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility)
+		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
 	}
 	m.capabilityObserver = nil
 	m.runtimeAdapter = nil
@@ -388,6 +392,39 @@ func (m *Module) handleRuntimeCapabilities(event magicevent.Event, result magice
 		return
 	}
 	result.Set(response, nil)
+}
+
+func (m *Module) handleRuntimeOperationAdmissibility(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand)
+	if !ok || m.runtimeAdapter == nil || command.WorkspaceID == "" || command.RunID == "" || command.AuthoritySnapshotID == "" ||
+		command.PrerequisiteID == "" || command.OwnerModuleID != ModuleID || command.WorkspaceDeliverableDirectory == "" || len(command.RequiredKinds) == 0 {
+		setPrerequisiteError(result, common.ErrInvalidArgument)
+		return
+	}
+	inventory, err := m.runtimeAdapter.AcquireRuntimeOperationAdmissibility(command.WorkspaceDeliverableDirectory, command.PrerequisiteID, command.RequiredKinds, command.RequiredTargetRefs, command.MaxItems)
+	if setPrerequisiteError(result, err) {
+		return
+	}
+	result.Set(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{PrerequisiteID: command.PrerequisiteID, Admissibility: inventory}, nil)
+}
+
+func (m *Module) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
+	if !ok || m.runtimeAdapter == nil || command.WorkspaceID == "" || command.RunID == "" || command.Transaction.AuthoritySnapshotID == "" || command.WorkspaceDeliverableDirectory == "" {
+		setPrerequisiteError(result, common.ErrInvalidArgument)
+		return
+	}
+	operation := command.Operation.Normalized()
+	descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+	if !known || descriptor.OwnerModuleID != ModuleID || command.Admissibility.OwnerModuleID != ModuleID {
+		setPrerequisiteError(result, common.ErrInvalidArgument)
+		return
+	}
+	failure := m.runtimeAdapter.ProbeRuntimeOperationFeasibility(command.WorkspaceDeliverableDirectory, command.Admissibility, operation)
+	result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{
+		OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID,
+		Feasible: failure == nil, Failure: failure,
+	}, nil)
 }
 
 func (m *Module) handleAcquireWorkspaceManifest(event magicevent.Event, result magicevent.Result) {

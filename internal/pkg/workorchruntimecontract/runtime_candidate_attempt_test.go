@@ -53,3 +53,24 @@ func TestRuntimeCandidateAttemptScopeValidationRejectsRunawayAttempts(t *testing
 		t.Fatal("runaway candidate attempts were accepted")
 	}
 }
+
+func TestRuntimeCandidateFeasibilityRecordValidationRejectsAmbiguousOrAcceptedLedger(t *testing.T) {
+	failure := &FailureFact{Class: FailureClassCandidateContractFailure, Code: "target_invalid", Signature: "file/target_invalid", Message: "target is invalid"}
+	values := []RuntimeCandidateFeasibilityRecord{
+		{OperationID: "operation-1", AdmissibilitySnapshotID: "inventory-1", Feasible: false, Failure: failure},
+		{OperationID: "operation-1", AdmissibilitySnapshotID: "inventory-1", Feasible: true},
+	}
+	if err := ValidateRuntimeCandidateFeasibilityRecords(values); err == nil {
+		t.Fatal("duplicate candidate feasibility operation was accepted")
+	}
+	facts := testRuntimeFacts()
+	transaction := validDecisionForState(ConvergenceStateNeedStateChange).AuthorityTransaction()
+	values = values[:1]
+	attempt := RuntimeCandidateAttemptRecord{
+		AuthorityContractID: StableAuthorityContractID(facts.WorkspaceID, facts.RunID, transaction), Transaction: transaction,
+		Attempt: 0, StablePrefixHash: "stable-prefix", State: RuntimeCandidateAttemptStateAccepted, Feasibilities: values,
+	}
+	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, []RuntimeCandidateAttemptRecord{attempt}); err == nil {
+		t.Fatal("accepted candidate attempt retained an unsealed feasibility ledger")
+	}
+}

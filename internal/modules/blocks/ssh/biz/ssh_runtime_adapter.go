@@ -80,6 +80,27 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 	return ret, nil
 }
 
+// ProbeOperation validates all local SSH execution prerequisites without
+// opening a network connection or starting a command. It is used exclusively
+// by Runtime V2 candidate admission before a dispatch is sealed.
+func (a *RuntimeAdapter) ProbeOperation(request RuntimeCommandRequest) error {
+	spec, err := sshCommandSpecFromRequest(request, a.defaultTimeout())
+	if err != nil {
+		return err
+	}
+	if spec.privateKeyPath == "" {
+		return nil
+	}
+	info, err := os.Stat(spec.privateKeyPath)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%w: ssh privateKeyPath is not a regular file", common.ErrInvalidArgument)
+	}
+	return nil
+}
+
 func sshRuntimeEvidence(result RuntimeCommandResult) runtimecontract.RuntimeOperationEvidence {
 	exitCode := result.ExitCode
 	return runtimecontract.RuntimeOperationEvidence{

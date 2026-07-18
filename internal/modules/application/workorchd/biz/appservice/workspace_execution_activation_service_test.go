@@ -1533,9 +1533,8 @@ func TestActivationResponseReusesRunSnapshotRun(t *testing.T) {
 	session, _ := newTestRuntimeSession(t, "memory", "")
 	exports := testRuntimeExports(session.Bootstrap)
 	workspace := &workspacemodel.Workspace{
-		ID:    "ws-activation-run-snapshot-reuse",
-		Title: "activation run snapshot reuse",
-		State: common.WorkspaceStateActive,
+		ID: "ws-activation-run-snapshot-reuse", Title: "activation run snapshot reuse", State: common.WorkspaceStateActive,
+		ContextHints: runtimeV2TestContextHints(t),
 	}
 	goal := &workspacemodel.Goal{
 		ID:          "goal-activation-run-snapshot-reuse",
@@ -1582,9 +1581,8 @@ func TestActivateWorkspaceExecutionCreatesRunWithTypedRuntimeBootstrap(t *testin
 	session, _ := newTestRuntimeSession(t, "memory", "")
 	exports := testRuntimeExports(session.Bootstrap)
 	workspace := &workspacemodel.Workspace{
-		ID:    "ws-activation-inline-compressed",
-		Title: "activation inline compressed",
-		State: common.WorkspaceStateActive,
+		ID: "ws-activation-inline-compressed", Title: "activation inline compressed", State: common.WorkspaceStateActive,
+		ContextHints: runtimeV2TestContextHints(t),
 	}
 	goal := &workspacemodel.Goal{
 		ID:          "goal-activation-inline-compressed",
@@ -1669,9 +1667,8 @@ func TestActivationResponseWorkspaceSnapshotReusesRunSnapshotWorkspace(t *testin
 	session, _ := newTestRuntimeSession(t, "memory", "")
 	exports := testRuntimeExports(session.Bootstrap)
 	workspace := &workspacemodel.Workspace{
-		ID:    "ws-activation-workspace-snapshot-reuse",
-		Title: "activation workspace snapshot reuse",
-		State: common.WorkspaceStateActive,
+		ID: "ws-activation-workspace-snapshot-reuse", Title: "activation workspace snapshot reuse", State: common.WorkspaceStateActive,
+		ContextHints: runtimeV2TestContextHints(t),
 	}
 	goal := &workspacemodel.Goal{
 		ID:          "goal-activation-workspace-snapshot-reuse",
@@ -1992,9 +1989,8 @@ func TestActivateWorkspaceExecutionUsesInjectedConfigLoader(t *testing.T) {
 	goalID := common.GoalID("goal-injected-config")
 	dodID := common.DoDID("dod-injected-config")
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
-		ID:    workspaceID,
-		Title: "injected config workspace",
-		State: common.WorkspaceStateActive,
+		ID: workspaceID, Title: "injected config workspace", State: common.WorkspaceStateActive,
+		ContextHints: runtimeV2TestContextHints(t),
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
@@ -2054,7 +2050,7 @@ func TestActivateWorkspaceExecutionWithBackendAddsWorkspaceBoundEvidencePolicy(t
 	}); err != nil {
 		t.Fatalf("CreateSoulWithBackend: %v", err)
 	}
-	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+	if _, err := createRuntimeV2TestTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
 		ID:   "template-evidence-policy",
 		Name: "Evidence Policy Template",
 		SoulBindings: map[string]string{
@@ -2119,7 +2115,7 @@ func TestActivateWorkspaceExecutionWithBackendAddsExecutionContractFromWorkspace
 	}); err != nil {
 		t.Fatalf("CreateSoulWithBackend: %v", err)
 	}
-	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+	if _, err := createRuntimeV2TestTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
 		ID:   "template-state-change-contract",
 		Name: "State Change Contract Template",
 		SoulBindings: map[string]string{
@@ -2253,7 +2249,7 @@ func TestActivateWorkspaceExecutionAppliesTemplateDefaultMCPContext(t *testing.T
 		t.Fatalf("close setup session: %v", err)
 	}
 
-	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+	if _, err := createRuntimeV2TestTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
 		ID:   "template-default-mcp",
 		Name: "Default MCP Template",
 		ContextHints: map[string]any{
@@ -2303,7 +2299,7 @@ func TestActivateWorkspaceExecutionDoesNotSelectMCPWithoutTemplateOrWorkspaceDef
 	ctx := context.Background()
 	dataRoot := t.TempDir()
 	cleanupSharedBackendSession(t, "file", dataRoot)
-	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+	if _, err := createRuntimeV2TestTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
 		ID:           "template-no-mcp-default",
 		Name:         "No MCP Default Template",
 		ContextHints: map[string]any{},
@@ -2378,7 +2374,7 @@ func TestActivateWorkspaceExecutionUsesUpdatedTemplateMCPDefaultWhenWorkspaceHas
 	}
 
 	templateID := "template-mcp-refresh"
-	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+	if _, err := createRuntimeV2TestTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
 		ID:   templateID,
 		Name: "MCP Refresh Template",
 		ContextHints: map[string]any{
@@ -2470,7 +2466,7 @@ func TestActivateWorkspaceExecutionUsesWorkspaceMCPDefaultOverride(t *testing.T)
 	}
 
 	templateID := "template-mcp-workspace-override"
-	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+	if _, err := createRuntimeV2TestTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
 		ID:   templateID,
 		Name: "MCP Workspace Override Template",
 		ContextHints: map[string]any{
@@ -2540,7 +2536,7 @@ func TestActivateWorkspaceExecutionRepairsMissingManagedWorkspaceConfig(t *testi
 	ctx := context.Background()
 	dataRoot := t.TempDir()
 	cleanupSharedBackendSession(t, "file", dataRoot)
-	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+	if _, err := createRuntimeV2TestTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
 		ID:   "template-managed-config-activation",
 		Name: "Managed Config Activation Template",
 		ContextHints: map[string]any{
@@ -2610,7 +2606,7 @@ func TestActivationExecutionContractUsesWorkspaceTemplateIDBeforeSoulRouting(t *
 	dataRoot := t.TempDir()
 	cleanupSharedBackendSession(t, "file", dataRoot)
 	templateID := "template-explicit-contract"
-	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+	if _, err := createRuntimeV2TestTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
 		ID:   templateID,
 		Name: "explicit contract",
 		ContextHints: map[string]any{
@@ -2707,7 +2703,7 @@ func TestActivateWorkspaceExecutionWithBackendRefreshesExecutionContractFromMatc
 		t.Fatalf("CreateSoulWithBackend: %v", err)
 	}
 	templateID := "template-refresh-contract"
-	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+	if _, err := createRuntimeV2TestTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
 		ID:   templateID,
 		Name: "Refresh Contract Template",
 		SoulBindings: map[string]string{

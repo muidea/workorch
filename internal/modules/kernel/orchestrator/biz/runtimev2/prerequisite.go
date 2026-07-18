@@ -11,14 +11,15 @@ import (
 type RuntimeRequirement = runtimecontract.RuntimeRequirement
 
 type PrerequisiteResult struct {
-	PrerequisiteID    string
-	Manifest          *runtimecontract.WorkspaceManifest
-	TargetSnapshot    *runtimecontract.TargetSnapshot
-	FailureTarget     *runtimecontract.FailureTarget
-	Capabilities      *runtimecontract.RuntimeCapabilities
-	ValidationScratch *runtimecontract.ValidationScratch
-	ProviderCeiling   *runtimecontract.ProviderCeiling
-	CapabilityState   *runtimecontract.RuntimeCapabilityStateSnapshot
+	PrerequisiteID         string
+	Manifest               *runtimecontract.WorkspaceManifest
+	TargetSnapshot         *runtimecontract.TargetSnapshot
+	FailureTarget          *runtimecontract.FailureTarget
+	Capabilities           *runtimecontract.RuntimeCapabilities
+	ValidationScratch      *runtimecontract.ValidationScratch
+	ProviderCeiling        *runtimecontract.ProviderCeiling
+	CapabilityState        *runtimecontract.RuntimeCapabilityStateSnapshot
+	OperationAdmissibility *runtimecontract.RuntimeOperationAdmissibility
 }
 
 func PreflightRuntimeFacts(facts runtimecontract.RuntimeFacts, requirements []RuntimeRequirement) runtimecontract.RuntimeFacts {
@@ -126,6 +127,37 @@ func applyPrerequisiteResult(facts *runtimecontract.RuntimeFacts, prerequisite r
 			}
 		}
 		facts.Resources.ProviderCeiling = result.ProviderCeiling
+	case runtimecontract.PrerequisiteKindOperationAdmissibility:
+		if result.OperationAdmissibility == nil {
+			return fmt.Errorf("operation admissibility prerequisite returned no inventory")
+		}
+		inventory := result.OperationAdmissibility.Normalized()
+		if inventory.PrerequisiteID != prerequisite.ID || inventory.OwnerModuleID != prerequisite.OwnerModuleID {
+			return fmt.Errorf("operation admissibility prerequisite returned a mismatched inventory")
+		}
+		if err := inventory.Validate(); err != nil {
+			return fmt.Errorf("operation admissibility prerequisite returned invalid inventory: %w", err)
+		}
+		maxItems := facts.ConvergencePolicy.MaxCandidateContextItems
+		if maxItems < 1 || len(inventory.TargetRefs) > maxItems || len(inventory.SelectorRefs) > maxItems {
+			return fmt.Errorf("operation admissibility inventory exceeds sealed candidate context bound")
+		}
+		required := make([]string, 0, len(prerequisite.RequiredCapabilities))
+		for _, kind := range prerequisite.RequiredCapabilities {
+			if canonical := runtimecontract.CanonicalRuntimeBlockKind(kind); canonical != "" {
+				required = append(required, canonical)
+			}
+		}
+		available := map[string]struct{}{}
+		for _, kind := range inventory.OperationKinds {
+			available[kind] = struct{}{}
+		}
+		for _, kind := range required {
+			if _, ok := available[kind]; !ok {
+				return fmt.Errorf("operation admissibility inventory does not include required kind %q", kind)
+			}
+		}
+		facts.Resources.OperationAdmissibilities = append(facts.Resources.OperationAdmissibilities, inventory)
 	default:
 		return fmt.Errorf("unsupported prerequisite kind %q", prerequisite.Kind)
 	}
@@ -158,6 +190,13 @@ func runtimeRequirementSatisfied(facts runtimecontract.RuntimeFacts, requirement
 		return facts.Resources.ValidationScratch != nil && facts.Resources.ValidationScratch.Reference != "" && facts.Resources.ValidationScratch.Revision != ""
 	case runtimecontract.PrerequisiteKindProviderCeiling:
 		return facts.Resources.ProviderCeiling != nil && facts.Resources.ProviderCeiling.MaxBytes >= requirement.MinimumBytes
+	case runtimecontract.PrerequisiteKindOperationAdmissibility:
+		for _, inventory := range facts.Resources.OperationAdmissibilities {
+			if inventory.PrerequisiteID == runtimePrerequisiteID(requirement) && inventory.OwnerModuleID == requirement.OwnerModuleID {
+				return true
+			}
+		}
+		return false
 	default:
 		return false
 	}

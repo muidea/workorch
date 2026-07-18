@@ -11,7 +11,85 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestRuntimeAdapterProbeRejectsDirectoryPatchTargetWithoutMutation(t *testing.T) {
+	workspace := t.TempDir()
+	patchType, content := "file_write", "new content\n"
+	adapter := NewRuntimeAdapter()
+	inventory, err := adapter.AcquireRuntimeOperationAdmissibility(workspace, "admissibility-file", []string{runtimecontract.RuntimeBlockKindPatchApply}, []string{"."}, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure := adapter.ProbeRuntimeOperationFeasibility(workspace, inventory, runtimecontract.RuntimeOperation{
+		ID: "patch-directory", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{"."},
+		Parameters: []runtimecontract.OperationParameter{
+			{Name: "targetRef", String: stringPointer(".")},
+			{Name: "patchType", String: &patchType},
+			{Name: "content", String: &content},
+		},
+	})
+	if failure == nil || failure.Code != "operation_target_not_regular" {
+		t.Fatalf("directory patch feasibility failure = %+v", failure)
+	}
+	entries, err := os.ReadDir(workspace)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("probe mutated workspace entries=%+v err=%v", entries, err)
+	}
+}
+
+func TestRuntimeAdapterProbeRejectsStaleAdmissibilitySnapshotWithoutMutation(t *testing.T) {
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "main.go")
+	if err := os.WriteFile(path, []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	adapter := NewRuntimeAdapter()
+	inventory, err := adapter.AcquireRuntimeOperationAdmissibility(workspace, "admissibility-file", []string{runtimecontract.StepKindFileEdit}, []string{"main.go"}, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("package main\n// changed after inventory\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target, oldText, newText := "main.go", "package main\n", "package app\n"
+	failure := adapter.ProbeRuntimeOperationFeasibility(workspace, inventory, runtimecontract.RuntimeOperation{
+		ID: "stale-edit", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{"main.go"},
+		Parameters: []runtimecontract.OperationParameter{
+			{Name: "path", String: &target},
+			{Name: "oldText", String: &oldText},
+			{Name: "newText", String: &newText},
+		},
+	})
+	if failure == nil || failure.Code != "operation_admissibility_stale" {
+		t.Fatalf("stale inventory feasibility failure = %+v", failure)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil || string(content) != "package main\n// changed after inventory\n" {
+		t.Fatalf("probe mutated workspace content=%q err=%v", content, err)
+	}
+}
+
+func TestRuntimeAdapterAdmissibilityInventoryPrioritizesFocusTargetsWithinBound(t *testing.T) {
+	workspace := t.TempDir()
+	for _, name := range []string{"a.txt", "b.txt", "focus.txt"} {
+		if err := os.WriteFile(filepath.Join(workspace, name), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	inventory, err := NewRuntimeAdapter().AcquireRuntimeOperationAdmissibility(
+		workspace, "admissibility-file", []string{runtimecontract.StepKindFileEdit}, []string{"focus.txt"}, 2,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inventory.TargetRefs) != 2 || inventory.TargetRefs[0] != "focus.txt" || inventory.TargetRefs[1] != "a.txt" {
+		t.Fatalf("bounded inventory = %#v, want focus target first then canonical manifest entry", inventory.TargetRefs)
+	}
+}
+
+func stringPointer(value string) *string { return &value }
 
 func TestRuntimeAdapterReadReturnsContentAndHash(t *testing.T) {
 	workspace := t.TempDir()

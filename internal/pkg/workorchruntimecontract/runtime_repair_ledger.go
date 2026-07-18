@@ -21,6 +21,8 @@ type RuntimeConvergencePolicy struct {
 	MaxRepairAttemptsPerFocus        int
 	MaxValidationOnlyRetriesPerFocus int
 	MaxAcceptanceSliceWorkItems      int
+	MaxFocuses                       int
+	MaxCandidateContextItems         int
 }
 
 // RuntimeRepairLedger tracks same-focus repair progress independently from candidate attempts.
@@ -50,9 +52,6 @@ func (p RuntimeConvergencePolicy) Normalized() RuntimeConvergencePolicy {
 	if p.MaxValidationOnlyRetriesPerFocus < 0 {
 		p.MaxValidationOnlyRetriesPerFocus = DefaultMaxValidationOnlyRetriesPerFocus
 	}
-	if p.MaxAcceptanceSliceWorkItems <= 0 {
-		p.MaxAcceptanceSliceWorkItems = RuntimeAcceptanceSliceDefaultMaxItems
-	}
 	return p
 }
 
@@ -66,6 +65,12 @@ func (p RuntimeConvergencePolicy) Validate() error {
 	}
 	if p.MaxAcceptanceSliceWorkItems < RuntimeAcceptanceSliceMaxWorkItemsMin || p.MaxAcceptanceSliceWorkItems > RuntimeAcceptanceSliceMaxWorkItemsMax {
 		return fmt.Errorf("MaxAcceptanceSliceWorkItems must be in %d..%d", RuntimeAcceptanceSliceMaxWorkItemsMin, RuntimeAcceptanceSliceMaxWorkItemsMax)
+	}
+	if p.MaxFocuses < 1 || p.MaxFocuses > RuntimeAcceptanceFocusMaxCount {
+		return fmt.Errorf("MaxFocuses must be in 1..%d", RuntimeAcceptanceFocusMaxCount)
+	}
+	if p.MaxCandidateContextItems < 1 || p.MaxCandidateContextItems > RuntimeCandidateContextItemsMaxCount {
+		return fmt.Errorf("MaxCandidateContextItems must be in 1..%d", RuntimeCandidateContextItemsMaxCount)
 	}
 	return nil
 }
@@ -216,5 +221,7 @@ func DefaultRuntimeConvergencePolicy() RuntimeConvergencePolicy {
 		MaxRepairAttemptsPerFocus:        DefaultMaxRepairAttemptsPerFocus,
 		MaxValidationOnlyRetriesPerFocus: DefaultMaxValidationOnlyRetriesPerFocus,
 		MaxAcceptanceSliceWorkItems:      RuntimeAcceptanceSliceDefaultMaxItems,
+		MaxFocuses:                       RuntimeAcceptanceFocusMaxCount,
+		MaxCandidateContextItems:         RuntimeCandidateContextItemsMaxCount,
 	}.Normalized()
 }

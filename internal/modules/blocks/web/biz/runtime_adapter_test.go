@@ -445,3 +445,45 @@ func TestRuntimeAdapterReloadsProviderConfigByRevision(t *testing.T) {
 		t.Fatalf("results/loadCount = %+v/%d, want reloaded second provider", results, loadCount)
 	}
 }
+
+func TestRuntimeAdapterOperationAdmissibilityTracksConfigAndProbeAvoidsHTTP(t *testing.T) {
+	revision := uint64(1)
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	adapter := NewRuntimeAdapterFromConfigLoaderWithRevision(func() (string, map[string]ProviderConfig, error) {
+		maxResults := 2
+		if revision > 1 {
+			maxResults = 3
+		}
+		return "http", map[string]ProviderConfig{
+			"http": {ID: "http", Provider: webcommon.ProviderHTTP, SearchEndpoint: server.URL, MaxResults: maxResults, MaxFetchBytes: 4096},
+		}, nil
+	}, func() uint64 { return revision }, nil)
+	adapter.client = server.Client()
+
+	ids, firstRevision, err := adapter.OperationAdmissibility()
+	if err != nil || len(ids) != 1 || ids[0] != "http" || firstRevision == "" {
+		t.Fatalf("first admissibility = ids=%v revision=%q err=%v", ids, firstRevision, err)
+	}
+	if err := adapter.ProbeOperation(context.Background(), RuntimeOperationRequest{Kind: webcommon.StepKindSearch, Query: "runtime v2", ProviderID: "http"}); err != nil {
+		t.Fatalf("probe configured web search: %v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("probe contacted web provider %d times", requests)
+	}
+	if err := adapter.ProbeOperation(context.Background(), RuntimeOperationRequest{Kind: webcommon.StepKindFetch, URL: "http://169.254.169.254/latest", ProviderID: "http"}); err == nil {
+		t.Fatal("probe accepted denied metadata fetch URL")
+	}
+	if requests != 0 {
+		t.Fatalf("invalid probe contacted web provider %d times", requests)
+	}
+	revision++
+	_, secondRevision, err := adapter.OperationAdmissibility()
+	if err != nil || secondRevision == firstRevision {
+		t.Fatalf("admissibility revision did not follow config revision: first=%q second=%q err=%v", firstRevision, secondRevision, err)
+	}
+}

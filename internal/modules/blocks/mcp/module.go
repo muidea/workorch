@@ -51,6 +51,8 @@ func (m *Module) Start() error {
 	}
 	m.capabilityObserver = magicevent.NewSimpleObserver(ModuleID, m.eventHub)
 	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
+	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
+	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
 	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteMCPOperation, m.handleMCPOperation)
 	return nil
 }
@@ -60,6 +62,8 @@ func (m *Module) Stop(ctx context.Context) error {
 	if m.capabilityObserver != nil {
 		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteMCPOperation)
 		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
+		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility)
+		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
 	}
 	m.capabilityObserver = nil
 	if m.runtimeAdapter != nil {
@@ -144,6 +148,83 @@ func (m *Module) handleRuntimeCapabilities(event magicevent.Event, result magice
 	result.Set(response, nil)
 }
 
+func (m *Module) handleRuntimeOperationAdmissibility(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand)
+	if !ok {
+		setCapabilityError(result, common.ErrInvalidArgument)
+		return
+	}
+	if err := orchestratorevents.ValidateRuntimeOperationAdmissibilityCommand(command, ModuleID); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	serverIDs, revision, err := m.runtimeAdapter.OperationAdmissibility(event.Context())
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	inventory, err := orchestratorevents.NewRuntimeOperationAdmissibility(command.PrerequisiteID, ModuleID, command.RequiredKinds, nil, serverIDs, []string{"configured-mcp-server", "owner-execution-policy"}, revision)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	result.Set(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{PrerequisiteID: command.PrerequisiteID, Admissibility: inventory}, nil)
+}
+
+func (m *Module) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
+	if !ok || m.runtimeAdapter == nil {
+		setCapabilityError(result, common.ErrInvalidArgument)
+		return
+	}
+	if err := orchestratorevents.ValidateRuntimeOperationFeasibilityCommand(command, ModuleID); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	operation := command.Operation.Normalized()
+	serverIDs, revision, revisionErr := m.runtimeAdapter.OperationAdmissibility(event.Context())
+	if revisionErr != nil {
+		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "mcp_server_catalog_unavailable", revisionErr.Error())
+		result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: false, Failure: failure}, nil)
+		return
+	}
+	if revision != command.Admissibility.ObservedRevision {
+		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "operation_admissibility_stale", "runtime mcp operation admissibility snapshot is stale")
+		result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: false, Failure: failure}, nil)
+		return
+	}
+	data, err := orchestratorevents.MCPOperationDataFromRuntimeOperation(operation)
+	if err != nil {
+		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "mcp_operation_invalid", err.Error())
+		result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: false, Failure: failure}, nil)
+		return
+	}
+	if !containsMCPAdmissibleServer(serverIDs, data.ServerID) {
+		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "mcp_server_not_admissible", "runtime mcp operation server is absent from the owner admissibility inventory")
+		result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: false, Failure: failure}, nil)
+		return
+	}
+	err = m.runtimeAdapter.ProbeOperation(event.Context(), mcpbiz.RuntimeOperationRequest{
+		WorkspaceID: command.WorkspaceID, RunID: command.RunID, StepID: common.StepID("probe/" + operation.ID), Kind: operation.Kind,
+		WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory, TargetRefs: operation.TargetRefs, Data: data,
+	})
+	if err != nil {
+		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "mcp_prerequisite_unavailable", err.Error())
+		result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: false, Failure: failure}, nil)
+		return
+	}
+	result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: true}, nil)
+}
+
+func containsMCPAdmissibleServer(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
 func setCapabilityError(result magicevent.Result, err error) {
 	if result != nil {
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
@@ -152,6 +233,36 @@ func setCapabilityError(result magicevent.Result, err error) {
 
 type mcpEventServerGetter struct {
 	hub magicevent.Hub
+}
+
+func (g mcpEventServerGetter) ListServers(ctx context.Context) ([]*mcpmodel.Server, error) {
+	if g.hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	ev := magicevent.NewEventWithContext(
+		mcpevents.TopicMCPCommandListServers,
+		ModuleID,
+		mcpevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		mcpevents.ListServersCommand{},
+	)
+	result := g.hub.Send(ev)
+	if result == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	if err := result.Error(); err != nil {
+		return nil, err
+	}
+	data, err := result.Get()
+	if err != nil {
+		return nil, err
+	}
+	response, ok := data.(mcpevents.MCPCommandResult)
+	if !ok {
+		return nil, common.ErrInvalidArgument
+	}
+	return append([]*mcpmodel.Server(nil), response.Servers...), nil
 }
 
 func (g mcpEventServerGetter) GetServer(ctx context.Context, id common.MCPServerID) (*mcpmodel.Server, error) {

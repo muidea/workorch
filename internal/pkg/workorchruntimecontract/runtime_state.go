@@ -45,13 +45,29 @@ const (
 	RuntimeCandidateAttemptStateAccepted RuntimeCandidateAttemptState = "accepted"
 )
 
+// RuntimeCandidateFeasibilityRecord is the durable, read-only SM-3 admission
+// result for one proposed operation.  It is not an execution receipt and can
+// never be used as evidence. Persisting it lets restart/duplicate delivery
+// resume an attempt without replaying an already completed owner probe.
+type RuntimeCandidateFeasibilityRecord struct {
+	OperationID             string
+	AdmissibilitySnapshotID string
+	Feasible                bool
+	Failure                 *FailureFact
+}
+
 type RuntimeCandidateAttemptRecord struct {
 	AuthorityContractID string
 	Transaction         AuthorityTransaction
 	Attempt             int
 	StablePrefixHash    string
 	State               RuntimeCandidateAttemptState
-	Failure             *RuntimeCandidateFailure
+	// Proposal is the schema-valid, unsealed candidate persisted after provider
+	// generation. It is replayed after restart into the read-only feasibility
+	// gate, never treated as a dispatch or execution record.
+	Proposal      *RuntimeCandidate
+	Feasibilities []RuntimeCandidateFeasibilityRecord
+	Failure       *RuntimeCandidateFailure
 }
 
 // RuntimeStateRecord 是 Runtime V2 在 Run owner 中持久化的唯一正式状态。
@@ -116,6 +132,21 @@ func (r RuntimeStateRecord) Validate() error {
 	}
 	if err := ValidateRuntimeCandidateAttemptRecordsForScope(r.Facts.WorkspaceID, r.Facts.RunID, r.CandidateAttempts); err != nil {
 		return err
+	}
+	for _, attempt := range r.CandidateAttempts {
+		// A pending proposal is the exact candidate that can be resumed into the
+		// feasibility gate. Validate it again at aggregate load so corrupted
+		// persistence cannot cause owner probes for a candidate that was never
+		// schema-valid under the still-current authority contract.
+		if attempt.State != RuntimeCandidateAttemptStatePending || attempt.Proposal == nil {
+			continue
+		}
+		if !SameAuthorityContract(attempt.Transaction, r.Decision.AuthorityTransaction()) {
+			return fmt.Errorf("pending runtime candidate proposal does not match current authority contract")
+		}
+		if err := attempt.Proposal.ValidateWithActivation(r.Decision, r.Facts.Activation); err != nil {
+			return fmt.Errorf("pending runtime candidate proposal is invalid: %w", err)
+		}
 	}
 	if err := ValidateRuntimeGovernanceResolutionRecords(r.GovernanceResolutions); err != nil {
 		return err
@@ -261,12 +292,21 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 			if value.Failure != nil {
 				return fmt.Errorf("runtime candidate attempt %s state %s cannot carry failure", key, value.State)
 			}
+			if value.State == RuntimeCandidateAttemptStateAccepted && value.Proposal != nil {
+				return fmt.Errorf("accepted runtime candidate attempt %s cannot retain an unsealed proposal", key)
+			}
+			if value.State == RuntimeCandidateAttemptStateAccepted && len(value.Feasibilities) > 0 {
+				return fmt.Errorf("accepted runtime candidate attempt %s cannot retain unsealed feasibility records", key)
+			}
 		case RuntimeCandidateAttemptStateFailed:
 			if value.Failure == nil || value.Failure.Class == "" || strings.TrimSpace(value.Failure.Reason) == "" {
 				return fmt.Errorf("failed runtime candidate attempt %s requires typed failure", key)
 			}
 		default:
 			return fmt.Errorf("runtime candidate attempt %s has invalid state %q", key, value.State)
+		}
+		if err := ValidateRuntimeCandidateFeasibilityRecords(value.Feasibilities); err != nil {
+			return fmt.Errorf("runtime candidate attempt %s feasibility records: %w", key, err)
 		}
 	}
 	for snapshotID, attempts := range bySnapshot {
@@ -277,6 +317,34 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 		}
 		if hasFirst && first.State == RuntimeCandidateAttemptStateAccepted && hasSecond {
 			return fmt.Errorf("runtime candidate snapshot %s retried after accepted attempt 0", snapshotID)
+		}
+	}
+	return nil
+}
+
+// ValidateRuntimeCandidateFeasibilityRecords enforces the durable admission
+// ledger's one-result-per-operation rule. It intentionally validates only
+// read-only probe facts; candidate/static validation remains the seal path's
+// responsibility.
+func ValidateRuntimeCandidateFeasibilityRecords(values []RuntimeCandidateFeasibilityRecord) error {
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		operationID := strings.TrimSpace(value.OperationID)
+		if operationID == "" || strings.TrimSpace(value.AdmissibilitySnapshotID) == "" {
+			return fmt.Errorf("runtime candidate feasibility record requires operation and snapshot identity")
+		}
+		if _, exists := seen[operationID]; exists {
+			return fmt.Errorf("runtime candidate feasibility operation %q is duplicated", operationID)
+		}
+		seen[operationID] = struct{}{}
+		if value.Feasible {
+			if value.Failure != nil {
+				return fmt.Errorf("feasible runtime candidate operation %q cannot carry failure", operationID)
+			}
+			continue
+		}
+		if value.Failure == nil || strings.TrimSpace(string(value.Failure.Class)) == "" || strings.TrimSpace(value.Failure.Code) == "" || strings.TrimSpace(value.Failure.Signature) == "" || strings.TrimSpace(value.Failure.Message) == "" {
+			return fmt.Errorf("infeasible runtime candidate operation %q requires stable failure facts", operationID)
 		}
 	}
 	return nil
@@ -373,6 +441,11 @@ func (r RuntimeStateRecord) Clone() RuntimeStateRecord {
 	ret.CandidateAttempts = make([]RuntimeCandidateAttemptRecord, len(r.CandidateAttempts))
 	for idx, attempt := range r.CandidateAttempts {
 		ret.CandidateAttempts[idx] = attempt
+		if attempt.Proposal != nil {
+			proposal := cloneRuntimeCandidate(*attempt.Proposal)
+			ret.CandidateAttempts[idx].Proposal = &proposal
+		}
+		ret.CandidateAttempts[idx].Feasibilities = cloneRuntimeCandidateFeasibilities(attempt.Feasibilities)
 		if attempt.Failure != nil {
 			failure := *attempt.Failure
 			ret.CandidateAttempts[idx].Failure = &failure
@@ -388,6 +461,22 @@ func (r RuntimeStateRecord) Clone() RuntimeStateRecord {
 	if r.Termination != nil {
 		term := r.Termination.Clone()
 		ret.Termination = &term
+	}
+	return ret
+}
+
+func cloneRuntimeCandidateFeasibilities(values []RuntimeCandidateFeasibilityRecord) []RuntimeCandidateFeasibilityRecord {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]RuntimeCandidateFeasibilityRecord, len(values))
+	for idx, value := range values {
+		ret[idx] = value
+		if value.Failure != nil {
+			failure := *value.Failure
+			failure.TargetRefs = append([]string(nil), value.Failure.TargetRefs...)
+			ret[idx].Failure = &failure
+		}
 	}
 	return ret
 }

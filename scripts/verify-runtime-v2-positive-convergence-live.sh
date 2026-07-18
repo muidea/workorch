@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Runtime V2 deployed verification. Terminal mode accepts only bounded fixtures;
-# liveness mode observes real workspaces without imposing a terminal SLA.
+# Runtime V2 deployed verification. Positive acceptance requires completed Runs;
+# bounded terminal mode additionally constrains the fixture shape, while liveness
+# observes real workspaces without claiming accepted convergence.
 
 set -euo pipefail
 
@@ -8,7 +9,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 BASE_URL="${WORKORCH_BASE_URL:-http://127.0.0.1:8080}"
-MODE="${WORKORCH_E2E_MODE:-terminal}"
+MODE="${WORKORCH_E2E_MODE:-positive}"
 ARTIFACT_DIR="$(realpath -m "${WORKORCH_E2E_ARTIFACT_DIR:-${TMPDIR:-/tmp}/workorch-e2e/runtime-v2-positive-convergence-live/$(date -u +%Y%m%dT%H%M%SZ)}")"
 REPOSITORY_E2E_ARTIFACT_DIR="$(realpath -m "$ROOT_DIR/.workorch-e2e")"
 if [[ "$ARTIFACT_DIR" == "$REPOSITORY_E2E_ARTIFACT_DIR" || "$ARTIFACT_DIR" == "$REPOSITORY_E2E_ARTIFACT_DIR/"* ]]; then
@@ -21,9 +22,9 @@ PROVIDER_ID="${WORKORCH_E2E_PROVIDER_ID:-}"
 MODEL_ID="${WORKORCH_E2E_MODEL_ID:-}"
 ACTIVATE="${WORKORCH_E2E_ACTIVATE:-0}"
 case "$MODE" in
-  terminal|liveness) ;;
+  positive|bounded_terminal|liveness) ;;
   *)
-    echo "WORKORCH_E2E_MODE must be terminal or liveness, got $MODE" >&2
+    echo "WORKORCH_E2E_MODE must be positive, bounded_terminal, or liveness, got $MODE" >&2
     exit 2
     ;;
 esac
@@ -33,7 +34,7 @@ if [[ "$MODE" == "liveness" && "$ACTIVATE" != "0" ]]; then
 fi
 mkdir -p "$ARTIFACT_DIR"
 
-echo "runtime-v2 positive-convergence live verifier mode=$MODE"
+echo "runtime-v2 live verifier mode=$MODE"
 echo "base_url=$BASE_URL artifacts=$ARTIFACT_DIR poll=${POLL_INTERVAL}s timeout=${TIMEOUT}s"
 
 if ! curl -fsS --connect-timeout 5 --max-time 15 "$BASE_URL/healthz" >"$ARTIFACT_DIR/healthz.json"; then
@@ -69,9 +70,9 @@ WS_A="${WORKORCH_E2E_WORKSPACE_ID_A:-}"
 WS_B="${WORKORCH_E2E_WORKSPACE_ID_B:-}"
 if [[ -z "$WS_A" || -z "$WS_B" ]]; then
   cat <<MSG
-bounded dual-workspace fixture IDs not set.
+Runtime V2 workspace IDs not set.
 Set WORKORCH_E2E_WORKSPACE_ID_A / WORKORCH_E2E_WORKSPACE_ID_B to the deployed
-bounded positive fixtures (each <=2 focuses and <=4 coverage items/focus), optionally with:
+fixtures or workspaces to observe, optionally with:
   WORKORCH_E2E_PROVIDER_ID / WORKORCH_E2E_MODEL_ID
   WORKORCH_E2E_ACTIVATE=1 to issue explicit fixture activations before polling
   WORKORCH_E2E_POLL_INTERVAL_SECONDS / WORKORCH_E2E_TIMEOUT_SECONDS
@@ -79,7 +80,7 @@ Then re-run. File-backed sequences are covered by:
   make verify-runtime-v2-positive-convergence-file
 MSG
   if [[ "${WORKORCH_E2E_LIVE_ALLOW_SKIP:-}" == "1" ]]; then
-    echo "WORKORCH_E2E_LIVE_ALLOW_SKIP=1: skipping bounded dual-workspace terminal assertions"
+    echo "WORKORCH_E2E_LIVE_ALLOW_SKIP=1: skipping live verification"
     exit 0
   fi
   exit 3
@@ -208,13 +209,16 @@ def operation_receipt_errors(detail):
             errors.append(f"operation {operation.get('operationId')} has outcome_unknown")
     return errors
 
-def terminal_convergence_errors(detail):
+def positive_acceptance_errors(detail, bounded):
     acceptance = acceptance_from_detail(detail)
     summary = acceptance.get("summary") or {}
     operations = acceptance.get("operations") or []
     errors = []
-    if int(summary.get("acceptedSlices") or 0) != 2:
-        errors.append(f"acceptedSlices={summary.get('acceptedSlices')}, want 2")
+    accepted_slices = int(summary.get("acceptedSlices") or 0)
+    if accepted_slices < 1:
+        errors.append(f"acceptedSlices={summary.get('acceptedSlices')}, want at least 1")
+    if bounded and accepted_slices != 2:
+        errors.append(f"acceptedSlices={summary.get('acceptedSlices')}, want 2 for bounded terminal acceptance")
     durable = any(
         item.get("outcome") == "accepted" and item.get("observedEffectScope") in ("workspace_durable", "remote_durable")
         for item in operations
@@ -298,7 +302,7 @@ for ws, label in ((ws_a, "a"), (ws_b, "b")):
         "acceptanceBounds": acceptance_bounds(body),
     })
 
-if mode == "terminal":
+if mode == "bounded_terminal":
     fixture_errors = []
     for ws, label in ((ws_a, "a"), (ws_b, "b")):
         bounds = acceptance_bounds(initial_bodies[ws])
@@ -313,7 +317,7 @@ if mode == "terminal":
             "mode": mode,
             "baseline": baseline,
             "errors": fixture_errors,
-            "reason": "terminal mode requires bounded fixtures; use WORKORCH_E2E_MODE=liveness for real workspaces",
+            "reason": "bounded_terminal mode requires bounded fixtures; use positive or liveness for other workspaces",
         })
         raise SystemExit("terminal fixture preflight failed: " + "; ".join(fixture_errors))
 
@@ -346,10 +350,10 @@ if do_activate:
     activate_workspace(ws_b, "b")
 
 # A workspace has no authoritative focus slices until its fresh Runtime V2 Run
-# is activated.  Recheck the bound after activation so terminal mode cannot
+# is activated. Recheck the bound after activation so bounded terminal mode cannot
 # accidentally accept an uncompiled or oversized fixture merely because its
 # pre-activation snapshot had no slices yet.
-if mode == "terminal" and do_activate:
+if mode == "bounded_terminal" and do_activate:
     activated_fixture_errors = []
     activated_bodies = {}
     for ws, label in ((ws_a, "a"), (ws_b, "b")):
@@ -377,7 +381,7 @@ if mode == "terminal" and do_activate:
             "mode": mode,
             "baseline": baseline,
             "errors": activated_fixture_errors,
-            "reason": "activated terminal fixtures must expose exactly two bounded focus slices",
+            "reason": "activated bounded terminal fixtures must expose exactly two bounded focus slices",
         })
         raise SystemExit("terminal fixture activated preflight failed: " + "; ".join(activated_fixture_errors))
 
@@ -386,7 +390,7 @@ results = {}
 last = {}
 timed_out = False
 while time.time() < deadline:
-    terminal = mode == "terminal"
+    terminal = mode != "liveness"
     for ws, label in ((ws_a, "a"), (ws_b, "b")):
         body = snapshot(ws)
         observe_capability_states(ws, body)
@@ -406,7 +410,7 @@ while time.time() < deadline:
         ),
         flush=True,
     )
-    if mode == "terminal" and terminal:
+    if mode != "liveness" and terminal:
         results = dict(last)
         break
     time.sleep(poll)
@@ -438,7 +442,7 @@ for ws, label in ((ws_a, "a"), (ws_b, "b")):
     errors.extend(f"{label}: {value}" for value in governance_binding_errors(detail))
     if (s.get("projectionState") or "ready") not in ("ready", "ok", ""):
         errors.append(f"{label}: projectionState={s.get('projectionState')}")
-    if mode == "terminal":
+    if mode != "liveness":
         if s.get("runState") != "completed":
             errors.append(f"{label}: runState={s.get('runState')} fail={s.get('failureReason')}")
         if s.get("activeRunId"):
@@ -452,8 +456,8 @@ for ws, label in ((ws_a, "a"), (ws_b, "b")):
             errors.append(f"{label}: llmUsageSummary empty")
         if s.get("runState") == "completed" and s.get("action") not in ("complete", None, ""):
             errors.append(f"{label}: expected action=complete got {s.get('action')}")
-        errors.extend(f"{label}: {value}" for value in terminal_convergence_errors(detail))
-        if label == "a":
+        errors.extend(f"{label}: {value}" for value in positive_acceptance_errors(detail, mode == "bounded_terminal"))
+        if mode == "bounded_terminal" and label == "a":
             errors.extend(f"{label}: {value}" for value in bounded_git_sequence_errors(detail))
     else:
         before = baseline[ws]
@@ -478,12 +482,25 @@ for ws, label in ((ws_a, "a"), (ws_b, "b")):
         if s.get("runState") in terminal_states and s.get("activeRunId"):
             errors.append(f"{label}: terminal Run retained an activeRunId")
 
-if timed_out and mode == "terminal":
+if timed_out and mode != "liveness":
     errors.append(f"timeout waiting {timeout}s for dual-workspace terminal runs")
+
+classification = ""
+if mode == "liveness":
+    terminal_states = ("completed", "failed", "cancelled", "superseded")
+    if any((item.get("runState") in terminal_states and item.get("runState") != "completed") for item in results.values()):
+        classification = "safe_terminal_rejected"
+    else:
+        classification = "lifecycle_liveness"
+elif mode == "bounded_terminal":
+    classification = "bounded_terminal_acceptance"
+else:
+    classification = "positive_acceptance"
 
 write_json("summary.json", {
     "mode": mode,
-    "timedOut": timed_out and mode == "terminal",
+    "classification": classification,
+    "timedOut": timed_out and mode != "liveness",
     "observationWindowElapsed": timed_out and mode == "liveness",
     "baseline": baseline,
     "results": results,
@@ -496,7 +513,7 @@ if errors:
     print(f"{mode} live verification failed:", "; ".join(errors), file=sys.stderr)
     sys.exit(1)
 
-print(f"runtime-v2 positive-convergence {mode} verification passed")
+print(f"runtime-v2 {classification} verification passed")
 for ws, item in results.items():
     print(ws, json.dumps(item, ensure_ascii=False))
 PY

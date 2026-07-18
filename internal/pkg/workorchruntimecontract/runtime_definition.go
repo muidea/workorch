@@ -103,6 +103,8 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 		writeHashString(h, "acceptance-slice-policy:present")
 		writeHashString(h, policy.SchemaVersion)
 		writeHashString(h, fmt.Sprintf("%d", policy.MaxWorkItems))
+		writeHashString(h, fmt.Sprintf("%d", policy.MaxFocuses))
+		writeHashString(h, fmt.Sprintf("%d", policy.MaxCandidateContextItems))
 		writeHashString(h, policy.CompletionPolicy)
 		writeHashString(h, policy.ResultPolicy)
 		writeHashString(h, fmt.Sprintf("%d", len(policy.Groups)))

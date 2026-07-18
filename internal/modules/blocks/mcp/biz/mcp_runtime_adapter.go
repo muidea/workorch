@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,6 +38,10 @@ type RuntimeAdapter struct {
 
 type serverGetter interface {
 	GetServer(context.Context, common.MCPServerID) (*mcpmodel.Server, error)
+}
+
+type serverLister interface {
+	ListServers(context.Context) ([]*mcpmodel.Server, error)
 }
 
 const (
@@ -151,6 +157,102 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeOp
 		err := fmt.Errorf("%w: unsupported mcp transport %q", common.ErrInvalidArgument, server.Transport)
 		return failedResult(spec, unsupportedTransportStage(spec), err), err
 	}
+}
+
+// ProbeOperation validates the selected MCP server and its local transport
+// launch prerequisites without creating a stdio session or sending an HTTP
+// request. Runtime V2 uses it before dispatch seal; execution remains the only
+// path that can call a tool or create a receipt.
+func (a *RuntimeAdapter) ProbeOperation(ctx context.Context, request RuntimeOperationRequest) error {
+	spec, err := parseOperationSpec(request)
+	if err != nil {
+		return err
+	}
+	if a == nil || a.service == nil {
+		return common.ErrInvalidArgument
+	}
+	server, err := a.service.GetServer(ctx, common.MCPServerID(spec.ServerID))
+	if err != nil {
+		return err
+	}
+	if err := validateServerPolicy(server, spec); err != nil {
+		return err
+	}
+	switch strings.ToLower(strings.TrimSpace(server.Transport)) {
+	case "http", "https":
+		endpoint := strings.TrimSpace(server.Endpoint)
+		if endpoint == "" {
+			return fmt.Errorf("%w: mcp endpoint is required", common.ErrInvalidArgument)
+		}
+		if _, err := url.ParseRequestURI(endpoint); err != nil {
+			return fmt.Errorf("%w: invalid mcp endpoint: %v", common.ErrInvalidArgument, err)
+		}
+		return nil
+	case "stdio":
+		command, _, _, err := stdioLaunchConfig(server, request)
+		if err != nil {
+			return err
+		}
+		if strings.ContainsAny(command, `/\\`) {
+			info, statErr := os.Stat(command)
+			if statErr != nil {
+				return statErr
+			}
+			if !info.Mode().IsRegular() {
+				return fmt.Errorf("%w: mcp stdio command is not a regular file", common.ErrInvalidArgument)
+			}
+			return nil
+		}
+		_, err = exec.LookPath(command)
+		return err
+	default:
+		return fmt.Errorf("%w: unsupported mcp transport %q", common.ErrInvalidArgument, server.Transport)
+	}
+}
+
+// OperationAdmissibility returns enabled MCP server IDs and a stable hash of
+// their effective registry state. It performs only the typed registry query;
+// no MCP transport is opened and no capability operation is invoked.
+func (a *RuntimeAdapter) OperationAdmissibility(ctx context.Context) ([]string, string, error) {
+	if a == nil || a.service == nil {
+		return nil, "", common.ErrInvalidArgument
+	}
+	lister, ok := a.service.(serverLister)
+	if !ok {
+		return nil, "", fmt.Errorf("%w: mcp server catalog is unavailable", common.ErrInvalidArgument)
+	}
+	servers, err := lister.ListServers(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	orderedServers := append([]*mcpmodel.Server(nil), servers...)
+	sort.Slice(orderedServers, func(i, j int) bool {
+		if orderedServers[i] == nil {
+			return false
+		}
+		if orderedServers[j] == nil {
+			return true
+		}
+		return string(orderedServers[i].ID) < string(orderedServers[j].ID)
+	})
+	ids := make([]string, 0, len(orderedServers))
+	persisted := make([]mcpmodel.Server, 0, len(orderedServers))
+	for _, server := range orderedServers {
+		if server == nil || !server.Enabled || strings.TrimSpace(string(server.ID)) == "" {
+			continue
+		}
+		ids = append(ids, string(server.ID))
+		persisted = append(persisted, *server)
+	}
+	if len(ids) == 0 {
+		return nil, "", fmt.Errorf("%w: no enabled mcp server is available", common.ErrNotFound)
+	}
+	raw, err := json.Marshal(persisted)
+	if err != nil {
+		return nil, "", err
+	}
+	sum := sha256.Sum256(raw)
+	return ids, "mcp-admissibility-" + hex.EncodeToString(sum[:])[:20], nil
 }
 
 func (a *RuntimeAdapter) Close() {

@@ -85,6 +85,20 @@ func (o *RuntimeOrchestrator) BeginRuntimeV2CandidateAttempt(ctx context.Context
 	return o.runtimeV2Controller.BeginCandidateAttempt(ctx, workspaceID, runID, attempt, stablePrefixHash)
 }
 
+func (o *RuntimeOrchestrator) RecordRuntimeV2CandidateProposal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimemodel.RuntimeCandidate) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.RecordCandidateProposal(ctx, workspaceID, runID, attempt, candidate)
+}
+
+func (o *RuntimeOrchestrator) RecordRuntimeV2CandidateFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, record runtimemodel.RuntimeCandidateFeasibilityRecord) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.RecordCandidateFeasibility(ctx, workspaceID, runID, attempt, record)
+}
+
 func (o *RuntimeOrchestrator) QueryRuntimeV2OperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID, operationID, executionKey string, fence uint64, grant *runtimemodel.RuntimeOperationGovernanceGrant) (runtimemodel.RuntimeOperationReceipt, bool, error) {
 	if o == nil || o.runtimeV2Controller == nil {
 		return runtimemodel.RuntimeOperationReceipt{}, false, common.ErrInvalidArgument

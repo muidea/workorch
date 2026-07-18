@@ -159,7 +159,7 @@ func sameRuntimeAcceptanceSlicePolicy(left *RuntimeAcceptanceSlicePolicy, right 
 	}
 	l := left.Normalized()
 	r := right.Normalized()
-	if l.SchemaVersion != r.SchemaVersion || l.MaxWorkItems != r.MaxWorkItems || l.CompletionPolicy != r.CompletionPolicy || l.ResultPolicy != r.ResultPolicy || len(l.Groups) != len(r.Groups) {
+	if l.SchemaVersion != r.SchemaVersion || l.MaxWorkItems != r.MaxWorkItems || l.MaxFocuses != r.MaxFocuses || l.MaxCandidateContextItems != r.MaxCandidateContextItems || l.CompletionPolicy != r.CompletionPolicy || l.ResultPolicy != r.ResultPolicy || len(l.Groups) != len(r.Groups) {
 		return false
 	}
 	for idx := range l.Groups {

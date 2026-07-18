@@ -130,6 +130,29 @@ func TestRuntimeAdapterRejectsMissingAuthentication(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterProbeValidatesLocalPrerequisitesWithoutSSHExecution(t *testing.T) {
+	toolsDir := t.TempDir()
+	marker := filepath.Join(toolsDir, "ssh-called")
+	writeExecutable(t, filepath.Join(toolsDir, "ssh"), "#!/bin/sh\ntouch \""+marker+"\"\n")
+	t.Setenv("PATH", toolsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	adapter := NewRuntimeAdapter()
+	if err := adapter.ProbeOperation(RuntimeCommandRequest{
+		WorkspaceID: "ws-ssh", RunID: "run-ssh", StepID: "probe/ssh-1",
+		Host: "example.internal", Username: "operator", Password: "secret", Command: "hostname", TimeoutMillis: 5000,
+	}); err != nil {
+		t.Fatalf("probe valid ssh command: %v", err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("probe started ssh command: stat err=%v", err)
+	}
+	if err := adapter.ProbeOperation(RuntimeCommandRequest{
+		Host: "example.internal", Username: "operator", PrivateKeyPath: "missing-key", Command: "hostname",
+	}); err == nil {
+		t.Fatal("probe accepted missing private key path")
+	}
+}
+
 func writeExecutable(t *testing.T, path string, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o700); err != nil {

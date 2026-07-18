@@ -24,11 +24,12 @@ type runtimeCandidateDefinitionProjection struct {
 }
 
 type runtimeCandidateResourceProjection struct {
-	Manifest          *runtimecontract.WorkspaceManifest               `json:"manifest,omitempty"`
-	TargetSnapshots   []runtimecontract.TargetSnapshot                 `json:"targetSnapshots,omitempty"`
-	FailureTarget     *runtimecontract.FailureTarget                   `json:"failureTarget,omitempty"`
-	ValidationScratch *runtimecontract.ValidationScratch               `json:"validationScratch,omitempty"`
-	CapabilityStates  []runtimecontract.RuntimeCapabilityStateSnapshot `json:"capabilityStates,omitempty"`
+	Manifest                 *runtimecontract.WorkspaceManifest               `json:"manifest,omitempty"`
+	TargetSnapshots          []runtimecontract.TargetSnapshot                 `json:"targetSnapshots,omitempty"`
+	FailureTarget            *runtimecontract.FailureTarget                   `json:"failureTarget,omitempty"`
+	ValidationScratch        *runtimecontract.ValidationScratch               `json:"validationScratch,omitempty"`
+	CapabilityStates         []runtimecontract.RuntimeCapabilityStateSnapshot `json:"capabilityStates,omitempty"`
+	OperationAdmissibilities []runtimecontract.RuntimeOperationAdmissibility  `json:"operationAdmissibilities,omitempty"`
 }
 
 type runtimeCandidateActivationProjection struct {
@@ -465,7 +466,7 @@ func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidat
 		Resources: runtimeCandidateResourceProjection{
 			Manifest: context.Resources.Manifest, TargetSnapshots: context.Resources.TargetSnapshots,
 			FailureTarget: context.Resources.FailureTarget, ValidationScratch: context.Resources.ValidationScratch,
-			CapabilityStates: context.Resources.CapabilityStates,
+			CapabilityStates: context.Resources.CapabilityStates, OperationAdmissibilities: context.Resources.OperationAdmissibilities,
 		},
 		Activation: runtimeCandidateActivationProjection{
 			DialogLanguage: activation.DialogLanguage, CurrentStage: stage, Soul: runtimeV2CandidateSoul(activation, stage),
@@ -825,6 +826,9 @@ func runtimeV2CandidateRetry(attempt int, failure *runtimecontract.RuntimeCandid
 	instruction := "Retry the exact same sealed authority contract. Return only the legal top-level object for the requested action."
 	if previous.Class == runtimecontract.RuntimeCandidateFailureClassSchema || previous.Class == runtimecontract.RuntimeCandidateFailureClassContract {
 		instruction += " The previous candidate shape was rejected; do not repeat any wrapper or field named candidate, candidates, or executionGraph."
+	}
+	if previous.Class == runtimecontract.RuntimeCandidateFailureClassInfeasible {
+		instruction += " The previous operation was owner-infeasible before dispatch seal. Choose only targets, selectors, and parameters in the current operationAdmissibilities inventory; do not repeat its failure signature."
 	}
 	instruction += runtimeV2CandidateRetryParameterHint(previous.Reason)
 	return &runtimeCandidateRetryProjection{PreviousFailure: previous, Instruction: instruction}

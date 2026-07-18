@@ -9,13 +9,24 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func testAcceptanceSlicePolicy() *runtimecontract.RuntimeAcceptanceSlicePolicy {
+	return &runtimecontract.RuntimeAcceptanceSlicePolicy{
+		SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaV2,
+		MaxWorkItems:  4, MaxFocuses: 16, MaxCandidateContextItems: 4,
+		Groups: []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{{
+			ID: "slice-default", Title: "Default", Scope: "default", Priority: 100, MaxWorkItems: 1,
+			Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true},
+		}},
+	}
+}
+
 func TestRuntimeV2BootstrapBuildsOrderedDoDFocuses(t *testing.T) {
 	bootstrap, err := RuntimeV2Bootstrap(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "交付完整能力"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"实现行为一", "验证行为二", "覆盖行为三"}},
 		"definition-1",
 		nil,
-		runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce}},
+		runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce}},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -23,7 +34,7 @@ func TestRuntimeV2BootstrapBuildsOrderedDoDFocuses(t *testing.T) {
 	if len(bootstrap.Focuses) != 3 || bootstrap.Focuses[0].ID != "focus-001" || bootstrap.Focuses[2].CoverageWorkItemIDs[0] != "cwi-003" {
 		t.Fatalf("bootstrap focuses = %+v", bootstrap.Focuses)
 	}
-	if bootstrap.Definition.GoalDefinition != "交付完整能力" || bootstrap.Definition.DoDDefinition == "" || len(bootstrap.Requirements) != 7 {
+	if bootstrap.Definition.GoalDefinition != "交付完整能力" || bootstrap.Definition.DoDDefinition == "" || len(bootstrap.Requirements) != 9 {
 		t.Fatalf("bootstrap = %+v", bootstrap)
 	}
 	if !containsBootstrapCapability(bootstrap.Requirements, runtimecontract.RuntimeModuleFile, runtimecontract.RuntimeCapabilityClassValidation, runtimecontract.StepKindFileRead) {
@@ -35,6 +46,10 @@ func TestRuntimeV2BootstrapBuildsOrderedDoDFocuses(t *testing.T) {
 	if containsBootstrapCapability(bootstrap.Requirements, runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeCapabilityClassValidation, runtimecontract.StepKindShellCommand) {
 		t.Fatalf("bootstrap must not seal side-effecting shell/command as default validation capability: %+v", bootstrap.Requirements)
 	}
+	if !containsBootstrapOperationAdmissibility(bootstrap.Requirements, runtimecontract.RuntimeModuleFile, runtimecontract.StepKindFileEdit, runtimecontract.StepKindFileRead) ||
+		!containsBootstrapOperationAdmissibility(bootstrap.Requirements, runtimecontract.RuntimeModuleShell, runtimecontract.StepKindShellCommand, runtimecontract.RuntimeBlockKindManagedValidationSession) {
+		t.Fatalf("bootstrap must seal owner operation-admissibility prerequisites: %+v", bootstrap.Requirements)
+	}
 	facts, err := bootstrap.InitialFacts(common.WorkspaceID("ws-1"), common.RunID("run-1"))
 	if err != nil {
 		t.Fatal(err)
@@ -42,6 +57,25 @@ func TestRuntimeV2BootstrapBuildsOrderedDoDFocuses(t *testing.T) {
 	if facts.Focus.ID != "focus-001" || len(facts.RemainingFocuses) != 2 || facts.EvidenceRevision != runtimecontract.InitialRuntimeEvidenceRevision {
 		t.Fatalf("initial facts = %+v", facts)
 	}
+}
+
+func containsBootstrapOperationAdmissibility(requirements []runtimecontract.RuntimeRequirement, owner string, kinds ...string) bool {
+	for _, requirement := range requirements {
+		if requirement.Kind != runtimecontract.PrerequisiteKindOperationAdmissibility || requirement.OwnerModuleID != owner || len(requirement.RequiredCapabilities) != len(kinds) {
+			continue
+		}
+		matches := true
+		for idx, kind := range kinds {
+			if requirement.RequiredCapabilities[idx] != kind {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
 }
 
 func containsBootstrapCapability(requirements []runtimecontract.RuntimeRequirement, owner string, class runtimecontract.RuntimeCapabilityClass, kind string) bool {
@@ -60,7 +94,7 @@ func TestRuntimeV2BootstrapAllowsValidationOnlyFocusWhenStateChangeIsOptional(t 
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"核对结果已验证"}},
 		"definition-1",
 		nil,
-		runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{StateChangePolicy: runtimecontract.RuntimeStateChangeAllowedButNotRequired}},
+		runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), StateChangePolicy: runtimecontract.RuntimeStateChangeAllowedButNotRequired}},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +111,7 @@ func TestRuntimeV2BootstrapSealsConfiguredConvergencePolicy(t *testing.T) {
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"validate"}},
 		"definition-1",
 		nil,
-		runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{
+		runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
 			MaxRepairAttemptsPerFocus: 7,
 			ValidationPolicies: []runtimecontract.RuntimeValidationPolicy{{
 				ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, MaxValidationOnlyRetriesPerFocus: 2,
@@ -93,7 +127,7 @@ func TestRuntimeV2BootstrapSealsConfiguredConvergencePolicy(t *testing.T) {
 }
 
 func TestRuntimeV2BootstrapAppendsRequiredProfileFocusesWithTypedRequirements(t *testing.T) {
-	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{
+	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
 		StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
 		ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID:                   "software-dev",
@@ -141,7 +175,7 @@ func TestRuntimeV2BootstrapAppendsRequiredProfileFocusesWithTypedRequirements(t 
 }
 
 func TestRuntimeV2BootstrapBuildsBoundedGitCapabilityStateFixture(t *testing.T) {
-	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{
+	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
 		StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
 		ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID: "bounded-git",
@@ -188,7 +222,7 @@ func TestRuntimeV2BootstrapBuildsBoundedGitCapabilityStateFixture(t *testing.T) 
 }
 
 func TestRuntimeV2BootstrapRejectsUnknownProfileAcceptedKind(t *testing.T) {
-	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{
+	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
 		StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
 		ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID: "broken-profile",
@@ -208,7 +242,7 @@ func TestRuntimeV2BootstrapRejectsUnknownProfileAcceptedKind(t *testing.T) {
 }
 
 func TestRuntimeV2BootstrapSoftwareDevProfileIncludesManagedValidation(t *testing.T) {
-	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{
+	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
 		StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
 		ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID: "software-dev",

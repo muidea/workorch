@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
@@ -110,6 +111,18 @@ func (m *Module) resolveRuntimeV2Prerequisite(
 		}
 		capabilities := facts.Capabilities
 		return runtimev2.PrerequisiteResult{PrerequisiteID: prerequisite.ID, Capabilities: &capabilities}, nil
+	case runtimecontract.PrerequisiteKindOperationAdmissibility:
+		result, err := AcquireRuntimeOperationAdmissibilityPrerequisite(ctx, m.rawEventHub, events.AcquireRuntimeOperationAdmissibilityCommand{
+			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
+			PrerequisiteID: prerequisite.ID, OwnerModuleID: prerequisite.OwnerModuleID,
+			WorkspaceDeliverableDirectory: deliverableDirectory, RequiredKinds: append([]string(nil), prerequisite.RequiredCapabilities...),
+			RequiredTargetRefs: append([]string(nil), aggregate.Decision.Focus.TargetRefs...), MaxItems: aggregate.Facts.ConvergencePolicy.MaxCandidateContextItems,
+		})
+		if err != nil {
+			return runtimev2.PrerequisiteResult{}, err
+		}
+		admissibility := result.Admissibility
+		return runtimev2.PrerequisiteResult{PrerequisiteID: prerequisite.ID, OperationAdmissibility: &admissibility}, nil
 	case runtimecontract.PrerequisiteKindCapabilityState:
 		state, err := AcquireGitCapabilityStatePrerequisite(ctx, m.rawEventHub, prerequisite.OwnerModuleID, events.AcquireGitCapabilityStateCommand{
 			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
@@ -151,55 +164,81 @@ func (m *Module) requestAndSealRuntimeV2Candidate(
 		return runtimev2.RuntimeAggregate{}, err
 	}
 	transaction := aggregate.Decision.AuthorityTransaction()
-	previousFailure, err := runtimeV2PreviousCandidateFailure(aggregate, candidateAttempt)
-	if err != nil {
-		return runtimev2.RuntimeAggregate{}, err
-	}
-	response, err := RequestRuntimeCandidate(ctx, m.rawEventHub, events.RequestRuntimeCandidateCommand{
-		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		Decision: aggregate.Decision, Transaction: transaction, CandidateAttempt: candidateAttempt,
-		PreviousFailure:  previousFailure,
-		StablePrefixHash: stablePrefixHash, DefinitionContext: aggregate.Definition,
-		CandidateContext: runtimecontract.RuntimeCandidateContextForDecision(
-			aggregate.Facts,
-			aggregate.Decision,
-			runtimeV2CompletedDispatchRecords(aggregate.CompletedDispatches),
-		),
-	})
-	if err != nil {
-		return m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, runtimecontract.RuntimeCandidateFailure{
-			Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: err.Error(),
+	candidate, proposalPersisted := runtimeV2PendingCandidateProposal(aggregate, candidateAttempt)
+	if !proposalPersisted {
+		previousFailure, previousErr := runtimeV2PreviousCandidateFailure(aggregate, candidateAttempt)
+		if previousErr != nil {
+			return runtimev2.RuntimeAggregate{}, previousErr
+		}
+		response, requestErr := RequestRuntimeCandidate(ctx, m.rawEventHub, events.RequestRuntimeCandidateCommand{
+			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+			Decision: aggregate.Decision, Transaction: transaction, CandidateAttempt: candidateAttempt,
+			PreviousFailure:  previousFailure,
+			StablePrefixHash: stablePrefixHash, DefinitionContext: aggregate.Definition,
+			CandidateContext: runtimecontract.RuntimeCandidateContextForDecision(
+				aggregate.Facts,
+				aggregate.Decision,
+				runtimeV2CompletedDispatchRecords(aggregate.CompletedDispatches),
+			),
 		})
-	}
-	if response.Transaction != transaction {
-		return m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, runtimecontract.RuntimeCandidateFailure{
-			Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: "runtime candidate response changed the sealed authority transaction",
-		})
-	}
-	if response.Failure != nil {
-		if response.Failure.Class == runtimecontract.RuntimeCandidateFailureClassProviderTransient {
-			recovered, consumed, budgetErr := m.bizPtr.ConsumeRuntimeV2RecoveryBudget(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeRecoveryBudgetProviderTransport)
-			if budgetErr != nil {
-				return runtimev2.RuntimeAggregate{}, budgetErr
-			}
-			if consumed {
-				return recovered, nil
-			}
-			return m.bizPtr.RecordRuntimeV2FailureFact(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.FailureFact{
-				Class: runtimecontract.FailureClassProviderTransient, Code: "provider_transport_exhausted",
-				Signature: "provider-transport-exhausted", Message: strings.TrimSpace(response.Failure.Reason),
+		if requestErr != nil {
+			return m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, runtimecontract.RuntimeCandidateFailure{
+				Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: requestErr.Error(),
 			})
 		}
-		failed, failErr := m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, *response.Failure)
-		if failErr != nil {
-			return runtimev2.RuntimeAggregate{}, failErr
+		if response.Transaction != transaction {
+			return m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, runtimecontract.RuntimeCandidateFailure{
+				Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: "runtime candidate response changed the sealed authority transaction",
+			})
 		}
-		if fact, ok := runtimeV2ProviderGovernanceFailure(*response.Failure); ok {
-			return m.bizPtr.RecordRuntimeV2FailureFact(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, fact)
+		if response.Failure != nil {
+			if response.Failure.Class == runtimecontract.RuntimeCandidateFailureClassProviderTransient {
+				recovered, consumed, budgetErr := m.bizPtr.ConsumeRuntimeV2RecoveryBudget(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeRecoveryBudgetProviderTransport)
+				if budgetErr != nil {
+					return runtimev2.RuntimeAggregate{}, budgetErr
+				}
+				if consumed {
+					return recovered, nil
+				}
+				return m.bizPtr.RecordRuntimeV2FailureFact(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.FailureFact{
+					Class: runtimecontract.FailureClassProviderTransient, Code: "provider_transport_exhausted",
+					Signature: "provider-transport-exhausted", Message: strings.TrimSpace(response.Failure.Reason),
+				})
+			}
+			failed, failErr := m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, *response.Failure)
+			if failErr != nil {
+				return runtimev2.RuntimeAggregate{}, failErr
+			}
+			if fact, ok := runtimeV2ProviderGovernanceFailure(*response.Failure); ok {
+				return m.bizPtr.RecordRuntimeV2FailureFact(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, fact)
+			}
+			return failed, nil
 		}
-		return failed, nil
+		aggregate, err = m.bizPtr.RecordRuntimeV2CandidateProposal(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, response.Candidate)
+		if err != nil {
+			return runtimev2.RuntimeAggregate{}, err
+		}
+		candidate, proposalPersisted = runtimeV2PendingCandidateProposal(aggregate, candidateAttempt)
+		if !proposalPersisted {
+			return runtimev2.RuntimeAggregate{}, fmt.Errorf("persisted runtime candidate proposal is missing")
+		}
 	}
-	accepted, err := m.bizPtr.AcceptRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, response.Candidate)
+	if len(aggregate.Facts.Resources.OperationAdmissibilities) > 0 {
+		workspace, workspaceErr := (workspaceEventRepository{hub: m.rawEventHub}).Get(ctx, aggregate.Facts.WorkspaceID)
+		if workspaceErr != nil {
+			return m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, runtimecontract.RuntimeCandidateFailure{
+				Class: runtimecontract.RuntimeCandidateFailureClassInternal, Code: "workspace_resolution_failed", Reason: workspaceErr.Error(),
+			})
+		}
+		if feasibilityFailure, probeErr := m.probeRuntimeV2CandidateFeasibility(ctx, aggregate, workspace.DeliverableDirectory, candidate, candidateAttempt); probeErr != nil {
+			return m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, runtimecontract.RuntimeCandidateFailure{
+				Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "operation_feasibility_probe_invalid", Reason: probeErr.Error(),
+			})
+		} else if feasibilityFailure != nil {
+			return m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, *feasibilityFailure)
+		}
+	}
+	accepted, err := m.bizPtr.AcceptRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, candidate)
 	if err != nil {
 		if isRuntimeCandidateReplayError(err) {
 			return m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, runtimecontract.RuntimeCandidateFailure{
@@ -209,6 +248,189 @@ func (m *Module) requestAndSealRuntimeV2Candidate(
 		return runtimev2.RuntimeAggregate{}, err
 	}
 	return accepted, nil
+}
+
+func runtimeV2PendingCandidateProposal(aggregate runtimev2.RuntimeAggregate, attempt int) (runtimecontract.RuntimeCandidate, bool) {
+	contractID := runtimecontract.StableAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Decision.AuthorityTransaction())
+	for _, record := range aggregate.CandidateAttempts {
+		if runtimecontract.CandidateAttemptAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, record) != contractID || record.Attempt != attempt || record.State != runtimecontract.RuntimeCandidateAttemptStatePending || record.Proposal == nil {
+			continue
+		}
+		return *record.Proposal, true
+	}
+	return runtimecontract.RuntimeCandidate{}, false
+}
+
+func (m *Module) probeRuntimeV2CandidateFeasibility(ctx context.Context, aggregate runtimev2.RuntimeAggregate, workspaceDirectory string, candidate runtimecontract.RuntimeCandidate, candidateAttempt int) (*runtimecontract.RuntimeCandidateFailure, error) {
+	if m == nil || m.bizPtr == nil || m.rawEventHub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	// Assessment candidates and governance candidates contain no executable
+	// owner operation. Their authority is validated by their own seal contract,
+	// so an unrelated persisted inventory must not make assessment impossible.
+	if candidate.StateChange == nil && candidate.Validation == nil {
+		return nil, nil
+	}
+	if len(aggregate.Facts.Resources.OperationAdmissibilities) == 0 {
+		if runtimeV2RequiresOperationAdmissibility(aggregate.Facts.Prerequisites) {
+			return nil, fmt.Errorf("runtime candidate has no persisted owner admissibility inventory")
+		}
+		// Focused reducer/receipt fixtures can construct facts directly without a
+		// bootstrap prerequisite. Production activation always seals this
+		// prerequisite, so such fixtures cannot bypass the production gate.
+		return nil, nil
+	}
+	operations, err := orderedRuntimeV2CandidateOperations(candidate)
+	if err != nil {
+		return nil, err
+	}
+	for _, operation := range operations {
+		descriptor, ok := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+		if !ok || descriptor.OwnerModuleID == "" {
+			return nil, fmt.Errorf("candidate operation %q has no canonical owner", operation.Kind)
+		}
+		inventory, found := runtimeV2OperationAdmissibilityForKind(aggregate.Facts.Resources.OperationAdmissibilities, descriptor.OwnerModuleID, operation.Kind)
+		if !found {
+			return nil, fmt.Errorf("candidate operation %q has no persisted owner admissibility inventory", operation.Kind)
+		}
+		if persisted, found := runtimeV2CandidateFeasibilityRecord(aggregate, candidateAttempt, operation.ID); found {
+			if persisted.AdmissibilitySnapshotID != inventory.SnapshotID {
+				return nil, fmt.Errorf("candidate operation %q feasibility snapshot does not match persisted owner inventory", operation.ID)
+			}
+			if persisted.Feasible {
+				continue
+			}
+			return runtimeCandidateFailureFromFeasibility(persisted), nil
+		}
+		response, probeErr := ProbeRuntimeOperationFeasibility(ctx, m.rawEventHub, events.ProbeRuntimeOperationFeasibilityCommand{
+			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, Transaction: aggregate.Decision.AuthorityTransaction(),
+			WorkspaceDeliverableDirectory: workspaceDirectory, Operation: operation, Admissibility: inventory,
+		})
+		if probeErr != nil {
+			return nil, probeErr
+		}
+		recorded, recordErr := m.bizPtr.RecordRuntimeV2CandidateFeasibility(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, runtimecontract.RuntimeCandidateFeasibilityRecord{
+			OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, Feasible: response.Feasible, Failure: response.Failure,
+		})
+		if recordErr != nil {
+			return nil, recordErr
+		}
+		aggregate = recorded
+		if response.Feasible {
+			continue
+		}
+		return runtimeCandidateFailureFromFeasibility(runtimecontract.RuntimeCandidateFeasibilityRecord{
+			OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, Feasible: false, Failure: response.Failure,
+		}), nil
+	}
+	return nil, nil
+}
+
+func runtimeV2CandidateFeasibilityRecord(aggregate runtimev2.RuntimeAggregate, attempt int, operationID string) (runtimecontract.RuntimeCandidateFeasibilityRecord, bool) {
+	contractID := runtimecontract.StableAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Decision.AuthorityTransaction())
+	for _, candidateAttempt := range aggregate.CandidateAttempts {
+		if runtimecontract.CandidateAttemptAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt) != contractID || candidateAttempt.Attempt != attempt {
+			continue
+		}
+		for _, record := range candidateAttempt.Feasibilities {
+			if record.OperationID == operationID {
+				return record, true
+			}
+		}
+	}
+	return runtimecontract.RuntimeCandidateFeasibilityRecord{}, false
+}
+
+func runtimeCandidateFailureFromFeasibility(record runtimecontract.RuntimeCandidateFeasibilityRecord) *runtimecontract.RuntimeCandidateFailure {
+	if record.Feasible || record.Failure == nil {
+		return nil
+	}
+	failure := record.Failure
+	return &runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassInfeasible,
+		Code:  failure.Code, Signature: failure.Signature, Reason: failure.Message,
+		TargetRefs: append([]string(nil), failure.TargetRefs...),
+	}
+}
+
+func runtimeV2RequiresOperationAdmissibility(state runtimecontract.PrerequisiteState) bool {
+	for _, prerequisite := range append(append([]runtimecontract.RuntimePrerequisite(nil), state.Pending...), state.Satisfied...) {
+		if prerequisite.Kind == runtimecontract.PrerequisiteKindOperationAdmissibility {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeV2OperationAdmissibilityForKind(values []runtimecontract.RuntimeOperationAdmissibility, owner, kind string) (runtimecontract.RuntimeOperationAdmissibility, bool) {
+	canonical := runtimecontract.CanonicalRuntimeBlockKind(kind)
+	for _, value := range values {
+		value = value.Normalized()
+		if value.OwnerModuleID != owner {
+			continue
+		}
+		for _, available := range value.OperationKinds {
+			if available == canonical {
+				return value, true
+			}
+		}
+	}
+	return runtimecontract.RuntimeOperationAdmissibility{}, false
+}
+
+func orderedRuntimeV2CandidateOperations(candidate runtimecontract.RuntimeCandidate) ([]runtimecontract.RuntimeOperation, error) {
+	operations := []runtimecontract.RuntimeOperation{}
+	if candidate.StateChange != nil {
+		for _, value := range candidate.StateChange.Operations {
+			operations = append(operations, value.Operation.Normalized())
+		}
+	} else if candidate.Validation != nil {
+		for _, value := range candidate.Validation.Operations {
+			operations = append(operations, value.Operation.Normalized())
+		}
+	}
+	if len(operations) == 0 {
+		return nil, fmt.Errorf("runtime candidate has no executable operations")
+	}
+	byID := make(map[string]runtimecontract.RuntimeOperation, len(operations))
+	for _, operation := range operations {
+		if operation.ID == "" {
+			return nil, fmt.Errorf("runtime candidate operation requires id")
+		}
+		byID[operation.ID] = operation
+	}
+	completed := map[string]struct{}{}
+	ordered := make([]runtimecontract.RuntimeOperation, 0, len(operations))
+	for len(ordered) < len(byID) {
+		ready := []string{}
+		for id, operation := range byID {
+			if _, done := completed[id]; done {
+				continue
+			}
+			allDependenciesComplete := true
+			for _, dependency := range operation.DependsOn {
+				if _, exists := byID[dependency]; !exists {
+					return nil, fmt.Errorf("runtime candidate operation %q depends on unknown operation %q", id, dependency)
+				}
+				if _, done := completed[dependency]; !done {
+					allDependenciesComplete = false
+					break
+				}
+			}
+			if allDependenciesComplete {
+				ready = append(ready, id)
+			}
+		}
+		if len(ready) == 0 {
+			return nil, fmt.Errorf("runtime candidate operation dependency graph contains a cycle")
+		}
+		sort.Strings(ready)
+		for _, id := range ready {
+			ordered = append(ordered, byID[id])
+			completed[id] = struct{}{}
+		}
+	}
+	return ordered, nil
 }
 
 func runtimeV2CompletedDispatchRecords(values []runtimev2.SealedDispatch) []runtimecontract.RuntimeDispatchRecord {

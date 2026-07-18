@@ -90,6 +90,148 @@ func (a *RuntimeAdapter) AcquireWorkspaceManifest(workspaceDirectory string) (ru
 	}, nil
 }
 
+// AcquireRuntimeOperationAdmissibility returns the bounded File-owner view used
+// to render a candidate. It reads metadata only and never writes a receipt or
+// workspace file.
+func (a *RuntimeAdapter) AcquireRuntimeOperationAdmissibility(workspaceDirectory, prerequisiteID string, operationKinds, requiredTargetRefs []string, maxItems int) (runtimemodel.RuntimeOperationAdmissibility, error) {
+	manifest, err := a.AcquireWorkspaceManifest(workspaceDirectory)
+	if err != nil {
+		return runtimemodel.RuntimeOperationAdmissibility{}, err
+	}
+	if maxItems < 1 || maxItems > runtimemodel.RuntimeCandidateContextItemsMaxCount {
+		return runtimemodel.RuntimeOperationAdmissibility{}, common.ErrInvalidArgument
+	}
+	inventory := runtimemodel.RuntimeOperationAdmissibility{
+		PrerequisiteID:   prerequisiteID,
+		OwnerModuleID:    runtimemodel.RuntimeModuleFile,
+		OperationKinds:   append([]string(nil), operationKinds...),
+		TargetRefs:       boundedAdmissibilityTargetRefs(requiredTargetRefs, manifest.TargetRefs, maxItems),
+		ConstraintRefs:   []string{"workspace-relative-path", "regular-file-required-for-read-edit-and-existing-patch-target"},
+		ObservedRevision: manifest.Revision,
+	}
+	inventory.SnapshotID = runtimemodel.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	if err := inventory.Validate(); err != nil {
+		return runtimemodel.RuntimeOperationAdmissibility{}, err
+	}
+	return inventory, nil
+}
+
+func boundedAdmissibilityTargetRefs(required, available []string, maxItems int) []string {
+	seen := map[string]struct{}{}
+	ret := make([]string, 0, maxItems)
+	appendRef := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" || len(ret) >= maxItems {
+			return
+		}
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		ret = append(ret, value)
+	}
+	for _, value := range required {
+		appendRef(value)
+	}
+	for _, value := range available {
+		appendRef(value)
+	}
+	return ret
+}
+
+// ProbeRuntimeOperationFeasibility checks target admissibility without applying
+// a patch, writing a file, or creating an execution receipt.
+func (a *RuntimeAdapter) ProbeRuntimeOperationFeasibility(workspaceDirectory string, inventory runtimemodel.RuntimeOperationAdmissibility, operation runtimemodel.RuntimeOperation) *runtimemodel.FailureFact {
+	operation = operation.Normalized()
+	inventory = inventory.Normalized()
+	manifest, manifestErr := a.AcquireWorkspaceManifest(workspaceDirectory)
+	if manifestErr != nil {
+		return fileOperationInfeasible(operation, "operation_admissibility_unavailable", manifestErr.Error(), nil)
+	}
+	if inventory.ObservedRevision != manifest.Revision {
+		return fileOperationInfeasible(operation, "operation_admissibility_stale", "runtime file operation admissibility snapshot is stale", nil)
+	}
+	targetRef := fileOperationTargetRef(operation)
+	if targetRef == "" {
+		return fileOperationInfeasible(operation, "operation_target_missing", "runtime file operation requires a concrete workspace-relative target", nil)
+	}
+	if !fileInventoryContainsTarget(inventory, targetRef) {
+		return fileOperationInfeasible(operation, "operation_target_not_admissible", "runtime file operation target is absent from the owner admissibility inventory", []string{targetRef})
+	}
+	_, target, rel, err := guardedWorkspacePath(workspaceDirectory, targetRef, false)
+	if err != nil {
+		return fileOperationInfeasible(operation, "operation_target_invalid", err.Error(), []string{targetRef})
+	}
+	info, statErr := os.Stat(target)
+	requiresRegular := fileOperationRequiresRegularTarget(operation)
+	if statErr == nil && requiresRegular && !info.Mode().IsRegular() {
+		return fileOperationInfeasible(operation, "operation_target_not_regular", "runtime file operation target is not a regular file", []string{filepath.ToSlash(rel)})
+	}
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return fileOperationInfeasible(operation, "operation_target_unreadable", statErr.Error(), []string{filepath.ToSlash(rel)})
+	}
+	if statErr != nil && fileOperationRequiresExistingTarget(operation) {
+		return fileOperationInfeasible(operation, "operation_target_missing", "runtime file operation requires an existing regular file", []string{filepath.ToSlash(rel)})
+	}
+	return nil
+}
+
+func fileInventoryContainsTarget(inventory runtimemodel.RuntimeOperationAdmissibility, targetRef string) bool {
+	targetRef = strings.TrimSpace(targetRef)
+	for _, value := range inventory.Normalized().TargetRefs {
+		if value == targetRef {
+			return true
+		}
+	}
+	return false
+}
+
+func fileOperationTargetRef(operation runtimemodel.RuntimeOperation) string {
+	for _, parameter := range operation.Parameters {
+		if (parameter.Name == "path" || parameter.Name == "targetRef") && parameter.String != nil && strings.TrimSpace(*parameter.String) != "" {
+			return strings.TrimSpace(*parameter.String)
+		}
+	}
+	if len(operation.TargetRefs) == 1 {
+		return operation.TargetRefs[0]
+	}
+	return ""
+}
+
+func fileOperationRequiresRegularTarget(operation runtimemodel.RuntimeOperation) bool {
+	switch operation.Kind {
+	case runtimemodel.StepKindFileRead, runtimemodel.StepKindFileEdit, runtimemodel.StepKindFileWrite, runtimemodel.RuntimeBlockKindPatchApply, runtimemodel.RuntimeBlockKindPatchPreview:
+		return true
+	default:
+		return false
+	}
+}
+
+func fileOperationRequiresExistingTarget(operation runtimemodel.RuntimeOperation) bool {
+	if operation.Kind == runtimemodel.StepKindFileRead || operation.Kind == runtimemodel.StepKindFileEdit {
+		return true
+	}
+	if operation.Kind != runtimemodel.RuntimeBlockKindPatchApply && operation.Kind != runtimemodel.RuntimeBlockKindPatchPreview {
+		return false
+	}
+	for _, parameter := range operation.Parameters {
+		if parameter.Name == "patchType" && parameter.String != nil {
+			return strings.TrimSpace(*parameter.String) == "text_replace"
+		}
+	}
+	return false
+}
+
+func fileOperationInfeasible(operation runtimemodel.RuntimeOperation, code, message string, targets []string) *runtimemodel.FailureFact {
+	return &runtimemodel.FailureFact{
+		Class:      runtimemodel.FailureClassCandidateContractFailure,
+		Code:       code,
+		Signature:  "operation-admissibility/" + operation.Kind + "/" + code,
+		Message:    message,
+		TargetRefs: targets,
+	}
+}
+
 func guardedWorkspacePath(deliverableDirectory string, inputPath string, requireExisting bool) (string, string, string, error) {
 	if strings.TrimSpace(deliverableDirectory) == "" || strings.TrimSpace(inputPath) == "" {
 		return "", "", "", common.ErrInvalidArgument

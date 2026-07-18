@@ -21,6 +21,9 @@ import (
 
 func TestRuntimeV2StateRepositoryPersistsAndLoadsThroughRunOwner(t *testing.T) {
 	ctx := context.Background()
+	if err := runtimeV2Bootstrap().Validate(); err != nil {
+		t.Fatalf("test runtime bootstrap must validate: %v", err)
+	}
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	runs := memory.NewRunRepository()
@@ -38,6 +41,9 @@ func TestRuntimeV2StateRepositoryPersistsAndLoadsThroughRunOwner(t *testing.T) {
 
 	repository := runtimeV2StateRepository{hub: hub}
 	aggregate := runtimeV2Aggregate(t, 1)
+	if current, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2"); err != nil || current.RuntimeBootstrap == nil || !runtimecontract.SameRuntimeBootstrap(*current.RuntimeBootstrap, runtimeV2Bootstrap()) {
+		t.Fatalf("persisted bootstrap mismatch current=%+v err=%v", current, err)
+	}
 	if err := repository.Save(ctx, aggregate, 0); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -366,6 +372,376 @@ func TestRuntimeV2MainlineRetriesSameCandidateContractOnce(t *testing.T) {
 	}
 }
 
+func TestRuntimeV2MainlineRecordsInfeasibleCandidateBeforeDispatchSeal(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	runs := memory.NewRunRepository()
+	if err := runs.Create(ctx, runtimeV2RunForTest(common.RunStateActive, runtimeV2Definition())); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir()}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+
+	probeObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
+	probeObserver.Subscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
+		failure := &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_target_not_regular", Signature: "operation-admissibility/file/edit/operation_target_not_regular", Message: "target is a directory", TargetRefs: []string{"."}}
+		result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: command.Operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: false, Failure: failure}, nil)
+	})
+	t.Cleanup(func() {
+		probeObserver.Unsubscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
+	})
+
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		candidate := runtimecontract.RuntimeCandidate{
+			StateChange: &runtimecontract.StateChangeCandidate{
+				Operations: []runtimecontract.StateChangingOperation{{
+					Operation: runtimecontract.RuntimeOperation{
+						ID: "directory-edit", Kind: runtimecontract.StepKindFileEdit,
+						CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"."},
+						Parameters: runtimeV2FileEditParameters("."),
+					},
+				}},
+			},
+		}
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: candidate}, nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+
+	facts := runtimeV2Aggregate(t, 1).Facts
+	inventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "operation_admissibility:blocks/file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{"."}, ObservedRevision: "test-revision",
+	}
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
+	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	initialized, err := biz.InitializeRuntimeV2(ctx, facts, runtimeV2Definition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	module := &Module{bizPtr: biz, rawEventHub: hub}
+	failed, err := module.requestAndSealRuntimeV2Candidate(ctx, initialized, "stable-admissibility-prefix", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.ActiveDispatch != nil || len(failed.CandidateAttempts) != 1 || failed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || failed.CandidateAttempts[0].Failure == nil || failed.CandidateAttempts[0].Failure.Class != runtimecontract.RuntimeCandidateFailureClassInfeasible || failed.CandidateAttempts[0].Failure.Code != "operation_target_not_regular" {
+		t.Fatalf("infeasible candidate was sealed or not persisted as an admission failure: %+v", failed)
+	}
+	if len(failed.OperationReceipts) != 0 || len(failed.Facts.Evidence.Accepted) != 0 || len(failed.Facts.Evidence.Rejected) != 0 {
+		t.Fatalf("infeasible candidate created execution state: %+v", failed)
+	}
+}
+
+func TestRuntimeV2CandidateAdmissionSkipsOwnerProbeForAssessment(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(1)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	module := &Module{bizPtr: orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil), rawEventHub: hub}
+	candidate := runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Disposition: runtimecontract.AssessmentDispositionRepairableGap, Summary: "assessment-only"}}
+	failure, err := module.probeRuntimeV2CandidateFeasibility(ctx, runtimev2.RuntimeAggregate{}, t.TempDir(), candidate, 0)
+	if err != nil || failure != nil {
+		t.Fatalf("assessment candidate should not enter owner operation probe: failure=%+v err=%v", failure, err)
+	}
+}
+
+func TestRuntimeV2MainlineRetriesCorrectedInfeasibleCandidateBeforeSeal(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	runs := memory.NewRunRepository()
+	if err := runs.Create(ctx, runtimeV2RunForTest(common.RunStateActive, runtimeV2Definition())); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir()}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+
+	probes := 0
+	probeObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
+	probeObserver.Subscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
+		probes++
+		command := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
+		response := orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: command.Operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: probes != 1}
+		if !response.Feasible {
+			response.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_target_not_regular", Signature: "operation-admissibility/file/edit/operation_target_not_regular", Message: "target is a directory", TargetRefs: []string{"."}}
+		}
+		result.Set(response, nil)
+	})
+	t.Cleanup(func() {
+		probeObserver.Unsubscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
+	})
+
+	var requests []orchestratorevents.RequestRuntimeCandidateCommand
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		requests = append(requests, command)
+		target := "target.txt"
+		if command.CandidateAttempt == 0 {
+			target = "."
+		} else if command.PreviousFailure == nil || command.PreviousFailure.Class != runtimecontract.RuntimeCandidateFailureClassInfeasible || command.PreviousFailure.Code != "operation_target_not_regular" {
+			t.Fatalf("retry did not receive persisted infeasibility: %+v", command.PreviousFailure)
+		}
+		candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+			ID: "edit-" + target, Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target}, Parameters: runtimeV2FileEditParameters(target),
+		}}}}}
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: candidate}, nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+
+	facts := runtimeV2Aggregate(t, 1).Facts
+	inventory := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "operation_admissibility:blocks/file", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{".", "target.txt"}, ObservedRevision: "test-revision"}
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
+	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	initialized, err := biz.InitializeRuntimeV2(ctx, facts, runtimeV2Definition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := (&Module{bizPtr: biz, rawEventHub: hub}).requestAndSealRuntimeV2CandidateWithRetry(ctx, initialized, "stable-admissibility-prefix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sealed.ActiveDispatch == nil || probes != 2 || len(requests) != 2 || len(sealed.CandidateAttempts) != 2 ||
+		sealed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || sealed.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStateAccepted {
+		t.Fatalf("corrected candidate was not sealed after one infeasible retry: probes=%d requests=%+v aggregate=%+v", probes, requests, sealed)
+	}
+	if len(sealed.OperationReceipts) != 0 || len(sealed.Facts.Evidence.Accepted) != 0 || len(sealed.Facts.Evidence.Rejected) != 0 {
+		t.Fatalf("candidate admission created execution state: %+v", sealed)
+	}
+}
+
+func TestRuntimeV2MainlineExhaustsTwoInfeasibleCandidatesWithoutDispatch(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	runs := memory.NewRunRepository()
+	if err := runs.Create(ctx, runtimeV2RunForTest(common.RunStateActive, runtimeV2Definition())); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir()}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+	probeObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
+	probeObserver.Subscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
+		result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: command.Operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: false, Failure: &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_target_not_regular", Signature: "operation-admissibility/file/edit/operation_target_not_regular", Message: "target is a directory", TargetRefs: []string{"."}}}, nil)
+	})
+	t.Cleanup(func() {
+		probeObserver.Unsubscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
+	})
+
+	requests := 0
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		requests++
+		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		target := "."
+		candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+			ID: "directory-edit", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target}, Parameters: runtimeV2FileEditParameters(target),
+		}}}}}
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: candidate}, nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+
+	facts := runtimeV2Aggregate(t, 1).Facts
+	inventory := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "operation_admissibility:blocks/file", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{"."}, ObservedRevision: "test-revision"}
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
+	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	initialized, err := biz.InitializeRuntimeV2(ctx, facts, runtimeV2Definition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal, err := (&Module{bizPtr: biz, rawEventHub: hub}).requestAndSealRuntimeV2CandidateWithRetry(ctx, initialized, "stable-admissibility-prefix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 || terminal.ActiveDispatch != nil || terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Facts.Failure == nil || terminal.Facts.Failure.Class != runtimecontract.FailureClassCandidateExhausted || terminal.Facts.Failure.Code != "candidate_retry_exhausted" {
+		t.Fatalf("two infeasible candidates did not terminalize as bounded exhaustion: requests=%d aggregate=%+v", requests, terminal)
+	}
+	if len(terminal.OperationReceipts) != 0 || len(terminal.Facts.Evidence.Accepted) != 0 || len(terminal.Facts.Evidence.Rejected) != 0 {
+		t.Fatalf("infeasible candidates created execution state: %+v", terminal)
+	}
+}
+
+func TestRuntimeV2MainlineRestartsFromPersistedCandidateProposalWithoutProviderReplay(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	runs := memory.NewRunRepository()
+	if err := runs.Create(ctx, runtimeV2RunForTest(common.RunStateActive, runtimeV2Definition())); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+
+	providerCalls := 0
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) {
+		providerCalls++
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+
+	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := biz.InitializeRuntimeV2(ctx, runtimeV2Aggregate(t, 1).Facts, runtimeV2Definition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const prefix = "persisted-proposal-prefix"
+	pending, err := biz.BeginRuntimeV2CandidateAttempt(ctx, "ws-v2", "run-v2", 0, prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+		ID: "persisted-edit", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileEditParameters("target.txt"),
+	}}}}}
+	persisted, err := biz.RecordRuntimeV2CandidateProposal(ctx, "ws-v2", "run-v2", 0, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.StateRevision <= pending.StateRevision || len(persisted.CandidateAttempts) != 1 || persisted.CandidateAttempts[0].Proposal == nil {
+		t.Fatalf("candidate proposal was not persisted: pending=%+v persisted=%+v", pending, persisted)
+	}
+	restarted, err := biz.LoadRuntimeV2(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	module := &Module{bizPtr: biz, rawEventHub: hub}
+	sealed, err := module.requestAndSealRuntimeV2Candidate(ctx, restarted, prefix, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 0 || sealed.ActiveDispatch == nil || sealed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateAccepted || sealed.CandidateAttempts[0].Proposal != nil {
+		t.Fatalf("restart replayed provider or did not seal persisted proposal: calls=%d aggregate=%+v", providerCalls, sealed)
+	}
+}
+
+func TestRuntimeV2MainlineRestartSkipsPersistedFeasibilityProbe(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	runs := memory.NewRunRepository()
+	if err := runs.Create(ctx, runtimeV2RunForTest(common.RunStateActive, runtimeV2Definition())); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir()}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+	providerCalls, probeCalls := 0, 0
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providerCalls++ })
+	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	probeObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
+	probeObserver.Subscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, func(_ magicevent.Event, _ magicevent.Result) { probeCalls++ })
+	t.Cleanup(func() {
+		probeObserver.Unsubscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
+	})
+
+	facts := runtimeV2Aggregate(t, 1).Facts
+	inventory := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "operation_admissibility:blocks/file", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{"target.txt"}, ObservedRevision: "test-revision"}
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
+	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := biz.InitializeRuntimeV2(ctx, facts, runtimeV2Definition(), nil); err != nil {
+		t.Fatal(err)
+	}
+	const prefix = "persisted-feasibility-prefix"
+	if _, err := biz.BeginRuntimeV2CandidateAttempt(ctx, "ws-v2", "run-v2", 0, prefix); err != nil {
+		t.Fatal(err)
+	}
+	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+		ID: "persisted-feasible-edit", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileEditParameters("target.txt"),
+	}}}}}
+	if _, err := biz.RecordRuntimeV2CandidateProposal(ctx, "ws-v2", "run-v2", 0, candidate); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := biz.RecordRuntimeV2CandidateFeasibility(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{OperationID: "persisted-feasible-edit", AdmissibilitySnapshotID: inventory.SnapshotID, Feasible: true}); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := biz.LoadRuntimeV2(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := (&Module{bizPtr: biz, rawEventHub: hub}).requestAndSealRuntimeV2Candidate(ctx, restarted, prefix, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 0 || probeCalls != 0 || sealed.ActiveDispatch == nil || sealed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateAccepted || len(sealed.CandidateAttempts[0].Feasibilities) != 0 {
+		t.Fatalf("restart replayed provider/probe or retained unsealed feasibility state: provider=%d probes=%d aggregate=%+v", providerCalls, probeCalls, sealed)
+	}
+}
+
 func runtimeV2FileEditParameters(path string) []runtimecontract.OperationParameter {
 	oldText := "old"
 	newText := "new"
@@ -470,20 +846,24 @@ func TestNextRuntimeV2CandidateAttemptRejectsResealRunaway(t *testing.T) {
 
 func runtimeV2Aggregate(t *testing.T, revision uint64) runtimev2.RuntimeAggregate {
 	t.Helper()
+	policy := runtimeV2TestAcceptanceSlicePolicy()
 	facts := runtimecontract.RuntimeFacts{
 		Activation: runtimecontract.RuntimeActivationContext{
 			ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 			ExecutionContract: runtimecontract.RuntimeExecutionContract{
 				OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+				AcceptanceSlicePolicy:     &policy,
 			},
 		},
 		WorkspaceID: "ws-v2", RunID: "run-v2", DefinitionRevision: "definition-v2", EvidenceRevision: "evidence-v2-00000000000000000000",
 		Focus: runtimecontract.CoverageFocus{
-			ID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+			ID: "focus-v2", SliceID: "slice-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, TargetRefs: []string{"target.txt"},
 		},
-		Coverage:     []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-v2", State: runtimecontract.RuntimeCoverageItemStateOpen}},
-		Capabilities: runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{runtimecontract.StepKindFileEdit}},
+		Coverage:          []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-v2", SliceID: "slice-v2", State: runtimecontract.RuntimeCoverageItemStateOpen}},
+		Capabilities:      runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{runtimecontract.StepKindFileEdit}},
+		ConvergencePolicy: runtimeV2TestConvergencePolicy(),
+		RecoveryPolicy:    runtimecontract.DefaultRuntimeRecoveryPolicy(),
 	}
 	decision, err := runtimev2.ReduceRuntimeState(facts, nil)
 	if err != nil {
@@ -500,6 +880,7 @@ func runtimeV2Definition() runtimecontract.RuntimeDefinitionContext {
 }
 
 func runtimeV2Bootstrap() runtimecontract.RuntimeBootstrap {
+	policy := runtimeV2TestAcceptanceSlicePolicy()
 	return runtimecontract.RuntimeBootstrap{
 		SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 		Definition:    runtimeV2Definition(),
@@ -507,18 +888,38 @@ func runtimeV2Bootstrap() runtimecontract.RuntimeBootstrap {
 			ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 			ExecutionContract: runtimecontract.RuntimeExecutionContract{
 				OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+				AcceptanceSlicePolicy:     &policy,
 			},
 		},
 		Focuses: []runtimecontract.CoverageFocus{{
-			ID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+			ID: "focus-v2", SliceID: "slice-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, TargetRefs: []string{"target.txt"},
 		}},
-		CoverageItems: []runtimecontract.RuntimeCoverageItem{{ID: "cwi-v2"}},
+		Slices:        []runtimecontract.RuntimeAcceptanceSlice{{ID: "slice-v2", Title: "Test", Scope: "test", Priority: 1, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll, ResultPolicy: runtimecontract.RuntimeAcceptanceSliceResultAllowed}},
+		CoverageItems: []runtimecontract.RuntimeCoverageItem{{ID: "cwi-v2", SliceID: "slice-v2"}},
 		Requirements: []runtimecontract.RuntimeRequirement{{
 			Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 			CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.StepKindFileEdit},
 		}},
+		ConvergencePolicy: runtimeV2TestConvergencePolicy(),
+		RecoveryPolicy:    runtimecontract.DefaultRuntimeRecoveryPolicy(),
 	}
+}
+
+func runtimeV2TestAcceptanceSlicePolicy() runtimecontract.RuntimeAcceptanceSlicePolicy {
+	return runtimecontract.RuntimeAcceptanceSlicePolicy{
+		SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaV2,
+		MaxWorkItems:  4, MaxFocuses: 16, MaxCandidateContextItems: 4,
+		Groups: []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{{ID: "test", Title: "Test", Scope: "test", Priority: 1, MaxWorkItems: 4, Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true}}},
+	}
+}
+
+func runtimeV2TestConvergencePolicy() runtimecontract.RuntimeConvergencePolicy {
+	policy := runtimecontract.DefaultRuntimeConvergencePolicy()
+	policy.MaxAcceptanceSliceWorkItems = 4
+	policy.MaxFocuses = 16
+	policy.MaxCandidateContextItems = 4
+	return policy
 }
 
 func runtimeV2RunForTest(state common.RunState, definition runtimecontract.RuntimeDefinitionContext) *runmodel.Run {

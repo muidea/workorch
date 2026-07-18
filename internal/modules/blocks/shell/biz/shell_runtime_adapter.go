@@ -64,6 +64,129 @@ func NewRuntimeAdapterFromTimeoutString(timeoutValue string) (*RuntimeAdapter, e
 	return adapter, nil
 }
 
+// AcquireRuntimeOperationAdmissibility reports the Shell owner's bounded
+// command-parameter envelope. It only inspects the workspace directory; no
+// command is started and no managed-validation resource is allocated.
+func (a *RuntimeAdapter) AcquireRuntimeOperationAdmissibility(workspaceDirectory, prerequisiteID string, operationKinds []string) (runtimemodel.RuntimeOperationAdmissibility, error) {
+	directory, err := filepath.Abs(strings.TrimSpace(workspaceDirectory))
+	if err != nil || directory == "" {
+		return runtimemodel.RuntimeOperationAdmissibility{}, common.ErrInvalidArgument
+	}
+	info, err := os.Stat(directory)
+	if err != nil || !info.IsDir() {
+		if err == nil {
+			err = common.ErrInvalidArgument
+		}
+		return runtimemodel.RuntimeOperationAdmissibility{}, err
+	}
+	inventory := runtimemodel.RuntimeOperationAdmissibility{
+		PrerequisiteID:   prerequisiteID,
+		OwnerModuleID:    runtimemodel.RuntimeModuleShell,
+		OperationKinds:   append([]string(nil), operationKinds...),
+		ConstraintRefs:   []string{"workspace-working-directory", "executable-on-path", "bounded-timeout", "validation-target-must-exist"},
+		ObservedRevision: fmt.Sprintf("%d", info.ModTime().UTC().UnixNano()),
+	}
+	inventory.SnapshotID = runtimemodel.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	if err := inventory.Validate(); err != nil {
+		return runtimemodel.RuntimeOperationAdmissibility{}, err
+	}
+	return inventory, nil
+}
+
+// ProbeRuntimeOperationFeasibility validates a concrete shell operation without
+// starting a process. It deliberately shares the execution policy helpers so
+// candidate admission and owner execution cannot disagree on basic viability.
+func (a *RuntimeAdapter) ProbeRuntimeOperationFeasibility(workspaceDirectory string, inventory runtimemodel.RuntimeOperationAdmissibility, operation runtimemodel.RuntimeOperation) *runtimemodel.FailureFact {
+	operation = operation.Normalized()
+	inventory = inventory.Normalized()
+	request, err := shellProbeRequestFromOperation(workspaceDirectory, operation)
+	if err != nil {
+		return shellOperationInfeasible(operation, "shell_operation_invalid", err)
+	}
+	command, args, err := shellCommandSpec(request.Command, request.Args)
+	if err != nil {
+		return shellOperationInfeasible(operation, "shell_command_invalid", err)
+	}
+	directory, err := filepath.Abs(strings.TrimSpace(request.WorkspaceDeliverableDirectory))
+	if err != nil || directory == "" {
+		return shellOperationInfeasible(operation, "shell_working_directory_invalid", common.ErrInvalidArgument)
+	}
+	info, statErr := os.Stat(directory)
+	if statErr != nil || !info.IsDir() {
+		if statErr == nil {
+			statErr = common.ErrInvalidArgument
+		}
+		return shellOperationInfeasible(operation, "shell_working_directory_unavailable", statErr)
+	}
+	if inventory.ObservedRevision != fmt.Sprintf("%d", info.ModTime().UTC().UnixNano()) {
+		return shellOperationInfeasible(operation, "operation_admissibility_stale", fmt.Errorf("runtime shell operation admissibility snapshot is stale"))
+	}
+	execCommand, execArgs, _ := normalizeShellExecutionCommand(command, args)
+	if _, lookErr := exec.LookPath(execCommand); lookErr != nil {
+		return shellOperationInfeasible(operation, "shell_executable_unavailable", lookErr)
+	}
+	if err := validateShellCommandPolicy(execCommand, execArgs, directory, shellInputHasManagedValidation(request)); err != nil {
+		return shellOperationInfeasible(operation, "shell_command_policy_rejected", err)
+	}
+	if err := validateValidationShellEvidencePolicy(request.ValidationEvidence, execCommand, execArgs); err != nil {
+		return shellOperationInfeasible(operation, "shell_validation_contract_rejected", err)
+	}
+	if _, err := shellCommandTimeout(request.TimeoutMillis, a.timeout); err != nil {
+		return shellOperationInfeasible(operation, "shell_command_timeout_policy_rejected", err)
+	}
+	if err := validateShellValidationPreflight(directory, execCommand, execArgs, request); err != nil {
+		return shellOperationInfeasible(operation, "validation_target_missing", err)
+	}
+	return nil
+}
+
+func shellProbeRequestFromOperation(workspaceDirectory string, operation runtimemodel.RuntimeOperation) (RuntimeCommandRequest, error) {
+	if operation.Kind != runtimemodel.StepKindShellCommand && operation.Kind != runtimemodel.RuntimeBlockKindManagedValidationSession {
+		return RuntimeCommandRequest{}, common.ErrInvalidArgument
+	}
+	request := RuntimeCommandRequest{WorkspaceDeliverableDirectory: workspaceDirectory}
+	if operation.Kind == runtimemodel.RuntimeBlockKindManagedValidationSession {
+		request.ManagedValidation = runtimemodel.RuntimeManagedValidation{RuntimeManaged: true, Kind: runtimemodel.RuntimeBlockKindManagedValidationSession, OriginalNodeKind: runtimemodel.RuntimeBlockKindManagedValidationSession}
+	}
+	for _, parameter := range operation.Parameters {
+		switch parameter.Name {
+		case "command":
+			if parameter.String != nil {
+				request.Command = *parameter.String
+			}
+		case "args":
+			request.Args = append([]string(nil), parameter.StringList...)
+		case "timeoutMillis":
+			if parameter.Integer != nil {
+				request.TimeoutMillis = *parameter.Integer
+			}
+		case "stateChanging":
+			if parameter.Boolean != nil {
+				request.StateChanging = *parameter.Boolean
+			}
+		case "targetRef":
+			if parameter.String != nil {
+				request.TargetRef = *parameter.String
+			}
+		case "targetRefs":
+			request.TargetRefs = append([]string(nil), parameter.StringList...)
+		}
+	}
+	return request, nil
+}
+
+func shellOperationInfeasible(operation runtimemodel.RuntimeOperation, code string, err error) *runtimemodel.FailureFact {
+	message := "shell operation is not currently feasible"
+	if err != nil {
+		message = err.Error()
+	}
+	return &runtimemodel.FailureFact{
+		Class: runtimemodel.FailureClassCandidateContractFailure,
+		Code:  code, Signature: "operation-admissibility/" + operation.Kind + "/" + code,
+		Message: message, TargetRefs: append([]string(nil), operation.TargetRefs...),
+	}
+}
+
 func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCommandRequest) (RuntimeCommandResult, error) {
 	command, args, err := shellCommandSpec(request.Command, request.Args)
 	if err != nil {
@@ -807,6 +930,9 @@ func validateGoTestValidationPreflight(deliverableDirectory string, args []strin
 	if len(args) == 0 || strings.TrimSpace(args[0]) != "test" {
 		return nil
 	}
+	if err := validateGoTestPackageTargets(deliverableDirectory, args); err != nil {
+		return err
+	}
 	runPattern := goTestRunPattern(args)
 	hasTestFiles, err := workspaceContainsGoTestFiles(deliverableDirectory)
 	if err != nil {
@@ -817,6 +943,41 @@ func validateGoTestValidationPreflight(deliverableDirectory string, args []strin
 			return fmt.Errorf("%w: validation preflight failed: no *_test.go files found for go test -run %q; create a matching test first or choose an executable validation command", common.ErrInvalidArgument, runPattern)
 		}
 		return fmt.Errorf("%w: validation preflight failed: no *_test.go files found for go test; create tests first or choose an executable validation command", common.ErrInvalidArgument)
+	}
+	return nil
+}
+
+func validateGoTestPackageTargets(deliverableDirectory string, args []string) error {
+	for idx := 1; idx < len(args); idx++ {
+		arg := strings.TrimSpace(args[idx])
+		if arg == "" {
+			continue
+		}
+		if arg == "-run" || arg == "--run" {
+			idx++
+			continue
+		}
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		// Go package patterns not rooted in the workspace are resolved by the Go
+		// toolchain. Workspace-relative targets are deterministic and can be
+		// rejected before process start when they do not exist.
+		if arg != "." && !strings.HasPrefix(arg, "./") {
+			continue
+		}
+		if arg == "./..." {
+			continue
+		}
+		rel := strings.TrimPrefix(arg, "./")
+		path := filepath.Join(deliverableDirectory, filepath.FromSlash(rel))
+		info, err := os.Stat(path)
+		if err != nil || !info.IsDir() {
+			if err == nil {
+				err = common.ErrNotFound
+			}
+			return fmt.Errorf("%w: validation preflight failed: go test package target %q does not exist", err, arg)
+		}
 	}
 	return nil
 }

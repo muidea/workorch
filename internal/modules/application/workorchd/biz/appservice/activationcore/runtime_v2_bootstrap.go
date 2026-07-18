@@ -2,6 +2,7 @@ package activationcore
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
@@ -14,6 +15,9 @@ func RuntimeV2Bootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defi
 	if goal == nil || dod == nil || goal.ID == "" || dod.ID == "" || goal.WorkspaceID == "" || goal.WorkspaceID != dod.WorkspaceID ||
 		strings.TrimSpace(goal.Text) == "" || len(dod.Items) == 0 || definitionRevision == "" {
 		return nil, common.ErrInvalidArgument
+	}
+	if activation.ExecutionContract.AcceptanceSlicePolicy == nil {
+		return nil, fmt.Errorf("runtime v2 bootstrap requires acceptance slice policy %s", runtimecontract.RuntimeAcceptanceSlicePolicySchemaV2)
 	}
 	dodLines := make([]string, 0, len(dod.Items))
 	for idx, item := range dod.Items {
@@ -57,6 +61,11 @@ func RuntimeV2Bootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defi
 		return nil, err
 	}
 	requirements = append(requirements, profileRequirements...)
+	admissibilityRequirements, err := runtimeV2OperationAdmissibilityRequirements(capabilityContract)
+	if err != nil {
+		return nil, err
+	}
+	requirements = append(requirements, admissibilityRequirements...)
 	stateRequirements := runtimeV2ProfileCapabilityStateRequirements(activation.ExecutionContract.ProfileContracts)
 	requirements = append(requirements, stateRequirements...)
 	stateChangeRequirement := runtimecontract.RuntimeRunStateChangeRequirement{
@@ -69,18 +78,16 @@ func RuntimeV2Bootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defi
 			stateChangeRequirement.CoverageWorkItemIDs = append(stateChangeRequirement.CoverageWorkItemIDs, focus.CoverageWorkItemIDs...)
 		}
 	}
+	slicePolicy := activation.ExecutionContract.AcceptanceSlicePolicy.Normalized()
 	convergencePolicy := runtimecontract.DefaultRuntimeConvergencePolicy()
+	convergencePolicy.MaxAcceptanceSliceWorkItems = slicePolicy.MaxWorkItems
+	convergencePolicy.MaxFocuses = slicePolicy.MaxFocuses
+	convergencePolicy.MaxCandidateContextItems = slicePolicy.MaxCandidateContextItems
 	if maxAttempts := activation.ExecutionContract.MaxRepairAttemptsPerFocus; maxAttempts > 0 {
 		convergencePolicy.MaxRepairAttemptsPerFocus = maxAttempts
 	}
 	if maxRetries, ok := runtimecontract.RuntimeValidationRetryLimit(activation.ExecutionContract.ValidationPolicies, runtimecontract.EvidenceKindValidation); ok {
 		convergencePolicy.MaxValidationOnlyRetriesPerFocus = maxRetries
-	}
-	if activation.ExecutionContract.AcceptanceSlicePolicy != nil {
-		maxItems := activation.ExecutionContract.AcceptanceSlicePolicy.Normalized().MaxWorkItems
-		if maxItems > 0 {
-			convergencePolicy.MaxAcceptanceSliceWorkItems = maxItems
-		}
 	}
 	bootstrap := runtimecontract.RuntimeBootstrap{
 		SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
@@ -104,6 +111,45 @@ func RuntimeV2Bootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defi
 		return nil, err
 	}
 	return &bootstrap, nil
+}
+
+func runtimeV2OperationAdmissibilityRequirements(kinds []string) ([]runtimecontract.RuntimeRequirement, error) {
+	byOwner := map[string][]string{}
+	for _, kind := range kinds {
+		canonical := runtimecontract.CanonicalRuntimeBlockKind(kind)
+		descriptor, ok := runtimecontract.RuntimeOperationDescriptorForKind(canonical)
+		if !ok {
+			return nil, fmt.Errorf("runtime operation kind %q has no descriptor", kind)
+		}
+		if descriptor.OwnerModuleID == "" || !runtimeV2DescriptorProducesCandidate(descriptor) {
+			continue
+		}
+		byOwner[descriptor.OwnerModuleID] = append(byOwner[descriptor.OwnerModuleID], canonical)
+	}
+	owners := make([]string, 0, len(byOwner))
+	for owner := range byOwner {
+		owners = append(owners, owner)
+	}
+	sort.Strings(owners)
+	ret := make([]runtimecontract.RuntimeRequirement, 0, len(owners))
+	for _, owner := range owners {
+		values := byOwner[owner]
+		sort.Strings(values)
+		ret = append(ret, runtimecontract.RuntimeRequirement{
+			Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: owner,
+			RequiredCapabilities: values, Reason: "operation parameter admissibility required",
+		})
+	}
+	return ret, nil
+}
+
+func runtimeV2DescriptorProducesCandidate(descriptor runtimecontract.RuntimeOperationDescriptor) bool {
+	for _, action := range descriptor.AllowedActions {
+		if action == runtimecontract.RuntimeActionProduceStateChange || action == runtimecontract.RuntimeActionProduceValidation {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeV2ProfileCapabilityStateRequirements(profiles []runtimecontract.RuntimeProfileContract) []runtimecontract.RuntimeRequirement {

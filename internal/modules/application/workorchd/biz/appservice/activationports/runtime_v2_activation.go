@@ -167,10 +167,12 @@ func runtimeV2ExecutionContract(input map[string]any) runtimecontract.RuntimeExe
 	}
 	if policy := runtimeV2Map(input["acceptanceSlicePolicy"]); len(policy) > 0 {
 		slicePolicy := runtimecontract.RuntimeAcceptanceSlicePolicy{
-			SchemaVersion:    runtimeV2String(policy["schemaVersion"]),
-			MaxWorkItems:     runtimeV2Int(policy["maxWorkItems"]),
-			CompletionPolicy: runtimeV2String(policy["completionPolicy"]),
-			ResultPolicy:     runtimeV2String(policy["resultPolicy"]),
+			SchemaVersion:            runtimeV2String(policy["schemaVersion"]),
+			MaxWorkItems:             runtimeV2Int(policy["maxWorkItems"]),
+			MaxFocuses:               runtimeV2Int(policy["maxFocuses"]),
+			MaxCandidateContextItems: runtimeV2Int(policy["maxCandidateContextItems"]),
+			CompletionPolicy:         runtimeV2String(policy["completionPolicy"]),
+			ResultPolicy:             runtimeV2String(policy["resultPolicy"]),
 		}
 		for _, item := range runtimeV2MapSlice(policy["groups"]) {
 			match := runtimeV2Map(item["match"])

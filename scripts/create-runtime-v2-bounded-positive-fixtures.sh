@@ -123,6 +123,25 @@ created_template_ids = []
 if template_id:
     template_ids = {"a": template_id, "b": template_id}
 else:
+    # New Runtime V2 activations seal an explicit acceptance-slice policy.  Keep
+    # every generated work item isolated so this fixture exercises exactly two
+    # bounded focuses instead of relying on an implicit compiler default.
+    acceptance_slice_policy = {
+        "schemaVersion": "workorch.acceptance_slice_policy.v2",
+        "maxWorkItems": 1,
+        "maxFocuses": 2,
+        "maxCandidateContextItems": 4,
+        "completionPolicy": "all_required_items_accepted",
+        "resultPolicy": "slice_result_allowed",
+        "groups": [{
+            "id": "bounded-all",
+            "title": "Bounded fixture acceptance",
+            "scope": "bounded_fixture",
+            "priority": 10,
+            "maxWorkItems": 1,
+            "match": {"all": True},
+        }],
+    }
     suffix = os.path.basename(artifact_dir).lower().replace("_", "-")
     template_ids = {
         "a": "runtime-v2-bounded-git-" + suffix,
@@ -137,6 +156,7 @@ else:
             "doDItems": ["A traceable workspace result is validated before final assessment."],
             "contextHints": {
                 "stateChangePolicy": "must_produce_state_change",
+                "acceptanceSlicePolicy": acceptance_slice_policy,
                 "profileContracts": {
                     "bounded-git": {
                         "deliverableExpectations": [{
@@ -162,7 +182,10 @@ else:
             "description": "Script-owned two-focus fixture with a required durable state change.",
             "goalText": "Produce and validate a bounded, evidence-backed workspace result.",
             "doDItems": ["A bounded state change is produced", "The state change is validated"],
-            "contextHints": {"stateChangePolicy": "must_produce_state_change"},
+            "contextHints": {
+                "stateChangePolicy": "must_produce_state_change",
+                "acceptanceSlicePolicy": acceptance_slice_policy,
+            },
         },
     }
     for label, template in templates.items():
@@ -270,7 +293,7 @@ payload = json.load(open(sys.argv[1], encoding="utf-8"))
 fixtures = payload["fixtures"]
 print(f"export WORKORCH_E2E_WORKSPACE_ID_A={shlex.quote(fixtures[0]['workspaceId'])}")
 print(f"export WORKORCH_E2E_WORKSPACE_ID_B={shlex.quote(fixtures[1]['workspaceId'])}")
-print("export WORKORCH_E2E_MODE=terminal")
+print("export WORKORCH_E2E_MODE=bounded_terminal")
 print("export WORKORCH_E2E_ACTIVATE=1")
 PY
 

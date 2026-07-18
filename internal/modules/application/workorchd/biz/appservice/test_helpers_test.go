@@ -11,18 +11,16 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
-	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	governancemodule "github.com/muidea/workorch/internal/modules/kernel/governance"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/testkit"
-	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -56,6 +54,37 @@ func mustAppserviceGovernancePayload(t *testing.T, input map[string]any) workorc
 		t.Fatal(err)
 	}
 	return payload
+}
+
+// runtimeV2TestTemplate seals the same explicit policy required by production
+// activation. Test fixtures may add their own contracts, but must not rely on a
+// removed implicit acceptance-slice default.
+func runtimeV2TestTemplate(template WorkspaceTemplate) WorkspaceTemplate {
+	if template.ContextHints == nil {
+		template.ContextHints = map[string]any{}
+	}
+	if _, ok := template.ContextHints["acceptanceSlicePolicy"]; ok {
+		return template
+	}
+	template.ContextHints["acceptanceSlicePolicy"] = map[string]any{
+		"schemaVersion": "workorch.acceptance_slice_policy.v2", "maxWorkItems": 4, "maxFocuses": 8, "maxCandidateContextItems": 4,
+		"completionPolicy": "all_required_items_accepted", "resultPolicy": "slice_result_allowed",
+		"groups": []any{map[string]any{"id": "test-all", "title": "Test acceptance", "scope": "test_fixture", "priority": 10, "maxWorkItems": 4, "match": map[string]any{"all": true}}},
+	}
+	return template
+}
+
+func runtimeV2TestContextHints(t *testing.T) workorcheventpayload.Payload {
+	t.Helper()
+	payload, err := workorcheventpayload.FromMap(runtimeV2TestTemplate(WorkspaceTemplate{ContextHints: map[string]any{}}).ContextHints)
+	if err != nil {
+		t.Fatalf("Runtime V2 test context hints: %v", err)
+	}
+	return payload
+}
+
+func createRuntimeV2TestTemplateWithBackend(ctx context.Context, backend string, dataRoot string, template WorkspaceTemplate) (WorkspaceTemplate, error) {
+	return CreateWorkspaceTemplateWithBackend(ctx, backend, dataRoot, runtimeV2TestTemplate(template))
 }
 
 func TestMain(m *testing.M) {
@@ -258,6 +287,49 @@ func createWorkspaceWithIDWithSession(ctx context.Context, session *RuntimeSessi
 	item, err := ownerreadports.ReadWorkspaceByOwnerCommand(ctx, hub, id)
 	if err != nil {
 		return Workspace{}, err
+	}
+	// This low-level test helper deliberately bypasses the product workspace
+	// creation view to retain caller-provided IDs. Bind an explicit current
+	// policy through the same owner-template path before any test later creates
+	// or activates a Runtime V2 Run; production must not regain an implicit
+	// acceptance-slice default for this fixture convenience.
+	templateID := "runtime-v2-test-policy-" + string(id)
+	template := WorkspaceTemplate{
+		ID:   templateID,
+		Name: "Runtime V2 test acceptance policy",
+		ContextHints: map[string]any{
+			"acceptanceSlicePolicy": map[string]any{
+				"schemaVersion":            "workorch.acceptance_slice_policy.v2",
+				"maxWorkItems":             4,
+				"maxFocuses":               8,
+				"maxCandidateContextItems": 4,
+				"completionPolicy":         "all_required_items_accepted",
+				"resultPolicy":             "slice_result_allowed",
+				"groups": []any{map[string]any{
+					"id": "test-all", "title": "Test acceptance", "scope": "test_fixture", "priority": 10,
+					"maxWorkItems": 4, "match": map[string]any{"all": true},
+				}},
+			},
+		},
+	}
+	if _, err := CreateWorkspaceTemplateWithSession(ctx, session, template); err != nil {
+		return Workspace{}, fmt.Errorf("create Runtime V2 test acceptance template: %w", err)
+	}
+	item, err = workspacecore.ApplyTemplateToWorkspace(item, template)
+	if err != nil {
+		return Workspace{}, fmt.Errorf("apply Runtime V2 test acceptance template: %w", err)
+	}
+	// File-backed fixtures can use the test-only repository seed surface without
+	// introducing a second RuntimeSession. Memory-only tests using this helper
+	// do not create Runs and retain their intentionally bare setup.
+	if session.RepositoryBackend() == "file" {
+		repositories := testkit.OpenRepositories(session.RepositoryBackend(), session.RepositoryDataDir())
+		if repositories.Workspaces == nil {
+			return Workspace{}, fmt.Errorf("load Runtime V2 test workspace fixture repository: %w", common.ErrInvalidArgument)
+		}
+		if err := repositories.Workspaces.Update(ctx, item); err != nil {
+			return Workspace{}, fmt.Errorf("bind Runtime V2 test acceptance template: %w", err)
+		}
 	}
 	return workspacecore.MapWorkspace(item), nil
 }
@@ -500,26 +572,32 @@ func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID
 	}); err != nil {
 		t.Fatalf("Create decision step: %v", err)
 	}
-	if _, err := sendAppserviceTestCommand[decisionevents.EnsureTicketCommand, decisionevents.DecisionCommandResult](ctx, exports.Infrastructure.CommandHub, decisionevents.TopicDecisionCommandEnsureTicket, decisionevents.CommandDestination, decisionevents.EnsureTicketCommand{
-		TicketID:     ticketID,
-		WorkspaceID:  common.WorkspaceID(workspaceID),
-		RunID:        common.RunID(runID),
-		StepID:       stepID,
-		Reason:       "test decision gate",
-		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
-		Question:     "provide test decision input",
-		Context: func() []decisionevents.DecisionEvidenceField {
-			payload, fieldErr := workorcheventpayload.FromMap(map[string]any{"requiredFields": []any{"input"}})
-			if fieldErr != nil {
-				t.Fatalf("DecisionFieldsFromMap: %v", fieldErr)
-			}
-			return payload.Fields
-		}(),
+	if err := exports.Repositories.Tickets.Create(ctx, &decisionmodel.Ticket{
+		ID: ticketID, WorkspaceID: common.WorkspaceID(workspaceID), RunID: common.RunID(runID), StepID: stepID,
+		Reason: "test decision gate", DecisionKind: "provide_missing_info", Question: "provide test decision input",
+		Context: mustAppserviceGovernancePayload(t, map[string]any{"requiredFields": []any{"input"}}), State: common.DecisionTicketStateOpen,
 	}); err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
-	if _, err := sendAppserviceTestCommand[orchestratorevents.BlockDecisionCommand, orchestratorevents.OrchestratorCommandResult](ctx, exports.Infrastructure.CommandHub, orchestratorevents.TopicOrchestratorCommandBlockDecision, orchestratorevents.CommandDestination, orchestratorevents.BlockDecisionCommand{RunID: common.RunID(runID), TicketID: ticketID}); err != nil {
-		t.Fatalf("BlockOnDecision: %v", err)
+	// This read-model fixture intentionally has no Runtime V2 aggregate.  It is
+	// therefore projected directly as blocked instead of invoking the production
+	// SM-1 command, which correctly accepts only aggregate-backed Runs.
+	seeded, err := exports.Repositories.Runs.Get(ctx, common.RunID(runID))
+	if err != nil {
+		t.Fatalf("Get decision fixture run: %v", err)
+	}
+	seeded.State = common.RunStateBlockedOnDecision
+	seeded.BlockingTicketID = ticketID
+	if err := exports.Repositories.Runs.Update(ctx, seeded); err != nil {
+		t.Fatalf("Block decision fixture run: %v", err)
+	}
+	workspace, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspaceID))
+	if err != nil {
+		t.Fatalf("Get decision fixture workspace: %v", err)
+	}
+	workspace.ActiveRunID = common.RunID(runID)
+	if err := exports.Repositories.Workspaces.Update(ctx, workspace); err != nil {
+		t.Fatalf("Activate decision fixture workspace: %v", err)
 	}
 	item, err := exports.Repositories.Runs.Get(ctx, common.RunID(runID))
 	if err != nil {
@@ -555,8 +633,24 @@ func prepareApprovalRun(t *testing.T, dataRoot string, workspaceID string, runID
 	if err := exports.Repositories.Approvals.Create(ctx, &approvalmodel.Approval{ID: approvalID, WorkspaceID: common.WorkspaceID(workspaceID), RunID: common.RunID(runID), StepID: stepID, Reason: "test approval gate", State: common.ApprovalStatePending}); err != nil {
 		t.Fatalf("CreateApproval: %v", err)
 	}
-	if _, err := sendAppserviceTestCommand[orchestratorevents.BlockApprovalCommand, orchestratorevents.OrchestratorCommandResult](ctx, exports.Infrastructure.CommandHub, orchestratorevents.TopicOrchestratorCommandBlockApproval, orchestratorevents.CommandDestination, orchestratorevents.BlockApprovalCommand{RunID: common.RunID(runID), ApprovalID: approvalID}); err != nil {
-		t.Fatalf("BlockOnApproval: %v", err)
+	// See prepareDecisionRun: this is a read-model fixture, not an authority
+	// transition for a synthetic aggregate-free Run.
+	seeded, err := exports.Repositories.Runs.Get(ctx, common.RunID(runID))
+	if err != nil {
+		t.Fatalf("Get approval fixture run: %v", err)
+	}
+	seeded.State = common.RunStateBlockedOnApproval
+	seeded.BlockingApprovalID = approvalID
+	if err := exports.Repositories.Runs.Update(ctx, seeded); err != nil {
+		t.Fatalf("Block approval fixture run: %v", err)
+	}
+	workspace, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspaceID))
+	if err != nil {
+		t.Fatalf("Get approval fixture workspace: %v", err)
+	}
+	workspace.ActiveRunID = common.RunID(runID)
+	if err := exports.Repositories.Workspaces.Update(ctx, workspace); err != nil {
+		t.Fatalf("Activate approval fixture workspace: %v", err)
 	}
 	item, err := exports.Repositories.Runs.Get(ctx, common.RunID(runID))
 	if err != nil {

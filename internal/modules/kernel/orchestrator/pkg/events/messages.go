@@ -82,6 +82,46 @@ type AcquireRuntimeCapabilitiesResult struct {
 	Capabilities   runtimecontract.RuntimeCapabilities
 }
 
+// AcquireRuntimeOperationAdmissibilityCommand requests a bounded, read-only
+// parameter inventory from one canonical operation owner before candidate
+// generation. The owner must not allocate resources, mutate a deliverable, or
+// write a runtime receipt while handling this command.
+type AcquireRuntimeOperationAdmissibilityCommand struct {
+	WorkspaceID                   common.WorkspaceID
+	RunID                         common.RunID
+	AuthoritySnapshotID           string
+	PrerequisiteID                string
+	OwnerModuleID                 string
+	WorkspaceDeliverableDirectory string
+	RequiredKinds                 []string
+	RequiredTargetRefs            []string
+	MaxItems                      int
+}
+
+type AcquireRuntimeOperationAdmissibilityResult struct {
+	PrerequisiteID string
+	Admissibility  runtimecontract.RuntimeOperationAdmissibility
+}
+
+// ProbeRuntimeOperationFeasibilityCommand is an SM-3 admission check for one
+// schema-valid operation. It is intentionally separate from execute commands:
+// Feasible=false cannot create a dispatch, receipt, evidence, or side effect.
+type ProbeRuntimeOperationFeasibilityCommand struct {
+	WorkspaceID                   common.WorkspaceID
+	RunID                         common.RunID
+	Transaction                   runtimecontract.AuthorityTransaction
+	WorkspaceDeliverableDirectory string
+	Operation                     runtimecontract.RuntimeOperation
+	Admissibility                 runtimecontract.RuntimeOperationAdmissibility
+}
+
+type ProbeRuntimeOperationFeasibilityResult struct {
+	OperationID             string
+	AdmissibilitySnapshotID string
+	Feasible                bool
+	Failure                 *runtimecontract.FailureFact
+}
+
 type AcquireGitCapabilityStateCommand struct {
 	WorkspaceID                   common.WorkspaceID
 	RunID                         common.RunID
@@ -1025,6 +1065,8 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[AcquireWorkspaceManifestCommand, AcquireWorkspaceManifestResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireWorkspaceManifest).MessageContract(),
 		eventcontract.CommandTopic[AcquireProviderCeilingCommand, AcquireProviderCeilingResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireProviderCeiling).MessageContract(),
 		eventcontract.CommandTopic[AcquireRuntimeCapabilitiesCommand, AcquireRuntimeCapabilitiesResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireRuntimeCapabilities).MessageContract(),
+		eventcontract.CommandTopic[AcquireRuntimeOperationAdmissibilityCommand, AcquireRuntimeOperationAdmissibilityResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireRuntimeOperationAdmissibility).MessageContract(),
+		eventcontract.CommandTopic[ProbeRuntimeOperationFeasibilityCommand, ProbeRuntimeOperationFeasibilityResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorProbeRuntimeOperationFeasibility).MessageContract(),
 		eventcontract.CommandTopic[AcquireGitCapabilityStateCommand, AcquireGitCapabilityStateResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireGitCapabilityState).MessageContract(),
 		eventcontract.CommandTopic[DriveRuntimeV2Command, DriveRuntimeV2Result]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorDriveRuntimeV2).MessageContract(),
 		eventcontract.CommandTopic[QueryRuntimeOperationReceiptCommand, QueryRuntimeOperationReceiptResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorQueryRuntimeOperationReceipt).MessageContract(),

@@ -260,6 +260,45 @@ func TestRuntimeControllerOwnsDispatchAndEvidenceCommit(t *testing.T) {
 	}
 }
 
+func TestRuntimeControllerRejectsExecutableSealWithoutPersistedOwnerFeasibility(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, _ := NewRuntimeController(repository)
+	facts := controllerFacts()
+	inventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "operation_admissibility:file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: []string{"target.txt"}, ObservedRevision: "inventory-revision",
+	}
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{{
+		ID: inventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.StepKindFileWrite},
+	}}
+	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
+		t.Fatal(err)
+	}
+	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+		ID: "write-1", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("state"),
+	}}}}}
+	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, candidate); err == nil || !strings.Contains(err.Error(), "no current persisted feasibility result") {
+		t.Fatalf("sealed executable candidate without owner feasibility: %v", err)
+	}
+	if _, err := controller.RecordCandidateProposal(context.Background(), "ws-v2", "run-v2", 0, candidate); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.RecordCandidateFeasibility(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+		OperationID: "write-1", AdmissibilitySnapshotID: inventory.SnapshotID, Feasible: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if sealed, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, candidate); err != nil || sealed.ActiveDispatch == nil {
+		t.Fatalf("sealed candidate with persisted owner feasibility = %+v err=%v", sealed, err)
+	}
+}
+
 func TestRuntimeControllerCommitsTypedAssessmentBeforeCompletion(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)

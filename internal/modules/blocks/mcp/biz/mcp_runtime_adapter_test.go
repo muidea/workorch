@@ -68,6 +68,38 @@ func TestRuntimeAdapterExecutesAllowedHTTPToolCall(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterProbeChecksServerPolicyWithoutCallingTool(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	adapter := NewRuntimeAdapter(newMCPService(t, mcpmodel.Server{
+		ID: common.MCPServerID("mcp-probe"), Transport: "http", Endpoint: server.URL, Enabled: true, AllowedTools: []string{"repo.summary"},
+	}))
+	ids, revision, err := adapter.OperationAdmissibility(context.Background())
+	if err != nil || len(ids) != 1 || ids[0] != "mcp-probe" || revision == "" {
+		t.Fatalf("mcp admissibility = ids=%v revision=%q err=%v", ids, revision, err)
+	}
+	if err := adapter.ProbeOperation(context.Background(), RuntimeOperationRequest{
+		Kind: "mcp/tool_call", Data: orchestratorevents.MCPOperationData{ServerID: "mcp-probe", Tool: "repo.summary"},
+	}); err != nil {
+		t.Fatalf("probe configured MCP tool: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("probe called MCP endpoint %d times", calls)
+	}
+	if err := adapter.ProbeOperation(context.Background(), RuntimeOperationRequest{
+		Kind: "mcp/tool_call", Data: orchestratorevents.MCPOperationData{ServerID: "mcp-probe", Tool: "repo.delete"},
+	}); err == nil {
+		t.Fatal("probe accepted tool outside server policy")
+	}
+	if calls != 0 {
+		t.Fatalf("rejected probe called MCP endpoint %d times", calls)
+	}
+}
+
 func TestRuntimeAdapterExecutesHTTPResourceReadAndPromptGet(t *testing.T) {
 	ctx := context.Background()
 	var captured []map[string]any
@@ -968,6 +1000,13 @@ func (g staticMCPServerGetter) GetServer(_ context.Context, id common.MCPServerI
 		return nil, common.ErrNotFound
 	}
 	return g.server, nil
+}
+
+func (g staticMCPServerGetter) ListServers(_ context.Context) ([]*mcpmodel.Server, error) {
+	if g.server == nil {
+		return nil, common.ErrNotFound
+	}
+	return []*mcpmodel.Server{g.server}, nil
 }
 
 func newMCPService(t *testing.T, server mcpmodel.Server) serverGetter {

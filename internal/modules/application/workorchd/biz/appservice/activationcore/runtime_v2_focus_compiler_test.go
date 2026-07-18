@@ -174,7 +174,8 @@ func TestRuntimeV2BootstrapCompilesDodWildcardIntoFocuses(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
-			StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
+			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaV2, MaxWorkItems: 4, MaxFocuses: 4, MaxCandidateContextItems: 4},
+			StateChangePolicy:     runtimecontract.RuntimeStateChangeMustProduce,
 			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 				ID: "software-dev",
 				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
@@ -207,7 +208,8 @@ func TestRuntimeV2BootstrapSealsRunLevelStateChangeRequirement(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
-			StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
+			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaV2, MaxWorkItems: 4, MaxFocuses: 4, MaxCandidateContextItems: 4},
+			StateChangePolicy:     runtimecontract.RuntimeStateChangeMustProduce,
 		},
 	}
 	bootstrap, err := RuntimeV2Bootstrap(
@@ -296,8 +298,8 @@ func TestCompileRuntimeV2CoverageSlicesBoundLargeDoD(t *testing.T) {
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
 			StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
 			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
-				SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaV1,
-				MaxWorkItems:  4,
+				SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaV2,
+				MaxWorkItems:  4, MaxFocuses: 4, MaxCandidateContextItems: 4,
 				Groups: []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{{
 					ID: "slice-remaining-acceptance", Title: "Remaining", Scope: "remaining_acceptance", Priority: 90,
 					MaxWorkItems: 4, Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true},
@@ -337,8 +339,8 @@ func TestCompileRuntimeV2CoverageRejectsInvalidSliceMax(t *testing.T) {
 		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
 			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
-				SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaV1,
-				MaxWorkItems:  100,
+				SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaV2,
+				MaxWorkItems:  100, MaxFocuses: 4, MaxCandidateContextItems: 4,
 			},
 		},
 	}
@@ -362,7 +364,7 @@ func TestCompileRuntimeV2CoverageRejectsUnboundedFocusCount(t *testing.T) {
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: items},
 		runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 	)
-	if err == nil || !strings.Contains(err.Error(), "exceeding neutral limit") {
+	if err == nil || !strings.Contains(err.Error(), "exceeding sealed policy limit") {
 		t.Fatalf("expected focus-count guard failure, got %v", err)
 	}
 }

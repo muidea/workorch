@@ -521,7 +521,20 @@ func TestDeleteWorkspaceWithBackendDeletesOnlyWorkspaceByDefault(t *testing.T) {
 func TestDeleteWorkspaceWithBackendPurgesWorkspaceData(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
-	created, err := CreateWorkspaceWithBackend(ctx, "file", dataRoot, "purge workspace", "", "")
+	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+		ID:   "template-purge-runtime-v2",
+		Name: "purge Runtime V2 workspace",
+		ContextHints: map[string]any{
+			"acceptanceSlicePolicy": map[string]any{
+				"schemaVersion": "workorch.acceptance_slice_policy.v2", "maxWorkItems": 4, "maxFocuses": 4, "maxCandidateContextItems": 4,
+				"completionPolicy": "all_required_items_accepted", "resultPolicy": "slice_result_allowed",
+				"groups": []any{map[string]any{"id": "purge-all", "maxWorkItems": 4, "match": map[string]any{"all": true}}},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
+	}
+	created, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{Title: "purge workspace", TemplateID: "template-purge-runtime-v2"})
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}

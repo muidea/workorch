@@ -55,12 +55,31 @@ func (b RuntimeBootstrap) Validate() error {
 	if len(b.Focuses) == 0 {
 		return fmt.Errorf("runtime bootstrap requires at least one coverage focus")
 	}
+	if len(b.Focuses) > b.ConvergencePolicy.MaxFocuses {
+		return fmt.Errorf("runtime bootstrap has %d focuses, exceeding sealed limit %d", len(b.Focuses), b.ConvergencePolicy.MaxFocuses)
+	}
 	if len(b.CoverageItems) == 0 {
 		return fmt.Errorf("runtime bootstrap requires explicit coverage items")
 	}
-	coverageItems := make(map[common.CoverageWorkItemID]struct{}, len(b.CoverageItems))
+	coverageItems := make(map[common.CoverageWorkItemID]RuntimeCoverageItem, len(b.CoverageItems))
 	for _, item := range b.CoverageItems {
-		coverageItems[item.ID] = struct{}{}
+		if _, exists := coverageItems[item.ID]; exists {
+			return fmt.Errorf("runtime bootstrap coverage item %s is duplicated", item.ID)
+		}
+		coverageItems[item.ID] = item
+	}
+	slices := make(map[string]RuntimeAcceptanceSlice, len(b.Slices))
+	for _, slice := range b.Slices {
+		if slice.ID == "" || len(slice.CoverageWorkItemIDs) == 0 {
+			return fmt.Errorf("runtime bootstrap slice requires identity and coverage")
+		}
+		if len(slice.CoverageWorkItemIDs) > b.ConvergencePolicy.MaxAcceptanceSliceWorkItems || len(slice.CoverageWorkItemIDs) > b.ConvergencePolicy.MaxCandidateContextItems {
+			return fmt.Errorf("runtime bootstrap slice %s exceeds sealed execution budget", slice.ID)
+		}
+		if _, exists := slices[slice.ID]; exists {
+			return fmt.Errorf("runtime bootstrap slice %s is duplicated", slice.ID)
+		}
+		slices[slice.ID] = slice
 	}
 	seen := map[string]struct{}{}
 	for _, focus := range b.Focuses {
@@ -70,9 +89,20 @@ func (b RuntimeBootstrap) Validate() error {
 		if _, ok := seen[focus.ID]; ok {
 			return fmt.Errorf("runtime bootstrap focus %s is duplicated", focus.ID)
 		}
+		if len(focus.CoverageWorkItemIDs) > b.ConvergencePolicy.MaxAcceptanceSliceWorkItems || len(focus.CoverageWorkItemIDs) > b.ConvergencePolicy.MaxCandidateContextItems {
+			return fmt.Errorf("runtime bootstrap focus %s exceeds sealed execution budget", focus.ID)
+		}
+		slice, ok := slices[focus.SliceID]
+		if !ok || !sameCoverageWorkItemIDs(slice.CoverageWorkItemIDs, focus.CoverageWorkItemIDs) {
+			return fmt.Errorf("runtime bootstrap focus %s does not match its declared slice", focus.ID)
+		}
 		for _, id := range focus.CoverageWorkItemIDs {
-			if _, ok := coverageItems[id]; !ok {
+			item, ok := coverageItems[id]
+			if !ok {
 				return fmt.Errorf("runtime bootstrap focus %s coverage item %s is not declared", focus.ID, id)
+			}
+			if item.SliceID != focus.SliceID {
+				return fmt.Errorf("runtime bootstrap coverage item %s is assigned to a different slice", id)
 			}
 		}
 		seen[focus.ID] = struct{}{}

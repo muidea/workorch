@@ -107,6 +107,26 @@
             }
           }
         ]
+      },
+      "acceptanceSlicePolicy": {
+        "schemaVersion": "workorch.acceptance_slice_policy.v2",
+        "maxWorkItems": 4,
+        "maxFocuses": 12,
+        "maxCandidateContextItems": 4,
+        "completionPolicy": "all_required_items_accepted",
+        "resultPolicy": "slice_result_allowed",
+        "groups": [
+          {
+            "id": "generic-governed-all",
+            "title": "Generic governed acceptance",
+            "scope": "generic_governed",
+            "priority": 10,
+            "maxWorkItems": 4,
+            "match": {
+              "all": true
+            }
+          }
+        ]
       }
     }
   },
@@ -129,6 +149,28 @@
       "approval": "soul-weather-query-approval",
       "validation": "soul-weather-query-validation",
       "artifact": "soul-weather-query-artifact"
+    },
+    "contextHints": {
+      "acceptanceSlicePolicy": {
+        "schemaVersion": "workorch.acceptance_slice_policy.v2",
+        "maxWorkItems": 4,
+        "maxFocuses": 12,
+        "maxCandidateContextItems": 4,
+        "completionPolicy": "all_required_items_accepted",
+        "resultPolicy": "slice_result_allowed",
+        "groups": [
+          {
+            "id": "weather-query-all",
+            "title": "Weather query acceptance",
+            "scope": "weather_query",
+            "priority": 10,
+            "maxWorkItems": 4,
+            "match": {
+              "all": true
+            }
+          }
+        ]
+      }
     }
   },
   {
@@ -322,8 +364,10 @@
       },
       "stateChangePolicy": "must_produce_state_change",
       "acceptanceSlicePolicy": {
-        "schemaVersion": "workorch.acceptance_slice_policy.v1",
-        "maxWorkItems": 16,
+        "schemaVersion": "workorch.acceptance_slice_policy.v2",
+        "maxWorkItems": 4,
+        "maxFocuses": 12,
+        "maxCandidateContextItems": 4,
         "completionPolicy": "all_required_items_accepted",
         "resultPolicy": "slice_result_allowed",
         "groups": [
@@ -344,7 +388,7 @@
             "title": "Direct validation evidence",
             "scope": "direct_validation",
             "priority": 20,
-            "maxWorkItems": 16,
+            "maxWorkItems": 4,
             "match": {
               "missingEvidenceKinds": [
                 "validation"
@@ -356,7 +400,7 @@
             "title": "Supplemental evidence",
             "scope": "supplemental_evidence",
             "priority": 30,
-            "maxWorkItems": 8,
+            "maxWorkItems": 4,
             "match": {
               "evidenceRoles": [
                 "supplemental_evidence"
@@ -380,7 +424,7 @@
             "title": "Remaining acceptance",
             "scope": "remaining_acceptance",
             "priority": 90,
-            "maxWorkItems": 16,
+            "maxWorkItems": 4,
             "match": {
               "all": true
             }

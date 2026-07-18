@@ -17,7 +17,7 @@ Last Updated: 2026-07-17
 - 当前事实 / API / 验收 **不得** 回写本目录
 - 实现约束以 `00-core` + 模块 readme + `workorchruntimecontract` 为准
 
-## 2026-07-16 Docs Cleanup Ingest
+## 2026-07-16–18 Docs Cleanup Ingest
 
 本轮从 `70-roadmap/active/`、`docs/` 根与 `60-verification/` 迁入过程稿（**不约束新实现**）：
 
@@ -40,6 +40,7 @@ Last Updated: 2026-07-17
 | `llm-context-budget-todo.md` | 基础已收口；高级项进 candidates |
 | `runtime-v2-positive-convergence-closure-plan.md` | RVC-01～18 completed；deployed dual-workspace live 通过 |
 | `runtime-v2-positive-convergence-remediation-2026-07-18.md` | RVC-R17～R26 completed；fresh bounded terminal 与 canonical real canary liveness 通过 |
+| `runtime-v2-production-admissibility-closure-2026-07-18.md` | RPA-1 completed；owner feasibility gate、sealed budget、fresh bounded terminal 与 positive acceptance 通过 |
 | `docs-domain-module-flow-reorganization-plan.md` | 目录重组历史计划 |
 | `tui-data-stability-command-optimization-plan.md` | TUI 数据稳定化过程收口 |
 | `tui-workspace-model-selection-closure-plan.md` | `/model` 完成 providerId/modelId 选择、workspace 持久化、Runtime V2 新 Run 优先级与 deployed e2e 收口 |

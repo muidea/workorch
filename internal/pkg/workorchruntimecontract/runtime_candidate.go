@@ -129,12 +129,19 @@ const (
 	RuntimeCandidateFailureClassProviderTransient      RuntimeCandidateFailureClass = "provider_transient"
 	RuntimeCandidateFailureClassProviderAuthentication RuntimeCandidateFailureClass = "provider_authentication"
 	RuntimeCandidateFailureClassProviderConfiguration  RuntimeCandidateFailureClass = "provider_configuration"
-	RuntimeCandidateFailureClassInternal               RuntimeCandidateFailureClass = "internal"
+	// RuntimeCandidateFailureClassInfeasible is an owner-authored, read-only
+	// feasibility rejection before dispatch seal. It cannot stand for execution
+	// evidence or an owner receipt.
+	RuntimeCandidateFailureClassInfeasible RuntimeCandidateFailureClass = "infeasible"
+	RuntimeCandidateFailureClassInternal   RuntimeCandidateFailureClass = "internal"
 )
 
 type RuntimeCandidateFailure struct {
-	Class  RuntimeCandidateFailureClass
-	Reason string
+	Class      RuntimeCandidateFailureClass
+	Code       string
+	Signature  string
+	Reason     string
+	TargetRefs []string
 }
 
 func StableRuntimeCandidateHash(candidate RuntimeCandidate) string {

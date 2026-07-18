@@ -35,6 +35,56 @@ func TestRuntimeAdapter_ExecuteOperationRunsCommandInWorkspaceDirectory(t *testi
 	}
 }
 
+func TestRuntimeAdapterProbeRejectsMissingGoTestTargetWithoutStartingProcess(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "marker"), []byte("unchanged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := "go"
+	args := []string{"test", "./missing/package"}
+	adapter := NewRuntimeAdapter()
+	inventory, err := adapter.AcquireRuntimeOperationAdmissibility(workspace, "admissibility-shell", []string{runtimemodel.RuntimeBlockKindManagedValidationSession})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure := adapter.ProbeRuntimeOperationFeasibility(workspace, inventory, runtimemodel.RuntimeOperation{
+		ID: "validation-missing-target", Kind: runtimemodel.RuntimeBlockKindManagedValidationSession,
+		Parameters: []runtimemodel.OperationParameter{{Name: "command", String: &command}, {Name: "args", StringList: args}},
+	})
+	if failure == nil || failure.Code != "validation_target_missing" {
+		t.Fatalf("missing go test target feasibility failure = %+v", failure)
+	}
+	content, err := os.ReadFile(filepath.Join(workspace, "marker"))
+	if err != nil || string(content) != "unchanged\n" {
+		t.Fatalf("probe changed workspace content=%q err=%v", content, err)
+	}
+}
+
+func TestRuntimeAdapterProbeRejectsStaleAdmissibilitySnapshotWithoutStartingProcess(t *testing.T) {
+	workspace := t.TempDir()
+	adapter := NewRuntimeAdapter()
+	inventory, err := adapter.AcquireRuntimeOperationAdmissibility(workspace, "admissibility-shell", []string{runtimemodel.RuntimeBlockKindManagedValidationSession})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "changed-after-inventory"), []byte("unchanged by probe\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := "go"
+	args := []string{"test", "./missing/package"}
+	failure := adapter.ProbeRuntimeOperationFeasibility(workspace, inventory, runtimemodel.RuntimeOperation{
+		ID: "stale-validation", Kind: runtimemodel.RuntimeBlockKindManagedValidationSession,
+		Parameters: []runtimemodel.OperationParameter{{Name: "command", String: &command}, {Name: "args", StringList: args}},
+	})
+	if failure == nil || failure.Code != "operation_admissibility_stale" {
+		t.Fatalf("stale inventory feasibility failure = %+v", failure)
+	}
+	content, err := os.ReadFile(filepath.Join(workspace, "changed-after-inventory"))
+	if err != nil || string(content) != "unchanged by probe\n" {
+		t.Fatalf("probe changed workspace content=%q err=%v", content, err)
+	}
+}
+
 func TestRuntimeAdapterRejectsStateChangingShellWithoutWorkspaceDelta(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")

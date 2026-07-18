@@ -50,6 +50,8 @@ func (m *Module) Start() error {
 	}
 	m.capabilityObserver = magicevent.NewSimpleObserver(ModuleID, m.eventHub)
 	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
+	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
+	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
 	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteWebOperation, m.handleWebOperation)
 	return nil
 }
@@ -59,6 +61,8 @@ func (m *Module) Stop(ctx context.Context) error {
 	if m.capabilityObserver != nil {
 		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteWebOperation)
 		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
+		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility)
+		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
 	}
 	m.capabilityObserver = nil
 	m.runtimeAdapter = nil
@@ -158,6 +162,72 @@ func (m *Module) handleRuntimeCapabilities(event magicevent.Event, result magice
 		return
 	}
 	result.Set(response, nil)
+}
+
+func (m *Module) handleRuntimeOperationAdmissibility(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand)
+	if !ok || m.runtimeAdapter == nil {
+		setCapabilityError(result, common.ErrInvalidArgument)
+		return
+	}
+	if err := orchestratorevents.ValidateRuntimeOperationAdmissibilityCommand(command, ModuleID); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	providerIDs, revision, err := m.runtimeAdapter.OperationAdmissibility()
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	inventory, err := orchestratorevents.NewRuntimeOperationAdmissibility(command.PrerequisiteID, ModuleID, command.RequiredKinds, nil, providerIDs, []string{"configured-web-provider", "owner-execution-policy"}, revision)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	result.Set(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{PrerequisiteID: command.PrerequisiteID, Admissibility: inventory}, nil)
+}
+
+func (m *Module) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
+	if !ok || m.runtimeAdapter == nil {
+		setCapabilityError(result, common.ErrInvalidArgument)
+		return
+	}
+	if err := orchestratorevents.ValidateRuntimeOperationFeasibilityCommand(command, ModuleID); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	operation := command.Operation.Normalized()
+	_, revision, revisionErr := m.runtimeAdapter.OperationAdmissibility()
+	if revisionErr != nil {
+		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "web_provider_configuration_unavailable", revisionErr.Error())
+		result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: false, Failure: failure}, nil)
+		return
+	}
+	if revision != command.Admissibility.ObservedRevision {
+		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "operation_admissibility_stale", "runtime web operation admissibility snapshot is stale")
+		result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: false, Failure: failure}, nil)
+		return
+	}
+	data, err := orchestratorevents.WebOperationDataFromRuntimeOperation(operation)
+	if err != nil {
+		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "web_operation_invalid", err.Error())
+		result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: false, Failure: failure}, nil)
+		return
+	}
+	err = m.runtimeAdapter.ProbeOperation(event.Context(), webbiz.RuntimeOperationRequest{
+		WorkspaceID: command.WorkspaceID, RunID: command.RunID, StepID: common.StepID("probe/" + operation.ID), Kind: operation.Kind,
+		WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
+		ProviderID:                    data.ProviderID, Query: data.Query, Locale: data.Locale, Recency: data.Recency,
+		Domains: data.Domains, ExcludeDomains: data.ExcludeDomains, MaxResults: data.MaxResults, SafeSearch: data.SafeSearch,
+		ApprovalID: data.ApprovalID, URL: data.URL, MaxBytes: data.MaxBytes, ExtractMode: data.ExtractMode, TargetRefs: operation.TargetRefs,
+	})
+	if err != nil {
+		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "web_operation_infeasible", err.Error())
+		result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: false, Failure: failure}, nil)
+		return
+	}
+	result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: true}, nil)
 }
 
 func setCapabilityError(result magicevent.Result, err error) {

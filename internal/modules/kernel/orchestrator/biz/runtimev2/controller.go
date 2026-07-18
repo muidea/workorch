@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -288,6 +289,115 @@ func (c *RuntimeController) BeginCandidateAttempt(ctx context.Context, workspace
 	return aggregate, nil
 }
 
+// RecordCandidateProposal persists a schema-valid provider proposal before the
+// feasibility probe. A restart can then reuse this exact proposal without a
+// second provider request or an extra candidate attempt.
+func (c *RuntimeController) RecordCandidateProposal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimecontract.RuntimeCandidate) (RuntimeAggregate, error) {
+	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) {
+		return RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
+	idx, record, ok := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
+	if !ok {
+		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d is not pending", common.ErrConflict, attempt)
+	}
+	if err := candidate.ValidateWithActivation(aggregate.Decision, aggregate.Facts.Activation); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if record.Proposal != nil {
+		if runtimecontract.StableRuntimeCandidateHash(*record.Proposal) != runtimecontract.StableRuntimeCandidateHash(candidate) {
+			return RuntimeAggregate{}, fmt.Errorf("%w: pending candidate attempt proposal changed", common.ErrConflict)
+		}
+		return aggregate, nil
+	}
+	expectedRevision := aggregate.StateRevision
+	proposal := candidate
+	aggregate.CandidateAttempts[idx].Proposal = &proposal
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return aggregate, nil
+}
+
+// RecordCandidateFeasibility persists one completed, side-effect-free owner
+// probe. The operation must belong to the already persisted proposal, making
+// this ledger a restart fence rather than a second candidate authority.
+func (c *RuntimeController) RecordCandidateFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, record runtimecontract.RuntimeCandidateFeasibilityRecord) (RuntimeAggregate, error) {
+	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) {
+		return RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	if err := runtimecontract.ValidateRuntimeCandidateFeasibilityRecords([]runtimecontract.RuntimeCandidateFeasibilityRecord{record}); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
+	idx, attemptRecord, ok := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
+	if !ok || attemptRecord.Proposal == nil {
+		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d has no pending proposal", common.ErrConflict, attempt)
+	}
+	if !candidateProposalContainsOperation(*attemptRecord.Proposal, record.OperationID) {
+		return RuntimeAggregate{}, fmt.Errorf("%w: candidate feasibility operation %q is absent from the persisted proposal", common.ErrConflict, record.OperationID)
+	}
+	for _, persisted := range attemptRecord.Feasibilities {
+		if strings.TrimSpace(persisted.OperationID) != strings.TrimSpace(record.OperationID) {
+			continue
+		}
+		if persisted.AdmissibilitySnapshotID != record.AdmissibilitySnapshotID || persisted.Feasible != record.Feasible || !reflect.DeepEqual(persisted.Failure, record.Failure) {
+			return RuntimeAggregate{}, fmt.Errorf("%w: candidate feasibility result for operation %q changed", common.ErrConflict, record.OperationID)
+		}
+		return aggregate, nil
+	}
+	expectedRevision := aggregate.StateRevision
+	copyRecord := record
+	if record.Failure != nil {
+		failure := *record.Failure
+		failure.TargetRefs = append([]string(nil), record.Failure.TargetRefs...)
+		copyRecord.Failure = &failure
+	}
+	aggregate.CandidateAttempts[idx].Feasibilities = append(aggregate.CandidateAttempts[idx].Feasibilities, copyRecord)
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return aggregate, nil
+}
+
+func candidateProposalContainsOperation(candidate runtimecontract.RuntimeCandidate, wanted string) bool {
+	wanted = strings.TrimSpace(wanted)
+	if wanted == "" {
+		return false
+	}
+	if candidate.StateChange != nil {
+		for _, value := range candidate.StateChange.Operations {
+			if value.Operation.Normalized().ID == wanted {
+				return true
+			}
+		}
+	}
+	if candidate.Validation != nil {
+		for _, value := range candidate.Validation.Operations {
+			if value.Operation.Normalized().ID == wanted {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (c *RuntimeController) AcceptCandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimecontract.RuntimeCandidate) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
@@ -307,6 +417,9 @@ func (c *RuntimeController) AcceptCandidateAttempt(ctx context.Context, workspac
 	if err := runtimecontract.ValidateCandidateAgainstMissingValidationGap(aggregate.Facts, aggregate.Decision, candidate); err != nil {
 		return RuntimeAggregate{}, err
 	}
+	if err := validateCandidateAdmissionFeasibility(aggregate.Facts, candidate, record); err != nil {
+		return RuntimeAggregate{}, err
+	}
 	dispatch, err := SealDispatchWithActivation(aggregate.Decision, candidate, aggregate.Facts.Activation)
 	if err != nil {
 		return RuntimeAggregate{}, err
@@ -314,8 +427,13 @@ func (c *RuntimeController) AcceptCandidateAttempt(ctx context.Context, workspac
 	if record.Transaction != dispatch.Transaction || aggregate.ActiveDispatch != nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt does not match current dispatch state", common.ErrConflict)
 	}
+	if record.Proposal != nil && runtimecontract.StableRuntimeCandidateHash(*record.Proposal) != runtimecontract.StableRuntimeCandidateHash(candidate) {
+		return RuntimeAggregate{}, fmt.Errorf("%w: accepted candidate does not match the persisted proposal", common.ErrConflict)
+	}
 	expectedRevision := aggregate.StateRevision
 	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateAccepted
+	aggregate.CandidateAttempts[idx].Proposal = nil
+	aggregate.CandidateAttempts[idx].Feasibilities = nil
 	aggregate.ActiveDispatch = &dispatch
 	aggregate.StateRevision++
 	if err := aggregate.Validate(); err != nil {
@@ -325,6 +443,70 @@ func (c *RuntimeController) AcceptCandidateAttempt(ctx context.Context, workspac
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
+}
+
+// validateCandidateAdmissionFeasibility is the final write-side fence for
+// SM-3. Mainline records probes, but this controller-level validation prevents
+// any alternate caller from sealing an executable candidate without every
+// required persisted owner feasibility result.
+func validateCandidateAdmissionFeasibility(facts runtimecontract.RuntimeFacts, candidate runtimecontract.RuntimeCandidate, attempt runtimecontract.RuntimeCandidateAttemptRecord) error {
+	operations := candidateRuntimeOperations(candidate)
+	if len(operations) == 0 || !runtimeOperationAdmissibilityRequired(facts.Prerequisites) {
+		return nil
+	}
+	for _, operation := range operations {
+		operation = operation.Normalized()
+		descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+		if !known || descriptor.OwnerModuleID == "" {
+			return fmt.Errorf("candidate operation %q has no canonical owner", operation.Kind)
+		}
+		inventory, found := runtimeOperationAdmissibilityForKind(facts.Resources.OperationAdmissibilities, descriptor.OwnerModuleID, operation.Kind)
+		if !found {
+			return fmt.Errorf("candidate operation %q has no persisted owner admissibility inventory", operation.Kind)
+		}
+		feasibility, found := candidateAttemptFeasibilityForOperation(attempt.Feasibilities, operation.ID)
+		if !found || feasibility.AdmissibilitySnapshotID != inventory.SnapshotID {
+			return fmt.Errorf("candidate operation %q has no current persisted feasibility result", operation.ID)
+		}
+		if !feasibility.Feasible {
+			return fmt.Errorf("candidate operation %q has persisted infeasible result", operation.ID)
+		}
+	}
+	return nil
+}
+
+func runtimeOperationAdmissibilityRequired(prerequisites runtimecontract.PrerequisiteState) bool {
+	for _, prerequisite := range append(append([]runtimecontract.RuntimePrerequisite(nil), prerequisites.Pending...), prerequisites.Satisfied...) {
+		if prerequisite.Kind == runtimecontract.PrerequisiteKindOperationAdmissibility {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeOperationAdmissibilityForKind(values []runtimecontract.RuntimeOperationAdmissibility, owner, kind string) (runtimecontract.RuntimeOperationAdmissibility, bool) {
+	canonicalKind := runtimecontract.CanonicalRuntimeBlockKind(kind)
+	for _, inventory := range values {
+		inventory = inventory.Normalized()
+		if inventory.OwnerModuleID != owner {
+			continue
+		}
+		for _, available := range inventory.OperationKinds {
+			if available == canonicalKind {
+				return inventory, true
+			}
+		}
+	}
+	return runtimecontract.RuntimeOperationAdmissibility{}, false
+}
+
+func candidateAttemptFeasibilityForOperation(values []runtimecontract.RuntimeCandidateFeasibilityRecord, operationID string) (runtimecontract.RuntimeCandidateFeasibilityRecord, bool) {
+	for _, value := range values {
+		if strings.TrimSpace(value.OperationID) == strings.TrimSpace(operationID) {
+			return value, true
+		}
+	}
+	return runtimecontract.RuntimeCandidateFeasibilityRecord{}, false
 }
 
 func (c *RuntimeController) FailCandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, failure runtimecontract.RuntimeCandidateFailure) (RuntimeAggregate, error) {
@@ -349,7 +531,10 @@ func (c *RuntimeController) FailCandidateAttempt(ctx context.Context, workspaceI
 		aggregate.Facts.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeContractMisalignment, Signature: "candidate-internal", Message: failure.Reason}
 		createdTerminalFailure = true
 	} else if attempt == 1 {
-		aggregate.Facts.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateExhausted, Signature: "candidate-retry-exhausted", Message: failure.Reason}
+		aggregate.Facts.Failure = &runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassCandidateExhausted, Code: "candidate_retry_exhausted",
+			Signature: "candidate-retry-exhausted", Message: failure.Reason,
+		}
 		createdTerminalFailure = true
 	}
 	if createdTerminalFailure {

@@ -5897,10 +5897,20 @@ func TestHTTPServerStartupLeavesFileBackedRunningRunForManualRecovery(t *testing
 	}
 }
 
+var runtimeV2HTTPFixtureSequence atomic.Uint64
+
 func createWorkspaceForHTTP(t *testing.T, handler http.Handler, title string, deliverableDirectory string) appservice.Workspace {
 	t.Helper()
 
-	workspaceReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"title":"`+title+`","deliverableDirectory":"`+deliverableDirectory+`"}`))
+	// Runtime V2 deliberately rejects an activation without an explicitly sealed
+	// acceptance-slice policy.  Keep the general HTTP fixture valid through the
+	// same template path used by production instead of reintroducing a runtime
+	// default only for tests.
+	templateID := fmt.Sprintf("runtime-v2-http-fixture-%d", runtimeV2HTTPFixtureSequence.Add(1))
+	templateBody := `{"id":"` + templateID + `","name":"Runtime V2 HTTP fixture","contextHints":{"acceptanceSlicePolicy":{"schemaVersion":"workorch.acceptance_slice_policy.v2","maxWorkItems":4,"maxFocuses":8,"maxCandidateContextItems":4,"completionPolicy":"all_required_items_accepted","resultPolicy":"slice_result_allowed","groups":[{"id":"http-fixture-all","title":"HTTP fixture acceptance","scope":"http_fixture","priority":10,"maxWorkItems":4,"match":{"all":true}}]}}}`
+	postAndExpect(t, handler, "/api/v1/workorch/workspace-templates", templateBody, http.StatusCreated)
+
+	workspaceReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"title":"`+title+`","deliverableDirectory":"`+deliverableDirectory+`","templateId":"`+templateID+`"}`))
 	workspaceReq.Header.Set("Content-Type", "application/json")
 	workspaceRec := httptest.NewRecorder()
 	handler.ServeHTTP(workspaceRec, workspaceReq)

@@ -15,7 +15,8 @@ Last Updated: 2026-07-18
 | 主题 | 状态 |
 | --- | --- |
 | Runtime V2 生产主链 | **代码已收口**（Start/Resume → `DriveRuntimeV2` only） |
-| Runtime V2 正向收敛闭环 | **completed**；RVC-R17～R26 已 code-landed，RVC-R16 bounded terminal 与 canonical canary liveness 已通过；完成记录迁入 archive |
+| Runtime V2 正向收敛基础闭环 | **completed**；RVC-R17～R26 已 code-landed，RVC-R16 bounded terminal 与 canonical canary liveness 已通过；完成记录迁入 archive |
+| Runtime V2 production admissibility + positive acceptance | **completed**；RPA-1 的 sealed budget、owner feasibility gate 与 fresh deployed bounded/positive acceptance 已通过；完成记录迁入 archive |
 | V1 StagePacket / NextAction / graph dispatch 主链 | **已删除** |
 | 设计结论上提 | 见 [00-core/runtime-stage-contract.md](../../00-core/runtime-stage-contract.md)、[current-state.md](../../01-overview/current-state.md) |
 
@@ -30,13 +31,14 @@ Last Updated: 2026-07-18
 
 统一清单：[current-unclosed-matrix.md](../../01-overview/current-unclosed-matrix.md)、[unfinished-todo-index.md](../../01-overview/unfinished-todo-index.md)。
 
-## 2026-07-16 Docs Cleanup Ingest
+## 2026-07-16–18 Docs Cleanup Ingest
 
 本轮从 `active/` 与验证过程目录迁出 / 移除：
 
 ### → `90-archive/completed/`
 
 - `runtime-v2-positive-convergence-closure-plan.md`（历史 RVC-01～18 completion record；其 deployed 结论已由当前 remediation 复核作废）
+- `runtime-v2-production-admissibility-closure-2026-07-18.md`（RPA-1 complete；fresh bounded terminal 与 positive acceptance 通过）
 - `ai-proxy-primary-llm-provider-cutover-design-2026-07-15.md`（code-closed + live 通过）
 - `operation-map-json-contract-audit-2026-07-14.md`
 - `module-block-initiator-inventory-audit-2026-07-09.md`

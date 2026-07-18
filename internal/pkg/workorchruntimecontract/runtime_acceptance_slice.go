@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	RuntimeAcceptanceSlicePolicySchemaV1  = "workorch.acceptance_slice_policy.v1"
+	RuntimeAcceptanceSlicePolicySchemaV2  = "workorch.acceptance_slice_policy.v2"
 	RuntimeAcceptanceSliceCompletionAll   = "all_required_items_accepted"
 	RuntimeAcceptanceSliceResultAllowed   = "slice_result_allowed"
 	RuntimeCoverageItemStateOpen          = "open"
@@ -19,16 +19,19 @@ const (
 	RuntimeAcceptanceSliceMaxWorkItemsMax = 32
 	RuntimeAcceptanceSliceDefaultMaxItems = 1
 	RuntimeAcceptanceFocusMaxCount        = 64
+	RuntimeCandidateContextItemsMaxCount  = 32
 )
 
 // RuntimeAcceptanceSlicePolicy is the typed activation policy for grouping coverage
 // work items into bounded acceptance slices. Kernel does not interpret business titles.
 type RuntimeAcceptanceSlicePolicy struct {
-	SchemaVersion    string
-	MaxWorkItems     int
-	CompletionPolicy string
-	ResultPolicy     string
-	Groups           []RuntimeAcceptanceSliceGroupPolicy
+	SchemaVersion            string
+	MaxWorkItems             int
+	MaxFocuses               int
+	MaxCandidateContextItems int
+	CompletionPolicy         string
+	ResultPolicy             string
+	Groups                   []RuntimeAcceptanceSliceGroupPolicy
 }
 
 type RuntimeAcceptanceSliceGroupPolicy struct {
@@ -138,7 +141,7 @@ func (p RuntimeAcceptanceSlicePolicy) Normalized() RuntimeAcceptanceSlicePolicy 
 	if p.ResultPolicy == "" {
 		p.ResultPolicy = RuntimeAcceptanceSliceResultAllowed
 	}
-	if p.MaxWorkItems <= 0 {
+	if p.SchemaVersion != RuntimeAcceptanceSlicePolicySchemaV2 && p.MaxWorkItems <= 0 {
 		p.MaxWorkItems = RuntimeAcceptanceSliceDefaultMaxItems
 	}
 	groups := make([]RuntimeAcceptanceSliceGroupPolicy, 0, len(p.Groups))
@@ -171,15 +174,17 @@ func (p RuntimeAcceptanceSlicePolicy) Normalized() RuntimeAcceptanceSlicePolicy 
 
 func (p RuntimeAcceptanceSlicePolicy) Validate() error {
 	p = p.Normalized()
-	if p.SchemaVersion == "" {
-		// legacy missing schema is allowed only for normalization paths; new activation must set v1.
-		return nil
-	}
-	if p.SchemaVersion != RuntimeAcceptanceSlicePolicySchemaV1 {
+	if p.SchemaVersion != RuntimeAcceptanceSlicePolicySchemaV2 {
 		return fmt.Errorf("acceptance slice policy has unsupported schema %q", p.SchemaVersion)
 	}
 	if p.MaxWorkItems < RuntimeAcceptanceSliceMaxWorkItemsMin || p.MaxWorkItems > RuntimeAcceptanceSliceMaxWorkItemsMax {
 		return fmt.Errorf("acceptance slice policy maxWorkItems must be in %d..%d", RuntimeAcceptanceSliceMaxWorkItemsMin, RuntimeAcceptanceSliceMaxWorkItemsMax)
+	}
+	if p.MaxFocuses < 1 || p.MaxFocuses > RuntimeAcceptanceFocusMaxCount {
+		return fmt.Errorf("acceptance slice policy maxFocuses must be in 1..%d", RuntimeAcceptanceFocusMaxCount)
+	}
+	if p.MaxCandidateContextItems < 1 || p.MaxCandidateContextItems > RuntimeCandidateContextItemsMaxCount {
+		return fmt.Errorf("acceptance slice policy maxCandidateContextItems must be in 1..%d", RuntimeCandidateContextItemsMaxCount)
 	}
 	if p.CompletionPolicy != RuntimeAcceptanceSliceCompletionAll {
 		return fmt.Errorf("acceptance slice policy has unsupported completionPolicy %q", p.CompletionPolicy)

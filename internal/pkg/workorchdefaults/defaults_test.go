@@ -204,7 +204,6 @@ func TestEmbeddedNonSoftwareTemplatesDoNotDeclareSoftwareDevStrategy(t *testing.
 		"versionControl",
 		"semanticCodeNavigation",
 		"managedWorkspaceConfigs",
-		"acceptanceSlicePolicy",
 		"capabilityUsagePolicies",
 	}
 	var checked int
@@ -957,11 +956,17 @@ func assertSoftwareDevAcceptanceSlicePolicy(t *testing.T, hints map[string]any) 
 	if !ok {
 		t.Fatalf("software-dev acceptanceSlicePolicy = %+v, want map", hints["acceptanceSlicePolicy"])
 	}
-	if policy["schemaVersion"] != "workorch.acceptance_slice_policy.v1" {
+	if policy["schemaVersion"] != "workorch.acceptance_slice_policy.v2" {
 		t.Fatalf("acceptanceSlicePolicy schemaVersion = %q", policy["schemaVersion"])
 	}
-	if got := testIntFromAny(policy["maxWorkItems"]); got != 16 {
-		t.Fatalf("acceptanceSlicePolicy maxWorkItems = %d, want 16", got)
+	if got := testIntFromAny(policy["maxWorkItems"]); got != 4 {
+		t.Fatalf("acceptanceSlicePolicy maxWorkItems = %d, want 4", got)
+	}
+	if got := testIntFromAny(policy["maxFocuses"]); got != 12 {
+		t.Fatalf("acceptanceSlicePolicy maxFocuses = %d, want 12", got)
+	}
+	if got := testIntFromAny(policy["maxCandidateContextItems"]); got != 4 {
+		t.Fatalf("acceptanceSlicePolicy maxCandidateContextItems = %d, want 4", got)
 	}
 	groups, ok := policy["groups"].([]any)
 	if !ok || len(groups) < 4 {
@@ -976,10 +981,10 @@ func assertSoftwareDevAcceptanceSlicePolicy(t *testing.T, hints map[string]any) 
 	}
 	wantMaxWorkItems := map[string]int{
 		"slice-primary-state-change":     2,
-		"slice-direct-validation":        16,
+		"slice-direct-validation":        4,
 		"slice-version-control-snapshot": 2,
-		"slice-supplemental-evidence":    8,
-		"slice-remaining-acceptance":     16,
+		"slice-supplemental-evidence":    4,
+		"slice-remaining-acceptance":     4,
 	}
 	priorities := map[string]int{}
 	for _, raw := range groups {

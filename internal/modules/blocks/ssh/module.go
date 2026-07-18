@@ -46,6 +46,8 @@ func (m *Module) Start() error {
 	}
 	m.capabilityObserver = magicevent.NewSimpleObserver(ModuleID, m.eventHub)
 	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
+	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
+	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
 	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteSSHOperation, m.handleSSHOperation)
 	return nil
 }
@@ -55,6 +57,8 @@ func (m *Module) Stop(ctx context.Context) error {
 	if m.capabilityObserver != nil {
 		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteSSHOperation)
 		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
+		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility)
+		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
 	}
 	m.capabilityObserver = nil
 	m.runtimeAdapter = nil
@@ -132,6 +136,55 @@ func (m *Module) handleRuntimeCapabilities(event magicevent.Event, result magice
 		return
 	}
 	result.Set(response, nil)
+}
+
+func (m *Module) handleRuntimeOperationAdmissibility(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand)
+	if !ok {
+		setCapabilityError(result, common.ErrInvalidArgument)
+		return
+	}
+	if err := orchestratorevents.ValidateRuntimeOperationAdmissibilityCommand(command, ModuleID); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	inventory, err := orchestratorevents.NewRuntimeOperationAdmissibility(command.PrerequisiteID, ModuleID, command.RequiredKinds, nil, nil, []string{"remote-host-parameter", "owner-execution-policy"}, "ssh-owner")
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	result.Set(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{PrerequisiteID: command.PrerequisiteID, Admissibility: inventory}, nil)
+}
+
+func (m *Module) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
+	if !ok || m.runtimeAdapter == nil {
+		setCapabilityError(result, common.ErrInvalidArgument)
+		return
+	}
+	if err := orchestratorevents.ValidateRuntimeOperationFeasibilityCommand(command, ModuleID); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	operation := command.Operation.Normalized()
+	data, err := orchestratorevents.SSHOperationDataFromRuntimeOperation(operation)
+	if err != nil {
+		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "ssh_operation_invalid", err.Error())
+		result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: false, Failure: failure}, nil)
+		return
+	}
+	err = m.runtimeAdapter.ProbeOperation(sshbiz.RuntimeCommandRequest{
+		WorkspaceID: command.WorkspaceID, RunID: command.RunID, StepID: common.StepID("probe/" + operation.ID),
+		WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
+		Host:                          data.Host, Port: data.Port, Username: data.Username, Password: data.Password,
+		PrivateKey: data.PrivateKey, PrivateKeyPath: data.PrivateKeyPath, Command: data.Command, TimeoutMillis: data.TimeoutMillis,
+	})
+	if err != nil {
+		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "ssh_prerequisite_unavailable", err.Error())
+		result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: false, Failure: failure}, nil)
+		return
+	}
+	result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: true}, nil)
 }
 
 func setCapabilityError(result magicevent.Result, err error) {

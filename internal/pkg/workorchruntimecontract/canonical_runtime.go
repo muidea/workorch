@@ -159,6 +159,10 @@ const (
 	PrerequisiteKindCapabilityState   PrerequisiteKind = "capability_state"
 	PrerequisiteKindValidationScratch PrerequisiteKind = "validation_scratch"
 	PrerequisiteKindProviderCeiling   PrerequisiteKind = "provider_ceiling"
+	// PrerequisiteKindOperationAdmissibility acquires a bounded owner-authored
+	// parameter inventory before candidate generation. It is an SM-2 fact, not
+	// a candidate or an execution receipt.
+	PrerequisiteKindOperationAdmissibility PrerequisiteKind = "operation_admissibility"
 )
 
 type RuntimePrerequisite struct {
@@ -239,12 +243,69 @@ const (
 )
 
 type RuntimeResourceFacts struct {
-	Manifest          *WorkspaceManifest
-	TargetSnapshots   []TargetSnapshot
-	FailureTarget     *FailureTarget
-	ValidationScratch *ValidationScratch
-	ProviderCeiling   *ProviderCeiling
-	CapabilityStates  []RuntimeCapabilityStateSnapshot
+	Manifest                 *WorkspaceManifest
+	TargetSnapshots          []TargetSnapshot
+	FailureTarget            *FailureTarget
+	ValidationScratch        *ValidationScratch
+	ProviderCeiling          *ProviderCeiling
+	CapabilityStates         []RuntimeCapabilityStateSnapshot
+	OperationAdmissibilities []RuntimeOperationAdmissibility
+}
+
+// RuntimeOperationAdmissibility is a bounded, owner-authored parameter
+// inventory for candidate rendering and feasibility probes. It intentionally
+// describes admissible references rather than an owner-specific work plan.
+type RuntimeOperationAdmissibility struct {
+	PrerequisiteID   string
+	SnapshotID       string
+	OwnerModuleID    string
+	OperationKinds   []string
+	TargetRefs       []string
+	SelectorRefs     []string
+	ConstraintRefs   []string
+	ObservedRevision string
+}
+
+func (a RuntimeOperationAdmissibility) Normalized() RuntimeOperationAdmissibility {
+	a.PrerequisiteID = strings.TrimSpace(a.PrerequisiteID)
+	a.SnapshotID = strings.TrimSpace(a.SnapshotID)
+	a.OwnerModuleID = strings.TrimSpace(a.OwnerModuleID)
+	a.OperationKinds = canonicalizeOperationKinds(a.OperationKinds)
+	a.TargetRefs = normalizeStrings(a.TargetRefs)
+	a.SelectorRefs = normalizeStrings(a.SelectorRefs)
+	a.ConstraintRefs = normalizeStrings(a.ConstraintRefs)
+	a.ObservedRevision = strings.TrimSpace(a.ObservedRevision)
+	return a
+}
+
+func (a RuntimeOperationAdmissibility) Validate() error {
+	a = a.Normalized()
+	if a.PrerequisiteID == "" || a.SnapshotID == "" || a.OwnerModuleID == "" || len(a.OperationKinds) == 0 || a.ObservedRevision == "" {
+		return fmt.Errorf("runtime operation admissibility requires identity, owner, kinds and revision")
+	}
+	for _, kind := range a.OperationKinds {
+		descriptor, ok := RuntimeOperationDescriptorForKind(kind)
+		if !ok || descriptor.OwnerModuleID != a.OwnerModuleID {
+			return fmt.Errorf("runtime operation admissibility kind %q does not belong to owner %q", kind, a.OwnerModuleID)
+		}
+	}
+	if expected := StableRuntimeOperationAdmissibilitySnapshotID(a); a.SnapshotID != expected {
+		return fmt.Errorf("runtime operation admissibility snapshot identity mismatch")
+	}
+	return nil
+}
+
+func StableRuntimeOperationAdmissibilitySnapshotID(value RuntimeOperationAdmissibility) string {
+	value = value.Normalized()
+	h := sha256.New()
+	writeHashString(h, value.PrerequisiteID)
+	writeHashString(h, value.OwnerModuleID)
+	writeHashStrings(h, value.OperationKinds)
+	writeHashStrings(h, value.TargetRefs)
+	writeHashStrings(h, value.SelectorRefs)
+	writeHashStrings(h, value.ConstraintRefs)
+	writeHashString(h, value.ObservedRevision)
+	return "operation-admissibility-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
 
 type RuntimeCapabilityStateDisposition string
@@ -539,6 +600,11 @@ func (f RuntimeFacts) Validate() error {
 			return fmt.Errorf("unknown capability-state disposition %q", snapshot.Disposition)
 		}
 	}
+	for _, admissibility := range f.Resources.OperationAdmissibilities {
+		if err := admissibility.Validate(); err != nil {
+			return fmt.Errorf("runtime operation admissibility: %w", err)
+		}
+	}
 	seenFocus := map[string]struct{}{f.Focus.ID: {}}
 	for _, focus := range f.RemainingFocuses {
 		if focus.ID == "" {
@@ -636,7 +702,28 @@ func (r RuntimeResourceFacts) Normalized() RuntimeResourceFacts {
 		r.ProviderCeiling = &ceiling
 	}
 	r.CapabilityStates = NormalizeRuntimeCapabilityStateSnapshots(r.CapabilityStates)
+	r.OperationAdmissibilities = NormalizeRuntimeOperationAdmissibilities(r.OperationAdmissibilities)
 	return r
+}
+
+func NormalizeRuntimeOperationAdmissibilities(values []RuntimeOperationAdmissibility) []RuntimeOperationAdmissibility {
+	byPrerequisite := make(map[string]RuntimeOperationAdmissibility, len(values))
+	for _, value := range values {
+		value = value.Normalized()
+		if value.PrerequisiteID != "" {
+			byPrerequisite[value.PrerequisiteID] = value
+		}
+	}
+	keys := make([]string, 0, len(byPrerequisite))
+	for key := range byPrerequisite {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	ret := make([]RuntimeOperationAdmissibility, 0, len(keys))
+	for _, key := range keys {
+		ret = append(ret, byPrerequisite[key])
+	}
+	return nilIfEmpty(ret)
 }
 
 func NormalizeRuntimeCapabilityStateSnapshots(values []RuntimeCapabilityStateSnapshot) []RuntimeCapabilityStateSnapshot {

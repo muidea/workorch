@@ -107,7 +107,7 @@ func TestRuntimeCandidatePrefixChangesWithSealedValidationAndSlicePolicies(t *te
 		ValidationPolicies: []RuntimeValidationPolicy{{
 			ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{EvidenceKindValidation}, MaxValidationOnlyRetriesPerFocus: 2,
 		}},
-		AcceptanceSlicePolicy: &RuntimeAcceptanceSlicePolicy{SchemaVersion: RuntimeAcceptanceSlicePolicySchemaV1, MaxWorkItems: 4},
+		AcceptanceSlicePolicy: &RuntimeAcceptanceSlicePolicy{SchemaVersion: RuntimeAcceptanceSlicePolicySchemaV2, MaxWorkItems: 4, MaxFocuses: 4, MaxCandidateContextItems: 4},
 	}
 	changedValidation := base.Normalized()
 	changedValidation.ValidationPolicies[0].MaxValidationOnlyRetriesPerFocus = 3

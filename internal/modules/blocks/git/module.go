@@ -81,6 +81,8 @@ func (m *Module) Start() error {
 	}
 	m.capabilityObserver = magicevent.NewSimpleObserver(ModuleID, m.eventHub)
 	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
+	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
+	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
 	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireGitCapabilityState, m.handleGitCapabilityState)
 	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteGitOperation, m.handleGitOperation)
 	return nil
@@ -91,6 +93,8 @@ func (m *Module) Stop(ctx context.Context) error {
 	if m.capabilityObserver != nil {
 		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteGitOperation)
 		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
+		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility)
+		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
 		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireGitCapabilityState)
 	}
 	m.capabilityObserver = nil
@@ -127,6 +131,95 @@ func (m *Module) handleGitCapabilityState(event magicevent.Event, result magicev
 		return
 	}
 	result.Set(orchestratorevents.AcquireGitCapabilityStateResult{PrerequisiteID: command.PrerequisiteID, Snapshot: snapshot}, nil)
+}
+
+func (m *Module) handleRuntimeOperationAdmissibility(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand)
+	if !ok || m.runtimeAdapter == nil {
+		setCapabilityError(result, common.ErrInvalidArgument)
+		return
+	}
+	if err := orchestratorevents.ValidateRuntimeOperationAdmissibilityCommand(command, ModuleID); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	// Git's owner snapshot is deliberately acquired through the same read-only
+	// adapter used by the existing capability-state prerequisite.  This keeps
+	// candidate admission inside the Git owner and avoids treating a constant
+	// module marker as proof that repository parameters remain feasible.
+	snapshot, err := m.runtimeAdapter.CapabilityState(event.Context(), command.PrerequisiteID, "workspace_deliverable", command.WorkspaceDeliverableDirectory)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	inventory, err := orchestratorevents.NewRuntimeOperationAdmissibility(
+		command.PrerequisiteID,
+		ModuleID,
+		command.RequiredKinds,
+		nil,
+		nil,
+		[]string{"repository-state-snapshot:" + snapshot.SnapshotID, "owner-execution-policy"},
+		snapshot.ObservedRevision,
+	)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	result.Set(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{PrerequisiteID: command.PrerequisiteID, Admissibility: inventory}, nil)
+}
+
+func (m *Module) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
+	if !ok || m.runtimeAdapter == nil {
+		setCapabilityError(result, common.ErrInvalidArgument)
+		return
+	}
+	if err := orchestratorevents.ValidateRuntimeOperationFeasibilityCommand(command, ModuleID); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	operation := command.Operation.Normalized()
+	failure := m.runtimeOperationFeasibility(event.Context(), command)
+	result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{
+		OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID,
+		Feasible: failure == nil, Failure: failure,
+	}, nil)
+}
+
+// runtimeOperationFeasibility is a read-only candidate-admission check.  It
+// never initializes a repository, runs a write operation, or commits an
+// owner receipt.  The actual effect still occurs only after sealed dispatch.
+func (m *Module) runtimeOperationFeasibility(ctx context.Context, command orchestratorevents.ProbeRuntimeOperationFeasibilityCommand) *runtimecontract.FailureFact {
+	operation := command.Operation.Normalized()
+	inventory := command.Admissibility.Normalized()
+	snapshot, err := m.runtimeAdapter.CapabilityState(ctx, inventory.PrerequisiteID, "workspace_deliverable", command.WorkspaceDeliverableDirectory)
+	if err != nil {
+		return orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "git_repository_unavailable", err.Error())
+	}
+	if snapshot.ObservedRevision != inventory.ObservedRevision {
+		return orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "operation_admissibility_stale", "runtime git operation admissibility snapshot is stale")
+	}
+	// A repository snapshot can require a specific write sequence (for example
+	// init -> add -> commit).  The generic candidate validator verifies the
+	// complete dependency graph; the owner gate ensures this concrete operation
+	// is at least one currently declared Git variant before it can be sealed.
+	if operation.Kind == StepKindWrite && len(snapshot.RequiredOperationSequence) > 0 {
+		contract, found := runtimecontract.RuntimeOperationContractForKind(operation.Kind)
+		if !found {
+			return orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "git_operation_contract_missing", "runtime git operation has no contract")
+		}
+		variant, matchErr := runtimecontract.MatchRuntimeOperationVariant(operation, contract)
+		if matchErr != nil {
+			return orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "git_operation_variant_invalid", matchErr.Error())
+		}
+		for _, required := range snapshot.RequiredOperationSequence {
+			if required.Kind == operation.Kind && required.VariantID == variant.ID {
+				return nil
+			}
+		}
+		return orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "git_operation_variant_not_admissible", "runtime git operation is absent from the current repository-state sequence")
+	}
+	return nil
 }
 
 func (m *Module) handleGitOperation(event magicevent.Event, result magicevent.Result) {

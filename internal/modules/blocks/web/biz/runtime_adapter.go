@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -160,6 +161,64 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeOp
 	default:
 		err := fmt.Errorf("%w: unsupported web step kind %q", common.ErrInvalidArgument, request.Kind)
 		return failedWebResult(request, provider, webcommon.ErrorInvalidRequest, err), err
+	}
+}
+
+// OperationAdmissibility returns the current, bounded provider selector set and
+// a stable revision for Runtime V2's read-only candidate-admission inventory.
+// It only reads provider configuration; it never performs an HTTP request.
+func (a *RuntimeAdapter) OperationAdmissibility() ([]string, string, error) {
+	if a == nil {
+		return nil, "", common.ErrInvalidArgument
+	}
+	defaultID, providers, err := a.providerConfigs()
+	if err != nil {
+		return nil, "", err
+	}
+	ids := make([]string, 0, len(providers))
+	for id := range providers {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	payload, err := json.Marshal(struct {
+		DefaultProviderID string                    `json:"defaultProviderId"`
+		Providers         map[string]ProviderConfig `json:"providers"`
+	}{DefaultProviderID: defaultID, Providers: providers})
+	if err != nil {
+		return nil, "", err
+	}
+	sum := sha256.Sum256(payload)
+	return ids, "web-admissibility-" + hex.EncodeToString(sum[:])[:20], nil
+}
+
+// ProbeOperation checks only local/provider-policy prerequisites. It does not
+// contact a search/fetch endpoint, create a receipt, or commit any evidence.
+// A fetch may perform DNS classification, which is read-only and uses the same
+// SSRF policy as execution so an invalid target cannot be sealed.
+func (a *RuntimeAdapter) ProbeOperation(ctx context.Context, request RuntimeOperationRequest) error {
+	if a == nil {
+		return common.ErrInvalidArgument
+	}
+	provider, err := a.selectProviderID(request.ProviderID)
+	if err != nil {
+		return err
+	}
+	switch strings.TrimSpace(request.Kind) {
+	case webcommon.StepKindSearch:
+		if strings.TrimSpace(request.Query) == "" {
+			return fmt.Errorf("%w: web/search query is required", common.ErrInvalidArgument)
+		}
+		return nil
+	case webcommon.StepKindFetch:
+		if strings.TrimSpace(request.URL) == "" {
+			return fmt.Errorf("%w: web/fetch url is required", common.ErrInvalidArgument)
+		}
+		if decision := a.classifyURL(ctx, request.URL, provider, true); decision.Decision == policyDenied {
+			return fmt.Errorf("%w: web/fetch URL is not allowed: %s", common.ErrInvalidArgument, strings.Join(decision.Reasons, ","))
+		}
+		return nil
+	default:
+		return fmt.Errorf("%w: unsupported web step kind %q", common.ErrInvalidArgument, request.Kind)
 	}
 }
 

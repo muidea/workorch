@@ -13,36 +13,31 @@ Runtime V2-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **�
 
 ## 阅读导航
 
-1. [A. Runtime 正向收敛](#a-runtime-正向收敛)
-2. [B. 运维切换](#b-运维切换)
-3. [C. 可选验证](#c-可选验证)
-4. [D. 延期候选](#d-延期候选)
-5. [E. 文档维护](#e-文档维护)
-6. [F. 已清理 / 不再跟踪](#f-已清理--不再跟踪)
+1. [A. 运维切换](#a-运维切换)
+2. [B. 可选验证](#b-可选验证)
+3. [C. 延期候选](#c-延期候选)
+4. [D. 文档维护](#d-文档维护)
+5. [E. 已清理 / 不再跟踪](#e-已清理--不再跟踪)
 
-## A. Runtime 正向收敛
-
-RVC-1 已完成并归档：[RVC-R17～R26 完成记录](../90-archive/completed/runtime-v2-positive-convergence-remediation-2026-07-18.md)；fresh bounded terminal 与 canonical real canary liveness 均已通过。它不再是 active 待办。
-
-## B. 运维切换
+## A. 运维切换
 
 | # | 主题 | 待办 | 历史过程稿 |
 | --- | --- | --- | --- |
 | B1 | 生产 apply | clean build + 生产目录维护窗口正式 `runtime-v1-retirement --apply` | `90-archive/completed/deployed-workspace-progress-blocker-component-closure-plan.md` |
 
-## C. 可选验证
+## B. 可选验证
 
 | # | 主题 | 待办 | 历史过程稿 |
 | --- | --- | --- | --- |
 | C1 | file-patch live | 可选补一次 deployed `patch apply + validation + DoD closeout` | `90-archive/completed/file-patch-side-effect-owner-migration-plan.md` |
 
-## D. 延期候选
+## C. 延期候选
 
 | # | 主题 | 说明 |
 | --- | --- | --- |
 | D1 | LLM context budget 高级项 | failover / tokenizer / 原生 usage 精度 / context-too-large 差异化 → `70-roadmap/candidates/next-stage-demand-candidates.md`（不占 active） |
 
-## E. 文档维护
+## D. 文档维护
 
 | # | 主题 | 说明 |
 | --- | --- | --- |
@@ -50,7 +45,7 @@ RVC-1 已完成并归档：[RVC-R17～R26 完成记录](../90-archive/completed/
 | E2 | block readme 措辞 | 可选；实现 SoT 仍是 `kernel/orchestrator/readme.md` |
 | E3 | archive 索引 | 保持 `90-archive/*/overview.md` 可检索 |
 
-## F. 已清理 / 不再跟踪
+## E. 已清理 / 不再跟踪
 
 以下类别 **已从 active / 当前验收导航移除**，不在本索引展开：
 
@@ -59,6 +54,7 @@ RVC-1 已完成并归档：[RVC-R17～R26 完成记录](../90-archive/completed/
 - 被 Runtime V2 reducer 吸收的 `convergence-authority-*`、`runtime-*-closure-plan`、`*-nextaction-*` hardening
 - 2026-07-16 归档的产品/审计日记：ai-proxy cutover、operation-map、module-inventory、auto-gov、software-dev DoD/SRD、next-mvp、TUI 统一、run-quality、authority-live design、module-block contract validation、deployed blocker 长文、file-patch 长文、llm-context-budget todo、docs reorg plan
 - dated live verification 记录与 `60-verification/artifacts/**`（出库；结论在 records markdown）
+- RPA-1 production admissibility + positive acceptance（fresh bounded terminal 与 positive acceptance 已通过，见 `90-archive/completed/runtime-v2-production-admissibility-closure-2026-07-18.md`）
 
 事实入口：[current-state.md](current-state.md)  
 未关矩阵：[current-unclosed-matrix.md](current-unclosed-matrix.md)  

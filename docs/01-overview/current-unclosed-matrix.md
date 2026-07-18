@@ -22,6 +22,7 @@ Last Updated: 2026-07-18
 | 2026-07-16：TUI workspace provider/model 选择与持久化 | MODEL-01～18、全量 gate 与 deployed e2e 已通过，计划已迁 `90-archive/completed/` |
 | 2026-07-17：Runtime V2 正向收敛 foundation（RVC-R5～R15） | effect/receipt/directive、exact-fence governance grant、独立预算、typed recovery inventory、schema v2-only 与 file-backed crash/E2E 已落地；2026-07-18 deployed Live 已重新打开后续代码收口 |
 | 2026-07-18：Runtime V2 正向收敛 RVC-R17～R26 | fresh bounded Git/general terminal gate 与 canonical LSP-Bridge/ai-proxy liveness verifier 已通过；pre-R25 alias aggregate 保留历史诊断，不做兼容迁移 |
+| 2026-07-18：Runtime V2 production admissibility + positive acceptance（RPA-1） | owner feasibility inventory/probe、sealed execution budget、分类 verifier 已完成；fresh bounded terminal 与 positive acceptance 均通过 |
 
 ## Residual Open
 
@@ -54,9 +55,9 @@ Last Updated: 2026-07-18
 ## Judgment
 
 - **代码主链**：Runtime V2 only；V1 authority 不再是问题来源。
-- **正向收敛**：RVC-R5～R26 本地代码、file-backed matrix、RVC-R16 fresh bounded terminal 与 canonical real canary liveness 均已通过。
+- **正向收敛基础**：RVC-R5～R26 与 RPA-1 本地代码、file-backed matrix、fresh bounded terminal、canonical real canary liveness、fresh positive acceptance 均已通过。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；不得再从已归档 plan 推导实现约束。
-- **Active roadmap**：OPS-1（+ 可选 OPT-1）；RVC-1 已归 archive，其余历史切片在 archive / candidates 检索。
+- **Active roadmap**：OPS-1（+ 可选 OPT-1）；RVC-1 与 RPA-1 已归 archive，其余历史切片在 archive / candidates 检索。
 - **清理原则**：失效主链叙述、重复 audit、过程日记、live 产物一律归档或出库，不在 active 保留“假活跃”项。
 
 ## Navigation

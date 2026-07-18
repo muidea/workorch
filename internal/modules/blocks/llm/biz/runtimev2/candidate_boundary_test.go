@@ -3,6 +3,7 @@ package runtimev2
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -134,7 +135,7 @@ func TestCandidateRetryIsExactlyOnceAndKeepsSealedContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if retry.CandidateAttempt != 1 || retry.PreviousFailure == nil || *retry.PreviousFailure != failure || retry.Transaction != request.Transaction || retry.StablePrefixHash != request.StablePrefixHash || retry.Decision.AuthoritySnapshot.RequiredOutputHash != request.Decision.AuthoritySnapshot.RequiredOutputHash {
+	if retry.CandidateAttempt != 1 || retry.PreviousFailure == nil || !reflect.DeepEqual(*retry.PreviousFailure, failure) || retry.Transaction != request.Transaction || retry.StablePrefixHash != request.StablePrefixHash || retry.Decision.AuthoritySnapshot.RequiredOutputHash != request.Decision.AuthoritySnapshot.RequiredOutputHash {
 		t.Fatalf("retry changed sealed request: initial=%+v retry=%+v", request, retry)
 	}
 	if _, err := RetrySameContract(retry, failure); err == nil {

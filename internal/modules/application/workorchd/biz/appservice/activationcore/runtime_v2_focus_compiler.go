@@ -143,16 +143,16 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 	}
 
 	// 2) Group into acceptance slices using typed policy (or 1 item = 1 slice default).
-	slicePolicy := runtimecontract.RuntimeAcceptanceSlicePolicy{MaxWorkItems: runtimecontract.RuntimeAcceptanceSliceDefaultMaxItems}
+	slicePolicy := runtimecontract.RuntimeAcceptanceSlicePolicy{
+		SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaV2,
+		MaxWorkItems:  runtimecontract.RuntimeAcceptanceSliceDefaultMaxItems, MaxFocuses: runtimecontract.RuntimeAcceptanceFocusMaxCount,
+		MaxCandidateContextItems: runtimecontract.RuntimeCandidateContextItemsMaxCount,
+	}
 	if activation.ExecutionContract.AcceptanceSlicePolicy != nil {
 		slicePolicy = activation.ExecutionContract.AcceptanceSlicePolicy.Normalized()
-		if err := slicePolicy.Validate(); err != nil {
-			return compiledCoverage{}, err
-		}
-		// New activation must be explicit v1 when a policy object is present.
-		if slicePolicy.SchemaVersion == "" {
-			return compiledCoverage{}, fmt.Errorf("acceptance slice policy requires schemaVersion %s", runtimecontract.RuntimeAcceptanceSlicePolicySchemaV1)
-		}
+	}
+	if err := slicePolicy.Validate(); err != nil {
+		return compiledCoverage{}, err
 	}
 
 	groups := slicePolicy.Groups
@@ -270,8 +270,8 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 	if len(focuses) == 0 {
 		return compiledCoverage{}, fmt.Errorf("runtime coverage focus compiler produced no focuses")
 	}
-	if len(focuses) > runtimecontract.RuntimeAcceptanceFocusMaxCount {
-		return compiledCoverage{}, fmt.Errorf("runtime coverage focus compiler produced %d focuses, exceeding neutral limit %d; configure bounded acceptance slices", len(focuses), runtimecontract.RuntimeAcceptanceFocusMaxCount)
+	if len(focuses) > slicePolicy.MaxFocuses {
+		return compiledCoverage{}, fmt.Errorf("runtime coverage focus compiler produced %d focuses, exceeding sealed policy limit %d; configure bounded acceptance slices", len(focuses), slicePolicy.MaxFocuses)
 	}
 	return compiledCoverage{Focuses: focuses, Slices: slices, CoverageItems: coverageItems}, nil
 }
