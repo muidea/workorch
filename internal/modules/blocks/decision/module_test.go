@@ -7,9 +7,11 @@ import (
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -871,5 +873,87 @@ func TestDecisionUpdateTicketCommandPublishesUpdatedNotification(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("ticket update command did not publish ticket updated notification")
+	}
+}
+
+func TestRuntimeGovernanceResolutionDoesNotResolveTicketBeforeAggregateCommit(t *testing.T) {
+	ctx := context.Background()
+	rawHub := magicevent.NewHub(16)
+	tickets := memory.NewDecisionTicketRepository()
+	resolutions := memory.NewDecisionResolutionRepository()
+	if err := tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:                     "ticket-runtime-commit-order",
+		WorkspaceID:            "ws-runtime-commit-order",
+		RunID:                  "run-runtime-commit-order",
+		StepID:                 "runtime-v2/dispatch-1",
+		Reason:                 "confirm provider recovery",
+		DecisionKind:           "runtime_v2_governance",
+		State:                  common.DecisionTicketStateOpen,
+		AllowedRecoveryActions: []string{decisioncommon.ResolutionTypeProvideMissingInfo},
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	module := New()
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := module.Stop(ctx); err != nil {
+			t.Errorf("Stop: %v", err)
+		}
+	})
+
+	_, err := sendDecisionTestCommand(ctx, rawHub, decisionevents.TopicDecisionCommandEnsureResolved, decisionevents.EnsureResolvedCommand{
+		ResolutionID: "resolution-runtime-commit-order",
+		TicketID:     "ticket-runtime-commit-order",
+		WorkspaceID:  "ws-runtime-commit-order",
+		RunID:        "run-runtime-commit-order",
+		StepID:       "runtime-v2/dispatch-1",
+		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:      mustDecisionEventPayload(t, map[string]any{"summary": "provider is ready"}),
+	})
+	if err == nil {
+		t.Fatal("resolve unexpectedly succeeded without an aggregate commit handler")
+	}
+	ticket, err := tickets.Get(ctx, "ticket-runtime-commit-order")
+	if err != nil {
+		t.Fatalf("read ticket: %v", err)
+	}
+	if ticket.State != common.DecisionTicketStateOpen || ticket.RuntimeGovernanceProposal == nil || ticket.RuntimeGovernanceProposal.State != decisionmodel.RuntimeGovernanceResolutionProposalPending {
+		t.Fatalf("ticket after failed aggregate commit = %+v", ticket)
+	}
+	if _, err := resolutions.GetByTicketID(ctx, "ticket-runtime-commit-order"); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("formal resolution err = %v, want not found", err)
+	}
+
+	ackEvidence := subscribeDecisionEvidenceAck(rawHub)
+	defer ackEvidence()
+	commitObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, rawHub)
+	commitObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, func(event magicevent.Event, result magicevent.Result) {
+		command, ok := event.Data().(orchestratorevents.CommitRuntimeGovernanceTicketResolutionCommand)
+		if !ok || command.ResolutionID != "resolution-runtime-commit-order" {
+			result.Set(nil, nil)
+			return
+		}
+		result.Set(orchestratorevents.CommitRuntimeGovernanceResolutionResult{
+			ResolutionID: command.ResolutionID,
+			Disposition:  orchestratorevents.RuntimeGovernanceResolutionDispositionDuplicate,
+		}, nil)
+	})
+	defer commitObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket)
+
+	module.reconcileRuntimeGovernanceProposals(ctx)
+	ticket, err = tickets.Get(ctx, "ticket-runtime-commit-order")
+	if err != nil {
+		t.Fatalf("read reconciled ticket: %v", err)
+	}
+	if ticket.State != common.DecisionTicketStateResolved || ticket.RuntimeGovernanceProposal == nil || ticket.RuntimeGovernanceProposal.State != decisionmodel.RuntimeGovernanceResolutionProposalCommitted {
+		t.Fatalf("ticket after reconciliation = %+v", ticket)
+	}
+	if _, err := resolutions.GetByTicketID(ctx, "ticket-runtime-commit-order"); err != nil {
+		t.Fatalf("formal resolution after reconciliation: %v", err)
 	}
 }

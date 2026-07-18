@@ -655,6 +655,10 @@ func ResolveDecisionWithType(be backend.Backend, workspaceID string, ticketID st
 		if !backend.IsSupportedDecisionResolutionType(resolutionType) {
 			resolutionType = inferDecisionResolutionType(answer)
 		}
+		current, _ := be.Decision().Get(ctx, wsID, common.TicketID(ticketID))
+		if current != nil && !decisionResolutionAllowed(current, resolutionType) {
+			return DecisionResolvedMsg{WorkspaceID: wsID, Error: fmt.Errorf("%w: decision action %q is not allowed for ticket %s", common.ErrInvalidArgument, resolutionType, ticketID)}
+		}
 		decision, err := be.Decision().Resolve(ctx, backend.ResolveDecisionRequest{
 			WorkspaceID:    wsID,
 			TicketID:       common.TicketID(ticketID),
@@ -669,6 +673,18 @@ func ResolveDecisionWithType(be backend.Backend, workspaceID string, ticketID st
 		}
 		return DecisionResolvedMsg{WorkspaceID: wsID, Decision: decision, Error: err}
 	}
+}
+
+func decisionResolutionAllowed(item *backend.DecisionInfo, resolutionType string) bool {
+	if item == nil || len(item.AllowedRecoveryActions) == 0 {
+		return true
+	}
+	for _, allowed := range item.AllowedRecoveryActions {
+		if allowed == resolutionType {
+			return true
+		}
+	}
+	return false
 }
 
 func inferDecisionResolutionType(answer string) string {

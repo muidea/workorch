@@ -2,10 +2,13 @@ package decision
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"sync"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
+	magictask "github.com/muidea/magicCommon/task"
 	decisionbiz "github.com/muidea/workorch/internal/modules/blocks/decision/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisioncontracts "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/contracts"
@@ -28,19 +31,24 @@ type UpdateTicketCommand = decisioncontracts.UpdateTicketCommand
 type ResolveTicketCommand = decisioncontracts.ResolveTicketCommand
 
 type Dependencies struct {
-	Tickets     repository.DecisionTicketRepository
-	Resolutions repository.DecisionResolutionRepository
-	EventHub    magicevent.Hub
+	Tickets           repository.DecisionTicketRepository
+	Resolutions       repository.DecisionResolutionRepository
+	EventHub          magicevent.Hub
+	BackgroundRoutine magictask.BackgroundRoutine
 }
 
 type Module struct {
-	bizPtr      *decisionbiz.Service
-	servicePtr  *decisionservice.Module
-	eventHub    magicevent.Hub
-	tickets     repository.DecisionTicketRepository
-	resolutions repository.DecisionResolutionRepository
-	observer    magicevent.SimpleObserver
-	topics      []string
+	bizPtr          *decisionbiz.Service
+	servicePtr      *decisionservice.Module
+	eventHub        magicevent.Hub
+	tickets         repository.DecisionTicketRepository
+	resolutions     repository.DecisionResolutionRepository
+	background      magictask.BackgroundRoutine
+	observer        magicevent.SimpleObserver
+	topics          []string
+	reconcileMu     sync.Mutex
+	reconcileCancel context.CancelFunc
+	reconcileDone   chan struct{}
 }
 
 func New() *Module { return &Module{} }
@@ -54,6 +62,7 @@ func (m *Module) Configure(deps Dependencies) error {
 	m.eventHub = deps.EventHub
 	m.tickets = deps.Tickets
 	m.resolutions = deps.Resolutions
+	m.background = deps.BackgroundRoutine
 	m.bizPtr = decisionbiz.NewService(deps.Tickets, deps.Resolutions, deps.EventHub)
 	m.servicePtr = decisionservice.New(decisionservice.Dependencies{
 		CreateTicket:                  m.bizPtr.CreateTicket,
@@ -94,6 +103,9 @@ func (m *Module) Start() error {
 	m.observer.Subscribe(orchestratorevents.TopicOrchestratorOpenRuntimeGovernanceRequest, m.handleRuntimeGovernanceRequest)
 	m.topics = append(m.topics, orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
 	m.observer.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
+	if err := m.startRuntimeGovernanceProposalReconciliation(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -156,6 +168,7 @@ func setRuntimeGovernanceRequestResult(result magicevent.Result, response orches
 
 func (m *Module) Stop(ctx context.Context) error {
 	_ = ctx
+	m.stopRuntimeGovernanceProposalReconciliation()
 	if m.observer != nil {
 		for idx := len(m.topics) - 1; idx >= 0; idx-- {
 			m.observer.Unsubscribe(m.topics[idx])
@@ -168,6 +181,7 @@ func (m *Module) Stop(ctx context.Context) error {
 	m.eventHub = nil
 	m.tickets = nil
 	m.resolutions = nil
+	m.background = nil
 	return nil
 }
 
@@ -232,11 +246,42 @@ func (m *Module) executeCommand(ev magicevent.Event) (decisionevents.DecisionCom
 			cmd.StepID = ticket.StepID
 			ctx = common.ContextWithRuntimeWorkspaceID(ctx, ticket.WorkspaceID)
 		}
-		ticket, resolution, err := m.servicePtr.EnsureResolvedTicketAndReturn(ctx, resolveTicketContract(cmd))
+		currentTicket, err := m.tickets.Get(ctx, cmd.TicketID)
 		if err != nil {
 			return decisionevents.DecisionCommandResult{}, err
 		}
-		if err := m.commitRuntimeV2GovernanceTicketResolution(ctx, ticket, resolution); err != nil {
+		resolveCommand := resolveTicketContract(cmd)
+		if currentTicket.DecisionKind == "runtime_v2_governance" {
+			ticket, proposal, err := m.bizPtr.EnsureRuntimeGovernanceResolutionProposal(ctx, resolveCommand)
+			if err != nil {
+				return decisionevents.DecisionCommandResult{}, err
+			}
+			commit, err := m.commitRuntimeV2GovernanceTicketProposal(ctx, ticket, proposal)
+			if err != nil {
+				if errors.Is(err, common.ErrConflict) || errors.Is(err, common.ErrInvalidArgument) {
+					_ = m.bizPtr.RejectRuntimeGovernanceResolutionProposal(ctx, resolveCommand, "aggregate_commit_rejected", err.Error())
+				}
+				return decisionevents.DecisionCommandResult{}, err
+			}
+			switch commit.Disposition {
+			case orchestratorevents.RuntimeGovernanceResolutionDispositionCommitted,
+				orchestratorevents.RuntimeGovernanceResolutionDispositionDuplicate:
+				ticket, resolution, err := m.bizPtr.FinalizeRuntimeGovernanceResolutionProposal(ctx, resolveCommand)
+				if err != nil {
+					return decisionevents.DecisionCommandResult{}, err
+				}
+				return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}, nil
+			case orchestratorevents.RuntimeGovernanceResolutionDispositionStale:
+				if err := m.bizPtr.RejectRuntimeGovernanceResolutionProposal(ctx, resolveCommand, "aggregate_commit_stale", "runtime governance proposal belongs to a stale aggregate authority"); err != nil {
+					return decisionevents.DecisionCommandResult{}, err
+				}
+				return decisionevents.DecisionCommandResult{}, common.ErrConflict
+			default:
+				return decisionevents.DecisionCommandResult{}, common.ErrConflict
+			}
+		}
+		ticket, resolution, err := m.servicePtr.EnsureResolvedTicketAndReturn(ctx, resolveCommand)
+		if err != nil {
 			return decisionevents.DecisionCommandResult{}, err
 		}
 		return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}, nil
@@ -310,6 +355,13 @@ func (m *Module) executeCommand(ev magicevent.Event) (decisionevents.DecisionCom
 		if !ticketMatchesDecisionScope(item, decisionCommandScope{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, StepID: cmd.StepID}) {
 			return decisionevents.DecisionCommandResult{}, common.ErrNotFound
 		}
+		current, err := m.tickets.Get(ctx, cmd.TicketID)
+		if err != nil {
+			return decisionevents.DecisionCommandResult{}, err
+		}
+		if current.DecisionKind == "runtime_v2_governance" && item.State == common.DecisionTicketStateResolved {
+			return decisionevents.DecisionCommandResult{}, common.ErrConflict
+		}
 		if err := m.tickets.Update(ctx, item); err != nil {
 			return decisionevents.DecisionCommandResult{}, err
 		}
@@ -349,6 +401,13 @@ func (m *Module) executeCommand(ev magicevent.Event) (decisionevents.DecisionCom
 		if err != nil {
 			return decisionevents.DecisionCommandResult{}, err
 		}
+		ticket, err := m.tickets.Get(resolutionCtx, item.TicketID)
+		if err != nil {
+			return decisionevents.DecisionCommandResult{}, err
+		}
+		if ticket.DecisionKind == "runtime_v2_governance" {
+			return decisionevents.DecisionCommandResult{}, common.ErrConflict
+		}
 		if err := m.resolutions.Create(resolutionCtx, item); err != nil {
 			return decisionevents.DecisionCommandResult{}, err
 		}
@@ -385,18 +444,18 @@ func (m *Module) executeCommand(ev magicevent.Event) (decisionevents.DecisionCom
 	}
 }
 
-func (m *Module) commitRuntimeV2GovernanceTicketResolution(ctx context.Context, ticket *decisionmodel.Ticket, resolution *decisionmodel.Resolution) error {
-	if ticket == nil || resolution == nil || ticket.DecisionKind != "runtime_v2_governance" {
-		return nil
+func (m *Module) commitRuntimeV2GovernanceTicketProposal(ctx context.Context, ticket *decisionmodel.Ticket, proposal *decisionmodel.RuntimeGovernanceResolutionProposal) (orchestratorevents.CommitRuntimeGovernanceResolutionResult, error) {
+	if m == nil || m.eventHub == nil || ticket == nil || proposal == nil || ticket.DecisionKind != "runtime_v2_governance" {
+		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument
 	}
 	outcome := runtimecontract.RuntimeGovernanceResolutionOutcome("")
-	switch resolution.Type {
+	switch proposal.ResolutionType {
 	case modulecommon.ResolutionTypeProvideMissingInfo:
 		outcome = runtimecontract.RuntimeGovernanceResolutionOutcomeContinue
 	case modulecommon.ResolutionTypeRejectCurrentPath:
 		outcome = runtimecontract.RuntimeGovernanceResolutionOutcomeFail
 	default:
-		return common.ErrInvalidArgument
+		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument
 	}
 	result := m.eventHub.Send(magicevent.NewEventWithContext(
 		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
@@ -405,31 +464,31 @@ func (m *Module) commitRuntimeV2GovernanceTicketResolution(ctx context.Context, 
 		magicevent.NewHeader(),
 		ctx,
 		orchestratorevents.CommitRuntimeGovernanceTicketResolutionCommand{
-			ResolutionID: resolution.ID, TicketID: ticket.ID,
+			ResolutionID: proposal.ResolutionID, TicketID: ticket.ID,
 			WorkspaceID: ticket.WorkspaceID, RunID: ticket.RunID,
-			Outcome: outcome, Summary: runtimeV2GovernanceResolutionSummary(ticket, resolution),
+			Outcome: outcome, Summary: runtimeV2GovernanceProposalSummary(ticket, proposal),
 		},
 	))
 	if result == nil {
-		return common.ErrInvalidArgument
+		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument
 	}
 	if err := result.Error(); err != nil {
-		return err
+		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err
 	}
 	data, err := result.Get()
 	if err != nil {
-		return err
+		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err
 	}
 	response, ok := data.(orchestratorevents.CommitRuntimeGovernanceResolutionResult)
-	if !ok || response.ResolutionID != resolution.ID {
-		return common.ErrInvalidArgument
+	if !ok || response.ResolutionID != proposal.ResolutionID {
+		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument
 	}
-	return nil
+	return response, nil
 }
 
-func runtimeV2GovernanceResolutionSummary(ticket *decisionmodel.Ticket, resolution *decisionmodel.Resolution) string {
-	if resolution != nil {
-		if value, ok := resolution.Payload.String("summary"); ok && strings.TrimSpace(value) != "" {
+func runtimeV2GovernanceProposalSummary(ticket *decisionmodel.Ticket, proposal *decisionmodel.RuntimeGovernanceResolutionProposal) string {
+	if proposal != nil {
+		if value, ok := proposal.Payload.String("summary"); ok && strings.TrimSpace(value) != "" {
 			return strings.TrimSpace(value)
 		}
 	}

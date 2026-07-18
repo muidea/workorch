@@ -235,6 +235,23 @@ func TestRuntimeV2CandidateSchemasAreActionSpecific(t *testing.T) {
 	}
 }
 
+func TestRuntimeV2CandidateSchemaDerivesPatchTargetRequirementsFromOperationContract(t *testing.T) {
+	schema := runtimeV2CandidateSchemaForDecision(runtimecontract.RuntimeDecision{
+		Action: runtimecontract.RuntimeActionProduceStateChange,
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+		},
+	})
+	for _, value := range []string{`"const":"patch/apply"`, `"const":"patchType"`, `"const":"targetRef"`, `"const":"path"`, `"targetRefs"`, `"minItems":1`} {
+		if !strings.Contains(schema, value) {
+			t.Fatalf("descriptor-driven patch schema lost %q: %s", value, schema)
+		}
+	}
+	if strings.Contains(runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceStateChange), `"const":"patch/apply"`) {
+		t.Fatal("volatile operation constraints leaked into the stable generic contract schema")
+	}
+}
+
 func TestRuntimeV2AssessmentRequestPublishesCanonicalEvidenceRefContract(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
 		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},

@@ -361,18 +361,19 @@ func workspaceActivityItemInfosFromClient(items []client.WorkspaceActivityItem) 
 
 func decisionInfoFromClient(item client.Decision) DecisionInfo {
 	return DecisionInfo{
-		ID:                 common.TicketID(item.ID),
-		WorkspaceID:        common.WorkspaceID(item.WorkspaceID),
-		RunID:              common.RunID(item.RunID),
-		Reason:             item.Reason,
-		Question:           item.Question,
-		Context:            item.Context.Clone(),
-		State:              item.State,
-		ResolutionType:     item.ResolutionType,
-		ContinuationAction: item.ContinuationAction,
-		ResumeRunID:        common.RunID(item.ResumeRunID),
-		SuccessorRunID:     common.RunID(item.SuccessorRunID),
-		AutoGovernance:     mapRemoteAutoGovernanceSummary(item.AutoGovernance),
+		ID:                     common.TicketID(item.ID),
+		WorkspaceID:            common.WorkspaceID(item.WorkspaceID),
+		RunID:                  common.RunID(item.RunID),
+		Reason:                 item.Reason,
+		Question:               item.Question,
+		Context:                item.Context.Clone(),
+		AllowedRecoveryActions: append([]string(nil), item.AllowedRecoveryActions...),
+		State:                  item.State,
+		ResolutionType:         item.ResolutionType,
+		ContinuationAction:     item.ContinuationAction,
+		ResumeRunID:            common.RunID(item.ResumeRunID),
+		SuccessorRunID:         common.RunID(item.SuccessorRunID),
+		AutoGovernance:         mapRemoteAutoGovernanceSummary(item.AutoGovernance),
 	}
 }
 
@@ -1103,18 +1104,19 @@ func decisionInfosFromClient(items []client.Decision) []DecisionInfo {
 	ret := make([]DecisionInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, DecisionInfo{
-			ID:                 common.TicketID(item.ID),
-			WorkspaceID:        common.WorkspaceID(item.WorkspaceID),
-			RunID:              common.RunID(item.RunID),
-			Reason:             item.Reason,
-			Question:           item.Question,
-			Context:            item.Context.Clone(),
-			State:              item.State,
-			ResolutionType:     item.ResolutionType,
-			ContinuationAction: item.ContinuationAction,
-			ResumeRunID:        common.RunID(item.ResumeRunID),
-			SuccessorRunID:     common.RunID(item.SuccessorRunID),
-			AutoGovernance:     mapRemoteAutoGovernanceSummary(item.AutoGovernance),
+			ID:                     common.TicketID(item.ID),
+			WorkspaceID:            common.WorkspaceID(item.WorkspaceID),
+			RunID:                  common.RunID(item.RunID),
+			Reason:                 item.Reason,
+			Question:               item.Question,
+			Context:                item.Context.Clone(),
+			AllowedRecoveryActions: append([]string(nil), item.AllowedRecoveryActions...),
+			State:                  item.State,
+			ResolutionType:         item.ResolutionType,
+			ContinuationAction:     item.ContinuationAction,
+			ResumeRunID:            common.RunID(item.ResumeRunID),
+			SuccessorRunID:         common.RunID(item.SuccessorRunID),
+			AutoGovernance:         mapRemoteAutoGovernanceSummary(item.AutoGovernance),
 		})
 	}
 	return ret
@@ -1632,18 +1634,19 @@ func mapRemoteDecisionInfoPtr(d *client.Decision) DecisionInfo {
 
 func mapRemoteDecisionInfo(d client.Decision) DecisionInfo {
 	return DecisionInfo{
-		ID:                 common.TicketID(d.ID),
-		WorkspaceID:        common.WorkspaceID(d.WorkspaceID),
-		RunID:              common.RunID(d.RunID),
-		Reason:             d.Reason,
-		Question:           d.Question,
-		Context:            d.Context.Clone(),
-		State:              d.State,
-		ResolutionType:     d.ResolutionType,
-		ContinuationAction: d.ContinuationAction,
-		ResumeRunID:        common.RunID(d.ResumeRunID),
-		SuccessorRunID:     common.RunID(d.SuccessorRunID),
-		AutoGovernance:     mapRemoteAutoGovernanceSummary(d.AutoGovernance),
+		ID:                     common.TicketID(d.ID),
+		WorkspaceID:            common.WorkspaceID(d.WorkspaceID),
+		RunID:                  common.RunID(d.RunID),
+		Reason:                 d.Reason,
+		Question:               d.Question,
+		Context:                d.Context.Clone(),
+		AllowedRecoveryActions: append([]string(nil), d.AllowedRecoveryActions...),
+		State:                  d.State,
+		ResolutionType:         d.ResolutionType,
+		ContinuationAction:     d.ContinuationAction,
+		ResumeRunID:            common.RunID(d.ResumeRunID),
+		SuccessorRunID:         common.RunID(d.SuccessorRunID),
+		AutoGovernance:         mapRemoteAutoGovernanceSummary(d.AutoGovernance),
 	}
 }
 

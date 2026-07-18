@@ -377,6 +377,39 @@ func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
 	}
 }
 
+func TestBatchResolveDecisionViewsRejectsMixedAllowedActionsBeforeWrites(t *testing.T) {
+	ctx := context.Background()
+	testHub := newGovernanceMagicTestHub(t)
+	hub := testHub.rawHub
+	workspaceID := common.WorkspaceID("ws-governance-actions")
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) decisionevents.DecisionCommandResult {
+		cmd := data.(decisionevents.GetTicketCommand)
+		actions := []string{"provide_missing_info"}
+		if cmd.TicketID == "ticket-action-b" {
+			actions = []string{"replan"}
+		}
+		return decisionevents.DecisionCommandResult{Ticket: &decisionmodel.Ticket{
+			ID: cmd.TicketID, WorkspaceID: workspaceID, RunID: "run-actions", State: common.DecisionTicketStateOpen,
+			AllowedRecoveryActions: actions,
+		}}
+	})
+	resolvedCount := 0
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(_ any) decisionevents.DecisionCommandResult {
+		resolvedCount++
+		return decisionevents.DecisionCommandResult{}
+	})
+	_, err := BatchResolveDecisionViews(ctx, hub, nil, appmodelcore.BatchResolveDecisionCommand{
+		TicketIDs: []string{"ticket-action-a", "ticket-action-b"}, ResolutionType: "provide_missing_info",
+		ResolutionPayload: mustGovernancePayload(t, map[string]any{"answer": "continue"}),
+	}, workspaceID)
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("mixed allowed action batch err = %v, want invalid argument", err)
+	}
+	if resolvedCount != 0 {
+		t.Fatalf("mixed allowed action batch wrote %d resolutions, want zero", resolvedCount)
+	}
+}
+
 func TestApprovalViewsForQueryProjectsAutoGovernance(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)

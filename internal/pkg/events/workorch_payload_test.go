@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
@@ -93,6 +94,34 @@ func TestTypedPatchAndGovernancePayloadDecodersRoundTrip(t *testing.T) {
 	decodedGovernance, ok := decodeGovernanceEventPayload(governance.EventPayload())
 	if !ok || decodedGovernance != governance {
 		t.Fatalf("governance round trip = %+v/%v, want %+v", decodedGovernance, ok, governance)
+	}
+}
+
+func TestLLMUsagePayloadUsesTypedAuditDTOs(t *testing.T) {
+	payload := (LLMUsagePayloadData{
+		WorkspaceID: "ws-audit", RunID: "run-audit", Status: "completed",
+		ContextBudget: llmaudit.ContextBudget{
+			ProviderID: "ai-proxy", ModelID: "chat-a", ActualTokens: 321,
+			StablePrefixHash: "stable-audit", ProviderSubmitted: true,
+		},
+		CacheUsage: llmaudit.CacheUsage{CacheReadTokens: 120, Estimated: false, Source: "provider_native"},
+	}).EventPayload()
+	budget, ok := payload.Object(PayloadKeyContextBudget)
+	if !ok {
+		t.Fatal("context budget object is missing")
+	}
+	if providerID, _ := budget.String("providerId"); providerID != "ai-proxy" {
+		t.Fatalf("providerId = %q", providerID)
+	}
+	if submitted, _ := budget.Bool("providerSubmitted"); !submitted {
+		t.Fatal("providerSubmitted was not preserved")
+	}
+	cache, ok := payload.Object(PayloadKeyCacheUsage)
+	if !ok {
+		t.Fatal("cache usage object is missing")
+	}
+	if read, _ := cache.Int64("cacheReadTokens"); read != 120 {
+		t.Fatalf("cacheReadTokens = %d", read)
 	}
 }
 

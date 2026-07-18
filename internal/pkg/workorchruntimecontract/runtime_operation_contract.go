@@ -22,10 +22,12 @@ type RuntimeOperationParameterContract struct {
 }
 
 type RuntimeOperationContract struct {
-	Kind                string
-	Parameters          []RuntimeOperationParameterContract
-	ForbiddenParameters []string
-	Rules               []string
+	Kind                   string
+	Parameters             []RuntimeOperationParameterContract
+	RequireOneOfParameters []string
+	RequireTargetRefs      bool
+	ForbiddenParameters    []string
+	Rules                  []string
 }
 
 func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, bool) {
@@ -97,7 +99,9 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				{Name: "coverageTargets", Type: RuntimeOperationParameterTypeStringList, Description: "coverage targets addressed by this state change"},
 				{Name: "summary", Type: RuntimeOperationParameterTypeString, Description: "bounded change summary"},
 			},
-			ForbiddenParameters: []string{"filePath", "fileContent", "targetRefs"},
+			RequireOneOfParameters: []string{"targetRef", "path"},
+			RequireTargetRefs:      true,
+			ForbiddenParameters:    []string{"filePath", "fileContent", "targetRefs"},
 			Rules: []string{
 				"file_write must provide content",
 				"text_replace must provide non-empty oldText and a distinct newText",

@@ -1,14 +1,14 @@
 # Runtime V2 Positive Convergence Systemic Closure Plan
 
-Status: active — RVC-R5～R15 code-landed and verified; RVC-R16 deployed Live pending
+Status: active — code reopened by 2026-07-18 deployed Live; RVC-R17～R22 pending before final RVC-R16 rerun
 
 Type: roadmap / implementation closure specification
 
-Last Updated: 2026-07-17
+Last Updated: 2026-07-18
 
 ## 1. Purpose
 
-本文是 Runtime V2 正向收敛的唯一 active 实现收口计划。它承接最新 deployed/file-backed 双 workspace Live 证据，对四状态机交界处暴露的系统性偏差进行整体收口，避免继续通过 prompt、单一 operation kind、单一 workspace 或单一失败文本做片面堵漏。
+本文是 Runtime V2 正向收敛的唯一 active 实现收口计划。它承接最新 deployed/file-backed 双 workspace Live 证据，对四状态机交界处暴露的系统性偏差进行整体收口，避免继续通过 prompt、单一 operation kind、单一 workspace 或单一失败文本做片面堵漏。2026-07-18 Live 已证明 RVC-R5～R15 的 effect/receipt/recovery 主链成立，但同时暴露 governance resolution 跨 owner 提交、blocked Resume 权威门禁、端侧 allowed action、candidate parameter contract 和 Live fixture 边界仍未关闭；因此“只剩 RVC-R16 Live”的旧判断正式作废。
 
 核心语义权威仍是：
 
@@ -35,6 +35,29 @@ Last Updated: 2026-07-17
 2. Start/Resume、CAS、sealed dispatch、terminal delivery 和 projection 主骨架可工作；
 3. 当前根因位于 SM-2 action、SM-3 operation effect、owner receipt 与 evidence commit 的交界合同；
 4. 现有测试证明了实现内部一致，但没有证明跨状态机不变量完整。
+
+### 2.2 2026-07-18 post-RVC-R15 Live evidence
+
+| Workspace | Run | 已验证正确 | 新暴露偏差 |
+| --- | --- | --- | --- |
+| `ws-1138d6b3bfddb4fd` / LSP-Bridge | `run-023` | provider transient 正确进入 `request_governance`；aggregate 保持 blocked，不会因 owner ticket resolved 自动消费无效 resolution | ticket 只允许 `provide_missing_info/reject_current_path`，TUI 却提交 `replan`；Decision owner 已将 ticket/resolution 持久化为 resolved，Orchestrator aggregate 无 matching governance resolution，形成永久 split-brain |
+| `ws-bea4fee67e459bcc` / ai-proxy | `run-023` | focus-001/002 已 accepted，durable File receipt 为 `workspace_durable`，focus-003 正确经历 validation → repair → assessment；最终 typed rejected Result/Run failed/Workspace release 收敛 | attempt 0/1 均生成缺少 `targetRef/path` 的 `patch/apply`，被 contract gate 正确拒绝并 `candidate_retry_exhausted`；说明 candidate producer 的 action-specific parameter schema/repair context 仍不足 |
+
+本轮额外确认：
+
+- `/readyz` source/projected revision 一致，projection 不是阻塞根因；
+- ai-proxy request 使用封存 provider/model，stable prefix 未漂移，context budget 未超限；
+- 普通 Resume 会在 Decision ticket 已 resolved 时调用 `ActivateRuntimeV2Run` 清除 Run blocker，即使 aggregate 尚无 matching typed resolution；drive 随后又根据 aggregate 回到 governed wait，形成 `blocked → active → blocked` 的非权威抖动；
+- 真实 ai-proxy DoD 编译为 396 coverage items / 27 focuses；focus 数虽未超过 neutral guard 64，但整体规模不适合作为 180 秒 terminal SLA fixture。
+
+因此本轮不是修改现有四状态机语义，而是补齐已经写入 core contract 的以下执行门禁：
+
+1. SM-1 `blocked → active` 必须有 persisted Runtime V2 governance resolution；
+2. SM-2/SM-3 governance outcome 只能由 Orchestrator aggregate 接受后生效；
+3. Decision owner 的 ticket/resolution 只能投影已被 Runtime V2 接受的治理结论；
+4. TUI/Web/HTTP 的动作集合必须从 ticket contract 派生；
+5. action-specific candidate schema 必须在 provider 输出边界尽量消除机械参数缺失；
+6. deployed terminal gate 与真实长任务 liveness observation 必须分层。
 
 ## 3. Scope And Non-Goals
 
@@ -554,14 +577,15 @@ Application server 和 projection 不负责扫描或选择 action。
 | `runtime_v2_mainline.go` | action-specific seal、receipt recovery、typed provider/owner error routing |
 | `module.go` | startup recovery inventory；CAS conflict 分类；delivery retry |
 | `kernel/run` | schema v2 validation、execution fence、termination record、recovery inventory query |
-| `application/workorchd/activationports` | effect/governance/retry policy 编译；MCP kind normalization；不得参与 recovery action |
+| `application/workorchd/activationports` | effect/governance/retry policy 编译；MCP kind normalization；不得参与 recovery action；blocked Runtime V2 Resume 不得只依据 ticket owner state 清 blocker |
 | `blocks/llm` | action-specific schema/prompt；repair directive projection；stable contract version |
 | File/Git/Shell/MCP/SSH/Web owners | concrete execute/query receipt command；ObservedEffectScope；governance-required preflight；ExecutionKey 幂等 |
-| Decision/Approval | operation-scoped governance binding/resolution |
+| Decision/Approval | operation-scoped governance binding/resolution；Runtime V2 resolution proposal/commit saga；allowed action owner validation；禁止先 resolved 后提交 aggregate |
 | Result | closeout v2，包含 expected/observed effect、receipt refs、unknown outcomes |
-| read model/TUI/Web | 展示 current directive、effect mismatch、operation recovery、separate budgets；不产生 authority |
+| read model/TUI/Web | 展示 current directive、effect mismatch、operation recovery、separate budgets；动作从 `AllowedRecoveryActions` 派生；不产生 authority |
+| `blocks/llm/pkg/events` / eventstream | usage/context/cache audit 使用 concrete typed DTO，清除跨 owner `map[string]any` |
 
-## Implementation Progress (2026-07-17)
+## Implementation Progress (2026-07-18)
 
 | Batch | Status | Notes |
 | --- | --- | --- |
@@ -576,7 +600,13 @@ Application server 和 projection 不负责扫描或选择 action。
 | RVC-R13 | code-landed | provider/operation/CAS/terminal-delivery 独立 policy/ledger 已封存并接入 retry routing、Result closeout 与 read model |
 | RVC-R14 | code-landed | Run owner typed recovery inventory、blocked binding verification、terminal delivery retry inventory、schema v2-only 与 read model 已落地 |
 | RVC-R15 | code-landed | 真实 file-backed 主场景与 crash matrix 已覆盖两 focus、provider transient、CAS reload、File approval/grant、same key/next fence、stale/duplicate、validation、assessment、focus advance、terminal delivery retry、accepted Result、Run completed 与 Workspace release |
-| RVC-R16 | pending | dual-workspace deployed Live |
+| RVC-R16 | failed / reopened | 2026-07-18 dual-workspace Live 暴露 resolved-ticket/uncommitted-aggregate split、blocked Resume bypass、candidate patch target omission 与 180s fixture sizing 偏差；不得以超时或合法 terminal 代替 accepted-result gate |
+| RVC-R17 | code-landed | Decision ticket 内 durable pending proposal → Orchestrator typed commit → formal Resolution/ticket finalize；启动 reconciliation 只重放同一 commit |
+| RVC-R18 | code-landed | blocked Runtime V2 Resume/Activate 均要求 aggregate matching resolution + request binding，普通 ticket resolved 不再清 blocker |
+| RVC-R19 | code-landed | Decision owner server-first allowed-action gate；read model/TUI 提供并预检同一集合，batch 仍以服务端全量预检为准 |
+| RVC-R20 | code-landed | provider output schema 在 C3 从 sealed RuntimeOperationContract 动态生成 patch target/parameter constraint；final seal 保留最终一致性裁决 |
+| RVC-R21 | code-landed | ContextBudget/CacheUsage 改为 owner-neutral concrete audit DTO，LLM candidate/usage EventHub 与 eventstream payload 无 `map[string]any` bridge |
+| RVC-R22 | pending | deployed bounded terminal fixture + real-workspace liveness observation 分层；最终重跑 RVC-R16 |
 
 ## 17. Implementation Batches
 
@@ -912,22 +942,294 @@ Exit gate:
 Scope: all
 
 - 部署 clean binary。
-- 创建新 successor Run；旧 terminal Run 不 Resume。
-- 先 LSP-Bridge canary，再 ai-proxy canary。
+- 先创建两个全新 bounded positive fixtures，旧 terminal/污染 Run 不 Resume。
+- bounded fixtures 通过后，再分别观察 LSP-Bridge 与 ai-proxy 真实 canary；需要继续原目标时只创建显式 typed successor activation，不自动 successor。
+- bounded fixtures 负责 accepted terminal gate；真实 canary 负责 liveness 与状态机合法性，不共用 180 秒 terminal SLA。
 - Live 证据只写 `/tmp`，不污染仓库。
 
 Exit gate 见第 20 节。
+
+### RVC-R17 — Runtime V2 governance durable proposal/commit saga
+
+Scope: SM-1/SM-2/SM-3、Decision owner、Orchestrator、kernel/governance
+
+#### RVC-R17.1 Authority split
+
+| Object | Formal authority |
+| --- | --- |
+| ticket question、allowed actions、operator input | Decision owner |
+| Runtime V2 request binding（ticket/dispatch/snapshot/dependency/subject） | Orchestrator aggregate |
+| continue/fail outcome、governance evidence、next reducer action | Orchestrator aggregate |
+| resolved ticket / resolution read model | Decision owner 对已提交 Runtime V2 outcome 的投影 |
+| Run blocked/active/terminal | SM-1 owner projection，输入只能来自 Orchestrator committed aggregate |
+
+`runtime_v2_governance` 不得继续沿用“先调用 Decision owner 普通 resolve，再尝试
+Orchestrator commit”的顺序。跨 owner 没有数据库事务，必须建立可重放、可审计的
+durable saga。
+
+#### RVC-R17.2 Proposal model
+
+Decision owner 增加 focused persisted proposal，不新增 Module/Block：
+
+```go
+type RuntimeGovernanceResolutionProposalState string
+
+const (
+    RuntimeGovernanceResolutionProposalPending   RuntimeGovernanceResolutionProposalState = "pending"
+    RuntimeGovernanceResolutionProposalCommitted RuntimeGovernanceResolutionProposalState = "committed"
+    RuntimeGovernanceResolutionProposalRejected  RuntimeGovernanceResolutionProposalState = "rejected"
+)
+
+type RuntimeGovernanceResolutionProposal struct {
+    ResolutionID   common.ResolutionID
+    TicketID       common.TicketID
+    WorkspaceID    common.WorkspaceID
+    RunID          common.RunID
+    ResolutionType string
+    Outcome        runtimecontract.RuntimeGovernanceResolutionOutcome
+    Summary        string
+    PayloadHash    string
+    State          RuntimeGovernanceResolutionProposalState
+    FailureClass   string
+    FailureReason  string
+    CreatedAt      string
+    UpdatedAt      string
+}
+```
+
+规则：
+
+- proposal ID 使用 deterministic resolution ID；相同 ID + payload hash 幂等，不同 payload conflict；
+- proposal 是 Decision owner 内部恢复事实，不是正式 resolved resolution；
+- `pending` 时 ticket 必须保持 open，Run 必须保持 blocked；
+- `committed` 只允许在 Orchestrator 返回 committed/duplicate 后写入；
+- contract/stale/rejected failure 可写 `rejected`，ticket 仍 open；owner transient 保持 pending 并重试；
+- 不为 2026-07-18 以前已产生的错误 resolution 增加兼容迁移；旧 Run 保持审计，新部署后通过新 typed activation 验证。
+
+#### RVC-R17.3 Command sequence
+
+```text
+TUI/Web/CLI
+  -> Decision EnsureResolved request
+  -> Decision owner load ticket + validate scope/state/allowed action/payload
+  -> persist pending proposal (ticket still open)
+  -> Send CommitRuntimeGovernanceTicketResolutionCommand
+       -> Orchestrator load aggregate
+       -> validate ticket binding + outcome + snapshot/dispatch/dependency
+       -> CAS commit governance resolution/evidence/reducer decision
+       -> return committed | duplicate | stale_diagnostic
+  -> committed/duplicate:
+       Decision owner create/ensure formal Resolution
+       Decision owner mark ticket resolved
+       mark proposal committed
+       publish resolved notification
+  -> failure:
+       do not mark ticket resolved
+       persist retryable/rejected proposal state
+```
+
+Orchestrator committed 后可以按自身 aggregate 继续 drive/terminal delivery；Decision
+owner finalize 失败只造成 read-model lag，不得回滚 aggregate。Decision block 在 Start
+或 BackgroundRoutine 中扫描 pending proposals，重新发送同一 typed commit；duplicate
+返回后完成本 owner resolution/ticket finalize。禁止 application watcher代替该 saga
+发送普通 Resume。
+
+#### RVC-R17.4 Allowed outcome mapping
+
+对 `runtime_v2_governance` 固化：
+
+| Resolution type | Runtime outcome | Meaning |
+| --- | --- | --- |
+| `provide_missing_info` | `continue` | 写 accepted governance evidence，回到同 reducer/operation continuation |
+| `reject_current_path` | `fail` | 写 governance rejected evidence，产生 typed terminal |
+| `replan` | invalid for current ticket | 产品层新 typed activation/restart，不是当前 Run resolution |
+
+generic Decision 可以保留自己的 replan 产品语义，但不得映射为当前 Runtime V2 aggregate
+的 continue/fail。Runtime V2 需要重新定义目标时，先按正式治理结论终止/保留当前
+Run，再由显式 activation 创建 successor；不得自动 successor。
+
+Exit gate:
+
+- invalid/unallowed resolution 在任何 Resolution/ticket resolved 写入前被拒绝；
+- proposal persisted 后任意 crash/restart 均可收敛到 committed/duplicate 或 rejected；
+- Orchestrator commit failure 不产生 resolved ticket；
+- Decision finalize failure 不丢失已提交 aggregate，重启后由 proposal 幂等完成；
+- 同一 resolution 最多一份 governance evidence、一次 reducer effect、一个正式 Resolution。
+
+### RVC-R18 — SM-1 blocked Resume authority gate
+
+Scope: SM-1/SM-4、Orchestrator lifecycle、HTTP scheduler、activationports
+
+`ResumeRunCommand` 必须区分“调度 active Run”与“消费 blocked governance resolution”：
+
+```text
+active Run
+  -> repair active-run projection if needed
+  -> schedule same DriveRuntimeV2
+
+blocked Runtime V2 Run
+  -> load aggregate binding
+  -> matching committed governance resolution exists?
+       no  -> ErrBlocked / no state mutation
+       yes -> projection-only blocked -> active repair
+              schedule same DriveRuntimeV2
+
+terminal Run
+  -> conflict; new activation only
+```
+
+实现要求：
+
+- `CanResumeRun` 不得以 `ticket.State != open` 或 `approval.State != pending` 作为 Runtime V2 sufficient proof；
+- Runtime V2 proof 必须来自 aggregate 中匹配 current blocker 的 resolution record，至少匹配 ticket、dispatch、authority snapshot、dependency、subject 与 outcome；
+- 将当前无条件 `ActivateRuntimeV2Run` 拆为内部 projection helper，或要求传入并验证 typed continuation proof；不得保留可由普通 command 直接清 blocker 的 public facade；
+- `continueRuntimeV2Governance` 使用 commit result/aggregate proof；ordinary Resume 只能调度 active Run，或修复“aggregate 已 committed、owner projection 尚 blocked”的单边投影；
+- execution activation `intent=resume` 遇到 unresolved blocked Runtime V2 时返回当前 governed wait/409，不得产生 `blocked → active → blocked` 抖动；
+- startup `blocked_governance` inventory 只验证 binding/proposal/ticket，不自动 Resume；只有 aggregate committed resolution 才进入 continuation/recovery class。
+
+Exit gate:
+
+- ticket resolved 但 aggregate 无 resolution：Resume 返回 blocked/conflict，Run/Workspace 不变；
+- aggregate committed 但 Run 仍 blocked：Resume/startup recovery 可幂等修复 projection；
+- duplicate Resume 不重复 drive/evidence；
+- terminal、stale ticket、mismatched workspace/run/snapshot 均拒绝。
+
+### RVC-R19 — Allowed recovery action end-to-end contract
+
+Scope: Decision owner、application governanceports、HTTP、CLI/TUI、Web、client/port
+
+`AllowedRecoveryActions` 是 ticket owner 的正式输入合同，不是展示提示。动作校验必须
+在服务端执行，端侧过滤只是 UX。
+
+规则：
+
+- Decision owner 在 proposal/resolution 写入前执行最终校验；
+- application `ValidateDecisionResolutionPayloadForTicket` 同时校验 normalized resolution type 与 allowed actions，尽早返回 400/invalid argument；
+- 若 ticket 没有 allowed actions，generic ticket 使用明确的 owner default policy；`runtime_v2_governance` 不允许缺省为任意 supported resolution；
+- TUI `/decision` 帮助、补全和命令执行按当前 ticket actions 动态生成；不允许的 `/decision replan` 在本地提示并由服务端再次拒绝；
+- Web 每行按钮按 allowed actions 渲染；batch action 必须属于所有选中 ticket 的交集，否则整批拒绝，禁止部分提交；
+- CLI 显式 `--type` 同样由服务端校验；agent 默认 `provide_missing_info` 仅在 ticket 允许时使用；
+- read model/client/port 必须完整携带 allowed actions，不从 question/reason 自然语言推断；
+- `replan` 对 Runtime V2 blocker 显示为独立“创建新 activation/restart”操作时，必须走 activation API，不调用 resolve endpoint。
+
+Exit gate:
+
+- TUI/Web/CLI/REST/batch 对同一 ticket 得到一致动作集合；
+- unallowed action 无 proposal、Resolution、ticket update、aggregate update；
+- batch mixed-actions 全拒绝且零部分写入；
+- action projection missing/stale 时端侧不猜测，服务端仍保护 authority。
+
+### RVC-R20 — Descriptor-driven candidate parameter closure
+
+Scope: SM-3、`workorchruntimecontract`、blocks/llm candidate renderer/provider
+
+当前 final validator 对 `patch/apply` 缺 target 的拒绝是正确行为，不得在 Orchestrator
+里按 operation ID、文件名或 failure text 自动补参数。收口目标是在 provider 输出边界
+提前暴露 descriptor 的机械参数合同，并让 attempt 1 能针对 exact contract failure 修正。
+
+实现要求：
+
+- 从 `RuntimeOperationDescriptor` / operation parameter contract 生成 action-specific provider schema/context；不得维护第二份手写 operation 规则表；
+- `patch/apply|patch/preview` 至少要求 `patchType`，并要求 `targetRef` 或 `path` 之一；resolved target 必须存在于 operation `TargetRefs`；
+- `file/edit` 要求 path/oldText/newText；`file/write` 保持独立 durable descriptor；shell state-changing target、MCP capability effect 等继续由现有 typed contract校验；
+- JSON/schema 无法表达的 cross-field membership 仍由 final validator裁决，不得降低 seal gate；
+- attempt 1 使用同一 authority transaction/stable prefix，在 volatile context 中携带 exact candidate contract failure：operation ID、kind、missing/conflicting parameter、descriptor rules 和 rejected shape hash；
+- attempt 1 不复用 malformed raw response，不把失败正文复制为新 candidate；
+- 两次均 invalid 时继续 `candidate_retry_exhausted` typed terminal，这属于正确 bounded failure；不得转普通 execution repair或第三次 candidate。
+
+Exit gate:
+
+- attempt 0 缺 target、attempt 1 补齐 target 后可 seal/execute；
+- attempt 0/1 均缺 target 时只产生两个 persisted attempt 并 terminal；
+- stable prefix attempt 0/1 不漂移；
+- descriptor/schema/final validator 对所有 operation kinds 一致，无 domain-specific inference。
+
+### RVC-R21 — Cross-owner typed LLM audit contract
+
+Scope: blocks/llm、eventstream、read model
+
+将 `LLMUsageRecordedData.ContextBudget` 与 `CacheUsage` 的 `map[string]any` 替换为
+concrete typed DTO，例如：
+
+```go
+type LLMContextBudgetAudit struct {
+    ContextWindowTokens      int
+    EffectiveMaxOutputTokens int
+    ActualTokens             int
+    ActualBytes              int
+    MaxTokens                int
+    MaxBytes                 int
+    CacheStrategy            string
+    StablePrefixHash         string
+    ProviderSubmitted        bool
+    OverBudget               bool
+    Truncated                bool
+}
+
+type LLMCacheUsageAudit struct {
+    CacheReadTokens         int
+    CacheWriteTokens        int
+    CacheCreationTokens     int
+    CacheableInputTokens    int
+    NonCacheableInputTokens int
+    Estimated               bool
+    Source                  string
+}
+```
+
+类型应复用 `workorchruntimecontract` 已有 provider audit value，或在 LLM owner
+`pkg/events` 定义 owner-owned DTO；不得通过 JSON/map bridge 传输。eventstream wire
+payload 可以在持久化边界编码，但组件内 EventHub data 必须保持 concrete typed。
+
+Exit gate:
+
+- EventHub contract 扫描不再命中 LLM usage `map[string]any`；
+- native/estimated/no-cache usage round-trip；
+- read model、SSE/HTTP 输出字段保持兼容的产品 JSON 形状，但不把 wire shape反向作为组件合同。
+
+### RVC-R22 — Bounded deployed gate and real-workspace liveness observation
+
+Scope: verification scripts、deployed fixtures、RVC-R16 final rerun
+
+将 deployed 验收拆为两层：
+
+1. **bounded terminal gate**：专用双 workspace fixture，每 workspace ≤2 focuses、每 focus
+   ≤4 coverage items，180 秒内必须 accepted Result、Run completed、activeRun release；
+2. **real-workspace liveness observation**：LSP-Bridge/ai-proxy 等大型任务验证 revision、
+   accepted/rejected evidence、focus、governance/terminal 是否按合同正向变化，不要求在固定
+   180 秒内完成数百 coverage items。
+
+脚本要求：
+
+- terminal gate 不复用历史污染 Run；每次创建新 workspace/Goal/DoD/Run 或确定性 clean fixture；
+- real-workspace observation 不对 terminal Run Resume，不对 unresolved governance 自动提交动作；
+- timeout 输出必须保存完整 final snapshot、ticket/approval、aggregate operation/receipt、usage audit 与 readyz；
+- 合法 governed wait 计为 liveness 合规但不计为 accepted terminal pass；
+- typed rejected terminal 计为状态机收敛，但不计为 positive-convergence accepted pass；
+- large workspace 需声明 focus/coverage 规模和预计 observation policy，禁止用统一 180 秒 terminal SLA；
+- artifacts 只写 `/tmp`。
+
+Exit gate:
+
+- bounded dual workspace terminal gate 连续通过；
+- LSP/ai-proxy observation 无非法迁移、无 authority split、无 projection lag、无重复副作用；
+- 最终重新执行 RVC-R16，两个指定 positive fixtures 均 accepted，真实 canary 另行记录 liveness 结论。
 
 ### 17.1 Mandatory closure order
 
 后续代码必须按以下依赖顺序逐项收口，前一项 exit gate 未通过时不得把后一项标记
 completed：
 
-1. RVC-R11：exact fence receipt lookup → typed grant → resume dispatch → owner grant verification；
-2. RVC-R13：独立 recovery policy/ledger 与 failure routing；
-3. RVC-R14：Run owner typed recovery inventory、terminal delivery inventory 与 read model；
-4. RVC-R10/R15：完整 crash matrix 与真实两 focus file-backed E2E；
-5. RVC-R16：deployed dual-workspace Live。
+1. RVC-R17：Decision durable proposal → Orchestrator commit → owner finalize/reconcile；
+2. RVC-R18：blocked Resume aggregate proof gate 与 projection-only continuation；
+3. RVC-R19：server-first allowed action validation，再收口 TUI/Web/CLI/batch；
+4. RVC-R20：descriptor-driven candidate schema 与 exact attempt-1 contract failure；
+5. RVC-R21：LLM audit typed EventHub DTO；
+6. RVC-R22：bounded deployed fixture 与 real-workspace liveness 分层；
+7. RVC-R16 final rerun：先 bounded dual terminal gate，再真实 canary observation。
+
+RVC-R11～R15 保持 code-landed foundation；RVC-R17～R22 不得回退 exact fence、typed
+grant、independent budget、startup inventory、terminal delivery lane 或 schema v2-only。
 
 每批完成后依次运行 focused package tests、boundary verifier、全量测试及对应 file/live
 gate，并同步第 21 节列出的 SoT。单纯 `go test ./...` 通过不等于该批完成。
@@ -940,6 +1242,9 @@ gate，并同步第 21 节列出的 SoT。单纯 `go test ./...` 通过不等于
 - completed/failed 只能由 reducer terminal 投影。
 - active V2 cancel/supersede 必须先有 termination record。
 - stale terminal release 不抢占新 active run。
+- blocked Runtime V2 ticket resolved 但 aggregate 无 matching resolution 时，Resume 不改变 Run/Workspace。
+- aggregate resolution committed 但 Run 仍 blocked 时，projection repair 幂等恢复 active/terminal。
+- execution activation `intent=resume` 不产生 `blocked→active→blocked` 抖动。
 
 ### 18.2 SM-2
 
@@ -959,6 +1264,10 @@ gate，并同步第 21 节列出的 SoT。单纯 `go test ./...` 通过不等于
 - governance `Receipt(K,N)` → grant → resume `Receipt(K,N+1)`。
 - stale/mismatched grant、duplicate resolution、再次 governance-required。
 - dependency graph 在 recovery 后不重复已完成节点。
+- Decision proposal pending → Orchestrator committed → Decision finalized saga。
+- crash after proposal、after aggregate commit、before ticket update、after Resolution create 的逐点恢复。
+- invalid/unallowed resolution 零正式写入；same proposal duplicate 幂等、different payload conflict。
+- `patch/apply` attempt 0 缺 target、attempt 1 修正；两次缺失 bounded terminal。
 
 ### 18.4 SM-4
 
@@ -969,6 +1278,7 @@ gate，并同步第 21 节列出的 SoT。单纯 `go test ./...` 通过不等于
 - CAS conflict reload，不生成伪 terminal。
 - provider/operation/CAS/delivery budget 各自独立消耗与耗尽。
 - projection high-watermark/readiness 不反向驱动 reducer。
+- pending governance proposal startup reconciliation 不依赖 application Resume watcher。
 
 ### 18.5 Cross-component regressions
 
@@ -979,6 +1289,10 @@ gate，并同步第 21 节列出的 SoT。单纯 `go test ./...` 通过不等于
 - `lsp_initialize` 仅在 capability owner 显式声明 `ephemeral_session` 时具有 session effect；名称本身不产生推断。
 - web/file approval-required governance。
 - exact `run-021` / `run-022` failure lineage fixtures。
+- TUI/Web/CLI/HTTP/batch 只允许 ticket `AllowedRecoveryActions`；mixed batch 零部分写入。
+- Runtime V2 `replan` 只能进入显式 activation/restart，不能 resolve current governance ticket。
+- LLM usage ContextBudget/CacheUsage typed EventHub round-trip，无 `map[string]any`。
+- bounded deployed fixture terminal SLA 与 real-workspace liveness policy 分离。
 
 ## 19. Verification Commands
 
@@ -990,7 +1304,11 @@ go test ./internal/modules/kernel/orchestrator/biz/runtimev2 -count=1
 go test ./internal/modules/kernel/orchestrator/... -count=1
 go test ./internal/modules/kernel/run/... -count=1
 go test ./internal/modules/blocks/{file,git,shell,mcp,ssh,web,llm}/... -count=1
+go test ./internal/modules/blocks/decision/... -count=1
+go test ./internal/modules/kernel/governance/... -count=1
 go test ./internal/modules/application/workorchd/... -count=1
+go test ./internal/services/workorch/service/tui/... -count=1
+go test ./internal/services/workorch/biz/backends/... -count=1
 make fmt-check
 make vet
 make verify-boundary-contract
@@ -1008,6 +1326,16 @@ make verify-runtime-v2-positive-convergence-live
 
 `verify-runtime-v2-positive-convergence-file/live` 必须升级为本方案定义的真实行为验证，不得继续只聚合已有测试名称。
 
+新增结构扫描必须检查：
+
+```bash
+rg -n 'ContextBudget map\[string\]any|CacheUsage map\[string\]any' internal/modules/blocks/llm/pkg/events
+rg -n 'case "replan"|batchResolve\(.replan' internal/services/workorch/service/tui web/workorch-console/src
+rg -n 'ActivateRuntimeV2Run|CanResumeRun' internal/modules/kernel/orchestrator
+```
+
+扫描命中不直接代表失败，但每处必须由新 typed gate/test 证明不会绕过 authority。
+
 ## 20. Deployed Live Acceptance
 
 ### 20.1 Service/provider preflight
@@ -1019,9 +1347,9 @@ make verify-runtime-v2-positive-convergence-live
 - workspace target 为预期 `providerId/modelId`；
 - credential/base URL 未进入 workspace/run persisted authority。
 
-### 20.2 Per-workspace proof
+### 20.2 Bounded terminal fixture proof
 
-每个 canary 必须证明：
+每个 bounded positive fixture 必须证明：
 
 1. 至少跨越两个 focus；
 2. 至少一个 durable owner receipt；
@@ -1034,7 +1362,25 @@ make verify-runtime-v2-positive-convergence-live
 9. Run terminal、workspace activeRun 释放；
 10. projection revision 追平。
 
-### 20.3 Negative assertions
+fixture 额外限制：
+
+- ≤2 focuses；
+- 每 focus ≤4 coverage items；
+- 使用全新 Run，不 Resume 历史 terminal/invalid governance Run；
+- 180 秒 terminal SLA 只适用于该 bounded fixture。
+
+### 20.3 Real-workspace liveness proof
+
+真实 LSP-Bridge/ai-proxy canary 至少证明：
+
+1. source/projected revision 追平；
+2. 一段 observation window 内 state revision、evidence、focus 或合法 governed/terminal 状态至少一项可解释变化；
+3. blocked governance 的 ticket action 与 aggregate binding 一致；
+4. resolved ticket 必须有 matching aggregate resolution，或明确处于 pending proposal reconciliation；
+5. candidate contract failure、execution failure、provider transient 各自进入正确预算/终态；
+6. 不把大型 DoD 未在 180 秒完成误判为状态机死锁。
+
+### 20.4 Negative assertions
 
 - 无 `stateChanging=false` operation 被记为 state-change；
 - 无 session/read-only MCP 被记为 durable state-change；
@@ -1043,6 +1389,10 @@ make verify-runtime-v2-positive-convergence-live
 - 无 CAS/owner transient 被误记为 runtime contract defect；
 - 无 terminal Run Resume；
 - 无 stable prefix unexpected drift。
+- 无 ticket resolved / aggregate unresolved split；
+- 无 blocked Runtime V2 被普通 Resume 清 blocker；
+- 无端侧提交不在 allowed actions 中的 resolution；
+- 无 typed rejected terminal 被误报为 positive accepted pass。
 
 ## 21. Documentation Closure
 
@@ -1063,6 +1413,12 @@ make verify-runtime-v2-positive-convergence-live
 - 在 reducer 中识别 LSP、Go、测试命令、文件名或 workspace ID。
 - 仅增加 anti-replay 文案，未消除 action authority 冲突。
 - 仅在 projection/watchdog 自动 Resume。
+- 只在 TUI/Web 隐藏 `replan`，但服务端仍接受 unallowed action。
+- 只给 `CanResumeRun` 增加 ticket/resolution 文件判断，不核对 aggregate binding/resolution。
+- Decision owner 继续先写 resolved，再依赖失败补偿删除 resolution/ticket。
+- 用进程内 retry 代替 durable governance proposal。
+- Orchestrator 根据 operation ID/文件名自动补 `targetRef/path`。
+- 用真实 396-item workspace 的 180 秒超时作为唯一 terminal gate。
 - crash recovery 直接重放 sealed operation。
 - 继续让 owner 回显 Orchestrator 指定 EvidenceKind。
 - 将所有 owner/provider/CAS 错误统一终态化。
@@ -1073,13 +1429,16 @@ make verify-runtime-v2-positive-convergence-live
 
 RVC-1 只有同时满足以下条件才能关闭：
 
-1. RVC-R5～R16 全部完成；
+1. RVC-R5～R15 foundation 保持通过，RVC-R17～R22 全部完成，并最终重新通过 RVC-R16；
 2. core contract、module readme、contract types 与代码一致；
 3. effect、receipt、repair directive、governance、termination 和 recovery 均为 persisted typed authority；
 4. 四状态机合法/禁止迁移、幂等、restart、stale/duplicate、budget/guard 测试齐备；
 5. boundary verifier、full tests、file-backed E2E 通过；
-6. 两个真实 workspace 均跨 focus 并产生 accepted Result；
+6. 两个 bounded positive fixtures 均跨 focus并产生 accepted Result；LSP-Bridge/ai-proxy 真实 canary 均满足独立 liveness 断言且无非法迁移；
 7. 无 credential/runtime client state 序列化回归；
-8. active roadmap、current-state 和 unclosed matrix 不再保留虚假 code-closed 状态。
+8. active roadmap、current-state 和 unclosed matrix 不再保留虚假 code-closed 状态；
+9. Runtime V2 governance 不存在 resolved-ticket/uncommitted-aggregate 或 aggregate-committed/unrecoverable-owner-projection 状态；
+10. 普通 Resume、TUI/Web/CLI/HTTP/batch 均不能绕过 aggregate authority 与 allowed action contract；
+11. bounded deployed terminal gate 与真实长任务 liveness observation 均有独立证据。
 
 在上述条件满足前，本项状态保持：**active — code reopened**。

@@ -147,18 +147,19 @@ func PortRunInfos(items []appmodelcore.Run) []port.RunInfo {
 
 func PortDecisionInfo(item appmodelcore.Decision) port.DecisionInfo {
 	return port.DecisionInfo{
-		ID:                 common.TicketID(item.ID),
-		WorkspaceID:        common.WorkspaceID(item.WorkspaceID),
-		RunID:              common.RunID(item.RunID),
-		Reason:             item.Reason,
-		Question:           item.Question,
-		Context:            item.Context.Clone(),
-		State:              item.State,
-		ResolutionType:     item.ResolutionType,
-		ContinuationAction: item.ContinuationAction,
-		ResumeRunID:        common.RunID(item.ResumeRunID),
-		SuccessorRunID:     common.RunID(item.SuccessorRunID),
-		AutoGovernance:     portAutoGovernanceSummaryInfo(item.AutoGovernance),
+		ID:                     common.TicketID(item.ID),
+		WorkspaceID:            common.WorkspaceID(item.WorkspaceID),
+		RunID:                  common.RunID(item.RunID),
+		Reason:                 item.Reason,
+		Question:               item.Question,
+		Context:                item.Context.Clone(),
+		AllowedRecoveryActions: append([]string(nil), item.AllowedRecoveryActions...),
+		State:                  item.State,
+		ResolutionType:         item.ResolutionType,
+		ContinuationAction:     item.ContinuationAction,
+		ResumeRunID:            common.RunID(item.ResumeRunID),
+		SuccessorRunID:         common.RunID(item.SuccessorRunID),
+		AutoGovernance:         portAutoGovernanceSummaryInfo(item.AutoGovernance),
 	}
 }
 

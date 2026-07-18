@@ -6,6 +6,7 @@ import (
 	workspaceModel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func (o *RuntimeOrchestrator) AcceptRunStart(ctx context.Context, runID common.RunID) error {
@@ -107,6 +108,16 @@ func (o *RuntimeOrchestrator) CanResumeRun(ctx context.Context, runID common.Run
 	case common.RunStateActive:
 		return nil
 	case common.RunStateBlockedOnDecision:
+		if r.RuntimeContractVersion == runtimecontract.RuntimeContractVersionV2 {
+			committed, err := o.hasCommittedRuntimeV2DecisionResolution(ctx, r)
+			if err != nil {
+				return err
+			}
+			if !committed {
+				return common.ErrBlocked
+			}
+			return nil
+		}
 		if r.BlockingTicketID == "" || o.tickets == nil {
 			return common.ErrConflict
 		}

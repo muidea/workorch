@@ -8,7 +8,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-ARTIFACT_DIR="${WORKORCH_E2E_ARTIFACT_DIR:-/tmp/workorch-e2e/runtime-v2-positive-convergence/$(date -u +%Y%m%dT%H%M%SZ)}"
+ARTIFACT_DIR="$(realpath -m "${WORKORCH_E2E_ARTIFACT_DIR:-${TMPDIR:-/tmp}/workorch-e2e/runtime-v2-positive-convergence/$(date -u +%Y%m%dT%H%M%SZ)}")"
+REPOSITORY_E2E_ARTIFACT_DIR="$(realpath -m "$ROOT_DIR/.workorch-e2e")"
+if [[ "$ARTIFACT_DIR" == "$REPOSITORY_E2E_ARTIFACT_DIR" || "$ARTIFACT_DIR" == "$REPOSITORY_E2E_ARTIFACT_DIR/"* ]]; then
+  echo "WORKORCH_E2E_ARTIFACT_DIR must not point to the repository .workorch-e2e directory" >&2
+  exit 2
+fi
 mkdir -p "$ARTIFACT_DIR"
 LOG="$ARTIFACT_DIR/verify.log"
 
@@ -46,9 +51,26 @@ run_pkg ./internal/modules/blocks/file/... \
 run_pkg ./internal/modules/kernel/orchestrator \
   -run 'TestDriveRuntimeV2FileBackedRunExecutesDurableFileOwnerAndRestarts|TestDriveRuntimeV2FileBackedRestartRecoversCrashAfterOwnerReceipt|TestRuntimeV2FileBackedClaimEvidenceAndDispatchCloseCrashMatrix|TestDriveRuntimeV2FileBackedTwoFocusStateValidationAssessmentAndRestart|TestDriveRuntimeV2CompletesTypedPathAndIsRestartIdempotent|TestDriveRuntimeV2CandidateFailureStopsAfterSameContractRetry|TestRuntimeV2EnsureCandidateFeasibleBlocksProviderWithoutKinds|TestRuntimeV2GovernanceDependencyPreservesSuspendedOperationBinding|TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand'
 
+# RVC-R17/R18: Decision durable proposal saga and aggregate-only blocked Resume gate.
+run_pkg ./internal/modules/blocks/decision/... \
+  -run 'TestService_RuntimeGovernanceProposalStaysOpenUntilFinalize|TestService_RuntimeGovernanceRejectsUnallowedActionBeforeProposal|TestRuntimeGovernanceResolutionDoesNotResolveTicketBeforeAggregateCommit'
+
+run_pkg ./internal/modules/kernel/orchestrator/biz \
+  -run 'TestRuntimeV2BlockedDecisionRequiresCommittedAggregateResolution'
+
+# RVC-R20/R21: descriptor-driven provider schema and concrete LLM audit DTO wire payload.
+run_pkg ./internal/modules/blocks/llm/... \
+  -run 'TestRuntimeV2CandidateSchemaDerivesPatchTargetRequirementsFromOperationContract'
+
+run_pkg ./internal/pkg/events \
+  -run 'TestLLMUsagePayloadUsesTypedAuditDTOs'
+
 # Continuation / unresolved rehydrate.
 run_pkg ./internal/modules/application/workorchd/biz/appservice/activationcore \
   -run 'TestCompileRuntimeV2CoverageRehydratesUnresolvedContinuation|TestCompileRuntimeV2CoverageGapAnalysisWhenContinuationLacksStructuredGaps|TestCompileRuntimeV2CoverageSlicesBoundLargeDoD'
+
+run_pkg ./internal/modules/application/workorchd/biz/appservice/governanceports \
+  -run 'TestBatchResolveDecisionViewsRejectsMixedAllowedActionsBeforeWrites'
 
 # Projection generation recovery / ready.
 run_pkg ./internal/modules/application/workorchd/biz/appservice/workspaceviewcore \

@@ -4,7 +4,7 @@ Status: active
 
 Type: index
 
-Last Updated: 2026-07-17
+Last Updated: 2026-07-18
 
 ## Purpose
 
@@ -24,7 +24,7 @@ Runtime V2-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **�
 
 | # | 主题 | 状态 | 当前方案 / 历史记录 |
 | --- | --- | --- | --- |
-| A1 | Runtime V2 positive convergence | **active — code closure verified**；RVC-R5～R15 已落地，剩余 RVC-R16 deployed dual-workspace Live | 当前：`70-roadmap/active/runtime-v2-positive-convergence-remediation.md`；历史：`90-archive/completed/runtime-v2-positive-convergence-closure-plan.md` |
+| A1 | Runtime V2 positive convergence | **active — code reopened by deployed Live**；RVC-R5～R15 foundation 保持，依次收口 RVC-R17～R22 后最终重跑 RVC-R16 | 当前：`70-roadmap/active/runtime-v2-positive-convergence-remediation.md`；历史：`90-archive/completed/runtime-v2-positive-convergence-closure-plan.md` |
 
 ## B. 运维切换
 

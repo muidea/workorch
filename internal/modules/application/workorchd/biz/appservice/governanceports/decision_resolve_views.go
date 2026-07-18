@@ -176,6 +176,9 @@ func prepareDecisionResolution(ticket *decisionmodel.Ticket, resolutionType stri
 	// no longer short-circuits on state=resolved, so the per-ticket kernel call
 	// is the single source of truth for conflict detection.
 	normalizedPayload, normalizedType := governancecore.NormalizeDecisionResolutionPayloadForTicket(ticket, payload, resolutionType)
+	if err := governancecore.ValidateDecisionResolutionTypeForTicket(ticket, normalizedType); err != nil {
+		return workorcheventpayload.Payload{}, "", err
+	}
 	if err := governancecore.ValidateDecisionResolutionPayloadForTicket(ticket, normalizedPayload); err != nil {
 		return workorcheventpayload.Payload{}, "", err
 	}

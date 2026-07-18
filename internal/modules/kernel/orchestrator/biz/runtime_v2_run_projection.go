@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -28,6 +29,15 @@ func (o *RuntimeOrchestrator) ActivateRuntimeV2Run(ctx context.Context, workspac
 	if run.State != common.RunStateBlockedOnDecision && run.State != common.RunStateBlockedOnApproval {
 		return common.ErrConflict
 	}
+	if run.State == common.RunStateBlockedOnDecision && run.RuntimeContractVersion == runtimecontract.RuntimeContractVersionV2 {
+		committed, err := o.hasCommittedRuntimeV2DecisionResolution(ctx, run)
+		if err != nil {
+			return err
+		}
+		if !committed {
+			return common.ErrBlocked
+		}
+	}
 	run.State = common.RunStateActive
 	run.BlockingTicketID = ""
 	run.BlockingApprovalID = ""
@@ -37,6 +47,32 @@ func (o *RuntimeOrchestrator) ActivateRuntimeV2Run(ctx context.Context, workspac
 		return err
 	}
 	return nil
+}
+
+func (o *RuntimeOrchestrator) hasCommittedRuntimeV2DecisionResolution(ctx context.Context, run *runModel.Run) (bool, error) {
+	if o == nil || run == nil || run.WorkspaceID == "" || run.ID == "" || run.BlockingTicketID == "" {
+		return false, common.ErrInvalidArgument
+	}
+	aggregate, err := o.LoadRuntimeV2(common.ContextWithRuntimeWorkspaceID(ctx, run.WorkspaceID), run.WorkspaceID, run.ID)
+	if err != nil {
+		return false, err
+	}
+	for _, resolution := range aggregate.GovernanceResolutions {
+		if resolution.TicketID != run.BlockingTicketID {
+			continue
+		}
+		if resolution.Outcome != runtimecontract.RuntimeGovernanceResolutionOutcomeContinue && resolution.Outcome != runtimecontract.RuntimeGovernanceResolutionOutcomeFail {
+			continue
+		}
+		for _, request := range aggregate.GovernanceRequests {
+			if request.TicketID == resolution.TicketID &&
+				request.AuthoritySnapshotID == resolution.AuthoritySnapshotID &&
+				request.DispatchID == resolution.DispatchID {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // ProjectRuntimeV2Terminal 将 typed reducer terminal 投影到 Run/Workspace owner。

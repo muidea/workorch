@@ -17,6 +17,7 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -217,7 +218,7 @@ func (m *Module) publishLLMUsageRecorded(ctx context.Context, audit *llmmodels.P
 		DurationMs:            audit.DurationMs,
 		RequestBytes:          audit.RequestBytes,
 		ResponseBytes:         audit.ResponseBytes,
-		ContextBudget:         providerContextBudgetMap(audit.ContextBudget),
+		ContextBudget:         providerContextBudgetAudit(audit.ContextBudget),
 		OccurredAt:            occurredAt,
 	}
 	if usage != nil {
@@ -226,7 +227,7 @@ func (m *Module) publishLLMUsageRecorded(ctx context.Context, audit *llmmodels.P
 		data.TotalTokens = usage.TotalTokens
 		data.Estimated = false
 		data.UsageSource = modulecommon.UsageSourceProviderNative
-		data.CacheUsage = providerCacheUsageMap(usage)
+		data.CacheUsage = providerCacheUsageAudit(usage)
 	} else if audit.ContextBudget != nil && audit.ContextBudget.ActualTokens > 0 {
 		data.TotalTokens = audit.ContextBudget.ActualTokens
 		data.Estimated = true
@@ -271,7 +272,7 @@ func providerRequestAuditView(audit *llmmodels.ProviderRequestAudit) *runtimecon
 		Kind:                  audit.Kind,
 		APISurface:            audit.APISurface,
 		Provider:              audit.Provider,
-		ContextBudget:         providerContextBudgetMap(audit.ContextBudget),
+		ContextBudget:         providerContextBudgetAudit(audit.ContextBudget),
 		ProviderSubmitted:     audit.ProviderSubmitted,
 		Status:                audit.Status,
 		FailureClass:          audit.FailureClass,
@@ -299,64 +300,39 @@ func providerUsageView(usage *llmmodels.ProviderUsage) *runtimecontract.Provider
 	}
 }
 
-func providerContextBudgetMap(budget *llmmodels.ProviderContextBudget) map[string]any {
+func providerContextBudgetAudit(budget *llmmodels.ProviderContextBudget) llmaudit.ContextBudget {
 	if budget == nil {
-		return nil
+		return llmaudit.ContextBudget{}
 	}
-	out := map[string]any{
-		"providerId":               budget.ProviderID,
-		"modelId":                  budget.ModelID,
-		"capabilityRevision":       budget.CapabilityRevision,
-		"configurationRevision":    budget.ConfigurationRevision,
-		"contextWindowTokens":      budget.ContextWindowTokens,
-		"providerMaxOutputTokens":  budget.ProviderMaxOutputTokens,
-		"effectiveMaxOutputTokens": budget.EffectiveMaxOutputTokens,
-		"maxBytes":                 budget.MaxBytes,
-		"actualBytes":              budget.ActualBytes,
-		"maxTokens":                budget.MaxTokens,
-		"estimatedInputTokens":     budget.EstimatedInputTokens,
-		"estimatedOutputTokens":    budget.EstimatedOutputTokens,
-		"actualTokens":             budget.ActualTokens,
-		"maxRequestBytes":          budget.MaxRequestBytes,
-		"profileMode":              budget.ProfileMode,
-		"capabilitySource":         budget.CapabilitySource,
-		"providerSubmitted":        budget.ProviderSubmitted,
-		"overBudget":               budget.OverBudget,
-		"truncated":                budget.Truncated,
+	ret := llmaudit.ContextBudget{
+		ProviderID: budget.ProviderID, ModelID: budget.ModelID,
+		CapabilityRevision: budget.CapabilityRevision, ConfigurationRevision: budget.ConfigurationRevision,
+		ContextWindowTokens: budget.ContextWindowTokens, ProviderMaxOutputTokens: budget.ProviderMaxOutputTokens,
+		EffectiveMaxOutputTokens: budget.EffectiveMaxOutputTokens, MaxBytes: budget.MaxBytes,
+		ActualBytes: budget.ActualBytes, MaxTokens: budget.MaxTokens, EstimatedInputTokens: budget.EstimatedInputTokens,
+		EstimatedOutputTokens: budget.EstimatedOutputTokens, ActualTokens: budget.ActualTokens,
+		MaxRequestBytes: budget.MaxRequestBytes, ProfileMode: budget.ProfileMode, CapabilitySource: budget.CapabilitySource,
+		ProviderSubmitted: budget.ProviderSubmitted, OverBudget: budget.OverBudget, Truncated: budget.Truncated,
+		ContextGateAction: budget.ContextGateAction, ContextGateReason: budget.ContextGateReason,
+		BudgetFailureClass: budget.BudgetFailureClass,
 	}
 	if budget.CachePlan != nil {
-		out["stablePrefixHash"] = budget.CachePlan.StablePrefixHash
-		out["renderedStablePrefixHash"] = budget.CachePlan.RenderedStablePrefixHash
-		out["cacheStrategy"] = budget.CachePlan.Strategy
+		ret.StablePrefixHash = budget.CachePlan.StablePrefixHash
+		ret.RenderedStablePrefixHash = budget.CachePlan.RenderedStablePrefixHash
+		ret.CacheStrategy = budget.CachePlan.Strategy
 	}
-	if budget.ContextGateAction != "" {
-		out["contextGateAction"] = budget.ContextGateAction
-	}
-	if budget.ContextGateReason != "" {
-		out["contextGateReason"] = budget.ContextGateReason
-	}
-	if budget.BudgetFailureClass != "" {
-		out["budgetFailureClass"] = budget.BudgetFailureClass
-	}
-	return out
+	return ret
 }
 
-func providerCacheUsageMap(usage *llmmodels.ProviderUsage) map[string]any {
-	if usage == nil {
-		return nil
+func providerCacheUsageAudit(usage *llmmodels.ProviderUsage) llmaudit.CacheUsage {
+	if usage == nil || (usage.CacheReadTokens == 0 && usage.CacheWriteTokens == 0 && usage.CacheCreationTokens == 0 &&
+		usage.CacheableInputTokens == 0 && usage.NonCacheableInputTokens == 0) {
+		return llmaudit.CacheUsage{}
 	}
-	if usage.CacheReadTokens == 0 && usage.CacheWriteTokens == 0 && usage.CacheCreationTokens == 0 &&
-		usage.CacheableInputTokens == 0 && usage.NonCacheableInputTokens == 0 {
-		return nil
-	}
-	return map[string]any{
-		"estimated":               false,
-		"source":                  modulecommon.UsageSourceProviderNative,
-		"cacheReadTokens":         usage.CacheReadTokens,
-		"cacheWriteTokens":        usage.CacheWriteTokens,
-		"cacheCreationTokens":     usage.CacheCreationTokens,
-		"cacheableInputTokens":    usage.CacheableInputTokens,
-		"nonCacheableInputTokens": usage.NonCacheableInputTokens,
+	return llmaudit.CacheUsage{
+		CacheReadTokens: usage.CacheReadTokens, CacheWriteTokens: usage.CacheWriteTokens,
+		CacheCreationTokens: usage.CacheCreationTokens, CacheableInputTokens: usage.CacheableInputTokens,
+		NonCacheableInputTokens: usage.NonCacheableInputTokens, Estimated: false, Source: modulecommon.UsageSourceProviderNative,
 	}
 }
 

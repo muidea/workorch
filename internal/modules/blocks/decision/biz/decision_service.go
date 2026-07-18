@@ -2,7 +2,11 @@ package decision
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -101,6 +105,12 @@ func (s *Service) ResolveTicket(ctx context.Context, cmd decisioncontracts.Resol
 	if !ticketMatchesResolveScope(ticket, cmd) {
 		return common.ErrNotFound
 	}
+	if ticket.DecisionKind == "runtime_v2_governance" {
+		return common.ErrConflict
+	}
+	if err := validateResolutionTypeForTicket(ticket, cmd.Type); err != nil {
+		return err
+	}
 	if ticket.State != common.DecisionTicketStateOpen {
 		return common.ErrConflict
 	}
@@ -167,6 +177,12 @@ func (s *Service) EnsureResolvedTicketAndReturn(ctx context.Context, cmd decisio
 	}
 	if !ticketMatchesResolveScope(ticket, cmd) {
 		return nil, nil, common.ErrNotFound
+	}
+	if ticket.DecisionKind == "runtime_v2_governance" {
+		return nil, nil, common.ErrConflict
+	}
+	if err := validateResolutionTypeForTicket(ticket, cmd.Type); err != nil {
+		return nil, nil, err
 	}
 
 	// Orphan resolution recovery: a resolution file may already exist for this
@@ -356,4 +372,226 @@ func stringSlicePayloadValue(payload workorcheventpayload.Payload, key string) [
 		}
 	}
 	return ret
+}
+
+func validateResolutionTypeForTicket(ticket *decisionModel.Ticket, resolutionType string) error {
+	if ticket == nil || !modulecommon.IsSupportedResolutionType(resolutionType) {
+		return common.ErrInvalidArgument
+	}
+	allowed := ticket.AllowedRecoveryActions
+	if ticket.DecisionKind == "runtime_v2_governance" && len(allowed) == 0 {
+		return fmt.Errorf("%w: runtime_v2_governance ticket has no allowed recovery actions", common.ErrInvalidArgument)
+	}
+	if len(allowed) == 0 {
+		return nil
+	}
+	if slices.Contains(allowed, resolutionType) {
+		return nil
+	}
+	return fmt.Errorf("%w: resolution type %q is not allowed for ticket %s", common.ErrInvalidArgument, resolutionType, ticket.ID)
+}
+
+// EnsureRuntimeGovernanceResolutionProposal persists a Runtime V2 proposal
+// while leaving the ticket open. The caller must submit the resulting typed
+// resolution to Orchestrator before it can finalize the Decision resolution.
+func (s *Service) EnsureRuntimeGovernanceResolutionProposal(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.RuntimeGovernanceResolutionProposal, error) {
+	if s == nil || cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
+		return nil, nil, common.ErrInvalidArgument
+	}
+	ctx = resolveCommandContext(ctx, cmd)
+	ticket, err := s.tickets.Get(ctx, cmd.TicketID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !ticketMatchesResolveScope(ticket, cmd) {
+		return nil, nil, common.ErrNotFound
+	}
+	if ticket.DecisionKind != "runtime_v2_governance" {
+		return nil, nil, common.ErrInvalidArgument
+	}
+	if err := validateResolutionTypeForTicket(ticket, cmd.Type); err != nil {
+		return nil, nil, err
+	}
+	if ticket.State != common.DecisionTicketStateOpen {
+		return nil, nil, common.ErrConflict
+	}
+	if existing, err := s.resolutions.GetByTicketID(ctx, cmd.TicketID); err == nil && existing != nil {
+		return nil, nil, common.ErrConflict
+	} else if err != nil && !errors.Is(err, common.ErrNotFound) {
+		return nil, nil, err
+	}
+	proposal, err := runtimeGovernanceProposalFromCommand(cmd)
+	if err != nil {
+		return nil, nil, err
+	}
+	if existing := ticket.RuntimeGovernanceProposal; existing != nil {
+		if !sameRuntimeGovernanceProposal(*existing, proposal) {
+			return nil, nil, common.ErrConflict
+		}
+		switch existing.State {
+		case decisionModel.RuntimeGovernanceResolutionProposalPending:
+			ret := existing.Clone()
+			return ticket, &ret, nil
+		case decisionModel.RuntimeGovernanceResolutionProposalCommitted,
+			decisionModel.RuntimeGovernanceResolutionProposalRejected:
+			return nil, nil, common.ErrConflict
+		default:
+			return nil, nil, common.ErrConflict
+		}
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	proposal.CreatedAt = now
+	proposal.UpdatedAt = now
+	ticket.RuntimeGovernanceProposal = &proposal
+	if err := s.tickets.Update(ctx, ticket); err != nil {
+		return nil, nil, err
+	}
+	ret := proposal.Clone()
+	return ticket, &ret, nil
+}
+
+// FinalizeRuntimeGovernanceResolutionProposal creates the public resolution
+// and marks its ticket resolved only after the matching Runtime V2 aggregate
+// has committed. It is safe to retry after any owner-local write failure.
+func (s *Service) FinalizeRuntimeGovernanceResolutionProposal(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.Resolution, error) {
+	if s == nil || cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
+		return nil, nil, common.ErrInvalidArgument
+	}
+	ctx = resolveCommandContext(ctx, cmd)
+	ticket, err := s.tickets.Get(ctx, cmd.TicketID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !ticketMatchesResolveScope(ticket, cmd) || ticket.DecisionKind != "runtime_v2_governance" {
+		return nil, nil, common.ErrNotFound
+	}
+	proposal, err := runtimeGovernanceProposalFromCommand(cmd)
+	if err != nil {
+		return nil, nil, err
+	}
+	if ticket.RuntimeGovernanceProposal == nil || !sameRuntimeGovernanceProposal(*ticket.RuntimeGovernanceProposal, proposal) {
+		return nil, nil, common.ErrConflict
+	}
+	if ticket.RuntimeGovernanceProposal.State == decisionModel.RuntimeGovernanceResolutionProposalRejected {
+		return nil, nil, common.ErrConflict
+	}
+	resolution, err := s.resolutions.GetByTicketID(ctx, cmd.TicketID)
+	if err != nil && !errors.Is(err, common.ErrNotFound) {
+		return nil, nil, err
+	}
+	if resolution != nil {
+		if resolution.ID != cmd.ResolutionID || resolution.Type != cmd.Type || !sameResolutionPayload(resolution.Payload, common.RedactSensitivePayload(cmd.Payload)) {
+			return nil, nil, common.ErrConflict
+		}
+	} else {
+		resolution = resolutionFromResolveCommand(cmd)
+		if err := s.resolutions.Create(ctx, resolution); err != nil {
+			return nil, nil, err
+		}
+	}
+	if ticket.State != common.DecisionTicketStateOpen && ticket.State != common.DecisionTicketStateResolved {
+		return nil, nil, common.ErrConflict
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	ticket.State = common.DecisionTicketStateResolved
+	ticket.ResolvedAt = nonEmptyString(ticket.ResolvedAt, now)
+	ticket.ResolvedBy = nonEmptyString(ticket.ResolvedBy, stringPayloadValue(cmd.Payload, "resolvedBy"), stringPayloadValue(cmd.Payload, "actor"))
+	ticket.RuntimeGovernanceProposal.State = decisionModel.RuntimeGovernanceResolutionProposalCommitted
+	ticket.RuntimeGovernanceProposal.FailureClass = ""
+	ticket.RuntimeGovernanceProposal.FailureReason = ""
+	ticket.RuntimeGovernanceProposal.UpdatedAt = now
+	if err := s.tickets.Update(ctx, ticket); err != nil {
+		return nil, nil, err
+	}
+	if err := s.recordDecisionResolutionEvidence(ctx, ticket, resolution); err != nil {
+		return nil, nil, err
+	}
+	if err := s.publishResolvedTicketEvent(ctx, ticket, resolution); err != nil {
+		return nil, nil, err
+	}
+	return ticket, resolution, nil
+}
+
+func (s *Service) RejectRuntimeGovernanceResolutionProposal(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand, failureClass string, failureReason string) error {
+	if s == nil || cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
+		return common.ErrInvalidArgument
+	}
+	ctx = resolveCommandContext(ctx, cmd)
+	ticket, err := s.tickets.Get(ctx, cmd.TicketID)
+	if err != nil {
+		return err
+	}
+	proposal, err := runtimeGovernanceProposalFromCommand(cmd)
+	if err != nil {
+		return err
+	}
+	if ticket.DecisionKind != "runtime_v2_governance" || ticket.State != common.DecisionTicketStateOpen || ticket.RuntimeGovernanceProposal == nil || !sameRuntimeGovernanceProposal(*ticket.RuntimeGovernanceProposal, proposal) {
+		return common.ErrConflict
+	}
+	ticket.RuntimeGovernanceProposal.State = decisionModel.RuntimeGovernanceResolutionProposalRejected
+	ticket.RuntimeGovernanceProposal.FailureClass = strings.TrimSpace(failureClass)
+	ticket.RuntimeGovernanceProposal.FailureReason = strings.TrimSpace(failureReason)
+	ticket.RuntimeGovernanceProposal.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	return s.tickets.Update(ctx, ticket)
+}
+
+func runtimeGovernanceProposalFromCommand(cmd decisioncontracts.ResolveTicketCommand) (decisionModel.RuntimeGovernanceResolutionProposal, error) {
+	payload := common.RedactSensitivePayload(cmd.Payload)
+	hash, err := runtimeGovernanceProposalPayloadHash(cmd, payload)
+	if err != nil {
+		return decisionModel.RuntimeGovernanceResolutionProposal{}, err
+	}
+	return decisionModel.RuntimeGovernanceResolutionProposal{
+		ResolutionID:       cmd.ResolutionID,
+		ResolutionType:     cmd.Type,
+		Payload:            payload,
+		ContinuationAction: nonEmptyString(cmd.ContinuationAction, stringPayloadValue(payload, "continuationAction")),
+		ResumeRunID:        nonEmptyRunID(cmd.ResumeRunID, common.RunID(stringPayloadValue(payload, "resumeRunId"))),
+		SuccessorRunID:     nonEmptyRunID(cmd.SuccessorRunID, common.RunID(stringPayloadValue(payload, "successorRunId"))),
+		PayloadHash:        hash,
+		State:              decisionModel.RuntimeGovernanceResolutionProposalPending,
+	}, nil
+}
+
+func runtimeGovernanceProposalPayloadHash(cmd decisioncontracts.ResolveTicketCommand, payload workorcheventpayload.Payload) (string, error) {
+	encoded, err := json.Marshal(struct {
+		ResolutionID       common.ResolutionID
+		ResolutionType     string
+		Payload            workorcheventpayload.Payload
+		ContinuationAction string
+		ResumeRunID        common.RunID
+		SuccessorRunID     common.RunID
+	}{
+		ResolutionID: cmd.ResolutionID, ResolutionType: cmd.Type, Payload: payload,
+		ContinuationAction: nonEmptyString(cmd.ContinuationAction, stringPayloadValue(payload, "continuationAction")),
+		ResumeRunID:        nonEmptyRunID(cmd.ResumeRunID, common.RunID(stringPayloadValue(payload, "resumeRunId"))),
+		SuccessorRunID:     nonEmptyRunID(cmd.SuccessorRunID, common.RunID(stringPayloadValue(payload, "successorRunId"))),
+	})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func sameRuntimeGovernanceProposal(left decisionModel.RuntimeGovernanceResolutionProposal, right decisionModel.RuntimeGovernanceResolutionProposal) bool {
+	return left.ResolutionID == right.ResolutionID &&
+		left.ResolutionType == right.ResolutionType &&
+		left.PayloadHash == right.PayloadHash &&
+		left.ContinuationAction == right.ContinuationAction &&
+		left.ResumeRunID == right.ResumeRunID &&
+		left.SuccessorRunID == right.SuccessorRunID &&
+		left.Payload.Equal(right.Payload)
+}
+
+func resolutionFromResolveCommand(cmd decisioncontracts.ResolveTicketCommand) *decisionModel.Resolution {
+	return &decisionModel.Resolution{
+		ID:                 cmd.ResolutionID,
+		TicketID:           cmd.TicketID,
+		Type:               cmd.Type,
+		Payload:            common.RedactSensitivePayload(cmd.Payload),
+		ContinuationAction: nonEmptyString(cmd.ContinuationAction, stringPayloadValue(cmd.Payload, "continuationAction")),
+		ResumeRunID:        nonEmptyRunID(cmd.ResumeRunID, common.RunID(stringPayloadValue(cmd.Payload, "resumeRunId"))),
+		SuccessorRunID:     nonEmptyRunID(cmd.SuccessorRunID, common.RunID(stringPayloadValue(cmd.Payload, "successorRunId"))),
+	}
 }

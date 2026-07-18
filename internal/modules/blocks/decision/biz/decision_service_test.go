@@ -165,6 +165,88 @@ func TestService_CreateTicket_SeedsOpenState(t *testing.T) {
 	}
 }
 
+func TestService_RuntimeGovernanceProposalStaysOpenUntilFinalize(t *testing.T) {
+	ctx := context.Background()
+	tickets := memory.NewDecisionTicketRepository()
+	resolutions := memory.NewDecisionResolutionRepository()
+	service := NewService(tickets, resolutions, nil)
+	if err := tickets.Create(ctx, &decisionModel.Ticket{
+		ID:                     "ticket-runtime-proposal",
+		WorkspaceID:            "ws-runtime-proposal",
+		RunID:                  "run-runtime-proposal",
+		StepID:                 "runtime-v2/dispatch-1",
+		Reason:                 "provider recovery needs confirmation",
+		DecisionKind:           "runtime_v2_governance",
+		State:                  common.DecisionTicketStateOpen,
+		AllowedRecoveryActions: []string{decisioncommon.ResolutionTypeProvideMissingInfo},
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	cmd := decisionservice.ResolveTicketCommand{
+		ResolutionID: "resolution-runtime-proposal",
+		TicketID:     "ticket-runtime-proposal",
+		WorkspaceID:  "ws-runtime-proposal",
+		RunID:        "run-runtime-proposal",
+		StepID:       "runtime-v2/dispatch-1",
+		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:      mustDecisionPayload(t, map[string]any{"summary": "provider is ready"}),
+	}
+	ticket, proposal, err := service.EnsureRuntimeGovernanceResolutionProposal(ctx, cmd)
+	if err != nil {
+		t.Fatalf("persist proposal: %v", err)
+	}
+	if ticket.State != common.DecisionTicketStateOpen || proposal == nil || proposal.State != decisionModel.RuntimeGovernanceResolutionProposalPending {
+		t.Fatalf("ticket/proposal after pending persist = %+v / %+v", ticket, proposal)
+	}
+	if _, err := resolutions.GetByTicketID(ctx, cmd.TicketID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("formal resolution err = %v, want not found before aggregate commit", err)
+	}
+	ticket, resolution, err := service.FinalizeRuntimeGovernanceResolutionProposal(ctx, cmd)
+	if err != nil {
+		t.Fatalf("finalize proposal: %v", err)
+	}
+	if ticket.State != common.DecisionTicketStateResolved || ticket.RuntimeGovernanceProposal == nil || ticket.RuntimeGovernanceProposal.State != decisionModel.RuntimeGovernanceResolutionProposalCommitted || resolution == nil {
+		t.Fatalf("ticket/resolution after finalize = %+v / %+v", ticket, resolution)
+	}
+}
+
+func TestService_RuntimeGovernanceRejectsUnallowedActionBeforeProposal(t *testing.T) {
+	ctx := context.Background()
+	tickets := memory.NewDecisionTicketRepository()
+	resolutions := memory.NewDecisionResolutionRepository()
+	service := NewService(tickets, resolutions, nil)
+	if err := tickets.Create(ctx, &decisionModel.Ticket{
+		ID:                     "ticket-runtime-actions",
+		WorkspaceID:            "ws-runtime-actions",
+		RunID:                  "run-runtime-actions",
+		StepID:                 "runtime-v2/dispatch-1",
+		Reason:                 "provider recovery needs confirmation",
+		DecisionKind:           "runtime_v2_governance",
+		State:                  common.DecisionTicketStateOpen,
+		AllowedRecoveryActions: []string{decisioncommon.ResolutionTypeProvideMissingInfo},
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	_, _, err := service.EnsureRuntimeGovernanceResolutionProposal(ctx, decisionservice.ResolveTicketCommand{
+		ResolutionID: "resolution-runtime-actions",
+		TicketID:     "ticket-runtime-actions",
+		WorkspaceID:  "ws-runtime-actions",
+		RunID:        "run-runtime-actions",
+		StepID:       "runtime-v2/dispatch-1",
+		Type:         decisioncommon.ResolutionTypeReplan,
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("unallowed proposal err = %v, want invalid argument", err)
+	}
+	ticket, err := tickets.Get(ctx, "ticket-runtime-actions")
+	if err != nil {
+		t.Fatalf("read ticket: %v", err)
+	}
+	if ticket.RuntimeGovernanceProposal != nil || ticket.State != common.DecisionTicketStateOpen {
+		t.Fatalf("unallowed action mutated ticket: %+v", ticket)
+	}
+}
+
 func TestService_CreateTicket_ValidateArguments(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(memory.NewDecisionTicketRepository(), memory.NewDecisionResolutionRepository(), nil)

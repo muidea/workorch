@@ -74,10 +74,12 @@ type runtimeCandidateOutputContractProjection struct {
 }
 
 type runtimeCandidateOperationContractProjection struct {
-	Kind                string                                         `json:"kind"`
-	Parameters          []runtimeCandidateOperationParameterProjection `json:"parameters"`
-	ForbiddenParameters []string                                       `json:"forbiddenParameters,omitempty"`
-	Rules               []string                                       `json:"rules,omitempty"`
+	Kind                   string                                         `json:"kind"`
+	Parameters             []runtimeCandidateOperationParameterProjection `json:"parameters"`
+	RequireOneOfParameters []string                                       `json:"requireOneOfParameters,omitempty"`
+	RequireTargetRefs      bool                                           `json:"requireTargetRefs,omitempty"`
+	ForbiddenParameters    []string                                       `json:"forbiddenParameters,omitempty"`
+	Rules                  []string                                       `json:"rules,omitempty"`
 }
 
 type runtimeCandidateOperationParameterProjection struct {
@@ -390,7 +392,7 @@ func runtimeV2ProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmod
 	providerRequest := llmmodels.ProviderRequest{
 		WorkspaceID: string(candidateContext.WorkspaceID), RunID: string(candidateContext.RunID),
 		StepID: request.Transaction.AuthoritySnapshotID, Kind: "runtime_v2_candidate",
-		Schema: runtimeV2CandidateSchema(request.Decision.Action),
+		Schema: runtimeV2CandidateSchemaForDecision(request.Decision),
 		PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.runtime_candidate_prompt.v2", Sections: []llmmodels.PromptSection{
 			{ID: "C0.runtime-candidate-contract", Name: "Runtime candidate contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, Content: runtimeV2CandidateContractCatalog()},
 			{ID: "C1.goal-dod", Name: "Goal and DoD", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 1, DefinitionRevision: definitionContext.Revision, Content: string(definitionJSON)},
@@ -504,6 +506,96 @@ func runtimeV2CandidateSchema(action runtimecontract.RuntimeAction) string {
 	}
 }
 
+// runtimeV2CandidateSchemaForDecision refines only the volatile provider
+// output schema from the sealed operation contracts. The stable C0-C2 prompt
+// prefix remains unchanged; admissible operation kinds belong to C3 authority.
+func runtimeV2CandidateSchemaForDecision(decision runtimecontract.RuntimeDecision) string {
+	base := runtimeV2CandidateSchema(decision.Action)
+	if decision.Action != runtimecontract.RuntimeActionProduceStateChange && decision.Action != runtimecontract.RuntimeActionProduceValidation {
+		return base
+	}
+	var schema map[string]any
+	if err := json.Unmarshal([]byte(base), &schema); err != nil {
+		return base
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return base
+	}
+	operations, ok := properties["operations"].(map[string]any)
+	if !ok {
+		return base
+	}
+	items, ok := operations["items"].(map[string]any)
+	if !ok {
+		return base
+	}
+	conditions := runtimeV2OperationSchemaConditions(decision.RequiredOutput.AcceptedKinds)
+	if len(conditions) == 0 {
+		return base
+	}
+	items["allOf"] = conditions
+	encoded, err := json.Marshal(schema)
+	if err != nil {
+		return base
+	}
+	return string(encoded)
+}
+
+func runtimeV2OperationSchemaConditions(kinds []string) []any {
+	seen := map[string]struct{}{}
+	ret := make([]any, 0, len(kinds))
+	for _, requestedKind := range kinds {
+		contract, ok := runtimecontract.RuntimeOperationContractForKind(requestedKind)
+		if !ok {
+			continue
+		}
+		if _, duplicate := seen[contract.Kind]; duplicate {
+			continue
+		}
+		seen[contract.Kind] = struct{}{}
+		parameterNames := make([]string, 0, len(contract.Parameters))
+		parameterRequirements := make([]any, 0, len(contract.Parameters)+1)
+		for _, parameter := range contract.Parameters {
+			parameterNames = append(parameterNames, parameter.Name)
+			if parameter.Required {
+				parameterRequirements = append(parameterRequirements, runtimeV2ParameterContainsSchema(parameter.Name))
+			}
+		}
+		if len(contract.RequireOneOfParameters) > 0 {
+			oneOf := make([]any, 0, len(contract.RequireOneOfParameters))
+			for _, name := range contract.RequireOneOfParameters {
+				oneOf = append(oneOf, runtimeV2ParameterContainsSchema(name))
+			}
+			parameterRequirements = append(parameterRequirements, map[string]any{"anyOf": oneOf})
+		}
+		parameterSchema := map[string]any{
+			"type":  "array",
+			"items": map[string]any{"properties": map[string]any{"name": map[string]any{"enum": parameterNames}}},
+		}
+		if len(parameterRequirements) > 0 {
+			parameterSchema["allOf"] = parameterRequirements
+		}
+		thenProperties := map[string]any{"parameters": parameterSchema}
+		then := map[string]any{"properties": thenProperties}
+		if contract.RequireTargetRefs {
+			then["required"] = []string{"targetRefs"}
+			thenProperties["targetRefs"] = map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}}
+		}
+		ret = append(ret, map[string]any{
+			"if":   map[string]any{"properties": map[string]any{"kind": map[string]any{"const": contract.Kind}}, "required": []string{"kind"}},
+			"then": then,
+		})
+	}
+	return ret
+}
+
+func runtimeV2ParameterContainsSchema(name string) map[string]any {
+	return map[string]any{
+		"contains": map[string]any{"type": "object", "properties": map[string]any{"name": map[string]any{"const": name}}, "required": []string{"name"}},
+	}
+}
+
 func runtimeV2OperationCandidateSchema(id, title, description string) string {
 	value := map[string]any{
 		"$id": id, "title": title, "description": description,
@@ -561,7 +653,7 @@ func runtimeV2CandidateContractCatalog() string {
 func runtimeV2CandidateOutputContract(decision runtimecontract.RuntimeDecision) runtimeCandidateOutputContractProjection {
 	return runtimeCandidateOutputContractProjection{
 		Action:                  decision.Action,
-		Schema:                  json.RawMessage(runtimeV2CandidateSchema(decision.Action)),
+		Schema:                  json.RawMessage(runtimeV2CandidateSchemaForDecision(decision)),
 		RequiredTopLevelExample: runtimeV2CandidateTopLevelExample(decision.Action),
 		ForbiddenTopLevelFields: []string{"candidate", "candidates", "executionGraph", "convergenceState", "focus", "authority", "transaction", "outputMode", "result", "runtimeState"},
 		OperationContracts:      runtimeV2CandidateOperationContracts(decision.RequiredOutput.AcceptedKinds),
@@ -576,7 +668,8 @@ func runtimeV2CandidateOperationContracts(kinds []string) []runtimeCandidateOper
 			continue
 		}
 		projection := runtimeCandidateOperationContractProjection{
-			Kind: contract.Kind, ForbiddenParameters: append([]string(nil), contract.ForbiddenParameters...), Rules: append([]string(nil), contract.Rules...),
+			Kind: contract.Kind, RequireOneOfParameters: append([]string(nil), contract.RequireOneOfParameters...), RequireTargetRefs: contract.RequireTargetRefs,
+			ForbiddenParameters: append([]string(nil), contract.ForbiddenParameters...), Rules: append([]string(nil), contract.Rules...),
 			Parameters: make([]runtimeCandidateOperationParameterProjection, 0, len(contract.Parameters)),
 		}
 		for _, parameter := range contract.Parameters {

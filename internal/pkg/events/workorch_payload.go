@@ -2,6 +2,7 @@ package events
 
 import (
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
@@ -340,8 +341,8 @@ type LLMUsagePayloadData struct {
 	RequestBytes          int
 	ResponseBytes         int
 	Streaming             bool
-	ContextBudget         map[string]any
-	CacheUsage            map[string]any
+	ContextBudget         llmaudit.ContextBudget
+	CacheUsage            llmaudit.CacheUsage
 	StartedAt             string
 	CompletedAt           string
 	DurationMs            int
@@ -787,15 +788,11 @@ func (data LLMUsagePayloadData) EventPayload() workorcheventpayload.Payload {
 	fields = appendOptionalPayloadString(fields, PayloadKeyStartedAt, data.StartedAt)
 	fields = appendOptionalPayloadString(fields, PayloadKeyCompletedAt, data.CompletedAt)
 	fields = appendOptionalPayloadString(fields, PayloadKeyFailureClass, data.FailureClass)
-	if len(data.ContextBudget) > 0 {
-		if nested, err := workorcheventpayload.FromMap(data.ContextBudget); err == nil && len(nested.Fields) > 0 {
-			fields = append(fields, workorcheventpayload.ObjectField(PayloadKeyContextBudget, nested))
-		}
+	if !data.ContextBudget.Empty() {
+		fields = append(fields, workorcheventpayload.ObjectField(PayloadKeyContextBudget, data.ContextBudget.Payload()))
 	}
-	if len(data.CacheUsage) > 0 {
-		if nested, err := workorcheventpayload.FromMap(data.CacheUsage); err == nil && len(nested.Fields) > 0 {
-			fields = append(fields, workorcheventpayload.ObjectField(PayloadKeyCacheUsage, nested))
-		}
+	if !data.CacheUsage.Empty() {
+		fields = append(fields, workorcheventpayload.ObjectField(PayloadKeyCacheUsage, data.CacheUsage.Payload()))
 	}
 	return workorcheventpayload.New(fields...)
 }

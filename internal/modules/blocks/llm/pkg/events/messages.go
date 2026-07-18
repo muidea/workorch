@@ -5,6 +5,7 @@ import (
 	llmmodel "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -96,11 +97,9 @@ type LLMUsageRecordedData struct {
 	TotalTokens           int
 	Estimated             bool
 	UsageSource           string
-	// ContextBudget is the sealed budget snapshot as a scalar map for event payload encoding.
-	ContextBudget map[string]any
-	// CacheUsage carries provider-native or estimated cache token fields when present.
-	CacheUsage map[string]any
-	OccurredAt string
+	ContextBudget         llmaudit.ContextBudget
+	CacheUsage            llmaudit.CacheUsage
+	OccurredAt            string
 }
 
 func MessageContracts() []eventcontract.MessageContract {

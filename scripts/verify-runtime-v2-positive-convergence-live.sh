@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# RVC-18: deployed dual-workspace positive-convergence live acceptance.
-# Requires a running workorch instance at WORKORCH_BASE_URL and two real workspaces.
+# RVC-R16 final rerun: deployed dual-workspace positive-convergence live acceptance.
+# Bounded terminal fixtures use the 180s SLA; large real workspaces are observed
+# separately and must not be supplied as this terminal gate.
 
 set -euo pipefail
 
@@ -8,7 +9,12 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 BASE_URL="${WORKORCH_BASE_URL:-http://127.0.0.1:8080}"
-ARTIFACT_DIR="${WORKORCH_E2E_ARTIFACT_DIR:-.workorch-e2e/runtime-v2-positive-convergence-live/$(date -u +%Y%m%dT%H%M%SZ)}"
+ARTIFACT_DIR="$(realpath -m "${WORKORCH_E2E_ARTIFACT_DIR:-${TMPDIR:-/tmp}/workorch-e2e/runtime-v2-positive-convergence-live/$(date -u +%Y%m%dT%H%M%SZ)}")"
+REPOSITORY_E2E_ARTIFACT_DIR="$(realpath -m "$ROOT_DIR/.workorch-e2e")"
+if [[ "$ARTIFACT_DIR" == "$REPOSITORY_E2E_ARTIFACT_DIR" || "$ARTIFACT_DIR" == "$REPOSITORY_E2E_ARTIFACT_DIR/"* ]]; then
+  echo "WORKORCH_E2E_ARTIFACT_DIR must not point to the repository .workorch-e2e directory" >&2
+  exit 2
+fi
 POLL_INTERVAL="${WORKORCH_E2E_POLL_INTERVAL_SECONDS:-2}"
 TIMEOUT="${WORKORCH_E2E_TIMEOUT_SECONDS:-180}"
 PROVIDER_ID="${WORKORCH_E2E_PROVIDER_ID:-}"
@@ -52,17 +58,17 @@ WS_A="${WORKORCH_E2E_WORKSPACE_ID_A:-}"
 WS_B="${WORKORCH_E2E_WORKSPACE_ID_B:-}"
 if [[ -z "$WS_A" || -z "$WS_B" ]]; then
   cat <<MSG
-live dual-workspace fixture IDs not set.
+bounded dual-workspace fixture IDs not set.
 Set WORKORCH_E2E_WORKSPACE_ID_A / WORKORCH_E2E_WORKSPACE_ID_B to the deployed
-ai-proxy and LSP-Bridge workspaces, optionally with:
+bounded positive fixtures (each <=2 focuses and <=4 coverage items/focus), optionally with:
   WORKORCH_E2E_PROVIDER_ID / WORKORCH_E2E_MODEL_ID
-  WORKORCH_E2E_ACTIVATE=1 to issue resume activations before polling
+  WORKORCH_E2E_ACTIVATE=1 to issue explicit fixture activations before polling
   WORKORCH_E2E_POLL_INTERVAL_SECONDS / WORKORCH_E2E_TIMEOUT_SECONDS
 Then re-run. File-backed sequences are covered by:
   make verify-runtime-v2-positive-convergence-file
 MSG
   if [[ "${WORKORCH_E2E_LIVE_ALLOW_SKIP:-}" == "1" ]]; then
-    echo "WORKORCH_E2E_LIVE_ALLOW_SKIP=1: skipping dual-workspace live assertions"
+    echo "WORKORCH_E2E_LIVE_ALLOW_SKIP=1: skipping bounded dual-workspace terminal assertions"
     exit 0
   fi
   exit 3

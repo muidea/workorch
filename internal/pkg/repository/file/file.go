@@ -3632,6 +3632,10 @@ func cloneDecisionTicket(item *decision.Ticket) *decision.Ticket {
 	cloned := *item
 	cloned.Context = item.Context.Clone()
 	cloned.AutoGovernance = item.AutoGovernance.Clone()
+	if item.RuntimeGovernanceProposal != nil {
+		proposal := item.RuntimeGovernanceProposal.Clone()
+		cloned.RuntimeGovernanceProposal = &proposal
+	}
 	return &cloned
 }
 

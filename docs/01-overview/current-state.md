@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-07-17
+Last Updated: 2026-07-18
 
 
 ## LLM Provider（2026-07-15）
@@ -89,9 +89,9 @@ Last Updated: 2026-07-17
 
 ## Remaining Open Work
 
-Runtime V2-only 主链骨架及 RVC-R5～R15 结构化代码收口已完成并通过真实 file-backed crash/双 focus/full gates。2026-07-17 Live 暴露的 SM-2 action、SM-3 effect/receipt/evidence 与 SM-4 recovery/delivery 交界偏差已进入主路径回归；当前剩余主要是：
+Runtime V2-only 主链骨架及 RVC-R5～R15 结构化 foundation 已完成并通过真实 file-backed crash/双 focus/full gates。2026-07-18 deployed Live 进一步证明 effect/receipt/focus 主链能够推进，同时暴露跨 owner governance 提交、blocked Resume 权威门禁、allowed action 端到端合同、candidate 参数合同、LLM audit 类型边界与 Live fixture 分层仍未闭环；当前剩余主要是：
 
-1. **Runtime 正向收敛（RVC-1）**：**active — code closure verified, deployed Live pending**；effect/receipt/directive、exact-fence governance grant、独立预算、typed startup/delivery inventory、schema v2-only 与真实 file-backed crash/双 focus E2E 均已通过。下一步只进入 RVC-R16 dual-workspace Live。详见 [active remediation](../70-roadmap/active/runtime-v2-positive-convergence-remediation.md)。
+1. **Runtime 正向收敛（RVC-1）**：**active — code reopened by deployed Live**。RVC-R5～R15 保持为不可回退的已落地 foundation；按 RVC-R17～R22 依次完成 governance durable proposal/commit saga、aggregate-backed blocked Resume、server-first allowed actions、descriptor-driven candidate parameter closure、typed LLM audit DTO，以及 bounded terminal gate / real-workspace liveness 分层，之后最终重跑 RVC-R16。详见 [active remediation](../70-roadmap/active/runtime-v2-positive-convergence-remediation.md)。
 2. **运维切换（OPS-1）**：真实生产目录 `runtime-v1-retirement --apply` + clean build 维护窗口（过程日记已归档，不在 active 放长文）。
 3. **可选验证（OPT-1）**：file-patch `apply + validation + DoD closeout` 的 deployed live 一次。
 4. **延期候选**：LLM context budget 高级项见 `70-roadmap/candidates/`，**不占 active**。

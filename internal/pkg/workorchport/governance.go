@@ -44,18 +44,19 @@ type ApprovalSemanticNormalization struct {
 }
 
 type DecisionInfo struct {
-	ID                 common.TicketID
-	WorkspaceID        common.WorkspaceID
-	RunID              common.RunID
-	Reason             string
-	Question           string
-	Context            workorcheventpayload.Payload
-	State              string
-	ResolutionType     string
-	ContinuationAction string
-	ResumeRunID        common.RunID
-	SuccessorRunID     common.RunID
-	AutoGovernance     *AutoGovernanceSummaryInfo
+	ID                     common.TicketID
+	WorkspaceID            common.WorkspaceID
+	RunID                  common.RunID
+	Reason                 string
+	Question               string
+	Context                workorcheventpayload.Payload
+	AllowedRecoveryActions []string
+	State                  string
+	ResolutionType         string
+	ContinuationAction     string
+	ResumeRunID            common.RunID
+	SuccessorRunID         common.RunID
+	AutoGovernance         *AutoGovernanceSummaryInfo
 }
 
 type ResolveDecisionRequest struct {

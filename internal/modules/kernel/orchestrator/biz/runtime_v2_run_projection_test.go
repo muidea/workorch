@@ -3,15 +3,36 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+type runtimeV2ProjectionStateRepository struct {
+	aggregate runtimev2.RuntimeAggregate
+}
+
+func (r *runtimeV2ProjectionStateRepository) Load(_ context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runtimev2.RuntimeAggregate, error) {
+	if r.aggregate.Facts.WorkspaceID != workspaceID || r.aggregate.Facts.RunID != runID {
+		return runtimev2.RuntimeAggregate{}, common.ErrNotFound
+	}
+	return r.aggregate, nil
+}
+
+func (r *runtimeV2ProjectionStateRepository) Save(_ context.Context, aggregate runtimev2.RuntimeAggregate, expectedRevision uint64) error {
+	if r.aggregate.StateRevision != expectedRevision {
+		return fmt.Errorf("%w: revision changed", common.ErrConflict)
+	}
+	r.aggregate = aggregate
+	return nil
+}
 
 func TestActivateRuntimeV2RunOnlyProjectsOwnerState(t *testing.T) {
 	ctx := context.Background()
@@ -40,6 +61,59 @@ func TestActivateRuntimeV2RunOnlyProjectsOwnerState(t *testing.T) {
 	items, err := steps.ListByRun(ctx, "run-v2")
 	if err != nil || len(items) != 0 {
 		t.Fatalf("Runtime V2 activation created legacy steps: %+v err=%v", items, err)
+	}
+}
+
+func TestRuntimeV2BlockedDecisionRequiresCommittedAggregateResolution(t *testing.T) {
+	ctx := context.Background()
+	runs := memory.NewRunRepository()
+	workspaces := memory.NewWorkspaceRepository()
+	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2-gate", State: common.WorkspaceStateActive, ActiveRunID: "run-v2-gate"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runs.Create(ctx, &runmodel.Run{
+		ID:                     "run-v2-gate",
+		WorkspaceID:            "ws-v2-gate",
+		State:                  common.RunStateBlockedOnDecision,
+		BlockingTicketID:       "ticket-v2-gate",
+		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	state := &runtimeV2ProjectionStateRepository{aggregate: runtimev2.RuntimeAggregate{
+		StateRevision: 1,
+		Facts:         runtimecontract.RuntimeFacts{WorkspaceID: "ws-v2-gate", RunID: "run-v2-gate"},
+		GovernanceRequests: []runtimecontract.RuntimeGovernanceRequestRecord{{
+			TicketID: "ticket-v2-gate", AuthoritySnapshotID: "snapshot-v2-gate", DispatchID: "dispatch-v2-gate",
+			DependencyKind: "configuration", SubjectRef: "provider/ai-proxy",
+		}},
+	}}
+	orchestrator := NewRuntimeOrchestrator(runs, workspaces, nil, nil)
+	if err := orchestrator.ConfigureRuntimeV2Repository(state); err != nil {
+		t.Fatalf("configure runtime state repository: %v", err)
+	}
+	if err := orchestrator.CanResumeRun(ctx, "run-v2-gate"); !errors.Is(err, common.ErrBlocked) {
+		t.Fatalf("CanResumeRun without aggregate resolution err = %v, want blocked", err)
+	}
+	if err := orchestrator.ActivateRuntimeV2Run(ctx, "ws-v2-gate", "run-v2-gate"); !errors.Is(err, common.ErrBlocked) {
+		t.Fatalf("ActivateRuntimeV2Run without aggregate resolution err = %v, want blocked", err)
+	}
+	state.aggregate.GovernanceResolutions = []runtimecontract.RuntimeGovernanceResolutionRecord{{
+		ResolutionID: "resolution-v2-gate", TicketID: "ticket-v2-gate", AuthoritySnapshotID: "snapshot-v2-gate",
+		DispatchID: "dispatch-v2-gate", Outcome: runtimecontract.RuntimeGovernanceResolutionOutcomeContinue,
+	}}
+	if err := orchestrator.CanResumeRun(ctx, "run-v2-gate"); err != nil {
+		t.Fatalf("CanResumeRun with committed aggregate resolution: %v", err)
+	}
+	if err := orchestrator.ActivateRuntimeV2Run(ctx, "ws-v2-gate", "run-v2-gate"); err != nil {
+		t.Fatalf("ActivateRuntimeV2Run with committed aggregate resolution: %v", err)
+	}
+	run, err := runs.GetByWorkspaceID(ctx, "ws-v2-gate", "run-v2-gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.State != common.RunStateActive || run.BlockingTicketID != "" {
+		t.Fatalf("activated run = %+v", run)
 	}
 }
 
