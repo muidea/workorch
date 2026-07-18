@@ -32,18 +32,18 @@ func (f fakeEventRecordLister) List(context.Context, repository.EventRecordQuery
 }
 
 type fakeWorkspaceTemplateReader struct {
-	item *repository.WorkspaceTemplate
+	item *workspacemodel.WorkspaceTemplate
 }
 
-func (f fakeWorkspaceTemplateReader) Get(context.Context, string) (*repository.WorkspaceTemplate, error) {
+func (f fakeWorkspaceTemplateReader) Get(context.Context, string) (*workspacemodel.WorkspaceTemplate, error) {
 	return f.item, nil
 }
 
-func (f fakeWorkspaceTemplateReader) List(context.Context) ([]*repository.WorkspaceTemplate, error) {
+func (f fakeWorkspaceTemplateReader) List(context.Context) ([]*workspacemodel.WorkspaceTemplate, error) {
 	if f.item == nil {
 		return nil, nil
 	}
-	return []*repository.WorkspaceTemplate{f.item}, nil
+	return []*workspacemodel.WorkspaceTemplate{f.item}, nil
 }
 
 func TestOrderedWorkspaceGoalsUsesLatestEventOrder(t *testing.T) {
@@ -225,7 +225,7 @@ func TestWorkspaceExecutionContractIncludesAcceptanceSlicePolicyFromHints(t *tes
 		ID:         "ws-policy",
 		TemplateID: "template-policy",
 	}
-	reader := fakeWorkspaceTemplateReader{item: &repository.WorkspaceTemplate{
+	reader := fakeWorkspaceTemplateReader{item: &workspacemodel.WorkspaceTemplate{
 		ID: "template-policy",
 		ContextHints: mustActivationPayload(t, map[string]any{
 			"acceptanceSlicePolicy": map[string]any{
@@ -258,7 +258,7 @@ func TestWorkspaceExecutionContractIncludesAcceptanceSlicePolicyFromHints(t *tes
 
 func TestWorkspaceExecutionContractIncludesValidationPoliciesFromHints(t *testing.T) {
 	workspace := &workspacemodel.Workspace{ID: "ws-validation", TemplateID: "template-validation"}
-	reader := fakeWorkspaceTemplateReader{item: &repository.WorkspaceTemplate{
+	reader := fakeWorkspaceTemplateReader{item: &workspacemodel.WorkspaceTemplate{
 		ID: "template-validation",
 		ContextHints: mustActivationPayload(t, map[string]any{"validationPolicies": []any{map[string]any{
 			"id": "validation-1", "scope": "workspace_profile", "appliesToEvidenceKinds": []any{"validation"}, "maxValidationOnlyRetriesPerFocus": 2,
@@ -276,7 +276,7 @@ func TestWorkspaceExecutionContractIncludesTemplateStagePoliciesFromHints(t *tes
 		ID:         "ws-stage-policy",
 		TemplateID: "template-stage-policy",
 	}
-	reader := fakeWorkspaceTemplateReader{item: &repository.WorkspaceTemplate{
+	reader := fakeWorkspaceTemplateReader{item: &workspacemodel.WorkspaceTemplate{
 		ID: "template-stage-policy",
 		ContextHints: mustActivationPayload(t, map[string]any{
 			"templateStagePolicies": map[string]any{

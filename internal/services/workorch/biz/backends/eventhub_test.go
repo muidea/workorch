@@ -784,6 +784,9 @@ func newEventHubBackendWithDispatcher(t *testing.T, ctx context.Context) (Backen
 	t.Helper()
 	runtime := testkit.NewRuntime("memory", "", nil)
 	session := appservice.NewRuntimeSession(runtime)
+	// The memory owner fixture still creates workspace-managed directories.
+	// Keep those test artifacts under t.TempDir instead of the package cwd.
+	session.SetRepositoryConfig("file", t.TempDir())
 	t.Cleanup(func() { _ = session.Close(ctx) })
 	var err error
 	exports, err := testkit.SessionExports(session)

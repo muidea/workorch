@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync/atomic"
+	"time"
 
 	cd "github.com/muidea/magicCommon/def"
 	"github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 )
 
 type Service struct {
@@ -62,6 +65,7 @@ func (s *Service) Run(_ context.Context) *cd.Error {
 		}
 		s.done <- err
 		close(s.done)
+		s.publishStopped(err)
 	}
 
 	s.runStarted.Store(true)
@@ -85,6 +89,22 @@ func (s *Service) Run(_ context.Context) *cd.Error {
 		return cd.NewError(cd.Unexpected, "http server background scheduling failed: "+err.Error())
 	}
 	return nil
+}
+
+func (s *Service) publishStopped(err error) {
+	if s == nil || s.commandHub == nil {
+		return
+	}
+	data := workorchdevents.ServiceStoppedData{ServiceName: "workorch", State: "stopped", ErrorCode: "server_stopped", StoppedAt: time.Now().UTC()}
+	if err != nil {
+		data.State = "failed"
+		data.ErrorCode = "server_failed"
+		data.ErrorMessage = err.Error()
+		if len(data.ErrorMessage) > 512 {
+			data.ErrorMessage = strings.TrimSpace(data.ErrorMessage[:512])
+		}
+	}
+	s.commandHub.Post(event.NewEventWithContext(workorchdevents.TopicWorkorchDServiceStopped, "workorchd/server", workorchdevents.NotificationDestination, event.NewHeader(), context.Background(), data))
 }
 
 func (s *Service) Shutdown(ctx context.Context) {

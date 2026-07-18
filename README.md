@@ -18,7 +18,7 @@ configured.
 
 - `application/workorch`: executable entry; default mode starts the TUI, and `--server` starts the HTTP/Web service
 - `internal/services/workorch`: process-level framework service for startup mode selection, local/remote backend wiring, CLI, TUI, and agent session adapters
-- `internal/initiators/workorchruntime`: workorch runtime initiator (repository providers, EventHub access, bootstrap helpers for plugin-loaded modules)
+- `internal/initiators/workorchruntime`: repository-provider initiator for plugin-loaded owners; it does not export EventHub, runtime policy, or bootstrap facades
 - `internal/modules/application/workorchd`: server-side application module (`biz` / `service` / `pkg`); constructs typed bootstrap, projections, HTTP/SSE — does **not** own Runtime V2 drive
 - `web/workorch-console`: React/TypeScript management console source
 - `web/consoleassets`: embedded management console build output served by `workorch --server`
@@ -36,7 +36,7 @@ Each module follows the go-multi-module-dev minimum shape:
 
 - `module.go` / `plugin.go`: constructor and EventHub registration
 - `biz/`: business logic (orchestrator includes `biz/runtimev2/`)
-- `service/`: module-facing surface when present
+- `service/`: HTTP/CLI/session/protocol adapters only; owner-to-owner I/O remains typed EventHub commands/results
 - `pkg/`: models, events, common constants
 - `readme.md`: module interaction contract (implementation SoT for that module)
 

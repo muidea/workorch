@@ -10,7 +10,6 @@ import (
 	approvalcontracts "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/contracts"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
-	approvalservice "github.com/muidea/workorch/internal/modules/blocks/approval/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -19,7 +18,6 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
-type Service = approvalservice.Service
 type CreateApprovalCommand = approvalcontracts.CreateApprovalCommand
 type UpdateApprovalCommand = approvalcontracts.UpdateApprovalCommand
 type ResolveApprovalCommand = approvalcontracts.ResolveApprovalCommand
@@ -30,12 +28,11 @@ type Dependencies struct {
 }
 
 type Module struct {
-	bizPtr     *approvalbiz.Service
-	servicePtr *approvalservice.Module
-	eventHub   magicevent.Hub
-	approvals  repository.ApprovalRepository
-	observer   magicevent.SimpleObserver
-	topics     []string
+	bizPtr    *approvalbiz.Service
+	eventHub  magicevent.Hub
+	approvals repository.ApprovalRepository
+	observer  magicevent.SimpleObserver
+	topics    []string
 }
 
 func New() *Module { return &Module{} }
@@ -49,21 +46,11 @@ func (m *Module) Configure(deps Dependencies) error {
 	m.eventHub = deps.EventHub
 	m.approvals = deps.Approvals
 	m.bizPtr = approvalbiz.NewService(deps.Approvals, deps.EventHub)
-	m.servicePtr = approvalservice.New(approvalservice.Dependencies{
-		CreateApproval:          m.bizPtr.CreateApproval,
-		EnsureApproval:          m.bizPtr.EnsureApproval,
-		Approve:                 m.bizPtr.Approve,
-		EnsureApproved:          m.bizPtr.EnsureApproved,
-		EnsureApprovedAndReturn: m.bizPtr.EnsureApprovedAndReturn,
-		Reject:                  m.bizPtr.Reject,
-		EnsureRejected:          m.bizPtr.EnsureRejected,
-		EnsureRejectedAndReturn: m.bizPtr.EnsureRejectedAndReturn,
-	})
 	return nil
 }
 
 func (m *Module) Start() error {
-	if m == nil || m.servicePtr == nil || m.eventHub == nil {
+	if m == nil || m.bizPtr == nil || m.eventHub == nil {
 		return common.ErrInvalidArgument
 	}
 	if m.observer != nil {
@@ -97,18 +84,10 @@ func (m *Module) Stop(ctx context.Context) error {
 	}
 	m.topics = nil
 	m.observer = nil
-	m.servicePtr = nil
 	m.bizPtr = nil
 	m.eventHub = nil
 	m.approvals = nil
 	return nil
-}
-
-func (m *Module) Service() Service {
-	if m == nil || m.servicePtr == nil {
-		return nil
-	}
-	return m.servicePtr
 }
 
 func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
@@ -120,7 +99,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (approvalevents.ApprovalCom
 	ctx := ev.Context()
 	topic := ev.ID()
 	data := ev.Data()
-	if m == nil || m.approvals == nil || m.servicePtr == nil {
+	if m == nil || m.approvals == nil || m.bizPtr == nil {
 		return approvalevents.ApprovalCommandResult{}, common.ErrInvalidArgument
 	}
 	workspaceID := common.WorkspaceID("")
@@ -153,7 +132,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (approvalevents.ApprovalCom
 		if err := m.ensureApprovalScopeForCommand(ctx, cmd.ApprovalID, scope); err != nil {
 			return approvalevents.ApprovalCommandResult{}, err
 		}
-		item, err := m.servicePtr.EnsureApprovedAndReturn(ctx, resolveApprovalContract(cmd))
+		item, err := m.bizPtr.EnsureApprovedAndReturn(ctx, resolveApprovalContract(cmd))
 		if err != nil {
 			return approvalevents.ApprovalCommandResult{}, err
 		}
@@ -170,7 +149,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (approvalevents.ApprovalCom
 		if err := m.ensureApprovalScopeForCommand(ctx, cmd.ApprovalID, scope); err != nil {
 			return approvalevents.ApprovalCommandResult{}, err
 		}
-		item, err := m.servicePtr.EnsureRejectedAndReturn(ctx, resolveApprovalContract(cmd))
+		item, err := m.bizPtr.EnsureRejectedAndReturn(ctx, resolveApprovalContract(cmd))
 		if err != nil {
 			return approvalevents.ApprovalCommandResult{}, err
 		}
@@ -183,7 +162,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (approvalevents.ApprovalCom
 		if !ok {
 			return approvalevents.ApprovalCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.EnsureApproval(ctx, createApprovalContract(cmd)); err != nil {
+		if err := m.bizPtr.EnsureApproval(ctx, createApprovalContract(cmd)); err != nil {
 			return approvalevents.ApprovalCommandResult{}, err
 		}
 		return approvalevents.ApprovalCommandResult{}, nil
@@ -192,7 +171,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (approvalevents.ApprovalCom
 		if !ok {
 			return approvalevents.ApprovalCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.CreateApproval(ctx, createApprovalContract(cmd)); err != nil {
+		if err := m.bizPtr.CreateApproval(ctx, createApprovalContract(cmd)); err != nil {
 			return approvalevents.ApprovalCommandResult{}, err
 		}
 		return approvalevents.ApprovalCommandResult{}, nil

@@ -11,7 +11,7 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
-	orchestratorservice "github.com/muidea/workorch/internal/modules/kernel/orchestrator/service"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
@@ -22,16 +22,23 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if module.ID() != ModuleID {
 		t.Fatalf("ID = %q, want %q", module.ID(), ModuleID)
 	}
-	if module.servicePtr != nil {
-		t.Fatal("new module service pointer is non-nil before Configure")
+	if module.bizPtr != nil {
+		t.Fatal("new module biz pointer is non-nil before Configure")
 	}
 
 	deps := moduleContractDependencies()
+	recoveryObserver := magicevent.NewSimpleObserver(runevents.CommandDestination, deps.CommandHub)
+	recoveryObserver.Subscribe(runevents.TopicRunCommandRuntimeV2RecoveryInventory, func(_ magicevent.Event, result magicevent.Result) {
+		if result != nil {
+			result.Set(runevents.QueryRuntimeV2RecoveryInventoryResult{}, nil)
+		}
+	})
+	t.Cleanup(func() {
+		recoveryObserver.Unsubscribe(runevents.TopicRunCommandRuntimeV2RecoveryInventory)
+		deps.CommandHub.Terminate(context.Background())
+	})
 	if err := module.Configure(deps); err != nil {
 		t.Fatalf("Configure: %v", err)
-	}
-	if module.servicePtr == nil {
-		t.Fatal("service pointer is nil after Configure")
 	}
 	if module.bizPtr == nil {
 		t.Fatal("biz pointer is nil after Configure")
@@ -58,8 +65,7 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if module.servicePtr != nil ||
-		module.bizPtr != nil ||
+	if module.bizPtr != nil ||
 		module.rawEventHub != nil ||
 		module.backgroundRoutine != nil ||
 		len(module.rawTopics) != 0 {
@@ -67,6 +73,21 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	}
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("second Stop: %v", err)
+	}
+}
+
+func TestGMMR1SM4OrchestratorStartFailsWithoutRecoveryInventory(t *testing.T) {
+	deps := moduleContractDependencies()
+	t.Cleanup(func() { deps.CommandHub.Terminate(context.Background()) })
+	module := New()
+	if err := module.Configure(deps); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := module.Start(); err == nil {
+		t.Fatal("Start succeeded without the required Run recovery inventory subscription")
+	}
+	if err := module.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop after failed Start: %v", err)
 	}
 }
 
@@ -114,7 +135,6 @@ func TestModuleStartRunCommandAcceptsStateAndSchedulesBackgroundDispatch(t *test
 	bg := &recordingBackgroundRoutine{}
 	module := &Module{
 		bizPtr:            orch,
-		servicePtr:        orchestratorservice.New(orchestratorServiceDependencies(orch)),
 		backgroundRoutine: bg,
 	}
 
@@ -169,7 +189,6 @@ func TestModuleResumeRunCommandSchedulesRuntimeV2Drive(t *testing.T) {
 	bg := &recordingBackgroundRoutine{}
 	module := &Module{
 		bizPtr:            orch,
-		servicePtr:        orchestratorservice.New(orchestratorServiceDependencies(orch)),
 		backgroundRoutine: bg,
 	}
 
@@ -213,7 +232,6 @@ func TestModuleResumeRunCommandRejectsTerminalRunBeforeBackgroundDispatch(t *tes
 	bg := &recordingBackgroundRoutine{}
 	module := &Module{
 		bizPtr:            orch,
-		servicePtr:        orchestratorservice.New(orchestratorServiceDependencies(orch)),
 		backgroundRoutine: bg,
 	}
 
@@ -273,16 +291,6 @@ func moduleContractDependencies() Dependencies {
 		CoverageWorkItems:     memoryrepo.NewCoverageWorkItemRepository(),
 		ArtifactContinuations: memoryrepo.NewArtifactContinuationRepository(),
 		CommandHub:            rawHub,
-	}
-}
-
-func orchestratorServiceDependencies(orch *orchestratorbiz.RuntimeOrchestrator) orchestratorservice.Dependencies {
-	return orchestratorservice.Dependencies{
-		BlockOnDecision: orch.BlockOnDecision,
-		BlockOnApproval: orch.BlockOnApproval,
-		CancelRun:       orch.CancelRun,
-		SupersedeRun:    orch.SupersedeRun,
-		FailRun:         orch.FailRun,
 	}
 }
 

@@ -3,8 +3,8 @@ package events
 import "github.com/muidea/workorch/internal/pkg/eventcontract"
 
 func Contracts() []eventcontract.Contract {
-	ret := eventcontract.Build("workorchd", eventcontract.CommandClassFacade, eventcontract.LanePolicyTopic,
-		TopicWorkorchDCommandDone,
+	ret := eventcontract.Build("workorchd.service", eventcontract.CommandClassNotify, eventcontract.LanePolicyTopic,
+		TopicWorkorchDServiceStopped,
 	)
 	ret = append(ret, eventcontract.Build("workorchd.scheduler", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
 		TopicWorkorchDCommandWorkspaceRunRequested,

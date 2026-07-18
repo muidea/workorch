@@ -9,7 +9,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 func WorkspaceExecutionContract(ctx context.Context, hub magicevent.Hub, workspace *workspacemodel.Workspace) map[string]any {
@@ -23,14 +22,14 @@ type workspaceTemplateReader struct {
 	hub magicevent.Hub
 }
 
-func (r workspaceTemplateReader) Get(ctx context.Context, id string) (*repository.WorkspaceTemplate, error) {
+func (r workspaceTemplateReader) Get(ctx context.Context, id string) (*workspacemodel.WorkspaceTemplate, error) {
 	if r.hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
 	return workspaceports.ReadWorkspaceTemplateRecord(ctx, r.hub, strings.TrimSpace(id))
 }
 
-func (r workspaceTemplateReader) List(ctx context.Context) ([]*repository.WorkspaceTemplate, error) {
+func (r workspaceTemplateReader) List(ctx context.Context) ([]*workspacemodel.WorkspaceTemplate, error) {
 	if r.hub == nil {
 		return nil, common.ErrInvalidArgument
 	}

@@ -11,8 +11,8 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
+	workspacecontracts "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/contracts"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
-	workspaceservice "github.com/muidea/workorch/internal/modules/blocks/workspace/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
@@ -83,7 +83,7 @@ func TestGoalDoDManager_CreateWorkspace(t *testing.T) {
 	repo := memory.NewWorkspaceRepository()
 	manager := NewGoalDoDManager(repo, memory.NewGoalRepository(), memory.NewDoDRepository(), nil)
 
-	cmd := workspaceservice.CreateWorkspaceCommand{
+	cmd := workspacecontracts.CreateWorkspaceCommand{
 		WorkspaceID:          common.WorkspaceID("ws-1"),
 		Title:                "workorch workspace",
 		Description:          "workspace description",
@@ -115,7 +115,7 @@ func TestGoalDoDManager_CreateWorkspace_ValidateArguments(t *testing.T) {
 	ctx := context.Background()
 	manager := NewGoalDoDManager(memory.NewWorkspaceRepository(), memory.NewGoalRepository(), memory.NewDoDRepository(), nil)
 
-	tests := []workspaceservice.CreateWorkspaceCommand{
+	tests := []workspacecontracts.CreateWorkspaceCommand{
 		{WorkspaceID: "", Title: "ok", DeliverableDirectory: "/tmp/workorch/ws-1"},
 		{WorkspaceID: common.WorkspaceID("ws-1"), Title: "", DeliverableDirectory: "/tmp/workorch/ws-1"},
 		{WorkspaceID: common.WorkspaceID("ws-1"), Title: "   ", DeliverableDirectory: "/tmp/workorch/ws-1"},
@@ -138,27 +138,27 @@ func TestGoalDoDManager_DefineGoalAndDoDRejectBlankText(t *testing.T) {
 		t.Fatalf("seed workspace: %v", err)
 	}
 
-	if err := manager.DefineGoal(ctx, workspaceservice.DefineGoalCommand{
+	if err := manager.DefineGoal(ctx, workspacecontracts.DefineGoalCommand{
 		GoalID:      "goal-blank",
 		WorkspaceID: workspaceID,
 		Text:        "   ",
 	}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("define blank goal err = %v, want invalid argument", err)
 	}
-	if err := manager.UpdateGoal(ctx, workspaceservice.UpdateGoalCommand{
+	if err := manager.UpdateGoal(ctx, workspacecontracts.UpdateGoalCommand{
 		GoalID: "goal-blank",
 		Text:   "   ",
 	}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("update blank goal err = %v, want invalid argument", err)
 	}
-	if err := manager.DefineDoD(ctx, workspaceservice.DefineDoDCommand{
+	if err := manager.DefineDoD(ctx, workspacecontracts.DefineDoDCommand{
 		DoDID:       "dod-blank",
 		WorkspaceID: workspaceID,
 		Items:       []string{"valid item", "   "},
 	}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("define blank dod item err = %v, want invalid argument", err)
 	}
-	if err := manager.UpdateDoD(ctx, workspaceservice.UpdateDoDCommand{
+	if err := manager.UpdateDoD(ctx, workspacecontracts.UpdateDoDCommand{
 		DoDID: "dod-blank",
 		Items: []string{"   "},
 	}); !errors.Is(err, common.ErrInvalidArgument) {
@@ -171,7 +171,7 @@ func TestGoalDoDManager_CreateWorkspace_RejectsDuplicateWorkspaceID(t *testing.T
 	repo := memory.NewWorkspaceRepository()
 	manager := NewGoalDoDManager(repo, memory.NewGoalRepository(), memory.NewDoDRepository(), nil)
 
-	cmd := workspaceservice.CreateWorkspaceCommand{
+	cmd := workspacecontracts.CreateWorkspaceCommand{
 		WorkspaceID:          common.WorkspaceID("ws-duplicate"),
 		Title:                "workorch workspace",
 		DeliverableDirectory: "/tmp/workorch/ws-duplicate",
@@ -180,7 +180,7 @@ func TestGoalDoDManager_CreateWorkspace_RejectsDuplicateWorkspaceID(t *testing.T
 		t.Fatalf("first create workspace: %v", err)
 	}
 
-	second := workspaceservice.CreateWorkspaceCommand{
+	second := workspacecontracts.CreateWorkspaceCommand{
 		WorkspaceID:          cmd.WorkspaceID,
 		Title:                "workorch workspace updated",
 		DeliverableDirectory: "/tmp/workorch/ws-duplicate-updated",
@@ -205,17 +205,17 @@ func TestGoalDoDManager_DeleteWorkspacePurgesGoalAndDoD(t *testing.T) {
 	dodRepo := memory.NewDoDRepository()
 	manager := NewGoalDoDManager(workspaceRepo, goalRepo, dodRepo, nil)
 	workspaceID := common.WorkspaceID("ws-delete-cascade")
-	if err := manager.CreateWorkspace(ctx, workspaceservice.CreateWorkspaceCommand{
+	if err := manager.CreateWorkspace(ctx, workspacecontracts.CreateWorkspaceCommand{
 		WorkspaceID:          workspaceID,
 		Title:                "delete cascade",
 		DeliverableDirectory: "/tmp/workorch/ws-delete-cascade",
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if err := manager.DefineGoal(ctx, workspaceservice.DefineGoalCommand{WorkspaceID: workspaceID, GoalID: "goal-delete-cascade", Text: "goal"}); err != nil {
+	if err := manager.DefineGoal(ctx, workspacecontracts.DefineGoalCommand{WorkspaceID: workspaceID, GoalID: "goal-delete-cascade", Text: "goal"}); err != nil {
 		t.Fatalf("define goal: %v", err)
 	}
-	if err := manager.DefineDoD(ctx, workspaceservice.DefineDoDCommand{WorkspaceID: workspaceID, DoDID: "dod-delete-cascade", Items: []string{"dod"}}); err != nil {
+	if err := manager.DefineDoD(ctx, workspacecontracts.DefineDoDCommand{WorkspaceID: workspaceID, DoDID: "dod-delete-cascade", Items: []string{"dod"}}); err != nil {
 		t.Fatalf("define dod: %v", err)
 	}
 
@@ -239,7 +239,7 @@ func TestGoalDoDManager_CreateWorkspace_PublishesWorkspaceCreatedEvent(t *testin
 	hub, recorder := newWorkspaceNotificationRecorder(t)
 	manager := NewGoalDoDManager(repo, memory.NewGoalRepository(), memory.NewDoDRepository(), hub)
 
-	cmd := workspaceservice.CreateWorkspaceCommand{
+	cmd := workspacecontracts.CreateWorkspaceCommand{
 		WorkspaceID:          common.WorkspaceID("ws-event"),
 		Title:                "workorch workspace",
 		Description:          "workspace event description",
@@ -268,7 +268,7 @@ func TestGoalDoDManager_PublishesWorkspaceNotificationsThroughAsyncHub(t *testin
 	hub, recorder := newWorkspaceNotificationRecorder(t)
 	manager := NewGoalDoDManager(repo, memory.NewGoalRepository(), memory.NewDoDRepository(), hub)
 
-	if err := manager.CreateWorkspace(ctx, workspaceservice.CreateWorkspaceCommand{
+	if err := manager.CreateWorkspace(ctx, workspacecontracts.CreateWorkspaceCommand{
 		WorkspaceID:          common.WorkspaceID("ws-async"),
 		Title:                "async workspace",
 		DeliverableDirectory: "/tmp/workorch/ws-async",
@@ -297,14 +297,14 @@ func TestGoalDoDManager_PublishesDefinitionNotificationsThroughAsyncHub(t *testi
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if err := manager.DefineGoal(ctx, workspaceservice.DefineGoalCommand{
+	if err := manager.DefineGoal(ctx, workspacecontracts.DefineGoalCommand{
 		GoalID:      common.GoalID("goal-async"),
 		WorkspaceID: workspaceID,
 		Text:        "goal",
 	}); err != nil {
 		t.Fatalf("define goal: %v", err)
 	}
-	if err := manager.DefineDoD(ctx, workspaceservice.DefineDoDCommand{
+	if err := manager.DefineDoD(ctx, workspacecontracts.DefineDoDCommand{
 		DoDID:       common.DoDID("dod-async"),
 		WorkspaceID: workspaceID,
 		Items:       []string{"dod"},
@@ -328,7 +328,7 @@ func TestGoalDoDManager_EnsureWorkspaceCreatesMissingWorkspace(t *testing.T) {
 	repo := memory.NewWorkspaceRepository()
 	manager := NewGoalDoDManager(repo, memory.NewGoalRepository(), memory.NewDoDRepository(), nil)
 
-	cmd := workspaceservice.EnsureWorkspaceCommand{
+	cmd := workspacecontracts.EnsureWorkspaceCommand{
 		WorkspaceID:          common.WorkspaceID("ws-ensure-create"),
 		Title:                "workorch ensure workspace",
 		Description:          "ensure description",
@@ -371,10 +371,10 @@ func TestGoalDoDManager_DefinitionLineageFields(t *testing.T) {
 		t.Fatalf("seed workspace: %v", err)
 	}
 
-	if err := manager.DefineGoal(ctx, workspaceservice.DefineGoalCommand{WorkspaceID: workspaceID, GoalID: "goal-1", Text: "first goal"}); err != nil {
+	if err := manager.DefineGoal(ctx, workspacecontracts.DefineGoalCommand{WorkspaceID: workspaceID, GoalID: "goal-1", Text: "first goal"}); err != nil {
 		t.Fatalf("define first goal: %v", err)
 	}
-	if err := manager.DefineGoal(ctx, workspaceservice.DefineGoalCommand{WorkspaceID: workspaceID, GoalID: "goal-2", Text: "second goal"}); err != nil {
+	if err := manager.DefineGoal(ctx, workspacecontracts.DefineGoalCommand{WorkspaceID: workspaceID, GoalID: "goal-2", Text: "second goal"}); err != nil {
 		t.Fatalf("define second goal: %v", err)
 	}
 	secondGoal, err := goalRepo.Get(ctx, "goal-2")
@@ -385,10 +385,10 @@ func TestGoalDoDManager_DefinitionLineageFields(t *testing.T) {
 		t.Fatalf("second goal lineage = %+v, want revision, previous hash/id and active lineage", secondGoal)
 	}
 
-	if err := manager.DefineDoD(ctx, workspaceservice.DefineDoDCommand{WorkspaceID: workspaceID, DoDID: "dod-1", Items: []string{"first dod"}}); err != nil {
+	if err := manager.DefineDoD(ctx, workspacecontracts.DefineDoDCommand{WorkspaceID: workspaceID, DoDID: "dod-1", Items: []string{"first dod"}}); err != nil {
 		t.Fatalf("define first dod: %v", err)
 	}
-	if err := manager.DefineDoD(ctx, workspaceservice.DefineDoDCommand{WorkspaceID: workspaceID, DoDID: "dod-2", Items: []string{"second dod"}}); err != nil {
+	if err := manager.DefineDoD(ctx, workspacecontracts.DefineDoDCommand{WorkspaceID: workspaceID, DoDID: "dod-2", Items: []string{"second dod"}}); err != nil {
 		t.Fatalf("define second dod: %v", err)
 	}
 	secondDoD, err := dodRepo.Get(ctx, "dod-2")
@@ -431,7 +431,7 @@ func TestGoalDoDManager_EnsureWorkspaceResetsWorkspaceAndPublishesStateChanged(t
 		t.Fatalf("create stale workspace: %v", err)
 	}
 
-	if err := manager.EnsureWorkspace(ctx, workspaceservice.EnsureWorkspaceCommand{
+	if err := manager.EnsureWorkspace(ctx, workspacecontracts.EnsureWorkspaceCommand{
 		WorkspaceID:          workspaceID,
 		Title:                "workorch reset workspace",
 		Description:          "reset description",
@@ -482,7 +482,7 @@ func TestGoalDoDManager_DefinitionChangeReopensTerminalWorkspace(t *testing.T) {
 		{
 			name: "define goal",
 			act: func(manager *GoalDoDManager, workspaceID common.WorkspaceID) error {
-				return manager.DefineGoal(ctx, workspaceservice.DefineGoalCommand{
+				return manager.DefineGoal(ctx, workspacecontracts.DefineGoalCommand{
 					GoalID:      "goal-reopen",
 					WorkspaceID: workspaceID,
 					Text:        "new goal requirement",
@@ -492,7 +492,7 @@ func TestGoalDoDManager_DefinitionChangeReopensTerminalWorkspace(t *testing.T) {
 		{
 			name: "define dod",
 			act: func(manager *GoalDoDManager, workspaceID common.WorkspaceID) error {
-				return manager.DefineDoD(ctx, workspaceservice.DefineDoDCommand{
+				return manager.DefineDoD(ctx, workspacecontracts.DefineDoDCommand{
 					DoDID:       "dod-reopen",
 					WorkspaceID: workspaceID,
 					Items:       []string{"new acceptance requirement"},

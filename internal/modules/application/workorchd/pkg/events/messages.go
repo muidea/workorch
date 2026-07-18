@@ -6,14 +6,20 @@ import (
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+	"time"
 )
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 const CommandDestination = modulecommon.ModuleID
 
-type DoneCommand struct{}
-type DoneCommandResult struct {
-	Done <-chan error
+// ServiceStoppedData is a bounded lifecycle notification. Process-local wait
+// handles never cross the EventHub boundary.
+type ServiceStoppedData struct {
+	ServiceName  string
+	State        string
+	ErrorCode    string
+	ErrorMessage string
+	StoppedAt    time.Time
 }
 
 type WorkspaceRunRequestedCommand struct {
@@ -89,7 +95,7 @@ type CLIProgress struct {
 
 func MessageContracts() []eventcontract.MessageContract {
 	ret := eventcontract.MessageContracts(
-		eventcontract.FacadeTopic[DoneCommand, DoneCommandResult]("workorchd", definitionPackage, TopicWorkorchDCommandDone),
+		eventcontract.DataTopic[ServiceStoppedData]("workorchd.service", definitionPackage, eventcontract.LanePolicyTopic, TopicWorkorchDServiceStopped),
 		eventcontract.CommandTopic[WorkspaceRunRequestedCommand, WorkspaceRunRequestedResult]("workorchd.scheduler", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkorchDCommandWorkspaceRunRequested),
 		eventcontract.CommandTopic[ReadWorkspaceRuntimeViewCommand, ReadWorkspaceRuntimeViewResult]("workorchd.workspace_runtime_view", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkorchDCommandReadWorkspaceRuntimeView),
 		eventcontract.DataTopic[WorkspaceProjectionChangedData]("workorchd.workspace_projection", definitionPackage, eventcontract.LanePolicyState, TopicWorkspaceProjectionChanged),

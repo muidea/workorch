@@ -13,7 +13,6 @@ import (
 	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	runservice "github.com/muidea/workorch/internal/modules/kernel/run/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -22,7 +21,6 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
-type Service = runservice.Service
 type CreateRunCommand = runcontracts.CreateRunCommand
 type StartRunCommand = runcontracts.StartRunCommand
 type ResumeRunCommand = runcontracts.ResumeRunCommand
@@ -43,16 +41,17 @@ type Dependencies struct {
 type Module struct {
 	// commandMu only coordinates in-flight EventHub owner commands with Stop.
 	// Framework serializes Configure/Start/Stop lifecycle calls.
-	commandMu   sync.RWMutex
-	stopping    bool
-	bizPtr      *runbiz.Service
-	servicePtr  *runservice.Module
-	runs        repository.RunRepository
-	steps       repository.StepRepository
-	checkpoints repository.RuntimeCheckpointRepository
-	eventHub    magicevent.Hub
-	observer    magicevent.SimpleObserver
-	topics      []string
+	commandMu     sync.RWMutex
+	stopping      bool
+	bizPtr        *runbiz.Service
+	runs          repository.RunRepository
+	steps         repository.StepRepository
+	checkpoints   repository.RuntimeCheckpointRepository
+	eventHub      magicevent.Hub
+	observer      magicevent.SimpleObserver
+	topics        []string
+	recoveryReady bool
+	started       bool
 }
 
 func New() *Module { return &Module{} }
@@ -71,26 +70,28 @@ func (m *Module) Configure(deps Dependencies) error {
 	m.steps = deps.Steps
 	m.checkpoints = deps.Checkpoints
 	m.bizPtr = runbiz.NewServiceWithEventHub(deps.Runs, deps.EventHub)
-	m.servicePtr = runservice.New(runservice.Dependencies{
-		CreateRun: m.bizPtr.CreateRun,
-		EnsureRun: m.bizPtr.EnsureRun,
-	})
 	m.eventHub = deps.EventHub
-	return nil
+	// Configure is invoked exclusively from Setup (or explicit test assembly).
+	// Establish the SM-4 downstream read contract before any later module Run.
+	return m.prepareRuntimeV2RecoveryInventory()
 }
 
 func (m *Module) Start() error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}
-	if m.stopping || m.servicePtr == nil || m.eventHub == nil {
+	m.commandMu.Lock()
+	defer m.commandMu.Unlock()
+	if m.stopping || m.bizPtr == nil || m.eventHub == nil {
 		return common.ErrInvalidArgument
 	}
-	if m.observer != nil {
+	if m.started {
 		return nil
 	}
-	m.observer = magicevent.NewSimpleObserver(ModuleID, m.eventHub)
-	m.topics = []string{
+	if err := m.ensureRuntimeV2RecoveryInventoryLocked(); err != nil {
+		return err
+	}
+	regularTopics := []string{
 		runevents.TopicRunCommandEnsure,
 		runevents.TopicRunCommandCreate,
 		runevents.TopicRunCommandGet,
@@ -106,11 +107,38 @@ func (m *Module) Start() error {
 		runevents.TopicRunCommandLinkSuccessor,
 		runevents.TopicRunCommandDelete,
 	}
-	for _, topic := range m.topics {
+	for _, topic := range regularTopics {
 		m.observer.Subscribe(topic, m.handleCommand)
 	}
-	m.topics = append(m.topics, runevents.TopicRunCommandRuntimeV2RecoveryInventory)
+	m.topics = append(m.topics, regularTopics...)
+	m.started = true
+	return nil
+}
+
+// prepareRuntimeV2RecoveryInventory establishes the narrow SM-4 recovery read
+// contract during Setup. Regular Run owner commands remain Run-phase concerns.
+func (m *Module) prepareRuntimeV2RecoveryInventory() error {
+	if m == nil {
+		return common.ErrInvalidArgument
+	}
+	m.commandMu.Lock()
+	defer m.commandMu.Unlock()
+	if m.stopping || m.bizPtr == nil || m.eventHub == nil {
+		return common.ErrInvalidArgument
+	}
+	return m.ensureRuntimeV2RecoveryInventoryLocked()
+}
+
+func (m *Module) ensureRuntimeV2RecoveryInventoryLocked() error {
+	if m.observer == nil {
+		m.observer = magicevent.NewSimpleObserver(ModuleID, m.eventHub)
+	}
+	if m.recoveryReady {
+		return nil
+	}
 	m.observer.Subscribe(runevents.TopicRunCommandRuntimeV2RecoveryInventory, m.handleRuntimeV2RecoveryInventory)
+	m.topics = append(m.topics, runevents.TopicRunCommandRuntimeV2RecoveryInventory)
+	m.recoveryReady = true
 	return nil
 }
 
@@ -213,7 +241,8 @@ func (m *Module) Stop(ctx context.Context) error {
 	m.stopping = true
 	m.topics = nil
 	m.observer = nil
-	m.servicePtr = nil
+	m.recoveryReady = false
+	m.started = false
 	m.bizPtr = nil
 	m.runs = nil
 	m.steps = nil
@@ -226,13 +255,6 @@ func (m *Module) Stop(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-func (m *Module) Service() Service {
-	if m == nil {
-		return nil
-	}
-	return m.servicePtr
 }
 
 func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
@@ -249,7 +271,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (runevents.RunCommandResult
 	ctx := ev.Context()
 	topic := ev.ID()
 	data := ev.Data()
-	if m.stopping || m.runs == nil || m.servicePtr == nil {
+	if m.stopping || m.runs == nil || m.bizPtr == nil {
 		return runevents.RunCommandResult{}, common.ErrInvalidArgument
 	}
 	workspaceID := common.WorkspaceID("")
@@ -286,7 +308,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (runevents.RunCommandResult
 		if !ok || cmd.RunID == "" || cmd.WorkspaceID == "" {
 			return runevents.RunCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.EnsureRun(ctx, cmd); err != nil {
+		if err := m.bizPtr.EnsureRun(ctx, cmd); err != nil {
 			return runevents.RunCommandResult{}, err
 		}
 		return runevents.RunCommandResult{}, nil
@@ -295,7 +317,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (runevents.RunCommandResult
 		if !ok || cmd.RunID == "" || cmd.WorkspaceID == "" {
 			return runevents.RunCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.CreateRun(ctx, cmd); err != nil {
+		if err := m.bizPtr.CreateRun(ctx, cmd); err != nil {
 			return runevents.RunCommandResult{}, err
 		}
 		return runevents.RunCommandResult{}, nil

@@ -6,7 +6,6 @@ import (
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
-	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
@@ -28,7 +27,17 @@ type ListMemoryByWorkspaceCommand struct {
 }
 
 type SearchMemoryCommand struct {
-	Query repository.MemorySearchQuery
+	Query MemorySearchQuery
+}
+
+type MemorySearchQuery struct {
+	WorkspaceID common.WorkspaceID
+	Query       string
+	Tags        []string
+	Types       []string
+	Vector      []float64
+	MinScore    float64
+	Limit       int
 }
 
 type GetMemoryRecallTraceCommand struct {
@@ -37,7 +46,17 @@ type GetMemoryRecallTraceCommand struct {
 }
 
 type ListMemoryRecallTracesCommand struct {
-	Query repository.MemoryRecallTraceQuery
+	Query MemoryRecallTraceQuery
+}
+
+type MemoryRecallTraceQuery struct {
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	StepID      common.StepID
+	Stage       string
+	Source      string
+	Status      string
+	Limit       int
 }
 
 type MemoryChangedData struct {

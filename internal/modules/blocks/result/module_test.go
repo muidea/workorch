@@ -40,17 +40,11 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if module.ID() != ModuleID {
 		t.Fatalf("ID = %q, want %q", module.ID(), ModuleID)
 	}
-	if module.Service() != nil {
-		t.Fatal("new module service is non-nil before Configure")
-	}
 
 	if err := module.Configure(resultModuleContractDependencies()); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if module.Service() == nil {
-		t.Fatal("service is nil after Configure")
-	}
-	if module.bizPtr == nil || module.servicePtr == nil || module.eventHub == nil {
+	if module.bizPtr == nil || module.eventHub == nil {
 		t.Fatalf("module not fully configured: %+v", module)
 	}
 	if err := module.Start(); err != nil {
@@ -69,9 +63,7 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if module.Service() != nil ||
-		module.bizPtr != nil ||
-		module.servicePtr != nil ||
+	if module.bizPtr != nil ||
 		module.eventHub != nil ||
 		len(module.topics) != 0 {
 		t.Fatalf("module was not cleared after Stop: %+v", module)
@@ -94,9 +86,9 @@ func TestModuleServiceManagesResultsAndArtifacts(t *testing.T) {
 	if err := module.Start(); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	service := module.Service()
+	service := module.bizPtr
 	if service == nil {
-		t.Fatalf("Service nil, want configured service")
+		t.Fatalf("biz nil, want configured owner")
 	}
 	result := validModuleTestResult()
 	if err := service.CreateResult(ctx, result); err != nil {
@@ -123,8 +115,8 @@ func TestModuleServiceManagesResultsAndArtifacts(t *testing.T) {
 	if err := module.Stop(ctx); err != nil {
 		t.Fatalf("Teardown: %v", err)
 	}
-	if module.Service() != nil {
-		t.Fatalf("Service after teardown = %v, want nil", module.Service())
+	if module.bizPtr != nil {
+		t.Fatalf("biz after teardown = %v, want nil", module.bizPtr)
 	}
 }
 

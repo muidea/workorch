@@ -9,7 +9,6 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/common"
 	soulcontracts "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/contracts"
 	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
-	soulservice "github.com/muidea/workorch/internal/modules/blocks/soul/service"
 	systemevents "github.com/muidea/workorch/internal/modules/kernel/system/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -18,7 +17,6 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
-type Service = soulservice.Service
 type CreateSoulCommand = soulcontracts.CreateSoulCommand
 type UpdateSoulCommand = soulcontracts.UpdateSoulCommand
 type ValidateCapabilitySelectionCommand = soulcontracts.ValidateCapabilitySelectionCommand
@@ -29,12 +27,11 @@ type Dependencies struct {
 }
 
 type Module struct {
-	bizPtr     *soulbiz.Service
-	servicePtr *soulservice.Module
-	souls      repository.SoulRepository
-	eventHub   magicevent.Hub
-	observer   magicevent.SimpleObserver
-	topics     []string
+	bizPtr   *soulbiz.Service
+	souls    repository.SoulRepository
+	eventHub magicevent.Hub
+	observer magicevent.SimpleObserver
+	topics   []string
 }
 
 func New() *Module { return &Module{} }
@@ -48,19 +45,11 @@ func (m *Module) Configure(deps Dependencies) error {
 	m.eventHub = deps.EventHub
 	m.souls = deps.Souls
 	m.bizPtr = soulbiz.NewService(deps.Souls)
-	m.servicePtr = soulservice.New(soulservice.Dependencies{
-		CreateSoul:                  m.bizPtr.CreateSoul,
-		UpdateSoul:                  m.bizPtr.UpdateSoul,
-		DeleteSoul:                  m.bizPtr.DeleteSoul,
-		GetSoul:                     m.bizPtr.GetSoul,
-		ListSouls:                   m.bizPtr.ListSouls,
-		ValidateCapabilitySelection: m.bizPtr.ValidateCapabilitySelection,
-	})
 	return nil
 }
 
 func (m *Module) Start() error {
-	if m == nil || m.servicePtr == nil {
+	if m == nil || m.bizPtr == nil {
 		return common.ErrInvalidArgument
 	}
 	if m.eventHub == nil {
@@ -95,7 +84,6 @@ func (m *Module) Stop(ctx context.Context) error {
 	}
 	m.topics = nil
 	m.observer = nil
-	m.servicePtr = nil
 	m.bizPtr = nil
 	m.souls = nil
 	m.eventHub = nil
@@ -121,20 +109,13 @@ func setSystemSoulDefaultsResult(result magicevent.Result, err error) {
 	result.Set(systemevents.EnsureSoulDefaultsResult{Ensured: true}, nil)
 }
 
-func (m *Module) Service() Service {
-	if m == nil || m.servicePtr == nil {
-		return nil
-	}
-	return m.servicePtr
-}
-
 func (m *Module) handleSoulCommand(ev magicevent.Event, result magicevent.Result) {
 	response, err := m.executeSoulCommand(ev)
 	setMagicResult(result, response, err)
 }
 
 func (m *Module) executeSoulCommand(ev magicevent.Event) (soulevents.SoulCommandResult, error) {
-	if m == nil || m.servicePtr == nil {
+	if m == nil || m.bizPtr == nil {
 		return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
 	}
 	ctx := ev.Context()
@@ -144,10 +125,10 @@ func (m *Module) executeSoulCommand(ev magicevent.Event) (soulevents.SoulCommand
 		if !ok {
 			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.CreateSoul(ctx, cmd); err != nil {
+		if err := m.bizPtr.CreateSoul(ctx, cmd); err != nil {
 			return soulevents.SoulCommandResult{}, err
 		}
-		item, err := m.servicePtr.GetSoul(ctx, cmd.SoulID)
+		item, err := m.bizPtr.GetSoul(ctx, cmd.SoulID)
 		if err != nil {
 			return soulevents.SoulCommandResult{}, err
 		}
@@ -157,7 +138,7 @@ func (m *Module) executeSoulCommand(ev magicevent.Event) (soulevents.SoulCommand
 		if !ok {
 			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
 		}
-		item, err := m.servicePtr.GetSoul(ctx, cmd.SoulID)
+		item, err := m.bizPtr.GetSoul(ctx, cmd.SoulID)
 		if err != nil {
 			return soulevents.SoulCommandResult{}, err
 		}
@@ -166,7 +147,7 @@ func (m *Module) executeSoulCommand(ev magicevent.Event) (soulevents.SoulCommand
 		if _, ok := ev.Data().(soulevents.ListSoulsCommand); !ok {
 			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
 		}
-		items, err := m.servicePtr.ListSouls(ctx)
+		items, err := m.bizPtr.ListSouls(ctx)
 		if err != nil {
 			return soulevents.SoulCommandResult{}, err
 		}
@@ -176,10 +157,10 @@ func (m *Module) executeSoulCommand(ev magicevent.Event) (soulevents.SoulCommand
 		if !ok {
 			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.UpdateSoul(ctx, cmd); err != nil {
+		if err := m.bizPtr.UpdateSoul(ctx, cmd); err != nil {
 			return soulevents.SoulCommandResult{}, err
 		}
-		item, err := m.servicePtr.GetSoul(ctx, cmd.SoulID)
+		item, err := m.bizPtr.GetSoul(ctx, cmd.SoulID)
 		if err != nil {
 			return soulevents.SoulCommandResult{}, err
 		}
@@ -189,7 +170,7 @@ func (m *Module) executeSoulCommand(ev magicevent.Event) (soulevents.SoulCommand
 		if !ok {
 			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.DeleteSoul(ctx, cmd.SoulID); err != nil {
+		if err := m.bizPtr.DeleteSoul(ctx, cmd.SoulID); err != nil {
 			return soulevents.SoulCommandResult{}, err
 		}
 		return soulevents.SoulCommandResult{}, nil
@@ -198,7 +179,7 @@ func (m *Module) executeSoulCommand(ev magicevent.Event) (soulevents.SoulCommand
 		if !ok {
 			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.ValidateCapabilitySelection(ctx, cmd); err != nil {
+		if err := m.bizPtr.ValidateCapabilitySelection(ctx, cmd); err != nil {
 			return soulevents.SoulCommandResult{}, err
 		}
 		return soulevents.SoulCommandResult{}, nil

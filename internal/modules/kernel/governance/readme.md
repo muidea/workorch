@@ -9,6 +9,7 @@
 - 通过 EventHub 读取 DecisionTicket、Approval、Run、Workspace 与 Memory 的权威状态。
 - 自动解决时通过 Decision 或 Approval owner 的具体 resolve command 写入治理结果；需要继续执行时通过 Orchestrator command 恢复 Run。
 - `pkg/events.GovernanceData` 发布 evaluated、resolved、escalated、blocked 通知；`ListAutoGovernanceTracesCommand` / `GovernanceCommandResult` 提供 trace 查询。
+- `AutoGovernanceTraceQuery` 是 Governance owner DTO；module 内部映射 repository query，EventHub 合同不引用 repository 类型。
 - application 和 Eventstream 按需导入 `kernel/governance/pkg/events` 消费治理 trace 与通知。
 - AutoGovernanceTrace 只记录治理协调过程，不替代 Decision、Approval 或 Run 的正式状态。
 

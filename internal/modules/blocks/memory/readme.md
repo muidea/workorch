@@ -7,6 +7,7 @@
 ## 组件交互及合同
 
 - MemoryItem 与 RecallTrace command/query 由 `blocks/memory/pkg/events` 定义，并返回 `MemoryCommandResult`。
+- `MemorySearchQuery` 与 `MemoryRecallTraceQuery` 是 owner event DTO；module 内部才映射到 repository query，并 clone vector/tags/types 等可变 slice。repository type 不得进入 event contract。
 - MemoryItem create/update/delete 成功后由本 block 单点发布 `MemoryChangedData`。
 - RecallTrace upsert 成功后由本 block单点发布 `MemoryRecallRecordedData`。
 - `application/workorchd`、`kernel/orchestrator` 和 `kernel/governance` 通过 EventHub 查询、搜索或写入 Memory；LLM 只消费 Orchestrator 组织后的有界记忆上下文。

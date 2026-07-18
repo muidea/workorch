@@ -9,7 +9,6 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/common"
 	mcpcontracts "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/contracts"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
-	mcpservice "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/service"
 	systemevents "github.com/muidea/workorch/internal/modules/kernel/system/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -18,7 +17,6 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
-type Service = mcpservice.Service
 type CreateServerCommand = mcpcontracts.CreateServerCommand
 type UpdateServerCommand = mcpcontracts.UpdateServerCommand
 
@@ -30,7 +28,6 @@ type Dependencies struct {
 
 type Module struct {
 	bizPtr       *mcpbiz.Service
-	servicePtr   *mcpservice.Module
 	servers      repository.MCPServerRepository
 	capabilities repository.MCPCapabilityRepository
 	eventHub     magicevent.Hub
@@ -50,21 +47,11 @@ func (m *Module) Configure(deps Dependencies) error {
 	m.servers = deps.Servers
 	m.capabilities = deps.Capabilities
 	m.bizPtr = mcpbiz.NewService(deps.Servers, deps.Capabilities)
-	m.servicePtr = mcpservice.New(mcpservice.Dependencies{
-		CreateServer:     m.bizPtr.CreateServer,
-		UpdateServer:     m.bizPtr.UpdateServer,
-		GetServer:        m.bizPtr.GetServer,
-		ListServers:      m.bizPtr.ListServers,
-		CreateCapability: m.bizPtr.CreateCapability,
-		UpdateCapability: m.bizPtr.UpdateCapability,
-		GetCapability:    m.bizPtr.GetCapability,
-		ListCapabilities: m.bizPtr.ListCapabilities,
-	})
 	return nil
 }
 
 func (m *Module) Start() error {
-	if m == nil || m.servicePtr == nil || m.eventHub == nil {
+	if m == nil || m.bizPtr == nil || m.eventHub == nil {
 		return common.ErrInvalidArgument
 	}
 	if m.observer != nil {
@@ -98,7 +85,6 @@ func (m *Module) Stop(ctx context.Context) error {
 	}
 	m.topics = nil
 	m.observer = nil
-	m.servicePtr = nil
 	m.bizPtr = nil
 	m.servers = nil
 	m.capabilities = nil
@@ -125,20 +111,13 @@ func setSystemMCPDefaultsResult(result magicevent.Result, err error) {
 	result.Set(systemevents.EnsureMCPDefaultsResult{Ensured: true}, nil)
 }
 
-func (m *Module) Service() Service {
-	if m == nil || m.servicePtr == nil {
-		return nil
-	}
-	return m.servicePtr
-}
-
 func (m *Module) handleMCPCommand(ev magicevent.Event, result magicevent.Result) {
 	response, err := m.executeMCPCommand(ev)
 	setMagicResult(result, response, err)
 }
 
 func (m *Module) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandResult, error) {
-	if m == nil || m.servicePtr == nil {
+	if m == nil || m.bizPtr == nil {
 		return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 	}
 	ctx := ev.Context()
@@ -148,10 +127,10 @@ func (m *Module) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandRes
 		if !ok {
 			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.CreateServer(ctx, cmd); err != nil {
+		if err := m.bizPtr.CreateServer(ctx, cmd); err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
-		server, err := m.servicePtr.GetServer(ctx, cmd.ServerID)
+		server, err := m.bizPtr.GetServer(ctx, cmd.ServerID)
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
@@ -161,7 +140,7 @@ func (m *Module) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandRes
 		if !ok {
 			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 		}
-		server, err := m.servicePtr.GetServer(ctx, cmd.ServerID)
+		server, err := m.bizPtr.GetServer(ctx, cmd.ServerID)
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
@@ -170,7 +149,7 @@ func (m *Module) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandRes
 		if _, ok := ev.Data().(mcpevents.ListServersCommand); !ok {
 			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 		}
-		servers, err := m.servicePtr.ListServers(ctx)
+		servers, err := m.bizPtr.ListServers(ctx)
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
@@ -180,10 +159,10 @@ func (m *Module) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandRes
 		if !ok {
 			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.UpdateServer(ctx, cmd); err != nil {
+		if err := m.bizPtr.UpdateServer(ctx, cmd); err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
-		server, err := m.servicePtr.GetServer(ctx, cmd.ServerID)
+		server, err := m.bizPtr.GetServer(ctx, cmd.ServerID)
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
@@ -193,7 +172,7 @@ func (m *Module) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandRes
 		if !ok {
 			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 		}
-		item, err := m.servicePtr.CreateCapability(ctx, mcpCapabilityContractCommand(cmd))
+		item, err := m.bizPtr.CreateCapability(ctx, mcpCapabilityContractCommand(cmd))
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
@@ -203,7 +182,7 @@ func (m *Module) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandRes
 		if !ok {
 			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 		}
-		item, err := m.servicePtr.GetCapability(ctx, cmd.CapabilityID)
+		item, err := m.bizPtr.GetCapability(ctx, cmd.CapabilityID)
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
@@ -213,7 +192,7 @@ func (m *Module) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandRes
 		if !ok {
 			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 		}
-		items, err := m.servicePtr.ListCapabilities(ctx, cmd.Query)
+		items, err := m.bizPtr.ListCapabilities(ctx, cmd.Query)
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
@@ -223,7 +202,7 @@ func (m *Module) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandRes
 		if !ok {
 			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 		}
-		item, err := m.servicePtr.UpdateCapability(ctx, mcpCapabilityContractCommand(cmd))
+		item, err := m.bizPtr.UpdateCapability(ctx, mcpCapabilityContractCommand(cmd))
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}

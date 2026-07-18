@@ -3,7 +3,7 @@ package events
 const NotificationDestination = "/workorchd/consumers/#"
 
 const (
-	TopicWorkorchDCommandDone                     = "/workorchd/command/done"
+	TopicWorkorchDServiceStopped                  = "/workorchd/service/stopped"
 	TopicWorkorchDCommandWorkspaceRunRequested    = "/workorchd/command/workspace-run/requested"
 	TopicWorkorchDCommandReadWorkspaceRuntimeView = "/workorchd/command/workspace-runtime-view/read"
 	TopicWorkspaceProjectionChanged               = "/workorchd/workspace/projection/changed"

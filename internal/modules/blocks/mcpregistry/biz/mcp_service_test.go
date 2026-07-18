@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	mcpservice "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/contracts"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
-	mcpservice "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/repository/memory"
 )

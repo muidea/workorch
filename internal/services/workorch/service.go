@@ -92,7 +92,7 @@ func (s *serverService) Run(ctx context.Context) error {
 	if err := s.framework.Run(ctx); err != nil {
 		return err
 	}
-	return waitServer(ctx)
+	return s.framework.waitServer(ctx)
 }
 
 func (s *serverService) Shutdown(ctx context.Context) error {

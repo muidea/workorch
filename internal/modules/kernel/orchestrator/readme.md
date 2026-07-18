@@ -123,7 +123,7 @@
 - `runtime_v2_governance` resolution committed 后由 Orchestrator 自行投影 terminal 或调度 drive continuation；application resolved watcher 不得再次发送 Resume。
 - 相同 governance resolution 的 duplicate commit 必须重试幂等 continuation/projection；singleflight gate 负责与仍在执行的 drive 合并，避免“aggregate 已提交但 Run 仍 blocked”的单边状态。
 - provider transport、operation recovery、CAS reload、terminal delivery 使用独立 persisted recovery policy/ledger；candidate attempt 0/1 与 per-focus repair budget 不得消费这些预算。
-- startup recovery 必须通过 Run owner concrete typed inventory 获取 `active_no_dispatch`、`active_sealed_dispatch`、`blocked_governance`、`terminal_delivery_pending`，不得由 Orchestrator 使用通用 Run List 自行推断。
+- startup recovery 必须通过 Run owner concrete typed inventory 获取 `active_no_dispatch`、`active_sealed_dispatch`、`blocked_governance`、`terminal_delivery_pending`，不得由 Orchestrator 使用通用 Run List 自行推断；SM-4 在 Orchestrator `Run` 中同步完成全部 inventory 分页，缺 subscriber、owner error、nil/wrong result 或 cursor 异常必须使启动失败。盘点成功后才以 run-scoped singleflight 将具体 re-drive 交给 `BackgroundRoutine`，不建立 application scan 或第二套 startup retry 状态机。
 - definition revision、Goal/DoD identity、正文或 capability contract 任一漂移都必须返回 conflict；definition context revision 必须与 facts 和 authority transaction 一致。
 - LLM dispatch 前必须先完成 manifest、target snapshot、failure target、capability、validation scratch 和 provider ceiling preflight；缺失资源只能进入 deterministic `AcquirePrerequisite`，不得混入 LLM state-changing requiredOutput。
 - block 输出只是 candidate；evidence quality、coverage binding、next action 和 accepted Result 只能由 Orchestrator 判定。

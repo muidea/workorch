@@ -6,7 +6,6 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
-	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -129,8 +128,8 @@ type WorkspaceCommandResult struct {
 	Goals      []*workspacemodel.Goal
 	DoD        *workspacemodel.DoD
 	DoDs       []*workspacemodel.DoD
-	Template   *repository.WorkspaceTemplate
-	Templates  []*repository.WorkspaceTemplate
+	Template   *workspacemodel.WorkspaceTemplate
+	Templates  []*workspacemodel.WorkspaceTemplate
 }
 
 func MessageContracts() []eventcontract.MessageContract {

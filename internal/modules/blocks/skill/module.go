@@ -9,14 +9,12 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/common"
 	skillcontracts "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/contracts"
 	skillevents "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/events"
-	skillservice "github.com/muidea/workorch/internal/modules/blocks/skill/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 const ModuleID = modulecommon.ModuleID
 
-type Service = skillservice.Service
 type CreateSkillCommand = skillcontracts.CreateSkillCommand
 type UpdateSkillCommand = skillcontracts.UpdateSkillCommand
 
@@ -26,11 +24,10 @@ type Dependencies struct {
 }
 
 type Module struct {
-	bizPtr     *skillbiz.Service
-	servicePtr *skillservice.Module
-	eventHub   magicevent.Hub
-	observer   magicevent.SimpleObserver
-	topics     []string
+	bizPtr   *skillbiz.Service
+	eventHub magicevent.Hub
+	observer magicevent.SimpleObserver
+	topics   []string
 }
 
 func New() *Module { return &Module{} }
@@ -43,17 +40,11 @@ func (m *Module) Configure(deps Dependencies) error {
 	}
 	m.eventHub = deps.EventHub
 	m.bizPtr = skillbiz.NewService(deps.Skills)
-	m.servicePtr = skillservice.New(skillservice.Dependencies{
-		CreateSkill: m.bizPtr.CreateSkill,
-		UpdateSkill: m.bizPtr.UpdateSkill,
-		GetSkill:    m.bizPtr.GetSkill,
-		ListSkills:  m.bizPtr.ListSkills,
-	})
 	return nil
 }
 
 func (m *Module) Start() error {
-	if m == nil || m.servicePtr == nil {
+	if m == nil || m.bizPtr == nil {
 		return common.ErrInvalidArgument
 	}
 	if m.eventHub == nil {
@@ -84,17 +75,9 @@ func (m *Module) Stop(ctx context.Context) error {
 	}
 	m.topics = nil
 	m.observer = nil
-	m.servicePtr = nil
 	m.bizPtr = nil
 	m.eventHub = nil
 	return nil
-}
-
-func (m *Module) Service() Service {
-	if m == nil || m.servicePtr == nil {
-		return nil
-	}
-	return m.servicePtr
 }
 
 func (m *Module) handleSkillCommand(ev magicevent.Event, result magicevent.Result) {
@@ -103,7 +86,7 @@ func (m *Module) handleSkillCommand(ev magicevent.Event, result magicevent.Resul
 }
 
 func (m *Module) executeSkillCommand(ev magicevent.Event) (skillevents.SkillCommandResult, error) {
-	if m == nil || m.servicePtr == nil {
+	if m == nil || m.bizPtr == nil {
 		return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
 	}
 	ctx := ev.Context()
@@ -113,10 +96,10 @@ func (m *Module) executeSkillCommand(ev magicevent.Event) (skillevents.SkillComm
 		if !ok {
 			return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.CreateSkill(ctx, cmd); err != nil {
+		if err := m.bizPtr.CreateSkill(ctx, cmd); err != nil {
 			return skillevents.SkillCommandResult{}, err
 		}
-		item, err := m.servicePtr.GetSkill(ctx, cmd.SkillID)
+		item, err := m.bizPtr.GetSkill(ctx, cmd.SkillID)
 		if err != nil {
 			return skillevents.SkillCommandResult{}, err
 		}
@@ -126,7 +109,7 @@ func (m *Module) executeSkillCommand(ev magicevent.Event) (skillevents.SkillComm
 		if !ok {
 			return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
 		}
-		item, err := m.servicePtr.GetSkill(ctx, cmd.SkillID)
+		item, err := m.bizPtr.GetSkill(ctx, cmd.SkillID)
 		if err != nil {
 			return skillevents.SkillCommandResult{}, err
 		}
@@ -135,7 +118,7 @@ func (m *Module) executeSkillCommand(ev magicevent.Event) (skillevents.SkillComm
 		if _, ok := ev.Data().(skillevents.ListSkillsCommand); !ok {
 			return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
 		}
-		items, err := m.servicePtr.ListSkills(ctx)
+		items, err := m.bizPtr.ListSkills(ctx)
 		if err != nil {
 			return skillevents.SkillCommandResult{}, err
 		}
@@ -145,10 +128,10 @@ func (m *Module) executeSkillCommand(ev magicevent.Event) (skillevents.SkillComm
 		if !ok {
 			return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.UpdateSkill(ctx, cmd); err != nil {
+		if err := m.bizPtr.UpdateSkill(ctx, cmd); err != nil {
 			return skillevents.SkillCommandResult{}, err
 		}
-		item, err := m.servicePtr.GetSkill(ctx, cmd.SkillID)
+		item, err := m.bizPtr.GetSkill(ctx, cmd.SkillID)
 		if err != nil {
 			return skillevents.SkillCommandResult{}, err
 		}

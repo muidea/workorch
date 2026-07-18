@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
-
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
@@ -26,7 +24,6 @@ type Module struct {
 	commandHub    magicevent.Hub
 	session       *appservice.RuntimeSession
 	cliDispatcher *appservice.CLICommandDispatcher
-	doneObserver  magicevent.SimpleObserver
 }
 
 func New() *Module {
@@ -77,8 +74,6 @@ func (m *Module) Run(ctx context.Context) *cd.Error {
 			m.service.Shutdown(ctx)
 			return cd.NewError(cd.IllegalParam, fmt.Sprintf("workorch cli dispatcher run failed: %v", err))
 		}
-		m.doneObserver = magicevent.NewSimpleObserver(workorchdevents.CommandDestination, m.commandHub)
-		m.doneObserver.Subscribe(workorchdevents.TopicWorkorchDCommandDone, m.handleDoneCommand)
 	}
 	return nil
 }
@@ -86,10 +81,6 @@ func (m *Module) Run(ctx context.Context) *cd.Error {
 func (m *Module) Teardown(ctx context.Context) {
 	if m == nil {
 		return
-	}
-	if m.doneObserver != nil {
-		m.doneObserver.Unsubscribe(workorchdevents.TopicWorkorchDCommandDone)
-		m.doneObserver = nil
 	}
 	if m.cliDispatcher != nil {
 		m.cliDispatcher.Close()
@@ -104,21 +95,4 @@ func (m *Module) Teardown(ctx context.Context) {
 	}
 	m.service = nil
 	m.commandHub = nil
-}
-
-func (m *Module) Done() <-chan error {
-	if m == nil || m.service == nil {
-		closed := make(chan error)
-		close(closed)
-		return closed
-	}
-	return m.service.Done()
-}
-
-func (m *Module) handleDoneCommand(ev magicevent.Event, result magicevent.Result) {
-	if _, ok := ev.Data().(workorchdevents.DoneCommand); !ok {
-		result.Set(nil, cd.NewError(cd.IllegalParam, "invalid workorchd done command"))
-		return
-	}
-	result.Set(workorchdevents.DoneCommandResult{Done: m.Done()}, nil)
 }

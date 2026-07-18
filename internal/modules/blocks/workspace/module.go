@@ -11,7 +11,6 @@ import (
 	workspacecontracts "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/contracts"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
-	workspaceservice "github.com/muidea/workorch/internal/modules/blocks/workspace/service"
 	systemevents "github.com/muidea/workorch/internal/modules/kernel/system/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
@@ -29,7 +28,6 @@ type DefineGoalCommand = workspacecontracts.DefineGoalCommand
 type UpdateGoalCommand = workspacecontracts.UpdateGoalCommand
 type DefineDoDCommand = workspacecontracts.DefineDoDCommand
 type UpdateDoDCommand = workspacecontracts.UpdateDoDCommand
-type Service = workspaceservice.Service
 
 type Dependencies struct {
 	Workspaces repository.WorkspaceRepository
@@ -41,7 +39,6 @@ type Dependencies struct {
 
 type Module struct {
 	bizPtr     *workspacebiz.GoalDoDManager
-	servicePtr *workspaceservice.Module
 	workspaces repository.WorkspaceRepository
 	goals      repository.GoalRepository
 	dods       repository.DoDRepository
@@ -65,20 +62,11 @@ func (m *Module) Configure(deps Dependencies) error {
 	m.templates = deps.Templates
 	m.eventHub = deps.EventHub
 	m.bizPtr = workspacebiz.NewGoalDoDManager(deps.Workspaces, deps.Goals, deps.DoDs, deps.EventHub)
-	m.servicePtr = workspaceservice.New(workspaceservice.Dependencies{
-		CreateWorkspace: m.bizPtr.CreateWorkspace,
-		EnsureWorkspace: m.bizPtr.EnsureWorkspace,
-		DeleteWorkspace: m.bizPtr.DeleteWorkspace,
-		DefineGoal:      m.bizPtr.DefineGoal,
-		UpdateGoal:      m.bizPtr.UpdateGoal,
-		DefineDoD:       m.bizPtr.DefineDoD,
-		UpdateDoD:       m.bizPtr.UpdateDoD,
-	})
 	return nil
 }
 
 func (m *Module) Start() error {
-	if m == nil || m.servicePtr == nil || m.eventHub == nil {
+	if m == nil || m.bizPtr == nil || m.eventHub == nil {
 		return common.ErrInvalidArgument
 	}
 	if m.observer != nil {
@@ -146,7 +134,6 @@ func (m *Module) Stop(ctx context.Context) error {
 	}
 	m.topics = nil
 	m.observer = nil
-	m.servicePtr = nil
 	m.bizPtr = nil
 	m.workspaces = nil
 	m.goals = nil
@@ -156,17 +143,13 @@ func (m *Module) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (m *Module) Service() Service {
-	return m.servicePtr
-}
-
 func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
 	response, err := m.executeCommand(ev)
 	setWorkspaceMagicResult(result, response, err)
 }
 
 func (m *Module) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceCommandResult, error) {
-	if m == nil || m.servicePtr == nil {
+	if m == nil || m.bizPtr == nil {
 		return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 	}
 	workspaceID, err := workspaceScopeFromCommand(ev)
@@ -183,7 +166,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceC
 		if !ok {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.CreateWorkspace(ctx, cmd); err != nil {
+		if err := m.bizPtr.CreateWorkspace(ctx, cmd); err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
 		return workspaceevents.WorkspaceCommandResult{}, nil
@@ -192,7 +175,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceC
 		if !ok {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.EnsureWorkspace(ctx, cmd); err != nil {
+		if err := m.bizPtr.EnsureWorkspace(ctx, cmd); err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
 		return workspaceevents.WorkspaceCommandResult{}, nil
@@ -254,7 +237,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceC
 		if !ok || cmd.WorkspaceID == "" {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.DeleteWorkspace(ctx, cmd.WorkspaceID); err != nil {
+		if err := m.bizPtr.DeleteWorkspace(ctx, cmd.WorkspaceID); err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
 		return workspaceevents.WorkspaceCommandResult{}, nil
@@ -263,7 +246,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceC
 		if !ok || m.goals == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.DefineGoal(ctx, cmd); err != nil {
+		if err := m.bizPtr.DefineGoal(ctx, cmd); err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
 		item, err := m.goals.Get(ctx, cmd.GoalID)
@@ -276,7 +259,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceC
 		if !ok || m.goals == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.UpdateGoal(ctx, cmd); err != nil {
+		if err := m.bizPtr.UpdateGoal(ctx, cmd); err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
 		item, err := m.goals.Get(ctx, cmd.GoalID)
@@ -318,7 +301,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceC
 		if !ok || m.dods == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.DefineDoD(ctx, cmd); err != nil {
+		if err := m.bizPtr.DefineDoD(ctx, cmd); err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
 		item, err := m.dods.Get(ctx, cmd.DoDID)
@@ -331,7 +314,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceC
 		if !ok || m.dods == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.UpdateDoD(ctx, cmd); err != nil {
+		if err := m.bizPtr.UpdateDoD(ctx, cmd); err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
 		item, err := m.dods.Get(ctx, cmd.DoDID)
@@ -380,7 +363,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceC
 		if err := m.templates.Create(ctx, item); err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{Template: item}, nil
+		return workspaceevents.WorkspaceCommandResult{Template: workspaceTemplateFromRepository(item)}, nil
 	case workspaceevents.TopicWorkspaceTemplateCommandGet:
 		cmd, ok := ev.Data().(workspaceevents.GetWorkspaceTemplateCommand)
 		if !ok || cmd.TemplateID == "" || m.templates == nil {
@@ -390,7 +373,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceC
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{Template: item}, nil
+		return workspaceevents.WorkspaceCommandResult{Template: workspaceTemplateFromRepository(item)}, nil
 	case workspaceevents.TopicWorkspaceTemplateCommandList:
 		if _, ok := ev.Data().(workspaceevents.ListWorkspaceTemplatesCommand); !ok || m.templates == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
@@ -399,7 +382,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceC
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{Templates: items}, nil
+		return workspaceevents.WorkspaceCommandResult{Templates: workspaceTemplatesFromRepository(items)}, nil
 	case workspaceevents.TopicWorkspaceTemplateCommandUpdate:
 		cmd, ok := ev.Data().(workspaceevents.UpdateWorkspaceTemplateCommand)
 		if !ok || m.templates == nil {
@@ -412,7 +395,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceC
 		if err := m.templates.Update(ctx, item); err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{Template: item}, nil
+		return workspaceevents.WorkspaceCommandResult{Template: workspaceTemplateFromRepository(item)}, nil
 	case workspaceevents.TopicWorkspaceTemplateCommandDelete:
 		cmd, ok := ev.Data().(workspaceevents.DeleteWorkspaceTemplateCommand)
 		if !ok || cmd.TemplateID == "" || m.templates == nil {
@@ -511,6 +494,34 @@ func workspaceTemplateFromCommand(cmd workspaceevents.CreateWorkspaceTemplateCom
 		ContextHints:     cmd.ContextHints.Clone(),
 		EvidencePolicies: workorcheventpayload.CloneSlice(cmd.EvidencePolicies),
 	}, nil
+}
+
+func workspaceTemplateFromRepository(item *repository.WorkspaceTemplate) *workspacemodel.WorkspaceTemplate {
+	if item == nil {
+		return nil
+	}
+	return &workspacemodel.WorkspaceTemplate{
+		ID:               item.ID,
+		Name:             item.Name,
+		Description:      item.Description,
+		GoalText:         item.GoalText,
+		DoDItems:         append([]string(nil), item.DoDItems...),
+		DefaultSoulID:    item.DefaultSoulID,
+		SoulBindings:     cloneStringMap(item.SoulBindings),
+		ContextHints:     item.ContextHints.Clone(),
+		EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies),
+	}
+}
+
+func workspaceTemplatesFromRepository(items []*repository.WorkspaceTemplate) []*workspacemodel.WorkspaceTemplate {
+	if items == nil {
+		return nil
+	}
+	ret := make([]*workspacemodel.WorkspaceTemplate, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, workspaceTemplateFromRepository(item))
+	}
+	return ret
 }
 
 func workspaceFromUpdateCommand(cmd workspaceevents.UpdateWorkspaceCommand) *workspacemodel.Workspace {

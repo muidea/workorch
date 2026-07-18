@@ -29,6 +29,12 @@ func (m *Module) Setup(_ context.Context, eventHub event.Hub, _ task.BackgroundR
 	}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())
 	}
+	// GMM-R1 / SM-4: Orchestrator runs before this module by framework weight.
+	// The recovery inventory is therefore a Setup-phase read contract rather than
+	// a normal Run-phase command subscription.
+	if setupErr := m.prepareRuntimeV2RecoveryInventory(); setupErr != nil {
+		return cd.NewError(cd.Unexpected, setupErr.Error())
+	}
 	return nil
 }
 

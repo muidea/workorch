@@ -8,7 +8,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 func ApplyWorkspaceTemplateOnCreate(ctx context.Context, hub magicevent.Hub, item *workspacemodel.Workspace, templateID string) (*workspacemodel.Workspace, error) {
@@ -26,7 +25,7 @@ func ApplyWorkspaceTemplateOnCreate(ctx context.Context, hub magicevent.Hub, ite
 	if err := ValidateWorkspaceTemplateSoulRefs(ctx, hub, templateItem); err != nil {
 		return nil, err
 	}
-	updated, err := workspacecore.ApplyTemplateToWorkspace(item, workspacecore.WorkspaceTemplateFromRepository(templateItem))
+	updated, err := workspacecore.ApplyTemplateToWorkspace(item, workspacecore.WorkspaceTemplateFromOwner(templateItem))
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +35,7 @@ func ApplyWorkspaceTemplateOnCreate(ctx context.Context, hub magicevent.Hub, ite
 	return ReadWorkspaceRecord(ctx, hub, updated.ID)
 }
 
-func ValidateWorkspaceTemplateSoulRefs(ctx context.Context, hub magicevent.Hub, template *repository.WorkspaceTemplate) error {
+func ValidateWorkspaceTemplateSoulRefs(ctx context.Context, hub magicevent.Hub, template *workspacemodel.WorkspaceTemplate) error {
 	if template == nil {
 		return common.ErrInvalidArgument
 	}

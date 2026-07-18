@@ -9,7 +9,6 @@ import (
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
@@ -141,7 +140,7 @@ func TestModuleListTracesCommandUsesRepositoryQueryContract(t *testing.T) {
 	})
 
 	response, err := sendGovernanceTestCommand(ctx, rawHub, governanceevents.TopicGovernanceAutoCommandListTraces, governanceevents.ListAutoGovernanceTracesCommand{
-		Query: repository.AutoGovernanceTraceQuery{
+		Query: governanceevents.AutoGovernanceTraceQuery{
 			WorkspaceID: "ws-governance-owner-a",
 			RunID:       "run-governance-owner-a",
 			ItemType:    "decision",

@@ -1,11 +1,11 @@
 package workspacecore
 
 import (
-	"github.com/muidea/workorch/internal/pkg/repository"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-func WorkspaceTemplateToRepository(item WorkspaceTemplate) (*repository.WorkspaceTemplate, error) {
+func WorkspaceTemplateToOwner(item WorkspaceTemplate) (*workspacemodel.WorkspaceTemplate, error) {
 	contextHints, err := workorcheventpayload.FromMap(item.ContextHints)
 	if err != nil {
 		return nil, err
@@ -14,7 +14,7 @@ func WorkspaceTemplateToRepository(item WorkspaceTemplate) (*repository.Workspac
 	if err != nil {
 		return nil, err
 	}
-	return &repository.WorkspaceTemplate{
+	return &workspacemodel.WorkspaceTemplate{
 		ID:               item.ID,
 		Name:             item.Name,
 		Description:      item.Description,
@@ -27,7 +27,7 @@ func WorkspaceTemplateToRepository(item WorkspaceTemplate) (*repository.Workspac
 	}, nil
 }
 
-func WorkspaceTemplateFromRepository(item *repository.WorkspaceTemplate) WorkspaceTemplate {
+func WorkspaceTemplateFromOwner(item *workspacemodel.WorkspaceTemplate) WorkspaceTemplate {
 	if item == nil {
 		return WorkspaceTemplate{}
 	}

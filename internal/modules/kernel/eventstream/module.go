@@ -8,14 +8,11 @@ import (
 	eventstreambiz "github.com/muidea/workorch/internal/modules/kernel/eventstream/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/common"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
-	eventstreamservice "github.com/muidea/workorch/internal/modules/kernel/eventstream/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 const ModuleID = modulecommon.ModuleID
-
-type Service = eventstreamservice.Service
 
 type Dependencies struct {
 	EventRecords repository.EventRecordRepository
@@ -23,11 +20,10 @@ type Dependencies struct {
 }
 
 type Module struct {
-	bizPtr     *eventstreambiz.Service
-	servicePtr *eventstreamservice.Module
-	eventHub   magicevent.Hub
-	observer   magicevent.SimpleObserver
-	topics     []string
+	bizPtr   *eventstreambiz.Service
+	eventHub magicevent.Hub
+	observer magicevent.SimpleObserver
+	topics   []string
 }
 
 func New() *Module { return &Module{} }
@@ -39,11 +35,6 @@ func (m *Module) Configure(deps Dependencies) error {
 		return common.ErrInvalidArgument
 	}
 	m.bizPtr = eventstreambiz.NewService(deps.EventRecords, deps.EventHub)
-	m.servicePtr = eventstreamservice.New(eventstreamservice.Dependencies{
-		ListEvents:           m.bizPtr.ListEvents,
-		HighWatermarks:       m.bizPtr.HighWatermarks,
-		PurgeWorkspaceEvents: m.bizPtr.PurgeWorkspaceEvents,
-	})
 	m.eventHub = deps.EventHub
 	return nil
 }
@@ -82,17 +73,9 @@ func (m *Module) Stop(ctx context.Context) error {
 	}
 	m.topics = nil
 	m.observer = nil
-	m.servicePtr = nil
 	m.bizPtr = nil
 	m.eventHub = nil
 	return nil
-}
-
-func (m *Module) Service() Service {
-	if m == nil || m.servicePtr == nil {
-		return nil
-	}
-	return m.servicePtr
 }
 
 func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
@@ -104,7 +87,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (eventstreamevents.EventStr
 	ctx := ev.Context()
 	topic := ev.ID()
 	data := ev.Data()
-	if m == nil || m.servicePtr == nil {
+	if m == nil || m.bizPtr == nil {
 		return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
 	}
 	switch topic {
@@ -113,11 +96,11 @@ func (m *Module) executeCommand(ev magicevent.Event) (eventstreamevents.EventStr
 		if !ok {
 			return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
 		}
-		query := cmd.Query
+		query := eventRecordQueryFromEvent(cmd.Query)
 		if query.WorkspaceID != "" {
 			ctx = common.ContextWithRuntimeWorkspaceID(ctx, query.WorkspaceID)
 		}
-		items, err := m.servicePtr.ListEvents(ctx, query)
+		items, err := m.bizPtr.ListEvents(ctx, query)
 		if err != nil {
 			return eventstreamevents.EventStreamCommandResult{}, err
 		}
@@ -135,7 +118,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (eventstreamevents.EventStr
 		if !ok {
 			return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
 		}
-		items, err := m.servicePtr.HighWatermarks(ctx, cmd.WorkspaceIDs)
+		items, err := m.bizPtr.HighWatermarks(ctx, cmd.WorkspaceIDs)
 		if err != nil {
 			return eventstreamevents.EventStreamCommandResult{}, err
 		}
@@ -145,13 +128,22 @@ func (m *Module) executeCommand(ev magicevent.Event) (eventstreamevents.EventStr
 		if !ok || cmd.WorkspaceID == "" {
 			return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
 		}
-		deleted, err := m.servicePtr.PurgeWorkspaceEvents(ctx, cmd.WorkspaceID)
+		deleted, err := m.bizPtr.PurgeWorkspaceEvents(ctx, cmd.WorkspaceID)
 		if err != nil {
 			return eventstreamevents.EventStreamCommandResult{}, err
 		}
 		return eventstreamevents.EventStreamCommandResult{DeletedCount: deleted}, nil
 	default:
 		return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
+	}
+}
+
+func eventRecordQueryFromEvent(query eventstreamevents.EventRecordQuery) repository.EventRecordQuery {
+	return repository.EventRecordQuery{
+		WorkspaceID: query.WorkspaceID, RunID: query.RunID, Topic: query.Topic,
+		ExcludeTopics: append([]string(nil), query.ExcludeTopics...), SubjectType: query.SubjectType,
+		SubjectID: query.SubjectID, CursorAfterID: query.CursorAfterID, OccurredAfter: query.OccurredAfter,
+		OccurredBefore: query.OccurredBefore, Limit: query.Limit, IncludePayload: query.IncludePayload,
 	}
 }
 

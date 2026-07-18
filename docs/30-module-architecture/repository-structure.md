@@ -65,7 +65,7 @@ docs/                          # 设计与模块文档
 module.go
 plugin.go
 biz/
-service/          # 按需
+service/          # 仅按需的 HTTP/CLI/session/protocol adapter
 pkg/common/
 pkg/models/       # 按需
 pkg/events/       # EventHub 具体 command/data/result
@@ -78,7 +78,8 @@ readme.md
 - `plugin.go`：向 magicCommon/pluginmodule 注册
 - `module.go`：生命周期入口
 - `biz/`：业务实现
-- `service/`：模块服务面（生产跨组件优先 EventHub，不依赖 service facade 推进 V2）
+- `service/`：仅用于 HTTP/CLI/session/protocol adapter；owner module 不导出 direct
+  service facade，生产跨组件只能使用 typed EventHub command/result。
 - `pkg/events`：跨组件唯一交互合同
 - `pkg/common` / `pkg/models`：常量与本地模型
 
@@ -90,13 +91,12 @@ internal/modules/kernel/orchestrator/
   pkg/events/             # Drive / Operation / Candidate / Governance 合同
   pkg/contracts/
   runtime_v2_*.go         # drive, state repository, operation executor, result projection
-  service/
   readme.md
 ```
 
 ```text
 internal/modules/kernel/run/
-  biz/ service/ pkg/events/ pkg/models/ pkg/contracts/
+  biz/ pkg/events/ pkg/models/ pkg/contracts/
   # RuntimeBootstrap + RuntimeStateRecord 随 Run 持久化与 CAS
 ```
 

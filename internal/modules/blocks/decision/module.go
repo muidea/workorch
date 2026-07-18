@@ -14,7 +14,6 @@ import (
 	decisioncontracts "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/contracts"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
-	decisionservice "github.com/muidea/workorch/internal/modules/blocks/decision/service"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -25,7 +24,6 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
-type Service = decisionservice.Service
 type CreateTicketCommand = decisioncontracts.CreateTicketCommand
 type UpdateTicketCommand = decisioncontracts.UpdateTicketCommand
 type ResolveTicketCommand = decisioncontracts.ResolveTicketCommand
@@ -39,7 +37,6 @@ type Dependencies struct {
 
 type Module struct {
 	bizPtr          *decisionbiz.Service
-	servicePtr      *decisionservice.Module
 	eventHub        magicevent.Hub
 	tickets         repository.DecisionTicketRepository
 	resolutions     repository.DecisionResolutionRepository
@@ -64,18 +61,11 @@ func (m *Module) Configure(deps Dependencies) error {
 	m.resolutions = deps.Resolutions
 	m.background = deps.BackgroundRoutine
 	m.bizPtr = decisionbiz.NewService(deps.Tickets, deps.Resolutions, deps.EventHub)
-	m.servicePtr = decisionservice.New(decisionservice.Dependencies{
-		CreateTicket:                  m.bizPtr.CreateTicket,
-		EnsureTicket:                  m.bizPtr.EnsureTicket,
-		ResolveTicket:                 m.bizPtr.ResolveTicket,
-		EnsureResolvedTicket:          m.bizPtr.EnsureResolvedTicket,
-		EnsureResolvedTicketAndReturn: m.bizPtr.EnsureResolvedTicketAndReturn,
-	})
 	return nil
 }
 
 func (m *Module) Start() error {
-	if m == nil || m.servicePtr == nil || m.eventHub == nil {
+	if m == nil || m.bizPtr == nil || m.eventHub == nil {
 		return common.ErrInvalidArgument
 	}
 	if m.observer != nil {
@@ -132,13 +122,13 @@ func setDecisionRuntimeCapabilityResult(result magicevent.Result, response orche
 
 func (m *Module) handleRuntimeGovernanceRequest(event magicevent.Event, result magicevent.Result) {
 	command, ok := event.Data().(orchestratorevents.OpenRuntimeGovernanceRequestCommand)
-	if !ok || m == nil || m.servicePtr == nil || command.TicketID == "" || command.WorkspaceID == "" || command.RunID == "" ||
+	if !ok || m == nil || m.bizPtr == nil || command.TicketID == "" || command.WorkspaceID == "" || command.RunID == "" ||
 		command.DispatchID == "" || command.Transaction.AuthoritySnapshotID == "" || command.Dependency.Kind == "" || command.Dependency.Reason == "" ||
 		!modulecommon.IsSupportedResolutionType(command.ContinueResolutionType) || !modulecommon.IsSupportedResolutionType(command.FailResolutionType) {
 		setRuntimeGovernanceRequestResult(result, orchestratorevents.OpenRuntimeGovernanceRequestResult{}, common.ErrInvalidArgument)
 		return
 	}
-	err := m.servicePtr.EnsureTicket(event.Context(), decisioncontracts.CreateTicketCommand{
+	err := m.bizPtr.EnsureTicket(event.Context(), decisioncontracts.CreateTicketCommand{
 		TicketID: command.TicketID, WorkspaceID: command.WorkspaceID, RunID: command.RunID,
 		StepID: common.StepID("runtime-v2/" + command.DispatchID), Reason: command.Dependency.Reason,
 		DecisionKind: "runtime_v2_governance", Question: command.Dependency.Reason,
@@ -176,20 +166,12 @@ func (m *Module) Stop(ctx context.Context) error {
 	}
 	m.topics = nil
 	m.observer = nil
-	m.servicePtr = nil
 	m.bizPtr = nil
 	m.eventHub = nil
 	m.tickets = nil
 	m.resolutions = nil
 	m.background = nil
 	return nil
-}
-
-func (m *Module) Service() Service {
-	if m == nil || m.servicePtr == nil {
-		return nil
-	}
-	return m.servicePtr
 }
 
 func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
@@ -201,7 +183,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (decisionevents.DecisionCom
 	ctx := ev.Context()
 	topic := ev.ID()
 	data := ev.Data()
-	if m == nil || m.tickets == nil || m.resolutions == nil || m.servicePtr == nil {
+	if m == nil || m.tickets == nil || m.resolutions == nil || m.bizPtr == nil {
 		return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
 	}
 	workspaceID := common.WorkspaceID("")
@@ -283,7 +265,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (decisionevents.DecisionCom
 				return decisionevents.DecisionCommandResult{}, common.ErrConflict
 			}
 		}
-		ticket, resolution, err := m.servicePtr.EnsureResolvedTicketAndReturn(ctx, resolveCommand)
+		ticket, resolution, err := m.bizPtr.EnsureResolvedTicketAndReturn(ctx, resolveCommand)
 		if err != nil {
 			return decisionevents.DecisionCommandResult{}, err
 		}
@@ -293,7 +275,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (decisionevents.DecisionCom
 		if !ok {
 			return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.EnsureTicket(ctx, createTicketContract(cmd)); err != nil {
+		if err := m.bizPtr.EnsureTicket(ctx, createTicketContract(cmd)); err != nil {
 			return decisionevents.DecisionCommandResult{}, err
 		}
 		return decisionevents.DecisionCommandResult{}, nil
@@ -302,7 +284,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (decisionevents.DecisionCom
 		if !ok {
 			return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.CreateTicket(ctx, createTicketContract(cmd)); err != nil {
+		if err := m.bizPtr.CreateTicket(ctx, createTicketContract(cmd)); err != nil {
 			return decisionevents.DecisionCommandResult{}, err
 		}
 		return decisionevents.DecisionCommandResult{}, nil

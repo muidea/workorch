@@ -49,7 +49,7 @@ func TemplateContext(ctx context.Context, hub magicevent.Hub, templateID string)
 	if err != nil {
 		return workspacecore.WorkspaceTemplate{}, nil, err
 	}
-	template := workspacecore.WorkspaceTemplateFromRepository(item)
+	template := workspacecore.WorkspaceTemplateFromOwner(item)
 	return template, templateSouls(ctx, hub, template), nil
 }
 

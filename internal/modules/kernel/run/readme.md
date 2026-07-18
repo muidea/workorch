@@ -6,7 +6,7 @@
 
 ## 组件交互及合同
 
-- Run owner 通过 `TopicRunCommandRuntimeV2RecoveryInventory` 提供分页 typed recovery inventory，分类 active/no-dispatch、active/sealed、blocked governance 与 terminal delivery pending；Orchestrator 只消费该分类，不直接扫描 Run repository。
+- Run owner 通过 `TopicRunCommandRuntimeV2RecoveryInventory` 提供分页 typed recovery inventory，分类 active/no-dispatch、active/sealed、blocked governance 与 terminal delivery pending；该窄只读 topic 在 `Setup`（Configure 后）即订阅，早于常规 Run CRUD topic，因此 Orchestrator 的 SM-4 启动盘点不依赖 module `Weight()` 或 Run `Start()`；Orchestrator 只消费该分类，不直接扫描 Run repository。
 
 - Run 自身的 create/ensure/get/list/update/delete、Step 查询和 Checkpoint 查询由 `kernel/run/pkg/events` 定义具体 command 与 `RunCommandResult`。
 - workspace/run purge 通过 `PurgeRuntimeResourcesCommand` 由 Run owner 删除该 scope 下的 Step 与 RuntimeCheckpoint；命令必须先确认 Run 属于指定 workspace，并返回实际删除数量。
@@ -23,6 +23,7 @@
 
 - Run、Step 和 Checkpoint 操作必须携带足够的 workspace/run/step scope。
 - 生产装配只接收 Run 自身 repository 与 EventHub，不得注入 WorkspaceReader、Orchestrator service、callback 或其他 owner repository。
+- `Stop`/`Teardown` 必须逆序、幂等地解除 recovery inventory 与常规 topic；recovery inventory 不得在 owner 停止后继续响应。
 - Run 不负责 coverage、evidence quality、Result acceptance 或 LLM 输出正确性判断。
 - 不允许形成 active Run 无 next action、无 blocker 且当前 Step 已失败的悬挂状态。
 - Step 合同失败不得先记录 completed 再回滚为 failed。
@@ -37,5 +38,5 @@
 - retirement update 不得修改带 typed Runtime V2 bootstrap/state 的 Run，也不得删除历史 Step、Checkpoint 或 evidence 审计记录。
 - Resume 的状态准入由 Run owner 先核对，随后只发送 Orchestrator 定义的无 patch typed command；不得通过 Run command 传递 `map[string]any` 或调用 Orchestrator service facade。
 - Run 不提供 Validate/Complete service command；禁止 application 或其他 module 绕过 Runtime V2 reducer/evidence gate 直接把 active Run 标记为 validated/completed。
-- Run module service wrapper 只服务正式的 Create/Ensure EventHub handler；Start/Resume/Block/Cancel/Supersede/Fail 不通过 `Service()` 暴露，跨组件状态变更必须发送 owner 的具体 EventHub command。
+- Run module handler 直接调用本 owner `biz`；不保留 `Service()` 或 `service/` forwarding facade。Start/Resume/Block/Cancel/Supersede/Fail 等跨组件状态变更必须发送 owner 的具体 EventHub command。
 - Run biz 不再持有或构造 Orchestrator adapter；已删除仅用于 V1 lifecycle 转发的 service DTO alias 和 test-only constructor，Run owner 的生产依赖只包含自身 repository、Workspace typed read port 与状态通知 Hub。

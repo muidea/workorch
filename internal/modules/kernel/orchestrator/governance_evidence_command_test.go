@@ -4,11 +4,13 @@ import (
 	"context"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	approvalbiz "github.com/muidea/workorch/internal/modules/blocks/approval/biz"
 	approvalcontracts "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/contracts"
 	decisionbiz "github.com/muidea/workorch/internal/modules/blocks/decision/biz"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisioncontracts "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/contracts"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -20,6 +22,7 @@ func TestDecisionEvidenceCommandPersistsThroughOrchestratorConsumer(t *testing.T
 	evidenceRepo := memoryrepo.NewEvidenceRecordRepository()
 	deps := moduleContractDependencies()
 	deps.EvidenceRecords = evidenceRepo
+	installEmptyRecoveryInventory(t, deps.CommandHub)
 	module := New()
 	if err := module.Configure(deps); err != nil {
 		t.Fatalf("configure orchestrator: %v", err)
@@ -93,6 +96,7 @@ func TestApprovalEvidenceCommandPersistsThroughOrchestratorConsumer(t *testing.T
 	evidenceRepo := memoryrepo.NewEvidenceRecordRepository()
 	deps := moduleContractDependencies()
 	deps.EvidenceRecords = evidenceRepo
+	installEmptyRecoveryInventory(t, deps.CommandHub)
 	module := New()
 	if err := module.Configure(deps); err != nil {
 		t.Fatalf("configure orchestrator: %v", err)
@@ -154,4 +158,15 @@ func TestApprovalEvidenceCommandPersistsThroughOrchestratorConsumer(t *testing.T
 	if !ok || scope != "runtime" || resolvedBy != "tester" {
 		t.Fatalf("approval evidence context = %#v, want merged concrete context", metadataContext)
 	}
+}
+
+func installEmptyRecoveryInventory(t *testing.T, hub magicevent.Hub) {
+	t.Helper()
+	observer := magicevent.NewSimpleObserver(runevents.CommandDestination, hub)
+	observer.Subscribe(runevents.TopicRunCommandRuntimeV2RecoveryInventory, func(_ magicevent.Event, result magicevent.Result) {
+		if result != nil {
+			result.Set(runevents.QueryRuntimeV2RecoveryInventoryResult{}, nil)
+		}
+	})
+	t.Cleanup(func() { observer.Unsubscribe(runevents.TopicRunCommandRuntimeV2RecoveryInventory) })
 }

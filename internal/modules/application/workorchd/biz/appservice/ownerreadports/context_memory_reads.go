@@ -47,7 +47,7 @@ func SearchMemoryByOwnerCommand(ctx context.Context, hub magicevent.Hub, query r
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandSearch, sourceModule, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.SearchMemoryCommand{Query: query})
+	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandSearch, sourceModule, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.SearchMemoryCommand{Query: memoryevents.MemorySearchQuery{WorkspaceID: query.WorkspaceID, Query: query.Query, Tags: append([]string(nil), query.Tags...), Types: append([]string(nil), query.Types...), Vector: append([]float64(nil), query.Vector...), MinScore: query.MinScore, Limit: query.Limit}})
 	ownerevent.BindLane(event, memoryevents.TopicMemoryCommandSearch, "memory_search", string(query.WorkspaceID), query.WorkspaceID, "", "")
 	response, err := ownerevent.Memory(hub.Send(event), memoryevents.TopicMemoryCommandSearch)
 	if err != nil {

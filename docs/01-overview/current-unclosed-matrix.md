@@ -26,25 +26,31 @@ Last Updated: 2026-07-18
 
 ## Residual Open
 
-### A. 运维 / 生产切换
+### A. 运行单元架构 / 生命周期
+
+| ID | 项 | 说明 | 当前方案 |
+| --- | --- | --- | --- |
+| ARCH-1 | 22 组件 framework boundary 验证/归档 | 代码与文档收口已完成；待完整 structural/race/file-backed/deployed verification matrix 后归档 | [go-multi-module-22-component-boundary-remediation.md](../70-roadmap/active/go-multi-module-22-component-boundary-remediation.md) |
+
+### B. 运维 / 生产切换
 
 | ID | 项 | 说明 | 历史过程稿 |
 | --- | --- | --- | --- |
 | OPS-1 | 生产目录 V1 retirement 正式 apply | 代码/live complete；等待 clean build + 真实生产目录维护窗口执行 `runtime-v1-retirement --apply` | [deployed-workspace-progress-blocker…](../90-archive/completed/deployed-workspace-progress-blocker-component-closure-plan.md) |
 
-### B. 可选验证
+### C. 可选验证
 
 | ID | 项 | 说明 | 历史过程稿 |
 | --- | --- | --- | --- |
 | OPT-1 | file-patch deployed live | 可选：`patch apply + validation + DoD closeout` 一次 deployed live | [file-patch-side-effect-owner-migration-plan.md](../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
 
-### C. 延期候选（非 active）
+### D. 延期候选（非 active）
 
 | ID | 项 | 说明 |
 | --- | --- | --- |
 | CAND-LLM-BUDGET | LLM context budget 高级项 | provider failover、真实 tokenizer/原生 usage 精度、context-too-large 差异化等 → [candidates](../70-roadmap/candidates/next-stage-demand-candidates.md) |
 
-### D. 文档维护
+### E. 文档维护
 
 | ID | 项 | 说明 |
 | --- | --- | --- |
@@ -57,7 +63,7 @@ Last Updated: 2026-07-18
 - **代码主链**：Runtime V2 only；V1 authority 不再是问题来源。
 - **正向收敛基础**：RVC-R5～R26 与 RPA-1 本地代码、file-backed matrix、fresh bounded terminal、canonical real canary liveness、fresh positive acceptance 均已通过。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；不得再从已归档 plan 推导实现约束。
-- **Active roadmap**：OPS-1（+ 可选 OPT-1）；RVC-1 与 RPA-1 已归 archive，其余历史切片在 archive / candidates 检索。
+- **Active roadmap**：ARCH-1、OPS-1（+ 可选 OPT-1）；RVC-1 与 RPA-1 已归 archive，其余历史切片在 archive / candidates 检索。
 - **清理原则**：失效主链叙述、重复 audit、过程日记、live 产物一律归档或出库，不在 active 保留“假活跃”项。
 
 ## Navigation

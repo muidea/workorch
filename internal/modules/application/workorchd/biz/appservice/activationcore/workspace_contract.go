@@ -5,12 +5,11 @@ import (
 	"strings"
 
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
-	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 type WorkspaceTemplateReader interface {
-	Get(context.Context, string) (*repository.WorkspaceTemplate, error)
-	List(context.Context) ([]*repository.WorkspaceTemplate, error)
+	Get(context.Context, string) (*workspacemodel.WorkspaceTemplate, error)
+	List(context.Context) ([]*workspacemodel.WorkspaceTemplate, error)
 }
 
 func WorkspaceExecutionContract(ctx context.Context, templates WorkspaceTemplateReader, workspace *workspacemodel.Workspace) map[string]any {

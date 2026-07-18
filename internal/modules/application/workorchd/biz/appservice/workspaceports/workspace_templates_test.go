@@ -7,22 +7,22 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func TestWorkspaceTemplateViewUsesOwnerPorts(t *testing.T) {
 	ctx := context.Background()
 	testHub := newWorkspaceCommandTestHub(t)
-	templates := map[string]*repository.WorkspaceTemplate{}
+	templates := map[string]*workspacemodel.WorkspaceTemplate{}
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceTemplateCommandCreate, func(data any) (any, error) {
 		cmd := data.(workspaceevents.CreateWorkspaceTemplateCommand)
 		templates[cmd.TemplateID] = workspaceTemplateRecordFromCommand(cmd)
 		return workspaceevents.WorkspaceCommandResult{Template: templates[cmd.TemplateID]}, nil
 	})
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceTemplateCommandList, func(any) (any, error) {
-		items := make([]*repository.WorkspaceTemplate, 0, len(templates))
+		items := make([]*workspacemodel.WorkspaceTemplate, 0, len(templates))
 		for _, item := range templates {
 			items = append(items, item)
 		}
@@ -103,8 +103,8 @@ func TestWorkspaceTemplateViewUsesOwnerPorts(t *testing.T) {
 	}
 }
 
-func workspaceTemplateRecordFromCommand(cmd workspaceevents.CreateWorkspaceTemplateCommand) *repository.WorkspaceTemplate {
-	return &repository.WorkspaceTemplate{
+func workspaceTemplateRecordFromCommand(cmd workspaceevents.CreateWorkspaceTemplateCommand) *workspacemodel.WorkspaceTemplate {
+	return &workspacemodel.WorkspaceTemplate{
 		ID:               cmd.TemplateID,
 		Name:             cmd.Name,
 		Description:      cmd.Description,

@@ -42,19 +42,13 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if module.ID() != ModuleID {
 		t.Fatalf("ID = %q, want %q", module.ID(), ModuleID)
 	}
-	if module.Service() != nil {
-		t.Fatal("new module service is non-nil before Configure")
-	}
 	if err := module.Start(); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Start before Configure err = %v, want invalid argument", err)
 	}
 	if err := module.Configure(eventstreamModuleContractDependencies()); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if module.Service() == nil {
-		t.Fatal("service is nil after Configure")
-	}
-	if module.bizPtr == nil || module.servicePtr == nil || module.eventHub == nil {
+	if module.bizPtr == nil || module.eventHub == nil {
 		t.Fatalf("module not fully configured: %+v", module)
 	}
 	if err := module.Start(); err != nil {
@@ -73,9 +67,7 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if module.Service() != nil ||
-		module.bizPtr != nil ||
-		module.servicePtr != nil ||
+	if module.bizPtr != nil ||
 		module.eventHub != nil ||
 		module.observer != nil ||
 		len(module.topics) != 0 {

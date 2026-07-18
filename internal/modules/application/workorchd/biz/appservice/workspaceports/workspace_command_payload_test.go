@@ -22,7 +22,6 @@ import (
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
@@ -103,7 +102,7 @@ func TestWorkspaceTemplateRecordsSendOwnerCommands(t *testing.T) {
 			return workspaceevents.WorkspaceCommandResult{}, nil
 		})
 	}
-	template := &repository.WorkspaceTemplate{
+	template := &workspacemodel.WorkspaceTemplate{
 		ID:            "template-command-payload",
 		Name:          "Template Command Payload",
 		GoalText:      "ship",

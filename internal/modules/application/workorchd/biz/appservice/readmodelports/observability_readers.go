@@ -30,7 +30,7 @@ func (r MemoryRecallTraceReader) List(ctx context.Context, query repository.Memo
 	if r.Hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryRecallTraceCommandList, "workorchd/readmodelports", memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.ListMemoryRecallTracesCommand{Query: query})
+	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryRecallTraceCommandList, "workorchd/readmodelports", memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.ListMemoryRecallTracesCommand{Query: memoryevents.MemoryRecallTraceQuery{WorkspaceID: query.WorkspaceID, RunID: query.RunID, StepID: query.StepID, Stage: query.Stage, Source: query.Source, Status: query.Status, Limit: query.Limit}})
 	ownerevent.BindLane(event, memoryevents.TopicMemoryRecallTraceCommandList, "memory_recall_trace", "list", query.WorkspaceID, query.RunID, "")
 	response, err := ownerevent.Memory(r.Hub.Send(event), memoryevents.TopicMemoryRecallTraceCommandList)
 	if err != nil {

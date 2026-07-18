@@ -2,8 +2,10 @@ package workorch
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -19,8 +21,12 @@ import (
 const defaultApplicationShutdownTimeout = 30 * time.Second
 
 type frameworkRuntime struct {
-	configDir string
-	started   bool
+	configDir          string
+	started            bool
+	serverStopped      chan struct{}
+	serverStopOnce     sync.Once
+	serverStopObserver magicevent.SimpleObserver
+	serverStopData     workorchdevents.ServiceStoppedData
 }
 
 func (s *frameworkRuntime) Startup(ctx context.Context) error {
@@ -36,6 +42,14 @@ func (s *frameworkRuntime) Startup(ctx context.Context) error {
 		return err
 	}
 	s.started = true
+	s.serverStopped = make(chan struct{})
+	s.serverStopOnce = sync.Once{}
+	hub := application.Get().EventHub()
+	if hub == nil {
+		return common.ErrInvalidArgument
+	}
+	s.serverStopObserver = magicevent.NewSimpleObserver(workorchdevents.NotificationDestination, hub)
+	s.serverStopObserver.Subscribe(workorchdevents.TopicWorkorchDServiceStopped, s.handleServerStopped)
 	return nil
 }
 
@@ -61,6 +75,11 @@ func (s *frameworkRuntime) Shutdown(ctx context.Context) error {
 	}
 	shutdownCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	if s.serverStopObserver != nil {
+		s.serverStopObserver.Unsubscribe(workorchdevents.TopicWorkorchDServiceStopped)
+		s.serverStopObserver = nil
+	}
+	s.serverStopOnce.Do(func() { close(s.serverStopped) })
 	application.Shutdown(shutdownCtx)
 	s.started = false
 	if err := shutdownCtx.Err(); err != nil {
@@ -86,15 +105,14 @@ func applicationShutdownTimeout() time.Duration {
 	return parsed + 10*time.Second
 }
 
-func waitServer(ctx context.Context) error {
-	done, err := queryServerDoneChannel(ctx)
-	if err != nil {
-		return err
+func (s *frameworkRuntime) waitServer(ctx context.Context) error {
+	if s == nil || s.serverStopped == nil {
+		return common.ErrInvalidArgument
 	}
 	select {
-	case err, ok := <-done:
-		if ok {
-			return err
+	case <-s.serverStopped:
+		if s.serverStopData.State == "failed" {
+			return fmt.Errorf("%s: %s", s.serverStopData.ErrorCode, s.serverStopData.ErrorMessage)
 		}
 		return nil
 	case <-ctx.Done():
@@ -102,26 +120,13 @@ func waitServer(ctx context.Context) error {
 	}
 }
 
-func queryServerDoneChannel(ctx context.Context) (<-chan error, error) {
-	hub := application.Get().EventHub()
-	if hub == nil {
-		return nil, common.ErrInvalidArgument
+func (s *frameworkRuntime) handleServerStopped(ev magicevent.Event, _ magicevent.Result) {
+	data, ok := ev.Data().(workorchdevents.ServiceStoppedData)
+	if !ok || s == nil || s.serverStopped == nil {
+		return
 	}
-	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkorchDCommandDone, "workorch/app", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.DoneCommand{})
-	response := hub.Send(event)
-	if response == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	if err := response.Error(); err != nil {
-		return nil, err
-	}
-	data, resultErr := response.Get()
-	if resultErr != nil {
-		return nil, resultErr
-	}
-	result, ok := data.(workorchdevents.DoneCommandResult)
-	if !ok || result.Done == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	return result.Done, nil
+	s.serverStopOnce.Do(func() {
+		s.serverStopData = data
+		close(s.serverStopped)
+	})
 }

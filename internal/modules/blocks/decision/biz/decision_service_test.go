@@ -12,8 +12,8 @@ import (
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	decisionservice "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/contracts"
 	decisionModel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
-	decisionservice "github.com/muidea/workorch/internal/modules/blocks/decision/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"

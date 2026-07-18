@@ -9,6 +9,7 @@
 - 分 topic 订阅 Workspace、Run 状态、Orchestrator Patch/ArtifactContinuation、Result、Decision、Approval、Memory 和 Governance 的具体 data 类型。
 - 输入通知转换为 `EventRecordData` 后写入 EventRecord repository，并发布 `EventRecordAppendedData`。
 - `ListEventRecordsCommand`、`HighWatermarksCommand`、`PurgeWorkspaceEventsCommand` 及对应 `EventStreamCommandResult` 由 `kernel/eventstream/pkg/events` 定义；EventRecord 只能由已订阅的 owner notification 追加，不暴露外部 append command。
+- `EventRecordQuery` 是 Eventstream owner DTO；module 内部映射 repository query 并 clone `ExcludeTopics`，EventHub 不暴露 repository query/entity。
 - application projection readiness 必须通过 typed `HighWatermarksCommand` 比较 EventStream owner 的真实 persisted workspace revision；不得仅依赖 projection 自己收到的 `EventRecordAppendedData` 自证 ready。
 - application projection、SSE、Observed 和 remote 展示只消费 `EventRecordData`，不反向修改 owner 状态。
 - workspace purge 必须携带 WorkspaceID，并只删除该 workspace 的 EventRecord。

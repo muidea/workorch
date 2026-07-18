@@ -10,7 +10,6 @@ import (
 	memorycontracts "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/contracts"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
-	memoryservice "github.com/muidea/workorch/internal/modules/blocks/memory/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -18,7 +17,6 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
-type Service = memoryservice.Service
 type CreateMemoryItemCommand = memorycontracts.CreateMemoryItemCommand
 type UpdateMemoryItemCommand = memorycontracts.UpdateMemoryItemCommand
 
@@ -29,11 +27,10 @@ type Dependencies struct {
 }
 
 type Module struct {
-	bizPtr     *memorybiz.Service
-	servicePtr *memoryservice.Module
-	eventHub   magicevent.Hub
-	observer   magicevent.SimpleObserver
-	topics     []string
+	bizPtr   *memorybiz.Service
+	eventHub magicevent.Hub
+	observer magicevent.SimpleObserver
+	topics   []string
 }
 
 func New() *Module { return &Module{} }
@@ -46,23 +43,11 @@ func (m *Module) Configure(deps Dependencies) error {
 	}
 	m.eventHub = deps.EventHub
 	m.bizPtr = memorybiz.NewServiceWithRecallTraces(deps.MemoryItems, deps.MemoryRecallTraces)
-	m.servicePtr = memoryservice.New(memoryservice.Dependencies{
-		CreateMemoryItem:      m.bizPtr.CreateMemoryItem,
-		UpdateMemoryItem:      m.bizPtr.UpdateMemoryItem,
-		GetMemoryItem:         m.bizPtr.GetMemoryItem,
-		DeleteMemoryItem:      m.bizPtr.DeleteMemoryItem,
-		ListMemoryByWorkspace: m.bizPtr.ListMemoryByWorkspace,
-		SearchMemory:          m.bizPtr.SearchMemory,
-		UpsertRecallTrace:     m.bizPtr.UpsertMemoryRecallTrace,
-		GetRecallTrace:        m.bizPtr.GetMemoryRecallTrace,
-		ListRecallTraces:      m.bizPtr.ListMemoryRecallTraces,
-		DeleteRecallTrace:     m.bizPtr.DeleteMemoryRecallTrace,
-	})
 	return nil
 }
 
 func (m *Module) Start() error {
-	if m == nil || m.servicePtr == nil || m.eventHub == nil {
+	if m == nil || m.bizPtr == nil || m.eventHub == nil {
 		return common.ErrInvalidArgument
 	}
 	if m.observer != nil {
@@ -96,17 +81,9 @@ func (m *Module) Stop(ctx context.Context) error {
 	}
 	m.topics = nil
 	m.observer = nil
-	m.servicePtr = nil
 	m.bizPtr = nil
 	m.eventHub = nil
 	return nil
-}
-
-func (m *Module) Service() Service {
-	if m == nil || m.servicePtr == nil {
-		return nil
-	}
-	return m.servicePtr
 }
 
 func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
@@ -115,7 +92,7 @@ func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
 }
 
 func (m *Module) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommandResult, error) {
-	if m == nil || m.servicePtr == nil {
+	if m == nil || m.bizPtr == nil {
 		return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 	}
 	ctx := ev.Context()
@@ -126,10 +103,10 @@ func (m *Module) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommand
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
 		ctx = memoryCommandContext(ctx, cmd.WorkspaceID)
-		if err := m.servicePtr.CreateMemoryItem(ctx, cmd); err != nil {
+		if err := m.bizPtr.CreateMemoryItem(ctx, cmd); err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
-		item, err := m.servicePtr.GetMemoryItem(ctx, cmd.MemoryID)
+		item, err := m.bizPtr.GetMemoryItem(ctx, cmd.MemoryID)
 		if err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
@@ -141,7 +118,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommand
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
 		ctx = memoryCommandContext(ctx, cmd.WorkspaceID)
-		item, err := m.servicePtr.GetMemoryItem(ctx, cmd.MemoryID)
+		item, err := m.bizPtr.GetMemoryItem(ctx, cmd.MemoryID)
 		if err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
@@ -152,7 +129,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommand
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
 		ctx = memoryCommandContext(ctx, cmd.WorkspaceID)
-		items, err := m.servicePtr.ListMemoryByWorkspace(ctx, cmd.WorkspaceID)
+		items, err := m.bizPtr.ListMemoryByWorkspace(ctx, cmd.WorkspaceID)
 		if err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
@@ -163,7 +140,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommand
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
 		ctx = memoryCommandContext(ctx, cmd.Query.WorkspaceID)
-		items, err := m.servicePtr.SearchMemory(ctx, cmd.Query)
+		items, err := m.bizPtr.SearchMemory(ctx, memorySearchQueryFromEvent(cmd.Query))
 		if err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
@@ -174,10 +151,10 @@ func (m *Module) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommand
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
 		ctx = memoryCommandContext(ctx, cmd.WorkspaceID)
-		if err := m.servicePtr.UpdateMemoryItem(ctx, cmd); err != nil {
+		if err := m.bizPtr.UpdateMemoryItem(ctx, cmd); err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
-		item, err := m.servicePtr.GetMemoryItem(ctx, cmd.MemoryID)
+		item, err := m.bizPtr.GetMemoryItem(ctx, cmd.MemoryID)
 		if err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
@@ -189,14 +166,14 @@ func (m *Module) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommand
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
 		ctx = memoryCommandContext(ctx, cmd.WorkspaceID)
-		item, err := m.servicePtr.GetMemoryItem(ctx, cmd.MemoryID)
+		item, err := m.bizPtr.GetMemoryItem(ctx, cmd.MemoryID)
 		if err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
 		if item.WorkspaceID != cmd.WorkspaceID {
 			return memoryevents.MemoryCommandResult{}, common.ErrConflict
 		}
-		if err := m.servicePtr.DeleteMemoryItem(ctx, cmd.MemoryID); err != nil {
+		if err := m.bizPtr.DeleteMemoryItem(ctx, cmd.MemoryID); err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
 		m.publishMemoryChanged(ctx, memoryevents.TopicMemoryDeleted, item)
@@ -211,7 +188,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommand
 		if err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
-		if err := m.servicePtr.UpsertMemoryRecallTrace(ctx, trace); err != nil {
+		if err := m.bizPtr.UpsertMemoryRecallTrace(ctx, trace); err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
 		event := magicevent.NewEventWithContext(
@@ -251,7 +228,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommand
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
 		ctx = memoryCommandContext(ctx, cmd.WorkspaceID)
-		item, err := m.servicePtr.GetMemoryRecallTrace(ctx, cmd.TraceID)
+		item, err := m.bizPtr.GetMemoryRecallTrace(ctx, cmd.TraceID)
 		if err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
@@ -262,7 +239,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommand
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
 		ctx = memoryCommandContext(ctx, cmd.Query.WorkspaceID)
-		items, err := m.servicePtr.ListMemoryRecallTraces(ctx, cmd.Query)
+		items, err := m.bizPtr.ListMemoryRecallTraces(ctx, memoryRecallTraceQueryFromEvent(cmd.Query))
 		if err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
@@ -272,12 +249,27 @@ func (m *Module) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommand
 		if !ok || cmd.TraceID == "" {
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.DeleteMemoryRecallTrace(ctx, cmd.TraceID); err != nil {
+		if err := m.bizPtr.DeleteMemoryRecallTrace(ctx, cmd.TraceID); err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
 		return memoryevents.MemoryCommandResult{}, nil
 	default:
 		return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
+	}
+}
+
+func memorySearchQueryFromEvent(query memoryevents.MemorySearchQuery) repository.MemorySearchQuery {
+	return repository.MemorySearchQuery{
+		WorkspaceID: query.WorkspaceID, Query: query.Query, Tags: append([]string(nil), query.Tags...),
+		Types: append([]string(nil), query.Types...), Vector: append([]float64(nil), query.Vector...),
+		MinScore: query.MinScore, Limit: query.Limit,
+	}
+}
+
+func memoryRecallTraceQueryFromEvent(query memoryevents.MemoryRecallTraceQuery) repository.MemoryRecallTraceQuery {
+	return repository.MemoryRecallTraceQuery{
+		WorkspaceID: query.WorkspaceID, RunID: query.RunID, StepID: query.StepID, Stage: query.Stage,
+		Source: query.Source, Status: query.Status, Limit: query.Limit,
 	}
 }
 

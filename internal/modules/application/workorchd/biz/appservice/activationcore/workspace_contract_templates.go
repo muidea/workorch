@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
-	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 func MatchingWorkspaceTemplateContextHints(ctx context.Context, templates WorkspaceTemplateReader, workspace *workspacemodel.Workspace) map[string]any {
@@ -36,7 +35,7 @@ func MatchingWorkspaceTemplateContextHints(ctx context.Context, templates Worksp
 	return selected
 }
 
-func WorkspaceMatchesTemplateRouting(workspace *workspacemodel.Workspace, template *repository.WorkspaceTemplate) bool {
+func WorkspaceMatchesTemplateRouting(workspace *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate) bool {
 	if workspace == nil || template == nil {
 		return false
 	}

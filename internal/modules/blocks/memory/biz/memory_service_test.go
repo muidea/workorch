@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/common"
-	memoryservice "github.com/muidea/workorch/internal/modules/blocks/memory/service"
+	memoryservice "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	backend "github.com/muidea/workorch/internal/pkg/repository/memory"

@@ -30,11 +30,10 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/skillselectcore"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
-	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
-	mcpmodule "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/service"
+	mcpmodule "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/contracts"
 	memorycommon "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/common"
+	memorymodule "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/contracts"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
-	memorymodule "github.com/muidea/workorch/internal/modules/blocks/memory/service"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
@@ -302,7 +301,9 @@ type countingRunRepository struct {
 }
 
 type countingRunService struct {
-	runmodule.Service
+	base interface {
+		CreateRun(context.Context, runmodule.CreateRunCommand) error
+	}
 	createCommands []runmodule.CreateRunCommand
 }
 
@@ -312,7 +313,7 @@ func (s *countingRunService) CreateRun(ctx context.Context, cmd runmodule.Create
 		DefinitionRevision: cmd.DefinitionRevision, InitialStepKind: cmd.InitialStepKind,
 		RuntimeBootstrap: cmd.RuntimeBootstrap, Priority: cmd.Priority,
 	})
-	return s.Service.CreateRun(ctx, cmd)
+	return s.base.CreateRun(ctx, cmd)
 }
 
 func (r *countingRunRepository) Create(ctx context.Context, item *runmodel.Run) error {
@@ -537,66 +538,6 @@ func (r *blockingDecisionTicketRepository) Delete(ctx context.Context, id common
 
 var _ repository.SoulRepository = (*blockingSoulRepository)(nil)
 var _ repository.DecisionTicketRepository = (*blockingDecisionTicketRepository)(nil)
-
-type blockingMCPService struct {
-	base    mcpmodule.Service
-	started chan<- string
-	release <-chan struct{}
-}
-
-func (s *blockingMCPService) CreateServer(ctx context.Context, cmd mcpmodule.CreateServerCommand) error {
-	return s.base.CreateServer(ctx, cmd)
-}
-
-func (s *blockingMCPService) UpdateServer(ctx context.Context, cmd mcpmodule.UpdateServerCommand) error {
-	return s.base.UpdateServer(ctx, cmd)
-}
-
-func (s *blockingMCPService) GetServer(ctx context.Context, id common.MCPServerID) (*mcpmodel.Server, error) {
-	if s.started != nil {
-		s.started <- "mcp-server"
-	}
-	if s.release != nil {
-		select {
-		case <-s.release:
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	}
-	return s.base.GetServer(ctx, id)
-}
-
-func (s *blockingMCPService) ListServers(ctx context.Context) ([]*mcpmodel.Server, error) {
-	return s.base.ListServers(ctx)
-}
-
-func (s *blockingMCPService) CreateCapability(ctx context.Context, cmd mcpmodule.CreateCapabilityCommand) (*mcpmodel.Capability, error) {
-	return s.base.CreateCapability(ctx, cmd)
-}
-
-func (s *blockingMCPService) UpdateCapability(ctx context.Context, cmd mcpmodule.UpdateCapabilityCommand) (*mcpmodel.Capability, error) {
-	return s.base.UpdateCapability(ctx, cmd)
-}
-
-func (s *blockingMCPService) GetCapability(ctx context.Context, id common.MCPCapabilityID) (*mcpmodel.Capability, error) {
-	if s.started != nil {
-		s.started <- "mcp-capability"
-	}
-	if s.release != nil {
-		select {
-		case <-s.release:
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	}
-	return s.base.GetCapability(ctx, id)
-}
-
-func (s *blockingMCPService) ListCapabilities(ctx context.Context, query mcpmodule.CapabilityQuery) ([]*mcpmodel.Capability, error) {
-	return s.base.ListCapabilities(ctx, query)
-}
-
-var _ mcpmodule.Service = (*blockingMCPService)(nil)
 
 type countingActivationEventHub struct {
 	base   magicevent.Hub
@@ -2672,7 +2613,11 @@ func TestActivationExecutionContractUsesWorkspaceTemplateIDBeforeSoulRouting(t *
 	if err != nil {
 		t.Fatalf("get workspace #2: %v", err)
 	}
-	contract := activationcore.WorkspaceExecutionContract(ctx, exports.Repositories.WorkspaceTemplates, workspaceModel)
+	hub, err := session.RequiredCommandHub()
+	if err != nil {
+		t.Fatalf("RequiredCommandHub: %v", err)
+	}
+	contract := activationports.WorkspaceExecutionContract(ctx, hub, workspaceModel)
 	if contract["stateChangePolicy"] != "must_produce_state_change" {
 		t.Fatalf("executionContract = %+v, want template policy", contract)
 	}

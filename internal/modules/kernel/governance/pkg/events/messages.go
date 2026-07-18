@@ -3,15 +3,25 @@ package events
 import (
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
-	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 const CommandDestination = modulecommon.ModuleID
 
 type ListAutoGovernanceTracesCommand struct {
-	Query repository.AutoGovernanceTraceQuery
+	Query AutoGovernanceTraceQuery
+}
+
+type AutoGovernanceTraceQuery struct {
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	StepID      common.StepID
+	ItemType    string
+	ItemID      string
+	Status      string
+	Limit       int
 }
 
 type GovernanceData struct {

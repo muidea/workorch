@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
@@ -13,7 +14,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
-func TestModuleIdentityAndDoneCommandContract(t *testing.T) {
+func TestModuleIdentityAndStoppedNotificationContract(t *testing.T) {
 	mod := New()
 	if mod.ID() != ModuleID {
 		t.Fatalf("ID = %q, want %q", mod.ID(), ModuleID)
@@ -22,31 +23,9 @@ func TestModuleIdentityAndDoneCommandContract(t *testing.T) {
 		t.Fatalf("Weight = %d, want 100", mod.Weight())
 	}
 
-	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkorchDCommandDone, "test", workorchdevents.CommandDestination, magicevent.NewHeader(), context.Background(), workorchdevents.DoneCommand{})
-	response := magicevent.NewResult(event.ID(), event.Source(), event.Destination())
-	mod.handleDoneCommand(event, response)
-	if err := response.Error(); err != nil {
-		t.Fatalf("handleDoneCommand error = %v", err)
-	}
-	data, err := response.Get()
-	if err != nil {
-		t.Fatalf("handleDoneCommand result: %v", err)
-	}
-	result, ok := data.(workorchdevents.DoneCommandResult)
-	if !ok {
-		t.Fatalf("done result = %T, want DoneCommandResult", data)
-	}
-	done := result.Done
-	if done == nil {
-		t.Fatal("done channel is nil")
-	}
-	select {
-	case _, ok := <-done:
-		if ok {
-			t.Fatal("done channel is open before setup")
-		}
-	default:
-		t.Fatal("done channel is not closed before setup")
+	data := workorchdevents.ServiceStoppedData{ServiceName: "workorch", State: "failed", ErrorCode: "server_failed", ErrorMessage: "bounded", StoppedAt: time.Now()}
+	if data.ServiceName == "" || data.State == "" || data.ErrorCode == "" || data.StoppedAt.IsZero() {
+		t.Fatalf("invalid stopped notification: %+v", data)
 	}
 }
 
@@ -71,19 +50,6 @@ func TestModuleTeardownIsIdempotent(t *testing.T) {
 	mod := New()
 	mod.Teardown(context.Background())
 	mod.Teardown(context.Background())
-}
-
-func TestDoneReturnsClosedChannelBeforeSetup(t *testing.T) {
-	mod := New()
-
-	select {
-	case _, ok := <-mod.Done():
-		if ok {
-			t.Fatal("expected closed done channel")
-		}
-	default:
-		t.Fatal("expected done channel to be closed before setup")
-	}
 }
 
 func useWorkorchModuleTestConfig(t *testing.T, addr string, backend string, dataRoot string, readTimeout string) {

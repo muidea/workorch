@@ -24,8 +24,8 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if module.ID() != ModuleID {
 		t.Fatalf("ID = %q, want %q", module.ID(), ModuleID)
 	}
-	if module.servicePtr != nil {
-		t.Fatal("new module service pointer is non-nil before Configure")
+	if module.bizPtr != nil {
+		t.Fatal("new module biz pointer is non-nil before Configure")
 	}
 
 	hub := magicevent.NewHub(16)
@@ -38,8 +38,8 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if module.servicePtr == nil {
-		t.Fatal("service pointer is nil after Configure")
+	if module.bizPtr == nil {
+		t.Fatal("biz pointer is nil after Configure")
 	}
 	if module.eventHub == nil {
 		t.Fatal("event hub is nil after Configure")
@@ -60,8 +60,7 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if module.servicePtr != nil ||
-		module.bizPtr != nil ||
+	if module.bizPtr != nil ||
 		module.eventHub != nil ||
 		module.workspaces != nil ||
 		module.goals != nil ||

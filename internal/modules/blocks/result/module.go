@@ -9,15 +9,12 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
-	resultservice "github.com/muidea/workorch/internal/modules/blocks/result/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 const ModuleID = modulecommon.ModuleID
-
-type Service = resultservice.Service
 
 type Dependencies struct {
 	Results   repository.ResultRepository
@@ -26,11 +23,10 @@ type Dependencies struct {
 }
 
 type Module struct {
-	bizPtr     *resultbiz.Service
-	servicePtr *resultservice.Module
-	eventHub   magicevent.Hub
-	observer   magicevent.SimpleObserver
-	topics     []string
+	bizPtr   *resultbiz.Service
+	eventHub magicevent.Hub
+	observer magicevent.SimpleObserver
+	topics   []string
 }
 
 func New() *Module { return &Module{} }
@@ -43,26 +39,11 @@ func (m *Module) Configure(deps Dependencies) error {
 	}
 	m.eventHub = deps.EventHub
 	m.bizPtr = resultbiz.NewService(deps.Results, deps.Artifacts)
-	m.servicePtr = resultservice.New(resultservice.Dependencies{
-		CreateResult:             m.bizPtr.CreateResult,
-		GetResult:                m.bizPtr.GetResult,
-		ListResultsByWorkspace:   m.bizPtr.ListResultsByWorkspace,
-		ListResultsByRun:         m.bizPtr.ListResultsByRun,
-		UpdateResult:             m.bizPtr.UpdateResult,
-		DeleteResult:             m.bizPtr.DeleteResult,
-		CreateArtifact:           m.bizPtr.CreateArtifact,
-		GetArtifact:              m.bizPtr.GetArtifact,
-		ListArtifactsByWorkspace: m.bizPtr.ListArtifactsByWorkspace,
-		ListArtifactsByRun:       m.bizPtr.ListArtifactsByRun,
-		ListArtifactsByResult:    m.bizPtr.ListArtifactsByResult,
-		UpdateArtifact:           m.bizPtr.UpdateArtifact,
-		DeleteArtifact:           m.bizPtr.DeleteArtifact,
-	})
 	return nil
 }
 
 func (m *Module) Start() error {
-	if m == nil || m.servicePtr == nil || m.eventHub == nil {
+	if m == nil || m.bizPtr == nil || m.eventHub == nil {
 		return common.ErrInvalidArgument
 	}
 	if m.observer != nil {
@@ -99,17 +80,9 @@ func (m *Module) Stop(ctx context.Context) error {
 	}
 	m.topics = nil
 	m.observer = nil
-	m.servicePtr = nil
 	m.bizPtr = nil
 	m.eventHub = nil
 	return nil
-}
-
-func (m *Module) Service() Service {
-	if m == nil || m.servicePtr == nil {
-		return nil
-	}
-	return m.servicePtr
 }
 
 func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
@@ -118,7 +91,7 @@ func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
 }
 
 func (m *Module) executeCommand(ev magicevent.Event) (resultevents.ResultCommandResult, error) {
-	if m == nil || m.servicePtr == nil {
+	if m == nil || m.bizPtr == nil {
 		return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 	}
 	ctx := ev.Context()
@@ -129,7 +102,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (resultevents.ResultCommand
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
 		ctx = resultCommandContext(ctx, cmd.Result.WorkspaceID)
-		if err := m.servicePtr.CreateResult(ctx, cmd.Result); err != nil {
+		if err := m.bizPtr.CreateResult(ctx, cmd.Result); err != nil {
 			return resultevents.ResultCommandResult{}, err
 		}
 		m.publishResultChanged(ctx, cmd.Result)
@@ -139,7 +112,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (resultevents.ResultCommand
 		if !ok {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
-		item, err := m.servicePtr.GetResult(ctx, cmd.ResultID)
+		item, err := m.bizPtr.GetResult(ctx, cmd.ResultID)
 		if err != nil {
 			return resultevents.ResultCommandResult{}, err
 		}
@@ -150,7 +123,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (resultevents.ResultCommand
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
 		ctx = resultCommandContext(ctx, cmd.WorkspaceID)
-		items, err := m.servicePtr.ListResultsByWorkspace(ctx, cmd.WorkspaceID)
+		items, err := m.bizPtr.ListResultsByWorkspace(ctx, cmd.WorkspaceID)
 		if err != nil {
 			return resultevents.ResultCommandResult{}, err
 		}
@@ -160,7 +133,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (resultevents.ResultCommand
 		if !ok {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
-		items, err := m.servicePtr.ListResultsByRun(ctx, cmd.RunID)
+		items, err := m.bizPtr.ListResultsByRun(ctx, cmd.RunID)
 		if err != nil {
 			return resultevents.ResultCommandResult{}, err
 		}
@@ -171,7 +144,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (resultevents.ResultCommand
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
 		ctx = resultCommandContext(ctx, cmd.Result.WorkspaceID)
-		if err := m.servicePtr.UpdateResult(ctx, cmd.Result); err != nil {
+		if err := m.bizPtr.UpdateResult(ctx, cmd.Result); err != nil {
 			return resultevents.ResultCommandResult{}, err
 		}
 		m.publishResultChanged(ctx, cmd.Result)
@@ -181,7 +154,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (resultevents.ResultCommand
 		if !ok {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.DeleteResult(ctx, cmd.ResultID); err != nil {
+		if err := m.bizPtr.DeleteResult(ctx, cmd.ResultID); err != nil {
 			return resultevents.ResultCommandResult{}, err
 		}
 		return resultevents.ResultCommandResult{}, nil
@@ -191,7 +164,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (resultevents.ResultCommand
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
 		ctx = resultCommandContext(ctx, cmd.Artifact.WorkspaceID)
-		if err := m.servicePtr.CreateArtifact(ctx, cmd.Artifact); err != nil {
+		if err := m.bizPtr.CreateArtifact(ctx, cmd.Artifact); err != nil {
 			return resultevents.ResultCommandResult{}, err
 		}
 		m.publishArtifactCreated(ctx, cmd.Artifact)
@@ -201,7 +174,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (resultevents.ResultCommand
 		if !ok {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
-		item, err := m.servicePtr.GetArtifact(ctx, cmd.ArtifactID)
+		item, err := m.bizPtr.GetArtifact(ctx, cmd.ArtifactID)
 		if err != nil {
 			return resultevents.ResultCommandResult{}, err
 		}
@@ -212,7 +185,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (resultevents.ResultCommand
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
 		ctx = resultCommandContext(ctx, cmd.WorkspaceID)
-		items, err := m.servicePtr.ListArtifactsByWorkspace(ctx, cmd.WorkspaceID)
+		items, err := m.bizPtr.ListArtifactsByWorkspace(ctx, cmd.WorkspaceID)
 		if err != nil {
 			return resultevents.ResultCommandResult{}, err
 		}
@@ -222,7 +195,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (resultevents.ResultCommand
 		if !ok {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
-		items, err := m.servicePtr.ListArtifactsByRun(ctx, cmd.RunID)
+		items, err := m.bizPtr.ListArtifactsByRun(ctx, cmd.RunID)
 		if err != nil {
 			return resultevents.ResultCommandResult{}, err
 		}
@@ -232,7 +205,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (resultevents.ResultCommand
 		if !ok {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
-		items, err := m.servicePtr.ListArtifactsByResult(ctx, cmd.ResultID)
+		items, err := m.bizPtr.ListArtifactsByResult(ctx, cmd.ResultID)
 		if err != nil {
 			return resultevents.ResultCommandResult{}, err
 		}
@@ -243,7 +216,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (resultevents.ResultCommand
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
 		ctx = resultCommandContext(ctx, cmd.Artifact.WorkspaceID)
-		if err := m.servicePtr.UpdateArtifact(ctx, cmd.Artifact); err != nil {
+		if err := m.bizPtr.UpdateArtifact(ctx, cmd.Artifact); err != nil {
 			return resultevents.ResultCommandResult{}, err
 		}
 		return resultevents.ResultCommandResult{}, nil
@@ -252,7 +225,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (resultevents.ResultCommand
 		if !ok {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.DeleteArtifact(ctx, cmd.ArtifactID); err != nil {
+		if err := m.bizPtr.DeleteArtifact(ctx, cmd.ArtifactID); err != nil {
 			return resultevents.ResultCommandResult{}, err
 		}
 		return resultevents.ResultCommandResult{}, nil

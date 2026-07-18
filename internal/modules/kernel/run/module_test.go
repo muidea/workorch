@@ -77,8 +77,8 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if module.ID() != ModuleID {
 		t.Fatalf("ID = %q, want %q", module.ID(), ModuleID)
 	}
-	if module.servicePtr != nil {
-		t.Fatal("new module service pointer is non-nil before Configure")
+	if module.bizPtr != nil {
+		t.Fatal("new module biz pointer is non-nil before Configure")
 	}
 	rawHub := newRunModuleTestHub(t)
 	if err := module.Configure(Dependencies{
@@ -89,8 +89,8 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if module.servicePtr == nil {
-		t.Fatal("service pointer is nil after Configure")
+	if module.bizPtr == nil {
+		t.Fatal("biz pointer is nil after Configure")
 	}
 	if module.eventHub == nil {
 		t.Fatal("event hub is nil after Configure")
@@ -111,8 +111,7 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if module.servicePtr != nil ||
-		module.bizPtr != nil ||
+	if module.bizPtr != nil ||
 		module.eventHub != nil ||
 		module.runs != nil ||
 		module.steps != nil ||
@@ -123,6 +122,56 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	}
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("second Stop: %v", err)
+	}
+}
+
+func TestGMMR1SM4RecoveryInventoryAvailableAfterSetupBeforeRun(t *testing.T) {
+	ctx := context.Background()
+	rawHub := newRunModuleTestHub(t)
+	module := New()
+	if err := module.Configure(Dependencies{Runs: memory.NewRunRepository(), EventHub: rawHub}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	// plugin.Setup invokes this immediately after Configure. Do not call Start:
+	// Orchestrator Run precedes Run Run under the framework's current weights.
+	if err := module.prepareRuntimeV2RecoveryInventory(); err != nil {
+		t.Fatalf("Setup recovery subscription: %v", err)
+	}
+	result := rawHub.Send(magicevent.NewEventWithContext(
+		runevents.TopicRunCommandRuntimeV2RecoveryInventory, "run/module_test", runevents.CommandDestination,
+		magicevent.NewHeader(), ctx, runevents.QueryRuntimeV2RecoveryInventoryCommand{},
+	))
+	if result == nil {
+		t.Fatal("Setup recovery inventory query returned nil result")
+	}
+	data, err := result.Get()
+	if err != nil {
+		t.Fatalf("Setup recovery inventory query: %v", err)
+	}
+	if _, ok := data.(runevents.QueryRuntimeV2RecoveryInventoryResult); !ok {
+		t.Fatalf("Setup recovery inventory result type = %T", data)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	firstSubscriptionCount := len(module.topics)
+	if err := module.Start(); err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+	if len(module.topics) != firstSubscriptionCount {
+		t.Fatalf("duplicate subscriptions after second Start: %d != %d", len(module.topics), firstSubscriptionCount)
+	}
+	if err := module.Stop(ctx); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	result = rawHub.Send(magicevent.NewEventWithContext(
+		runevents.TopicRunCommandRuntimeV2RecoveryInventory, "run/module_test", runevents.CommandDestination,
+		magicevent.NewHeader(), ctx, runevents.QueryRuntimeV2RecoveryInventoryCommand{},
+	))
+	if result != nil {
+		if _, err := result.Get(); err == nil {
+			t.Fatal("recovery inventory remained available after Stop")
+		}
 	}
 }
 

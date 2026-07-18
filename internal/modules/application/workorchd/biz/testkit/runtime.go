@@ -31,6 +31,7 @@ import (
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	systemmodule "github.com/muidea/workorch/internal/modules/kernel/system"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 )
 
 type lifecycle interface {
@@ -104,10 +105,11 @@ func TryNewRuntime(backend string, dataRoot string, commandHub magicevent.Hub) (
 
 func newRuntime(backend string, dataRoot string, commandHub magicevent.Hub) *bootstrap.Runtime {
 	ensureTestLLMConfig()
+	dataRoot = testRuntimeDataRoot(backend, dataRoot)
 	hub := newRuntimeHub(commandHub)
 	hub.repos = buildRepositories(backend, dataRoot)
 	runtime := bootstrap.NewWithBackendAndCommandHub(backend, dataRoot, hub)
-	modules, err := startOwnerModules(RuntimeExports(runtime), hub)
+	modules, err := startOwnerModules(RuntimeExports(runtime), hub, dataRoot)
 	if err != nil {
 		panic(fmt.Errorf("start application test owner modules: %w", err))
 	}
@@ -115,7 +117,24 @@ func newRuntime(backend string, dataRoot string, commandHub magicevent.Hub) *boo
 	return runtime
 }
 
-func startOwnerModules(exports Exports, rawHub magicevent.Hub) ([]lifecycle, error) {
+// testRuntimeDataRoot prevents test-only owner state from falling back to a
+// package working directory. Callers that need persistence across sessions pass
+// an explicit root (normally t.TempDir); isolated fixtures receive a /tmp root.
+func testRuntimeDataRoot(backend string, dataRoot string) string {
+	if dataRoot != "" {
+		return dataRoot
+	}
+	if workorchrepo.NormalizeRepositoryBackend(backend) == "file" {
+		return workorchrepo.ResolveRepositoryDataRoot(backend, "")
+	}
+	root, err := os.MkdirTemp("", "workorch-testkit-runtime-")
+	if err != nil {
+		panic(fmt.Errorf("create testkit runtime root: %w", err))
+	}
+	return root
+}
+
+func startOwnerModules(exports Exports, rawHub magicevent.Hub, dataRoot string) ([]lifecycle, error) {
 	background := exports.Infrastructure.BackgroundRoutine
 	repositories := exports.Repositories
 	configured := make([]lifecycle, 0, 21)
@@ -136,7 +155,7 @@ func startOwnerModules(exports Exports, rawHub magicevent.Hub) ([]lifecycle, err
 	// Capability-state query receipts are owner-private durable state, so give
 	// the Git owner an explicit local store rather than projecting a global
 	// configuration value into the test session.
-	gitReceipts, err := gitbiz.NewCapabilityStateReceiptStore(".workorch-testkit-git-receipts")
+	gitReceipts, err := gitbiz.NewCapabilityStateReceiptStore(filepath.Join(dataRoot, "runtime-v2", "git-receipts"))
 	if err != nil {
 		return nil, err
 	}

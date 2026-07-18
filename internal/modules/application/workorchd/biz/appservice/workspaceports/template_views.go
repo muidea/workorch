@@ -17,7 +17,7 @@ func ListWorkspaceTemplates(ctx context.Context, hub magicevent.Hub) ([]workspac
 	}
 	ret := make([]workspacecore.WorkspaceTemplate, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, workspacecore.WorkspaceTemplateFromRepository(item))
+		ret = append(ret, workspacecore.WorkspaceTemplateFromOwner(item))
 	}
 	return ret, nil
 }
@@ -31,7 +31,7 @@ func ReadWorkspaceTemplate(ctx context.Context, hub magicevent.Hub, templateID s
 	if err != nil {
 		return workspacecore.WorkspaceTemplate{}, err
 	}
-	return workspacecore.WorkspaceTemplateFromRepository(item), nil
+	return workspacecore.WorkspaceTemplateFromOwner(item), nil
 }
 
 func RefreshWorkspaceTemplateBinding(ctx context.Context, hub magicevent.Hub, workspaceID string) (appmodelcore.Workspace, error) {
@@ -61,7 +61,7 @@ func CreateWorkspaceTemplate(ctx context.Context, hub magicevent.Hub, template w
 	if err != nil {
 		return workspacecore.WorkspaceTemplate{}, err
 	}
-	record, err := workspacecore.WorkspaceTemplateToRepository(item)
+	record, err := workspacecore.WorkspaceTemplateToOwner(item)
 	if err != nil {
 		return workspacecore.WorkspaceTemplate{}, err
 	}
@@ -80,7 +80,7 @@ func UpdateWorkspaceTemplate(ctx context.Context, hub magicevent.Hub, templateID
 	if err != nil {
 		return workspacecore.WorkspaceTemplate{}, err
 	}
-	record, err := workspacecore.WorkspaceTemplateToRepository(item)
+	record, err := workspacecore.WorkspaceTemplateToOwner(item)
 	if err != nil {
 		return workspacecore.WorkspaceTemplate{}, err
 	}

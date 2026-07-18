@@ -12,6 +12,7 @@
 - `application/workorchd` 通过 owner command/read port 管理和展示 workspace definition。
 - Runtime V1 retirement apply 通过 typed update command 清理指向 V1 Run 的 `ActiveRunID`，保留 Workspace definition 与交付目录，并发布 Workspace 状态通知。
 - `kernel/system` 发送 `EnsureWorkspaceTemplateDefaultsCommand`；本 block 在自己的 repository 内幂等初始化默认模板并返回具体 result。
+- `WorkspaceTemplate` 是 workspace owner 的 DTO；EventHub result 只返回该 owner DTO，并在 module 内部完成与 repository entity 的双向 mapping、slice/map/payload clone。repository 类型不得泄漏给 application 或其他 owner。
 
 ## 相关约束
 

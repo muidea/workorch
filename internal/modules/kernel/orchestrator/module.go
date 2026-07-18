@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -16,7 +17,6 @@ import (
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
-	orchestratorservice "github.com/muidea/workorch/internal/modules/kernel/orchestrator/service"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -24,8 +24,6 @@ import (
 )
 
 const ModuleID = modulecommon.ModuleID
-
-type Service = orchestratorservice.Service
 
 type Dependencies struct {
 	ToolCalls             repository.ToolCallRepository
@@ -40,7 +38,6 @@ type Dependencies struct {
 
 type Module struct {
 	bizPtr            *orchestratorbiz.RuntimeOrchestrator
-	servicePtr        *orchestratorservice.Module
 	evidenceRecords   repository.EvidenceRecordRepository
 	rawEventHub       magicevent.Hub
 	rawObserver       magicevent.SimpleObserver
@@ -48,6 +45,7 @@ type Module struct {
 	backgroundRoutine task.BackgroundRoutine
 	driveMu           sync.Mutex
 	drivingRuns       map[string]struct{}
+	started           bool
 }
 
 func New() *Module { return &Module{} }
@@ -84,13 +82,6 @@ func (m *Module) Configure(deps Dependencies) error {
 		},
 	)
 
-	m.servicePtr = orchestratorservice.New(orchestratorservice.Dependencies{
-		BlockOnDecision: m.bizPtr.BlockOnDecision,
-		BlockOnApproval: m.bizPtr.BlockOnApproval,
-		CancelRun:       m.bizPtr.CancelRun,
-		SupersedeRun:    m.bizPtr.SupersedeRun,
-		FailRun:         m.bizPtr.FailRun,
-	})
 	if err := m.bizPtr.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: deps.CommandHub}); err != nil {
 		return err
 	}
@@ -101,7 +92,7 @@ func (m *Module) Configure(deps Dependencies) error {
 }
 
 func (m *Module) Start() error {
-	if m == nil || m.servicePtr == nil || m.rawEventHub == nil {
+	if m == nil || m.bizPtr == nil || m.rawEventHub == nil {
 		return common.ErrInvalidArgument
 	}
 	if m.rawObserver != nil {
@@ -144,49 +135,47 @@ func (m *Module) Start() error {
 		m.rawObserver.Subscribe(decisionevents.TopicDecisionCommandRecordEvidence, m.handleDecisionEvidenceCommand)
 		m.rawObserver.Subscribe(approvalevents.TopicApprovalCommandRecordEvidence, m.handleApprovalEvidenceCommand)
 	}
-	// RVC-R14: inventory active V2 aggregates and schedule safe re-drive. Projection
-	// and application do not choose recovery actions.
-	m.scheduleRuntimeV2StartupRecovery()
+	if m.started {
+		return nil
+	}
+	// GMM-R1 / SM-4: recovery inventory must be acquired synchronously. A missing
+	// Run owner subscriber is a startup failure, not a warning that loses recovery.
+	if err := m.recoverRuntimeV2Startup(context.Background()); err != nil {
+		return err
+	}
+	m.started = true
 	return nil
 }
 
-func (m *Module) scheduleRuntimeV2StartupRecovery() {
+func (m *Module) recoverRuntimeV2Startup(ctx context.Context) error {
 	if m == nil || m.bizPtr == nil || m.rawEventHub == nil {
-		return
+		return common.ErrInvalidArgument
 	}
-	runRecovery := func() {
-		ctx := context.Background()
-		items, err := queryRuntimeV2RecoveryInventory(ctx, m.rawEventHub)
-		if err != nil {
-			slog.Warn("workorch Runtime V2 startup recovery inventory failed", "err", err)
-			return
-		}
-		recovered := 0
-		for _, item := range items {
-			switch item.Class {
-			case runevents.RuntimeV2RecoveryBlockedGovernance:
-				if _, loadErr := m.bizPtr.LoadRuntimeV2(ctx, item.WorkspaceID, item.RunID); loadErr != nil {
-					slog.Warn("workorch Runtime V2 blocked governance binding verification failed", "workspaceID", item.WorkspaceID, "runID", item.RunID, "err", loadErr)
-				}
-				continue
-			case runevents.RuntimeV2RecoveryActiveNoDispatch, runevents.RuntimeV2RecoveryActiveSealedDispatch,
-				runevents.RuntimeV2RecoveryTerminalDeliveryPending:
-			default:
-				continue
+	items, err := queryRuntimeV2RecoveryInventory(ctx, m.rawEventHub)
+	if err != nil {
+		return fmt.Errorf("Runtime V2 startup recovery inventory: %w", err)
+	}
+	recovered := 0
+	for _, item := range items {
+		switch item.Class {
+		case runevents.RuntimeV2RecoveryBlockedGovernance:
+			if _, loadErr := m.bizPtr.LoadRuntimeV2(ctx, item.WorkspaceID, item.RunID); loadErr != nil {
+				slog.Warn("workorch Runtime V2 blocked governance binding verification failed", "workspaceID", item.WorkspaceID, "runID", item.RunID, "err", loadErr)
 			}
-			if err := m.scheduleRuntimeV2Drive(ctx, item.WorkspaceID, item.RunID, "startup_recovery:"+string(item.Class)); err != nil {
-				slog.Warn("workorch Runtime V2 startup recovery schedule failed", "workspaceID", item.WorkspaceID, "runID", item.RunID, "class", item.Class, "err", err)
-				continue
-			}
-			recovered++
+			continue
+		case runevents.RuntimeV2RecoveryActiveNoDispatch, runevents.RuntimeV2RecoveryActiveSealedDispatch,
+			runevents.RuntimeV2RecoveryTerminalDeliveryPending:
+		default:
+			continue
 		}
-		slog.Info("workorch Runtime V2 startup recovery inventory complete", "recovered", recovered)
+		if err := m.scheduleRuntimeV2Drive(ctx, item.WorkspaceID, item.RunID, "startup_recovery:"+string(item.Class)); err != nil {
+			slog.Warn("workorch Runtime V2 startup recovery schedule failed", "workspaceID", item.WorkspaceID, "runID", item.RunID, "class", item.Class, "err", err)
+			continue
+		}
+		recovered++
 	}
-	if m.backgroundRoutine == nil {
-		runRecovery()
-		return
-	}
-	_ = m.backgroundRoutine.AsyncFunction(runRecovery)
+	slog.Info("workorch Runtime V2 startup recovery inventory complete", "recovered", recovered)
+	return nil
 }
 
 func queryRuntimeV2RecoveryInventory(ctx context.Context, hub magicevent.Hub) ([]runevents.RuntimeV2RecoveryInventoryItem, error) {
@@ -231,19 +220,15 @@ func (m *Module) Stop(ctx context.Context) error {
 	}
 	m.rawObserver = nil
 	m.rawTopics = nil
-	m.servicePtr = nil
 	m.bizPtr = nil
 	m.evidenceRecords = nil
 	m.rawEventHub = nil
 	m.backgroundRoutine = nil
+	m.started = false
 	m.driveMu.Lock()
 	m.drivingRuns = nil
 	m.driveMu.Unlock()
 	return nil
-}
-
-func (m *Module) Service() Service {
-	return m.servicePtr
 }
 
 func (m *Module) handleMagicCommand(ev magicevent.Event, result magicevent.Result) {
@@ -252,7 +237,7 @@ func (m *Module) handleMagicCommand(ev magicevent.Event, result magicevent.Resul
 }
 
 func (m *Module) executeMagicCommand(ev magicevent.Event) (orchestratorevents.OrchestratorCommandResult, error) {
-	if m == nil || m.servicePtr == nil {
+	if m == nil || m.bizPtr == nil {
 		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 	}
 	ctx := ev.Context()
@@ -268,13 +253,13 @@ func (m *Module) executeMagicCommand(ev magicevent.Event) (orchestratorevents.Or
 		if !ok || cmd.RunID == "" {
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
-		return orchestratorevents.OrchestratorCommandResult{}, m.servicePtr.BlockOnDecision(ctx, cmd.RunID, cmd.TicketID)
+		return orchestratorevents.OrchestratorCommandResult{}, m.bizPtr.BlockOnDecision(ctx, cmd.RunID, cmd.TicketID)
 	case orchestratorevents.TopicOrchestratorCommandBlockApproval:
 		cmd, ok := ev.Data().(orchestratorevents.BlockApprovalCommand)
 		if !ok || cmd.RunID == "" {
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
-		return orchestratorevents.OrchestratorCommandResult{}, m.servicePtr.BlockOnApproval(ctx, cmd.RunID, cmd.ApprovalID)
+		return orchestratorevents.OrchestratorCommandResult{}, m.bizPtr.BlockOnApproval(ctx, cmd.RunID, cmd.ApprovalID)
 	case orchestratorevents.TopicOrchestratorCommandResumeRun:
 		cmd, ok := ev.Data().(orchestratorevents.ResumeRunCommand)
 		if !ok || cmd.RunID == "" {
@@ -286,19 +271,19 @@ func (m *Module) executeMagicCommand(ev magicevent.Event) (orchestratorevents.Or
 		if !ok || cmd.RunID == "" {
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
-		return orchestratorevents.OrchestratorCommandResult{}, m.servicePtr.CancelRun(ctx, cmd.RunID)
+		return orchestratorevents.OrchestratorCommandResult{}, m.bizPtr.CancelRun(ctx, cmd.RunID)
 	case orchestratorevents.TopicOrchestratorCommandSupersedeRun:
 		cmd, ok := ev.Data().(orchestratorevents.SupersedeRunCommand)
 		if !ok || cmd.RunID == "" {
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
-		return orchestratorevents.OrchestratorCommandResult{}, m.servicePtr.SupersedeRun(ctx, cmd.RunID)
+		return orchestratorevents.OrchestratorCommandResult{}, m.bizPtr.SupersedeRun(ctx, cmd.RunID)
 	case orchestratorevents.TopicOrchestratorCommandFailRun:
 		cmd, ok := ev.Data().(orchestratorevents.FailRunCommand)
 		if !ok || cmd.RunID == "" {
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
-		return orchestratorevents.OrchestratorCommandResult{}, m.servicePtr.FailRun(ctx, cmd.RunID, cmd.Reason)
+		return orchestratorevents.OrchestratorCommandResult{}, m.bizPtr.FailRun(ctx, cmd.RunID, cmd.Reason)
 	case orchestratorevents.TopicOrchestratorCommandPurgeRun:
 		cmd, ok := ev.Data().(orchestratorevents.PurgeRunCommand)
 		if !ok || cmd.WorkspaceID == "" || cmd.RunID == "" {

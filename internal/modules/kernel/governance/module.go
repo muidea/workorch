@@ -107,7 +107,7 @@ func (m *Module) executeCommand(ev magicevent.Event) (governanceevents.Governanc
 		if !ok {
 			return governanceevents.GovernanceCommandResult{}, common.ErrInvalidArgument
 		}
-		items, err := m.traces.List(ev.Context(), cmd.Query)
+		items, err := m.traces.List(ev.Context(), repository.AutoGovernanceTraceQuery{WorkspaceID: cmd.Query.WorkspaceID, RunID: cmd.Query.RunID, StepID: cmd.Query.StepID, ItemType: cmd.Query.ItemType, ItemID: cmd.Query.ItemID, Status: cmd.Query.Status, Limit: cmd.Query.Limit})
 		if err != nil {
 			return governanceevents.GovernanceCommandResult{}, err
 		}

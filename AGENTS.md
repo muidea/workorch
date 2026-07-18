@@ -12,7 +12,7 @@ WorkOrch is a Go service (`github.com/muidea/workorch`, Go 1.24.x) with an embed
 | --- | --- |
 | `application/workorch` | Binary entry. Default mode starts TUI; `--server` starts HTTP/Web |
 | `internal/services/workorch` | Process-level wiring: local/remote backend, CLI, TUI, agent session |
-| `internal/initiators/workorchruntime` | Repository providers, EventHub access, bootstrap helpers |
+| `internal/initiators/workorchruntime` | Repository provider/factory only; no EventHub, runtime-policy, or bootstrap export |
 | `internal/modules/application/workorchd` | Server app module (`biz`/`service`/`pkg`): typed bootstrap, HTTP/SSE/projection — **does not** own Runtime V2 drive |
 | `internal/modules/kernel/orchestrator` | **Runtime V2 convergence authority** (`DriveRuntimeV2` + reducer + sealed dispatch) |
 | `internal/modules/kernel/{run,governance,eventstream,system}` | Run aggregate CAS, policy, audit stream, startup defaults |
@@ -23,7 +23,7 @@ WorkOrch is a Go service (`github.com/muidea/workorch`, Go 1.24.x) with an embed
 | `docs/` | Design docs; navigation: `docs/README.md` |
 | `config/`, `config/file/` | Default / file-backed TOML configs |
 
-Module shape: `module.go` / `plugin.go`, `biz/` (orchestrator has `biz/runtimev2/`), optional `service/`, `pkg/`, `readme.md` (module interaction SoT).
+Module shape: `module.go` / `plugin.go`, `biz/` (orchestrator has `biz/runtimev2/`), optional protocol-adapter `service/`, `pkg/`, `readme.md` (module interaction SoT). Owner modules do not expose direct service facades.
 
 ### Runtime V2 ownership (production path only)
 
