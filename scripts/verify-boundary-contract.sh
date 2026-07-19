@@ -19,6 +19,17 @@ for path in "${paths[@]}"; do
   fi
 done
 
+source_matches() {
+  local pattern="$1"
+  shift
+  grep -R -n -E \
+    --exclude='*_test.go' \
+    --exclude-dir='.git' \
+    --exclude-dir='dist' \
+    --exclude-dir='node_modules' \
+    -- "$pattern" "$@" || true
+}
+
 # Every framework Module/Block in this repository currently participates in
 # EventHub lifecycle. Its root is only a lifecycle bridge; the component-local
 # Biz must be the sole holder of the Base/EventHub interaction. The repository
@@ -29,22 +40,22 @@ for component_root in "${component_roots[@]}"; do
     echo "boundary contract violation: component has no local biz directory: $component_root" >&2
     exit 1
   fi
-  if ! rg -q --glob '*.go' 'basebiz\.Base' "$component_root/biz"; then
+  if ! grep -R -q -E --include='*.go' -- 'basebiz\.Base' "$component_root/biz"; then
     echo "boundary contract violation: component Biz does not embed basebiz.Base: $component_root" >&2
     exit 1
   fi
-  if ! rg -q --glob '*.go' 'func \(.*\) (Stop|Teardown|Close)\(' "$component_root/biz"; then
+  if ! grep -R -q -E --include='*.go' -- 'func \(.*\) (Stop|Teardown|Close)\(' "$component_root/biz"; then
     echo "boundary contract violation: component Biz has no explicit teardown: $component_root" >&2
     exit 1
   fi
   if [[ "$component_root" == "internal/modules/application/workorchd" ]]; then
-    if ! rg -q 'func \(m \*Module\) (Setup|Run|Teardown)\(' "$component_root/module.go"; then
+    if ! grep -q -E -- 'func \(m \*Module\) (Setup|Run|Teardown)\(' "$component_root/module.go"; then
       echo "boundary contract violation: application module lacks framework lifecycle bridge: $component_root" >&2
       exit 1
     fi
     continue
   fi
-  if [[ ! -f "$component_root/plugin.go" ]] || ! rg -q 'pluginmodule\.Register\(New\(\)\)' "$component_root/plugin.go" || ! rg -q 'func \(m \*Module\) Setup\(' "$component_root/plugin.go" || ! rg -q 'func \(m \*Module\) Run\(' "$component_root/plugin.go" || ! rg -q 'func \(m \*Module\) Teardown\(' "$component_root/plugin.go"; then
+  if [[ ! -f "$component_root/plugin.go" ]] || ! grep -q -E -- 'pluginmodule\.Register\(New\(\)\)' "$component_root/plugin.go" || ! grep -q -E -- 'func \(m \*Module\) Setup\(' "$component_root/plugin.go" || ! grep -q -E -- 'func \(m \*Module\) Run\(' "$component_root/plugin.go" || ! grep -q -E -- 'func \(m \*Module\) Teardown\(' "$component_root/plugin.go"; then
     echo "boundary contract violation: component plugin lacks registration or full lifecycle bridge: $component_root" >&2
     exit 1
   fi
@@ -56,7 +67,7 @@ for component_root in "${component_roots[@]}"; do
   # perform EventHub work: roots are lifecycle bridges only.
   if matches="$(
     find "$component_root" -maxdepth 1 -type f -name '*.go' ! -name '*_test.go' -print0 |
-      xargs -0 -r rg -n 'NewSimpleObserver|\.Subscribe\(|\.Unsubscribe\(|\.Send\(|\.Post\(' || true
+      xargs -0 -r grep -n -E -- 'NewSimpleObserver|\.Subscribe\(|\.Unsubscribe\(|\.Send\(|\.Post\(' || true
   )"; then
     if [[ -n "$matches" ]]; then
       root_event_operations+=("$matches")
@@ -74,10 +85,11 @@ EOF
   exit 1
 fi
 
-if matches="$(
-  rg -n --glob '**/service/*.go' --glob '**/service/**/*.go' --glob '!*_test.go' \
-    'event\.Hub|magicevent\.Hub|event\.SimpleObserver|magicevent\.SimpleObserver|NewSimpleObserver|\.Subscribe\(|\.Unsubscribe\(|\.Send\(|\.Post\(' internal/modules
-)"; then
+matches="$(
+  find internal/modules -type f -path '*/service/*.go' ! -name '*_test.go' -print0 |
+    xargs -0 -r grep -n -E -- 'event\.Hub|magicevent\.Hub|event\.SimpleObserver|magicevent\.SimpleObserver|NewSimpleObserver|\.Subscribe\(|\.Unsubscribe\(|\.Send\(|\.Post\(' || true
+)"
+if [[ -n "$matches" ]]; then
   cat >&2 <<EOF
 Boundary contract violation: protocol service/adapter code must not retain or
 operate on EventHub. Move the event lifecycle and typed handlers into the
@@ -88,9 +100,11 @@ EOF
   exit 1
 fi
 
-if matches="$(
-  rg -n --glob '*.go' --glob '!*_test.go' 'basebiz\.Base|NewSimpleObserver|\.Subscribe\(|\.Unsubscribe\(|\.Send\(|\.Post\(' internal/initiators
-)"; then
+matches="$(
+  find internal/initiators -type f -name '*.go' ! -name '*_test.go' -print0 |
+    xargs -0 -r grep -n -E -- 'basebiz\.Base|NewSimpleObserver|\.Subscribe\(|\.Unsubscribe\(|\.Send\(|\.Post\(' || true
+)"
+if [[ -n "$matches" ]]; then
   cat >&2 <<EOF
 Boundary contract violation: Initiators provide one stateless infrastructure
 capability and must not embed Base or participate in business EventHub traffic.
@@ -101,9 +115,14 @@ EOF
 fi
 
 mapfile -t event_contract_dirs < <(find internal/modules -type d -path '*/pkg/events' | sort)
-if ((${#event_contract_dirs[@]} > 0)) && matches="$(
-  rg -n --glob '*.go' 'map\[string\]any|\[\]any|\bany\b|<-chan|\bchan\b|internal/pkg/repository|io\.Writer|http\.ResponseWriter|\*.*Repository|Registry|Recorder' "${event_contract_dirs[@]}"
-)"; then
+matches=""
+if ((${#event_contract_dirs[@]} > 0)); then
+  matches="$(
+    find "${event_contract_dirs[@]}" -type f -name '*.go' -print0 |
+      xargs -0 -r grep -n -E -- 'map\[string\]any|\[\]any|\bany\b|<-chan|\bchan\b|internal/pkg/repository|io\.Writer|http\.ResponseWriter|\*.*Repository|Registry|Recorder' || true
+  )"
+fi
+if [[ -n "$matches" ]]; then
   cat >&2 <<EOF
 Boundary contract violation: EventHub Command/Data/Result contracts must use
 bounded concrete DTOs only. They may not leak maps, any, channels, repositories
@@ -138,10 +157,10 @@ while IFS= read -r topics_file; do
     if [[ "$topic_name" == "TopicRuntimeBlockCommandExecutePrefix" ]]; then
       continue
     fi
-    if ! rg -q "\b${topic_name}\b" "$contracts_file"; then
+    if ! grep -q -E -- "(^|[^[:alnum:]_])${topic_name}([^[:alnum:]_]|$)" "$contracts_file"; then
       event_contract_violations+=("${topics_file}: ${topic_name} is not declared in ${contracts_file}")
     fi
-  done < <(rg -o 'Topic[A-Za-z0-9_]+\s*=' "$topics_file" | sed 's/[[:space:]]*=//')
+  done < <(grep -E -o -- 'Topic[A-Za-z0-9_]+[[:space:]]*=' "$topics_file" | sed 's/[[:space:]]*=//')
 done < <(find internal/modules internal/initiators -path '*/pkg/events/topics.go' -o -path '*/pkg/runtimeevent/eventdefs/topics.go' | sort)
 
 if ((${#event_contract_violations[@]} > 0)); then
@@ -157,13 +176,10 @@ EOF
   exit 1
 fi
 
-if matches="$(
-  rg -n --hidden -S "$readmodel_presenter_import_pattern" \
-    internal/modules/application/workorchd/biz/appservice/readmodelcore \
-    internal/modules/application/workorchd/biz/appservice/readmodelprojection \
-    -g '!**/*_test.go' \
-    -g '!**/.git/**'
-)"; then
+matches="$(source_matches "$readmodel_presenter_import_pattern" \
+  internal/modules/application/workorchd/biz/appservice/readmodelcore \
+  internal/modules/application/workorchd/biz/appservice/readmodelprojection)"
+if [[ -n "$matches" ]]; then
   cat >&2 <<EOF
 Boundary contract violation: read-model core/projection code must not import presenter mappers.
 
@@ -176,12 +192,8 @@ EOF
   exit 1
 fi
 
-if matches="$(
-  rg -n --hidden -S "$orchestrator_patch_side_effect_pattern" \
-    internal/modules/kernel/orchestrator \
-    -g '!**/*_test.go' \
-    -g '!**/.git/**'
-)"; then
+matches="$(source_matches "$orchestrator_patch_side_effect_pattern" internal/modules/kernel/orchestrator)"
+if [[ -n "$matches" ]]; then
   cat >&2 <<EOF
 Boundary contract violation: orchestrator must not own patch filesystem side-effect execution.
 
@@ -194,12 +206,8 @@ EOF
   exit 1
 fi
 
-if matches="$(
-  rg -n --hidden -S "$orchestrator_repair_target_snapshot_read_pattern" \
-    internal/modules/kernel/orchestrator \
-    -g '!**/*_test.go' \
-    -g '!**/.git/**'
-)"; then
+matches="$(source_matches "$orchestrator_repair_target_snapshot_read_pattern" internal/modules/kernel/orchestrator)"
+if [[ -n "$matches" ]]; then
   cat >&2 <<EOF
 Boundary contract violation: orchestrator repair context must not read target snapshot files directly.
 
@@ -212,13 +220,8 @@ EOF
   exit 1
 fi
 
-if matches="$(
-  rg -n --hidden -S "$domain_specific_pattern" "${paths[@]}" \
-    -g '!**/*_test.go' \
-    -g '!**/dist/**' \
-    -g '!**/node_modules/**' \
-    -g '!**/.git/**'
-)"; then
+matches="$(source_matches "$domain_specific_pattern" "${paths[@]}")"
+if [[ -n "$matches" ]]; then
   cat >&2 <<EOF
 Boundary contract violation: reusable runtime code must not contain concrete business fallback terms.
 
@@ -232,13 +235,8 @@ EOF
   exit 1
 fi
 
-if matches="$(
-  rg -n --hidden -S "$software_dev_bias_pattern" "${paths[@]}" \
-    -g '!**/*_test.go' \
-    -g '!**/dist/**' \
-    -g '!**/node_modules/**' \
-    -g '!**/.git/**'
-)"; then
+matches="$(source_matches "$software_dev_bias_pattern" "${paths[@]}")"
+if [[ -n "$matches" ]]; then
   cat >&2 <<EOF
 Boundary contract violation: reusable runtime code must not contain software-development profile bias.
 
@@ -253,14 +251,17 @@ EOF
   exit 1
 fi
 
-if matches="$(
-  rg -n --hidden -S "$lsp_profile_pattern" internal/modules/kernel internal/modules/blocks internal/pkg \
-    -g '!**/*_test.go' \
-    -g '!internal/pkg/workorchdefaults/defaults/**' \
-    -g '!**/dist/**' \
-    -g '!**/node_modules/**' \
-    -g '!**/.git/**'
-)"; then
+matches="$(
+  find internal/modules/kernel internal/modules/blocks internal/pkg -type f \
+    ! -name '*_test.go' \
+    ! -path 'internal/pkg/workorchdefaults/defaults/*' \
+    ! -path '*/dist/*' \
+    ! -path '*/node_modules/*' \
+    ! -path '*/.git/*' \
+    -print0 |
+    xargs -0 -r grep -n -E -- "$lsp_profile_pattern" || true
+)"
+if [[ -n "$matches" ]]; then
   cat >&2 <<EOF
 Boundary contract violation: reusable runtime code must not contain LSP profile-specific logic.
 
@@ -274,14 +275,17 @@ EOF
   exit 1
 fi
 
-if matches="$(
-  rg -n --hidden -S "$deprecated_workspace_decision_endpoint_pattern" internal web scripts \
-    -g '!scripts/verify-boundary-contract.sh' \
-    -g '!**/*_test.go' \
-    -g '!**/dist/**' \
-    -g '!**/node_modules/**' \
-    -g '!**/.git/**'
-)"; then
+matches="$(
+  find internal web scripts -type f \
+    ! -name '*_test.go' \
+    ! -path 'scripts/verify-boundary-contract.sh' \
+    ! -path '*/dist/*' \
+    ! -path '*/node_modules/*' \
+    ! -path '*/.git/*' \
+    -print0 |
+    xargs -0 -r grep -n -E -- "$deprecated_workspace_decision_endpoint_pattern" || true
+)"
+if [[ -n "$matches" ]]; then
   cat >&2 <<EOF
 Boundary contract violation: deprecated workspace-scoped decision REST endpoint is not allowed in code.
 
