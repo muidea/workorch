@@ -5,13 +5,11 @@ import (
 	"net/http"
 
 	engine "github.com/muidea/magicEngine/http"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func registerMCPReadRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/mcp/servers", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		state.metrics.mcpServerListRequests.Add(1)
 		items, err := state.listMCPServers(r.Context(), state.config.Backend, state.config.DataRoot)
 		if err != nil {
@@ -26,7 +24,6 @@ func registerMCPReadRoutes(router engine.RouteRegistry, state *serverState) {
 		})
 	})
 	router.AddHandler("/api/v1/workorch/mcp/capabilities", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		state.metrics.mcpCapabilityListRequests.Add(1)
 		items, err := state.listMCPCapabilities(r.Context(), state.config.Backend, state.config.DataRoot, mcpCapabilityQueryFromRequest(r))
 		if err != nil {
@@ -41,7 +38,6 @@ func registerMCPReadRoutes(router engine.RouteRegistry, state *serverState) {
 		})
 	})
 	router.AddHandler("/api/v1/workorch/mcp/capabilities/:capabilityId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		capabilityID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/mcp/capabilities/")
 		if !ok {
 			http.NotFound(w, r)
@@ -61,7 +57,6 @@ func registerMCPReadRoutes(router engine.RouteRegistry, state *serverState) {
 		})
 	})
 	router.AddHandler("/api/v1/workorch/mcp/servers/:serverId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		serverID, action, ok := mcpServerActionFromPath(r.URL.Path)
 		if !ok || action != "" {
 			http.NotFound(w, r)
@@ -81,7 +76,6 @@ func registerMCPReadRoutes(router engine.RouteRegistry, state *serverState) {
 		})
 	})
 	router.AddHandler("/api/v1/workorch/mcp/servers/:serverId/tools", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		serverID, action, ok := mcpServerActionFromPath(r.URL.Path)
 		if !ok || action != "tools" {
 			http.NotFound(w, r)
@@ -101,7 +95,6 @@ func registerMCPReadRoutes(router engine.RouteRegistry, state *serverState) {
 		})
 	})
 	router.AddHandler("/api/v1/workorch/mcp/servers/:serverId/resources", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		serverID, action, ok := mcpServerActionFromPath(r.URL.Path)
 		if !ok || action != "resources" {
 			http.NotFound(w, r)
@@ -121,7 +114,6 @@ func registerMCPReadRoutes(router engine.RouteRegistry, state *serverState) {
 		})
 	})
 	router.AddHandler("/api/v1/workorch/mcp/servers/:serverId/prompts", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		serverID, action, ok := mcpServerActionFromPath(r.URL.Path)
 		if !ok || action != "prompts" {
 			http.NotFound(w, r)
@@ -144,7 +136,6 @@ func registerMCPReadRoutes(router engine.RouteRegistry, state *serverState) {
 
 func registerMCPWriteRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/mcp/servers", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		state.metrics.mcpServerCreateRequests.Add(1)
 		var req createMCPServerRequest
 		if err := decodeJSON(r, &req); err != nil {
@@ -164,7 +155,6 @@ func registerMCPWriteRoutes(router engine.RouteRegistry, state *serverState) {
 		})
 	})
 	router.AddHandler("/api/v1/workorch/mcp/servers/:serverId", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		serverID, action, ok := mcpServerActionFromPath(r.URL.Path)
 		if !ok || action != "" {
 			writeJSON(w, http.StatusNotFound, errorResponse{Error: common.ErrNotFound.Error()})
@@ -188,7 +178,6 @@ func registerMCPWriteRoutes(router engine.RouteRegistry, state *serverState) {
 		})
 	})
 	router.AddHandler("/api/v1/workorch/mcp/capabilities", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		state.metrics.mcpCapabilityCreateRequests.Add(1)
 		var req createMCPCapabilityRequest
 		if err := decodeJSON(r, &req); err != nil {
@@ -208,7 +197,6 @@ func registerMCPWriteRoutes(router engine.RouteRegistry, state *serverState) {
 		})
 	})
 	router.AddHandler("/api/v1/workorch/mcp/capabilities/:capabilityId", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		capabilityID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/mcp/capabilities/")
 		if !ok {
 			http.NotFound(w, r)

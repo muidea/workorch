@@ -39,7 +39,7 @@ func TestServiceCreateRunPersistsOwnerStateAndPublishesTypedNotification(t *test
 	})
 	t.Cleanup(func() { observer.Unsubscribe(runevents.TopicRunCreated) })
 
-	service := newServiceWithPorts(runRepo, testWorkspaceRepositoryReader{WorkspaceRepository: workspaceRepo}, eventRunStateNotifier{hub: hub})
+	service := newServiceWithPorts(runRepo, testWorkspaceRepositoryReader{WorkspaceRepository: workspaceRepo}, eventRunStateNotifier{post: hub.Post})
 	command := runcontracts.CreateRunCommand{
 		RunID: runID, WorkspaceID: workspaceID, GoalID: "goal-create-run", DoDID: "dod-create-run",
 		DefinitionRevision: "definition-create-run", InitialStepKind: "llm/workspace_execution", Priority: 3,

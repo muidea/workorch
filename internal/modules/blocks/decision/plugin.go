@@ -21,7 +21,7 @@ func (m *Module) Setup(_ context.Context, eventHub event.Hub, background task.Ba
 	if err != nil {
 		return err
 	}
-	if setupErr := m.Configure(Dependencies{
+	if setupErr := m.configure(Dependencies{
 		Tickets:           repos.Tickets,
 		Resolutions:       repos.Resolutions,
 		EventHub:          eventHub,

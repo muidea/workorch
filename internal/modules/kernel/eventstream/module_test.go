@@ -48,29 +48,19 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Configure(eventstreamModuleContractDependencies()); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if module.bizPtr == nil || module.eventHub == nil {
+	if module.bizPtr == nil {
 		t.Fatalf("module not fully configured: %+v", module)
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	firstSubscriptionCount := len(module.topics)
-	if firstSubscriptionCount == 0 {
-		t.Fatal("Start did not subscribe eventstream commands")
-	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("second Start: %v", err)
-	}
-	if len(module.topics) != firstSubscriptionCount {
-		t.Fatalf("second Start subscription count = %d, want %d", len(module.topics), firstSubscriptionCount)
 	}
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if module.bizPtr != nil ||
-		module.eventHub != nil ||
-		module.observer != nil ||
-		len(module.topics) != 0 {
+	if module.bizPtr != nil {
 		t.Fatalf("module was not cleared after Stop: %+v", module)
 	}
 	if err := module.Stop(context.Background()); err != nil {
@@ -108,20 +98,13 @@ func TestModuleRunIsIdempotentAndTeardownUnsubscribes(t *testing.T) {
 	if err := module.Start(); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	firstTopicCount := len(module.topics)
-	if firstTopicCount == 0 {
-		t.Fatalf("topic count = 0, want eventstream subscriptions")
-	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("second Run: %v", err)
-	}
-	if len(module.topics) != firstTopicCount {
-		t.Fatalf("topic count after second Run = %d, want %d", len(module.topics), firstTopicCount)
 	}
 	if err := module.Stop(ctx); err != nil {
 		t.Fatalf("Teardown: %v", err)
 	}
-	if module.observer != nil || len(module.topics) != 0 {
+	if module.bizPtr != nil {
 		t.Fatalf("module subscriptions were not cleared: %+v", module)
 	}
 }

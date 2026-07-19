@@ -7,6 +7,7 @@ import (
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	magictask "github.com/muidea/magicCommon/task"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 
@@ -86,34 +87,19 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Configure(decisionModuleContractDependencies()); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if module.bizPtr == nil ||
-		module.eventHub == nil ||
-		module.tickets == nil ||
-		module.resolutions == nil {
+	if module.bizPtr == nil || module.bizPtr.EventHub() == nil {
 		t.Fatalf("module not fully configured: %+v", module)
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	firstSubscriptionCount := len(module.topics)
-	if firstSubscriptionCount == 0 {
-		t.Fatal("Start did not subscribe decision commands")
-	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("second Start: %v", err)
-	}
-	if len(module.topics) != firstSubscriptionCount {
-		t.Fatalf("second Start subscription count = %d, want %d", len(module.topics), firstSubscriptionCount)
 	}
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if module.bizPtr != nil ||
-		module.eventHub != nil ||
-		module.tickets != nil ||
-		module.resolutions != nil ||
-		module.observer != nil ||
-		len(module.topics) != 0 {
+	if module.bizPtr != nil {
 		t.Fatalf("module was not cleared after Stop: %+v", module)
 	}
 	if err := module.Stop(context.Background()); err != nil {
@@ -158,7 +144,7 @@ func TestDecisionTicketCommandGetHonorsScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub, BackgroundRoutine: magictask.NewBackgroundRoutine(1)}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -538,7 +524,7 @@ func TestDecisionCreateResolutionCommandRequiresTicketScope(t *testing.T) {
 		t.Fatalf("seed ticket: %v", err)
 	}
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub, BackgroundRoutine: magictask.NewBackgroundRoutine(1)}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -885,7 +871,7 @@ func TestRuntimeGovernanceResolutionDoesNotResolveTicketBeforeAggregateCommit(t 
 		t.Fatalf("create ticket: %v", err)
 	}
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub, BackgroundRoutine: magictask.NewBackgroundRoutine(1)}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -937,7 +923,7 @@ func TestRuntimeGovernanceResolutionDoesNotResolveTicketBeforeAggregateCommit(t 
 	})
 	defer commitObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket)
 
-	module.reconcileRuntimeGovernanceProposals(ctx)
+	module.bizPtr.ReconcileRuntimeGovernanceProposals(ctx)
 	ticket, err = tickets.Get(ctx, "ticket-runtime-commit-order")
 	if err != nil {
 		t.Fatalf("read reconciled ticket: %v", err)

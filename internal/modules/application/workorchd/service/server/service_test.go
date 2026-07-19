@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/testkit"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -65,9 +65,14 @@ func TestServiceStartupRequiresFrameworkRuntime(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
 
 	if err := svc.Startup(context.Background(), "workorch", nil, routine); err == nil {
-		t.Fatal("Startup returned nil error without event hub")
+		t.Fatal("Startup returned nil error without runtime session")
 	}
-	if err := svc.Startup(context.Background(), "workorch", event.NewHub(8), nil); err == nil {
+	session, sessionErr := appservice.NewRuntimeSessionWithBackend("memory", "")
+	if sessionErr != nil {
+		t.Fatalf("new runtime session: %v", sessionErr)
+	}
+	t.Cleanup(func() { _ = session.Close(context.Background()) })
+	if err := svc.Startup(context.Background(), "workorch", session, nil); err == nil {
 		t.Fatal("Startup returned nil error without background routine")
 	}
 }
@@ -75,9 +80,8 @@ func TestServiceStartupRequiresFrameworkRuntime(t *testing.T) {
 func TestServiceRunUsesBackgroundRoutine(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
 	svc := &Service{
-		http:              newIsolatedTestHTTPServerWithBackground(Config{Addr: "127.0.0.1:0", Backend: "memory"}, routine),
-		backgroundRoutine: routine,
-		done:              make(chan error, 1),
+		http: newIsolatedTestHTTPServerWithBackground(Config{Addr: "127.0.0.1:0", Backend: "memory"}, routine),
+		done: make(chan error, 1),
 	}
 	configureIsolatedTestSession(t, svc.http.state, svc.http.state.config)
 
@@ -139,9 +143,8 @@ func TestServiceRunDoesNotRecoverLegacyInactiveRunningWorkspace(t *testing.T) {
 
 	routine := &recordingBackgroundRoutine{}
 	svc := &Service{
-		http:              newIsolatedTestHTTPServerWithBackground(Config{Addr: "127.0.0.1:0", Backend: "file", DataRoot: dataRoot}, routine),
-		backgroundRoutine: routine,
-		done:              make(chan error, 1),
+		http: newIsolatedTestHTTPServerWithBackground(Config{Addr: "127.0.0.1:0", Backend: "file", DataRoot: dataRoot}, routine),
+		done: make(chan error, 1),
 	}
 	configureIsolatedTestSession(t, svc.http.state, svc.http.state.config)
 	if err := svc.Run(ctx); err != nil {
@@ -202,9 +205,8 @@ func TestServiceRunReturnsErrorWhenBackgroundSubmitFails(t *testing.T) {
 	submitErr := errors.New("background routine is closed")
 	routine := &recordingBackgroundRoutine{err: submitErr}
 	svc := &Service{
-		http:              newIsolatedTestHTTPServerWithBackground(Config{Addr: "127.0.0.1:0", Backend: "memory"}, routine),
-		backgroundRoutine: routine,
-		done:              make(chan error, 1),
+		http: newIsolatedTestHTTPServerWithBackground(Config{Addr: "127.0.0.1:0", Backend: "memory"}, routine),
+		done: make(chan error, 1),
 	}
 	configureIsolatedTestSession(t, svc.http.state, svc.http.state.config)
 

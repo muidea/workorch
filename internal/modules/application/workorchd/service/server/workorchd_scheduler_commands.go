@@ -6,16 +6,31 @@ import (
 	"strings"
 	"time"
 
-	cd "github.com/muidea/magicCommon/def"
-	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+// WorkspaceRunScheduler is the narrow application Biz port used by the HTTP
+// adapter. The server neither owns nor directly uses EventHub.
+type WorkspaceRunScheduler interface {
+	SubmitWorkspaceRun(context.Context, workorchdevents.WorkspaceRunRequestedCommand) error
+	DispatchRuntimeRun(context.Context, string, string, string) error
+}
+
+func (s *serverState) updateWorkspaceLLMTarget(ctx context.Context, workspaceID string, target *runtimecontract.ProviderModelTarget) (appservice.Workspace, error) {
+	var ret appservice.Workspace
+	err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+		var err error
+		ret, err = appservice.UpdateWorkspaceLLMTargetWithSession(ctx, session, workspaceID, target)
+		return err
+	})
+	return ret, err
+}
 
 type workspaceRunRequest struct {
 	WorkspaceID        string
@@ -31,33 +46,13 @@ type workspaceRunRequest struct {
 }
 
 func (s *serverState) publishWorkorchDSchedulerCommand(ctx context.Context, topic string, command workorchdevents.WorkspaceRunRequestedCommand) error {
-	if s == nil || s.schedulerHub == nil || strings.TrimSpace(topic) == "" {
+	if s == nil || s.workspaceRunScheduler == nil || strings.TrimSpace(topic) == "" {
 		return common.ErrInvalidArgument
 	}
 	command = prepareHTTPSchedulerCommand(topic, command)
-	event := magicevent.NewEventWithContext(topic, "workorchd/http", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	event.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{SubjectType: schedulerSubjectType(topic), SubjectID: schedulerSubjectID(topic, command), WorkspaceID: strings.TrimSpace(string(command.WorkspaceID)), RunID: strings.TrimSpace(string(command.RunID))}))
-	response := s.schedulerHub.Send(event)
-	if response == nil {
-		s.recordSchedulerCommandResult(topic, "missing_response")
-		return fmt.Errorf("%w: scheduler command %s returned no accepted response", common.ErrConflict, topic)
-	}
-	if err := response.Error(); err != nil {
-		s.recordSchedulerCommandResult(topic, "failed")
-		if strings.Contains(err.Message, "missing observer") {
-			return fmt.Errorf("%w: scheduler command %s returned no accepted response", common.ErrConflict, topic)
-		}
-		return err
-	}
-	data, err := response.Get()
-	if err != nil {
+	if err := s.workspaceRunScheduler.SubmitWorkspaceRun(ctx, command); err != nil {
 		s.recordSchedulerCommandResult(topic, "failed")
 		return err
-	}
-	result, ok := data.(workorchdevents.WorkspaceRunRequestedResult)
-	if !ok || !result.Accepted {
-		s.recordSchedulerCommandResult(topic, "not_accepted")
-		return fmt.Errorf("%w: scheduler command %s was not accepted", common.ErrConflict, topic)
 	}
 	s.recordSchedulerCommandResult(topic, "accepted")
 	return nil
@@ -191,35 +186,6 @@ func schedulerSubjectID(topic string, command workorchdevents.WorkspaceRunReques
 	return strings.TrimSpace(string(command.WorkspaceID))
 }
 
-func (s *serverState) registerWorkorchDSchedulerCommandWatcher() {
-	if s == nil || s.schedulerHub == nil {
-		return
-	}
-	topics := []string{
-		workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested,
-	}
-	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, s.schedulerHub)
-	for _, topic := range topics {
-		topic := topic
-		observer.Subscribe(topic, func(ev magicevent.Event, result magicevent.Result) {
-			command, ok := ev.Data().(workorchdevents.WorkspaceRunRequestedCommand)
-			if !ok {
-				result.Set(nil, cd.NewError(cd.IllegalParam, common.ErrInvalidArgument.Error()))
-				return
-			}
-			ctx := ev.Context()
-			if err := s.handleWorkorchDSchedulerCommand(ctx, command); err != nil {
-				s.projectRejectedSchedulerCommand(command, err)
-				result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
-				return
-			}
-			s.projectAcceptedSchedulerCommand(command)
-			result.Set(workorchdevents.WorkspaceRunRequestedResult{Accepted: true}, nil)
-		})
-		s.eventUnsubscribes = append(s.eventUnsubscribes, func() { observer.Unsubscribe(topic) })
-	}
-}
-
 func schedulerIDs[ID ~string](values []string) []ID {
 	ret := make([]ID, 0, len(values))
 	for _, value := range values {
@@ -330,7 +296,7 @@ func (s *serverState) executeWorkspaceRuntimeV2Activation(ctx context.Context, r
 		return common.ErrInvalidArgument
 	}
 	workspaceID := strings.TrimSpace(req.WorkspaceID)
-	runCtx := appservice.ContextWithCommandHub(ctx, s.commandHub)
+	runCtx := ctx
 	runCtx = common.ContextWithRuntimeWorkspaceID(runCtx, common.WorkspaceID(workspaceID))
 	release, err := s.acquireRunSlotWithPriority(runCtx, req.Priority)
 	if err != nil {
@@ -350,41 +316,10 @@ func (s *serverState) executeWorkspaceRuntimeV2Activation(ctx context.Context, r
 }
 
 func (s *serverState) sendRuntimeV2RunOwnerCommand(ctx context.Context, workspaceID string, runID string, action string) error {
-	if s == nil || s.commandHub == nil || strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(runID) == "" {
+	if s == nil || s.workspaceRunScheduler == nil || strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(runID) == "" {
 		return common.ErrInvalidArgument
 	}
-	workspaceScope := common.WorkspaceID(strings.TrimSpace(workspaceID))
-	runScope := common.RunID(strings.TrimSpace(runID))
-	ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceScope)
-	var topic string
-	var command any
-	switch strings.TrimSpace(action) {
-	case "start":
-		topic = orchestratorevents.TopicOrchestratorCommandStartRun
-		command = orchestratorevents.StartRunCommand{RunID: runScope}
-	case "resume":
-		topic = orchestratorevents.TopicOrchestratorCommandResumeRun
-		command = orchestratorevents.ResumeRunCommand{WorkspaceID: workspaceScope, RunID: runScope}
-	default:
-		return common.ErrInvalidArgument
-	}
-	event := magicevent.NewEventWithContext(topic, "workorchd/scheduler", orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	event.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{SubjectType: "run", SubjectID: string(runScope), WorkspaceID: string(workspaceScope), RunID: string(runScope)}))
-	response := s.commandHub.Send(event)
-	if response == nil {
-		return fmt.Errorf("%w: Runtime V2 run command %s returned no response", common.ErrConflict, topic)
-	}
-	if err := response.Error(); err != nil {
-		return err
-	}
-	data, err := response.Get()
-	if err != nil {
-		return err
-	}
-	if _, ok := data.(orchestratorevents.OrchestratorCommandResult); !ok {
-		return fmt.Errorf("%w: Runtime V2 run command %s returned %T", common.ErrInvalidArgument, topic, data)
-	}
-	return nil
+	return s.workspaceRunScheduler.DispatchRuntimeRun(ctx, workspaceID, runID, action)
 }
 
 func workspaceRunRequestFromCommand(command workorchdevents.WorkspaceRunRequestedCommand) workspaceRunRequest {

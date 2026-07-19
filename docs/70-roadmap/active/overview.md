@@ -4,7 +4,7 @@ Status: active
 
 Type: roadmap
 
-Last Updated: 2026-07-18
+Last Updated: 2026-07-19
 
 ## Purpose
 
@@ -17,7 +17,7 @@ Last Updated: 2026-07-18
 | Runtime V2 生产主链 | **代码已收口**（Start/Resume → `DriveRuntimeV2` only） |
 | Runtime V2 正向收敛基础闭环 | **completed**；RVC-R17～R26 已 code-landed，RVC-R16 bounded terminal 与 canonical canary liveness 已通过；完成记录迁入 archive |
 | Runtime V2 production admissibility + positive acceptance | **completed**；RPA-1 的 sealed budget、owner feasibility gate 与 fresh deployed bounded/positive acceptance 已通过；完成记录迁入 archive |
-| 22-component framework boundary | **verification active**；代码/documentation 已收口，待完整 structural/race/file-backed/deployed matrix 后归档 |
+| 22-component framework boundary | **remediation active**；共享 Base Biz、全量本地 structural/race/file-backed 门禁已完成，待外部 deployed restart-fixture matrix |
 | V1 StagePacket / NextAction / graph dispatch 主链 | **已删除** |
 | 设计结论上提 | 见 [00-core/runtime-stage-contract.md](../../00-core/runtime-stage-contract.md)、[current-state.md](../../01-overview/current-state.md) |
 
@@ -25,7 +25,7 @@ Last Updated: 2026-07-18
 
 | ID | 项 | 说明 | 方案 / 历史过程稿 |
 | --- | --- | --- | --- |
-| ARCH-1 | 22 组件 framework boundary / lifecycle 验证 | recovery、channel contract、owner facade、repository DTO 与 test-data isolation 已收口；待 complete matrix | [go-multi-module-22-component-boundary-remediation.md](go-multi-module-22-component-boundary-remediation.md) |
+| ARCH-1 | 22 组件 framework boundary / lifecycle 验证 | Base Biz / Module-root EventHub 拓扑及本地验证已收口；待有重启后的外部目标与三类 fixture manifest 后执行 deployed SM-4 matrix | [go-multi-module-22-component-boundary-remediation.md](go-multi-module-22-component-boundary-remediation.md) |
 | OPS-1 | 生产目录 V1 retirement 正式 apply | 代码/live 已 complete；等待 clean build + 真实生产目录维护窗口执行 `runtime-v1-retirement --apply` | [deployed-workspace-progress-blocker-component-closure-plan.md](../../90-archive/completed/deployed-workspace-progress-blocker-component-closure-plan.md) |
 | OPT-1 | file-patch deployed live（可选） | 代码迁移已完成；可选补一次 `patch apply + validation + DoD closeout` 的 deployed live | [file-patch-side-effect-owner-migration-plan.md](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
 

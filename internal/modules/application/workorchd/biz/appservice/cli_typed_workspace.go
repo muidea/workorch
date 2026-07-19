@@ -9,7 +9,7 @@ import (
 )
 
 func (d *CLICommandDispatcher) handleTypedCLIWorkspace(event magicevent.Event, result magicevent.Result) {
-	ctx := ContextWithCommandHub(event.Context(), d.commandHub)
+	ctx := ContextWithCommandHub(event.Context(), d.EventHub())
 	switch command := event.Data().(type) {
 	case workorchdevents.CLIWorkspaceCreateCommand:
 		item, err := CreateWorkspaceWithTemplateWithSession(ctx, d.borrow(), appmodelcore.CreateWorkspaceCommand{
@@ -70,7 +70,7 @@ func (d *CLICommandDispatcher) handleTypedCLIWorkspace(event magicevent.Event, r
 			return
 		}
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
-		item, err := UpdateWorkspaceLLMTargetWithHub(ctx, d.commandHub, string(command.WorkspaceID), command.Target)
+		item, err := UpdateWorkspaceLLMTargetWithHub(ctx, d.EventHub(), string(command.WorkspaceID), command.Target)
 		if setTypedCLIError(result, err) {
 			return
 		}
@@ -90,7 +90,7 @@ func (d *CLICommandDispatcher) handleTypedWorkspaceRuntimeView(event magicevent.
 		setInvalidTypedCLICommand(result)
 		return
 	}
-	ctx := ContextWithCommandHub(event.Context(), d.commandHub)
+	ctx := ContextWithCommandHub(event.Context(), d.EventHub())
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
 	item, err := d.viewReader.ReadWorkspaceViewSnapshot(ctx, string(command.WorkspaceID))
 	if setTypedCLIError(result, err) {

@@ -3,7 +3,6 @@ package decision
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -131,7 +130,7 @@ func TestService_CreateTicket_SeedsOpenState(t *testing.T) {
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo, nil)
+	service := NewService(ticketRepo, resolutionRepo)
 
 	cmd := decisionservice.CreateTicketCommand{
 		TicketID:               common.TicketID("ticket-1"),
@@ -169,7 +168,7 @@ func TestService_RuntimeGovernanceProposalStaysOpenUntilFinalize(t *testing.T) {
 	ctx := context.Background()
 	tickets := memory.NewDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
-	service := NewService(tickets, resolutions, nil)
+	service := NewService(tickets, resolutions)
 	if err := tickets.Create(ctx, &decisionModel.Ticket{
 		ID:                     "ticket-runtime-proposal",
 		WorkspaceID:            "ws-runtime-proposal",
@@ -214,7 +213,7 @@ func TestService_RuntimeGovernanceRejectsUnallowedActionBeforeProposal(t *testin
 	ctx := context.Background()
 	tickets := memory.NewDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
-	service := NewService(tickets, resolutions, nil)
+	service := NewService(tickets, resolutions)
 	if err := tickets.Create(ctx, &decisionModel.Ticket{
 		ID:                     "ticket-runtime-actions",
 		WorkspaceID:            "ws-runtime-actions",
@@ -249,7 +248,7 @@ func TestService_RuntimeGovernanceRejectsUnallowedActionBeforeProposal(t *testin
 
 func TestService_CreateTicket_ValidateArguments(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(memory.NewDecisionTicketRepository(), memory.NewDecisionResolutionRepository(), nil)
+	service := NewService(memory.NewDecisionTicketRepository(), memory.NewDecisionResolutionRepository())
 
 	tests := []decisionservice.CreateTicketCommand{
 		{TicketID: "", RunID: common.RunID("run-1"), Reason: "need operator decision"},
@@ -269,7 +268,7 @@ func TestService_CreateTicket_RejectsDuplicateTicketID(t *testing.T) {
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo, nil)
+	service := NewService(ticketRepo, resolutionRepo)
 
 	first := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-dup"),
@@ -306,7 +305,7 @@ func TestService_CreateTicket_AllowsDuplicateTicketIDAcrossWorkspaces(t *testing
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo, nil)
+	service := NewService(ticketRepo, resolutionRepo)
 
 	first := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-workspace-local"),
@@ -347,7 +346,7 @@ func TestService_CreateTicket_AllowsDuplicateTicketIDAcrossWorkspaces(t *testing
 func TestService_EnsureTicket_IsIdempotentAndRejectsBindingMismatch(t *testing.T) {
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
-	service := NewService(ticketRepo, memory.NewDecisionResolutionRepository(), nil)
+	service := NewService(ticketRepo, memory.NewDecisionResolutionRepository())
 
 	cmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-ensure"),
@@ -388,7 +387,7 @@ func TestService_ResolveTicket_OpenToResolvedAndPersistsResolution(t *testing.T)
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo, nil)
+	service := NewService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-1"),
@@ -434,7 +433,7 @@ func TestService_ResolveTicket_OpenToResolvedAndPersistsResolution(t *testing.T)
 	}
 }
 
-func TestService_ResolveTicket_RecordsDecisionEvidence(t *testing.T) {
+func TestService_ResolveTicket_DoesNotUseEventHub(t *testing.T) {
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
@@ -452,7 +451,7 @@ func TestService_ResolveTicket_RecordsDecisionEvidence(t *testing.T) {
 		result.Set(decisionevents.RecordDecisionEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil)
 	})
 	defer observer.Unsubscribe(decisionevents.TopicDecisionCommandRecordEvidence)
-	service := NewService(ticketRepo, resolutionRepo, rawHub)
+	service := NewService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:     common.TicketID("ticket-evidence"),
@@ -485,19 +484,8 @@ func TestService_ResolveTicket_RecordsDecisionEvidence(t *testing.T) {
 		t.Fatalf("second ensure resolved ticket: %v", err)
 	}
 
-	if evidenceCommand.EvidenceRecordID == "" || strings.ContainsAny(string(evidenceCommand.EvidenceRecordID), `/\`) {
-		t.Fatalf("evidence record id = %q, want non-empty file-safe id", evidenceCommand.EvidenceRecordID)
-	}
-	if evidenceCommand.WorkspaceID != createCmd.WorkspaceID || evidenceCommand.RunID != createCmd.RunID || evidenceCommand.StepID != createCmd.StepID ||
-		evidenceCommand.TicketID != createCmd.TicketID || evidenceCommand.ResolutionID != resolveCmd.ResolutionID ||
-		evidenceCommand.ResolutionType != resolveCmd.Type || evidenceCommand.DecisionKind != createCmd.DecisionKind ||
-		evidenceCommand.ContinuationAction != resolveCmd.ContinuationAction || evidenceCommand.ResumeRunID != resolveCmd.ResumeRunID {
-		t.Fatalf("evidence command = %#v, want scoped decision resolution contract", evidenceCommand)
-	}
-	if len(evidenceCommand.ResolutionPayload) != 1 || evidenceCommand.ResolutionPayload[0].Name != "operatorInput" ||
-		evidenceCommand.ResolutionPayload[0].Value.Kind != decisionevents.DecisionEvidenceValueString ||
-		evidenceCommand.ResolutionPayload[0].Value.String != "continue with current plan" {
-		t.Fatalf("evidence payload = %#v, want concrete operatorInput field", evidenceCommand.ResolutionPayload)
+	if evidenceCommand.EvidenceRecordID != "" {
+		t.Fatalf("service unexpectedly submitted evidence: %#v", evidenceCommand)
 	}
 }
 
@@ -505,7 +493,7 @@ func TestService_ResolveTicket_RejectsSecondResolveOnResolvedTicket(t *testing.T
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo, nil)
+	service := NewService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-1"),
@@ -549,7 +537,7 @@ func TestService_EnsureResolvedTicket_IsIdempotentAndRejectsResolutionMismatch(t
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo, nil)
+	service := NewService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-ensure-resolved"),
@@ -614,7 +602,7 @@ func TestService_EnsureResolvedTicketReusesLoadedTicket(t *testing.T) {
 	ctx := context.Background()
 	ticketRepo := newCountingDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo, nil)
+	service := NewService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-ensure-loaded"),
@@ -644,7 +632,7 @@ func TestService_EnsureResolvedTicketAndReturnReturnsResolvedEntitiesWithoutExtr
 	ctx := context.Background()
 	ticketRepo := newCountingDecisionTicketRepository()
 	resolutionRepo := newCountingDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo, nil)
+	service := NewService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-return-loaded"),
@@ -691,7 +679,7 @@ func TestService_EnsureResolvedTicketAndReturnIdempotentReturnsPersistedResoluti
 	ctx := context.Background()
 	ticketRepo := newCountingDecisionTicketRepository()
 	resolutionRepo := newCountingDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo, nil)
+	service := NewService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-return-idempotent"),
@@ -741,7 +729,7 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionSamePayloadIsIdem
 	ctx := context.Background()
 	ticketRepo := newCountingDecisionTicketRepository()
 	resolutionRepo := newCountingDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo, nil)
+	service := NewService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-orphan-recover"),
@@ -798,12 +786,12 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionSamePayloadIsIdem
 	}
 }
 
-func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionPublishesResolvedEvent(t *testing.T) {
+func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionDoesNotPublish(t *testing.T) {
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	hub := newRecordingDecisionHub(t)
-	service := NewService(ticketRepo, resolutionRepo, hub)
+	service := NewService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-orphan-event"),
@@ -835,25 +823,8 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionPublishesResolved
 		t.Fatalf("orphan recovery: %v", err)
 	}
 
-	published := hub.Posted()
-	if len(published) != 2 {
-		t.Fatalf("len(published) = %d, want 2", len(published))
-	}
-	if published[1].ID() != decisionevents.TopicTicketResolved {
-		t.Fatalf("second topic = %s, want %s", published[1].ID(), decisionevents.TopicTicketResolved)
-	}
-	resolved, ok := published[1].Data().(decisionevents.TicketResolvedData)
-	if !ok {
-		t.Fatalf("resolved data type = %T", published[1].Data())
-	}
-	if resolved.ResolutionID != orphan.ID {
-		t.Fatalf("resolution id = %v, want %s", resolved.ResolutionID, orphan.ID)
-	}
-	if resolved.ContinuationAction != "" {
-		t.Fatalf("continuationAction = %v, want empty for orphan without refs", resolved.ContinuationAction)
-	}
-	if resolved.Ticket.State != common.DecisionTicketStateResolved {
-		t.Fatalf("resolved state = %v, want resolved", resolved.Ticket.State)
+	if published := hub.Posted(); len(published) != 0 {
+		t.Fatalf("service unexpectedly published %d events", len(published))
 	}
 }
 
@@ -862,7 +833,7 @@ func TestService_EnsureResolvedTicketAndReturn_PromotesRecoveryRefsFromPayload(t
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	hub := newRecordingDecisionHub(t)
-	service := NewService(ticketRepo, resolutionRepo, hub)
+	service := NewService(ticketRepo, resolutionRepo)
 
 	cmd := decisionservice.CreateTicketCommand{
 		TicketID:    "ticket-resolution-refs",
@@ -892,10 +863,8 @@ func TestService_EnsureResolvedTicketAndReturn_PromotesRecoveryRefsFromPayload(t
 	if resolution.ContinuationAction != "replan" || resolution.ResumeRunID != "run-source" || resolution.SuccessorRunID != "run-successor" {
 		t.Fatalf("resolution refs = %+v, want promoted payload refs", resolution)
 	}
-	published := hub.Posted()
-	last, ok := published[len(published)-1].Data().(decisionevents.TicketResolvedData)
-	if !ok || last.ContinuationAction != "replan" || last.ResumeRunID != "run-source" || last.SuccessorRunID != "run-successor" {
-		t.Fatalf("resolved event data = %+v, want recovery refs", last)
+	if published := hub.Posted(); len(published) != 0 {
+		t.Fatalf("service unexpectedly published %d events", len(published))
 	}
 }
 
@@ -907,7 +876,7 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionDifferentPayloadR
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo, nil)
+	service := NewService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-orphan-payload-mismatch"),
@@ -959,7 +928,7 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionDifferentIDReturn
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo, nil)
+	service := NewService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-orphan-id-mismatch"),
@@ -995,7 +964,7 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionDifferentIDReturn
 
 func TestService_ResolveTicket_ValidateArgumentsAndNotFound(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(memory.NewDecisionTicketRepository(), memory.NewDecisionResolutionRepository(), nil)
+	service := NewService(memory.NewDecisionTicketRepository(), memory.NewDecisionResolutionRepository())
 
 	tests := []decisionservice.ResolveTicketCommand{
 		{ResolutionID: "", TicketID: common.TicketID("ticket-1"), Type: decisioncommon.ResolutionTypeProvideMissingInfo},
@@ -1018,12 +987,12 @@ func TestService_ResolveTicket_ValidateArgumentsAndNotFound(t *testing.T) {
 	}
 }
 
-func TestService_CreateAndResolveTicket_PublishesEvents(t *testing.T) {
+func TestService_CreateAndResolveTicket_DoesNotPublishEvents(t *testing.T) {
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	hub := newRecordingDecisionHub(t)
-	service := NewService(ticketRepo, resolutionRepo, hub)
+	service := NewService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-event"),
@@ -1044,31 +1013,17 @@ func TestService_CreateAndResolveTicket_PublishesEvents(t *testing.T) {
 		t.Fatalf("resolve ticket: %v", err)
 	}
 
-	published := hub.Posted()
-	if len(published) != 2 {
-		t.Fatalf("len(published) = %d, want 2", len(published))
-	}
-	if published[0].ID() != decisionevents.TopicTicketCreated {
-		t.Fatalf("first topic = %s, want %s", published[0].ID(), decisionevents.TopicTicketCreated)
-	}
-	if published[1].ID() != decisionevents.TopicTicketResolved {
-		t.Fatalf("second topic = %s, want %s", published[1].ID(), decisionevents.TopicTicketResolved)
-	}
-	resolved, ok := published[1].Data().(decisionevents.TicketResolvedData)
-	if !ok || resolved.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo {
-		t.Fatalf("resolved data = %+v, want type %s", resolved, decisioncommon.ResolutionTypeProvideMissingInfo)
-	}
-	if resolved.Ticket.State != common.DecisionTicketStateResolved {
-		t.Fatalf("resolved state = %v, want resolved", resolved.Ticket.State)
+	if published := hub.Posted(); len(published) != 0 {
+		t.Fatalf("service unexpectedly published %d events", len(published))
 	}
 }
 
-func TestService_PublishesConcreteDecisionNotificationsThroughEventHub(t *testing.T) {
+func TestService_DoesNotPublishConcreteDecisionNotifications(t *testing.T) {
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	hub := newRecordingDecisionHub(t)
-	service := NewService(ticketRepo, resolutionRepo, hub)
+	service := NewService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-async"),
@@ -1088,14 +1043,55 @@ func TestService_PublishesConcreteDecisionNotificationsThroughEventHub(t *testin
 		t.Fatalf("resolve ticket: %v", err)
 	}
 
+	if published := hub.Posted(); len(published) != 0 {
+		t.Fatalf("service unexpectedly published %d events", len(published))
+	}
+}
+
+func TestBiz_PublishesDecisionNotificationsAndRecordsEvidence(t *testing.T) {
+	ctx := context.Background()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	hub := newRecordingDecisionHub(t)
+	owner, err := New(hub, nil, Dependencies{Tickets: ticketRepo, Resolutions: resolutionRepo, EventHub: hub})
+	if err != nil {
+		t.Fatalf("New Biz: %v", err)
+	}
+	create := decisionservice.CreateTicketCommand{
+		TicketID: "ticket-biz-notification", WorkspaceID: "ws-biz", RunID: "run-biz", StepID: "run-biz/gate", Reason: "need a decision",
+	}
+	ticket, err := owner.service.CreateTicketAndReturn(ctx, create)
+	if err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	if err := owner.publishTicketCreated(ctx, ticket); err != nil {
+		t.Fatalf("publish created: %v", err)
+	}
+	ticket, resolution, transitioned, err := owner.service.EnsureResolvedTicketAndReturnWithTransition(ctx, decisionservice.ResolveTicketCommand{
+		ResolutionID: "resolution-biz-notification", TicketID: create.TicketID, WorkspaceID: create.WorkspaceID, RunID: create.RunID, StepID: create.StepID,
+		Type: decisioncommon.ResolutionTypeProvideMissingInfo, Payload: mustDecisionPayload(t, map[string]any{"operatorInput": "continue"}),
+	})
+	if err != nil {
+		t.Fatalf("resolve ticket: %v", err)
+	}
+	if err := owner.recordAndPublishResolvedTicket(ctx, ticket, resolution, transitioned); err != nil {
+		t.Fatalf("record and publish resolved: %v", err)
+	}
+	_, _, transitioned, err = owner.service.EnsureResolvedTicketAndReturnWithTransition(ctx, decisionservice.ResolveTicketCommand{
+		ResolutionID: resolution.ID, TicketID: create.TicketID, WorkspaceID: create.WorkspaceID, RunID: create.RunID, StepID: create.StepID,
+		Type: resolution.Type, Payload: resolution.Payload.Clone(),
+	})
+	if err != nil {
+		t.Fatalf("retry resolve ticket: %v", err)
+	}
+	if transitioned {
+		t.Fatal("idempotent resolution unexpectedly transitioned ticket")
+	}
+	if err := owner.recordAndPublishResolvedTicket(ctx, ticket, resolution, transitioned); err != nil {
+		t.Fatalf("record idempotent evidence: %v", err)
+	}
 	published := hub.Posted()
 	if len(published) != 2 || published[0].ID() != decisionevents.TopicTicketCreated || published[1].ID() != decisionevents.TopicTicketResolved {
-		t.Fatalf("published = %+v, want ticket created and resolved notifications", published)
-	}
-	if _, ok := published[0].Data().(decisionevents.TicketChangedData); !ok {
-		t.Fatalf("created data type = %T", published[0].Data())
-	}
-	if _, ok := published[1].Data().(decisionevents.TicketResolvedData); !ok {
-		t.Fatalf("resolved data type = %T", published[1].Data())
+		t.Fatalf("published = %+v, want one created and one resolved notification", published)
 	}
 }

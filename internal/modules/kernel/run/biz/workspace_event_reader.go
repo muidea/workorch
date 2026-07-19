@@ -12,11 +12,11 @@ import (
 )
 
 type workspaceEventReader struct {
-	hub magicevent.Hub
+	send func(magicevent.Event) magicevent.Result
 }
 
 func (r workspaceEventReader) Get(ctx context.Context, id common.WorkspaceID) (*workspacemodel.Workspace, error) {
-	if r.hub == nil || id == "" {
+	if r.send == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGet, modulecommon.ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.GetWorkspaceCommand{WorkspaceID: id})
@@ -25,7 +25,7 @@ func (r workspaceEventReader) Get(ctx context.Context, id common.WorkspaceID) (*
 		SubjectID:   string(id),
 		WorkspaceID: string(id),
 	}))
-	result := r.hub.Send(ev)
+	result := r.send(ev)
 	if result == nil {
 		return nil, common.ErrInvalidArgument
 	}

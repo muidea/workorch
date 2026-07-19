@@ -2,234 +2,49 @@ package mcp
 
 import (
 	"context"
-
-	cd "github.com/muidea/magicCommon/def"
-	magicevent "github.com/muidea/magicCommon/event"
 	mcpbiz "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/common"
 	mcpcontracts "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/contracts"
-	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
-	systemevents "github.com/muidea/workorch/internal/modules/kernel/system/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
-	"github.com/muidea/workorch/internal/pkg/workorchdefaults"
 )
 
 const ModuleID = modulecommon.ModuleID
 
 type CreateServerCommand = mcpcontracts.CreateServerCommand
 type UpdateServerCommand = mcpcontracts.UpdateServerCommand
+type Dependencies = mcpbiz.Dependencies
+type Module struct{ bizPtr *mcpbiz.Biz }
 
-type Dependencies struct {
-	Servers      repository.MCPServerRepository
-	Capabilities repository.MCPCapabilityRepository
-	EventHub     magicevent.Hub
-}
-
-type Module struct {
-	bizPtr       *mcpbiz.Service
-	servers      repository.MCPServerRepository
-	capabilities repository.MCPCapabilityRepository
-	eventHub     magicevent.Hub
-	observer     magicevent.SimpleObserver
-	topics       []string
-}
-
-func New() *Module { return &Module{} }
-
-func (m *Module) ID() string { return ModuleID }
-
-func (m *Module) Configure(deps Dependencies) error {
-	if deps.Servers == nil || deps.Capabilities == nil || deps.EventHub == nil {
+func New() *Module                               { return &Module{} }
+func (m *Module) ID() string                     { return ModuleID }
+func (m *Module) Configure(d Dependencies) error { return m.configure(d) }
+func (m *Module) configure(d Dependencies) error {
+	if m == nil {
 		return common.ErrInvalidArgument
 	}
-	m.eventHub = deps.EventHub
-	m.servers = deps.Servers
-	m.capabilities = deps.Capabilities
-	m.bizPtr = mcpbiz.NewService(deps.Servers, deps.Capabilities)
+	if d.Servers == nil || d.Capabilities == nil {
+		return common.ErrInvalidArgument
+	}
+	if d.EventHub == nil {
+		return common.ErrInvalidArgument
+	}
+	x, e := mcpbiz.New(d.EventHub, d.BackgroundRoutine, d)
+	if e != nil {
+		return e
+	}
+	m.bizPtr = x
 	return nil
 }
-
 func (m *Module) Start() error {
-	if m == nil || m.bizPtr == nil || m.eventHub == nil {
+	if m == nil || m.bizPtr == nil {
 		return common.ErrInvalidArgument
 	}
-	if m.observer != nil {
-		return nil
+	return m.bizPtr.Start()
+}
+func (m *Module) Stop(c context.Context) error {
+	if m != nil && m.bizPtr != nil {
+		m.bizPtr.Teardown(c)
+		m.bizPtr = nil
 	}
-	m.observer = magicevent.NewSimpleObserver(ModuleID, m.eventHub)
-	m.topics = []string{
-		mcpevents.TopicMCPCommandCreateServer,
-		mcpevents.TopicMCPCommandGetServer,
-		mcpevents.TopicMCPCommandListServers,
-		mcpevents.TopicMCPCommandUpdateServer,
-		mcpevents.TopicMCPCommandCreateCapability,
-		mcpevents.TopicMCPCommandGetCapability,
-		mcpevents.TopicMCPCommandListCapabilities,
-		mcpevents.TopicMCPCommandUpdateCapability,
-	}
-	for _, topic := range m.topics {
-		m.observer.Subscribe(topic, m.handleMCPCommand)
-	}
-	m.topics = append(m.topics, systemevents.TopicSystemCommandEnsureMCPDefaults)
-	m.observer.Subscribe(systemevents.TopicSystemCommandEnsureMCPDefaults, m.handleSystemDefaultsCommand)
 	return nil
-}
-
-func (m *Module) Stop(ctx context.Context) error {
-	_ = ctx
-	if m.observer != nil {
-		for idx := len(m.topics) - 1; idx >= 0; idx-- {
-			m.observer.Unsubscribe(m.topics[idx])
-		}
-	}
-	m.topics = nil
-	m.observer = nil
-	m.bizPtr = nil
-	m.servers = nil
-	m.capabilities = nil
-	m.eventHub = nil
-	return nil
-}
-
-func (m *Module) handleSystemDefaultsCommand(ev magicevent.Event, result magicevent.Result) {
-	if _, ok := ev.Data().(systemevents.EnsureMCPDefaultsCommand); !ok || m == nil || m.servers == nil || m.capabilities == nil {
-		setSystemMCPDefaultsResult(result, common.ErrInvalidArgument)
-		return
-	}
-	setSystemMCPDefaultsResult(result, workorchdefaults.EnsureBuiltinMCPDefaults(ev.Context(), m.servers, m.capabilities))
-}
-
-func setSystemMCPDefaultsResult(result magicevent.Result, err error) {
-	if result == nil {
-		return
-	}
-	if err != nil {
-		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
-		return
-	}
-	result.Set(systemevents.EnsureMCPDefaultsResult{Ensured: true}, nil)
-}
-
-func (m *Module) handleMCPCommand(ev magicevent.Event, result magicevent.Result) {
-	response, err := m.executeMCPCommand(ev)
-	setMagicResult(result, response, err)
-}
-
-func (m *Module) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandResult, error) {
-	if m == nil || m.bizPtr == nil {
-		return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
-	}
-	ctx := ev.Context()
-	switch ev.ID() {
-	case mcpevents.TopicMCPCommandCreateServer:
-		cmd, ok := ev.Data().(mcpevents.CreateServerCommand)
-		if !ok {
-			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
-		}
-		if err := m.bizPtr.CreateServer(ctx, cmd); err != nil {
-			return mcpevents.MCPCommandResult{}, err
-		}
-		server, err := m.bizPtr.GetServer(ctx, cmd.ServerID)
-		if err != nil {
-			return mcpevents.MCPCommandResult{}, err
-		}
-		return mcpevents.MCPCommandResult{Server: server}, nil
-	case mcpevents.TopicMCPCommandGetServer:
-		cmd, ok := ev.Data().(mcpevents.GetServerCommand)
-		if !ok {
-			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
-		}
-		server, err := m.bizPtr.GetServer(ctx, cmd.ServerID)
-		if err != nil {
-			return mcpevents.MCPCommandResult{}, err
-		}
-		return mcpevents.MCPCommandResult{Server: server}, nil
-	case mcpevents.TopicMCPCommandListServers:
-		if _, ok := ev.Data().(mcpevents.ListServersCommand); !ok {
-			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
-		}
-		servers, err := m.bizPtr.ListServers(ctx)
-		if err != nil {
-			return mcpevents.MCPCommandResult{}, err
-		}
-		return mcpevents.MCPCommandResult{Servers: servers}, nil
-	case mcpevents.TopicMCPCommandUpdateServer:
-		cmd, ok := ev.Data().(mcpevents.UpdateServerCommand)
-		if !ok {
-			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
-		}
-		if err := m.bizPtr.UpdateServer(ctx, cmd); err != nil {
-			return mcpevents.MCPCommandResult{}, err
-		}
-		server, err := m.bizPtr.GetServer(ctx, cmd.ServerID)
-		if err != nil {
-			return mcpevents.MCPCommandResult{}, err
-		}
-		return mcpevents.MCPCommandResult{Server: server}, nil
-	case mcpevents.TopicMCPCommandCreateCapability:
-		cmd, ok := ev.Data().(mcpevents.CreateCapabilityCommand)
-		if !ok {
-			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
-		}
-		item, err := m.bizPtr.CreateCapability(ctx, mcpCapabilityContractCommand(cmd))
-		if err != nil {
-			return mcpevents.MCPCommandResult{}, err
-		}
-		return mcpevents.MCPCommandResult{Capability: item}, nil
-	case mcpevents.TopicMCPCommandGetCapability:
-		cmd, ok := ev.Data().(mcpevents.GetCapabilityCommand)
-		if !ok {
-			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
-		}
-		item, err := m.bizPtr.GetCapability(ctx, cmd.CapabilityID)
-		if err != nil {
-			return mcpevents.MCPCommandResult{}, err
-		}
-		return mcpevents.MCPCommandResult{Capability: item}, nil
-	case mcpevents.TopicMCPCommandListCapabilities:
-		cmd, ok := ev.Data().(mcpevents.ListCapabilitiesCommand)
-		if !ok {
-			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
-		}
-		items, err := m.bizPtr.ListCapabilities(ctx, cmd.Query)
-		if err != nil {
-			return mcpevents.MCPCommandResult{}, err
-		}
-		return mcpevents.MCPCommandResult{Capabilities: items}, nil
-	case mcpevents.TopicMCPCommandUpdateCapability:
-		cmd, ok := ev.Data().(mcpevents.UpdateCapabilityCommand)
-		if !ok {
-			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
-		}
-		item, err := m.bizPtr.UpdateCapability(ctx, mcpCapabilityContractCommand(cmd))
-		if err != nil {
-			return mcpevents.MCPCommandResult{}, err
-		}
-		return mcpevents.MCPCommandResult{Capability: item}, nil
-	default:
-		return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
-	}
-}
-
-func mcpCapabilityContractCommand(cmd mcpevents.CreateCapabilityCommand) mcpcontracts.CreateCapabilityCommand {
-	return mcpcontracts.CreateCapabilityCommand{
-		ID: cmd.ID, ServerID: cmd.ServerID, Kind: cmd.Kind, Name: cmd.Name, DisplayName: cmd.DisplayName,
-		Description: cmd.Description, Category: cmd.Category, Tags: append([]string(nil), cmd.Tags...),
-		UsageHint: cmd.UsageHint, InputSummary: cmd.InputSummary, OutputSummary: cmd.OutputSummary,
-		StageHints: append([]string(nil), cmd.StageHints...), RiskLevel: cmd.RiskLevel,
-		EffectScope: cmd.EffectScope, IdempotencyClass: cmd.IdempotencyClass, Schema: cmd.Schema.Clone(),
-		URI: cmd.URI, Enabled: cmd.Enabled, ApprovalPolicy: cmd.ApprovalPolicy, Status: cmd.Status,
-	}
-}
-
-func setMagicResult(result magicevent.Result, data mcpevents.MCPCommandResult, err error) {
-	if result == nil {
-		return
-	}
-	if err != nil {
-		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
-		return
-	}
-	result.Set(data, nil)
 }

@@ -8,6 +8,8 @@ import (
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	magictask "github.com/muidea/magicCommon/task"
+	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	workspaceModel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/run/pkg/common"
 	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
@@ -24,6 +26,7 @@ type workspaceReader interface {
 }
 
 type Service struct {
+	basebiz.Base
 	runs       repository.RunRepository
 	workspaces workspaceReader
 	notifier   runStateNotifier
@@ -34,11 +37,15 @@ type runStateNotifier interface {
 }
 
 type eventRunStateNotifier struct {
-	hub magicevent.Hub
+	post func(magicevent.Event)
 }
 
-func NewServiceWithEventHub(runs repository.RunRepository, commandHub magicevent.Hub) *Service {
-	return newServiceWithPorts(runs, workspaceEventReader{hub: commandHub}, eventRunStateNotifier{hub: commandHub})
+func NewServiceWithEventHub(runs repository.RunRepository, hub magicevent.Hub, background magictask.BackgroundRoutine) *Service {
+	service := newServiceWithPorts(runs, nil, nil)
+	service.Base = basebiz.New(modulecommon.ModuleID, hub, background)
+	service.workspaces = workspaceEventReader{send: service.SendEvent}
+	service.notifier = eventRunStateNotifier{post: service.PostEvent}
+	return service
 }
 
 func newServiceWithPorts(runs repository.RunRepository, workspaces workspaceReader, notifier runStateNotifier) *Service {
@@ -224,7 +231,7 @@ func (s *Service) publishRunEvent(ctx context.Context, topic string, run *runMod
 }
 
 func (n eventRunStateNotifier) PublishRunState(ctx context.Context, topic string, run *runModel.Run) error {
-	if n.hub == nil || run == nil {
+	if n.post == nil || run == nil {
 		return nil
 	}
 	event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, runevents.NotificationDestination, magicevent.NewHeader(), ctx, runevents.RunStateChangedDataFromModel(run))
@@ -234,6 +241,6 @@ func (n eventRunStateNotifier) PublishRunState(ctx context.Context, topic string
 		WorkspaceID: string(run.WorkspaceID),
 		RunID:       string(run.ID),
 	}))
-	n.hub.Post(event)
+	n.post(event)
 	return nil
 }

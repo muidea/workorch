@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -20,7 +21,10 @@ func TestWorkorchDSchedulerConsumesTypedWorkspaceRunCommand(t *testing.T) {
 		result.Set(orchestratorevents.OrchestratorCommandResult{}, nil)
 	})
 	t.Cleanup(func() { owner.Unsubscribe(orchestratorevents.TopicOrchestratorCommandResumeRun) })
-	_ = newServerStateWithCommandHubAndBackground(normalizeConfig(Config{Backend: "memory"}), rawHub, &recordingBackgroundRoutine{})
+	state := newTestServerStateWithCommandHubAndBackground(normalizeConfig(Config{Backend: "memory"}), rawHub, &recordingBackgroundRoutine{})
+	scheduler := directWorkspaceRunScheduler{state: state}
+	state.workspaceRunScheduler = scheduler
+	registerTestWorkspaceRunScheduler(t, rawHub, scheduler)
 	command := workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: "ws-typed-scheduler",
 		RunID:       "run-typed-scheduler",
@@ -54,7 +58,10 @@ func TestWorkorchDSchedulerConsumesTypedWorkspaceRunCommand(t *testing.T) {
 func TestWorkorchDSchedulerRejectsInvalidTypedWorkspaceRunCommand(t *testing.T) {
 	rawHub := magicevent.NewHub(16)
 	t.Cleanup(func() { rawHub.Terminate(context.Background()) })
-	_ = newServerStateWithCommandHubAndBackground(normalizeConfig(Config{Backend: "memory"}), rawHub, &recordingBackgroundRoutine{})
+	state := newTestServerStateWithCommandHubAndBackground(normalizeConfig(Config{Backend: "memory"}), rawHub, &recordingBackgroundRoutine{})
+	scheduler := directWorkspaceRunScheduler{state: state}
+	state.workspaceRunScheduler = scheduler
+	registerTestWorkspaceRunScheduler(t, rawHub, scheduler)
 	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, "test", workorchdevents.CommandDestination, magicevent.NewHeader(), context.Background(), workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: common.WorkspaceID("ws-invalid-typed-scheduler"),
 	})
@@ -62,4 +69,31 @@ func TestWorkorchDSchedulerRejectsInvalidTypedWorkspaceRunCommand(t *testing.T) 
 	if response == nil || response.Error() == nil {
 		t.Fatalf("scheduler response = %v, want invalid command error", response)
 	}
+}
+
+// registerTestWorkspaceRunScheduler models the application Biz subscription
+// that owns this command in production. It deliberately lives in the server
+// test fixture so the HTTP adapter itself remains free of EventHub observers.
+func registerTestWorkspaceRunScheduler(t *testing.T, hub magicevent.Hub, scheduler WorkspaceRunScheduler) {
+	t.Helper()
+	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, hub)
+	observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(event magicevent.Event, result magicevent.Result) {
+		command, ok := event.Data().(workorchdevents.WorkspaceRunRequestedCommand)
+		if !ok {
+			if result != nil {
+				result.Set(nil, cd.NewError(cd.IllegalParam, common.ErrInvalidArgument.Error()))
+			}
+			return
+		}
+		if err := scheduler.SubmitWorkspaceRun(event.Context(), command); err != nil {
+			if result != nil {
+				result.Set(nil, cd.NewError(cd.Unexpected, err.Error()))
+			}
+			return
+		}
+		if result != nil {
+			result.Set(workorchdevents.WorkspaceRunRequestedResult{Accepted: true}, nil)
+		}
+	})
+	t.Cleanup(func() { observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested) })
 }

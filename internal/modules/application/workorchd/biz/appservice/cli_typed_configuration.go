@@ -9,16 +9,16 @@ import (
 func (d *CLICommandDispatcher) handleTypedCLIConfiguration(event magicevent.Event, result magicevent.Result) {
 	switch command := event.Data().(type) {
 	case workorchdevents.CLIConfigurationGetCommand:
-		item, err := ReadServiceConfigurationWithCatalog(event.Context(), d.commandHub)
+		item, err := ReadServiceConfigurationWithCatalog(event.Context(), d.EventHub())
 		if setTypedCLIError(result, err) {
 			return
 		}
 		result.Set(workorchdevents.CLIConfigurationGetResult{Configuration: readmodelports.PortServiceConfig(item)}, nil)
 	case workorchdevents.CLIConfigurationRefreshChatModelsCommand:
-		if _, err := RefreshLLMModelCatalog(event.Context(), d.commandHub, RefreshLLMModelCatalogCommand{ProviderID: command.ProviderID}); setTypedCLIError(result, err) {
+		if _, err := RefreshLLMModelCatalog(event.Context(), d.EventHub(), RefreshLLMModelCatalogCommand{ProviderID: command.ProviderID}); setTypedCLIError(result, err) {
 			return
 		}
-		item, err := ReadServiceConfigurationWithCatalog(event.Context(), d.commandHub)
+		item, err := ReadServiceConfigurationWithCatalog(event.Context(), d.EventHub())
 		if setTypedCLIError(result, err) {
 			return
 		}

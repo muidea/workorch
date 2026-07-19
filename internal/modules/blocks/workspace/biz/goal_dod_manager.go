@@ -23,11 +23,15 @@ type GoalDoDManager struct {
 	workspaces repository.WorkspaceRepository
 	goals      repository.GoalRepository
 	dods       repository.DoDRepository
-	eventHub   magicevent.Hub
+	publish    func(magicevent.Event)
 }
 
-func NewGoalDoDManager(workspaces repository.WorkspaceRepository, goals repository.GoalRepository, dods repository.DoDRepository, eventHub magicevent.Hub) *GoalDoDManager {
-	return &GoalDoDManager{workspaces: workspaces, goals: goals, dods: dods, eventHub: eventHub}
+func NewGoalDoDManager(workspaces repository.WorkspaceRepository, goals repository.GoalRepository, dods repository.DoDRepository) *GoalDoDManager {
+	return &GoalDoDManager{workspaces: workspaces, goals: goals, dods: dods}
+}
+
+func NewGoalDoDManagerWithPublisher(workspaces repository.WorkspaceRepository, goals repository.GoalRepository, dods repository.DoDRepository, publish func(magicevent.Event)) *GoalDoDManager {
+	return &GoalDoDManager{workspaces: workspaces, goals: goals, dods: dods, publish: publish}
 }
 
 func (m *GoalDoDManager) CreateWorkspace(ctx context.Context, cmd workspacecontracts.CreateWorkspaceCommand) error {
@@ -279,7 +283,7 @@ func (m *GoalDoDManager) markWorkspaceDefinitionsChanged(ctx context.Context, wo
 }
 
 func (m *GoalDoDManager) publishWorkspaceEvent(ctx context.Context, topic string, workspace *workspaceModel.Workspace) error {
-	if m.eventHub == nil || workspace == nil {
+	if m.publish == nil || workspace == nil {
 		return nil
 	}
 	data := workspaceevents.WorkspaceChangedData{
@@ -293,12 +297,12 @@ func (m *GoalDoDManager) publishWorkspaceEvent(ctx context.Context, topic string
 	}
 	event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, workspaceevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
 	event.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{SubjectType: "workspace", SubjectID: string(workspace.ID), WorkspaceID: string(workspace.ID)}))
-	m.eventHub.Post(event)
+	m.publish(event)
 	return nil
 }
 
 func (m *GoalDoDManager) publishGoalEvent(ctx context.Context, goal *workspaceModel.Goal) error {
-	if m.eventHub == nil {
+	if m.publish == nil {
 		return nil
 	}
 	data := workspaceevents.GoalDefinedData{
@@ -312,7 +316,7 @@ func (m *GoalDoDManager) publishGoalEvent(ctx context.Context, goal *workspaceMo
 	}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicGoalDefined, modulecommon.ModuleID, workspaceevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
 	event.BindLaneKey(events.EventHubLaneKeyFor(workspaceevents.TopicGoalDefined, events.EventHubLaneScope{SubjectType: "goal", SubjectID: string(goal.ID), WorkspaceID: string(goal.WorkspaceID)}))
-	m.eventHub.Post(event)
+	m.publish(event)
 	return nil
 }
 
@@ -395,7 +399,7 @@ func definitionHashForItems(items []string) string {
 }
 
 func (m *GoalDoDManager) publishDoDEvent(ctx context.Context, dod *workspaceModel.DoD) error {
-	if m.eventHub == nil {
+	if m.publish == nil {
 		return nil
 	}
 	data := workspaceevents.DoDDefinedData{
@@ -410,6 +414,6 @@ func (m *GoalDoDManager) publishDoDEvent(ctx context.Context, dod *workspaceMode
 	}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicDoDDefined, modulecommon.ModuleID, workspaceevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
 	event.BindLaneKey(events.EventHubLaneKeyFor(workspaceevents.TopicDoDDefined, events.EventHubLaneScope{SubjectType: "dod", SubjectID: string(dod.ID), WorkspaceID: string(dod.WorkspaceID)}))
-	m.eventHub.Post(event)
+	m.publish(event)
 	return nil
 }

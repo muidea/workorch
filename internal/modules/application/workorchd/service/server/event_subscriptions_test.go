@@ -215,3 +215,44 @@ func TestSubscribeServerStreamEventsProjectionViewIgnoresOwnerEvents(t *testing.
 	case <-time.After(150 * time.Millisecond):
 	}
 }
+
+// These test-only helpers model the Biz subscriptions. Production server code
+// receives typed callbacks from Biz and never creates EventHub observers.
+func subscribeServerStreamEvents(hub magicevent.Hub, view string, handler func(context.Context, streamEvent) error) []func() {
+	if hub == nil || handler == nil {
+		return nil
+	}
+	projection := magicevent.NewSimpleObserver(workorchdevents.NotificationDestination, hub)
+	projection.Subscribe(workorchdevents.TopicWorkspaceProjectionChanged, func(event magicevent.Event, result magicevent.Result) {
+		if data, ok := event.Data().(workorchdevents.WorkspaceProjectionChangedData); ok {
+			_ = handler(event.Context(), workspaceProjectionStreamEvent(data))
+		}
+		if result != nil {
+			result.Set(nil, nil)
+		}
+	})
+	unsubscribers := []func(){func() { projection.Unsubscribe(workorchdevents.TopicWorkspaceProjectionChanged) }}
+	if isProjectionEventStreamView(view) {
+		return unsubscribers
+	}
+	records := magicevent.NewSimpleObserver(eventstreamevents.NotificationDestination, hub)
+	records.Subscribe(eventstreamevents.TopicEventStreamRecordAppended, func(event magicevent.Event, result magicevent.Result) {
+		if data, ok := event.Data().(eventstreamevents.EventRecordAppendedData); ok {
+			if envelope, valid := eventRecordStreamEvent(data.Record); valid {
+				_ = handler(event.Context(), envelope)
+			}
+		}
+		if result != nil {
+			result.Set(nil, nil)
+		}
+	})
+	return append(unsubscribers, func() { records.Unsubscribe(eventstreamevents.TopicEventStreamRecordAppended) })
+}
+
+func unsubscribeAll(unsubscribers []func()) {
+	for _, unsubscribe := range unsubscribers {
+		if unsubscribe != nil {
+			unsubscribe()
+		}
+	}
+}

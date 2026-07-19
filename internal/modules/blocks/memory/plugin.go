@@ -16,15 +16,16 @@ func init() {
 
 func (m *Module) Weight() int { return 26 }
 
-func (m *Module) Setup(_ context.Context, eventHub event.Hub, _ task.BackgroundRoutine) *cd.Error {
+func (m *Module) Setup(_ context.Context, eventHub event.Hub, backgroundRoutine task.BackgroundRoutine) *cd.Error {
 	repos, err := workorchdeps.ResolveMemoryRepositories(ModuleID)
 	if err != nil {
 		return err
 	}
-	if setupErr := m.Configure(Dependencies{
+	if setupErr := m.configure(Dependencies{
 		MemoryItems:        repos.MemoryItems,
 		MemoryRecallTraces: repos.MemoryRecallTraces,
 		EventHub:           eventHub,
+		BackgroundRoutine:  backgroundRoutine,
 	}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())
 	}

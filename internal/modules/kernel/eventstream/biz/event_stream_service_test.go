@@ -88,7 +88,7 @@ func newEventStreamTestService(t *testing.T, repo repository.EventRecordReposito
 	t.Helper()
 	rawHub := magicevent.NewHub(16)
 	t.Cleanup(func() { rawHub.Terminate(context.Background()) })
-	return NewService(repo, rawHub), rawHub
+	return NewService(repo, rawHub, nil), rawHub
 }
 
 func TestServicePersistsTypedDecisionNotifications(t *testing.T) {

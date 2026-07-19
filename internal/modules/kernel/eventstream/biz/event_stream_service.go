@@ -11,6 +11,8 @@ import (
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
+	magictask "github.com/muidea/magicCommon/task"
+	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	approvalcommon "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/common"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
@@ -33,17 +35,30 @@ import (
 )
 
 type Service struct {
+	basebiz.Base
 	repo          repository.EventRecordRepository
-	commandHub    magicevent.Hub
 	unsubscribers []func()
+	topics        []string
 	revisionMu    sync.Mutex
 	revisions     map[common.WorkspaceID]int64
 }
 
+// Dependencies are the EventStream owner's construction inputs. Keeping this
+// in biz prevents the module lifecycle bridge from owning EventHub types.
+type Dependencies struct {
+	EventRecords      repository.EventRecordRepository
+	EventHub          magicevent.Hub
+	BackgroundRoutine magictask.BackgroundRoutine
+}
+
 var eventRecordIDSequence atomic.Uint64
 
-func NewService(repo repository.EventRecordRepository, commandHub magicevent.Hub) *Service {
-	return &Service{repo: repo, commandHub: commandHub}
+func NewService(repo repository.EventRecordRepository, hub magicevent.Hub, background magictask.BackgroundRoutine) *Service {
+	return &Service{Base: basebiz.New(modulecommon.ModuleID, hub, background), repo: repo}
+}
+
+func NewServiceWithDependencies(deps Dependencies) *Service {
+	return NewService(deps.EventRecords, deps.EventHub, deps.BackgroundRoutine)
 }
 
 func (s *Service) HighWatermarks(ctx context.Context, workspaceIDs []common.WorkspaceID) ([]eventstreamevents.WorkspaceHighWatermark, error) {
@@ -79,7 +94,7 @@ func (s *Service) HighWatermarks(ctx context.Context, workspaceIDs []common.Work
 }
 
 func (s *Service) Start() error {
-	if s == nil || s.repo == nil || s.commandHub == nil {
+	if s == nil || s.repo == nil || s.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
 	if len(s.unsubscribers) > 0 {
@@ -94,15 +109,90 @@ func (s *Service) Start() error {
 	s.subscribeMemoryNotifications()
 	s.subscribeLLMNotifications()
 	s.subscribeOrchestratorDetailNotifications()
+	s.topics = []string{
+		eventstreamevents.TopicEventStreamCommandList,
+		eventstreamevents.TopicEventStreamCommandHighWatermarks,
+		eventstreamevents.TopicEventStreamCommandPurgeWorkspace,
+	}
+	for _, topic := range s.topics {
+		s.SubscribeFunc(topic, s.handleCommand)
+	}
 	return nil
 }
 
+func (s *Service) handleCommand(ev magicevent.Event, result magicevent.Result) {
+	response, err := s.executeCommand(ev)
+	if result == nil {
+		return
+	}
+	if err != nil {
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		return
+	}
+	result.Set(response, nil)
+}
+
+func (s *Service) executeCommand(ev magicevent.Event) (eventstreamevents.EventStreamCommandResult, error) {
+	if s == nil || s.repo == nil {
+		return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
+	}
+	switch ev.ID() {
+	case eventstreamevents.TopicEventStreamCommandList:
+		cmd, ok := ev.Data().(eventstreamevents.ListEventsCommand)
+		if !ok {
+			return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
+		}
+		query := eventRecordQueryFromEvent(cmd.Query)
+		ctx := ev.Context()
+		if query.WorkspaceID != "" {
+			ctx = common.ContextWithRuntimeWorkspaceID(ctx, query.WorkspaceID)
+		}
+		items, err := s.ListEvents(ctx, query)
+		if err != nil {
+			return eventstreamevents.EventStreamCommandResult{}, err
+		}
+		data := make([]eventstreamevents.EventRecordData, 0, len(items))
+		for _, item := range items {
+			converted, convertErr := eventstreamevents.EventRecordDataFromModel(item)
+			if convertErr != nil {
+				return eventstreamevents.EventStreamCommandResult{}, convertErr
+			}
+			data = append(data, converted)
+		}
+		return eventstreamevents.EventStreamCommandResult{Events: data}, nil
+	case eventstreamevents.TopicEventStreamCommandHighWatermarks:
+		cmd, ok := ev.Data().(eventstreamevents.HighWatermarksCommand)
+		if !ok {
+			return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
+		}
+		items, err := s.HighWatermarks(ev.Context(), cmd.WorkspaceIDs)
+		return eventstreamevents.EventStreamCommandResult{HighWatermarks: items}, err
+	case eventstreamevents.TopicEventStreamCommandPurgeWorkspace:
+		cmd, ok := ev.Data().(eventstreamevents.PurgeWorkspaceCommand)
+		if !ok || cmd.WorkspaceID == "" {
+			return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
+		}
+		deleted, err := s.PurgeWorkspaceEvents(common.ContextWithRuntimeWorkspaceID(ev.Context(), cmd.WorkspaceID), cmd.WorkspaceID)
+		return eventstreamevents.EventStreamCommandResult{DeletedCount: deleted}, err
+	default:
+		return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
+	}
+}
+
+func eventRecordQueryFromEvent(query eventstreamevents.EventRecordQuery) repository.EventRecordQuery {
+	return repository.EventRecordQuery{
+		WorkspaceID: query.WorkspaceID, RunID: query.RunID, Topic: query.Topic,
+		ExcludeTopics: append([]string(nil), query.ExcludeTopics...), SubjectType: query.SubjectType,
+		SubjectID: query.SubjectID, CursorAfterID: query.CursorAfterID, OccurredAfter: query.OccurredAfter,
+		OccurredBefore: query.OccurredBefore, Limit: query.Limit, IncludePayload: query.IncludePayload,
+	}
+}
+
 func (s *Service) subscribeOrchestratorDetailNotifications() {
-	if s == nil || s.commandHub == nil {
+	if s == nil || s.EventHub() == nil {
 		return
 	}
 	const observerID = "/orchestrator/consumers/kernel/eventstream/detail"
-	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, s.commandHub)
 	patchTopics := []string{
 		orchestratorevents.TopicPatchPreviewed,
 		orchestratorevents.TopicPatchApplied,
@@ -111,7 +201,7 @@ func (s *Service) subscribeOrchestratorDetailNotifications() {
 	}
 	for _, topic := range patchTopics {
 		topic := topic
-		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
+		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, result magicevent.Result) {
 			data, ok := event.Data().(orchestratorevents.PatchChangedData)
 			if !ok {
 				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
@@ -130,7 +220,7 @@ func (s *Service) subscribeOrchestratorDetailNotifications() {
 	}
 	for _, topic := range continuationTopics {
 		topic := topic
-		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
+		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, result magicevent.Result) {
 			data, ok := event.Data().(orchestratorevents.ArtifactContinuationChangedData)
 			if !ok {
 				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
@@ -141,24 +231,23 @@ func (s *Service) subscribeOrchestratorDetailNotifications() {
 	}
 	s.unsubscribers = append(s.unsubscribers, func() {
 		for _, topic := range patchTopics {
-			observer.Unsubscribe(topic)
+			s.UnsubscribeMatchedFunc(observerID, topic)
 		}
 		for _, topic := range continuationTopics {
-			observer.Unsubscribe(topic)
+			s.UnsubscribeMatchedFunc(observerID, topic)
 		}
 	})
 }
 
 func (s *Service) subscribeMemoryNotifications() {
-	if s == nil || s.commandHub == nil {
+	if s == nil || s.EventHub() == nil {
 		return
 	}
 	const observerID = "/memory/consumers/kernel/eventstream"
-	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, s.commandHub)
 	memoryTopics := []string{memoryevents.TopicMemoryCreated, memoryevents.TopicMemoryUpdated, memoryevents.TopicMemoryDeleted}
 	for _, topic := range memoryTopics {
 		topic := topic
-		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
+		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, result magicevent.Result) {
 			data, ok := event.Data().(memoryevents.MemoryChangedData)
 			if !ok {
 				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
@@ -167,7 +256,7 @@ func (s *Service) subscribeMemoryNotifications() {
 			s.finishRecordAppend(event, result, memoryRecord(topic, event.Source(), data), nil)
 		})
 	}
-	observer.Subscribe(memoryevents.TopicMemoryRecallRecorded, func(event magicevent.Event, result magicevent.Result) {
+	s.SubscribeMatchedFunc(observerID, observerID, memoryevents.TopicMemoryRecallRecorded, func(event magicevent.Event, result magicevent.Result) {
 		data, ok := event.Data().(memoryevents.MemoryRecallRecordedData)
 		if !ok {
 			s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
@@ -177,19 +266,18 @@ func (s *Service) subscribeMemoryNotifications() {
 	})
 	s.unsubscribers = append(s.unsubscribers, func() {
 		for _, topic := range memoryTopics {
-			observer.Unsubscribe(topic)
+			s.UnsubscribeMatchedFunc(observerID, topic)
 		}
-		observer.Unsubscribe(memoryevents.TopicMemoryRecallRecorded)
+		s.UnsubscribeMatchedFunc(observerID, memoryevents.TopicMemoryRecallRecorded)
 	})
 }
 
 func (s *Service) subscribeLLMNotifications() {
-	if s == nil || s.commandHub == nil {
+	if s == nil || s.EventHub() == nil {
 		return
 	}
 	const observerID = "/llm/consumers/kernel/eventstream"
-	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, s.commandHub)
-	observer.Subscribe(llmevents.TopicLLMUsageRecorded, func(event magicevent.Event, result magicevent.Result) {
+	s.SubscribeMatchedFunc(observerID, observerID, llmevents.TopicLLMUsageRecorded, func(event magicevent.Event, result magicevent.Result) {
 		data, ok := event.Data().(llmevents.LLMUsageRecordedData)
 		if !ok {
 			s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
@@ -198,16 +286,15 @@ func (s *Service) subscribeLLMNotifications() {
 		s.finishRecordAppend(event, result, llmUsageRecord(event.Source(), data), nil)
 	})
 	s.unsubscribers = append(s.unsubscribers, func() {
-		observer.Unsubscribe(llmevents.TopicLLMUsageRecorded)
+		s.UnsubscribeMatchedFunc(observerID, llmevents.TopicLLMUsageRecorded)
 	})
 }
 
 func (s *Service) subscribeResultNotifications() {
-	if s == nil || s.commandHub == nil {
+	if s == nil || s.EventHub() == nil {
 		return
 	}
 	const observerID = "/result/consumers/kernel/eventstream"
-	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, s.commandHub)
 	resultTopics := []string{
 		resultevents.TopicResultCreated,
 		resultevents.TopicResultAccepted,
@@ -216,7 +303,7 @@ func (s *Service) subscribeResultNotifications() {
 	}
 	for _, topic := range resultTopics {
 		topic := topic
-		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
+		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, result magicevent.Result) {
 			data, ok := event.Data().(resultevents.ResultChangedData)
 			if !ok {
 				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
@@ -225,7 +312,7 @@ func (s *Service) subscribeResultNotifications() {
 			s.finishRecordAppend(event, result, resultRecord(topic, event.Source(), data), nil)
 		})
 	}
-	observer.Subscribe(resultevents.TopicArtifactCreated, func(event magicevent.Event, result magicevent.Result) {
+	s.SubscribeMatchedFunc(observerID, observerID, resultevents.TopicArtifactCreated, func(event magicevent.Event, result magicevent.Result) {
 		data, ok := event.Data().(resultevents.ArtifactCreatedData)
 		if !ok {
 			s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
@@ -235,18 +322,17 @@ func (s *Service) subscribeResultNotifications() {
 	})
 	s.unsubscribers = append(s.unsubscribers, func() {
 		for _, topic := range resultTopics {
-			observer.Unsubscribe(topic)
+			s.UnsubscribeMatchedFunc(observerID, topic)
 		}
-		observer.Unsubscribe(resultevents.TopicArtifactCreated)
+		s.UnsubscribeMatchedFunc(observerID, resultevents.TopicArtifactCreated)
 	})
 }
 
 func (s *Service) subscribeWorkspaceNotifications() {
-	if s == nil || s.commandHub == nil {
+	if s == nil || s.EventHub() == nil {
 		return
 	}
 	const observerID = "/workspace/consumers/kernel/eventstream"
-	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, s.commandHub)
 	workspaceTopics := []string{
 		workspaceevents.TopicWorkspaceCreated,
 		workspaceevents.TopicWorkspaceStateChanged,
@@ -254,7 +340,7 @@ func (s *Service) subscribeWorkspaceNotifications() {
 	}
 	for _, topic := range workspaceTopics {
 		topic := topic
-		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
+		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, result magicevent.Result) {
 			data, ok := event.Data().(workspaceevents.WorkspaceChangedData)
 			if !ok {
 				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
@@ -263,7 +349,7 @@ func (s *Service) subscribeWorkspaceNotifications() {
 			s.finishRecordAppend(event, result, workspaceRecord(topic, event.Source(), data), nil)
 		})
 	}
-	observer.Subscribe(workspaceevents.TopicGoalDefined, func(event magicevent.Event, result magicevent.Result) {
+	s.SubscribeMatchedFunc(observerID, observerID, workspaceevents.TopicGoalDefined, func(event magicevent.Event, result magicevent.Result) {
 		data, ok := event.Data().(workspaceevents.GoalDefinedData)
 		if !ok {
 			s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
@@ -271,7 +357,7 @@ func (s *Service) subscribeWorkspaceNotifications() {
 		}
 		s.finishRecordAppend(event, result, goalRecord(event.Source(), data), nil)
 	})
-	observer.Subscribe(workspaceevents.TopicDoDDefined, func(event magicevent.Event, result magicevent.Result) {
+	s.SubscribeMatchedFunc(observerID, observerID, workspaceevents.TopicDoDDefined, func(event magicevent.Event, result magicevent.Result) {
 		data, ok := event.Data().(workspaceevents.DoDDefinedData)
 		if !ok {
 			s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
@@ -281,19 +367,18 @@ func (s *Service) subscribeWorkspaceNotifications() {
 	})
 	s.unsubscribers = append(s.unsubscribers, func() {
 		for _, topic := range workspaceTopics {
-			observer.Unsubscribe(topic)
+			s.UnsubscribeMatchedFunc(observerID, topic)
 		}
-		observer.Unsubscribe(workspaceevents.TopicGoalDefined)
-		observer.Unsubscribe(workspaceevents.TopicDoDDefined)
+		s.UnsubscribeMatchedFunc(observerID, workspaceevents.TopicGoalDefined)
+		s.UnsubscribeMatchedFunc(observerID, workspaceevents.TopicDoDDefined)
 	})
 }
 
 func (s *Service) subscribeRunStateNotifications() {
-	if s == nil || s.commandHub == nil {
+	if s == nil || s.EventHub() == nil {
 		return
 	}
 	const observerID = "/run/consumers/kernel/eventstream"
-	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, s.commandHub)
 	topics := []string{
 		runevents.TopicRunCreated,
 		runevents.TopicRunStarted,
@@ -308,7 +393,7 @@ func (s *Service) subscribeRunStateNotifications() {
 	}
 	for _, topic := range topics {
 		topic := topic
-		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
+		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, result magicevent.Result) {
 			data, ok := event.Data().(runevents.RunStateChangedData)
 			if !ok {
 				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
@@ -319,17 +404,16 @@ func (s *Service) subscribeRunStateNotifications() {
 	}
 	s.unsubscribers = append(s.unsubscribers, func() {
 		for _, topic := range topics {
-			observer.Unsubscribe(topic)
+			s.UnsubscribeMatchedFunc(observerID, topic)
 		}
 	})
 }
 
 func (s *Service) subscribeGovernanceNotifications() {
-	if s == nil || s.commandHub == nil {
+	if s == nil || s.EventHub() == nil {
 		return
 	}
 	const observerID = "/governance/consumers/kernel/eventstream"
-	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, s.commandHub)
 	topics := []string{
 		governanceevents.TopicGovernanceAutoEvaluated,
 		governanceevents.TopicGovernanceAutoResolved,
@@ -338,7 +422,7 @@ func (s *Service) subscribeGovernanceNotifications() {
 	}
 	for _, topic := range topics {
 		topic := topic
-		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
+		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, result magicevent.Result) {
 			data, ok := event.Data().(governanceevents.GovernanceData)
 			if !ok {
 				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
@@ -349,17 +433,16 @@ func (s *Service) subscribeGovernanceNotifications() {
 	}
 	s.unsubscribers = append(s.unsubscribers, func() {
 		for _, topic := range topics {
-			observer.Unsubscribe(topic)
+			s.UnsubscribeMatchedFunc(observerID, topic)
 		}
 	})
 }
 
 func (s *Service) subscribeApprovalNotifications() {
-	if s == nil || s.commandHub == nil {
+	if s == nil || s.EventHub() == nil {
 		return
 	}
 	const observerID = "/approval/consumers/kernel/eventstream"
-	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, s.commandHub)
 	topics := []string{
 		approvalevents.TopicApprovalCreated,
 		approvalevents.TopicApprovalApproved,
@@ -369,7 +452,7 @@ func (s *Service) subscribeApprovalNotifications() {
 	}
 	for _, topic := range topics {
 		topic := topic
-		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
+		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, result magicevent.Result) {
 			data, ok := event.Data().(approvalevents.ApprovalChangedData)
 			if !ok {
 				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
@@ -380,17 +463,16 @@ func (s *Service) subscribeApprovalNotifications() {
 	}
 	s.unsubscribers = append(s.unsubscribers, func() {
 		for _, topic := range topics {
-			observer.Unsubscribe(topic)
+			s.UnsubscribeMatchedFunc(observerID, topic)
 		}
 	})
 }
 
 func (s *Service) subscribeDecisionNotifications() {
-	if s == nil || s.commandHub == nil {
+	if s == nil || s.EventHub() == nil {
 		return
 	}
 	const observerID = "/decision/consumers/kernel/eventstream"
-	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, s.commandHub)
 	changedTopics := []string{
 		decisionevents.TopicTicketCreated,
 		decisionevents.TopicTicketUpdated,
@@ -400,7 +482,7 @@ func (s *Service) subscribeDecisionNotifications() {
 	}
 	for _, topic := range changedTopics {
 		topic := topic
-		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
+		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, result magicevent.Result) {
 			data, ok := event.Data().(decisionevents.TicketChangedData)
 			if !ok {
 				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
@@ -412,7 +494,7 @@ func (s *Service) subscribeDecisionNotifications() {
 	resolvedTopics := []string{decisionevents.TopicTicketResolved, decisionevents.TopicDecisionTicketResolved}
 	for _, topic := range resolvedTopics {
 		topic := topic
-		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
+		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, result magicevent.Result) {
 			data, ok := event.Data().(decisionevents.TicketResolvedData)
 			if !ok {
 				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
@@ -423,10 +505,10 @@ func (s *Service) subscribeDecisionNotifications() {
 	}
 	s.unsubscribers = append(s.unsubscribers, func() {
 		for _, topic := range changedTopics {
-			observer.Unsubscribe(topic)
+			s.UnsubscribeMatchedFunc(observerID, topic)
 		}
 		for _, topic := range resolvedTopics {
-			observer.Unsubscribe(topic)
+			s.UnsubscribeMatchedFunc(observerID, topic)
 		}
 	})
 }
@@ -761,7 +843,7 @@ func decisionResolvedRecord(topic string, data decisionevents.TicketResolvedData
 }
 
 func (s *Service) publishRecordAppended(ctx context.Context, record *eventstreammodel.EventRecord) error {
-	if s == nil || s.commandHub == nil || record == nil {
+	if s == nil || s.EventHub() == nil || record == nil {
 		return common.ErrInvalidArgument
 	}
 	data, err := eventstreamevents.EventRecordDataFromModel(record)
@@ -783,7 +865,7 @@ func (s *Service) publishRecordAppended(ctx context.Context, record *eventstream
 		RunID:       string(record.RunID),
 		StepID:      string(record.StepID),
 	}))
-	s.commandHub.Post(event)
+	s.PostEvent(event)
 	return nil
 }
 
@@ -791,6 +873,10 @@ func (s *Service) Stop() {
 	if s == nil {
 		return
 	}
+	for idx := len(s.topics) - 1; idx >= 0; idx-- {
+		s.UnsubscribeFunc(s.topics[idx])
+	}
+	s.topics = nil
 	unsubscribers := s.unsubscribers
 	s.unsubscribers = nil
 	for _, unsubscribe := range unsubscribers {

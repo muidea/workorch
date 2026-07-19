@@ -107,7 +107,7 @@ func (r *countingApprovalRepository) Delete(ctx context.Context, id common.Appro
 func TestService_CreateApproval_SeedsPendingState(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewApprovalRepository()
-	service := NewService(repo, nil)
+	service := NewService(repo)
 
 	cmd := approvalservice.CreateApprovalCommand{
 		ApprovalID:     common.ApprovalID("approval-1"),
@@ -136,7 +136,7 @@ func TestService_CreateApproval_SeedsPendingState(t *testing.T) {
 
 func TestService_CreateApproval_ValidateArguments(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(memory.NewApprovalRepository(), nil)
+	service := NewService(memory.NewApprovalRepository())
 
 	tests := []approvalservice.CreateApprovalCommand{
 		{ApprovalID: "", RunID: common.RunID("run-1"), Reason: "need human approval"},
@@ -155,7 +155,7 @@ func TestService_CreateApproval_ValidateArguments(t *testing.T) {
 func TestService_CreateApproval_RejectsDuplicateApprovalID(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewApprovalRepository()
-	service := NewService(repo, nil)
+	service := NewService(repo)
 
 	first := approvalservice.CreateApprovalCommand{
 		ApprovalID:  common.ApprovalID("approval-dup"),
@@ -191,7 +191,7 @@ func TestService_CreateApproval_RejectsDuplicateApprovalID(t *testing.T) {
 func TestService_CreateApproval_AllowsDuplicateApprovalIDAcrossWorkspaces(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewApprovalRepository()
-	service := NewService(repo, nil)
+	service := NewService(repo)
 
 	first := approvalservice.CreateApprovalCommand{
 		ApprovalID:  common.ApprovalID("approval-workspace-local"),
@@ -232,7 +232,7 @@ func TestService_CreateApproval_AllowsDuplicateApprovalIDAcrossWorkspaces(t *tes
 func TestService_EnsureApproval_IsIdempotentAndRejectsBindingMismatch(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewApprovalRepository()
-	service := NewService(repo, nil)
+	service := NewService(repo)
 
 	cmd := approvalservice.CreateApprovalCommand{
 		ApprovalID:  common.ApprovalID("approval-ensure"),
@@ -290,7 +290,7 @@ func TestService_ResolveApproval_PendingTransitions(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := memory.NewApprovalRepository()
-			service := NewService(repo, nil)
+			service := NewService(repo)
 
 			cmd := approvalservice.CreateApprovalCommand{
 				ApprovalID:  common.ApprovalID("approval-" + tc.name),
@@ -362,7 +362,11 @@ func TestService_ResolveApproval_RecordsGovernanceEvidence(t *testing.T) {
 				result.Set(approvalevents.RecordApprovalEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil)
 			})
 			defer observer.Unsubscribe(approvalevents.TopicApprovalCommandRecordEvidence)
-			service := NewService(repo, rawHub)
+			owner, err := New(rawHub, nil, Dependencies{Approvals: repo, EventHub: rawHub})
+			if err != nil {
+				t.Fatalf("new owner: %v", err)
+			}
+			service := owner.service
 
 			cmd := approvalservice.CreateApprovalCommand{
 				ApprovalID:  tc.approvalID,
@@ -381,11 +385,19 @@ func TestService_ResolveApproval_RecordsGovernanceEvidence(t *testing.T) {
 				ApprovalID: cmd.ApprovalID,
 				Context:    mustApprovalPayload(t, map[string]any{"resolution": tc.name}),
 			}
-			if _, err := tc.resolve(service, ctx, resolveCmd); err != nil {
+			item, err := tc.resolve(service, ctx, resolveCmd)
+			if err != nil {
 				t.Fatalf("resolve approval: %v", err)
 			}
-			if _, err := tc.resolve(service, ctx, resolveCmd); err != nil {
+			if err := owner.recordApprovalGovernanceEvidence(ctx, item); err != nil {
+				t.Fatalf("record approval evidence: %v", err)
+			}
+			item, err = tc.resolve(service, ctx, resolveCmd)
+			if err != nil {
 				t.Fatalf("second resolve approval: %v", err)
+			}
+			if err := owner.recordApprovalGovernanceEvidence(ctx, item); err != nil {
+				t.Fatalf("record repeated approval evidence: %v", err)
 			}
 
 			if evidenceCommand.EvidenceRecordID == "" || strings.ContainsAny(string(evidenceCommand.EvidenceRecordID), `/\`) {
@@ -426,7 +438,7 @@ func TestService_ResolveApproval_RejectsWhenAlreadyResolved(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := memory.NewApprovalRepository()
-			service := NewService(repo, nil)
+			service := NewService(repo)
 			approvalID := common.ApprovalID("approval-1")
 
 			if err := service.CreateApproval(ctx, approvalservice.CreateApprovalCommand{
@@ -498,7 +510,7 @@ func TestService_EnsureApprovalResolution_IsIdempotentAndRejectsOppositeTerminal
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := memory.NewApprovalRepository()
-			service := NewService(repo, nil)
+			service := NewService(repo)
 			approvalID := common.ApprovalID("approval-" + tc.name)
 
 			if err := service.CreateApproval(ctx, approvalservice.CreateApprovalCommand{
@@ -552,7 +564,7 @@ func TestService_EnsureApprovalResolutionReturnsLoadedApproval(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := newCountingApprovalRepository()
-			service := NewService(repo, nil)
+			service := NewService(repo)
 			approvalID := common.ApprovalID("approval-ensure-loaded-" + tc.name)
 			if err := service.CreateApproval(ctx, approvalservice.CreateApprovalCommand{
 				ApprovalID:  approvalID,
@@ -580,7 +592,7 @@ func TestService_EnsureApprovalResolutionReturnsLoadedApproval(t *testing.T) {
 
 func TestService_ResolveApproval_ValidateArgumentsAndNotFound(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(memory.NewApprovalRepository(), nil)
+	service := NewService(memory.NewApprovalRepository())
 
 	for _, resolve := range []struct {
 		name string
@@ -604,7 +616,11 @@ func TestService_CreateAndResolveApproval_PublishesEvents(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewApprovalRepository()
 	hub := newRecordingApprovalHub(t)
-	service := NewService(repo, hub)
+	owner, err := New(hub, nil, Dependencies{Approvals: repo, EventHub: hub})
+	if err != nil {
+		t.Fatalf("new owner: %v", err)
+	}
+	service := owner.service
 
 	cmd := approvalservice.CreateApprovalCommand{
 		ApprovalID:  common.ApprovalID("approval-event"),
@@ -616,9 +632,19 @@ func TestService_CreateAndResolveApproval_PublishesEvents(t *testing.T) {
 	if err := service.CreateApproval(ctx, cmd); err != nil {
 		t.Fatalf("create approval: %v", err)
 	}
+	item, err := repo.Get(ctx, cmd.ApprovalID)
+	if err != nil {
+		t.Fatalf("get created approval: %v", err)
+	}
+	owner.publishApprovalChanged(ctx, approvalevents.TopicApprovalCreated, item)
 	if err := service.Approve(ctx, approvalservice.ResolveApprovalCommand{ApprovalID: cmd.ApprovalID}); err != nil {
 		t.Fatalf("approve approval: %v", err)
 	}
+	item, err = repo.Get(ctx, cmd.ApprovalID)
+	if err != nil {
+		t.Fatalf("get resolved approval: %v", err)
+	}
+	owner.publishApprovalChanged(ctx, approvalevents.TopicApprovalResolved, item)
 
 	published := hub.Posted()
 	if len(published) != 2 {
@@ -639,7 +665,7 @@ func TestService_CreateAndResolveApproval_PublishesEvents(t *testing.T) {
 func TestService_ResolveApprovalMergesResolutionContext(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewApprovalRepository()
-	service := NewService(repo, nil)
+	service := NewService(repo)
 
 	approvalID := common.ApprovalID("approval-context")
 	if err := service.CreateApproval(ctx, approvalservice.CreateApprovalCommand{
@@ -683,7 +709,11 @@ func TestService_PublishesConcreteApprovalNotificationsThroughEventHub(t *testin
 	ctx := context.Background()
 	repo := memory.NewApprovalRepository()
 	hub := newRecordingApprovalHub(t)
-	service := NewService(repo, hub)
+	owner, err := New(hub, nil, Dependencies{Approvals: repo, EventHub: hub})
+	if err != nil {
+		t.Fatalf("new owner: %v", err)
+	}
+	service := owner.service
 
 	cmd := approvalservice.CreateApprovalCommand{
 		ApprovalID:  common.ApprovalID("approval-async"),
@@ -695,9 +725,19 @@ func TestService_PublishesConcreteApprovalNotificationsThroughEventHub(t *testin
 	if err := service.CreateApproval(ctx, cmd); err != nil {
 		t.Fatalf("create approval: %v", err)
 	}
+	item, err := repo.Get(ctx, cmd.ApprovalID)
+	if err != nil {
+		t.Fatalf("get created approval: %v", err)
+	}
+	owner.publishApprovalChanged(ctx, approvalevents.TopicApprovalCreated, item)
 	if err := service.Approve(ctx, approvalservice.ResolveApprovalCommand{ApprovalID: cmd.ApprovalID}); err != nil {
 		t.Fatalf("approve approval: %v", err)
 	}
+	item, err = repo.Get(ctx, cmd.ApprovalID)
+	if err != nil {
+		t.Fatalf("get resolved approval: %v", err)
+	}
+	owner.publishApprovalChanged(ctx, approvalevents.TopicApprovalResolved, item)
 
 	published := hub.Posted()
 	if len(published) != 2 || published[0].ID() != approvalevents.TopicApprovalCreated || published[1].ID() != approvalevents.TopicApprovalResolved {

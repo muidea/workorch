@@ -9,41 +9,39 @@ import (
 	"time"
 
 	cd "github.com/muidea/magicCommon/def"
-	"github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 )
 
 type Service struct {
-	config            Config
-	http              *HTTPServer
-	commandHub        event.Hub
-	backgroundRoutine task.BackgroundRoutine
-	done              chan error
-	runStarted        atomic.Bool
+	config                 Config
+	http                   *HTTPServer
+	done                   chan error
+	runStarted             atomic.Bool
+	serviceStoppedNotifier func(workorchdevents.ServiceStoppedData)
 }
 
 func NewService(config Config) *Service {
 	return &Service{config: normalizeConfig(config)}
 }
 
-func (s *Service) Startup(ctx context.Context, serviceName string, commandHub event.Hub, backgroundRoutine task.BackgroundRoutine) *cd.Error {
+func (s *Service) Startup(ctx context.Context, serviceName string, session *appservice.RuntimeSession, backgroundRoutine task.BackgroundRoutine) *cd.Error {
 	if s == nil {
 		return cd.NewError(cd.IllegalParam, "workorch service is nil")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if commandHub == nil {
-		return cd.NewError(cd.IllegalParam, "workorch event hub is not configured")
+	if session == nil {
+		return cd.NewError(cd.IllegalParam, "workorch runtime session is not configured")
 	}
 	if backgroundRoutine == nil {
 		return cd.NewError(cd.IllegalParam, "workorch background routine is not configured")
 	}
-	s.commandHub = commandHub
-	s.backgroundRoutine = backgroundRoutine
-	s.http = NewHTTPServerWithCommandHubAndBackground(s.config, commandHub, backgroundRoutine)
+	s.http = NewHTTPServerWithRuntimeSessionAndBackground(s.config, session, backgroundRoutine)
 	s.done = make(chan error, 1)
 	s.runStarted.Store(false)
 	if err := s.http.Validate(ctx); err != nil {
@@ -51,6 +49,57 @@ func (s *Service) Startup(ctx context.Context, serviceName string, commandHub ev
 	}
 	slog.Info("workorch service startup completed", "service", serviceName, "addr", s.config.Addr)
 	return nil
+}
+
+// SetWorkspaceRunScheduler injects the application Biz port after server
+// construction. HTTP handlers use it for typed scheduling without retaining
+// or dispatching through EventHub themselves.
+func (s *Service) SetWorkspaceRunScheduler(scheduler WorkspaceRunScheduler) {
+	if s == nil || s.http == nil || s.http.state == nil {
+		return
+	}
+	s.http.state.workspaceRunScheduler = scheduler
+}
+
+func (s *Service) SetServiceStoppedNotifier(notifier func(workorchdevents.ServiceStoppedData)) {
+	if s != nil {
+		s.serviceStoppedNotifier = notifier
+	}
+}
+
+func (s *Service) SetWorkspaceProjectionEventPorts(ports workspaceviewcore.EventPorts) {
+	if s != nil && s.http != nil && s.http.state != nil && s.http.state.workspaceProjection != nil {
+		s.http.state.workspaceProjection.SetEventPorts(ports)
+	}
+}
+
+// HandleWorkspaceRunRequest is the server-side use case invoked by the
+// application Biz's typed command handler.
+func (s *Service) HandleWorkspaceRunRequest(ctx context.Context, command workorchdevents.WorkspaceRunRequestedCommand) error {
+	if s == nil || s.http == nil || s.http.state == nil {
+		return errors.New("workorch http server is not configured")
+	}
+	if err := s.http.state.handleWorkorchDSchedulerCommand(ctx, command); err != nil {
+		s.http.state.projectRejectedSchedulerCommand(command, err)
+		return err
+	}
+	s.http.state.projectAcceptedSchedulerCommand(command)
+	return nil
+}
+
+func (s *Service) RecordWorkspaceProjectionChanged(ctx context.Context, data workorchdevents.WorkspaceProjectionChangedData) {
+	if s != nil && s.http != nil && s.http.state != nil {
+		s.http.state.RecordWorkspaceProjectionChanged(ctx, data)
+	}
+}
+
+func (s *Service) RecordEventRecordAppended(ctx context.Context, data eventstreamevents.EventRecordData) {
+	if s != nil && s.http != nil && s.http.state != nil {
+		s.http.state.RecordEventRecordAppended(ctx, data)
+		if s.http.state.workspaceProjection != nil {
+			_ = s.http.state.workspaceProjection.HandleEventRecord(ctx, data)
+		}
+	}
 }
 
 func (s *Service) Run(_ context.Context) *cd.Error {
@@ -69,22 +118,15 @@ func (s *Service) Run(_ context.Context) *cd.Error {
 	}
 
 	s.runStarted.Store(true)
-	if s.backgroundRoutine == nil {
+	if s.http.state == nil || s.http.state.backgroundRoutine == nil {
 		s.runStarted.Store(false)
 		return cd.NewError(cd.IllegalParam, "workorch background routine is not configured")
-	}
-	if s.http.state == nil {
-		s.runStarted.Store(false)
-		return cd.NewError(cd.IllegalParam, "workorch http server state is not configured")
-	}
-	if s.http.state != nil && s.http.state.backgroundRoutine == nil {
-		s.http.state.backgroundRoutine = s.backgroundRoutine
 	}
 	if err := s.http.state.startWorkspaceProjection(s.http.state.backgroundContext()); err != nil {
 		s.runStarted.Store(false)
 		return cd.NewError(cd.Unexpected, "workspace projection startup failed: "+err.Error())
 	}
-	if err := s.backgroundRoutine.AsyncFunction(runHTTPServer); err != nil {
+	if err := s.http.state.backgroundRoutine.AsyncFunction(runHTTPServer); err != nil {
 		s.runStarted.Store(false)
 		return cd.NewError(cd.Unexpected, "http server background scheduling failed: "+err.Error())
 	}
@@ -92,7 +134,7 @@ func (s *Service) Run(_ context.Context) *cd.Error {
 }
 
 func (s *Service) publishStopped(err error) {
-	if s == nil || s.commandHub == nil {
+	if s == nil || s.serviceStoppedNotifier == nil {
 		return
 	}
 	data := workorchdevents.ServiceStoppedData{ServiceName: "workorch", State: "stopped", ErrorCode: "server_stopped", StoppedAt: time.Now().UTC()}
@@ -104,7 +146,7 @@ func (s *Service) publishStopped(err error) {
 			data.ErrorMessage = strings.TrimSpace(data.ErrorMessage[:512])
 		}
 	}
-	s.commandHub.Post(event.NewEventWithContext(workorchdevents.TopicWorkorchDServiceStopped, "workorchd/server", workorchdevents.NotificationDestination, event.NewHeader(), context.Background(), data))
+	s.serviceStoppedNotifier(data)
 }
 
 func (s *Service) Shutdown(ctx context.Context) {

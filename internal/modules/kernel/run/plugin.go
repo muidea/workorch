@@ -16,16 +16,17 @@ func init() {
 
 func (m *Module) Weight() int { return 40 }
 
-func (m *Module) Setup(_ context.Context, eventHub event.Hub, _ task.BackgroundRoutine) *cd.Error {
+func (m *Module) Setup(_ context.Context, eventHub event.Hub, background task.BackgroundRoutine) *cd.Error {
 	repos, err := workorchdeps.ResolveRunRepositories(ModuleID)
 	if err != nil {
 		return err
 	}
 	if setupErr := m.Configure(Dependencies{
-		Runs:        repos.Runs,
-		Steps:       repos.Steps,
-		Checkpoints: repos.Checkpoints,
-		EventHub:    eventHub,
+		Runs:              repos.Runs,
+		Steps:             repos.Steps,
+		Checkpoints:       repos.Checkpoints,
+		EventHub:          eventHub,
+		BackgroundRoutine: background,
 	}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())
 	}

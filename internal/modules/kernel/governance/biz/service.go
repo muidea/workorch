@@ -12,8 +12,10 @@ import (
 	"sync"
 	"time"
 
+	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
+	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
@@ -78,15 +80,27 @@ type servicePorts struct {
 	WorkspaceDefinitions WorkspaceDefinitionReader
 	MemoryItems          MemoryReader
 	AutoGovernanceTraces repository.AutoGovernanceTraceRepository
-	NotificationHub      magicevent.Hub
-	ResolveDecision      ResolveDecisionFunc
-	ResolveApproval      ResolveApprovalFunc
-	ResumeRun            ResumeRunFunc
+	// NotificationHub is test-fixture assembly input. Production uses
+	// NewEventService and stores the Hub only in Base.
+	NotificationHub   magicevent.Hub
+	ResolveDecision   ResolveDecisionFunc
+	ResolveApproval   ResolveApprovalFunc
+	ResumeRun         ResumeRunFunc
+	LoadConfig        func() (workorchconfig.Config, error)
+	BackgroundRoutine magictask.BackgroundRoutine
+}
+
+// EventDependencies are the production Governance owner inputs. Test-only
+// port assembly remains private to this package.
+type EventDependencies struct {
+	AutoGovernanceTraces repository.AutoGovernanceTraceRepository
+	EventHub             magicevent.Hub
 	LoadConfig           func() (workorchconfig.Config, error)
 	BackgroundRoutine    magictask.BackgroundRoutine
 }
 
 type Service struct {
+	basebiz.Base
 	tickets         TicketReader
 	resolutions     ResolutionReader
 	approvals       ApprovalReader
@@ -94,7 +108,6 @@ type Service struct {
 	workspaceDefs   WorkspaceDefinitionReader
 	memoryItems     MemoryReader
 	traces          repository.AutoGovernanceTraceRepository
-	notificationHub magicevent.Hub
 	resolve         ResolveDecisionFunc
 	resolveApproval ResolveApprovalFunc
 	resume          ResumeRunFunc
@@ -102,6 +115,7 @@ type Service struct {
 	background      magictask.BackgroundRoutine
 	mu              sync.Mutex
 	unsubscribes    []func()
+	topics          []string
 	workCtx         context.Context
 	workCancel      context.CancelFunc
 	workQueue       chan governanceWork
@@ -113,25 +127,32 @@ type Service struct {
 type governanceWork func(context.Context)
 
 func NewEventService(traces repository.AutoGovernanceTraceRepository, commandHub magicevent.Hub, loadConfig func() (workorchconfig.Config, error), background magictask.BackgroundRoutine) *Service {
-	return newServiceWithPorts(servicePorts{
-		Tickets:              eventTicketReader{hub: commandHub},
-		Resolutions:          eventResolutionReader{hub: commandHub},
-		Approvals:            eventApprovalReader{hub: commandHub},
-		Runs:                 eventRunReader{hub: commandHub},
-		WorkspaceDefinitions: eventWorkspaceReader{hub: commandHub},
-		MemoryItems:          eventMemoryReader{hub: commandHub},
+	service := newServiceWithPorts(servicePorts{
 		AutoGovernanceTraces: traces,
 		NotificationHub:      commandHub,
-		ResolveDecision:      eventResolveDecision(commandHub),
-		ResolveApproval:      eventResolveApproval(commandHub),
-		ResumeRun:            eventResumeRun(commandHub),
 		LoadConfig:           loadConfig,
 		BackgroundRoutine:    background,
 	})
+	send := service.SendEvent
+	service.tickets = eventTicketReader{send: send}
+	service.resolutions = eventResolutionReader{send: send}
+	service.approvals = eventApprovalReader{send: send}
+	service.runs = eventRunReader{send: send}
+	service.workspaceDefs = eventWorkspaceReader{send: send}
+	service.memoryItems = eventMemoryReader{send: send}
+	service.resolve = eventResolveDecision(send)
+	service.resolveApproval = eventResolveApproval(send)
+	service.resume = eventResumeRun(send)
+	return service
+}
+
+func NewEventServiceWithDependencies(deps EventDependencies) *Service {
+	return NewEventService(deps.AutoGovernanceTraces, deps.EventHub, deps.LoadConfig, deps.BackgroundRoutine)
 }
 
 func newServiceWithPorts(deps servicePorts) *Service {
 	return &Service{
+		Base:            basebiz.New(governancecommon.ModuleID, deps.NotificationHub, deps.BackgroundRoutine),
 		tickets:         deps.Tickets,
 		resolutions:     deps.Resolutions,
 		approvals:       deps.Approvals,
@@ -139,7 +160,6 @@ func newServiceWithPorts(deps servicePorts) *Service {
 		workspaceDefs:   deps.WorkspaceDefinitions,
 		memoryItems:     deps.MemoryItems,
 		traces:          deps.AutoGovernanceTraces,
-		notificationHub: deps.NotificationHub,
 		resolve:         deps.ResolveDecision,
 		resolveApproval: deps.ResolveApproval,
 		resume:          deps.ResumeRun,
@@ -149,7 +169,7 @@ func newServiceWithPorts(deps servicePorts) *Service {
 }
 
 func (s *Service) Start() error {
-	if s == nil || s.notificationHub == nil || s.tickets == nil || s.approvals == nil || s.runs == nil || s.workspaceDefs == nil || s.memoryItems == nil || s.traces == nil || s.resolve == nil || s.resolveApproval == nil || s.resume == nil {
+	if s == nil || s.EventHub() == nil || s.tickets == nil || s.approvals == nil || s.runs == nil || s.workspaceDefs == nil || s.memoryItems == nil || s.traces == nil || s.resolve == nil || s.resolveApproval == nil || s.resume == nil {
 		return common.ErrInvalidArgument
 	}
 	if s.loadConfig == nil {
@@ -176,10 +196,9 @@ func (s *Service) Start() error {
 		return err
 	}
 	var unsubTicket func()
-	if s.notificationHub != nil {
+	if s.EventHub() != nil {
 		const observerID = "/decision/consumers/kernel/governance"
-		observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, s.notificationHub)
-		observer.Subscribe(decisionevents.TopicTicketCreated, func(event magicevent.Event, result magicevent.Result) {
+		s.SubscribeMatchedFunc(observerID, observerID, decisionevents.TopicTicketCreated, func(event magicevent.Event, result magicevent.Result) {
 			if data, ok := event.Data().(decisionevents.TicketChangedData); ok {
 				s.enqueueGovernanceWork(func(workCtx context.Context) {
 					s.processTicketCreated(workCtx, data)
@@ -189,13 +208,12 @@ func (s *Service) Start() error {
 				result.Set(nil, nil)
 			}
 		})
-		unsubTicket = func() { observer.Unsubscribe(decisionevents.TopicTicketCreated) }
+		unsubTicket = func() { s.UnsubscribeMatchedFunc(observerID, decisionevents.TopicTicketCreated) }
 	}
 	var unsubApproval func()
-	if s.notificationHub != nil {
+	if s.EventHub() != nil {
 		const observerID = "/approval/consumers/kernel/governance"
-		observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, s.notificationHub)
-		observer.Subscribe(approvalevents.TopicApprovalCreated, func(event magicevent.Event, result magicevent.Result) {
+		s.SubscribeMatchedFunc(observerID, observerID, approvalevents.TopicApprovalCreated, func(event magicevent.Event, result magicevent.Result) {
 			if data, ok := event.Data().(approvalevents.ApprovalChangedData); ok {
 				s.enqueueGovernanceWork(func(workCtx context.Context) {
 					s.processApprovalCreated(workCtx, data)
@@ -205,13 +223,12 @@ func (s *Service) Start() error {
 				result.Set(nil, nil)
 			}
 		})
-		unsubApproval = func() { observer.Unsubscribe(approvalevents.TopicApprovalCreated) }
+		unsubApproval = func() { s.UnsubscribeMatchedFunc(observerID, approvalevents.TopicApprovalCreated) }
 	}
 	var unsubRunState func()
-	if s.notificationHub != nil {
+	if s.EventHub() != nil {
 		const observerID = "/run/consumers/kernel/governance"
-		observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, s.notificationHub)
-		observer.Subscribe(runevents.TopicRunStateChanged, func(event magicevent.Event, result magicevent.Result) {
+		s.SubscribeMatchedFunc(observerID, observerID, runevents.TopicRunStateChanged, func(event magicevent.Event, result magicevent.Result) {
 			if data, ok := event.Data().(runevents.RunStateChangedData); ok {
 				s.enqueueGovernanceWork(func(workCtx context.Context) {
 					s.processRunStateChanged(workCtx, data)
@@ -221,9 +238,13 @@ func (s *Service) Start() error {
 				result.Set(nil, nil)
 			}
 		})
-		unsubRunState = func() { observer.Unsubscribe(runevents.TopicRunStateChanged) }
+		unsubRunState = func() { s.UnsubscribeMatchedFunc(observerID, runevents.TopicRunStateChanged) }
 	}
 	s.unsubscribes = []func(){unsubTicket, unsubApproval, unsubRunState}
+	s.topics = []string{governanceevents.TopicGovernanceAutoCommandListTraces}
+	for _, topic := range s.topics {
+		s.SubscribeFunc(topic, s.handleCommand)
+	}
 	if err := s.scheduleBlockedRunReconciliationLocked(); err != nil {
 		for _, unsub := range s.unsubscribes {
 			if unsub != nil {
@@ -243,6 +264,10 @@ func (s *Service) Start() error {
 
 func (s *Service) Stop() {
 	s.mu.Lock()
+	for idx := len(s.topics) - 1; idx >= 0; idx-- {
+		s.UnsubscribeFunc(s.topics[idx])
+	}
+	s.topics = nil
 	for _, unsub := range s.unsubscribes {
 		if unsub != nil {
 			unsub()
@@ -278,6 +303,39 @@ func (s *Service) Stop() {
 		case <-time.After(2 * time.Second):
 		}
 	}
+}
+
+func (s *Service) handleCommand(ev magicevent.Event, result magicevent.Result) {
+	response, err := s.executeCommand(ev)
+	if result == nil {
+		return
+	}
+	if err != nil {
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		return
+	}
+	result.Set(response, nil)
+}
+
+func (s *Service) executeCommand(ev magicevent.Event) (governanceevents.GovernanceCommandResult, error) {
+	if s == nil || s.traces == nil {
+		return governanceevents.GovernanceCommandResult{}, common.ErrInvalidArgument
+	}
+	if ev.ID() != governanceevents.TopicGovernanceAutoCommandListTraces {
+		return governanceevents.GovernanceCommandResult{}, common.ErrInvalidArgument
+	}
+	cmd, ok := ev.Data().(governanceevents.ListAutoGovernanceTracesCommand)
+	if !ok {
+		return governanceevents.GovernanceCommandResult{}, common.ErrInvalidArgument
+	}
+	items, err := s.traces.List(ev.Context(), repository.AutoGovernanceTraceQuery{
+		WorkspaceID: cmd.Query.WorkspaceID, RunID: cmd.Query.RunID, StepID: cmd.Query.StepID,
+		ItemType: cmd.Query.ItemType, ItemID: cmd.Query.ItemID, Status: cmd.Query.Status, Limit: cmd.Query.Limit,
+	})
+	if err != nil {
+		return governanceevents.GovernanceCommandResult{}, err
+	}
+	return governanceevents.GovernanceCommandResult{Traces: items}, nil
 }
 
 func (s *Service) startGovernanceWorker(ctx context.Context, queue <-chan governanceWork, done chan<- struct{}) error {
@@ -1896,7 +1954,7 @@ func (s *Service) loadMemoryItems(ctx context.Context, workspaceID common.Worksp
 }
 
 func (s *Service) publishGovernanceEvent(ctx context.Context, topic string, trace *governancemodel.AutoGovernanceTrace, escalationReason string) error {
-	if s == nil || s.notificationHub == nil || trace == nil {
+	if s == nil || s.EventHub() == nil || trace == nil {
 		return nil
 	}
 	cloned := *trace
@@ -1916,7 +1974,7 @@ func (s *Service) publishGovernanceEvent(ctx context.Context, topic string, trac
 		RunID:       string(trace.RunID),
 		StepID:      string(trace.StepID),
 	}))
-	s.notificationHub.Post(event)
+	s.PostEvent(event)
 	return nil
 }
 

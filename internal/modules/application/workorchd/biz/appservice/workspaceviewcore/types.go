@@ -4,9 +4,11 @@ import (
 	"context"
 	"time"
 
-	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 const (
@@ -106,9 +108,16 @@ type Loader interface {
 
 type Scheduler func(name string, fn func(context.Context)) bool
 
+// EventPorts are owned by the application Biz. They keep EventHub activity
+// outside the projection read-model manager.
+type EventPorts struct {
+	ReadHighWatermarks func(context.Context, []common.WorkspaceID) ([]eventstreamevents.WorkspaceHighWatermark, error)
+	PublishChanged     func(context.Context, workorchdevents.WorkspaceProjectionChangedData)
+}
+
 type ManagerOptions struct {
 	Loader               Loader
-	CommandHub           magicevent.Hub
 	Schedule             Scheduler
 	RebuildCoalesceDelay time.Duration
+	EventPorts           EventPorts
 }

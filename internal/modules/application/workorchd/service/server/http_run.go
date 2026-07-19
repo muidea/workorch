@@ -15,7 +15,6 @@ import (
 
 func registerRunReadRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/runs", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		state.metrics.runListRequests.Add(1)
 		items, err := state.listRuns(r.Context(), state.config.Backend, state.config.DataRoot, r.URL.Query().Get("workspaceId"))
 		if err != nil {
@@ -30,7 +29,6 @@ func registerRunReadRoutes(router engine.RouteRegistry, state *serverState) {
 		})
 	})
 	router.AddHandler("/api/v1/workorch/artifacts/content", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		state.metrics.artifactContentRequests.Add(1)
 		artifactURI := strings.TrimSpace(r.URL.Query().Get("uri"))
 		if artifactURI == "" {
@@ -45,7 +43,6 @@ func registerRunReadRoutes(router engine.RouteRegistry, state *serverState) {
 		writeArtifactContent(w, item)
 	})
 	router.AddHandler("/api/v1/workorch/runtime/payloads", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		ref := strings.TrimSpace(r.URL.Query().Get("ref"))
 		if ref == "" {
 			writeBusinessError(w, fmt.Errorf("%w: runtime payload ref is required", common.ErrInvalidArgument))
@@ -62,7 +59,6 @@ func registerRunReadRoutes(router engine.RouteRegistry, state *serverState) {
 
 func registerRunWriteRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/runs", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "runs" {
 			http.NotFound(w, r)
@@ -92,7 +88,6 @@ func registerRunWriteRoutes(router engine.RouteRegistry, state *serverState) {
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/runs", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "runs" {
 			http.NotFound(w, r)
@@ -131,7 +126,6 @@ func runListMetadata(items []appservice.Run) []appservice.Run {
 }
 
 func (s *serverState) handleWorkspaceScopedRunGet(w http.ResponseWriter, r *http.Request) {
-	r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), s.commandHub))
 	workspaceID, runID, action, ok := workspaceRunActionFromPath(r.URL.Path)
 	if !ok {
 		http.NotFound(w, r)
@@ -282,7 +276,6 @@ func (s *serverState) handleWorkspaceScopedRunGet(w http.ResponseWriter, r *http
 }
 
 func (s *serverState) handleWorkspaceScopedRunPost(w http.ResponseWriter, r *http.Request) {
-	r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), s.commandHub))
 	workspaceID, runID, action, ok := workspaceRunActionFromPath(r.URL.Path)
 	if !ok {
 		http.NotFound(w, r)

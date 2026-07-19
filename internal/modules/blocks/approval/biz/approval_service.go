@@ -6,24 +6,19 @@ import (
 	"strings"
 	"time"
 
-	magicevent "github.com/muidea/magicCommon/event"
-	modulecommon "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/common"
 	approvalcontracts "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/contracts"
-	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	approvalModel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 type Service struct {
-	approvals  repository.ApprovalRepository
-	commandHub magicevent.Hub
+	approvals repository.ApprovalRepository
 }
 
-func NewService(approvals repository.ApprovalRepository, commandHub magicevent.Hub) *Service {
-	return &Service{approvals: approvals, commandHub: commandHub}
+func NewService(approvals repository.ApprovalRepository) *Service {
+	return &Service{approvals: approvals}
 }
 
 func (s *Service) CreateApproval(ctx context.Context, cmd approvalcontracts.CreateApprovalCommand) error {
@@ -45,10 +40,7 @@ func (s *Service) CreateApproval(ctx context.Context, cmd approvalcontracts.Crea
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
-	if err := s.approvals.Create(ctx, item); err != nil {
-		return err
-	}
-	return s.publishApprovalChanged(ctx, approvalevents.TopicApprovalCreated, item)
+	return s.approvals.Create(ctx, item)
 }
 
 func (s *Service) EnsureApproval(ctx context.Context, cmd approvalcontracts.CreateApprovalCommand) error {
@@ -93,9 +85,6 @@ func (s *Service) EnsureApprovedAndReturn(ctx context.Context, cmd approvalcontr
 		return nil, err
 	}
 	if item.State == common.ApprovalStateApproved {
-		if err := s.recordApprovalGovernanceEvidence(ctx, item); err != nil {
-			return nil, err
-		}
 		return item, nil
 	}
 	if item.State == common.ApprovalStateRejected {
@@ -126,9 +115,6 @@ func (s *Service) EnsureRejectedAndReturn(ctx context.Context, cmd approvalcontr
 		return nil, err
 	}
 	if item.State == common.ApprovalStateRejected {
-		if err := s.recordApprovalGovernanceEvidence(ctx, item); err != nil {
-			return nil, err
-		}
 		return item, nil
 	}
 	if item.State == common.ApprovalStateApproved {
@@ -169,45 +155,7 @@ func (s *Service) resolveItem(ctx context.Context, item *approvalModel.Approval,
 	item.ResolvedBy = firstNonEmptyApprovalString(approvalStringValue(resolutionContext, "resolvedBy"), approvalStringValue(resolutionContext, "actor"))
 	item.Context = mergeApprovalContext(item.Context, resolutionContext)
 	item.State = target
-	if err := s.approvals.Update(ctx, item); err != nil {
-		return err
-	}
-	if err := s.recordApprovalGovernanceEvidence(ctx, item); err != nil {
-		return err
-	}
-	return s.publishApprovalChanged(ctx, approvalevents.TopicApprovalResolved, item)
-}
-
-func (s *Service) publishApprovalChanged(ctx context.Context, topic string, item *approvalModel.Approval) error {
-	if s == nil || s.commandHub == nil || item == nil {
-		return nil
-	}
-	event := magicevent.NewEventWithContext(
-		topic,
-		modulecommon.ModuleID,
-		approvalevents.NotificationDestination,
-		magicevent.NewHeader(),
-		ctx,
-		approvalevents.ApprovalChangedData{
-			ApprovalID:  item.ID,
-			WorkspaceID: item.WorkspaceID,
-			RunID:       item.RunID,
-			StepID:      item.StepID,
-			Reason:      item.Reason,
-			Action:      item.Action,
-			Context:     item.Context.Clone().Fields,
-			State:       item.State,
-		},
-	)
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(topic, workorchevents.EventHubLaneScope{
-		SubjectType: "approval",
-		SubjectID:   string(item.ID),
-		WorkspaceID: string(item.WorkspaceID),
-		RunID:       string(item.RunID),
-		StepID:      string(item.StepID),
-	}))
-	s.commandHub.Post(event)
-	return nil
+	return s.approvals.Update(ctx, item)
 }
 
 func cloneApprovalContext(input workorcheventpayload.Payload) workorcheventpayload.Payload {

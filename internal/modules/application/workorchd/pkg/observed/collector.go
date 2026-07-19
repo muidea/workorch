@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
+	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
@@ -15,9 +17,10 @@ import (
 )
 
 type Collector struct {
-	mu        sync.RWMutex
-	published []eventstreamevents.EventRecordData
-	observer  magicevent.SimpleObserver
+	basebiz.Base
+	mu         sync.RWMutex
+	published  []eventstreamevents.EventRecordData
+	observerID string
 }
 
 const maxCollectedEventRecords = 256
@@ -25,14 +28,14 @@ const maxCollectedEventRecords = 256
 var collectorObserverSequence atomic.Uint64
 
 func NewCollector(hub magicevent.Hub) *Collector {
-	collector := &Collector{}
+	collector := &Collector{Base: basebiz.New(modulecommon.ModuleID, hub, nil)}
 	if hub == nil {
 		return collector
 	}
 
 	observerID := fmt.Sprintf("/eventstream/consumers/application/workorchd/observed/%d", collectorObserverSequence.Add(1))
-	collector.observer = magicevent.NewSimpleObserverWithMatchID(observerID, observerID, hub)
-	collector.observer.Subscribe(eventstreamevents.TopicEventStreamRecordAppended, func(event magicevent.Event, result magicevent.Result) {
+	collector.observerID = observerID
+	collector.SubscribeMatchedFunc(observerID, observerID, eventstreamevents.TopicEventStreamRecordAppended, func(event magicevent.Event, result magicevent.Result) {
 		data, ok := event.Data().(eventstreamevents.EventRecordAppendedData)
 		if !ok {
 			if result != nil {
@@ -104,11 +107,11 @@ func (c *Collector) Close() {
 		return
 	}
 	c.mu.Lock()
-	observer := c.observer
-	c.observer = nil
+	observerID := c.observerID
+	c.observerID = ""
 	c.mu.Unlock()
-	if observer != nil {
-		observer.Unsubscribe(eventstreamevents.TopicEventStreamRecordAppended)
+	if observerID != "" {
+		c.UnsubscribeMatchedFunc(observerID, eventstreamevents.TopicEventStreamRecordAppended)
 	}
 }
 

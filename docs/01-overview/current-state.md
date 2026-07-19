@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-07-18
+Last Updated: 2026-07-19
 
 
 ## LLM Provider（2026-07-15）
@@ -91,7 +91,7 @@ Last Updated: 2026-07-18
 
 Runtime V2-only 主链骨架、RVC-R5～R15 foundation、RVC-R17～R26 与 RPA-1 已完成。2026-07-18 的 deployed rerun 已将 capability-state canonical owner 与 discriminated operation variant 进入 sealed authority；随后发现的 `requiredOperationRef` provider-schema/strict-DTO 字段漂移也已收口为 typed mapping 和 file-gate 回归。fresh bounded dual terminal、canonical real canary liveness 与 fresh positive acceptance 均已通过；当前剩余主要是：
 
-1. **组件边界 / 生命周期（ARCH-1）**：22 组件的 SM-4 startup recovery、channel-free process lifecycle、owner Service facade、repository DTO 与 test-data isolation 已在当前 worktree 收口；仍需完成完整 structural/race/file-backed/deployed verification 后归档。方案见 `70-roadmap/active/go-multi-module-22-component-boundary-remediation.md`。
+1. **组件边界 / 生命周期（ARCH-1）**：SM-4 startup recovery、channel-free process lifecycle、owner Service facade、repository DTO 与 test-data isolation 均已有实现/回归证据；2026-07-19 的 go-multi-module-dev 审计发现的共享 Base Biz 缺失和 framework Module 根直接持有 EventHub，现已迁移到 component-local Biz，且本地 structural/race/file-backed 门禁已重跑。仅待提供重启后的外部目标与 `active_no_dispatch`、`active_sealed_dispatch`、`terminal_delivery_pending` 三类 fixture manifest，以执行 deployed SM-4 matrix；方案见 `70-roadmap/active/go-multi-module-22-component-boundary-remediation.md`。
 2. **运维切换（OPS-1）**：真实生产目录 `runtime-v1-retirement --apply` + clean build 维护窗口（过程日记已归档，不在 active 放长文）。
 3. **可选验证（OPT-1）**：file-patch `apply + validation + DoD closeout` 的 deployed live 一次。
 4. **延期候选**：LLM context budget 高级项见 `70-roadmap/candidates/`，**不占 active**。

@@ -8,7 +8,7 @@ import (
 )
 
 func (d *CLICommandDispatcher) handleTypedCLIDefinition(event magicevent.Event, result magicevent.Result) {
-	ctx := ContextWithCommandHub(event.Context(), d.commandHub)
+	ctx := ContextWithCommandHub(event.Context(), d.EventHub())
 	switch command := event.Data().(type) {
 	case workorchdevents.CLIGoalDefineCommand:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)

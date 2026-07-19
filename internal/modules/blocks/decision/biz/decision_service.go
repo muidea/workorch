@@ -11,13 +11,10 @@ import (
 	"strings"
 	"time"
 
-	magicevent "github.com/muidea/magicCommon/event"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisioncontracts "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/contracts"
-	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	decisionModel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
@@ -25,16 +22,23 @@ import (
 type Service struct {
 	tickets     repository.DecisionTicketRepository
 	resolutions repository.DecisionResolutionRepository
-	commandHub  magicevent.Hub
 }
 
-func NewService(tickets repository.DecisionTicketRepository, resolutions repository.DecisionResolutionRepository, commandHub magicevent.Hub) *Service {
-	return &Service{tickets: tickets, resolutions: resolutions, commandHub: commandHub}
+// NewService only retains Decision owner repositories.
+func NewService(tickets repository.DecisionTicketRepository, resolutions repository.DecisionResolutionRepository) *Service {
+	return &Service{tickets: tickets, resolutions: resolutions}
 }
 
 func (s *Service) CreateTicket(ctx context.Context, cmd decisioncontracts.CreateTicketCommand) error {
+	_, err := s.CreateTicketAndReturn(ctx, cmd)
+	return err
+}
+
+// CreateTicketAndReturn persists a new ticket. Event publication is owned by
+// Biz so this repository service remains independent of framework resources.
+func (s *Service) CreateTicketAndReturn(ctx context.Context, cmd decisioncontracts.CreateTicketCommand) (*decisionModel.Ticket, error) {
 	if cmd.TicketID == "" || cmd.WorkspaceID == "" || cmd.RunID == "" || cmd.Reason == "" {
-		return common.ErrInvalidArgument
+		return nil, common.ErrInvalidArgument
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -56,14 +60,20 @@ func (s *Service) CreateTicket(ctx context.Context, cmd decisioncontracts.Create
 		UpdatedAt:              now,
 	}
 	if err := s.tickets.Create(ctx, item); err != nil {
-		return err
+		return nil, err
 	}
-	return s.publishTicketChanged(ctx, decisionevents.TopicTicketCreated, item)
+	return item, nil
 }
 
 func (s *Service) EnsureTicket(ctx context.Context, cmd decisioncontracts.CreateTicketCommand) error {
+	_, _, err := s.EnsureTicketAndReturn(ctx, cmd)
+	return err
+}
+
+// EnsureTicketAndReturn reports whether this invocation created the ticket.
+func (s *Service) EnsureTicketAndReturn(ctx context.Context, cmd decisioncontracts.CreateTicketCommand) (*decisionModel.Ticket, bool, error) {
 	if cmd.TicketID == "" || cmd.WorkspaceID == "" || cmd.RunID == "" || cmd.Reason == "" {
-		return common.ErrInvalidArgument
+		return nil, false, common.ErrInvalidArgument
 	}
 
 	item, err := s.tickets.Get(ctx, cmd.TicketID)
@@ -79,44 +89,50 @@ func (s *Service) EnsureTicket(ctx context.Context, cmd decisioncontracts.Create
 			item.FailureClass != nonEmptyString(cmd.FailureClass, stringPayloadValue(cmd.Context, "failureClass")) ||
 			item.FailureSignature != nonEmptyString(cmd.FailureSignature, stringPayloadValue(cmd.Context, "failureSignature")) ||
 			!slices.Equal(item.AllowedRecoveryActions, nonEmptyStringSlice(cmd.AllowedRecoveryActions, stringSlicePayloadValue(cmd.Context, "allowedRecoveryActions"))) {
-			return common.ErrConflict
+			return nil, false, common.ErrConflict
 		}
-		return nil
+		return item, false, nil
 	}
 	if !errors.Is(err, common.ErrNotFound) {
-		return err
+		return nil, false, err
 	}
-	return s.CreateTicket(ctx, cmd)
+	item, err = s.CreateTicketAndReturn(ctx, cmd)
+	return item, err == nil, err
 }
 
 func (s *Service) ResolveTicket(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) error {
+	_, _, err := s.ResolveTicketAndReturn(ctx, cmd)
+	return err
+}
+
+func (s *Service) ResolveTicketAndReturn(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.Resolution, error) {
 	if cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
-		return common.ErrInvalidArgument
+		return nil, nil, common.ErrInvalidArgument
 	}
 	if !modulecommon.IsSupportedResolutionType(cmd.Type) {
-		return common.ErrInvalidArgument
+		return nil, nil, common.ErrInvalidArgument
 	}
 	ctx = resolveCommandContext(ctx, cmd)
 
 	ticket, err := s.tickets.Get(ctx, cmd.TicketID)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	if !ticketMatchesResolveScope(ticket, cmd) {
-		return common.ErrNotFound
+		return nil, nil, common.ErrNotFound
 	}
 	if ticket.DecisionKind == "runtime_v2_governance" {
-		return common.ErrConflict
+		return nil, nil, common.ErrConflict
 	}
 	if err := validateResolutionTypeForTicket(ticket, cmd.Type); err != nil {
-		return err
+		return nil, nil, err
 	}
 	if ticket.State != common.DecisionTicketStateOpen {
-		return common.ErrConflict
+		return nil, nil, common.ErrConflict
 	}
 
-	_, err = s.resolveTicketItem(ctx, ticket, cmd)
-	return err
+	resolution, err := s.resolveTicketItem(ctx, ticket, cmd)
+	return ticket, resolution, err
 }
 
 func (s *Service) resolveTicketItem(ctx context.Context, ticket *decisionModel.Ticket, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Resolution, error) {
@@ -148,12 +164,6 @@ func (s *Service) resolveTicketItem(ctx context.Context, ticket *decisionModel.T
 	if err := s.tickets.Update(ctx, ticket); err != nil {
 		return nil, err
 	}
-	if err := s.recordDecisionResolutionEvidence(ctx, ticket, resolution); err != nil {
-		return nil, err
-	}
-	if err := s.publishResolvedTicketEvent(ctx, ticket, resolution); err != nil {
-		return nil, err
-	}
 	return resolution, nil
 }
 
@@ -163,26 +173,34 @@ func (s *Service) EnsureResolvedTicket(ctx context.Context, cmd decisioncontract
 }
 
 func (s *Service) EnsureResolvedTicketAndReturn(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.Resolution, error) {
+	ticket, resolution, _, err := s.EnsureResolvedTicketAndReturnWithTransition(ctx, cmd)
+	return ticket, resolution, err
+}
+
+// EnsureResolvedTicketAndReturnWithTransition reports whether the ticket
+// transitioned to resolved. Evidence is required for every successful call,
+// while the resolved notification is emitted only for a transition.
+func (s *Service) EnsureResolvedTicketAndReturnWithTransition(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.Resolution, bool, error) {
 	if cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
-		return nil, nil, common.ErrInvalidArgument
+		return nil, nil, false, common.ErrInvalidArgument
 	}
 	if !modulecommon.IsSupportedResolutionType(cmd.Type) {
-		return nil, nil, common.ErrInvalidArgument
+		return nil, nil, false, common.ErrInvalidArgument
 	}
 	ctx = resolveCommandContext(ctx, cmd)
 
 	ticket, err := s.tickets.Get(ctx, cmd.TicketID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	if !ticketMatchesResolveScope(ticket, cmd) {
-		return nil, nil, common.ErrNotFound
+		return nil, nil, false, common.ErrNotFound
 	}
 	if ticket.DecisionKind == "runtime_v2_governance" {
-		return nil, nil, common.ErrConflict
+		return nil, nil, false, common.ErrConflict
 	}
 	if err := validateResolutionTypeForTicket(ticket, cmd.Type); err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 
 	// Orphan resolution recovery: a resolution file may already exist for this
@@ -199,30 +217,23 @@ func (s *Service) EnsureResolvedTicketAndReturn(ctx context.Context, cmd decisio
 	// stay consistent with the repaired owner state.
 	existingResolution, resErr := s.resolutions.GetByTicketID(ctx, cmd.TicketID)
 	if resErr != nil && !errors.Is(resErr, common.ErrNotFound) {
-		return nil, nil, resErr
+		return nil, nil, false, resErr
 	}
 	if existingResolution != nil {
 		if existingResolution.ID != cmd.ResolutionID ||
 			existingResolution.Type != cmd.Type ||
 			!sameResolutionPayload(existingResolution.Payload, cmd.Payload) {
-			return nil, nil, common.ErrConflict
+			return nil, nil, false, common.ErrConflict
 		}
+		transitioned := ticket.State != common.DecisionTicketStateResolved
 		if ticket.State != common.DecisionTicketStateResolved {
 			ticket.State = common.DecisionTicketStateResolved
 			ticket.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 			if err := s.tickets.Update(ctx, ticket); err != nil {
-				return nil, nil, err
+				return nil, nil, false, err
 			}
-			if err := s.recordDecisionResolutionEvidence(ctx, ticket, existingResolution); err != nil {
-				return nil, nil, err
-			}
-			if err := s.publishResolvedTicketEvent(ctx, ticket, existingResolution); err != nil {
-				return nil, nil, err
-			}
-		} else if err := s.recordDecisionResolutionEvidence(ctx, ticket, existingResolution); err != nil {
-			return nil, nil, err
 		}
-		return ticket, existingResolution, nil
+		return ticket, existingResolution, transitioned, nil
 	}
 
 	if ticket.State == common.DecisionTicketStateResolved {
@@ -230,71 +241,16 @@ func (s *Service) EnsureResolvedTicketAndReturn(ctx context.Context, cmd decisio
 		// preserve the existing strict behavior. Re-creating a resolution
 		// here would be a fresh write — treat as ErrConflict to surface the
 		// invariant violation rather than silently accept.
-		return nil, nil, common.ErrConflict
+		return nil, nil, false, common.ErrConflict
 	}
 	if ticket.State != common.DecisionTicketStateOpen {
-		return nil, nil, common.ErrConflict
+		return nil, nil, false, common.ErrConflict
 	}
 	resolution, err := s.resolveTicketItem(ctx, ticket, cmd)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
-	return ticket, resolution, nil
-}
-
-func (s *Service) publishResolvedTicketEvent(ctx context.Context, ticket *decisionModel.Ticket, resolution *decisionModel.Resolution) error {
-	if s == nil || s.commandHub == nil || ticket == nil || resolution == nil {
-		return nil
-	}
-	data := decisionevents.TicketResolvedData{
-		Ticket:             ticketChangedData(ticket),
-		ResolutionID:       resolution.ID,
-		ResolutionType:     resolution.Type,
-		ResolutionPayload:  resolution.Payload.Clone().Fields,
-		ContinuationAction: resolution.ContinuationAction,
-		ResumeRunID:        resolution.ResumeRunID,
-		SuccessorRunID:     resolution.SuccessorRunID,
-	}
-	event := magicevent.NewEventWithContext(decisionevents.TopicTicketResolved, modulecommon.ModuleID, decisionevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
-	return s.postNotification(event, ticket)
-}
-
-func (s *Service) publishTicketChanged(ctx context.Context, topic string, ticket *decisionModel.Ticket) error {
-	if s == nil || s.commandHub == nil || ticket == nil {
-		return nil
-	}
-	event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, decisionevents.NotificationDestination, magicevent.NewHeader(), ctx, ticketChangedData(ticket))
-	return s.postNotification(event, ticket)
-}
-
-func ticketChangedData(ticket *decisionModel.Ticket) decisionevents.TicketChangedData {
-	if ticket == nil {
-		return decisionevents.TicketChangedData{}
-	}
-	return decisionevents.TicketChangedData{
-		TicketID:     ticket.ID,
-		WorkspaceID:  ticket.WorkspaceID,
-		RunID:        ticket.RunID,
-		StepID:       ticket.StepID,
-		Reason:       ticket.Reason,
-		DecisionKind: ticket.DecisionKind,
-		State:        ticket.State,
-	}
-}
-
-func (s *Service) postNotification(event magicevent.Event, ticket *decisionModel.Ticket) error {
-	if s == nil || s.commandHub == nil || ticket == nil {
-		return nil
-	}
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{
-		SubjectType: "decision_ticket",
-		SubjectID:   string(ticket.ID),
-		WorkspaceID: string(ticket.WorkspaceID),
-		RunID:       string(ticket.RunID),
-		StepID:      string(ticket.StepID),
-	}))
-	s.commandHub.Post(event)
-	return nil
+	return ticket, resolution, true, nil
 }
 
 func ticketMatchesResolveScope(ticket *decisionModel.Ticket, cmd decisioncontracts.ResolveTicketCommand) bool {
@@ -454,44 +410,52 @@ func (s *Service) EnsureRuntimeGovernanceResolutionProposal(ctx context.Context,
 // and marks its ticket resolved only after the matching Runtime V2 aggregate
 // has committed. It is safe to retry after any owner-local write failure.
 func (s *Service) FinalizeRuntimeGovernanceResolutionProposal(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.Resolution, error) {
+	ticket, resolution, _, err := s.FinalizeRuntimeGovernanceResolutionProposalWithTransition(ctx, cmd)
+	return ticket, resolution, err
+}
+
+// FinalizeRuntimeGovernanceResolutionProposalWithTransition reports whether
+// the public ticket moved from open to resolved during this invocation.
+func (s *Service) FinalizeRuntimeGovernanceResolutionProposalWithTransition(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.Resolution, bool, error) {
 	if s == nil || cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
-		return nil, nil, common.ErrInvalidArgument
+		return nil, nil, false, common.ErrInvalidArgument
 	}
 	ctx = resolveCommandContext(ctx, cmd)
 	ticket, err := s.tickets.Get(ctx, cmd.TicketID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	if !ticketMatchesResolveScope(ticket, cmd) || ticket.DecisionKind != "runtime_v2_governance" {
-		return nil, nil, common.ErrNotFound
+		return nil, nil, false, common.ErrNotFound
 	}
 	proposal, err := runtimeGovernanceProposalFromCommand(cmd)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	if ticket.RuntimeGovernanceProposal == nil || !sameRuntimeGovernanceProposal(*ticket.RuntimeGovernanceProposal, proposal) {
-		return nil, nil, common.ErrConflict
+		return nil, nil, false, common.ErrConflict
 	}
 	if ticket.RuntimeGovernanceProposal.State == decisionModel.RuntimeGovernanceResolutionProposalRejected {
-		return nil, nil, common.ErrConflict
+		return nil, nil, false, common.ErrConflict
 	}
 	resolution, err := s.resolutions.GetByTicketID(ctx, cmd.TicketID)
 	if err != nil && !errors.Is(err, common.ErrNotFound) {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	if resolution != nil {
 		if resolution.ID != cmd.ResolutionID || resolution.Type != cmd.Type || !sameResolutionPayload(resolution.Payload, common.RedactSensitivePayload(cmd.Payload)) {
-			return nil, nil, common.ErrConflict
+			return nil, nil, false, common.ErrConflict
 		}
 	} else {
 		resolution = resolutionFromResolveCommand(cmd)
 		if err := s.resolutions.Create(ctx, resolution); err != nil {
-			return nil, nil, err
+			return nil, nil, false, err
 		}
 	}
 	if ticket.State != common.DecisionTicketStateOpen && ticket.State != common.DecisionTicketStateResolved {
-		return nil, nil, common.ErrConflict
+		return nil, nil, false, common.ErrConflict
 	}
+	transitioned := ticket.State == common.DecisionTicketStateOpen
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	ticket.State = common.DecisionTicketStateResolved
 	ticket.ResolvedAt = nonEmptyString(ticket.ResolvedAt, now)
@@ -501,15 +465,9 @@ func (s *Service) FinalizeRuntimeGovernanceResolutionProposal(ctx context.Contex
 	ticket.RuntimeGovernanceProposal.FailureReason = ""
 	ticket.RuntimeGovernanceProposal.UpdatedAt = now
 	if err := s.tickets.Update(ctx, ticket); err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
-	if err := s.recordDecisionResolutionEvidence(ctx, ticket, resolution); err != nil {
-		return nil, nil, err
-	}
-	if err := s.publishResolvedTicketEvent(ctx, ticket, resolution); err != nil {
-		return nil, nil, err
-	}
-	return ticket, resolution, nil
+	return ticket, resolution, transitioned, nil
 }
 
 func (s *Service) RejectRuntimeGovernanceResolutionProposal(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand, failureClass string, failureReason string) error {

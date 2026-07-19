@@ -15,8 +15,8 @@ import (
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func (s *Service) recordDecisionResolutionEvidence(ctx context.Context, ticket *decisionmodel.Ticket, resolution *decisionmodel.Resolution) error {
-	if s == nil || s.commandHub == nil || ticket == nil || resolution == nil || resolution.ID == "" {
+func (m *Biz) recordDecisionResolutionEvidence(ctx context.Context, ticket *decisionmodel.Ticket, resolution *decisionmodel.Resolution) error {
+	if m == nil || m.EventHub() == nil || ticket == nil || resolution == nil || resolution.ID == "" {
 		return nil
 	}
 	timestamp := strings.TrimSpace(ticket.UpdatedAt)
@@ -55,7 +55,7 @@ func (s *Service) recordDecisionResolutionEvidence(ctx context.Context, ticket *
 		RunID:       string(ticket.RunID),
 		StepID:      string(ticket.StepID),
 	}))
-	result := s.commandHub.Send(ev)
+	result := m.SendEvent(ev)
 	if result == nil {
 		return fmt.Errorf("decision evidence command returned no result")
 	}

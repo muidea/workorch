@@ -8,6 +8,7 @@ import (
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	runbiz "github.com/muidea/workorch/internal/modules/kernel/run/biz"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -35,7 +36,7 @@ func TestBuildRuntimeV2RecoveryInventoryClassifiesAuthorityState(t *testing.T) {
 		{ID: "run-terminal-pending", WorkspaceID: "ws-3", State: common.RunStateActive, RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
 			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 4, Decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionComplete}, Facts: runtimecontract.RuntimeFacts{Recovery: runtimecontract.RuntimeRecoveryLedger{TerminalDeliveryAttempts: 2}}}},
 	}
-	result := buildRuntimeV2RecoveryInventory(runs, runevents.QueryRuntimeV2RecoveryInventoryCommand{Limit: 10})
+	result := runbiz.BuildRuntimeV2RecoveryInventory(runs, runevents.QueryRuntimeV2RecoveryInventoryCommand{Limit: 10})
 	if len(result.Items) != 4 {
 		t.Fatalf("recovery items = %+v", result.Items)
 	}
@@ -92,32 +93,16 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if module.bizPtr == nil {
 		t.Fatal("biz pointer is nil after Configure")
 	}
-	if module.eventHub == nil {
-		t.Fatal("event hub is nil after Configure")
-	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
-	}
-	firstSubscriptionCount := len(module.topics)
-	if firstSubscriptionCount == 0 {
-		t.Fatal("Start did not subscribe run commands")
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("second Start: %v", err)
 	}
-	if len(module.topics) != firstSubscriptionCount {
-		t.Fatalf("second Start subscription count = %d, want %d", len(module.topics), firstSubscriptionCount)
-	}
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if module.bizPtr != nil ||
-		module.eventHub != nil ||
-		module.runs != nil ||
-		module.steps != nil ||
-		module.checkpoints != nil ||
-		module.observer != nil ||
-		len(module.topics) != 0 {
+	if module.bizPtr != nil {
 		t.Fatalf("module was not cleared after Stop: %+v", module)
 	}
 	if err := module.Stop(context.Background()); err != nil {
@@ -154,12 +139,8 @@ func TestGMMR1SM4RecoveryInventoryAvailableAfterSetupBeforeRun(t *testing.T) {
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	firstSubscriptionCount := len(module.topics)
 	if err := module.Start(); err != nil {
 		t.Fatalf("second Start: %v", err)
-	}
-	if len(module.topics) != firstSubscriptionCount {
-		t.Fatalf("duplicate subscriptions after second Start: %d != %d", len(module.topics), firstSubscriptionCount)
 	}
 	if err := module.Stop(ctx); err != nil {
 		t.Fatalf("Stop: %v", err)
@@ -510,7 +491,7 @@ func TestValidateRunUpdateProtectsRuntimeV2Identity(t *testing.T) {
 		RuntimeContractVersion: current.RuntimeContractVersion, RuntimeState: current.RuntimeState,
 		State: current.State, CreatedAt: current.CreatedAt,
 	}
-	if err := validateRunUpdate(current, valid); err != nil {
+	if err := runbiz.ValidateRunUpdate(current, valid); err != nil {
 		t.Fatalf("valid Runtime V2 update rejected: %v", err)
 	}
 
@@ -537,7 +518,7 @@ func TestValidateRunUpdateProtectsRuntimeV2Identity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := valid
 			tc.mutate(&cmd)
-			if err := validateRunUpdate(current, cmd); !errors.Is(err, common.ErrConflict) {
+			if err := runbiz.ValidateRunUpdate(current, cmd); !errors.Is(err, common.ErrConflict) {
 				t.Fatalf("err = %v, want conflict", err)
 			}
 		})

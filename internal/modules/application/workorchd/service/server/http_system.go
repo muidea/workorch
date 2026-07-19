@@ -7,7 +7,6 @@ import (
 	_ "net/http/pprof"
 
 	engine "github.com/muidea/magicEngine/http"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 )
 
 func registerSystemRoutes(router engine.RouteRegistry, state *serverState) {
@@ -22,7 +21,6 @@ func registerSystemRoutes(router engine.RouteRegistry, state *serverState) {
 		})
 	})
 	router.AddHandler("/readyz", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		state.metrics.readyzRequests.Add(1)
 		if err := state.validate(r.Context(), state.config.Backend, state.config.DataRoot); err != nil {
 			writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: err.Error()})

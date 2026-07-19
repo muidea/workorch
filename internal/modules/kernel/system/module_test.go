@@ -32,14 +32,14 @@ func TestSystemModuleIdentityStartStopContract(t *testing.T) {
 	if err := module.Configure(deps); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if module.eventHub == nil {
-		t.Fatal("module event hub is nil after Configure")
+	if module.bizPtr == nil || module.bizPtr.EventHub() == nil {
+		t.Fatal("system biz is not configured after Configure")
 	}
 	if err := module.Stop(ctx); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if module.eventHub != nil {
-		t.Fatal("event hub was not cleared after Stop")
+	if module.bizPtr != nil {
+		t.Fatal("system biz was not cleared after Stop")
 	}
 	if err := module.Stop(ctx); err != nil {
 		t.Fatalf("second Stop: %v", err)

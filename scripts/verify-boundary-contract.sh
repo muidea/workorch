@@ -19,6 +19,101 @@ for path in "${paths[@]}"; do
   fi
 done
 
+# Every framework Module/Block in this repository currently participates in
+# EventHub lifecycle. Its root is only a lifecycle bridge; the component-local
+# Biz must be the sole holder of the Base/EventHub interaction. The repository
+# provider remains an Initiator, so it is intentionally excluded here.
+mapfile -t component_roots < <(find internal/modules -mindepth 2 -maxdepth 3 -name module.go -printf '%h\n' | sort)
+for component_root in "${component_roots[@]}"; do
+  if [[ ! -d "$component_root/biz" ]]; then
+    echo "boundary contract violation: component has no local biz directory: $component_root" >&2
+    exit 1
+  fi
+  if ! rg -q --glob '*.go' 'basebiz\.Base' "$component_root/biz"; then
+    echo "boundary contract violation: component Biz does not embed basebiz.Base: $component_root" >&2
+    exit 1
+  fi
+  if ! rg -q --glob '*.go' 'func \(.*\) (Stop|Teardown|Close)\(' "$component_root/biz"; then
+    echo "boundary contract violation: component Biz has no explicit teardown: $component_root" >&2
+    exit 1
+  fi
+  if [[ "$component_root" == "internal/modules/application/workorchd" ]]; then
+    if ! rg -q 'func \(m \*Module\) (Setup|Run|Teardown)\(' "$component_root/module.go"; then
+      echo "boundary contract violation: application module lacks framework lifecycle bridge: $component_root" >&2
+      exit 1
+    fi
+    continue
+  fi
+  if [[ ! -f "$component_root/plugin.go" ]] || ! rg -q 'pluginmodule\.Register\(New\(\)\)' "$component_root/plugin.go" || ! rg -q 'func \(m \*Module\) Setup\(' "$component_root/plugin.go" || ! rg -q 'func \(m \*Module\) Run\(' "$component_root/plugin.go" || ! rg -q 'func \(m \*Module\) Teardown\(' "$component_root/plugin.go"; then
+    echo "boundary contract violation: component plugin lacks registration or full lifecycle bridge: $component_root" >&2
+    exit 1
+  fi
+done
+
+root_event_operations=()
+for component_root in "${component_roots[@]}"; do
+  # A component root may contain both module.go and plugin.go. Neither may
+  # perform EventHub work: roots are lifecycle bridges only.
+  if matches="$(
+    find "$component_root" -maxdepth 1 -type f -name '*.go' ! -name '*_test.go' -print0 |
+      xargs -0 -r rg -n 'NewSimpleObserver|\.Subscribe\(|\.Unsubscribe\(|\.Send\(|\.Post\(' || true
+  )"; then
+    if [[ -n "$matches" ]]; then
+      root_event_operations+=("$matches")
+    fi
+  fi
+done
+
+if ((${#root_event_operations[@]} > 0)); then
+  cat >&2 <<EOF
+Boundary contract violation: Module roots must only bridge lifecycle and may
+not create observers, subscribe, or publish EventHub events.
+
+$(printf '%s\n' "${root_event_operations[@]}")
+EOF
+  exit 1
+fi
+
+if matches="$(
+  rg -n --glob '**/service/*.go' --glob '**/service/**/*.go' --glob '!*_test.go' \
+    'event\.Hub|magicevent\.Hub|event\.SimpleObserver|magicevent\.SimpleObserver|NewSimpleObserver|\.Subscribe\(|\.Unsubscribe\(|\.Send\(|\.Post\(' internal/modules
+)"; then
+  cat >&2 <<EOF
+Boundary contract violation: protocol service/adapter code must not retain or
+operate on EventHub. Move the event lifecycle and typed handlers into the
+component-local Biz.
+
+$matches
+EOF
+  exit 1
+fi
+
+if matches="$(
+  rg -n --glob '*.go' --glob '!*_test.go' 'basebiz\.Base|NewSimpleObserver|\.Subscribe\(|\.Unsubscribe\(|\.Send\(|\.Post\(' internal/initiators
+)"; then
+  cat >&2 <<EOF
+Boundary contract violation: Initiators provide one stateless infrastructure
+capability and must not embed Base or participate in business EventHub traffic.
+
+$matches
+EOF
+  exit 1
+fi
+
+mapfile -t event_contract_dirs < <(find internal/modules -type d -path '*/pkg/events' | sort)
+if ((${#event_contract_dirs[@]} > 0)) && matches="$(
+  rg -n --glob '*.go' 'map\[string\]any|\[\]any|\bany\b|<-chan|\bchan\b|internal/pkg/repository|io\.Writer|http\.ResponseWriter|\*.*Repository|Registry|Recorder' "${event_contract_dirs[@]}"
+)"; then
+  cat >&2 <<EOF
+Boundary contract violation: EventHub Command/Data/Result contracts must use
+bounded concrete DTOs only. They may not leak maps, any, channels, repositories
+or other mutable/I/O resources.
+
+$matches
+EOF
+  exit 1
+fi
+
 # These terms are allowed in e2e scripts, tests, and docs, where a concrete
 # acceptance dataset can describe a business scenario. They are forbidden in
 # reusable runtime layers because those layers must not synthesize business

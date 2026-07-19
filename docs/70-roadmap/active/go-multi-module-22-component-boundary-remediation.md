@@ -4,7 +4,7 @@ Status: active
 
 Type: remediation plan
 
-Last Updated: 2026-07-18
+Last Updated: 2026-07-19
 
 ## Implementation Progress
 
@@ -22,10 +22,35 @@ matrix):
   owner DTOs; `pkg/events` has no repository import.
 - GMM-R5: testkit runtime roots and Git receipts are explicit temporary roots;
   known source-tree residues and empty historical packages were removed.
+- GMM-R8 topology migration: the shared `internal/modules/base/biz` now backs
+  every framework Module/Block that uses EventHub. Module roots delegate only
+  lifecycle to their component-local Biz; Orchestrator retains the same Runtime
+  V2 authority inside `kernel/orchestrator/biz.Biz`.
 
-GMM-R6 inventory and GMM-R7 documentation truth alignment are completed in
-this worktree. Do not archive this plan until the complete repository and
-deployed verification matrix is recorded.
+GMM-R6 inventory and the pre-existing GMM-R7 documentation edits are present
+in this worktree. A follow-up static audit on 2026-07-19 found that the former
+module-root topology retained EventHub directly and there was no shared
+`internal/modules/base/biz`. GMM-R8 source migration is now complete; this
+plan remains active only for the externally supplied deployed restart-fixture
+matrix described below.
+
+Repository verification recorded on 2026-07-19:
+
+- structural gates, `make fmt-check`, `go vet ./...`, and `git diff --check`;
+- all 174 Go packages, executed serially as individual `go test -count=1`
+  invocations (the ordinary multi-package command did not reliably expose
+  complete package output in this environment);
+- Run and Orchestrator targeted `-race` suites;
+- `make verify-runtime-v2-positive-convergence-file`, `make build`, and the
+  two-iteration `make verify-managed-service-smoke` lifecycle check.
+
+The recorded commands above predate GMM-R8 and are only regression evidence
+for the then-current topology. Fresh post-migration repository verification
+was completed on 2026-07-19: `go test -p 1 ./... -count=1`, `make
+release-check`, `make build`, `make verify-runtime-v2-positive-convergence-file`,
+and the two-iteration `make verify-managed-service-smoke` all completed.
+No deployed restart fixture manifest or target service is recorded in this
+repository, so the external SM-4 restart matrix remains open.
 
 ## Purpose
 
@@ -124,6 +149,11 @@ cross component runtime I/O
   != owner Service()
   != repository DTO
   != channel/store/registry/recorder
+
+framework component shape
+  = module.go lifecycle bridge -> owner biz (embedded base/biz.Base)
+  -> protocol adapter/service when needed
+  != module root retaining Hub/observer/subscription/business handler
 ```
 
 ### Authority Rules
@@ -569,25 +599,130 @@ configuration normalization、投影算法和 HTTP/SSE 协议已经分别位于 
 
 文档更新必须与相应代码包同提交或紧邻提交，不能提前宣称 completed。
 
+## GMM-R8: Migrate EventHub Ownership From Module Roots To Owner Biz
+
+### Audit Finding
+
+`go-multi-module-dev` requires every framework Module or Block that uses the
+EventHub to own that interaction in a component-local `biz` type embedding
+`internal/modules/base/biz.Base`. The initial audit found no shared Base Biz
+package and found direct `event.Hub`, `Subscribe`, `Send`, or `Post` use in
+the roots of the application module and the kernel/block owners. This is a
+structural boundary defect even where the existing typed contracts and tests
+otherwise pass.
+
+`kernel/system` and capability `blocks/file` / `blocks/git` / `blocks/llm` /
+`blocks/mcp` / `blocks/shell` / `blocks/ssh` / `blocks/web` are the first
+migrated components:
+their Module roots now only bridge lifecycle and delegate to Base-embedding
+Biz types, which are their sole Hub entrypoints. Direct lifecycle and typed
+File-operation tests remain green.
+
+### Required Design
+
+1. Add the owner-neutral `internal/modules/base/biz.Base` exactly once. It
+   contains only owner ID, injected Hub, simple observer, injected Background
+   Routine, owner-neutral EventHub helpers, and task wrappers. It has no
+   plugin registration, business topic, repository, configuration, or concrete
+   component import.
+2. For every Hub-using Module/Block, move Hub fields, observer lifecycle,
+   subscriptions, sends/posts, typed handlers, and owner use cases to its own
+   `biz` package/type embedding Base.
+3. `module.go`/`plugin.go` may receive Hub and BackgroundRoutine solely in
+   framework `Setup` and pass them to `biz.New`; they must not retain either,
+   create observers, subscribe, or issue events.
+4. Protocol `service/` packages may depend on their own Biz narrow use cases,
+   but must not receive or retain Hub. Cross-owner communication remains typed
+   EventHub traffic from Biz.
+5. Initiators remain excluded: `workorchruntime` stays a single repository
+   infrastructure provider and must not embed Base.
+6. Preserve Runtime V2 authority: this is a boundary move only. In particular,
+   Orchestrator remains sole SM-2/SM-3/SM-4 authority and the migration must
+   not introduce application drive, callback, Service registry, or direct
+   repository path.
+
+### Migration Waves
+
+1. shared Base + `kernel/system` + `blocks/file` + `blocks/git` +
+   `blocks/llm` + `blocks/mcp` + `blocks/shell` + `blocks/ssh` +
+   `blocks/web` (completed);
+2. remaining stateful block (`decision`); `blocks/workspace`, `blocks/result`,
+   `blocks/approval`, `blocks/memory`, `blocks/skill`, `blocks/soul`, and
+   `blocks/mcpregistry` completed;
+3. kernel owners (`eventstream`, `governance`, and `run` completed;
+   `orchestrator` completed);
+4. `application/workorchd` framework root and CLI command dispatcher
+   completed. The HTTP `serverState` now receives only a `RuntimeSession` and
+   `BackgroundRoutine`; Hub construction, request-context injection, and
+   server-side subscription/dispatch were removed. Process-facing
+   protocol-adapter scans remain part of the final matrix;
+5. static structural scan and all affected lifecycle/EventHub tests.
+
+Each wave must preserve owner DTO contracts, idempotent teardown, nil-Result
+Post handling, and BackgroundRoutine ownership. Do not retain a forwarding
+root object merely to preserve a direct owner implementation surface.
+
+### Current Structural Evidence (2026-07-19)
+
+The final root-dependency pass moved the framework Hub and BackgroundRoutine
+construction inputs into each component-local `biz.Dependencies`. In
+particular, `approval`, `decision`, `git`, `llm`, `memory`, `mcpregistry`,
+`result`, `shell`, `skill`, `soul`, `ssh`, and `workspace` no longer declare
+Hub or observer types in `module.go`; their plugin `Setup` implementations
+only assemble and pass the Biz-owned dependency DTO.
+
+The following production scans meet the stated boundary (the first has the
+single framework-signature exception described below):
+
+```text
+rg --glob 'module.go' 'event\.Hub|magicevent\.Hub|event\.SimpleObserver|magicevent\.SimpleObserver|\.Subscribe\(|\.Unsubscribe\(|\.Send\(|\.Post\(' internal/modules
+rg --glob '**/service/**/*.go' --glob '!*_test.go' 'event\.Hub|magicevent\.Hub|event\.SimpleObserver|magicevent\.SimpleObserver|NewSimpleObserver|\.Subscribe\(|\.Unsubscribe\(|\.Send\(|\.Post\(' internal/modules
+rg --glob 'plugin.go' '\.Subscribe\(|\.Unsubscribe\(|\.Send\(|\.Post\(|NewSimpleObserver' internal/modules
+rg --glob '*.go' --glob '!*_test.go' --glob '!**/testkit/**' 'internal/modules/(blocks|kernel)/[^/]+/(biz|service|internal)' internal/modules/application internal/services
+```
+
+The first scan has the single framework-mandated `workorchd.Module.Setup` Hub
+parameter; it does not retain or operate on the Hub. Targeted Block tests,
+Run/Orchestrator race tests, application approval/session tests, the HTTP
+server package, and the repository gates recorded above are fresh evidence for
+this source state. Only deployed restart-fixture acceptance remains required
+by the matrix below.
+
+`scripts/verify-boundary-contract.sh` now makes the component audit
+repeatable: it discovers all 21 `internal/modules/**/module.go` roots, requires
+each local `biz/` to embed `basebiz.Base`, rejects EventHub operations in roots
+and production `service/` adapters, keeps initiators Base-free, and rejects
+unbounded/resource-carrying types in every owner `pkg/events` contract. The
+20 standalone `plugin.go` registrations plus `workorchd/module.go` account for
+all 21 module roots; `initiators/workorchruntime` is the sole non-Module
+component and intentionally remains Base-free. The application Start/Resume
+bridge has an explicit regression test proving the two outbound EventHub
+commands retain their concrete types rather than using an `any` carrier.
+
 ## 22-Component Closure Matrix
+
+The following historical per-component status is supplemented by GMM-R8. Every
+Hub-using Module/Block in the table now has a component-local Base-embedding
+Biz; the remaining entries are functional and final-verification evidence, not
+an exemption from the Base Biz topology gate.
 
 | 组件 | 当前结论 | 必须完成的整改 | 最终证据 |
 | --- | --- | --- | --- |
 | `initiators/workorchruntime` | 符合 | GMM-R7 文档 truth alignment；防回归、不扩大职责 | initiator contract test + no EventHub/policy export scan |
-| `application/workorchd` | 部分符合 | GMM-R2、R5、R6 | channel-free events、facade inventory、source-tree clean |
-| `kernel/eventstream` | 部分符合 | GMM-R3、R4 | no Service getter、owner query DTO |
-| `kernel/governance` | 部分符合 | GMM-R4 | owner query DTO、auto-governance tests |
-| `kernel/orchestrator` | 部分符合 | GMM-R1、R3 | lifecycle-order restart tests、no Service getter |
-| `kernel/run` | 部分符合 | GMM-R1、R3 | Setup inventory readiness、CAS/recovery tests |
+| `application/workorchd` | Base Biz topology 符合；其余既有边界结论待最终矩阵复核 | GMM-R2、R5、R6 防回归 | `module.go -> biz.Biz(Base)` scan、channel-free events、source-tree clean |
+| `kernel/eventstream` | Base Biz topology 符合；其余既有边界结论待最终矩阵复核 | GMM-R3、R4 防回归 | `module.go -> biz.Service(Base)` scan、owner query DTO、targeted tests |
+| `kernel/governance` | Base Biz topology 符合；其余既有边界结论待最终矩阵复核 | GMM-R4 防回归 | `module.go -> biz.Service(Base)` scan、owner query DTO、auto-governance tests |
+| `kernel/orchestrator` | Base Biz topology 符合；其余既有边界结论待最终矩阵复核 | GMM-R1、R3 防回归 | `module.go -> biz.Biz(Base)` scan、lifecycle-order restart tests、no Service getter |
+| `kernel/run` | Base Biz topology 符合；其余既有边界结论待最终矩阵复核 | GMM-R1、R3 防回归 | `module.go -> biz.Biz(Base)` scan、Setup inventory readiness、CAS/recovery tests |
 | `kernel/system` | 符合 | 防回归 | typed default ensure + lifecycle test |
-| `blocks/workspace` | 部分符合 | GMM-R3、R4 | no Service getter、template DTO |
-| `blocks/result` | 部分符合 | GMM-R3 | EventHub-only owner writes |
-| `blocks/decision` | 部分符合 | GMM-R3 | EventHub-only resolution/evidence |
-| `blocks/approval` | 部分符合 | GMM-R3 | EventHub-only approval/evidence |
-| `blocks/memory` | 部分符合 | GMM-R3、R4 | no Service getter、memory query DTO |
-| `blocks/skill` | 部分符合 | GMM-R3 | EventHub-only registry contract |
-| `blocks/soul` | 部分符合 | GMM-R3 | EventHub-only registry/default contract |
-| `blocks/mcpregistry` | 部分符合 | GMM-R3 | EventHub-only registry/default contract |
+| `blocks/workspace` | 符合 | 防回归 | no Service getter、template DTO |
+| `blocks/result` | 符合 | 防回归 | EventHub-only owner writes |
+| `blocks/decision` | Base Biz topology 符合；其余既有边界结论待最终矩阵复核 | GMM-R3 防回归 | EventHub-only resolution/evidence |
+| `blocks/approval` | 符合 | 防回归 | EventHub-only approval/evidence |
+| `blocks/memory` | 符合 | 防回归 | no Service getter、memory query DTO |
+| `blocks/skill` | Base Biz topology 符合；其余既有边界结论待最终矩阵复核 | GMM-R3 防回归 | EventHub-only registry contract |
+| `blocks/soul` | Base Biz topology 符合；其余既有边界结论待最终矩阵复核 | GMM-R3 防回归 | EventHub-only registry/default contract |
+| `blocks/mcpregistry` | Base Biz topology 符合；其余既有边界结论待最终矩阵复核 | GMM-R3 防回归 | EventHub-only registry/default contract |
 | `blocks/file` | 符合 | 防回归 | path/governance/receipt tests |
 | `blocks/git` | 符合 | GMM-R5 test path only | operation/receipt tests + no source artifact |
 | `blocks/llm` | 符合 | 防回归 | catalog/provider/candidate/cache tests |
@@ -608,7 +743,8 @@ configuration normalization、投影算法和 HTTP/SSE 协议已经分别位于 
 6. **GMM-R5 source-tree test isolation**
 7. **GMM-R6 application facade evidence-based cleanup**
 8. **GMM-R7 documentation truth alignment**
-9. **full structural, race, file-backed and deployed verification**
+9. **GMM-R8 Base Biz topology migration**
+10. **full structural, race, file-backed and deployed verification**
 
 每个步骤独立提交、独立通过 targeted tests。不得把所有 facade/DTO/lifecycle 变更
 压入一个不可审计的大提交。
@@ -625,6 +761,7 @@ rg '^type Service =' internal/modules
 rg 'ServiceExports|exports\.Services|Set[A-Z].*Service' internal application
 rg 'internal/pkg/repository' internal/modules/*/*/pkg/events --glob '*.go'
 rg 'map\[string\]any|\[\]any|<-chan|chan ' internal/modules/*/*/pkg/events internal/modules/application/workorchd/pkg/events --glob '*.go'
+rg 'event\.Hub|event\.NewSimpleObserver|\.Subscribe(Func)?\(|\.Send\(|\.Post\(' internal/modules --glob 'module.go' --glob 'plugin.go'
 rg 'internal/modules/.*/(biz|service)' internal/modules internal/services --glob '*.go'
 find application internal -type d \( -name '.workorch-data' -o -name '.workorch-testkit-git-receipts' -o -name '.workorch-e2e' \)
 ```
@@ -723,9 +860,11 @@ owner snapshot/observability，验证三类 fixture 自动到达 terminal 或 go
    直连、callback registry 或 generic bridge 回归。
 6. 源码树在 targeted/full tests 后不产生 WorkOrch runtime/test data 目录。
 7. appservice facade inventory 已完成；保留与移动均有职责证据，没有机械拆包。
-8. 22 个组件 direct tests、race tests、全量 tests、vet、boundary、build 通过。
-9. file-backed crash/restart matrix 与 fresh deployed positive acceptance 通过。
-10. `current-state`、module readme、active matrix 和 verification 文档与最终实现一致。
+8. 使用 Hub 的 21 个 Module/Block 都有 component-local Biz 嵌入 Base；Module
+   root、plugin 和 protocol service 不再保留 Hub/observer/subscription/event calls。
+9. 22 个组件 direct tests、race tests、全量 tests、vet、boundary、build 通过。
+10. file-backed crash/restart matrix 与 fresh deployed positive acceptance 通过。
+11. `current-state`、module readme、active matrix 和 verification 文档与最终实现一致。
 
 ## Closure Documentation
 

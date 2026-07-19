@@ -15,8 +15,8 @@ import (
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func (s *Service) recordApprovalGovernanceEvidence(ctx context.Context, item *approvalmodel.Approval) error {
-	if s == nil || s.commandHub == nil || item == nil || item.ID == "" {
+func (m *Biz) recordApprovalGovernanceEvidence(ctx context.Context, item *approvalmodel.Approval) error {
+	if m == nil || m.EventHub() == nil || item == nil || item.ID == "" {
 		return nil
 	}
 	if item.State != common.ApprovalStateApproved && item.State != common.ApprovalStateRejected {
@@ -53,7 +53,7 @@ func (s *Service) recordApprovalGovernanceEvidence(ctx context.Context, item *ap
 		RunID:       string(item.RunID),
 		StepID:      string(item.StepID),
 	}))
-	result := s.commandHub.Send(ev)
+	result := m.SendEvent(ev)
 	if result == nil {
 		return fmt.Errorf("approval evidence command returned no result")
 	}

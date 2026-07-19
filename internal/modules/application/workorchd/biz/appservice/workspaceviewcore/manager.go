@@ -7,29 +7,25 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
-	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
 type Manager struct {
 	loader               Loader
-	commandHub           magicevent.Hub
 	schedule             Scheduler
+	eventPorts           EventPorts
 	store                *Store
 	rebuildCoalesceDelay time.Duration
 
 	mu                 sync.Mutex
-	unsubscribers      []func()
 	started            bool
 	closed             bool
 	rebuildAllInFlight bool
@@ -37,8 +33,6 @@ type Manager struct {
 	workspaceRebuilds  map[string]*workspaceRebuildState
 	metrics            managerMetrics
 }
-
-var managerObserverSequence atomic.Uint64
 
 type workspaceRebuildState struct {
 	inFlight         bool
@@ -65,12 +59,24 @@ type workspaceRebuildMetrics struct {
 func NewManager(options ManagerOptions) *Manager {
 	return &Manager{
 		loader:               options.Loader,
-		commandHub:           options.CommandHub,
 		schedule:             options.Schedule,
+		eventPorts:           options.EventPorts,
 		store:                NewStore(),
 		rebuildCoalesceDelay: options.RebuildCoalesceDelay,
 		workspaceRebuilds:    map[string]*workspaceRebuildState{},
 	}
+}
+
+// SetEventPorts binds the application Biz-owned typed EventHub operations.
+// It is intentionally a narrow pair of projection-specific callbacks rather
+// than a Hub or a generic dispatcher.
+func (m *Manager) SetEventPorts(ports EventPorts) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.eventPorts = ports
+	m.mu.Unlock()
 }
 
 func (m *Manager) Start(ctx context.Context) error {
@@ -89,40 +95,15 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.mu.Unlock()
 		return nil
 	}
-	if !m.started {
-		m.started = true
-		if m.commandHub != nil {
-			observerID := fmt.Sprintf("/eventstream/consumers/application/workorchd/workspace-view/%d", managerObserverSequence.Add(1))
-			observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, m.commandHub)
-			observer.Subscribe(eventstreamevents.TopicEventStreamRecordAppended, func(event magicevent.Event, result magicevent.Result) {
-				data, ok := event.Data().(eventstreamevents.EventRecordAppendedData)
-				if ok {
-					_ = m.handleEventRecord(event.Context(), data.Record)
-				}
-				if result != nil {
-					result.Set(nil, nil)
-				}
-			})
-			m.unsubscribers = append(m.unsubscribers, func() {
-				observer.Unsubscribe(eventstreamevents.TopicEventStreamRecordAppended)
-			})
-		}
-	}
+	m.started = true
 	m.mu.Unlock()
 	if m.ScheduleRebuildAll() {
 		return nil
 	}
 	err := fmt.Errorf("%w: workspace projection baseline scheduling failed", common.ErrConflict)
 	m.mu.Lock()
-	unsubscribers := append([]func(){}, m.unsubscribers...)
-	m.unsubscribers = nil
 	m.started = false
 	m.mu.Unlock()
-	for _, unsubscribe := range unsubscribers {
-		if unsubscribe != nil {
-			unsubscribe()
-		}
-	}
 	m.store.setFailed(err)
 	return err
 }
@@ -132,15 +113,8 @@ func (m *Manager) Close() {
 		return
 	}
 	m.mu.Lock()
-	unsubscribers := append([]func(){}, m.unsubscribers...)
-	m.unsubscribers = nil
 	m.closed = true
 	m.mu.Unlock()
-	for _, unsubscribe := range unsubscribers {
-		if unsubscribe != nil {
-			unsubscribe()
-		}
-	}
 	m.store.setStopped()
 }
 
@@ -156,7 +130,7 @@ func (m *Manager) Status() Status {
 // own stale counters. Both owner workspace identity and EventStream revisions
 // are read through typed EventHub/owner ports.
 func (m *Manager) ReconcileSourceHighWatermarks(ctx context.Context) error {
-	if m == nil || m.loader == nil || m.store == nil || m.commandHub == nil {
+	if m == nil || m.loader == nil || m.store == nil || m.eventPorts.ReadHighWatermarks == nil {
 		return common.ErrInvalidArgument
 	}
 	workspaces, err := m.loader.ListWorkspaces(ctx)
@@ -181,28 +155,12 @@ func (m *Manager) ReconcileSourceHighWatermarks(ctx context.Context) error {
 	if len(workspaceIDs) == 0 {
 		return nil
 	}
-	event := magicevent.NewEventWithContext(
-		eventstreamevents.TopicEventStreamCommandHighWatermarks,
-		"application/workorchd/workspace-view", eventstreamevents.CommandDestination,
-		magicevent.NewHeader(), ctx, eventstreamevents.HighWatermarksCommand{WorkspaceIDs: workspaceIDs},
-	)
-	response := m.commandHub.Send(event)
-	if response == nil {
-		return fmt.Errorf("eventstream high-watermark query returned no response")
-	}
-	if response.Error() != nil {
-		return response.Error()
-	}
-	data, magicErr := response.Get()
-	if magicErr != nil {
-		return fmt.Errorf("eventstream high-watermark query failed: %s", magicErr.Message)
-	}
-	result, ok := data.(eventstreamevents.EventStreamCommandResult)
-	if !ok {
-		return fmt.Errorf("eventstream high-watermark query returned %T", data)
+	highWatermarks, err := m.eventPorts.ReadHighWatermarks(ctx, workspaceIDs)
+	if err != nil {
+		return err
 	}
 	observed := map[common.WorkspaceID]struct{}{}
-	for _, item := range result.HighWatermarks {
+	for _, item := range highWatermarks {
 		observed[item.WorkspaceID] = struct{}{}
 		if m.store.ObserveSourceHighWatermark(string(item.WorkspaceID), item.Revision) {
 			m.ScheduleRebuildWorkspace(string(item.WorkspaceID))
@@ -628,7 +586,7 @@ func (m *Manager) isClosed() bool {
 	return m.closed
 }
 
-func (m *Manager) handleEventRecord(_ context.Context, record eventstreamevents.EventRecordData) error {
+func (m *Manager) HandleEventRecord(_ context.Context, record eventstreamevents.EventRecordData) error {
 	if m == nil {
 		return nil
 	}
@@ -651,6 +609,12 @@ func (m *Manager) handleEventRecord(_ context.Context, record eventstreamevents.
 		m.ScheduleRebuildAll()
 	}
 	return nil
+}
+
+// handleEventRecord remains a package-local compatibility seam for focused
+// read-model tests; production input is supplied by the application Biz.
+func (m *Manager) handleEventRecord(ctx context.Context, record eventstreamevents.EventRecordData) error {
+	return m.HandleEventRecord(ctx, record)
 }
 
 func (m *Manager) rememberPendingWorkspaceRebuild(workspaceID string) {
@@ -754,7 +718,7 @@ func (m *Manager) publishProjectionChanged(ctx context.Context, workspaceID stri
 }
 
 func (m *Manager) publishProjectionChangedWithDiff(ctx context.Context, workspaceID string, changeKind string, previous, candidate readmodelcore.WorkspaceSnapshot) {
-	if m == nil || m.commandHub == nil || m.store == nil {
+	if m == nil || m.eventPorts.PublishChanged == nil || m.store == nil {
 		return
 	}
 	status := m.store.StatusForWorkspace(workspaceID)
@@ -803,9 +767,7 @@ func (m *Manager) publishProjectionChangedWithDiff(ctx context.Context, workspac
 		StaleReason:             status.StaleReason,
 		Error:                   status.Error,
 	}
-	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkspaceProjectionChanged, "workorchd.workspace_projection", workorchdevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
-	event.BindLaneKey(events.EventHubLaneKeyFor(event.ID(), events.EventHubLaneScope{SubjectType: "workspace_projection", SubjectID: workspaceID, WorkspaceID: workspaceID}))
-	m.commandHub.Post(event)
+	m.eventPorts.PublishChanged(ctx, data)
 }
 
 func firstNonEmptyString(values ...string) string {

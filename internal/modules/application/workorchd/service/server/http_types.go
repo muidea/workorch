@@ -13,10 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	magicevent "github.com/muidea/magicCommon/event"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
-	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
 	"github.com/muidea/magicCommon/task"
@@ -24,7 +22,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
@@ -591,15 +588,17 @@ type updateRuntimeConfigurationFunc func(appservice.UpdateRuntimeConfigurationCo
 type updateLLMConfigurationFunc func(appservice.UpdateLLMConfigurationCommand) (appservice.ServiceConfiguration, error)
 type updateWebSearchConfigurationFunc func(appservice.UpdateWebSearchConfigurationCommand) (appservice.ServiceConfiguration, error)
 
-type getLLMModelCatalogFunc func(ctx context.Context, hub magicevent.Hub, cmd appservice.GetLLMModelCatalogCommand) (appservice.ProviderCatalogSummary, error)
-type refreshLLMModelCatalogFunc func(ctx context.Context, hub magicevent.Hub, cmd appservice.RefreshLLMModelCatalogCommand) (appservice.ProviderCatalogSummary, error)
-type readConfigurationWithCatalogFunc func(ctx context.Context, hub magicevent.Hub) (appservice.ServiceConfiguration, error)
+type getLLMModelCatalogFunc func(context.Context, appservice.GetLLMModelCatalogCommand) (appservice.ProviderCatalogSummary, error)
+type refreshLLMModelCatalogFunc func(context.Context, appservice.RefreshLLMModelCatalogCommand) (appservice.ProviderCatalogSummary, error)
+type readConfigurationWithCatalogFunc func(context.Context) (appservice.ServiceConfiguration, error)
 
 type serverState struct {
 	config                       Config
-	commandHub                   magicevent.Hub
-	schedulerHub                 magicevent.Hub
+	workspaceRunScheduler        WorkspaceRunScheduler
 	eventReplay                  *sseReplayBuffer
+	streamSubscribersMu          sync.Mutex
+	streamSubscribers            map[uint64]chan streamEvent
+	streamSubscriberSequence     uint64
 	metrics                      *serverMetrics
 	validate                     validateFunc
 	createWorkspace              createWorkspaceFunc
@@ -958,12 +957,24 @@ func normalizeConfig(config Config) Config {
 }
 
 func NewHTTPServer(config Config) *HTTPServer {
-	return NewHTTPServerWithCommandHubAndBackground(config, nil, nil)
+	config = normalizeConfig(config)
+	session, err := appservice.NewRuntimeSessionWithBackend(config.Backend, config.DataRoot)
+	if err != nil {
+		return newHTTPServerWithRuntimeSessionAndBackground(config, nil, nil, err)
+	}
+	return NewHTTPServerWithRuntimeSessionAndBackground(config, session, nil)
 }
 
-func NewHTTPServerWithCommandHubAndBackground(config Config, commandHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine) *HTTPServer {
+// NewHTTPServerWithRuntimeSessionAndBackground constructs the protocol
+// adapter from a session-owned application boundary. The server never retains
+// or dispatches through EventHub directly.
+func NewHTTPServerWithRuntimeSessionAndBackground(config Config, session *appservice.RuntimeSession, backgroundRoutine task.BackgroundRoutine) *HTTPServer {
+	return newHTTPServerWithRuntimeSessionAndBackground(normalizeConfig(config), session, backgroundRoutine, nil)
+}
+
+func newHTTPServerWithRuntimeSessionAndBackground(config Config, session *appservice.RuntimeSession, backgroundRoutine task.BackgroundRoutine, sessionErr error) *HTTPServer {
 	config = normalizeConfig(config)
-	state := newServerStateWithCommandHubAndBackground(config, commandHub, backgroundRoutine)
+	state := newServerStateWithRuntimeSessionAndBackground(config, session, backgroundRoutine, sessionErr)
 	handler := newMuxWithStateNoStart(state)
 	return &HTTPServer{
 		config: config,
@@ -994,7 +1005,6 @@ func (s *HTTPServer) Validate(ctx context.Context) error {
 	if s == nil {
 		return errors.New("http server is not configured")
 	}
-	ctx = appservice.ContextWithCommandHub(ctx, s.state.commandHub)
 	return s.state.validate(ctx, s.config.Backend, s.config.DataRoot)
 }
 
@@ -1010,7 +1020,7 @@ func (s *HTTPServer) Shutdown(ctx context.Context) error {
 }
 
 func newMux(config Config) http.Handler {
-	return newMuxWithState(newServerStateWithCommandHubAndBackground(normalizeConfig(config), nil, nil))
+	return NewHTTPServer(config).http.Handler
 }
 
 func newMuxWithState(state *serverState) http.Handler {
@@ -1034,18 +1044,13 @@ func newMuxWithStateNoStart(state *serverState) http.Handler {
 	return handler
 }
 
-func newServerStateWithCommandHubAndBackground(config Config, commandHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine) *serverState {
-	if commandHub == nil {
-		commandHub = magicevent.NewHub(1024)
-	}
+func newServerStateWithRuntimeSessionAndBackground(config Config, session *appservice.RuntimeSession, backgroundRoutine task.BackgroundRoutine, sessionErr error) *serverState {
 	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
-	backgroundCtx = appservice.ContextWithCommandHub(backgroundCtx, commandHub)
 	diagnostics := newSchedulerDiagnosticsStore()
 	state := &serverState{
 		config:                       config,
-		commandHub:                   commandHub,
-		schedulerHub:                 commandHub,
 		eventReplay:                  newSSEReplayBuffer(defaultSSEReplayLimit),
+		streamSubscribers:            make(map[uint64]chan streamEvent),
 		metrics:                      &serverMetrics{schedulerDiagnostics: diagnostics},
 		validate:                     defaultValidate,
 		createWorkspace:              defaultCreateWorkspace,
@@ -1134,9 +1139,6 @@ func newServerStateWithCommandHubAndBackground(config Config, commandHub magicev
 		updateServerConfiguration:    appservice.UpdateServerConfiguration,
 		updateRuntimeConfiguration:   appservice.UpdateRuntimeConfiguration,
 		updateLLMConfiguration:       appservice.UpdateLLMConfiguration,
-		getLLMModelCatalog:           appservice.GetLLMModelCatalog,
-		refreshLLMModelCatalog:       appservice.RefreshLLMModelCatalog,
-		readConfigurationWithCatalog: appservice.ReadServiceConfigurationWithCatalog,
 		updateWebSearchConfiguration: appservice.UpdateWebSearchConfiguration,
 		backgroundRoutine:            backgroundRoutine,
 		backgroundCtx:                backgroundCtx,
@@ -1145,39 +1147,53 @@ func newServerStateWithCommandHubAndBackground(config Config, commandHub magicev
 		workspaceSetupDraftSessions:  map[string]*workspaceSetupDraftSession{},
 	}
 	state.workspaceProjection = newWorkspaceProjectionManager(state)
-	state.configureRuntimeSession()
-	state.registerEventReplayRecorder()
-	state.registerRunStatusCacheInvalidationWatcher()
-	state.registerWorkorchDSchedulerCommandWatcher()
+	if sessionErr != nil {
+		state.runtimeSessionErr = fmt.Errorf("workorch runtime session unavailable: %w", sessionErr)
+		state.validate = func(context.Context, string, string) error { return state.runtimeSessionErr }
+		return state
+	}
+	if session == nil {
+		state.runtimeSessionErr = errors.New("workorch runtime session is not configured")
+		state.validate = func(context.Context, string, string) error { return state.runtimeSessionErr }
+		return state
+	}
+	state.configureSessionBackedOperations(session)
 	return state
-}
-
-func (s *serverState) configureRuntimeSession() {
-	if s == nil || s.hasSharedSession() {
-		return
-	}
-	session, err := appservice.NewRuntimeSessionFromCommandHub(s.commandHub, s.backgroundRoutine)
-	if err != nil {
-		s.runtimeSessionErr = fmt.Errorf("workorch injected EventHub runtime session unavailable: %w", err)
-		s.validate = func(context.Context, string, string) error {
-			return s.runtimeSessionErr
-		}
-		return
-	}
-	s.configureSessionBackedOperations(session)
 }
 
 func (s *serverState) configureSessionBackedOperations(session *appservice.RuntimeSession) {
 	if s == nil || session == nil {
 		return
 	}
-	if exports, err := session.Exports(); err == nil {
-		s.commandHub = exports.Infrastructure.CommandHub
-		s.schedulerHub = exports.Infrastructure.CommandHub
-	}
-	s.backgroundCtx = appservice.ContextWithCommandHub(s.backgroundContext(), s.commandHub)
 	s.runtimeSessionErr = nil
 	s.setSharedSession(session)
+	s.getLLMModelCatalog = func(ctx context.Context, cmd appservice.GetLLMModelCatalogCommand) (appservice.ProviderCatalogSummary, error) {
+		var ret appservice.ProviderCatalogSummary
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.GetLLMModelCatalogWithSession(ctx, session, cmd)
+			return err
+		})
+		return ret, err
+	}
+	s.refreshLLMModelCatalog = func(ctx context.Context, cmd appservice.RefreshLLMModelCatalogCommand) (appservice.ProviderCatalogSummary, error) {
+		var ret appservice.ProviderCatalogSummary
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.RefreshLLMModelCatalogWithSession(ctx, session, cmd)
+			return err
+		})
+		return ret, err
+	}
+	s.readConfigurationWithCatalog = func(ctx context.Context) (appservice.ServiceConfiguration, error) {
+		var ret appservice.ServiceConfiguration
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ReadServiceConfigurationWithCatalogWithSession(ctx, session)
+			return err
+		})
+		return ret, err
+	}
 	s.validate = func(ctx context.Context, _, _ string) error {
 		return s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			_, err := session.Exports()
@@ -1914,42 +1930,35 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 	}
 }
 
-func (s *serverState) registerEventReplayRecorder() {
-	if s == nil || s.commandHub == nil || s.eventReplay == nil {
+func (s *serverState) recordStreamEvent(envelope streamEvent) {
+	if s == nil {
 		return
 	}
-	unsubscribers := subscribeServerStreamEvents(s.commandHub, eventStreamViewFull, func(_ context.Context, envelope streamEvent) error {
+	if s.eventReplay != nil {
 		s.eventReplay.Append(envelope)
-		return nil
-	})
-	s.eventUnsubscribes = append(s.eventUnsubscribes, unsubscribers...)
+	}
+	s.streamSubscribersMu.Lock()
+	defer s.streamSubscribersMu.Unlock()
+	for _, ch := range s.streamSubscribers {
+		enqueueEventStreamEnvelope(ch, envelope)
+	}
 }
 
-func (s *serverState) registerRunStatusCacheInvalidationWatcher() {
-	if s == nil || s.commandHub == nil {
-		return
+func (s *serverState) subscribeStreamEvents() (<-chan streamEvent, func()) {
+	if s == nil {
+		return nil, func() {}
 	}
-	unsubscribe := subscribeEventRecordAppended(s.commandHub, "run-status-cache", func(_ context.Context, record eventstreamevents.EventRecordData) error {
-		if record.Topic != runevents.TopicRunStateChanged {
-			return nil
-		}
-		runID := strings.TrimSpace(string(record.RunID))
-		if runID == "" {
-			runID = strings.TrimSpace(record.SubjectID)
-		}
-		if runID == "" {
-			s.notifyRunStatusChanged()
-			return nil
-		}
-		payload := record.Payload.Map()
-		s.notifyRunStatusChangedForRun(appservice.Run{
-			ID:          runID,
-			WorkspaceID: strings.TrimSpace(string(record.WorkspaceID)),
-			State:       schedulerStringValue(payload, events.PayloadKeyState),
-		})
-		return nil
-	})
-	s.eventUnsubscribes = append(s.eventUnsubscribes, unsubscribe)
+	ch := make(chan streamEvent, 128)
+	s.streamSubscribersMu.Lock()
+	s.streamSubscriberSequence++
+	id := s.streamSubscriberSequence
+	s.streamSubscribers[id] = ch
+	s.streamSubscribersMu.Unlock()
+	return ch, func() {
+		s.streamSubscribersMu.Lock()
+		delete(s.streamSubscribers, id)
+		s.streamSubscribersMu.Unlock()
+	}
 }
 
 func isMemoryBackend(backend string) bool {

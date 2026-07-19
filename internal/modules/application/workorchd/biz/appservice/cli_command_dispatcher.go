@@ -4,15 +4,17 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
+	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 // CLICommandDispatcher owns the operation-specific CLI EventHub contracts.
 type CLICommandDispatcher struct {
+	basebiz.Base
 	session    *RuntimeSession
-	commandHub magicevent.Hub
 	viewReader WorkspaceViewReader
-	typed      magicevent.SimpleObserver
+	typedReady bool
 }
 
 type WorkspaceViewReader interface {
@@ -25,7 +27,11 @@ type WorkspaceViewReader interface {
 }
 
 func NewCLICommandDispatcher(session *RuntimeSession, commandHub magicevent.Hub, viewReader WorkspaceViewReader) *CLICommandDispatcher {
-	return &CLICommandDispatcher{session: session, commandHub: commandHub, viewReader: viewReader}
+	return &CLICommandDispatcher{
+		Base:       basebiz.New(modulecommon.ModuleID, commandHub, nil),
+		session:    session,
+		viewReader: viewReader,
+	}
 }
 
 func (d *CLICommandDispatcher) Run() error {

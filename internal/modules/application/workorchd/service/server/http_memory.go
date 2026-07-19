@@ -6,13 +6,11 @@ import (
 	"strings"
 
 	engine "github.com/muidea/magicEngine/http"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func registerMemoryReadRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/memory", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		query := memoryQueryFromValues(r.URL.Query())
 		workspaceID := query.WorkspaceID
 		if workspaceID == "" {
@@ -33,7 +31,6 @@ func registerMemoryReadRoutes(router engine.RouteRegistry, state *serverState) {
 		})
 	})
 	router.AddHandler("/api/v1/workorch/memory/:memoryId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		memoryID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/memory/")
 		if !ok {
 			http.NotFound(w, r)
@@ -56,7 +53,6 @@ func registerMemoryReadRoutes(router engine.RouteRegistry, state *serverState) {
 		})
 	})
 	router.AddHandler("/api/v1/workorch/memory/:memoryId", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		memoryID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/memory/")
 		if !ok {
 			http.NotFound(w, r)
@@ -84,7 +80,6 @@ func registerMemoryReadRoutes(router engine.RouteRegistry, state *serverState) {
 		})
 	})
 	router.AddHandler("/api/v1/workorch/memory/:memoryId", http.MethodDelete, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		memoryID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/memory/")
 		if !ok {
 			http.NotFound(w, r)
@@ -110,7 +105,6 @@ func registerMemoryReadRoutes(router engine.RouteRegistry, state *serverState) {
 
 func registerMemoryWriteRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/memory", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "memory" {
 			http.NotFound(w, r)
@@ -152,7 +146,6 @@ func memoryRequestContext(w http.ResponseWriter, r *http.Request) (context.Conte
 }
 
 func (s *serverState) handleWorkspaceScopedMemoryGet(w http.ResponseWriter, r *http.Request) {
-	r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), s.commandHub))
 	workspaceID, memoryID, ok := workspaceResourceIDFromPath(r.URL.Path, "memory")
 	if !ok {
 		http.NotFound(w, r)
@@ -168,7 +161,6 @@ func (s *serverState) handleWorkspaceScopedMemoryGet(w http.ResponseWriter, r *h
 }
 
 func (s *serverState) handleWorkspaceScopedMemoryPut(w http.ResponseWriter, r *http.Request) {
-	r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), s.commandHub))
 	workspaceID, memoryID, ok := workspaceResourceIDFromPath(r.URL.Path, "memory")
 	if !ok {
 		http.NotFound(w, r)
@@ -189,7 +181,6 @@ func (s *serverState) handleWorkspaceScopedMemoryPut(w http.ResponseWriter, r *h
 }
 
 func (s *serverState) handleWorkspaceScopedMemoryDelete(w http.ResponseWriter, r *http.Request) {
-	r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), s.commandHub))
 	workspaceID, memoryID, ok := workspaceResourceIDFromPath(r.URL.Path, "memory")
 	if !ok {
 		http.NotFound(w, r)

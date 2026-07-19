@@ -35,3 +35,14 @@ func UpdateWorkspaceLLMTargetWithHub(ctx context.Context, hub magicevent.Hub, wo
 	}
 	return workspacecore.MapWorkspace(item), nil
 }
+
+func UpdateWorkspaceLLMTargetWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, target *runtimecontract.ProviderModelTarget) (Workspace, error) {
+	if session == nil {
+		return Workspace{}, common.ErrInvalidArgument
+	}
+	hub, err := session.RequiredCommandHub()
+	if err != nil {
+		return Workspace{}, err
+	}
+	return UpdateWorkspaceLLMTargetWithHub(ctx, hub, workspaceID, target)
+}

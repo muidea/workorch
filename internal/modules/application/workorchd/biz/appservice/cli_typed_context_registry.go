@@ -8,7 +8,7 @@ import (
 )
 
 func (d *CLICommandDispatcher) handleTypedCLIContextRegistry(event magicevent.Event, result magicevent.Result) {
-	ctx := ContextWithCommandHub(event.Context(), d.commandHub)
+	ctx := ContextWithCommandHub(event.Context(), d.EventHub())
 	switch command := event.Data().(type) {
 	case workorchdevents.CLISoulCreateCommand:
 		item, err := CreateSoulWithSession(ctx, d.borrow(), contextregistrycore.Soul{ID: string(command.Soul.ID), Name: command.Soul.Name, Description: command.Soul.Description, BusinessDomains: append([]string(nil), command.Soul.BusinessDomains...), SoulMD: command.Soul.SoulMD})

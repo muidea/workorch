@@ -12,14 +12,13 @@ import (
 
 func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/configuration", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		state.metrics.configurationReadRequests.Add(1)
 		var (
 			item appservice.ServiceConfiguration
 			err  error
 		)
 		if state.readConfigurationWithCatalog != nil {
-			item, err = state.readConfigurationWithCatalog(r.Context(), state.commandHub)
+			item, err = state.readConfigurationWithCatalog(r.Context())
 		} else {
 			item, err = state.readConfiguration()
 		}
@@ -33,7 +32,6 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 		})
 	})
 	router.AddHandler("/api/v1/workorch/configuration/server", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		state.metrics.configurationUpdateRequests.Add(1)
 		var req appservice.UpdateServerConfigurationCommand
 		if err := decodeJSON(r, &req); err != nil {
@@ -51,7 +49,6 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 		})
 	})
 	router.AddHandler("/api/v1/workorch/configuration/runtime", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		state.metrics.configurationUpdateRequests.Add(1)
 		var req appservice.UpdateRuntimeConfigurationCommand
 		if err := decodeJSON(r, &req); err != nil {
@@ -69,7 +66,6 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 		})
 	})
 	router.AddHandler("/api/v1/workorch/configuration/llm", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		state.metrics.configurationUpdateRequests.Add(1)
 		var req appservice.UpdateLLMConfigurationCommand
 		if err := decodeJSON(r, &req); err != nil {
@@ -87,7 +83,6 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 		})
 	})
 	router.AddHandler("/api/v1/workorch/configuration/llm/models", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		state.metrics.configurationReadRequests.Add(1)
 		providerID := strings.TrimSpace(r.URL.Query().Get("providerId"))
 		if providerID == "" {
@@ -97,7 +92,7 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "llm model catalog handler is not configured"})
 			return
 		}
-		catalog, err := state.getLLMModelCatalog(r.Context(), state.commandHub, appservice.GetLLMModelCatalogCommand{ProviderID: providerID})
+		catalog, err := state.getLLMModelCatalog(r.Context(), appservice.GetLLMModelCatalogCommand{ProviderID: providerID})
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -108,7 +103,6 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 		})
 	})
 	router.AddHandler("/api/v1/workorch/configuration/llm/models/refresh", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		state.metrics.configurationUpdateRequests.Add(1)
 		providerID := strings.TrimSpace(r.URL.Query().Get("providerId"))
 		if providerID == "" {
@@ -126,7 +120,7 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "llm model catalog refresh handler is not configured"})
 			return
 		}
-		catalog, err := state.refreshLLMModelCatalog(r.Context(), state.commandHub, appservice.RefreshLLMModelCatalogCommand{ProviderID: providerID})
+		catalog, err := state.refreshLLMModelCatalog(r.Context(), appservice.RefreshLLMModelCatalogCommand{ProviderID: providerID})
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -137,7 +131,6 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 		})
 	})
 	router.AddHandler("/api/v1/workorch/configuration/web-search", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		state.metrics.configurationUpdateRequests.Add(1)
 		var req appservice.UpdateWebSearchConfigurationCommand
 		if err := decodeJSON(r, &req); err != nil {

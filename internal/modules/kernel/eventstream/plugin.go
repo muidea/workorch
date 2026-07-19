@@ -16,14 +16,15 @@ func init() {
 
 func (m *Module) Weight() int { return 22 }
 
-func (m *Module) Setup(_ context.Context, eventHub event.Hub, _ task.BackgroundRoutine) *cd.Error {
+func (m *Module) Setup(_ context.Context, eventHub event.Hub, background task.BackgroundRoutine) *cd.Error {
 	repos, err := workorchdeps.ResolveEventStreamRepositories(ModuleID)
 	if err != nil {
 		return err
 	}
 	if setupErr := m.Configure(Dependencies{
-		EventRecords: repos.EventRecords,
-		EventHub:     eventHub,
+		EventRecords:      repos.EventRecords,
+		EventHub:          eventHub,
+		BackgroundRoutine: background,
 	}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())
 	}

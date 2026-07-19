@@ -5,6 +5,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 type ServiceConfiguration = configcore.ServiceConfiguration
@@ -64,10 +65,43 @@ func GetLLMModelCatalog(ctx context.Context, hub magicevent.Hub, cmd GetLLMModel
 	return configcore.GetLLMModelCatalog(ctx, hub, cmd)
 }
 
+func GetLLMModelCatalogWithSession(ctx context.Context, session *RuntimeSession, cmd GetLLMModelCatalogCommand) (ProviderCatalogSummary, error) {
+	if session == nil {
+		return ProviderCatalogSummary{}, common.ErrInvalidArgument
+	}
+	hub, err := session.RequiredCommandHub()
+	if err != nil {
+		return ProviderCatalogSummary{}, err
+	}
+	return GetLLMModelCatalog(ctx, hub, cmd)
+}
+
 func RefreshLLMModelCatalog(ctx context.Context, hub magicevent.Hub, cmd RefreshLLMModelCatalogCommand) (ProviderCatalogSummary, error) {
 	return configcore.RefreshLLMModelCatalog(ctx, hub, cmd)
 }
 
+func RefreshLLMModelCatalogWithSession(ctx context.Context, session *RuntimeSession, cmd RefreshLLMModelCatalogCommand) (ProviderCatalogSummary, error) {
+	if session == nil {
+		return ProviderCatalogSummary{}, common.ErrInvalidArgument
+	}
+	hub, err := session.RequiredCommandHub()
+	if err != nil {
+		return ProviderCatalogSummary{}, err
+	}
+	return RefreshLLMModelCatalog(ctx, hub, cmd)
+}
+
 func ReadServiceConfigurationWithCatalog(ctx context.Context, hub magicevent.Hub) (ServiceConfiguration, error) {
 	return configcore.ReadServiceConfigurationWithCatalog(ctx, hub)
+}
+
+func ReadServiceConfigurationWithCatalogWithSession(ctx context.Context, session *RuntimeSession) (ServiceConfiguration, error) {
+	if session == nil {
+		return ServiceConfiguration{}, common.ErrInvalidArgument
+	}
+	hub, err := session.RequiredCommandHub()
+	if err != nil {
+		return ServiceConfiguration{}, err
+	}
+	return ReadServiceConfigurationWithCatalog(ctx, hub)
 }

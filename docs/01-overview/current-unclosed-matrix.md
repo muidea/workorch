@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-07-18
+Last Updated: 2026-07-19
 
 ## Purpose
 
@@ -30,7 +30,7 @@ Last Updated: 2026-07-18
 
 | ID | 项 | 说明 | 当前方案 |
 | --- | --- | --- | --- |
-| ARCH-1 | 22 组件 framework boundary 验证/归档 | 代码与文档收口已完成；待完整 structural/race/file-backed/deployed verification matrix 后归档 | [go-multi-module-22-component-boundary-remediation.md](../70-roadmap/active/go-multi-module-22-component-boundary-remediation.md) |
+| ARCH-1 | 22 组件 framework boundary 验证/归档 | Base Biz、Module-root EventHub 拓扑及本地 structural/race/file-backed 门禁已完成；待外部重启目标与三类 fixture manifest 执行 deployed SM-4 matrix | [go-multi-module-22-component-boundary-remediation.md](../70-roadmap/active/go-multi-module-22-component-boundary-remediation.md) |
 
 ### B. 运维 / 生产切换
 

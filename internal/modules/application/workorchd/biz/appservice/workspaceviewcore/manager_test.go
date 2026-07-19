@@ -38,6 +38,33 @@ type managerEventRecordFixture struct {
 	Payload      map[string]any
 }
 
+func managerTestEventPorts(hub magicevent.Hub) EventPorts {
+	return EventPorts{
+		ReadHighWatermarks: func(ctx context.Context, workspaceIDs []common.WorkspaceID) ([]eventstreamevents.WorkspaceHighWatermark, error) {
+			event := magicevent.NewEventWithContext(eventstreamevents.TopicEventStreamCommandHighWatermarks, "workspace-view-test", eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx, eventstreamevents.HighWatermarksCommand{WorkspaceIDs: workspaceIDs})
+			response := hub.Send(event)
+			if response == nil {
+				return nil, common.ErrConflict
+			}
+			if err := response.Error(); err != nil {
+				return nil, err
+			}
+			data, err := response.Get()
+			if err != nil {
+				return nil, err
+			}
+			result, ok := data.(eventstreamevents.EventStreamCommandResult)
+			if !ok {
+				return nil, common.ErrInvalidArgument
+			}
+			return result.HighWatermarks, nil
+		},
+		PublishChanged: func(ctx context.Context, data workorchdevents.WorkspaceProjectionChangedData) {
+			hub.Post(magicevent.NewEventWithContext(workorchdevents.TopicWorkspaceProjectionChanged, "workspace-view-test", workorchdevents.NotificationDestination, magicevent.NewHeader(), ctx, data))
+		},
+	}
+}
+
 func publishManagerEventRecord(ctx context.Context, hub magicevent.Hub, record managerEventRecordFixture) error {
 	if record.ID == "" {
 		record.ID = fmt.Sprintf("workspace-view-event-%d", time.Now().UnixNano())
@@ -872,7 +899,7 @@ func TestManagerPublishesProjectionChangedAndIgnoresOwnEvent(t *testing.T) {
 				"ws-a": {Workspace: readmodelcore.Workspace{ID: "ws-a", State: "running"}},
 			},
 		},
-		CommandHub: commandHub,
+		EventPorts: managerTestEventPorts(commandHub),
 		Schedule: func(name string, fn func(context.Context)) bool {
 			scheduled[name]++
 			scheduledFuncs[name] = append(scheduledFuncs[name], fn)
@@ -903,18 +930,9 @@ func TestManagerPublishesProjectionChangedAndIgnoresOwnEvent(t *testing.T) {
 		t.Fatalf("projection data = %+v, want detail ready", found)
 	}
 
-	if err := publishManagerEventRecord(ctx, commandHub, managerEventRecordFixture{
-		ID:          "run-a/state",
-		Version:     events.WorkorchEventVersion,
-		Topic:       runevents.TopicRunStateChanged,
-		WorkspaceID: "ws-a",
-		RunID:       "run-a",
-		SubjectType: "run",
-		SubjectID:   "run-a",
-		Payload:     events.RunPayloadData{State: common.RunStateCompleted}.EventPayload().Map(),
-	}); err != nil {
-		t.Fatalf("publish run state event: %v", err)
-	}
+	// The application Biz owns the EventHub subscription and passes typed
+	// records to this pure projection manager.
+	_ = manager.HandleEventRecord(ctx, eventstreamevents.EventRecordData{Topic: runevents.TopicRunStateChanged, WorkspaceID: "ws-a", Revision: 1})
 	if scheduled["workspace_projection_rebuild"] != baselineWorkspaceRebuilds+1 {
 		t.Fatalf("scheduled rebuild count after run event = %d, want %d", scheduled["workspace_projection_rebuild"], baselineWorkspaceRebuilds+1)
 	}
@@ -929,7 +947,7 @@ func TestManagerPublishesProjectionChangedThroughAsyncHub(t *testing.T) {
 	commandHub := magicevent.NewHub(16)
 	t.Cleanup(func() { commandHub.Terminate(ctx) })
 	projectionEvents := subscribeProjectionNotifications(t, commandHub)
-	manager := NewManager(ManagerOptions{CommandHub: commandHub})
+	manager := NewManager(ManagerOptions{EventPorts: managerTestEventPorts(commandHub)})
 	manager.store.UpsertWorkspace(appmodelcore.Workspace{ID: "ws-a", State: "active"})
 
 	manager.publishProjectionChanged(ctx, "ws-a", "detail")
@@ -963,7 +981,7 @@ func TestManagerReconcilesMissedEventFromOwnerHighWatermark(t *testing.T) {
 	scheduled := map[string]int{}
 	manager := NewManager(ManagerOptions{
 		Loader:     fakeProjectionLoader{workspaces: []appmodelcore.Workspace{{ID: "ws-a", State: "active"}}},
-		CommandHub: commandHub,
+		EventPorts: managerTestEventPorts(commandHub),
 		Schedule: func(name string, _ func(context.Context)) bool {
 			scheduled[name]++
 			return true

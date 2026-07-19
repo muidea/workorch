@@ -37,7 +37,7 @@ func TestEventWorkspaceReaderCarriesRuntimeWorkspaceScope(t *testing.T) {
 		dodCommand = cmd
 		result.Set(workspaceevents.WorkspaceCommandResult{DoD: &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"dod"}, State: common.DoDStateReady}}, nil)
 	})
-	reader := eventWorkspaceReader{hub: rawHub}
+	reader := eventWorkspaceReader{send: rawHub.Send}
 	scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 
 	if _, err := reader.GetGoal(scopedCtx, goalID); err != nil {

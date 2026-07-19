@@ -536,7 +536,7 @@ func TestServiceAutoResolvesTicketFromMemoryStructuredContext(t *testing.T) {
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.notificationHub, ticketID, workspaceID, runID))
+	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.EventHub(), ticketID, workspaceID, runID))
 	waitForGovernanceCondition(t, func() bool {
 		return capture.completed(ticketID, runID)
 	})
@@ -624,7 +624,7 @@ func TestServiceEscalatesTicketWhenContextInsufficient(t *testing.T) {
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.notificationHub, ticketID, workspaceID, runID))
+	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.EventHub(), ticketID, workspaceID, runID))
 	traceID := common.AutoGovernanceTraceID(string(ticketID) + "/auto-governance")
 	trace := waitForGovernanceTrace(t, ctx, traceRepo, traceID, func(trace *governancemodel.AutoGovernanceTrace) bool {
 		return trace.Status == "escalated"
@@ -721,7 +721,7 @@ func TestServiceAutoReplansRuntimeRepairExhaustionTicket(t *testing.T) {
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.notificationHub, ticketID, workspaceID, runID))
+	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.EventHub(), ticketID, workspaceID, runID))
 	waitForGovernanceCondition(t, func() bool {
 		return capture.completed(ticketID, runID)
 	})
@@ -816,7 +816,7 @@ func TestServiceAutoResolvesReplanDecisionTicketWithoutMissingFields(t *testing.
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.notificationHub, ticketID, workspaceID, runID))
+	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.EventHub(), ticketID, workspaceID, runID))
 	waitForGovernanceCondition(t, func() bool {
 		return capture.completed(ticketID, runID)
 	})
@@ -901,7 +901,7 @@ func TestServiceEscalatesReplanDecisionTicketWhenMissingFieldsRemain(t *testing.
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.notificationHub, ticketID, workspaceID, runID))
+	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.EventHub(), ticketID, workspaceID, runID))
 	trace := waitForGovernanceTrace(t, ctx, traceRepo, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"), func(trace *governancemodel.AutoGovernanceTrace) bool {
 		return trace.Status == "escalated"
 	})
@@ -972,7 +972,7 @@ func TestServiceEscalatesRuntimeRepairExhaustionWhenExternalRecoveryRequired(t *
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.notificationHub, ticketID, workspaceID, runID))
+	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.EventHub(), ticketID, workspaceID, runID))
 	trace := waitForGovernanceTrace(t, ctx, traceRepo, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"), func(trace *governancemodel.AutoGovernanceTrace) bool {
 		return trace.Status == "escalated"
 	})
@@ -1135,7 +1135,7 @@ func TestServiceAutoResolvesTicketFromStructuredCandidateContext(t *testing.T) {
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.notificationHub, ticketID, workspaceID, runID))
+	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.EventHub(), ticketID, workspaceID, runID))
 	waitForGovernanceCondition(t, func() bool {
 		return capture.completed(ticketID, runID)
 	})
@@ -1263,7 +1263,7 @@ func TestServiceEscalatesTicketWhenStructuredCandidateRequiresHuman(t *testing.T
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.notificationHub, ticketID, workspaceID, runID))
+	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.EventHub(), ticketID, workspaceID, runID))
 	trace := waitForGovernanceTrace(t, ctx, traceRepo, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"), func(trace *governancemodel.AutoGovernanceTrace) bool {
 		return trace.Status == "escalated"
 	})
@@ -1338,7 +1338,7 @@ func TestServiceAutoApprovesReadOnlyApproval(t *testing.T) {
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, publishGovernanceTestApprovalCreated(ctx, svc.notificationHub, approvalID, workspaceID, runID))
+	mustNoErr(t, publishGovernanceTestApprovalCreated(ctx, svc.EventHub(), approvalID, workspaceID, runID))
 	waitForGovernanceCondition(t, func() bool {
 		return resolveCount.Load() == 1 && resumeCount.Load() == 1
 	})
@@ -1555,7 +1555,7 @@ func TestServiceAutoApprovesLowRiskWorkspaceDependencyMetadataApproval(t *testin
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, publishGovernanceTestApprovalCreated(ctx, svc.notificationHub, approvalID, workspaceID, runID))
+	mustNoErr(t, publishGovernanceTestApprovalCreated(ctx, svc.EventHub(), approvalID, workspaceID, runID))
 	waitForGovernanceCondition(t, func() bool {
 		return resolveCount.Load() == 1 && resumeCount.Load() == 1
 	})
@@ -1773,7 +1773,7 @@ func TestServiceEscalatesHighRiskApproval(t *testing.T) {
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, publishGovernanceTestApprovalCreated(ctx, svc.notificationHub, approvalID, workspaceID, runID))
+	mustNoErr(t, publishGovernanceTestApprovalCreated(ctx, svc.EventHub(), approvalID, workspaceID, runID))
 	trace := waitForGovernanceTrace(t, ctx, traceRepo, common.AutoGovernanceTraceID(string(approvalID)+"/auto-governance"), func(trace *governancemodel.AutoGovernanceTrace) bool {
 		return trace.Status == "escalated"
 	})
@@ -1899,7 +1899,7 @@ func TestServiceEscalatesTicketWhenRepeatedPromptBudgetExhausted(t *testing.T) {
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.notificationHub, ticketID, workspaceID, runID))
+	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.EventHub(), ticketID, workspaceID, runID))
 	trace := waitForGovernanceTrace(t, ctx, traceRepo, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"), func(trace *governancemodel.AutoGovernanceTrace) bool {
 		return trace.Status == "escalated"
 	})

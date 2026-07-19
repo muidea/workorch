@@ -10,7 +10,7 @@ import (
 )
 
 func (d *CLICommandDispatcher) handleTypedCLITemplate(event magicevent.Event, result magicevent.Result) {
-	ctx := ContextWithCommandHub(event.Context(), d.commandHub)
+	ctx := ContextWithCommandHub(event.Context(), d.EventHub())
 	switch command := event.Data().(type) {
 	case workorchdevents.CLITemplateCreateCommand:
 		item, err := CreateWorkspaceTemplateWithSession(ctx, d.borrow(), cliWorkspaceTemplate(command.Template))

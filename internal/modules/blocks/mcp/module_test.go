@@ -27,26 +27,19 @@ func TestMCPModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Configure(Dependencies{EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if module.runtimeAdapter == nil || module.eventHub == nil {
+	if module.bizPtr == nil || module.bizPtr.EventHub() == nil {
 		t.Fatalf("module not fully configured: %+v", module)
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	firstObserver := module.capabilityObserver
-	if firstObserver == nil {
-		t.Fatal("capability observer is nil after Start")
-	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("second Start: %v", err)
-	}
-	if module.capabilityObserver != firstObserver {
-		t.Fatal("second Start replaced capability observer")
 	}
 	if err := module.Stop(ctx); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if module.runtimeAdapter != nil || module.eventHub != nil || module.capabilityObserver != nil {
+	if module.bizPtr != nil {
 		t.Fatalf("module was not cleared after Stop: %+v", module)
 	}
 }

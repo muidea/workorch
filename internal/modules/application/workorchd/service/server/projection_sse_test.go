@@ -67,7 +67,7 @@ func TestProjectionSSEWireContractMatchesRemoteDecoder(t *testing.T) {
 	}()
 	waitSSEConnected(t, lines, readErr)
 
-	state.commandHub.Post(magicevent.NewEventWithContext(
+	testStateCommandHub(state).Post(magicevent.NewEventWithContext(
 		workorchdevents.TopicWorkspaceProjectionChanged,
 		"workorchd/projection",
 		workorchdevents.NotificationDestination,
@@ -298,7 +298,7 @@ func TestProjectionSSEFrameConsumedByProductionRemoteDecoder(t *testing.T) {
 	}()
 	waitSSEConnected(t, lines, readErr)
 
-	state.commandHub.Post(magicevent.NewEventWithContext(
+	testStateCommandHub(state).Post(magicevent.NewEventWithContext(
 		workorchdevents.TopicWorkspaceProjectionChanged,
 		"workorchd/projection",
 		workorchdevents.NotificationDestination,

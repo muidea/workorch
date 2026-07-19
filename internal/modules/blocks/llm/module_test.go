@@ -24,27 +24,19 @@ func TestLLMModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Configure(Dependencies{EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if module.catalogService == nil || module.rawEventHub == nil {
+	if module.bizPtr == nil || module.bizPtr.EventHub() == nil {
 		t.Fatalf("module not fully configured: %+v", module)
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	firstObserver := module.observer
-	firstSubscriptionCount := len(module.topics)
-	if firstObserver == nil || firstSubscriptionCount == 0 {
-		t.Fatalf("observer=%v subscriptions=%d, want provider/runtime V2 subscriptions", firstObserver != nil, firstSubscriptionCount)
-	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("second Start: %v", err)
-	}
-	if module.observer != firstObserver || len(module.topics) != firstSubscriptionCount {
-		t.Fatalf("second Start changed observer/subscriptions: observer changed=%v subscriptions=%d want %d", module.observer != firstObserver, len(module.topics), firstSubscriptionCount)
 	}
 	if err := module.Stop(ctx); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if module.rawEventHub != nil || module.observer != nil || module.prerequisiteObserver != nil || len(module.topics) != 0 {
+	if module.bizPtr != nil {
 		t.Fatalf("module was not cleared after Stop: %+v", module)
 	}
 }

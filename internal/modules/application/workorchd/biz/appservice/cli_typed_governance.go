@@ -9,7 +9,7 @@ import (
 )
 
 func (d *CLICommandDispatcher) handleTypedCLIGovernance(event magicevent.Event, result magicevent.Result) {
-	ctx := ContextWithCommandHub(event.Context(), d.commandHub)
+	ctx := ContextWithCommandHub(event.Context(), d.EventHub())
 	switch command := event.Data().(type) {
 	case workorchdevents.CLIDecisionResolveCommand:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.Request.WorkspaceID)

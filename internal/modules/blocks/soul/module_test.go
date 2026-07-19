@@ -26,28 +26,19 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Configure(soulModuleContractDependencies()); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if module.bizPtr == nil || module.eventHub == nil {
+	if module.bizPtr == nil || module.bizPtr.EventHub() == nil {
 		t.Fatalf("module not fully configured: %+v", module)
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	firstSubscriptionCount := len(module.topics)
-	if firstSubscriptionCount == 0 {
-		t.Fatal("Start did not subscribe soul commands")
-	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("second Start: %v", err)
-	}
-	if len(module.topics) != firstSubscriptionCount {
-		t.Fatalf("second Start subscription count = %d, want %d", len(module.topics), firstSubscriptionCount)
 	}
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if module.bizPtr != nil ||
-		module.eventHub != nil ||
-		len(module.topics) != 0 {
+	if module.bizPtr != nil {
 		t.Fatalf("module was not cleared after Stop: %+v", module)
 	}
 	if err := module.Stop(context.Background()); err != nil {
@@ -63,14 +54,11 @@ func TestModuleConfigureRequiresSoulRepository(t *testing.T) {
 	if err := module.Configure(Dependencies{Souls: memoryrepo.NewSoulRepository()}); err != nil {
 		t.Fatalf("Configure without EventHub: %v", err)
 	}
-	if module.bizPtr == nil {
-		t.Fatal("biz is nil after Configure without EventHub")
+	if module.bizPtr != nil {
+		t.Fatal("biz must not be constructed without EventHub")
 	}
-	if err := module.Start(); err != nil {
-		t.Fatalf("Start without EventHub should remain no-op: %v", err)
-	}
-	if len(module.topics) != 0 {
-		t.Fatalf("subscriptions without EventHub = %d, want 0", len(module.topics))
+	if err := module.Start(); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("Start without EventHub err = %v, want invalid argument", err)
 	}
 }
 
