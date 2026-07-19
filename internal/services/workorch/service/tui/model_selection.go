@@ -284,15 +284,11 @@ func (m *AppModel) applyWorkspaceLLMTargetUpdated(msg WorkspaceLLMTargetUpdatedM
 	m.result = "Workspace model updated\n- future runs: " + label + "\n- current run: unchanged"
 	switch m.activeWorkspacePromptMode() {
 	case workspacePromptModeDecision:
-		m.result += "\n- next: resolve the current decision, then use /run restart"
+		m.result += "\n- next: resolve the current decision, then use /run resume"
 	case workspacePromptModeApproval:
-		m.result += "\n- next: resolve the current approval, then use /run restart"
+		m.result += "\n- next: resolve the current approval, then use /run resume"
 	default:
-		if ws := m.activeWorkspaceOverview(); ws != nil && ws.ActiveRunID != "" {
-			m.result += "\n- apply with: /run restart"
-		} else {
-			m.result += "\n- continue with: /run resume"
-		}
+		m.result += "\n- continue with: /run resume"
 	}
 	m.progressText = "Workspace model configuration saved"
 	m.resetMainViewport()

@@ -1652,6 +1652,7 @@ export type Decision = {
   decisionKind?: string;
   question?: string;
   context?: Record<string, unknown>;
+  allowedRecoveryActions?: string[];
   state: string;
   resolutionId?: string;
   resolutionType?: string;

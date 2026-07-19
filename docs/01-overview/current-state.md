@@ -13,6 +13,7 @@ Last Updated: 2026-07-19
 - 模型发现：`blocks/llm` 读取 `/v1/models` catalog
 - activation：提交/持久化 `llmTarget` / `ProviderModelTarget`
 - workspace 默认 target：`blocks/workspace` 持久化可选 `DefaultLLMTarget`；新 Run 按 explicit activation → workspace → system `defaultChat` 解析
+- TUI 运行控制统一为 `/run resume`；application 根据 Run 终态、Goal/DoD 定义及封存 provider/model 是否漂移，自动保留原 Run 或创建新的 Runtime V2 activation，TUI 不再要求用户区分 resume/restart
 - TUI：`/model` 自动列出 ready chat `providerId/modelId`，双确认后更新当前 workspace；`/model show` 查看，`/model clear` 恢复继承系统默认
 - Runtime V2：`ProviderCeiling` 封存 target + token/byte ceiling + revision
 - 旧 `defaultProvider` / provider list / model pattern / provider context 路径已删除

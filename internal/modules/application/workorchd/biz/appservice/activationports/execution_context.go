@@ -133,6 +133,20 @@ func applyConfiguredRuntimeRepairLimit(ctx context.Context, executionContract ma
 }
 
 func resolveActivationProviderTarget(ctx context.Context, hub magicevent.Hub, requested *runtimecontract.ProviderModelTarget, workspaceDefault *runtimecontract.ProviderModelTarget) (runtimecontract.ProviderModelTarget, error) {
+	target, err := configuredActivationProviderTarget(ctx, requested, workspaceDefault)
+	if err != nil {
+		return runtimecontract.ProviderModelTarget{}, err
+	}
+	// Optional readiness check through LLM block when hub is available.
+	if hub != nil {
+		if err := ensureProviderTargetReady(ctx, hub, target); err != nil {
+			return runtimecontract.ProviderModelTarget{}, err
+		}
+	}
+	return target, nil
+}
+
+func configuredActivationProviderTarget(ctx context.Context, requested *runtimecontract.ProviderModelTarget, workspaceDefault *runtimecontract.ProviderModelTarget) (runtimecontract.ProviderModelTarget, error) {
 	var target runtimecontract.ProviderModelTarget
 	if requested != nil {
 		target = requested.Normalized()
@@ -154,12 +168,6 @@ func resolveActivationProviderTarget(ctx context.Context, hub magicevent.Hub, re
 	}
 	if err := target.Validate(); err != nil {
 		return runtimecontract.ProviderModelTarget{}, err
-	}
-	// Optional readiness check through LLM block when hub is available.
-	if hub != nil {
-		if err := ensureProviderTargetReady(ctx, hub, target); err != nil {
-			return runtimecontract.ProviderModelTarget{}, err
-		}
 	}
 	return target, nil
 }

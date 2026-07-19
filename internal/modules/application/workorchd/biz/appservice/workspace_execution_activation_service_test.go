@@ -3184,6 +3184,90 @@ func TestActivateWorkspaceExecutionWithBackendReturnsActiveRun(t *testing.T) {
 	}
 }
 
+func TestActivateWorkspaceExecutionWithBackendReplacesActiveRunWhenWorkspaceModelChanges(t *testing.T) {
+	useActivationLLMConfig(t, "", "")
+	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
+	ctx := context.Background()
+	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-activation-model-change", "activation model change workspace", "", "workspaces/activation-model-change")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "continue with the selected workspace model")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"the selected model is sealed into the run"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+
+	session, err := sharedBackendSession(ctx, "file", dataRoot)
+	if err != nil {
+		t.Fatalf("sharedBackendSession: %v", err)
+	}
+	hub, err := session.RequiredCommandHub()
+	if err != nil {
+		t.Fatalf("RequiredCommandHub: %v", err)
+	}
+	inputs, err := activationports.ReadWorkspaceRuntimeActivationInputs(ctx, hub, common.WorkspaceID(workspace.ID), common.GoalID(goal.ID), common.DoDID(dod.ID))
+	if err != nil {
+		t.Fatalf("ReadWorkspaceRuntimeActivationInputs: %v", err)
+	}
+	initialBuild, err := buildWorkspaceRuntimeActivationWithDefinitions(ctx, session, inputs.Workspace, inputs.Goal, inputs.DoD, ActivateWorkspaceExecutionCommand{})
+	if err != nil {
+		t.Fatalf("build initial activation: %v", err)
+	}
+	initialBootstrap, err := activationcore.RuntimeV2Bootstrap(initialBuild.EffectiveGoal, initialBuild.EffectiveDoD, initialBuild.DefinitionRevision, initialBuild.DefinitionChangeImpact, initialBuild.RuntimeActivation)
+	if err != nil {
+		t.Fatalf("initial Runtime V2 bootstrap: %v", err)
+	}
+	if got := initialBootstrap.Activation.ProviderTarget; !got.Same(runtimecontract.ProviderModelTarget{ProviderID: "custom-test", ModelID: "model-1"}) {
+		t.Fatalf("first provider target = %+v, want custom-test/model-1", got)
+	}
+	exports := testRuntimeExports(session.Bootstrap)
+	oldRunID := common.RunID("run-activation-model-change-old")
+	ownerCtx := common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspace.ID))
+	if err := exports.Repositories.Runs.Create(ownerCtx, &runmodel.Run{
+		ID: oldRunID, WorkspaceID: common.WorkspaceID(workspace.ID), GoalID: common.GoalID(goal.ID), DoDID: common.DoDID(dod.ID),
+		DefinitionRevision: initialBootstrap.Definition.Revision, InitialStepKind: "llm/workspace_execution", RuntimeBootstrap: initialBootstrap,
+		State: common.RunStateActive,
+	}); err != nil {
+		t.Fatalf("create sealed active run: %v", err)
+	}
+	workspaceRecord, err := exports.Repositories.Workspaces.Get(ownerCtx, common.WorkspaceID(workspace.ID))
+	if err != nil {
+		t.Fatalf("read workspace owner record: %v", err)
+	}
+	workspaceRecord.ActiveRunID = oldRunID
+	if err := exports.Repositories.Workspaces.Update(ownerCtx, workspaceRecord); err != nil {
+		t.Fatalf("set active run: %v", err)
+	}
+	changedTarget := runtimecontract.ProviderModelTarget{ProviderID: "custom-test", ModelID: "model-2"}
+	if _, err := UpdateWorkspaceLLMTargetWithSession(ctx, session, workspace.ID, &changedTarget); err != nil {
+		t.Fatalf("UpdateWorkspaceLLMTargetWithSession: %v", err)
+	}
+
+	continued, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{})
+	if err != nil {
+		t.Fatalf("resume activation after model change: %v", err)
+	}
+	if continued.Run.ID == string(oldRunID) {
+		t.Fatalf("continued run id = %q, want replacement for model drift", continued.Run.ID)
+	}
+	continuedOwnerRun := runtimeV2OwnerRunWithBackend(t, ctx, "file", dataRoot, workspace.ID, continued.Run.ID)
+	if got := continuedOwnerRun.RuntimeBootstrap.Activation.ProviderTarget; !got.Same(changedTarget) {
+		t.Fatalf("replacement provider target = %+v, want %+v", got, changedTarget)
+	}
+	oldRun, err := exports.Repositories.Runs.Get(common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspace.ID)), oldRunID)
+	if err != nil {
+		t.Fatalf("read superseded run: %v", err)
+	}
+	if oldRun.State != common.RunStateSuperseded {
+		t.Fatalf("old run state = %q, want superseded", oldRun.State)
+	}
+}
+
 func TestActivateWorkspaceExecutionWithBackendStartsCreatedActiveRun(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
@@ -3730,6 +3814,11 @@ apiKey = "secret-value"
 timeout = "5s"
 
 [llm.customProviders.custom-test.models.model-1]
+contextWindowTokens = 128000
+maxOutputTokens = 8192
+operations = ["chat_completions"]
+
+[llm.customProviders.custom-test.models.model-2]
 contextWindowTokens = 128000
 maxOutputTokens = 8192
 operations = ["chat_completions"]

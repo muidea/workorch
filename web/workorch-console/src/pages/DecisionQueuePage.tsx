@@ -65,8 +65,16 @@ export function DecisionQueuePage() {
 
   const resolve = async (item: Decision, resolutionType: string, payload?: Record<string, unknown>) => {
     try {
-      await workorchApi.resolveDecision(item.workspaceId, item.id, resolutionType, payload);
-      message.success(`决策已按 ${resolutionType} 处理，${modelLabels.run} 已由服务端转入后台继续`);
+      const decision = await workorchApi.resolveDecision(item.workspaceId, item.id, resolutionType, payload);
+      const recoveryAction = typeof decision.resolutionPayload?.recoveryAction === 'string'
+        ? decision.resolutionPayload.recoveryAction
+        : undefined;
+      const normalizedReplan = resolutionType === 'replan'
+        && decision.resolutionType === 'provide_missing_info'
+        && recoveryAction === 'retry_same_step';
+      message.success(normalizedReplan
+        ? `当前工单不适用重新规划，已转为重试当前步骤；${modelLabels.run}已由服务端继续处理`
+        : `决策已按 ${decision.resolutionType || resolutionType} 处理，${modelLabels.run}已由服务端转入后台继续`);
       void loadDecisionPage().catch((error: unknown) => message.error(errorMessage(error)));
     } catch (error) {
       message.error(errorMessage(error));
@@ -115,6 +123,7 @@ export function DecisionQueuePage() {
       return;
     }
     try {
+      const resolved: Decision[] = [];
       const selected = decisionRecords.filter((item) => ticketIds.includes(item.id));
       const byWorkspace = new Map<string, string[]>();
       for (const item of selected) {
@@ -127,9 +136,16 @@ export function DecisionQueuePage() {
         byWorkspace.set(workspaceId, items);
       }
       for (const [workspaceId, ids] of byWorkspace) {
-        await workorchApi.batchResolveDecisions(workspaceId, ids, resolutionType, { operator: 'console', mode: 'batch' });
+        resolved.push(...await workorchApi.batchResolveDecisions(workspaceId, ids, resolutionType, { operator: 'console', mode: 'batch' }));
       }
-      message.success(`${ticketIds.length} 个决策工单已按 ${resolutionType} 处理，相关${modelLabels.run}已由服务端转入后台继续`);
+      const retried = resolved.filter((item) => resolutionType === 'replan'
+        && item.resolutionType === 'provide_missing_info'
+        && item.resolutionPayload?.recoveryAction === 'retry_same_step').length;
+      const replanned = resolved.length - retried;
+      const summary = retried > 0
+        ? `${replanned > 0 ? `${replanned} 个已重新规划，` : ''}${retried} 个 provider 恢复工单已转为重试当前步骤`
+        : `${ticketIds.length} 个决策工单已按 ${resolutionType} 处理`;
+      message.success(`${summary}，相关${modelLabels.run}已由服务端转入后台继续`);
       setSelectedDecisionKeys([]);
       void loadDecisionPage().catch((error: unknown) => message.error(errorMessage(error)));
     } catch (error) {
@@ -153,7 +169,11 @@ export function DecisionQueuePage() {
       render: (_, item) => item.state === 'open' ? (
         <Space wrap>
           <Button size="small" type="primary" onClick={() => openDecisionResolution(item, 'provide_missing_info')}>补充信息</Button>
-          <Button size="small" onClick={() => void resolve(item, 'replan', { operator: 'console' })}>重新规划并继续</Button>
+          <Button size="small" onClick={() => void resolve(item, 'replan', { operator: 'console' })}>
+            {item.allowedRecoveryActions?.includes('replan') === false && item.allowedRecoveryActions.includes('provide_missing_info')
+              ? '重新规划（将重试）'
+              : '重新规划并继续'}
+          </Button>
           <Button size="small" danger onClick={() => void resolve(item, 'reject_current_path', { operator: 'console' })}>拒绝路径并继续</Button>
         </Space>
       ) : stateTag(item.resolutionType)

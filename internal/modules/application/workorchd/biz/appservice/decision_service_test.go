@@ -667,6 +667,50 @@ func TestResolveDecisionWithSessionAllowsProviderRecoveryConfirmationWithoutSecr
 	}
 }
 
+func TestResolveDecisionWithSessionConvertsProviderRecoveryReplanToRetry(t *testing.T) {
+	session, tickets, _ := newCountingDecisionRuntimeSession(t)
+	ctx := context.Background()
+	ticketID := common.TicketID("ticket-provider-recovery-replan")
+	if err := tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:                     ticketID,
+		WorkspaceID:            common.WorkspaceID("ws-provider-recovery-replan"),
+		RunID:                  common.RunID("run-provider-recovery-replan"),
+		StepID:                 common.StepID("run-provider-recovery-replan/step-1"),
+		Reason:                 "LLM provider retry attempts exhausted after 2 attempts",
+		Question:               "Fix or switch the LLM provider in system configuration first.",
+		AllowedRecoveryActions: []string{decisioncommon.ResolutionTypeProvideMissingInfo, decisioncommon.ResolutionTypeRejectCurrentPath},
+		Context: mustAppserviceGovernancePayload(t, map[string]any{
+			"failureClass":                                  "provider_timeout",
+			governancecore.DecisionContextKeyScope:          governancecore.DecisionContextScopeWorkorchRuntime,
+			governancecore.DecisionContextKeyDependency:     governancecore.DecisionContextDependencyLLMProvider,
+			governancecore.DecisionContextKeyRecoveryPolicy: governancecore.DecisionContextRecoveryPolicyConfigOnly,
+		}),
+		State: common.DecisionTicketStateOpen,
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
+		ResolutionType:    decisioncommon.ResolutionTypeReplan,
+		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"operator": "console"}),
+	})
+	if err != nil {
+		t.Fatalf("ResolveDecisionWithSession: %v", err)
+	}
+	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo {
+		t.Fatalf("decision = %+v, want resolved provider retry", item)
+	}
+	if value, _ := item.ResolutionPayload.String("requestedResolutionType"); value != decisioncommon.ResolutionTypeReplan {
+		t.Fatalf("requestedResolutionType = %q, want replan", value)
+	}
+	if value, _ := item.ResolutionPayload.String("recoveryAction"); value != "retry_same_step" {
+		t.Fatalf("recoveryAction = %q, want retry_same_step", value)
+	}
+	if value, _ := item.ResolutionPayload.String("resolutionNotice"); value == "" {
+		t.Fatalf("resolutionNotice is empty")
+	}
+}
+
 func TestResolveDecisionWithSessionAllowsTargetWorkspaceExternalDependencyConfig(t *testing.T) {
 	session, tickets, _ := newCountingDecisionRuntimeSession(t)
 	ctx := context.Background()

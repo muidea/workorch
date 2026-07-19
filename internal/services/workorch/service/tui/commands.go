@@ -446,7 +446,7 @@ func PersistDoD(be backend.Backend, workspaceID string, items []string) tea.Cmd 
 	}
 }
 
-func ResumeRun(be backend.Backend, workspaceID string, runID string, operatorInput string) tea.Cmd {
+func ResumeRun(be backend.Backend, workspaceID string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -455,188 +455,20 @@ func ResumeRun(be backend.Backend, workspaceID string, runID string, operatorInp
 		}
 		wsID := common.WorkspaceID(workspaceID)
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
-		targetRunID := common.RunID(runID)
-		var run *backend.RunInfo
-		snapshot, err := be.Workspace().Snapshot(ctx, wsID)
+		resumed, err := be.Run().Command(ctx, backend.WorkspaceRunCommand{
+			WorkspaceID: wsID,
+			Intent:      backend.RunCommandIntentResume,
+			Reason:      "user_requested",
+			Source:      "tui",
+			Activation: backend.ActivateRunRequest{
+				Source: "tui",
+			},
+		})
 		if err != nil {
 			return RunControlMsg{WorkspaceID: workspaceID, Error: err}
 		}
-		if snapshot == nil {
-			return RunControlMsg{WorkspaceID: workspaceID, Error: common.ErrInvalidArgument}
-		}
-		if targetRunID != "" {
-			run = findWorkspaceRun(targetRunID, snapshot.Runs)
-			if !runBelongsToWorkspace(run, wsID) {
-				run = nil
-				targetRunID = ""
-			}
-		}
-		if run == nil && snapshot.Workspace.ActiveRunID != "" {
-			run = findWorkspaceRun(snapshot.Workspace.ActiveRunID, snapshot.Runs)
-		}
-		if run == nil {
-			displayRun := selectWorkspaceDisplayRun(snapshot)
-			expectedRunID := common.RunID("")
-			if runBelongsToWorkspace(displayRun, wsID) {
-				expectedRunID = displayRun.ID
-			}
-			resumed, err := be.Run().Command(ctx, backend.WorkspaceRunCommand{
-				WorkspaceID:   wsID,
-				ExpectedRunID: expectedRunID,
-				Intent:        backend.RunCommandIntentResume,
-				Reason:        "user_requested",
-				Source:        "tui",
-			})
-			if err != nil {
-				return RunControlMsg{Run: displayRun, WorkspaceID: workspaceID, Error: err}
-			}
-			return RunControlMsg{Run: resumed, WorkspaceID: workspaceID, Message: "Resuming workspace execution"}
-		}
-		switch run.State {
-		case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
-			resumed, err := be.Run().Command(ctx, backend.WorkspaceRunCommand{
-				WorkspaceID:   wsID,
-				ExpectedRunID: run.ID,
-				Intent:        backend.RunCommandIntentResume,
-				Reason:        "user_requested",
-				Source:        "tui",
-			})
-			if err != nil {
-				return RunControlMsg{Run: run, WorkspaceID: workspaceID, Error: err}
-			}
-			return RunControlMsg{Run: resumed, WorkspaceID: workspaceID, Message: "Run resume accepted; refreshing workspace state."}
-		case common.RunStateActive:
-			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is already running; refreshing workspace state."}
-		case common.RunStateBlockedOnDecision:
-			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is waiting for decision; answer the decision before resuming."}
-		case common.RunStateBlockedOnApproval:
-			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is waiting for approval; resolve the approval before resuming."}
-		case common.RunStatePending:
-			resumed, err := be.Run().Command(ctx, backend.WorkspaceRunCommand{
-				WorkspaceID:   wsID,
-				ExpectedRunID: run.ID,
-				Intent:        backend.RunCommandIntentResume,
-				Reason:        "user_requested",
-				Source:        "tui",
-			})
-			if err != nil {
-				return RunControlMsg{Run: run, WorkspaceID: workspaceID, Error: err}
-			}
-			return RunControlMsg{Run: resumed, WorkspaceID: workspaceID, Message: "Resuming workspace execution"}
-		default:
-			resumed, err := be.Run().Command(ctx, backend.WorkspaceRunCommand{
-				WorkspaceID:   wsID,
-				ExpectedRunID: run.ID,
-				Intent:        backend.RunCommandIntentResume,
-				Reason:        "user_requested",
-				Source:        "tui",
-			})
-			if err != nil {
-				return RunControlMsg{Run: run, WorkspaceID: workspaceID, Error: err}
-			}
-			return RunControlMsg{Run: resumed, WorkspaceID: workspaceID, Message: "Resuming active run"}
-		}
+		return RunControlMsg{Run: resumed, WorkspaceID: workspaceID, Message: "Workspace resume requested"}
 	}
-}
-
-func findWorkspaceRun(id common.RunID, runs []backend.RunInfo) *backend.RunInfo {
-	if id == "" {
-		return nil
-	}
-	for i := range runs {
-		if runs[i].ID == id {
-			return &runs[i]
-		}
-	}
-	return nil
-}
-
-func selectWorkspaceDisplayRun(snapshot *backend.WorkspaceSnapshotInfo) *backend.RunInfo {
-	if snapshot == nil {
-		return nil
-	}
-	if run := findWorkspaceRun(snapshot.Workspace.ActiveRunID, snapshot.Runs); run != nil {
-		return run
-	}
-	if run := findWorkspaceRun(snapshot.Outcome.RunID, snapshot.Runs); run != nil {
-		return run
-	}
-	if run := findWorkspaceRun(snapshot.TaskProgress.RunID, snapshot.Runs); run != nil {
-		return run
-	}
-	return selectWorkspaceRun("", snapshot.Runs)
-}
-
-func terminalRunResumeMessage(run *backend.RunInfo) string {
-	if run == nil {
-		return "No active workspace run; use /run resume to resume this workspace."
-	}
-	switch run.State {
-	case common.RunStateCompleted:
-		return "Workspace run is completed; use /run restart to start a new run."
-	case common.RunStateFailed:
-		return "Workspace run is failed; use /run resume to attempt recovery."
-	case common.RunStateCancelled:
-		return "Workspace run is cancelled; use /run resume to resume if recoverable."
-	case common.RunStateSuperseded:
-		return "Workspace run is superseded; use /run resume to resume the current workspace."
-	default:
-		return "No active workspace run; use /run resume to resume this workspace."
-	}
-}
-
-func runBelongsToWorkspace(run *backend.RunInfo, workspaceID common.WorkspaceID) bool {
-	if run == nil {
-		return false
-	}
-	return run.WorkspaceID == "" || run.WorkspaceID == workspaceID
-}
-
-func RestartWorkspaceRun(be backend.Backend, workspaceID string, operatorInput string) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if strings.TrimSpace(workspaceID) == "" {
-			return RunControlMsg{Message: "No active workspace. Create or select a workspace first."}
-		}
-		return restartWorkspaceRun(ctx, be, common.WorkspaceID(workspaceID), operatorInput)
-	}
-}
-
-func restartWorkspaceRun(ctx context.Context, be backend.Backend, workspaceID common.WorkspaceID, operatorInput string) tea.Msg {
-	run, err := be.Run().Command(ctx, backend.WorkspaceRunCommand{
-		WorkspaceID: workspaceID,
-		Intent:      backend.RunCommandIntentRestart,
-		Reason:      "user_requested",
-		Source:      "tui",
-		Activation: backend.ActivateRunRequest{
-			Source: "tui",
-		},
-	})
-	if err != nil {
-		return RunControlMsg{Run: run, WorkspaceID: string(workspaceID), Error: err}
-	}
-	return RunControlMsg{Run: run, WorkspaceID: string(workspaceID), Message: "Restart requested"}
-}
-
-func activateWorkspaceRun(ctx context.Context, be backend.Backend, workspaceID common.WorkspaceID, run *backend.RunInfo, operatorInput string) tea.Msg {
-	return activateWorkspaceRunWithMessage(ctx, be, workspaceID, run, operatorInput, "Restarting workspace run")
-}
-
-func activateWorkspaceRunWithMessage(ctx context.Context, be backend.Backend, workspaceID common.WorkspaceID, run *backend.RunInfo, operatorInput string, message string) tea.Msg {
-	activated, err := be.Run().Command(ctx, backend.WorkspaceRunCommand{
-		WorkspaceID: workspaceID,
-		Intent:      backend.RunCommandIntentResume,
-		Reason:      "user_requested",
-		Source:      "tui",
-		Activation: backend.ActivateRunRequest{
-			Source: "tui",
-		},
-	})
-	if err != nil {
-		return RunControlMsg{Run: run, WorkspaceID: string(workspaceID), Error: err}
-	}
-	return RunControlMsg{Run: activated, WorkspaceID: string(workspaceID), Message: message}
 }
 
 func ResolveDecision(be backend.Backend, workspaceID string, ticketID string, answer string) tea.Cmd {

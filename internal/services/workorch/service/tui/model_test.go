@@ -442,7 +442,7 @@ func TestModelSubmitGoalStartsRun(t *testing.T) {
 	}
 }
 
-func TestModelPlainInputWithActiveRunningRunDoesNotResume(t *testing.T) {
+func TestModelPlainInputWithActiveRunningRunUsesWorkspaceResume(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateActive)
 	m := NewAppModel(be, "ws-1", "")
 	m.activeRunID = "run-resume"
@@ -459,11 +459,11 @@ func TestModelPlainInputWithActiveRunningRunDoesNotResume(t *testing.T) {
 	if len(be.goals) != 0 {
 		t.Fatalf("goals = %v, want no goal created for plain input", be.goals)
 	}
-	if be.lastSnapshotWorkspace != "ws-1" || be.lastGetWorkspace != "" || be.lastListWorkspace != "" || be.lastResumeWorkspace != "" {
-		t.Fatalf("snapshot/get/list/resume workspace scope = %q/%q/%q/%q, want ws-1/empty/empty/empty", be.lastSnapshotWorkspace, be.lastGetWorkspace, be.lastListWorkspace, be.lastResumeWorkspace)
-	}
 	if len(be.resumes) != 0 {
-		t.Fatalf("resumes = %v, want no resume for already-running run", be.resumes)
+		t.Fatalf("resumes = %v, want no run-scoped resume", be.resumes)
+	}
+	if len(be.activations) != 1 || len(be.runCommands) != 1 || be.runCommands[0].ExpectedRunID != "" || be.runCommands[0].Intent != backend.RunCommandIntentResume {
+		t.Fatalf("activations/runCommands = %d/%+v, want workspace-scoped resume", len(be.activations), be.runCommands)
 	}
 	runMsg, ok := msg.(RunControlMsg)
 	if !ok || runMsg.Run == nil || runMsg.Run.State != common.RunStateActive {
@@ -599,7 +599,7 @@ func TestModelGoalSlashCommandCanSubmitRunControlWordsAsGoal(t *testing.T) {
 	}
 }
 
-func TestModelRunResumeCommandDoesNotResumeAlreadyRunningRun(t *testing.T) {
+func TestModelRunResumeCommandUsesWorkspaceScopedResume(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateActive)
 	m := NewAppModel(be, "ws-1", "")
 	m.activeRunID = "run-resume"
@@ -616,10 +616,10 @@ func TestModelRunResumeCommandDoesNotResumeAlreadyRunningRun(t *testing.T) {
 		t.Fatalf("goals = %v, want no goal for active-run operator input", be.goals)
 	}
 	if len(be.resumes) != 0 {
-		t.Fatalf("resumes = %v, want no resume for already-running run", be.resumes)
+		t.Fatalf("resumes = %v, want no run-scoped resume", be.resumes)
 	}
-	if len(be.activations) != 0 {
-		t.Fatalf("activations = %d, want no activation for already-running run", len(be.activations))
+	if len(be.activations) != 1 || len(be.runCommands) != 1 || be.runCommands[0].ExpectedRunID != "" || be.runCommands[0].Intent != backend.RunCommandIntentResume {
+		t.Fatalf("activations/runCommands = %d/%+v, want workspace-scoped resume", len(be.activations), be.runCommands)
 	}
 	runMsg, ok := msg.(RunControlMsg)
 	if !ok || runMsg.Run == nil || runMsg.Run.State != common.RunStateActive {
@@ -630,8 +630,8 @@ func TestModelRunResumeCommandDoesNotResumeAlreadyRunningRun(t *testing.T) {
 	if m.progress != progressRunning || !m.running {
 		t.Fatalf("progress/running = %s/%v, want running state", m.progress, m.running)
 	}
-	if !strings.Contains(m.progressText, "already running") {
-		t.Fatalf("progressText = %q, want already-running guidance", m.progressText)
+	if !strings.Contains(m.progressText, "Workspace resume requested") {
+		t.Fatalf("progressText = %q, want unified resume acknowledgement", m.progressText)
 	}
 }
 
@@ -680,22 +680,22 @@ func TestModelRunResumeWithoutLiveRunDoesNotPredeclareContinuation(t *testing.T)
 	if !ok || msg.Error != nil || msg.Run == nil {
 		t.Fatalf("run resume msg = %#v, want RunControlMsg with resumed run", msg)
 	}
-	if msg.Run.ID != "run-failed" || msg.Run.State != common.RunStateActive || !strings.Contains(msg.Message, "Resuming") {
-		t.Fatalf("run/message = %+v/%q, want resumed failed run", msg.Run, msg.Message)
+	if msg.Run.ID != "run-new" || msg.Run.State != common.RunStateActive || !strings.Contains(msg.Message, "resume") {
+		t.Fatalf("run/message = %+v/%q, want workspace resume activation", msg.Run, msg.Message)
 	}
-	if len(be.resumes) != 1 || be.resumes[0] != "run-failed" {
-		t.Fatalf("resumes = %v, want terminal run resume through backend", be.resumes)
+	if len(be.resumes) != 0 {
+		t.Fatalf("resumes = %v, want no run-scoped terminal resume", be.resumes)
 	}
 	if len(be.runCommands) != 1 ||
 		be.runCommands[0].WorkspaceID != "ws-1" ||
-		be.runCommands[0].ExpectedRunID != "run-failed" ||
+		be.runCommands[0].ExpectedRunID != "" ||
 		be.runCommands[0].Intent != backend.RunCommandIntentResume ||
 		be.runCommands[0].Reason != "user_requested" ||
 		be.runCommands[0].Source != "tui" {
-		t.Fatalf("runCommands = %+v, want scoped TUI resume command", be.runCommands)
+		t.Fatalf("runCommands = %+v, want workspace-scoped TUI resume command", be.runCommands)
 	}
-	if len(be.activations) != 0 {
-		t.Fatalf("activations = %d, want no implicit activation for /run resume", len(be.activations))
+	if len(be.activations) != 1 {
+		t.Fatalf("activations = %d, want unified workspace resume activation", len(be.activations))
 	}
 	next, _ = m.Update(msg)
 	m = asModel(next)
@@ -724,21 +724,18 @@ func TestModelRunResumeIgnoresStaleRunIDFromAnotherWorkspace(t *testing.T) {
 	if len(be.resumes) != 0 {
 		t.Fatalf("resumes = %v, want no resume for already-running current workspace run", be.resumes)
 	}
-	if be.lastSnapshotWorkspace != "ws-2" || be.lastGetWorkspace != "" || be.lastListWorkspace != "" || be.lastResumeWorkspace != "" {
-		t.Fatalf("snapshot/get/list/resume workspace scope = %q/%q/%q/%q, want ws-2/empty/empty/empty", be.lastSnapshotWorkspace, be.lastGetWorkspace, be.lastListWorkspace, be.lastResumeWorkspace)
-	}
-	if len(be.activations) != 0 || msg.Run.WorkspaceID != "ws-2" {
-		t.Fatalf("activation/run = %d/%+v, want current run for ws-2", len(be.activations), msg.Run)
+	if len(be.activations) != 1 || len(be.runCommands) != 1 || be.runCommands[0].ExpectedRunID != "" || msg.Run.WorkspaceID != "ws-2" {
+		t.Fatalf("activation/runCommands/run = %d/%+v/%+v, want workspace-scoped resume for ws-2", len(be.activations), be.runCommands, msg.Run)
 	}
 
 	updated, _ := next.(*AppModel).Update(msg)
 	got := asModel(updated)
-	if got.activeRunID != "run-resume" || got.progress != progressRunning || !got.running {
-		t.Fatalf("run state = %q/%s/%v, want current workspace run", got.activeRunID, got.progress, got.running)
+	if got.activeRunID != "run-new" || got.progress != progressRunning || !got.running {
+		t.Fatalf("run state = %q/%s/%v, want workspace activation result", got.activeRunID, got.progress, got.running)
 	}
 }
 
-func TestModelRunRestartCommandRestartsWorkspaceWithOperatorInput(t *testing.T) {
+func TestModelRunRestartCompatibilityAliasUsesResume(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateCompleted)
 	m := NewAppModel(be, "ws-1", "")
 	m.activeRunID = "run-resume"
@@ -761,19 +758,19 @@ func TestModelRunRestartCommandRestartsWorkspaceWithOperatorInput(t *testing.T) 
 	if len(be.resumes) != 0 {
 		t.Fatalf("resumes = %v, want terminal run to activate a new run", be.resumes)
 	}
-	if len(be.activations) != 0 {
-		t.Fatalf("activations = %d, want no activation for restart command", len(be.activations))
+	if len(be.activations) != 1 {
+		t.Fatalf("activations = %d, want unified resume activation", len(be.activations))
 	}
-	if len(be.restarts) != 1 {
-		t.Fatalf("restarts = %d, want one restart", len(be.restarts))
+	if len(be.restarts) != 0 {
+		t.Fatalf("restarts = %d, want no TUI restart intent", len(be.restarts))
 	}
 	if len(be.runCommands) != 1 ||
 		be.runCommands[0].WorkspaceID != "ws-1" ||
 		be.runCommands[0].ExpectedRunID != "" ||
-		be.runCommands[0].Intent != backend.RunCommandIntentRestart ||
+		be.runCommands[0].Intent != backend.RunCommandIntentResume ||
 		be.runCommands[0].Reason != "user_requested" ||
 		be.runCommands[0].Source != "tui" {
-		t.Fatalf("runCommands = %+v, want scoped TUI restart command", be.runCommands)
+		t.Fatalf("runCommands = %+v, want workspace-scoped TUI resume command", be.runCommands)
 	}
 	if m.activeRunID != "run-new" || !m.running {
 		t.Fatalf("run state = %q/%v, want restarted run-new/running", m.activeRunID, m.running)
@@ -783,7 +780,7 @@ func TestModelRunRestartCommandRestartsWorkspaceWithOperatorInput(t *testing.T) 
 	}
 }
 
-func TestModelRunRestartSlashCommandActivatesWorkspaceWithoutCreatingGoal(t *testing.T) {
+func TestModelRunRestartSlashCommandAliasesWorkspaceResume(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateActive)
 	m := NewAppModel(be, "ws-1", "")
 	m.activeRunID = "run-resume"
@@ -803,11 +800,11 @@ func TestModelRunRestartSlashCommandActivatesWorkspaceWithoutCreatingGoal(t *tes
 	if len(be.resumes) != 0 {
 		t.Fatalf("resumes = %v, want /run restart to activate directly", be.resumes)
 	}
-	if len(be.activations) != 0 {
-		t.Fatalf("activations = %d, want no activation for /run restart", len(be.activations))
+	if len(be.activations) != 1 {
+		t.Fatalf("activations = %d, want unified resume activation", len(be.activations))
 	}
-	if len(be.restarts) != 1 {
-		t.Fatalf("restarts = %d, want one restart", len(be.restarts))
+	if len(be.restarts) != 0 || len(be.runCommands) != 1 || be.runCommands[0].Intent != backend.RunCommandIntentResume {
+		t.Fatalf("restarts/runCommands = %d/%+v, want restart alias normalized to resume", len(be.restarts), be.runCommands)
 	}
 }
 
@@ -853,6 +850,15 @@ func TestModelHelpPrefersRunResume(t *testing.T) {
 	help := stripANSI(m.renderHelp(160))
 	if !strings.Contains(help, "/run resume") {
 		t.Fatalf("help = %q, want /run resume", help)
+	}
+	overlay := stripANSI(m.renderHelpOverlay(120, 40))
+	if strings.Contains(overlay, "/run restart") {
+		t.Fatalf("help overlay still exposes restart: %q", overlay)
+	}
+	for _, suggestion := range m.slashCommandSuggestions("/run") {
+		if suggestion.Command == "/run restart" {
+			t.Fatalf("TUI suggestions still expose restart: %+v", suggestion)
+		}
 	}
 }
 
@@ -952,9 +958,9 @@ func TestModelRunResumeDoesNotBypassBlockingDecision(t *testing.T) {
 	}
 }
 
-func TestResumeRunReturnsBlockedRunWithoutResume(t *testing.T) {
+func TestResumeRunDelegatesStateChoiceToWorkspaceActivation(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateBlockedOnDecision)
-	msg := ResumeRun(be, "ws-1", "run-1", "resume")()
+	msg := ResumeRun(be, "ws-1")()
 	runMsg, ok := msg.(RunControlMsg)
 	if !ok {
 		t.Fatalf("message = %T, want RunControlMsg", msg)
@@ -962,14 +968,14 @@ func TestResumeRunReturnsBlockedRunWithoutResume(t *testing.T) {
 	if runMsg.Error != nil {
 		t.Fatalf("error = %v, want nil", runMsg.Error)
 	}
-	if runMsg.Run == nil || runMsg.Run.State != common.RunStateBlockedOnDecision {
-		t.Fatalf("run = %+v, want blocked decision", runMsg.Run)
+	if runMsg.Run == nil || runMsg.Run.ID != "run-new" || runMsg.Run.State != common.RunStateActive {
+		t.Fatalf("run = %+v, want workspace activation result", runMsg.Run)
 	}
-	if !strings.Contains(runMsg.Message, "waiting for decision") {
-		t.Fatalf("message = %q, want waiting decision", runMsg.Message)
+	if !strings.Contains(runMsg.Message, "resume") {
+		t.Fatalf("message = %q, want unified resume acknowledgement", runMsg.Message)
 	}
-	if len(be.resumes) != 0 {
-		t.Fatalf("resumes = %v, want no resume", be.resumes)
+	if len(be.resumes) != 0 || len(be.activations) != 1 || be.runCommands[0].ExpectedRunID != "" {
+		t.Fatalf("resumes/activations/runCommands = %v/%d/%+v, want workspace-scoped resume", be.resumes, len(be.activations), be.runCommands)
 	}
 }
 
@@ -978,7 +984,7 @@ func TestResumeRunActivatesWorkspaceWhenNoActiveRun(t *testing.T) {
 	be.snapshot = &backend.WorkspaceSnapshotInfo{
 		Workspace: backend.WorkspaceInfo{ID: "ws-1"},
 	}
-	msg := ResumeRun(be, "ws-1", "", "resume from tui")()
+	msg := ResumeRun(be, "ws-1")()
 	runMsg, ok := msg.(RunControlMsg)
 	if !ok {
 		t.Fatalf("message = %T, want RunControlMsg", msg)
@@ -997,9 +1003,9 @@ func TestResumeRunActivatesWorkspaceWhenNoActiveRun(t *testing.T) {
 	}
 }
 
-func TestResumeRunActivatesCreatedRun(t *testing.T) {
+func TestResumeRunDoesNotExposeCreatedRunDistinction(t *testing.T) {
 	be := newRecordingBE(t, common.RunStatePending)
-	msg := ResumeRun(be, "ws-1", "run-resume", "start created run")()
+	msg := ResumeRun(be, "ws-1")()
 	runMsg, ok := msg.(RunControlMsg)
 	if !ok {
 		t.Fatalf("message = %T, want RunControlMsg", msg)
@@ -1007,14 +1013,14 @@ func TestResumeRunActivatesCreatedRun(t *testing.T) {
 	if runMsg.Error != nil {
 		t.Fatalf("error = %v, want nil", runMsg.Error)
 	}
-	if runMsg.Run == nil || runMsg.Run.ID != "run-resume" {
-		t.Fatalf("run = %+v, want resumed created run", runMsg.Run)
+	if runMsg.Run == nil || runMsg.Run.ID != "run-new" {
+		t.Fatalf("run = %+v, want workspace activation result", runMsg.Run)
 	}
-	if len(be.activations) != 0 {
-		t.Fatalf("activations = %d, want resume command path", len(be.activations))
+	if len(be.activations) != 1 {
+		t.Fatalf("activations = %d, want workspace resume activation", len(be.activations))
 	}
-	if len(be.resumes) != 1 || be.resumes[0] != "run-resume" {
-		t.Fatalf("resumes = %v, want created run resume", be.resumes)
+	if len(be.resumes) != 0 || be.runCommands[0].ExpectedRunID != "" {
+		t.Fatalf("resumes/runCommands = %v/%+v, want no run-scoped distinction", be.resumes, be.runCommands)
 	}
 }
 

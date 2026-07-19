@@ -243,7 +243,7 @@ func (m AppModel) Init() tea.Cmd {
 	}
 	if m.initialGoal != "" && m.activeWorkspaceID != "" {
 		if isRunControlIntent(m.initialGoal) {
-			cmds = append(cmds, ResumeRun(m.be, m.activeWorkspaceID, "", ""))
+			cmds = append(cmds, ResumeRun(m.be, m.activeWorkspaceID))
 		} else {
 			cmds = append(cmds, SubmitGoal(m.be, m.activeWorkspaceID, m.initialGoal, m.dodItems))
 		}
@@ -826,7 +826,7 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 		m.appendTranscript("Input", text)
 		m.progress = progressSubmitting
 		m.progressText = "Resuming active run"
-		return m, ResumeRun(m.be, m.activeWorkspaceID, runID, text)
+		return m, ResumeRun(m.be, m.activeWorkspaceID)
 	}
 	m.cancelWorkspaceSelection()
 	return m.submitGoalText(text)
@@ -936,7 +936,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 	case "run":
 		m.addInputHistory(text)
 		args := strings.TrimSpace(strings.TrimPrefix(cmd, strings.Fields(cmd)[0]))
-		subcommand, rest := splitSlashSubcommand(args)
+		subcommand, _ := splitSlashSubcommand(args)
 		switch subcommand {
 		case "resume":
 			m.clearInput()
@@ -947,25 +947,25 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 			}
 			m.clearRunDisplayState()
 			m.lastError = nil
-			runID := m.activeWorkspaceRunID()
 			m.progress = progressSubmitting
-			if runID != "" {
+			if m.activeWorkspaceRunID() != "" {
 				m.progressText = "Resuming active run"
 			} else {
 				m.progressText = "Checking workspace run state"
 			}
-			return m, ResumeRun(m.be, m.activeWorkspaceID, runID, rest), true
-		case "restart":
+			return m, ResumeRun(m.be, m.activeWorkspaceID), true
+		case "restart": // Compatibility alias; TUI presents only /run resume.
 			m.clearInput()
 			m.cancelWorkspaceSelection()
+			if cmd := m.blockActiveWorkspaceResume(""); cmd != nil {
+				m.lastError = nil
+				return m, cmd, true
+			}
 			m.clearRunDisplayState()
 			m.lastError = nil
-			if rest != "" {
-				m.appendTranscript("Input", rest)
-			}
 			m.progress = progressSubmitting
-			m.progressText = "Restarting workspace run"
-			return m, RestartWorkspaceRun(m.be, m.activeWorkspaceID, rest), true
+			m.progressText = "Resuming workspace execution"
+			return m, ResumeRun(m.be, m.activeWorkspaceID), true
 		default:
 			m.lastError = fmt.Errorf("unknown run subcommand: %s", subcommand)
 			return m, nil, true

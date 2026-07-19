@@ -98,3 +98,39 @@ func TestSealedRunProviderTargetDoesNotDriftAfterWorkspacePreferenceChanges(t *t
 		t.Fatalf("sealed run target = %+v, want %+v", stored.RuntimeBootstrap, sealed)
 	}
 }
+
+func TestActiveRunProviderTargetStaleUsesDesiredActivationTarget(t *testing.T) {
+	sealed := runtimecontract.ProviderModelTarget{ProviderID: "provider-a", ModelID: "model-a"}
+	run := &runmodel.Run{
+		ID: "run-provider-target-stale",
+		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{
+			Activation: runtimecontract.RuntimeActivationContext{ProviderTarget: sealed},
+		},
+	}
+
+	stale, err := ActiveRunProviderTargetStale(context.Background(), run, nil, &sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stale {
+		t.Fatal("unchanged workspace provider target marked stale")
+	}
+
+	changed := runtimecontract.ProviderModelTarget{ProviderID: "provider-b", ModelID: "model-b"}
+	stale, err = ActiveRunProviderTargetStale(context.Background(), run, nil, &changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stale {
+		t.Fatal("changed workspace provider target did not require a new activation")
+	}
+
+	explicit := runtimecontract.ProviderModelTarget{ProviderID: "provider-c", ModelID: "model-c"}
+	stale, err = ActiveRunProviderTargetStale(context.Background(), run, &explicit, &sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stale {
+		t.Fatal("explicit provider target did not take precedence for stale detection")
+	}
+}
