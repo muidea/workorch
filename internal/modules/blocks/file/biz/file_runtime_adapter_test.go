@@ -89,6 +89,139 @@ func TestRuntimeAdapterAdmissibilityInventoryPrioritizesFocusTargetsWithinBound(
 	}
 }
 
+func TestRuntimeAdapterProbeAllowsSelectedNewFileWriteTargetWithoutMutation(t *testing.T) {
+	workspace := t.TempDir()
+	adapter := NewRuntimeAdapter()
+	inventory, err := adapter.AcquireRuntimeOperationAdmissibility(
+		workspace, "admissibility-file", []string{runtimecontract.RuntimeBlockKindPatchApply}, nil, 4,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inventory.TargetRefs) != 0 || len(inventory.SelectorRefs) != 1 || inventory.SelectorRefs[0] != runtimeFileSelectorWorkspaceRelativeNewTarget {
+		t.Fatalf("empty-workspace inventory = %+v, want bounded new-target selector", inventory)
+	}
+	patchType, content, target := "file_write", "package main\n", "main.go"
+	failure := adapter.ProbeRuntimeOperationFeasibility(workspace, inventory, runtimecontract.RuntimeOperation{
+		ID: "create-main", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{target},
+		Parameters: []runtimecontract.OperationParameter{
+			{Name: "targetRef", String: &target},
+			{Name: "patchType", String: &patchType},
+			{Name: "content", String: &content},
+		},
+	})
+	if failure != nil {
+		t.Fatalf("new file_write target rejected: %+v", failure)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, target)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("feasibility probe created target: %v", err)
+	}
+}
+
+func TestRuntimeAdapterProbeRejectsNewTargetWithoutOwnerSelector(t *testing.T) {
+	workspace := t.TempDir()
+	adapter := NewRuntimeAdapter()
+	inventory, err := adapter.AcquireRuntimeOperationAdmissibility(
+		workspace, "admissibility-file", []string{runtimecontract.RuntimeBlockKindPatchApply}, nil, 4,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory.SelectorRefs = nil
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	patchType, content, target := "file_write", "package main\n", "main.go"
+	failure := adapter.ProbeRuntimeOperationFeasibility(workspace, inventory, runtimecontract.RuntimeOperation{
+		ID: "create-main", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{target},
+		Parameters: []runtimecontract.OperationParameter{
+			{Name: "targetRef", String: &target},
+			{Name: "patchType", String: &patchType},
+			{Name: "content", String: &content},
+		},
+	})
+	if failure == nil || failure.Code != "operation_target_not_admissible" {
+		t.Fatalf("new target without selector failure = %+v", failure)
+	}
+}
+
+func TestRuntimeAdapterProbeNewTargetSelectorRejectsWorkspaceEscape(t *testing.T) {
+	workspace := t.TempDir()
+	adapter := NewRuntimeAdapter()
+	inventory, err := adapter.AcquireRuntimeOperationAdmissibility(
+		workspace, "admissibility-file", []string{runtimecontract.RuntimeBlockKindPatchApply}, nil, 4,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patchType, content, target := "file_write", "outside\n", "../outside.txt"
+	failure := adapter.ProbeRuntimeOperationFeasibility(workspace, inventory, runtimecontract.RuntimeOperation{
+		ID: "escape-workspace", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{target},
+		Parameters: []runtimecontract.OperationParameter{
+			{Name: "targetRef", String: &target},
+			{Name: "patchType", String: &patchType},
+			{Name: "content", String: &content},
+		},
+	})
+	if failure == nil || failure.Code != "operation_target_invalid" {
+		t.Fatalf("workspace escape failure = %+v", failure)
+	}
+}
+
+func TestRuntimeAdapterProbeNewTargetSelectorDoesNotAuthorizeExistingUnlistedTarget(t *testing.T) {
+	workspace := t.TempDir()
+	for _, name := range []string{"a.txt", "b.txt"} {
+		if err := os.WriteFile(filepath.Join(workspace, name), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	adapter := NewRuntimeAdapter()
+	inventory, err := adapter.AcquireRuntimeOperationAdmissibility(
+		workspace, "admissibility-file", []string{runtimecontract.RuntimeBlockKindPatchApply}, nil, 1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patchType, content, target := "file_write", "changed\n", "b.txt"
+	failure := adapter.ProbeRuntimeOperationFeasibility(workspace, inventory, runtimecontract.RuntimeOperation{
+		ID: "overwrite-unlisted", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{target},
+		Parameters: []runtimecontract.OperationParameter{
+			{Name: "targetRef", String: &target},
+			{Name: "patchType", String: &patchType},
+			{Name: "content", String: &content},
+		},
+	})
+	if failure == nil || failure.Code != "operation_target_not_admissible" {
+		t.Fatalf("existing unlisted target failure = %+v", failure)
+	}
+	current, err := os.ReadFile(filepath.Join(workspace, target))
+	if err != nil || string(current) != "b.txt\n" {
+		t.Fatalf("probe mutated existing target content=%q err=%v", current, err)
+	}
+}
+
+func TestRuntimeAdapterProbeRejectsMissingTextReplaceDespiteNewTargetSelector(t *testing.T) {
+	workspace := t.TempDir()
+	adapter := NewRuntimeAdapter()
+	inventory, err := adapter.AcquireRuntimeOperationAdmissibility(
+		workspace, "admissibility-file", []string{runtimecontract.RuntimeBlockKindPatchApply}, nil, 4,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patchType, oldText, newText, target := "text_replace", "old", "new", "main.go"
+	failure := adapter.ProbeRuntimeOperationFeasibility(workspace, inventory, runtimecontract.RuntimeOperation{
+		ID: "edit-missing", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{target},
+		Parameters: []runtimecontract.OperationParameter{
+			{Name: "targetRef", String: &target},
+			{Name: "patchType", String: &patchType},
+			{Name: "oldText", String: &oldText},
+			{Name: "newText", String: &newText},
+		},
+	})
+	if failure == nil || failure.Code != "operation_target_missing" {
+		t.Fatalf("missing text_replace target failure = %+v", failure)
+	}
+}
+
 func stringPointer(value string) *string { return &value }
 
 func TestRuntimeAdapterReadReturnsContentAndHash(t *testing.T) {

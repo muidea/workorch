@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	defaultMaxReadBytes = 64 * 1024
-	defaultMaxEntries   = 500
+	defaultMaxReadBytes                           = 64 * 1024
+	defaultMaxEntries                             = 500
+	runtimeFileSelectorWorkspaceRelativeNewTarget = "workspace-relative-new-file-target"
 )
 
 type RuntimeAdapter struct{}
@@ -102,11 +103,17 @@ func (a *RuntimeAdapter) AcquireRuntimeOperationAdmissibility(workspaceDirectory
 		return runtimemodel.RuntimeOperationAdmissibility{}, common.ErrInvalidArgument
 	}
 	inventory := runtimemodel.RuntimeOperationAdmissibility{
-		PrerequisiteID:   prerequisiteID,
-		OwnerModuleID:    runtimemodel.RuntimeModuleFile,
-		OperationKinds:   append([]string(nil), operationKinds...),
-		TargetRefs:       boundedAdmissibilityTargetRefs(requiredTargetRefs, manifest.TargetRefs, maxItems),
-		ConstraintRefs:   []string{"workspace-relative-path", "regular-file-required-for-read-edit-and-existing-patch-target"},
+		PrerequisiteID: prerequisiteID,
+		OwnerModuleID:  runtimemodel.RuntimeModuleFile,
+		OperationKinds: append([]string(nil), operationKinds...),
+		TargetRefs:     boundedAdmissibilityTargetRefs(requiredTargetRefs, manifest.TargetRefs, maxItems),
+		SelectorRefs:   fileAdmissibilitySelectorRefs(operationKinds),
+		ConstraintRefs: []string{
+			"workspace-relative-path",
+			"existing-target-must-be-listed",
+			"new-target-requires-owner-selector",
+			"regular-file-required-for-read-edit-and-existing-patch-target",
+		},
 		ObservedRevision: manifest.Revision,
 	}
 	inventory.SnapshotID = runtimemodel.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
@@ -114,6 +121,16 @@ func (a *RuntimeAdapter) AcquireRuntimeOperationAdmissibility(workspaceDirectory
 		return runtimemodel.RuntimeOperationAdmissibility{}, err
 	}
 	return inventory, nil
+}
+
+func fileAdmissibilitySelectorRefs(operationKinds []string) []string {
+	for _, kind := range operationKinds {
+		switch runtimemodel.CanonicalRuntimeBlockKind(kind) {
+		case runtimemodel.StepKindFileWrite, runtimemodel.RuntimeBlockKindPatchApply, runtimemodel.RuntimeBlockKindPatchPreview:
+			return []string{runtimeFileSelectorWorkspaceRelativeNewTarget}
+		}
+	}
+	return nil
 }
 
 func boundedAdmissibilityTargetRefs(required, available []string, maxItems int) []string {
@@ -155,23 +172,29 @@ func (a *RuntimeAdapter) ProbeRuntimeOperationFeasibility(workspaceDirectory str
 	if targetRef == "" {
 		return fileOperationInfeasible(operation, "operation_target_missing", "runtime file operation requires a concrete workspace-relative target", nil)
 	}
-	if !fileInventoryContainsTarget(inventory, targetRef) {
-		return fileOperationInfeasible(operation, "operation_target_not_admissible", "runtime file operation target is absent from the owner admissibility inventory", []string{targetRef})
-	}
 	_, target, rel, err := guardedWorkspacePath(workspaceDirectory, targetRef, false)
 	if err != nil {
 		return fileOperationInfeasible(operation, "operation_target_invalid", err.Error(), []string{targetRef})
 	}
 	info, statErr := os.Stat(target)
 	requiresRegular := fileOperationRequiresRegularTarget(operation)
-	if statErr == nil && requiresRegular && !info.Mode().IsRegular() {
-		return fileOperationInfeasible(operation, "operation_target_not_regular", "runtime file operation target is not a regular file", []string{filepath.ToSlash(rel)})
+	if statErr == nil {
+		if !fileInventoryContainsTarget(inventory, targetRef) {
+			return fileOperationInfeasible(operation, "operation_target_not_admissible", "runtime file operation target is absent from the owner admissibility inventory", []string{targetRef})
+		}
+		if requiresRegular && !info.Mode().IsRegular() {
+			return fileOperationInfeasible(operation, "operation_target_not_regular", "runtime file operation target is not a regular file", []string{filepath.ToSlash(rel)})
+		}
+		return nil
 	}
 	if statErr != nil && !os.IsNotExist(statErr) {
 		return fileOperationInfeasible(operation, "operation_target_unreadable", statErr.Error(), []string{filepath.ToSlash(rel)})
 	}
-	if statErr != nil && fileOperationRequiresExistingTarget(operation) {
+	if fileOperationRequiresExistingTarget(operation) {
 		return fileOperationInfeasible(operation, "operation_target_missing", "runtime file operation requires an existing regular file", []string{filepath.ToSlash(rel)})
+	}
+	if !fileInventoryContainsTarget(inventory, targetRef) && !fileInventoryAllowsNewTarget(inventory) {
+		return fileOperationInfeasible(operation, "operation_target_not_admissible", "runtime file operation target is absent from the owner admissibility inventory", []string{targetRef})
 	}
 	return nil
 }
@@ -180,6 +203,15 @@ func fileInventoryContainsTarget(inventory runtimemodel.RuntimeOperationAdmissib
 	targetRef = strings.TrimSpace(targetRef)
 	for _, value := range inventory.Normalized().TargetRefs {
 		if value == targetRef {
+			return true
+		}
+	}
+	return false
+}
+
+func fileInventoryAllowsNewTarget(inventory runtimemodel.RuntimeOperationAdmissibility) bool {
+	for _, value := range inventory.Normalized().SelectorRefs {
+		if value == runtimeFileSelectorWorkspaceRelativeNewTarget {
 			return true
 		}
 	}
