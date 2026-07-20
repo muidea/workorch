@@ -29,8 +29,8 @@ Last Updated: 2026-07-20
 
 - Runtime 核心规则 / V2 映射：
   [runtime-stage-contract.md](00-core/runtime-stage-contract.md)
-- 当前 Runtime V2 candidate admission / attempt transaction 收口：
-  [runtime-v2-candidate-admission-transaction-closure.md](70-roadmap/active/runtime-v2-candidate-admission-transaction-closure.md)
+- Runtime V2 candidate admission / attempt transaction 完成记录：
+  [runtime-v2-candidate-admission-transaction-closure.md](90-archive/completed/runtime-v2-candidate-admission-transaction-closure.md)
 - 当前仓库事实 / 未关项：
   [current-state.md](01-overview/current-state.md),
   [current-unclosed-matrix.md](01-overview/current-unclosed-matrix.md),

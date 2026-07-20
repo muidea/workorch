@@ -49,6 +49,7 @@ Last Updated: 2026-07-20
 | `runtime-v2-prerequisite-freshness-component-closure-matrix.md` | 组件 owner、独立回归与交接门完成记录 |
 | `runtime-v2-system-component-closure-supplement.md` | Resume/Decision、模型封存、provider 失败与 read surface 收口 |
 | `runtime-v2-residual-code-closure-runbook.md` | 残余 owner/runtime cards 的执行与验收记录 |
+| `runtime-v2-candidate-admission-transaction-closure.md` | RCA-1 completed：owner-local typed admission、attempt 0/1 atomic closure、terminal invariant、restart/crash、真实 provider 与 deployed partial-replay acceptance 通过 |
 
 ## 2026-07-14 Runtime V2 Docs Refresh Ingest
 

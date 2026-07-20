@@ -92,12 +92,17 @@ Last Updated: 2026-07-20
 
 Runtime V2-only 主链骨架、RVC-R5～R15 foundation、RVC-R17～R26 与 RPA-1 首次 inventory/selector/feasibility 切片已完成。2026-07-18 的 deployed rerun 已将 capability-state canonical owner 与 discriminated operation variant 进入 sealed authority；随后发现的 `requiredOperationRef` provider-schema/strict-DTO 字段漂移也已收口为 typed mapping 和 file-gate 回归。2026-07-20 的 RPF-1～5 已通过 owner-local、file-backed restart/crash、CI-safe 和 fresh deployed bounded acceptance：两个脚本拥有的工作区均 `completed/accepted`，随后清理恢复为单一真实工作区。第一次 live attempt 暴露的 Git verifier 误判已以 accepted-receipt-only 合同和 hermetic self-test 收口；证据见[归档 completion record](../90-archive/completed/runtime-v2-prerequisite-freshness-closure.md)。当前剩余主要是：
 
-1. **Candidate admission transaction（RCA-1）**：2026-07-20 对 `69a2486f97db` 的 fresh live 核对确认 provider/model 与 projection 健康，但 `run-009` 的 partial rejected-shape replay 以普通 error 越过 SM-3，进入 SM-4 drive failure并形成 terminal+pending attempt aggregate。需将 active rejected shape 与 candidate admission authority 从 contract package 收回 Orchestrator，以 typed disposition + controller CAS 原子闭合 attempt 0/1，删除字符串分类，并补齐 terminal transaction invariant。当前不要求兼容该异常历史 aggregate；细化方案见 [runtime-v2-candidate-admission-transaction-closure.md](../70-roadmap/active/runtime-v2-candidate-admission-transaction-closure.md)。
-2. **组件边界 / 生命周期（ARCH-1）**：SM-4 startup recovery、channel-free process lifecycle、owner Service facade、repository DTO 与 test-data isolation 均已有实现/回归证据；2026-07-19 的 go-multi-module-dev 审计发现的共享 Base Biz 缺失和 framework Module 根直接持有 EventHub，现已迁移到 component-local Biz，且本地 structural/race/file-backed 门禁已重跑。22 个组件的职责、typed 交互合同、禁止边界和可单独执行的回归命令已固化在 `70-roadmap/active/component-contract-and-regression-closure-matrix.md`。仅待提供重启后的外部目标与 `active_no_dispatch`、`active_sealed_dispatch`、`terminal_delivery_pending` 三类 fixture manifest，以执行 deployed SM-4 matrix；workspace 删除后的迟到投影还必须验证 `/readyz` 恢复 ready，不能以放宽 readiness 绕过。
-3. **运维切换（OPS-1）**：真实生产目录 `runtime-v1-retirement --apply` + clean build 维护窗口（过程日记已归档，不在 active 放长文）。
-4. **可选验证（OPT-1）**：file-patch `apply + validation + DoD closeout` 的 deployed live 一次。
-5. **延期候选**：LLM context budget 高级项见 `70-roadmap/candidates/`，**不占 active**。
-6. **文档维护**：权威层术语抽查、个别 block readme 措辞、archive 索引（见 matrix）。
+1. **组件边界 / 生命周期（ARCH-1）**：SM-4 startup recovery、channel-free process lifecycle、owner Service facade、repository DTO 与 test-data isolation 均已有实现/回归证据；2026-07-19 的 go-multi-module-dev 审计发现的共享 Base Biz 缺失和 framework Module 根直接持有 EventHub，现已迁移到 component-local Biz，且本地 structural/race/file-backed 门禁已重跑。22 个组件的职责、typed 交互合同、禁止边界和可单独执行的回归命令已固化在 `70-roadmap/active/component-contract-and-regression-closure-matrix.md`。仅待提供重启后的外部目标与 `active_no_dispatch`、`active_sealed_dispatch`、`terminal_delivery_pending` 三类 fixture manifest，以执行 deployed SM-4 matrix；workspace 删除后的迟到投影还必须验证 `/readyz` 恢复 ready，不能以放宽 readiness 绕过。
+2. **运维切换（OPS-1）**：真实生产目录 `runtime-v1-retirement --apply` + clean build 维护窗口（过程日记已归档，不在 active 放长文）。
+3. **可选验证（OPT-1）**：file-patch `apply + validation + DoD closeout` 的 deployed live 一次。
+4. **延期候选**：LLM context budget 高级项见 `70-roadmap/candidates/`，**不占 active**。
+5. **文档维护**：权威层术语抽查、个别 block readme 措辞、archive 索引（见 matrix）。
+
+2026-07-20 RCA-1 已由 `1ca44996` 完成：candidate admission authority 位于
+Orchestrator，full/partial replay、attempt 0/1、terminal closure 与 freshness priority
+均使用 typed CAS transition；真实 provider fresh Run 和隔离 deployed partial-replay Run
+均无 pending attempt、无 internal misalignment、无人工 Resume。完成记录见
+[runtime-v2-candidate-admission-transaction-closure.md](../90-archive/completed/runtime-v2-candidate-admission-transaction-closure.md)。
 
 2026-07-16 已将 active 中假活跃产品/审计日记、dated live 记录与 `60-verification/artifacts` 清理出当前入口；检索见 [90-archive](../90-archive/completed/overview.md)。
 

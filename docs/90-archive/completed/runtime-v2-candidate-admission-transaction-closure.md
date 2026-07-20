@@ -1,6 +1,6 @@
 # Runtime V2 Candidate Admission Transaction Closure
 
-Status: active
+Status: completed
 
 Type: remediation plan
 
@@ -8,8 +8,8 @@ Last Updated: 2026-07-20
 
 ## Implementation Checkpoint
 
-2026-07-20 current worktree has completed CA-1 through CA-7 and the
-deterministic portion of CA-8:
+2026-07-20 commit `1ca44996c6d5c1b98ab6f355e696c2c92cc02272` completed
+CA-1 through CA-8:
 
 - production admission has only typed `AdmitCandidateProposal` and
   `AdmitAndSealCandidateAttempt` transitions; the former direct proposal/accept
@@ -23,7 +23,7 @@ deterministic portion of CA-8:
 - current schema rejects historical terminal-plus-pending and unreduced
   attempt-1-failed aggregates. There is intentionally no compatibility,
   migration, or automatic repair path;
-- a subsequent fresh deployed `run-001` exposed a coordinated SM-2/SM-3/SM-4
+- an earlier fresh deployed `run-001` exposed a coordinated SM-2/SM-3/SM-4
   ordering gap: both provider responses reached the sealed 4096-token output
   ceiling and ended with `unexpected EOF`; attempt 1 was correctly persisted as
   failed, but prerequisite freshness reacquisition won before the determined
@@ -39,11 +39,50 @@ deterministic portion of CA-8:
   terminal drive failure plus a pending candidate transaction, the same-contract
   two-attempt drive sequence, and output-limit truncation classification.
 
-The remaining CA-8 item is the explicitly external fresh deployed acceptance
-below. It must use a new Runtime V2 Run, never the pre-closure `run-009` or the
-pre-priority-fix `run-001` aggregate. The deterministic verifier includes typed
-admission, partial-replay/restart, freshness-priority, atomic terminal closure,
-and output-limit truncation coverage.
+CA-8 is closed by two complementary deployed evidence layers:
+
+1. **Real provider / fresh storage acceptance** — fresh workspace
+   `ws-f5571c800e7fefab`, Run `run-001`, activation target
+   `ai-proxy / DeepSeek-V4-Flash`:
+   - source/projected revision remained aligned at `73/73`;
+   - an output-ceiling `unexpected EOF` was persisted as typed
+     `candidate_response_truncated`, and attempt 1 corrected it without stable
+     prefix drift;
+   - the final same-contract replay attempts closed as
+     `candidate_replays_rejected_shape` and deterministically produced
+     `candidate_retry_exhausted`;
+   - terminal aggregate revision `54` had no pending attempt or active dispatch,
+     workspace `activeRunId` was released, and no
+     `runtime_internal_contract_misalignment` or manual Resume occurred.
+2. **Isolated deployed-process partial replay acceptance** — temporary workspace
+   `ws-186cca368f70b3fa`, Run `run-001`, provider
+   `verify-candidate-admission-20260720t085238z / verify-model`:
+   - a sealed `patch/apply` reached the File owner and was rejected with
+     `unified_diff_apply_conflict`, creating an active rejected shape;
+   - the next authority contract
+     `authority-contract-72a7d69f4ea6ec1a9914` attempt 0 returned one replayed
+     plus one structurally new operation and atomically failed with
+     `candidate_partially_replays_rejected_shape`;
+   - attempt 1 received that exact typed failure, reused
+     `candidate-prefix-e94469a93233896b9662`, replayed again, and atomically
+     closed with `candidate_replays_rejected_shape` plus terminal
+     `candidate_retry_exhausted`;
+   - state revision `29` was stable for three seconds, pending attempt count was
+     zero, workspace active Run was released, projection stayed aligned at
+     `73/73`, and no internal-misalignment classification appeared;
+   - the verifier restored the original LLM configuration and purged its
+     temporary workspace. Retained local evidence:
+     `/tmp/workorch-candidate-admission-live/20260720T085238Z/summary.json`.
+
+The repeated `run-001` label is not aggregate reuse: Run IDs are scoped by
+workspace and restart from one after cleared storage. Both acceptance runs used
+new workspace identity and new persisted bootstrap/activation.
+
+Direct owner-local, cross-component and file-backed restart tests cover typed
+admission, partial replay after restart, freshness priority, atomic terminal
+closure and output-limit truncation. All Closure Criteria are satisfied; this
+document is retained as a completion record and moved to
+`docs/90-archive/completed/`.
 
 ## Purpose
 
@@ -651,7 +690,9 @@ reacquire；不得消费 attempt 1 或 candidate exhaustion。
 
 **Fresh deployed acceptance**
 
-- 使用最新 build新建 fresh Runtime V2 Run，不复用 `run-009` 或 `run-001`；
+- 使用最新 build新建 fresh Runtime V2 Run，不复用历史 workspace/run aggregate；清空
+  storage 后 Run sequence 可重新从 `run-001` 开始，必须以 workspace/run scoped identity
+  判断是否为新 aggregate；
 - workspace activation中记录的 provider/model必须与真实 LLM request一致；
 - 构造至少一次 partial replay attempt 0，确认 attempt 1收到 typed failure并继续；
 - 若 provider response达到 sealed output token ceiling并发生 JSON truncation，必须记录
