@@ -325,6 +325,7 @@ owner projection lane (one-way derived delivery)
 权威与约束：
 
 - `DriveRuntimeV2Command/Result` 是唯一同步推进合同；application 不持有 continuation queue。
+- startup recovery inventory 由 Run owner 按 typed state 分类：`active + RuntimeStateRecord` 进入 existing aggregate recovery；`active + RuntimeBootstrap + no RuntimeStateRecord` 进入 `active_no_dispatch`，由同一 drive 一次性初始化 aggregate。`runtimeContractVersion` 仅为审计字段，不能作为 inventory 或 Runtime V2 路由门槛；既无 bootstrap 也无 aggregate 的 legacy Run 不得被 Runtime V2 推断或接管。
 - drive 的每个非等待、非终态 transition 必须增加 persisted `StateRevision`；无 revision 进展立即 fail-fast。
 - drive transition guard 必须有界；超过 guard 生成 typed no-progress/runtime failure，不允许进程内无限循环。
 - singleflight key 必须包含 workspace/run scope；重复 Start/Resume/resolution continuation 复用当前 drive，不能并发生成伪 CAS failure terminal。

@@ -174,11 +174,27 @@ func buildRuntimeV2RecoveryInventory(runs []*runmodel.Run, cmd runevents.QueryRu
 	cursor := strings.TrimSpace(cmd.Cursor)
 	items := make([]runevents.RuntimeV2RecoveryInventoryItem, 0)
 	for _, run := range runs {
-		if run == nil || run.RuntimeContractVersion != runtimemodel.RuntimeContractVersionV2 || run.RuntimeState == nil {
+		if run == nil {
 			continue
 		}
 		key := string(run.WorkspaceID) + "\x00" + string(run.ID)
 		if cursor != "" && key <= cursor {
+			continue
+		}
+		// RuntimeContractVersion is audit metadata, not a V1/V2 routing gate.
+		// An active Run with a persisted typed bootstrap but no aggregate is the
+		// first SM-4 recovery state: DriveRuntimeV2 initializes it exactly once
+		// before it can acquire prerequisites or seal a dispatch. Keep legacy
+		// active Runs (which have neither bootstrap nor aggregate) out of the V2
+		// inventory rather than synthesizing authority from their old state.
+		if run.RuntimeState == nil {
+			if run.State == common.RunStateActive && run.RuntimeBootstrap != nil {
+				items = append(items, runevents.RuntimeV2RecoveryInventoryItem{
+					WorkspaceID: run.WorkspaceID,
+					RunID:       run.ID,
+					Class:       runevents.RuntimeV2RecoveryActiveNoDispatch,
+				})
+			}
 			continue
 		}
 		state := run.RuntimeState

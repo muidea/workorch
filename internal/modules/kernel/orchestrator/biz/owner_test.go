@@ -89,6 +89,40 @@ func TestGMMR1SM4OrchestratorStartFailsWithoutRecoveryInventory(t *testing.T) {
 	}
 }
 
+func TestGMMR1SM4StartupRecoverySchedulesBootstrapOnlyActiveRun(t *testing.T) {
+	deps := moduleContractDependencies()
+	background := &recordingBackgroundRoutine{}
+	deps.BackgroundRoutine = background
+	recoveryObserver := magicevent.NewSimpleObserver(runevents.CommandDestination, deps.CommandHub)
+	recoveryObserver.Subscribe(runevents.TopicRunCommandRuntimeV2RecoveryInventory, func(_ magicevent.Event, result magicevent.Result) {
+		if result != nil {
+			result.Set(runevents.QueryRuntimeV2RecoveryInventoryResult{Items: []runevents.RuntimeV2RecoveryInventoryItem{{
+				WorkspaceID: "ws-bootstrap-only",
+				RunID:       "run-bootstrap-only",
+				Class:       runevents.RuntimeV2RecoveryActiveNoDispatch,
+			}}}, nil)
+		}
+	})
+	t.Cleanup(func() {
+		recoveryObserver.Unsubscribe(runevents.TopicRunCommandRuntimeV2RecoveryInventory)
+		deps.CommandHub.Terminate(context.Background())
+	})
+
+	module := New()
+	if err := module.Configure(deps); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if background.asyncFunctionCalls != 1 || background.lastAsyncFunction == nil {
+		t.Fatalf("startup recovery schedules = %d, want one bootstrap-only drive", background.asyncFunctionCalls)
+	}
+	if err := module.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+}
+
 func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 	base := moduleContractDependencies()
 	tests := []struct {

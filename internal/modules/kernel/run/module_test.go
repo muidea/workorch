@@ -26,7 +26,18 @@ func newRunModuleTestHub(t *testing.T) magicevent.Hub {
 }
 
 func TestBuildRuntimeV2RecoveryInventoryClassifiesAuthorityState(t *testing.T) {
+	bootstrapOnly := runtimecontract.RuntimeBootstrap{SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent}
 	runs := []*runmodel.Run{
+		// A bootstrap-only activation is a valid SM-4 initialization recovery
+		// target even before the first aggregate record has been persisted.
+		{ID: "run-bootstrap-only", WorkspaceID: "ws-0", State: common.RunStateActive, RuntimeBootstrap: &bootstrapOnly},
+		// RuntimeContractVersion is audit metadata. A persisted aggregate remains
+		// recoverable even if an older record did not carry that marker.
+		{ID: "run-audit-version-blank", WorkspaceID: "ws-0", State: common.RunStateActive,
+			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 1, Decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceStateChange}}},
+		// An active legacy record still has no typed source from which Runtime V2
+		// could initialize and must not enter the Runtime V2 inventory.
+		{ID: "run-legacy", WorkspaceID: "ws-0", State: common.RunStateActive},
 		{ID: "run-active", WorkspaceID: "ws-1", State: common.RunStateActive, RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
 			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 1, Decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceStateChange}}},
 		{ID: "run-sealed", WorkspaceID: "ws-1", State: common.RunStateActive, RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
@@ -37,14 +48,17 @@ func TestBuildRuntimeV2RecoveryInventoryClassifiesAuthorityState(t *testing.T) {
 			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 4, Decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionComplete}, Facts: runtimecontract.RuntimeFacts{Recovery: runtimecontract.RuntimeRecoveryLedger{TerminalDeliveryAttempts: 2}}}},
 	}
 	result := runbiz.BuildRuntimeV2RecoveryInventory(runs, runevents.QueryRuntimeV2RecoveryInventoryCommand{Limit: 10})
-	if len(result.Items) != 4 {
+	if len(result.Items) != 6 {
 		t.Fatalf("recovery items = %+v", result.Items)
 	}
 	classes := map[common.RunID]runevents.RuntimeV2RecoveryClass{}
 	for _, item := range result.Items {
 		classes[item.RunID] = item.Class
 	}
-	if classes["run-active"] != runevents.RuntimeV2RecoveryActiveNoDispatch || classes["run-sealed"] != runevents.RuntimeV2RecoveryActiveSealedDispatch ||
+	if classes["run-bootstrap-only"] != runevents.RuntimeV2RecoveryActiveNoDispatch ||
+		classes["run-audit-version-blank"] != runevents.RuntimeV2RecoveryActiveNoDispatch ||
+		classes["run-legacy"] != "" ||
+		classes["run-active"] != runevents.RuntimeV2RecoveryActiveNoDispatch || classes["run-sealed"] != runevents.RuntimeV2RecoveryActiveSealedDispatch ||
 		classes["run-blocked"] != runevents.RuntimeV2RecoveryBlockedGovernance || classes["run-terminal-pending"] != runevents.RuntimeV2RecoveryTerminalDeliveryPending {
 		t.Fatalf("recovery classes = %+v", classes)
 	}
