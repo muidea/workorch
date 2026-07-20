@@ -34,8 +34,11 @@ func TestNewRuntimeOperationReceiptCarriesExecutionFence(t *testing.T) {
 		ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
 	}
 	receipt := NewRuntimeOperationReceipt(execution, "op-1", runtimecontract.RuntimeOperationExecutionStatusAccepted, nil,
-		runtimecontract.RuntimeOperationEvidence{Summary: "changed"}, nil, nil)
+		runtimecontract.RuntimeOperationEvidence{Summary: "changed"}, nil, nil, "2026-07-20T00:00:00Z")
 	if receipt.ExecutionKey != execution.ExecutionKey || receipt.Fence != execution.Fence {
 		t.Fatalf("receipt identity = %+v", receipt)
+	}
+	if receipt.CompletedAt != "2026-07-20T00:00:00Z" {
+		t.Fatalf("completedAt = %q", receipt.CompletedAt)
 	}
 }

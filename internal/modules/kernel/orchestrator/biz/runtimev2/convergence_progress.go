@@ -23,6 +23,7 @@ func RuntimeConvergenceProgressSignature(aggregate RuntimeAggregate) string {
 		Failure                    *runtimecontract.FailureFact
 		Prerequisites              runtimecontract.PrerequisiteState
 		Repair                     runtimecontract.RuntimeRepairLedger
+		RepairDirective            *runtimecontract.RuntimeRepairDirective
 		Recovery                   runtimecontract.RuntimeRecoveryLedger
 		FreshnessReacquireCoverage []common.CoverageWorkItemID
 		PrerequisiteObservations   []runtimecontract.RuntimePrerequisiteObservation
@@ -33,6 +34,7 @@ func RuntimeConvergenceProgressSignature(aggregate RuntimeAggregate) string {
 		Action                     runtimecontract.RuntimeAction
 		RequiredOutput             runtimecontract.RequiredOutputContract
 		Terminal                   *runtimecontract.TerminalOutcome
+		CandidateAdmissions        []runtimeConvergenceCandidateAdmission
 		ActiveDispatch             *runtimeConvergenceDispatchProgress
 		CompletedDispatches        []runtimeConvergenceDispatchProgress
 		GovernanceRequests         []runtimecontract.RuntimeGovernanceRequestRecord
@@ -40,7 +42,7 @@ func RuntimeConvergenceProgressSignature(aggregate RuntimeAggregate) string {
 	}{
 		Focus: facts.Focus, RemainingFocuses: facts.RemainingFocuses,
 		EvidenceRevision: facts.EvidenceRevision, Failure: facts.Failure,
-		Prerequisites: facts.Prerequisites, Repair: facts.Repair, Recovery: facts.Recovery,
+		Prerequisites: facts.Prerequisites, Repair: facts.Repair, RepairDirective: facts.RepairDirective, Recovery: facts.Recovery,
 		FreshnessReacquireCoverage: facts.FreshnessReacquireCoverage,
 		PrerequisiteObservations:   facts.Resources.PrerequisiteObservations,
 		PrerequisiteInvalidations:  append([]runtimecontract.RuntimePrerequisiteInvalidationRecord(nil), aggregate.PrerequisiteInvalidations...),
@@ -57,6 +59,19 @@ func RuntimeConvergenceProgressSignature(aggregate RuntimeAggregate) string {
 	for _, dispatch := range aggregate.CompletedDispatches {
 		progress.CompletedDispatches = append(progress.CompletedDispatches, runtimeConvergenceDispatchProgressFrom(dispatch))
 	}
+	for _, attempt := range aggregate.CandidateAttempts {
+		if attempt.Proposal == nil && len(attempt.Feasibilities) == 0 {
+			continue
+		}
+		value := runtimeConvergenceCandidateAdmission{
+			AuthorityContractID: attempt.AuthorityContractID, Transaction: attempt.Transaction,
+			Feasibilities: append([]runtimecontract.RuntimeCandidateFeasibilityRecord(nil), attempt.Feasibilities...),
+		}
+		if attempt.Proposal != nil {
+			value.ProposalHash = runtimecontract.StableRuntimeCandidateHash(*attempt.Proposal)
+		}
+		progress.CandidateAdmissions = append(progress.CandidateAdmissions, value)
+	}
 	payload, _ := json.Marshal(progress)
 	digest := sha256.Sum256(payload)
 	return hex.EncodeToString(digest[:])
@@ -66,6 +81,16 @@ type runtimeConvergenceDispatchProgress struct {
 	CandidateHash         string
 	State                 DispatchState
 	CompletedOperationIDs []string
+}
+
+// runtimeConvergenceCandidateAdmission includes the persisted SM-3 proposal
+// and owner feasibility evidence, while deliberately excluding attempt number,
+// state and provider failure bookkeeping.
+type runtimeConvergenceCandidateAdmission struct {
+	AuthorityContractID string
+	Transaction         runtimecontract.AuthorityTransaction
+	ProposalHash        string
+	Feasibilities       []runtimecontract.RuntimeCandidateFeasibilityRecord
 }
 
 func runtimeConvergenceDispatchProgressFrom(dispatch SealedDispatch) runtimeConvergenceDispatchProgress {

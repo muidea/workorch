@@ -226,8 +226,8 @@ func TestRuntimeV2MainlineRequestsAndSealsTypedCandidate(t *testing.T) {
 	fileObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
 	fileObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteFileEditOperation, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.ExecuteFileEditOperationCommand)
-		receipt := orchestratorevents.NewRuntimeOperationReceipt(command.Execution, command.OperationID, runtimecontract.RuntimeOperationExecutionStatusAccepted, command.TargetRefs, runtimecontract.RuntimeOperationEvidence{}, nil, nil)
-		committed, err := orchestratorevents.CommitPersistedRuntimeOperationReceipt(event.Context(), hub, runtimecontract.RuntimeModuleFile, command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+		receipt := orchestratorevents.NewRuntimeOperationReceipt(command.Execution, command.OperationID, runtimecontract.RuntimeOperationExecutionStatusAccepted, command.TargetRefs, runtimecontract.RuntimeOperationEvidence{}, nil, nil, "2026-07-20T00:00:00Z")
+		committed, err := commitRuntimeOperationReceiptForTest(event.Context(), hub, runtimecontract.RuntimeModuleFile, command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
 		if err != nil {
 			t.Errorf("commit owner receipt: %v", err)
 			return

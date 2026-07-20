@@ -207,6 +207,9 @@ func (a *RuntimeAdapter) ProbeRuntimeOperationFeasibilityWithObservation(workspa
 		if requiresRegular && !info.Mode().IsRegular() {
 			return fileOperationInfeasible(operation, "operation_target_not_regular", "runtime file operation target is not a regular file", []string{filepath.ToSlash(rel)}), nil
 		}
+		if failure := a.probePatchFeasibility(workspaceDirectory, operation, filepath.ToSlash(rel)); failure != nil {
+			return failure, nil
+		}
 		return nil, nil
 	}
 	if statErr != nil && !os.IsNotExist(statErr) {
@@ -218,7 +221,49 @@ func (a *RuntimeAdapter) ProbeRuntimeOperationFeasibilityWithObservation(workspa
 	if !fileInventoryContainsTarget(inventory, targetRef) && !fileInventoryAllowsNewTarget(inventory) {
 		return fileOperationInfeasible(operation, "operation_target_not_admissible", "runtime file operation target is absent from the owner admissibility inventory", []string{targetRef}), nil
 	}
+	if failure := a.probePatchFeasibility(workspaceDirectory, operation, filepath.ToSlash(rel)); failure != nil {
+		return failure, nil
+	}
 	return nil, nil
+}
+
+// probePatchFeasibility uses the same patch parser and in-memory apply path as
+// execution, but never writes or creates a receipt. This lets the File owner
+// reject an invalid unified diff before SM-3 seals a durable dispatch.
+func (a *RuntimeAdapter) probePatchFeasibility(workspaceDirectory string, operation runtimemodel.RuntimeOperation, targetRef string) *runtimemodel.FailureFact {
+	if operation.Kind != runtimemodel.RuntimeBlockKindPatchApply && operation.Kind != runtimemodel.RuntimeBlockKindPatchPreview {
+		return nil
+	}
+	patchType := runtimeOperationParameterString(operation, "patchType")
+	if patchType != patchTypeUnifiedDiff {
+		return nil
+	}
+	preview, err := a.PreviewPatch(PatchApplyRequest{
+		WorkspaceDirectory: workspaceDirectory, TargetRef: targetRef, PatchType: patchType,
+		Diff: runtimeOperationParameterString(operation, "diff"), BaseHash: runtimeOperationParameterString(operation, "baseHash"),
+		Summary: runtimeOperationParameterString(operation, "summary"),
+	})
+	if err == nil {
+		return nil
+	}
+	code := strings.TrimSpace(preview.FailureCode)
+	if code == "" {
+		code = "unified_diff_infeasible"
+	}
+	message := strings.TrimSpace(preview.FailureMessage)
+	if message == "" {
+		message = err.Error()
+	}
+	return fileOperationInfeasible(operation, code, message, []string{targetRef})
+}
+
+func runtimeOperationParameterString(operation runtimemodel.RuntimeOperation, name string) string {
+	for _, parameter := range operation.Parameters {
+		if parameter.Name == name && parameter.String != nil {
+			return strings.TrimSpace(*parameter.String)
+		}
+	}
+	return ""
 }
 
 func fileInventoryContainsTarget(inventory runtimemodel.RuntimeOperationAdmissibility, targetRef string) bool {

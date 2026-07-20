@@ -81,7 +81,7 @@ func (m *Biz) handleWebOperation(event magicevent.Event, result magicevent.Resul
 		setCapabilityError(result, err)
 		return
 	}
-	if receipt, found, err := orchestratorevents.QueryPersistedRuntimeOperationReceipt(event.Context(), m.EventHub(), ModuleID, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution); err != nil {
+	if receipt, found, err := m.queryRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution); err != nil {
 		setCapabilityError(result, err)
 		return
 	} else if found {
@@ -141,8 +141,8 @@ func (m *Biz) handleWebOperation(event magicevent.Event, result magicevent.Resul
 			observation.Changed = true
 		}
 	}
-	receipt := orchestratorevents.NewRuntimeOperationReceiptWithObservation(command.Execution, command.OperationID, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, governance, observation)
-	committed, err := orchestratorevents.CommitPersistedRuntimeOperationReceipt(event.Context(), m.EventHub(), ModuleID, command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, governance, observation)
+	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
 	if err != nil {
 		setCapabilityError(result, err)
 		return

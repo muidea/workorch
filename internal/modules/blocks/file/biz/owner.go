@@ -93,7 +93,8 @@ func (m *Biz) handleFileListOperation(event magicevent.Event, result magicevent.
 		setPrerequisiteError(result, err)
 		return
 	}
-	if receipt, found, handled := m.queryRuntimeOperationReceipt(event.Context(), result, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution); handled {
+	if receipt, found, err := m.queryRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution); err != nil {
+		setPrerequisiteError(result, err)
 		return
 	} else if found {
 		status, evidence, failure, _ := orchestratorevents.RuntimeOperationResultFromReceipt(receipt)
@@ -124,11 +125,13 @@ func (m *Biz) handleFileListOperation(event magicevent.Event, result magicevent.
 	if executeErr != nil {
 		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindFileList, operationResult.FailureCode, operationResult.FailureMessage, command.TargetRefs)
 	}
-	receipt, ok := m.commitRuntimeOperationReceipt(event.Context(), result, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution, response.Status, command.TargetRefs, response.Evidence, response.Failure, nil, fileReadOnlyReceiptObservation())
-	if !ok {
+	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, command.TargetRefs, response.Evidence, response.Failure, nil, fileReadOnlyReceiptObservation())
+	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+	if err != nil {
+		setPrerequisiteError(result, err)
 		return
 	}
-	response.Receipt = receipt
+	response.Receipt = committed
 	result.Set(response, nil)
 }
 
@@ -142,7 +145,8 @@ func (m *Biz) handleFileReadOperation(event magicevent.Event, result magicevent.
 		setPrerequisiteError(result, err)
 		return
 	}
-	if receipt, found, handled := m.queryRuntimeOperationReceipt(event.Context(), result, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution); handled {
+	if receipt, found, err := m.queryRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution); err != nil {
+		setPrerequisiteError(result, err)
 		return
 	} else if found {
 		status, evidence, failure, _ := orchestratorevents.RuntimeOperationResultFromReceipt(receipt)
@@ -169,11 +173,13 @@ func (m *Biz) handleFileReadOperation(event magicevent.Event, result magicevent.
 	if executeErr != nil {
 		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindFileRead, operationResult.FailureCode, operationResult.FailureMessage, command.TargetRefs)
 	}
-	receipt, ok := m.commitRuntimeOperationReceipt(event.Context(), result, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution, response.Status, command.TargetRefs, response.Evidence, response.Failure, nil, fileReadOnlyReceiptObservation())
-	if !ok {
+	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, command.TargetRefs, response.Evidence, response.Failure, nil, fileReadOnlyReceiptObservation())
+	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+	if err != nil {
+		setPrerequisiteError(result, err)
 		return
 	}
-	response.Receipt = receipt
+	response.Receipt = committed
 	result.Set(response, nil)
 }
 
@@ -187,7 +193,8 @@ func (m *Biz) handleFileEditOperation(event magicevent.Event, result magicevent.
 		setPrerequisiteError(result, err)
 		return
 	}
-	if receipt, found, handled := m.queryRuntimeOperationReceipt(event.Context(), result, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution); handled {
+	if receipt, found, err := m.queryRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution); err != nil {
+		setPrerequisiteError(result, err)
 		return
 	} else if found {
 		status, evidence, failure, _ := orchestratorevents.RuntimeOperationResultFromReceipt(receipt)
@@ -208,11 +215,13 @@ func (m *Biz) handleFileEditOperation(event magicevent.Event, result magicevent.
 	if executeErr != nil {
 		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindFileEdit, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
 	}
-	receipt, ok := m.commitRuntimeOperationReceipt(event.Context(), result, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, nil, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, response.Status, operationResult))
-	if !ok {
+	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, nil, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, response.Status, operationResult))
+	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+	if err != nil {
+		setPrerequisiteError(result, err)
 		return
 	}
-	response.Receipt = receipt
+	response.Receipt = committed
 	result.Set(response, nil)
 }
 
@@ -226,7 +235,8 @@ func (m *Biz) handleFileWriteOperation(event magicevent.Event, result magicevent
 		setPrerequisiteError(result, err)
 		return
 	}
-	if receipt, found, handled := m.queryRuntimeOperationReceipt(event.Context(), result, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution); handled {
+	if receipt, found, err := m.queryRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution); err != nil {
+		setPrerequisiteError(result, err)
 		return
 	} else if found {
 		status, evidence, failure, _ := orchestratorevents.RuntimeOperationResultFromReceipt(receipt)
@@ -252,11 +262,13 @@ func (m *Biz) handleFileWriteOperation(event magicevent.Event, result magicevent
 	if response.Failure != nil && response.Failure.Code == "approval_required" {
 		governance = &runtimecontract.RuntimeGovernanceRequirement{Kind: runtimecontract.GovernanceApproval, SubjectRef: command.Data.TargetRef, Reason: response.Failure.Message, RequestedAction: runtimecontract.StepKindFileWrite, RiskLevel: "high"}
 	}
-	receipt, ok := m.commitRuntimeOperationReceipt(event.Context(), result, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, governance, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, response.Status, operationResult))
-	if !ok {
+	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, governance, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, response.Status, operationResult))
+	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+	if err != nil {
+		setPrerequisiteError(result, err)
 		return
 	}
-	response.Receipt = receipt
+	response.Receipt = committed
 	result.Set(response, nil)
 }
 
@@ -270,7 +282,8 @@ func (m *Biz) handlePatchApplyOperation(event magicevent.Event, result magiceven
 		setPrerequisiteError(result, err)
 		return
 	}
-	if receipt, found, handled := m.queryRuntimeOperationReceipt(event.Context(), result, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution); handled {
+	if receipt, found, err := m.queryRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution); err != nil {
+		setPrerequisiteError(result, err)
 		return
 	} else if found {
 		status, evidence, failure, governance := orchestratorevents.RuntimeOperationResultFromReceipt(receipt)
@@ -302,11 +315,13 @@ func (m *Biz) handlePatchApplyOperation(event magicevent.Event, result magiceven
 	if response.Failure != nil && response.Failure.Code == "approval_required" {
 		governance = &runtimecontract.RuntimeGovernanceRequirement{Kind: runtimecontract.GovernanceApproval, SubjectRef: command.Data.TargetRef, Reason: response.Failure.Message, RequestedAction: runtimecontract.RuntimeBlockKindPatchApply, RiskLevel: "high"}
 	}
-	receipt, ok := m.commitRuntimeOperationReceipt(event.Context(), result, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, governance, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, response.Status, operationResult))
-	if !ok {
+	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, governance, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, response.Status, operationResult))
+	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+	if err != nil {
+		setPrerequisiteError(result, err)
 		return
 	}
-	response.Receipt = receipt
+	response.Receipt = committed
 	result.Set(response, nil)
 }
 
@@ -320,7 +335,8 @@ func (m *Biz) handlePatchPreviewOperation(event magicevent.Event, result magicev
 		setPrerequisiteError(result, err)
 		return
 	}
-	if receipt, found, handled := m.queryRuntimeOperationReceipt(event.Context(), result, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution); handled {
+	if receipt, found, err := m.queryRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution); err != nil {
+		setPrerequisiteError(result, err)
 		return
 	} else if found {
 		status, evidence, failure, _ := orchestratorevents.RuntimeOperationResultFromReceipt(receipt)
@@ -352,11 +368,13 @@ func (m *Biz) handlePatchPreviewOperation(event magicevent.Event, result magicev
 	if executeErr != nil {
 		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.RuntimeBlockKindPatchPreview, operationResult.FailureCode, operationResult.FailureMessage, command.TargetRefs)
 	}
-	receipt, ok := m.commitRuntimeOperationReceipt(event.Context(), result, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution, response.Status, command.TargetRefs, response.Evidence, response.Failure, nil, fileReadOnlyReceiptObservation())
-	if !ok {
+	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, command.TargetRefs, response.Evidence, response.Failure, nil, fileReadOnlyReceiptObservation())
+	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+	if err != nil {
+		setPrerequisiteError(result, err)
 		return
 	}
-	response.Receipt = receipt
+	response.Receipt = committed
 	result.Set(response, nil)
 }
 
@@ -457,25 +475,6 @@ func setPrerequisiteError(result magicevent.Result, err error) bool {
 		return true
 	}
 	return false
-}
-
-func (m *Biz) queryRuntimeOperationReceipt(ctx context.Context, result magicevent.Result, workspaceID common.WorkspaceID, runID common.RunID, dispatchID, operationID string, execution orchestratorevents.RuntimeOperationExecutionEnvelope) (runtimecontract.RuntimeOperationReceipt, bool, bool) {
-	receipt, found, err := orchestratorevents.QueryPersistedRuntimeOperationReceipt(ctx, m.EventHub(), ModuleID, workspaceID, runID, dispatchID, operationID, execution)
-	if err != nil {
-		setPrerequisiteError(result, err)
-		return runtimecontract.RuntimeOperationReceipt{}, false, true
-	}
-	return receipt, found, false
-}
-
-func (m *Biz) commitRuntimeOperationReceipt(ctx context.Context, result magicevent.Result, workspaceID common.WorkspaceID, runID common.RunID, dispatchID, operationID string, execution orchestratorevents.RuntimeOperationExecutionEnvelope, status runtimecontract.RuntimeOperationExecutionStatus, targetRefs []string, evidence runtimecontract.RuntimeOperationEvidence, failure *runtimecontract.FailureFact, governance *runtimecontract.RuntimeGovernanceRequirement, observation orchestratorevents.RuntimeOperationReceiptObservation) (runtimecontract.RuntimeOperationReceipt, bool) {
-	receipt := orchestratorevents.NewRuntimeOperationReceiptWithObservation(execution, operationID, status, targetRefs, evidence, failure, governance, observation)
-	committed, err := orchestratorevents.CommitPersistedRuntimeOperationReceipt(ctx, m.EventHub(), ModuleID, workspaceID, runID, dispatchID, execution, receipt)
-	if err != nil {
-		setPrerequisiteError(result, err)
-		return runtimecontract.RuntimeOperationReceipt{}, false
-	}
-	return committed, true
 }
 
 func fileReadOnlyReceiptObservation() orchestratorevents.RuntimeOperationReceiptObservation {

@@ -36,7 +36,7 @@ func ReduceRuntimeStateWithDirective(facts runtimecontract.RuntimeFacts, previou
 	if err != nil {
 		return facts, runtimecontract.RuntimeDecision{}, err
 	}
-	facts = runtimecontract.SyncRepairDirective(facts, decision)
+	facts = syncRepairDirective(facts, decision)
 	return facts, decision, nil
 }
 
@@ -87,7 +87,7 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 	}
 	// INV-05: persisted RepairDirective is the sole next-action authority for the focus.
 	// Raw MissingRequiredEvidenceKinds and anti-replay must not override it.
-	if decision, ok, err := runtimecontract.ApplyRepairDirectiveAction(facts, base); err != nil {
+	if decision, ok, err := applyRepairDirectiveAction(facts, base); err != nil {
 		return runtimecontract.RuntimeDecision{}, err
 	} else if ok {
 		return decision, nil
@@ -414,7 +414,7 @@ func advanceSatisfiedCoverageFocus(facts runtimecontract.RuntimeFacts) runtimeco
 	facts.Failure = nil
 	facts.Feasibility = nil
 	facts.Repair = facts.Repair.ResetForFocus(facts.Focus.ID, facts.Focus.SliceID, facts.EvidenceRevision)
-	facts = runtimecontract.ClearRepairDirectiveForFocusAdvance(facts)
+	facts.RepairDirective = nil
 	return facts.Normalized()
 }
 

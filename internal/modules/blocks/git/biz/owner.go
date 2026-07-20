@@ -313,7 +313,7 @@ func (m *Biz) handleGitOperation(event magicevent.Event, result magicevent.Resul
 		setCapabilityError(result, err)
 		return
 	}
-	if receipt, found, err := orchestratorevents.QueryPersistedRuntimeOperationReceipt(event.Context(), m.EventHub(), ModuleID, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution); err != nil {
+	if receipt, found, err := m.queryRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution); err != nil {
 		setCapabilityError(result, err)
 		return
 	} else if found {
@@ -325,7 +325,7 @@ func (m *Biz) handleGitOperation(event magicevent.Event, result magicevent.Resul
 		setCapabilityError(result, staleErr)
 		return
 	} else if stale != nil {
-		committed, err := orchestratorevents.CommitPersistedRuntimeOperationReceipt(event.Context(), m.EventHub(), ModuleID, command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, *stale)
+		committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, *stale)
 		if err != nil {
 			setCapabilityError(result, err)
 			return
@@ -384,8 +384,8 @@ func (m *Biz) handleGitOperation(event magicevent.Event, result magicevent.Resul
 			}
 		}
 	}
-	receipt := orchestratorevents.NewRuntimeOperationReceiptWithObservation(command.Execution, command.OperationID, response.Status, command.TargetRefs, response.Evidence, response.Failure, nil, observation)
-	committed, err := orchestratorevents.CommitPersistedRuntimeOperationReceipt(event.Context(), m.EventHub(), ModuleID, command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, command.TargetRefs, response.Evidence, response.Failure, nil, observation)
+	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
@@ -451,7 +451,7 @@ func (m *Biz) runtimeCapabilityStateStaleReceipt(ctx context.Context, command or
 			continue
 		}
 		failure := &runtimecontract.FailureFact{Class: runtimecontract.FailureClassExecutionFailure, Code: "prerequisite_stale", Signature: "capability-state-stale:" + snapshot.SnapshotID, Message: "owner capability state changed after sealed snapshot", TargetRefs: append([]string(nil), command.TargetRefs...)}
-		receipt := orchestratorevents.NewRuntimeOperationReceiptWithObservation(command.Execution, command.OperationID, runtimecontract.RuntimeOperationExecutionStatusRejected, command.TargetRefs, runtimecontract.RuntimeOperationEvidence{Summary: failure.Message}, failure, nil, orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectNone})
+		receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, runtimecontract.RuntimeOperationExecutionStatusRejected, command.TargetRefs, runtimecontract.RuntimeOperationEvidence{Summary: failure.Message}, failure, nil, orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectNone})
 		observation := gitCapabilityStateObservation(snapshot.RequirementID, snapshot)
 		receipt.PrerequisiteStale = &runtimecontract.RuntimePrerequisiteStale{
 			PrerequisiteID: observation.PrerequisiteID, ObservationID: observation.ObservationID,

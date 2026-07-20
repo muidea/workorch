@@ -85,7 +85,7 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		setCapabilityError(result, err)
 		return
 	}
-	if receipt, found, err := orchestratorevents.QueryPersistedRuntimeOperationReceipt(event.Context(), m.EventHub(), ModuleID, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution); err != nil {
+	if receipt, found, err := m.queryRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution); err != nil {
 		setCapabilityError(result, err)
 		return
 	} else if found {
@@ -134,8 +134,8 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindShellCommand, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
 	}
 	observation := shellMutationReceiptObservation(command.Data.StateChanging, response.Status, operationResult)
-	receipt := orchestratorevents.NewRuntimeOperationReceiptWithObservation(command.Execution, command.OperationID, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, nil, observation)
-	committed, err := orchestratorevents.CommitPersistedRuntimeOperationReceipt(event.Context(), m.EventHub(), ModuleID, command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, nil, observation)
+	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
 	if err != nil {
 		setCapabilityError(result, err)
 		return

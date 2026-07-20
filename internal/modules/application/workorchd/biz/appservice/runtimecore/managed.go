@@ -2,12 +2,11 @@ package runtimecore
 
 import (
 	magicevent "github.com/muidea/magicCommon/event"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/observed"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 )
 
 type ManagedRuntime struct {
-	collector *observed.Collector
+	collector *eventCollector
 }
 
 func NewManagedRuntime(commandHub magicevent.Hub) *ManagedRuntime {
@@ -15,7 +14,7 @@ func NewManagedRuntime(commandHub magicevent.Hub) *ManagedRuntime {
 		return nil
 	}
 	return &ManagedRuntime{
-		collector: observed.NewCollector(commandHub),
+		collector: newEventCollector(commandHub),
 	}
 }
 
@@ -36,7 +35,7 @@ func (r *ManagedRuntime) Close() {
 	}
 }
 
-func publishedEventRecordsFromCollector(collector *observed.Collector) []eventstreamevents.EventRecordData {
+func publishedEventRecordsFromCollector(collector *eventCollector) []eventstreamevents.EventRecordData {
 	if collector == nil {
 		return nil
 	}

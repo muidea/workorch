@@ -1,13 +1,6 @@
 package observed
 
 import (
-	"fmt"
-	"sync"
-	"sync/atomic"
-
-	magicevent "github.com/muidea/magicCommon/event"
-	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
-	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
@@ -16,54 +9,9 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-type Collector struct {
-	basebiz.Base
-	mu         sync.RWMutex
-	published  []eventstreamevents.EventRecordData
-	observerID string
-}
-
-const maxCollectedEventRecords = 256
-
-var collectorObserverSequence atomic.Uint64
-
-func NewCollector(hub magicevent.Hub) *Collector {
-	collector := &Collector{Base: basebiz.New(modulecommon.ModuleID, hub, nil)}
-	if hub == nil {
-		return collector
-	}
-
-	observerID := fmt.Sprintf("/eventstream/consumers/application/workorchd/observed/%d", collectorObserverSequence.Add(1))
-	collector.observerID = observerID
-	collector.SubscribeMatchedFunc(observerID, observerID, eventstreamevents.TopicEventStreamRecordAppended, func(event magicevent.Event, result magicevent.Result) {
-		data, ok := event.Data().(eventstreamevents.EventRecordAppendedData)
-		if !ok {
-			if result != nil {
-				result.Set(nil, nil)
-			}
-			return
-		}
-		if !validObservedRecord(data.Record) {
-			if result != nil {
-				result.Set(nil, nil)
-			}
-			return
-		}
-		collector.mu.Lock()
-		defer collector.mu.Unlock()
-		collector.published = append(collector.published, cloneEventRecordData(data.Record))
-		if len(collector.published) > maxCollectedEventRecords {
-			copy(collector.published, collector.published[len(collector.published)-maxCollectedEventRecords:])
-			collector.published = collector.published[:maxCollectedEventRecords]
-		}
-		if result != nil {
-			result.Set(nil, nil)
-		}
-	})
-	return collector
-}
-
-func validObservedRecord(item eventstreamevents.EventRecordData) bool {
+// ValidWorkorchEventRecord validates an event-stream DTO without subscribing,
+// caching, or otherwise taking ownership of runtime state.
+func ValidWorkorchEventRecord(item eventstreamevents.EventRecordData) bool {
 	if !events.ValidateWorkorchEventVersion(item.Topic, item.Version) {
 		return false
 	}
@@ -88,34 +36,8 @@ func validObservedRecord(item eventstreamevents.EventRecordData) bool {
 	}
 }
 
-func (c *Collector) PublishedEventRecords() []eventstreamevents.EventRecordData {
-	if c == nil {
-		return nil
-	}
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	out := make([]eventstreamevents.EventRecordData, 0, len(c.published))
-	for _, item := range c.published {
-		out = append(out, cloneEventRecordData(item))
-	}
-	return out
-}
-
-func (c *Collector) Close() {
-	if c == nil {
-		return
-	}
-	c.mu.Lock()
-	observerID := c.observerID
-	c.observerID = ""
-	c.mu.Unlock()
-	if observerID != "" {
-		c.UnsubscribeMatchedFunc(observerID, eventstreamevents.TopicEventStreamRecordAppended)
-	}
-}
-
-func cloneEventRecordData(item eventstreamevents.EventRecordData) eventstreamevents.EventRecordData {
+// CloneEventRecordData returns a deep DTO copy for read-model consumers.
+func CloneEventRecordData(item eventstreamevents.EventRecordData) eventstreamevents.EventRecordData {
 	item.Payload = cloneEventPayload(item.Payload)
 	item.PayloadSummary = cloneEventPayload(item.PayloadSummary)
 	return item

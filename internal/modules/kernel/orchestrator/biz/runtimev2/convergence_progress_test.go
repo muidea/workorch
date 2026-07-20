@@ -45,3 +45,39 @@ func TestRuntimeConvergenceProgressSignatureTracksEvidenceAndDispatch(t *testing
 		t.Fatal("sealed dispatch did not change convergence signature")
 	}
 }
+
+func TestRuntimeConvergenceProgressSignatureTracksRepairDirective(t *testing.T) {
+	base := RuntimeAggregate{Facts: validationFacts()}
+	withDirective := base
+	withDirective.Facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{
+		ID: "repair-cwi-1-produce_state_change-0", FocusID: "cwi-1",
+		Trigger:               runtimecontract.RuntimeRepairTriggerCandidateInfeasible,
+		RequiredAction:        runtimecontract.RuntimeActionProduceStateChange,
+		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+	}
+	if RuntimeConvergenceProgressSignature(base) == RuntimeConvergenceProgressSignature(withDirective) {
+		t.Fatal("repair directive changed without changing convergence signature")
+	}
+}
+
+func TestRuntimeConvergenceProgressSignatureTracksCandidateFeasibility(t *testing.T) {
+	facts := controllerFacts()
+	decision, err := ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := RuntimeAggregate{Facts: facts, Decision: decision}
+	withFeasibility := base
+	withFeasibility.CandidateAttempts = []runtimecontract.RuntimeCandidateAttemptRecord{{
+		AuthorityContractID: runtimecontract.StableAuthorityContractID(facts.WorkspaceID, facts.RunID, decision.AuthorityTransaction()),
+		Transaction:         decision.AuthorityTransaction(),
+		Feasibilities: []runtimecontract.RuntimeCandidateFeasibilityRecord{{
+			OperationID: "patch-1", AdmissibilitySnapshotID: "inventory-1", Feasible: true,
+		}},
+	}}
+	if RuntimeConvergenceProgressSignature(base) == RuntimeConvergenceProgressSignature(withFeasibility) {
+		t.Fatal("candidate feasibility changed without changing convergence signature")
+	}
+}

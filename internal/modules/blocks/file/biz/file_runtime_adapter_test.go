@@ -858,3 +858,29 @@ func TestRuntimeAdapterPatchApplyUnifiedDiffRejectsStaleContext(t *testing.T) {
 		t.Fatalf("rejected diff changed file: %q", string(content))
 	}
 }
+
+func TestRuntimeAdapterRuntimeFeasibilityRejectsStaleUnifiedDiff(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "main.txt"), []byte("one\nchanged\nthree\n"), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	adapter := NewRuntimeAdapter()
+	inventory, err := adapter.AcquireRuntimeOperationAdmissibility(workspace, "admissibility-file", []string{runtimecontract.RuntimeBlockKindPatchApply}, []string{"main.txt"}, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patchType, target, diff := "unified_diff", "main.txt", "--- a/main.txt\n+++ b/main.txt\n@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n"
+	failure := adapter.ProbeRuntimeOperationFeasibility(workspace, inventory, runtimecontract.RuntimeOperation{
+		ID: "stale-diff", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{target},
+		Parameters: []runtimecontract.OperationParameter{
+			{Name: "patchType", String: &patchType}, {Name: "targetRef", String: &target}, {Name: "diff", String: &diff},
+		},
+	})
+	if failure == nil || failure.Code != "unified_diff_apply_conflict" {
+		t.Fatalf("failure = %+v, want unified_diff_apply_conflict", failure)
+	}
+	content, err := os.ReadFile(filepath.Join(workspace, "main.txt"))
+	if err != nil || string(content) != "one\nchanged\nthree\n" {
+		t.Fatalf("read-only feasibility changed file content=%q err=%v", string(content), err)
+	}
+}
