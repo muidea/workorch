@@ -88,6 +88,9 @@ func RuntimeV2ProgressSummary(runtime *readmodelcore.RuntimeV2Progress) string {
 	}
 	parts = append(parts, fmt.Sprintf("dispatch %d", runtime.CompletedDispatchCount))
 	parts = append(parts, fmt.Sprintf("attempts %d", runtime.CandidateAttemptCount))
+	if state := strings.TrimSpace(runtime.PrerequisiteRefreshState); state != "" {
+		parts = append(parts, fmt.Sprintf("prerequisite refresh %s %d/%d", state, runtime.PrerequisiteRefreshUsed, runtime.PrerequisiteRefreshLimit))
+	}
 	if runtime.AcceptedEvidenceCount > 0 || runtime.RejectedEvidenceCount > 0 {
 		parts = append(parts, fmt.Sprintf("accepted %d rejected %d", runtime.AcceptedEvidenceCount, runtime.RejectedEvidenceCount))
 	}

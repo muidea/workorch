@@ -41,6 +41,43 @@ type RuntimeV2Progress struct {
 	FailureSignature       string   `json:"failureSignature,omitempty"`
 	FailureMessage         string   `json:"failureMessage,omitempty"`
 	RepairHintCodes        []string `json:"repairHintCodes,omitempty"`
+	// PrerequisiteRefresh is a read-only audit of generic freshness recovery.
+	// It is deliberately separate from candidate/repair/provider retry counters.
+	PrerequisiteRefreshState  string                                   `json:"prerequisiteRefreshState,omitempty"`
+	PrerequisiteRefreshUsed   int                                      `json:"prerequisiteRefreshUsed,omitempty"`
+	PrerequisiteRefreshLimit  int                                      `json:"prerequisiteRefreshLimit,omitempty"`
+	PrerequisiteInvalidations []RuntimePrerequisiteRefreshInvalidation `json:"prerequisiteInvalidations,omitempty"`
+}
+
+// RuntimePrerequisiteRefreshInvalidation is a metadata-only rendering of one
+// persisted Runtime V2 invalidation record. It is intentionally unable to
+// alter facts, dispatches, budgets or lifecycle state.
+type RuntimePrerequisiteRefreshInvalidation struct {
+	Signature        string                              `json:"signature,omitempty"`
+	Source           string                              `json:"source,omitempty"`
+	PrerequisiteIDs  []string                            `json:"prerequisiteIds,omitempty"`
+	ObservationIDs   []string                            `json:"observationIds,omitempty"`
+	DispatchID       string                              `json:"dispatchId,omitempty"`
+	OperationID      string                              `json:"operationId,omitempty"`
+	ReceiptHash      string                              `json:"receiptHash,omitempty"`
+	OwnerModuleID    string                              `json:"ownerModuleId,omitempty"`
+	ResourceDomain   string                              `json:"resourceDomain,omitempty"`
+	SubjectRef       string                              `json:"subjectRef,omitempty"`
+	ExpectedRevision string                              `json:"expectedRevision,omitempty"`
+	ObservedRevision string                              `json:"observedRevision,omitempty"`
+	Reason           string                              `json:"reason,omitempty"`
+	ResourceChanges  []RuntimePrerequisiteResourceChange `json:"resourceChanges,omitempty"`
+}
+
+// RuntimePrerequisiteResourceChange is the safe display subset of a resource
+// change. It contains the owner-observed revision identity, never owner-private
+// file contents, provider credentials or transport state.
+type RuntimePrerequisiteResourceChange struct {
+	OwnerModuleID  string `json:"ownerModuleId,omitempty"`
+	ResourceDomain string `json:"resourceDomain,omitempty"`
+	SubjectRef     string `json:"subjectRef,omitempty"`
+	BeforeRevision string `json:"beforeRevision,omitempty"`
+	AfterRevision  string `json:"afterRevision,omitempty"`
 }
 
 type AssessmentOutcome struct {

@@ -263,6 +263,28 @@ func runtimeProgressActivityItems(workspaceID, displayRunID string, runtime read
 			EvidenceSequence:     runtime.EvidenceSequence,
 		})
 	}
+	if state := strings.TrimSpace(runtime.PrerequisiteRefreshState); state != "" {
+		summary := fmt.Sprintf("prerequisite refresh %s | %d/%d", state, runtime.PrerequisiteRefreshUsed, runtime.PrerequisiteRefreshLimit)
+		if len(runtime.PrerequisiteInvalidations) > 0 {
+			invalidation := runtime.PrerequisiteInvalidations[0]
+			resource := strings.TrimSpace(invalidation.ResourceDomain + ":" + invalidation.SubjectRef)
+			if resource != ":" {
+				summary += " | " + resource
+			}
+		}
+		items = append(items, readmodelcore.WorkspaceActivityItem{
+			ID:                   activityID("runtime", displayRunID, "prerequisite-refresh", state, strconv.FormatUint(runtime.StateRevision, 10)),
+			WorkspaceID:          workspaceID,
+			RunID:                displayRunID,
+			Kind:                 readmodelcore.WorkspaceActivityRuntimeTransition,
+			State:                state,
+			Title:                "prerequisite refresh",
+			Summary:              summary,
+			OccurredAt:           occurredAt,
+			RuntimeStateRevision: runtime.StateRevision,
+			EvidenceSequence:     runtime.EvidenceSequence,
+		})
+	}
 	if runtime.AcceptedEvidenceCount > 0 || runtime.RejectedEvidenceCount > 0 || len(runtime.MissingEvidenceKinds) > 0 {
 		missing := "none"
 		if len(runtime.MissingEvidenceKinds) > 0 {

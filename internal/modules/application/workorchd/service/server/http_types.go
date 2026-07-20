@@ -497,7 +497,12 @@ type appendWorkspaceSetupDraftMessageRequest struct {
 }
 
 type errorResponse struct {
-	Error string `json:"error"`
+	Error                   string   `json:"error"`
+	Code                    string   `json:"code,omitempty"`
+	TicketID                string   `json:"ticketId,omitempty"`
+	RequestedResolutionType string   `json:"requestedResolutionType,omitempty"`
+	AllowedActions          []string `json:"allowedActions,omitempty"`
+	Remediation             string   `json:"remediation,omitempty"`
 }
 
 type createWorkspaceFunc func(context.Context, string, string, appservice.CreateWorkspaceCommand) (appservice.Workspace, error)

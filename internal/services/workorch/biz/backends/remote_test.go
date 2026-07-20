@@ -113,6 +113,47 @@ func TestRemoteSchedulerDiagnosticsPreservesContinuationReadback(t *testing.T) {
 	}
 }
 
+func TestRuntimeV2ProgressFromClientPreservesPrerequisiteRefreshAudit(t *testing.T) {
+	got := runtimeV2ProgressFromClient(&client.RuntimeV2Progress{
+		PrerequisiteRefreshState: "prerequisite_refreshing", PrerequisiteRefreshUsed: 1, PrerequisiteRefreshLimit: 3,
+		PrerequisiteInvalidations: []client.RuntimePrerequisiteRefreshInvalidation{{
+			Signature: "stale-1", Source: "execution_receipt_stale", OwnerModuleID: runtimecontract.RuntimeModuleGit,
+			ResourceDomain: string(runtimecontract.RuntimeResourceRepositoryState), SubjectRef: "workspace_deliverable",
+			ExpectedRevision: "repo-v1", ObservedRevision: "repo-v2", Reason: "repository changed",
+		}},
+	})
+	if got == nil || got.PrerequisiteRefreshState != "prerequisite_refreshing" || got.PrerequisiteRefreshUsed != 1 ||
+		got.PrerequisiteRefreshLimit != 3 || len(got.PrerequisiteInvalidations) != 1 {
+		t.Fatalf("remote refresh progress = %+v", got)
+	}
+	invalidation := got.PrerequisiteInvalidations[0]
+	if invalidation.Source != "execution_receipt_stale" || invalidation.OwnerModuleID != runtimecontract.RuntimeModuleGit ||
+		invalidation.ResourceDomain != string(runtimecontract.RuntimeResourceRepositoryState) || invalidation.ObservedRevision != "repo-v2" {
+		t.Fatalf("remote refresh invalidation = %+v", invalidation)
+	}
+}
+
+func TestRuntimeV2ProgressFromClientKeepsProviderFailureSeparateFromFreshness(t *testing.T) {
+	got := runtimeV2ProgressFromClient(&client.RuntimeV2Progress{
+		FailureClass:              "provider_transport",
+		FailureCode:               "deadline_exceeded",
+		FailureMessage:            "POST /v1/chat/completions: context deadline exceeded",
+		PrerequisiteRefreshState:  "prerequisite_refreshing",
+		PrerequisiteRefreshUsed:   1,
+		PrerequisiteRefreshLimit:  3,
+		PrerequisiteInvalidations: []client.RuntimePrerequisiteRefreshInvalidation{{Source: "execution_receipt_stale", OwnerModuleID: "llm", ResourceDomain: "provider_config", SubjectRef: "ai-proxy/model-a"}},
+	})
+	if got == nil {
+		t.Fatal("progress = nil")
+	}
+	if got.FailureClass != "provider_transport" || got.FailureCode != "deadline_exceeded" || !strings.Contains(got.FailureMessage, "deadline exceeded") {
+		t.Fatalf("provider failure was not preserved: %+v", got)
+	}
+	if got.PrerequisiteRefreshState != "prerequisite_refreshing" || got.PrerequisiteRefreshUsed != 1 || len(got.PrerequisiteInvalidations) != 1 {
+		t.Fatalf("freshness fact was conflated with provider failure: %+v", got)
+	}
+}
+
 func TestRemoteProjectionEventsBackendRequestsProjectionStreamView(t *testing.T) {
 	seenView := make(chan string, 1)
 	envelope := backendEventData{
@@ -482,6 +523,9 @@ func TestRemoteRunCommandResumeSendsRequestID(t *testing.T) {
 		Source:             "test",
 		DefinitionRevision: "rev-remote-resume",
 		DecisionID:         "ticket-remote-resume",
+		Activation: ActivateRunRequest{
+			LLMTarget: &runtimecontract.ProviderModelTarget{ProviderID: "provider-ignored-on-resume", ModelID: "model-ignored-on-resume"},
+		},
 	})
 	if err != nil {
 		t.Fatalf("remote run command: %v", err)
@@ -500,145 +544,46 @@ func TestRemoteRunCommandResumeSendsRequestID(t *testing.T) {
 			body["decisionId"] != "ticket-remote-resume" {
 			t.Fatalf("request body = %+v, want request id, reason, source, definition revision, and decision id", body)
 		}
+		for _, field := range []string{"llmTarget", "goalId", "doDId", "soulId", "skillIds", "mcpServerIds", "capabilityIds", "memoryIds"} {
+			if _, ok := body[field]; ok {
+				t.Fatalf("resume request body unexpectedly carries activation override %s: %+v", field, body)
+			}
+		}
 	case <-time.After(time.Second):
 		t.Fatal("remote server did not receive resume request")
 	}
 }
 
-func TestRemoteRunCommandReplanSendsUnifiedIntent(t *testing.T) {
-	requestBody := make(chan map[string]any, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/workorch/workspaces/ws-remote/execution-activations" {
-			http.NotFound(w, r)
-			return
-		}
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		requestBody <- body
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusAccepted)
-		_, _ = fmt.Fprint(w, `{"accepted":true}`)
-	}))
-	defer server.Close()
-
-	be := NewRemote(server.URL)
-	run, err := be.Run().Command(context.Background(), WorkspaceRunCommand{
-		WorkspaceID:        "ws-remote",
-		ExpectedRunID:      "run-001",
-		Intent:             RunCommandIntentReplan,
-		RequestID:          "request-remote-replan",
-		Reason:             "decision_replan_resolved",
-		Source:             "tui",
-		DefinitionRevision: "rev-remote-replan",
-		DecisionID:         "ticket-remote-replan",
-		Activation: ActivateRunRequest{
-			SkillIDs:      []common.SkillID{"skill-remote-replan"},
-			MCPServerIDs:  []common.MCPServerID{"mcp-remote-replan"},
-			CapabilityIDs: []common.MCPCapabilityID{"mcp-remote-replan:tool:validate"},
-			MemoryIDs:     []common.MemoryID{"memory-remote-replan"},
+func TestRemoteRunCommandRejectsHistoricalRuntimeIntentsBeforeRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		req  WorkspaceRunCommand
+	}{
+		{
+			name: "restart",
+			req:  WorkspaceRunCommand{WorkspaceID: "ws-remote", Intent: RunCommandIntentRestart},
 		},
-	})
-	if err != nil {
-		t.Fatalf("remote run command replan: %v", err)
-	}
-	if run != nil {
-		t.Fatalf("run = %+v, want accepted-only nil run", run)
-	}
-	select {
-	case body := <-requestBody:
-		if body["runId"] != "run-001" ||
-			body["intent"] != string(RunCommandIntentReplan) ||
-			body["requestId"] != "request-remote-replan" ||
-			body["reason"] != "decision_replan_resolved" ||
-			body["source"] != "tui" ||
-			body["definitionRevision"] != "rev-remote-replan" ||
-			body["decisionId"] != "ticket-remote-replan" {
-			t.Fatalf("request body = %+v, want unified replan intent and command metadata", body)
-		}
-		assertRemoteBodyStringSlice(t, body, "skillIds", "skill-remote-replan")
-		assertRemoteBodyStringSlice(t, body, "mcpServerIds", "mcp-remote-replan")
-		assertRemoteBodyStringSlice(t, body, "capabilityIds", "mcp-remote-replan:tool:validate")
-		assertRemoteBodyStringSlice(t, body, "memoryIds", "memory-remote-replan")
-	case <-time.After(time.Second):
-		t.Fatal("remote server did not receive replan request")
-	}
-}
-
-func TestRemoteRunCommandRestartSendsWorkspaceRestartCommandMetadata(t *testing.T) {
-	requestBody := make(chan map[string]any, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/workorch/workspaces/ws-remote/execution-activations" {
-			http.NotFound(w, r)
-			return
-		}
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		requestBody <- body
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusAccepted)
-		_, _ = fmt.Fprint(w, `{"accepted":true}`)
-	}))
-	defer server.Close()
-
-	be := NewRemote(server.URL)
-	run, err := be.Run().Command(context.Background(), WorkspaceRunCommand{
-		WorkspaceID:        "ws-remote",
-		Intent:             RunCommandIntentRestart,
-		RequestID:          "request-remote-restart",
-		Reason:             "operator_restart",
-		Source:             "tui",
-		Priority:           6,
-		DefinitionRevision: "rev-remote-restart",
-		DecisionID:         "ticket-remote-restart",
-		Activation: ActivateRunRequest{
-			GoalID:        "goal-remote-restart",
-			DoDID:         "dod-remote-restart",
-			LLMTarget:     &runtimecontract.ProviderModelTarget{ProviderID: "provider-remote-restart", ModelID: "gpt-4o"},
-			SoulID:        "soul-remote-restart",
-			SoulBindings:  map[string]common.SoulID{"validation": "soul-remote-restart-validation"},
-			SkillIDs:      []common.SkillID{"skill-remote-restart"},
-			MCPServerIDs:  []common.MCPServerID{"mcp-remote-restart"},
-			CapabilityIDs: []common.MCPCapabilityID{"mcp-remote-restart:tool:validate"},
-			MemoryIDs:     []common.MemoryID{"memory-remote-restart"},
+		{
+			name: "replan",
+			req:  WorkspaceRunCommand{WorkspaceID: "ws-remote", ExpectedRunID: "run-001", Intent: RunCommandIntentReplan},
 		},
-	})
-	if err != nil {
-		t.Fatalf("remote run command restart: %v", err)
-	}
-	if run != nil {
-		t.Fatalf("run = %+v, want accepted-only nil run", run)
-	}
-	select {
-	case body := <-requestBody:
-		if body["intent"] != string(RunCommandIntentRestart) ||
-			body["restart"] != true ||
-			body["requestId"] != "request-remote-restart" ||
-			body["reason"] != "operator_restart" ||
-			body["source"] != "tui" ||
-			body["definitionRevision"] != "rev-remote-restart" ||
-			body["decisionId"] != "ticket-remote-restart" ||
-			body["priority"] != float64(6) {
-			t.Fatalf("request body = %+v, want restart command metadata", body)
-		}
-		if body["goalId"] != "goal-remote-restart" ||
-			body["doDId"] != "dod-remote-restart" ||
-			!llmTargetMatches(body["llmTarget"], "provider-remote-restart", "gpt-4o") ||
-			body["soulId"] != "soul-remote-restart" {
-			t.Fatalf("request body = %+v, want restart activation payload preserved", body)
-		}
-		assertRemoteBodyStringMapValue(t, body, "soulBindings", "validation", "soul-remote-restart-validation")
-		assertRemoteBodyStringSlice(t, body, "skillIds", "skill-remote-restart")
-		assertRemoteBodyStringSlice(t, body, "mcpServerIds", "mcp-remote-restart")
-		assertRemoteBodyStringSlice(t, body, "capabilityIds", "mcp-remote-restart:tool:validate")
-		assertRemoteBodyStringSlice(t, body, "memoryIds", "memory-remote-restart")
-	case <-time.After(time.Second):
-		t.Fatal("remote server did not receive restart request")
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requests := atomic.Int64{}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				http.Error(w, "unexpected request", http.StatusInternalServerError)
+			}))
+			defer server.Close()
+
+			_, err := NewRemote(server.URL).Run().Command(context.Background(), tc.req)
+			if !errors.Is(err, common.ErrInvalidArgument) {
+				t.Fatalf("err = %v, want invalid argument", err)
+			}
+			if requests.Load() != 0 {
+				t.Fatalf("requests = %d, want no remote request", requests.Load())
+			}
+		})
 	}
 }
 
@@ -664,7 +609,7 @@ func TestRemoteRunCommandRejectsUnsupportedIntent(t *testing.T) {
 	}
 }
 
-func TestRemoteRunCommandRejectsInvalidIntentScopeBeforeRequest(t *testing.T) {
+func TestRemoteRunCommandRejectsHistoricalIntentWithAnyScopeBeforeRequest(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		req  WorkspaceRunCommand
@@ -699,7 +644,7 @@ func TestRemoteRunCommandRejectsInvalidIntentScopeBeforeRequest(t *testing.T) {
 				t.Fatalf("err = %v, want invalid argument", err)
 			}
 			if requests.Load() != 0 {
-				t.Fatalf("requests = %d, want no remote request for invalid intent scope", requests.Load())
+				t.Fatalf("requests = %d, want no remote request for historical intent", requests.Load())
 			}
 		})
 	}
@@ -737,7 +682,7 @@ func TestRemoteRunGetMapsDefinitionRevision(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"service":"workorch","run":{"id":"run-001","workspaceId":"ws-remote","goalId":"goal-001","doDId":"dod-001","definitionRevision":"goal:goal-001|dod:dod-001","state":"running"}}`)
+		_, _ = fmt.Fprint(w, `{"service":"workorch","run":{"id":"run-001","workspaceId":"ws-remote","goalId":"goal-001","doDId":"dod-001","definitionRevision":"goal:goal-001|dod:dod-001","state":"running","sealedLLMTarget":{"providerId":"sealed-provider","modelId":"sealed-model"}}}`)
 	}))
 	defer server.Close()
 
@@ -748,6 +693,9 @@ func TestRemoteRunGetMapsDefinitionRevision(t *testing.T) {
 	}
 	if got.DefinitionRevision != "goal:goal-001|dod:dod-001" {
 		t.Fatalf("definitionRevision = %q, want mapped owner revision", got.DefinitionRevision)
+	}
+	if got.SealedLLMTarget == nil || got.SealedLLMTarget.ProviderID != "sealed-provider" || got.SealedLLMTarget.ModelID != "sealed-model" {
+		t.Fatalf("sealed target = %+v, want server-sealed target", got.SealedLLMTarget)
 	}
 }
 

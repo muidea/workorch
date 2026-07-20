@@ -344,12 +344,18 @@ func validateResolutionTypeForTicket(ticket *decisionModel.Ticket, resolutionTyp
 	if slices.Contains(allowed, resolutionType) {
 		return nil
 	}
-	return fmt.Errorf("%w: resolution type %q is not allowed for ticket %s", common.ErrInvalidArgument, resolutionType, ticket.ID)
+	return modulecommon.NewResolutionActionConflict(ticket.ID, resolutionType, allowed)
 }
 
 // EnsureRuntimeGovernanceResolutionProposal persists a Runtime V2 proposal
 // while leaving the ticket open. The caller must submit the resulting typed
 // resolution to Orchestrator before it can finalize the Decision resolution.
+//
+// A replay of the exact already committed proposal returns that persisted
+// proposal as well. This is required after process recreation: the Decision
+// owner may have durably finalized its ticket while the caller still needs to
+// join Orchestrator's persisted, idempotent continuation lane. It must not
+// create a second Decision resolution or accept changed user input.
 func (s *Service) EnsureRuntimeGovernanceResolutionProposal(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.RuntimeGovernanceResolutionProposal, error) {
 	if s == nil || cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
 		return nil, nil, common.ErrInvalidArgument
@@ -368,17 +374,27 @@ func (s *Service) EnsureRuntimeGovernanceResolutionProposal(ctx context.Context,
 	if err := validateResolutionTypeForTicket(ticket, cmd.Type); err != nil {
 		return nil, nil, err
 	}
-	if ticket.State != common.DecisionTicketStateOpen {
-		return nil, nil, common.ErrConflict
-	}
-	if existing, err := s.resolutions.GetByTicketID(ctx, cmd.TicketID); err == nil && existing != nil {
-		return nil, nil, common.ErrConflict
-	} else if err != nil && !errors.Is(err, common.ErrNotFound) {
-		return nil, nil, err
-	}
 	proposal, err := runtimeGovernanceProposalFromCommand(cmd)
 	if err != nil {
 		return nil, nil, err
+	}
+	resolution, resolutionErr := s.resolutions.GetByTicketID(ctx, cmd.TicketID)
+	if resolutionErr != nil && !errors.Is(resolutionErr, common.ErrNotFound) {
+		return nil, nil, resolutionErr
+	}
+	if ticket.State == common.DecisionTicketStateResolved {
+		if resolution == nil || ticket.RuntimeGovernanceProposal == nil ||
+			ticket.RuntimeGovernanceProposal.State != decisionModel.RuntimeGovernanceResolutionProposalCommitted ||
+			!sameRuntimeGovernanceProposal(*ticket.RuntimeGovernanceProposal, proposal) ||
+			resolution.ID != cmd.ResolutionID || resolution.Type != cmd.Type ||
+			!sameResolutionPayload(resolution.Payload, common.RedactSensitivePayload(cmd.Payload)) {
+			return nil, nil, common.ErrConflict
+		}
+		ret := ticket.RuntimeGovernanceProposal.Clone()
+		return ticket, &ret, nil
+	}
+	if ticket.State != common.DecisionTicketStateOpen || resolution != nil {
+		return nil, nil, common.ErrConflict
 	}
 	if existing := ticket.RuntimeGovernanceProposal; existing != nil {
 		if !sameRuntimeGovernanceProposal(*existing, proposal) {

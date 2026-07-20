@@ -19,6 +19,8 @@ import (
 	gitbiz "github.com/muidea/workorch/internal/modules/blocks/git/biz"
 	resultmodule "github.com/muidea/workorch/internal/modules/blocks/result"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	shellmodule "github.com/muidea/workorch/internal/modules/blocks/shell"
+	shellbiz "github.com/muidea/workorch/internal/modules/blocks/shell/biz"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
@@ -44,6 +46,33 @@ type failOnceResultRepository struct {
 type failOnceCASRuntimeV2Repository struct {
 	delegate          runtimev2.RuntimeStateRepository
 	remainingFailures int
+}
+
+// inMemoryRuntimeV2StateRepository keeps the candidate/stale mainline test
+// independent of the Run owner. Production recovery is covered by the
+// file-backed fixtures; this direct repository only proves the controller CAS
+// transition owned by Orchestrator.
+type inMemoryRuntimeV2StateRepository struct {
+	aggregate *runtimev2.RuntimeAggregate
+}
+
+func (r *inMemoryRuntimeV2StateRepository) Load(_ context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runtimev2.RuntimeAggregate, error) {
+	if r == nil || r.aggregate == nil || r.aggregate.Facts.WorkspaceID != workspaceID || r.aggregate.Facts.RunID != runID {
+		return runtimev2.RuntimeAggregate{}, common.ErrNotFound
+	}
+	return *r.aggregate, nil
+}
+
+func (r *inMemoryRuntimeV2StateRepository) Save(_ context.Context, aggregate runtimev2.RuntimeAggregate, expectedRevision uint64) error {
+	if r == nil {
+		return common.ErrInvalidArgument
+	}
+	if r.aggregate != nil && r.aggregate.StateRevision != expectedRevision {
+		return common.ErrConflict
+	}
+	copy := aggregate
+	r.aggregate = &copy
+	return nil
 }
 
 type runtimeV2SaveCrashRepository struct {
@@ -202,20 +231,32 @@ func TestDriveRuntimeV2FileBackedRunExecutesDurableFileOwnerAndRestarts(t *testi
 
 func TestRuntimeV2FileBackedGitCapabilityStateSequenceMatrix(t *testing.T) {
 	testCases := []struct {
-		name          string
-		prepare       func(*testing.T, string)
-		expectedRefs  []string
-		expectedCount int
+		name               string
+		prepare            func(*testing.T, string)
+		expectedCandidates [][]string
+		expectedFinalRefs  []string
+		expectedCount      int
 	}{
 		{
-			name: "repository_absent", expectedRefs: []string{"create-commit", "repo-init", "stage-changes"}, expectedCount: 3,
+			name: "repository_absent",
+			expectedCandidates: [][]string{
+				{"create-commit", "repo-init", "stage-changes"},
+				{"create-commit", "stage-changes"},
+				{"create-commit"},
+			},
+			expectedCount: 3,
 			prepare: func(t *testing.T, deliverable string) {
 				t.Helper()
 				writeRuntimeV2GitFixtureFile(t, deliverable)
 			},
 		},
 		{
-			name: "initialized_unstaged", expectedRefs: []string{"create-commit", "stage-changes"}, expectedCount: 2,
+			name: "initialized_unstaged",
+			expectedCandidates: [][]string{
+				{"create-commit", "stage-changes"},
+				{"create-commit"},
+			},
+			expectedCount: 2,
 			prepare: func(t *testing.T, deliverable string) {
 				t.Helper()
 				runRuntimeV2Git(t, deliverable, "init", "-q")
@@ -225,7 +266,7 @@ func TestRuntimeV2FileBackedGitCapabilityStateSequenceMatrix(t *testing.T) {
 			},
 		},
 		{
-			name: "initialized_staged", expectedRefs: []string{"create-commit"}, expectedCount: 1,
+			name: "initialized_staged", expectedCandidates: [][]string{{"create-commit"}}, expectedCount: 1,
 			prepare: func(t *testing.T, deliverable string) {
 				t.Helper()
 				runRuntimeV2Git(t, deliverable, "init", "-q")
@@ -253,6 +294,10 @@ func TestRuntimeV2FileBackedGitCapabilityStateSequenceMatrix(t *testing.T) {
 			testCase.prepare(t, deliverable)
 
 			bootstrap := runtimeV2GitCapabilityStateBootstrap()
+			bootstrap.Requirements = append(bootstrap.Requirements, runtimecontract.RuntimeRequirement{
+				Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleGit,
+				RequiredCapabilities: []string{runtimecontract.StepKindGitWrite}, Reason: "git owner inventory",
+			})
 			runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
 			if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2", DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, State: common.RunStateActive}); err != nil {
 				t.Fatal(err)
@@ -292,10 +337,11 @@ func TestRuntimeV2FileBackedGitCapabilityStateSequenceMatrix(t *testing.T) {
 			llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 				candidateCalls++
 				command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
-				if got := requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence); !equalStrings(got, testCase.expectedRefs) {
+				refs := requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence)
+				if candidateCalls > len(testCase.expectedCandidates) || !equalStrings(refs, testCase.expectedCandidates[candidateCalls-1]) {
 					candidateRefsMatch = false
 				}
-				result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: runtimeV2GitStateCandidate(testCase.expectedRefs)}, nil)
+				result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: runtimeV2GitStateCandidate(refs)}, nil)
 			})
 			t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
 
@@ -307,15 +353,20 @@ func TestRuntimeV2FileBackedGitCapabilityStateSequenceMatrix(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 1 || !candidateRefsMatch {
+			if completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != len(testCase.expectedCandidates) || !candidateRefsMatch {
 				t.Fatalf("completed=%+v candidateCalls=%d candidateRefsMatch=%t", completed, candidateCalls, candidateRefsMatch)
 			}
 			persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 			if err != nil || persisted.RuntimeState == nil || len(persisted.RuntimeState.OperationReceipts) != testCase.expectedCount {
 				t.Fatalf("persisted=%+v err=%v", persisted, err)
 			}
-			if len(persisted.RuntimeState.Facts.Resources.CapabilityStates) != 1 || !equalStrings(requiredOperationRefs(persisted.RuntimeState.Facts.Resources.CapabilityStates[0].RequiredOperationSequence), testCase.expectedRefs) {
+			if len(persisted.RuntimeState.Facts.Resources.CapabilityStates) != 1 || !equalStrings(requiredOperationRefs(persisted.RuntimeState.Facts.Resources.CapabilityStates[0].RequiredOperationSequence), testCase.expectedFinalRefs) {
 				t.Fatalf("capability state = %+v", persisted.RuntimeState.Facts.Resources.CapabilityStates)
+			}
+			if len(persisted.RuntimeState.Facts.Resources.OperationAdmissibilities) != 1 ||
+				persisted.RuntimeState.Facts.Resources.OperationAdmissibilities[0].AcquisitionBinding == "" ||
+				persisted.RuntimeState.Facts.Resources.OperationAdmissibilities[0].AcquisitionBinding != persisted.RuntimeState.Facts.Resources.CapabilityStates[0].AcquisitionBinding {
+				t.Fatalf("Git capability/admissibility binding = states=%+v inventories=%+v", persisted.RuntimeState.Facts.Resources.CapabilityStates, persisted.RuntimeState.Facts.Resources.OperationAdmissibilities)
 			}
 			if output := runtimeV2GitOutput(t, deliverable, "rev-list", "--count", "HEAD"); strings.TrimSpace(output) != "1" {
 				t.Fatalf("commit count = %q, want 1", output)
@@ -394,15 +445,12 @@ func TestRuntimeV2FileBackedGitRestartAfterInitEvidenceCommitContinuesSequence(t
 	crashRepository := &runtimeV2SaveCrashRepository{
 		delegate: baseRepository, after: true, marker: "git-init-evidence",
 		match: func(current runtimev2.RuntimeAggregate) bool {
-			if current.ActiveDispatch == nil || current.EvidenceSequence != 1 || len(current.OperationReceipts) != 1 {
+			if current.ActiveDispatch != nil || current.EvidenceSequence != 1 || len(current.OperationReceipts) != 1 ||
+				current.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(current.CompletedDispatches) != 1 ||
+				current.CompletedDispatches[0].State != runtimev2.DispatchStateInvalidated || len(current.CompletedDispatches[0].CompletedOperationIDs) != 1 {
 				return false
 			}
-			for _, execution := range current.ActiveDispatch.OperationExecutions {
-				if execution.OperationID == "git-repo-init" {
-					return execution.State == runtimecontract.OperationExecutionEvidenceCommitted
-				}
-			}
-			return false
+			return current.CompletedDispatches[0].CompletedOperationIDs[0] == "git-repo-init"
 		},
 	}
 	crashingController, err := runtimev2.NewRuntimeController(crashRepository)
@@ -427,13 +475,24 @@ func TestRuntimeV2FileBackedGitRestartAfterInitEvidenceCommitContinuesSequence(t
 		t.Fatalf("first receipt=%+v", initReceipt)
 	}
 
+	candidateCalls := 0
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		candidateCalls++
+		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
+			Transaction: command.Transaction,
+			Candidate:   runtimeV2GitStateCandidate(requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence)),
+		}, nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
 	restarted := newRuntimeV2DriveTestModule(t, hub)
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, restarted.handleRuntimeV2Drive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete {
-		t.Fatalf("restart completed=%+v err=%v", completed, err)
+	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 2 {
+		t.Fatalf("restart completed=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
 	}
 	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil || persisted.RuntimeState == nil || len(persisted.RuntimeState.OperationReceipts) != 3 {
@@ -565,10 +624,25 @@ func TestRuntimeV2FileBackedGitQueryReceiptCrashBeforePrerequisiteCommitReusesSn
 	}
 	t.Cleanup(func() { _ = restartedGitOwner.Stop(ctx) })
 
+	candidateCalls := 0
+	firstCandidateReusedQueryReceipt := false
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		candidateCalls++
 		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
-		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: runtimeV2GitStateCandidate([]string{"create-commit", "repo-init", "stage-changes"})}, nil)
+		if candidateCalls == 1 && (len(command.CandidateContext.Resources.CapabilityStates) != 1 ||
+			command.CandidateContext.Resources.CapabilityStates[0].SnapshotID != queried.SnapshotID ||
+			command.CandidateContext.Resources.CapabilityStates[0].AcquisitionKey != queried.AcquisitionKey ||
+			command.CandidateContext.Resources.CapabilityStates[0].QueryReceiptRef != queried.QueryReceiptRef) {
+			t.Fatalf("restart did not reuse durable query receipt in first candidate: %+v", command.CandidateContext.Resources.CapabilityStates)
+		}
+		if candidateCalls == 1 {
+			firstCandidateReusedQueryReceipt = true
+		}
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
+			Transaction: command.Transaction,
+			Candidate:   runtimeV2GitStateCandidate(requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence)),
+		}, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
 	restarted := newRuntimeV2DriveTestModule(t, hub)
@@ -576,16 +650,15 @@ func TestRuntimeV2FileBackedGitQueryReceiptCrashBeforePrerequisiteCommitReusesSn
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, restarted.handleRuntimeV2Drive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete {
-		t.Fatalf("restart completed=%+v err=%v", completed, err)
+	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 3 || !firstCandidateReusedQueryReceipt {
+		t.Fatalf("restart completed=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
 	}
 	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil || persisted.RuntimeState == nil || len(persisted.RuntimeState.Facts.Resources.CapabilityStates) != 1 {
 		t.Fatalf("persisted=%+v err=%v", persisted, err)
 	}
-	resumed := persisted.RuntimeState.Facts.Resources.CapabilityStates[0]
-	if resumed.AcquisitionKey != queried.AcquisitionKey || resumed.SnapshotID != queried.SnapshotID || resumed.QueryReceiptRef != queried.QueryReceiptRef {
-		t.Fatalf("restart did not reuse durable query receipt: before=%+v after=%+v", queried, resumed)
+	if len(persisted.RuntimeState.OperationReceipts) != 3 {
+		t.Fatalf("restart did not complete refreshed Git sequence: receipts=%+v", persisted.RuntimeState.OperationReceipts)
 	}
 }
 
@@ -676,32 +749,313 @@ func TestRuntimeV2FileBackedGitSnapshotCommitCrashBeforeCandidateReusesCommitted
 	}
 	t.Cleanup(func() { _ = restartedGitOwner.Stop(ctx) })
 	candidateCalls := 0
+	firstCandidateReusedSnapshot := false
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		candidateCalls++
 		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
-		if len(command.CandidateContext.Resources.CapabilityStates) != 1 || command.CandidateContext.Resources.CapabilityStates[0].SnapshotID != committedSnapshot.SnapshotID ||
-			command.CandidateContext.Resources.CapabilityStates[0].AcquisitionKey != committedSnapshot.AcquisitionKey {
+		if candidateCalls == 1 && (len(command.CandidateContext.Resources.CapabilityStates) != 1 || command.CandidateContext.Resources.CapabilityStates[0].SnapshotID != committedSnapshot.SnapshotID ||
+			command.CandidateContext.Resources.CapabilityStates[0].AcquisitionKey != committedSnapshot.AcquisitionKey) {
 			t.Fatalf("candidate did not reuse committed capability snapshot: %+v", command.CandidateContext.Resources.CapabilityStates)
 		}
-		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: runtimeV2GitStateCandidate([]string{"create-commit", "repo-init", "stage-changes"})}, nil)
+		if candidateCalls == 1 {
+			firstCandidateReusedSnapshot = true
+		}
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
+			Transaction: command.Transaction,
+			Candidate:   runtimeV2GitStateCandidate(requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence)),
+		}, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, newRuntimeV2DriveTestModule(t, hub).handleRuntimeV2Drive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 1 {
+	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 3 || !firstCandidateReusedSnapshot {
 		t.Fatalf("restart after snapshot commit completed=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
 	}
 	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
-	if err != nil || persisted.RuntimeState == nil || len(persisted.RuntimeState.Facts.Resources.CapabilityStates) != 1 {
+	if err != nil || persisted.RuntimeState == nil || len(persisted.RuntimeState.Facts.Resources.CapabilityStates) != 1 || len(persisted.RuntimeState.OperationReceipts) != 3 {
 		t.Fatalf("persisted state=%+v err=%v", persisted, err)
 	}
-	resumed := persisted.RuntimeState.Facts.Resources.CapabilityStates[0]
-	if resumed.SnapshotID != committedSnapshot.SnapshotID || resumed.AcquisitionKey != committedSnapshot.AcquisitionKey || resumed.QueryReceiptRef != committedSnapshot.QueryReceiptRef {
-		t.Fatalf("restart changed committed capability snapshot: before=%+v after=%+v", committedSnapshot, resumed)
+}
+
+func TestDriveRuntimeV2FileBackedFreshFileShellGitAcceptance(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
 	}
+	ctx := context.Background()
+	hub := magicevent.NewHub(64)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	root := t.TempDir()
+	deliverable, internalDir := filepath.Join(root, "workspace"), filepath.Join(root, "internal")
+	if err := os.MkdirAll(deliverable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(internalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
+	workspaces := filerepository.NewWorkspaceRepository(filepath.Join(root, "workspaces.json"))
+	results := filerepository.NewResultRepository(filepath.Join(root, "results.json"))
+	artifacts := filerepository.NewArtifactRepository(filepath.Join(root, "artifacts.json"))
+	bootstrap := runtimeV2FileShellGitBootstrap()
+	if err := runs.Create(ctx, &runmodel.Run{
+		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2",
+		DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, State: common.RunStateActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+	startRuntimeV2ReceiptTestOwner(t, hub)
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{
+			ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir,
+		}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+	fileOwner := filemodule.New()
+	if err := fileOwner.Configure(filemodule.Dependencies{EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
+	shellOwner := shellmodule.New()
+	if err := shellOwner.Configure(shellmodule.Dependencies{EventHub: hub, RuntimeAdapter: shellbiz.NewRuntimeAdapter()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := shellOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = shellOwner.Stop(ctx) })
+	gitReceipts, err := gitbiz.NewCapabilityStateReceiptStore(filepath.Join(root, "git-owner-data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitOwner := gitmodule.New()
+	if err := gitOwner.Configure(gitmodule.Dependencies{EventHub: hub, RuntimeAdapter: gitbiz.NewRuntimeAdapter(true), CapabilityStateReceipts: gitReceipts}); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = gitOwner.Stop(ctx) })
+	resultOwner := resultmodule.New()
+	if err := resultOwner.Configure(resultmodule.Dependencies{Results: results, Artifacts: artifacts, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := resultOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = resultOwner.Stop(ctx) })
+
+	candidateAttempts := map[string][]int{}
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		focusID, action := command.Decision.Focus.ID, command.Decision.Action
+		candidateAttempts[focusID+"/"+string(action)] = append(candidateAttempts[focusID+"/"+string(action)], command.CandidateAttempt)
+		candidate, candidateErr := runtimeV2FileShellGitCandidate(command)
+		if candidateErr != nil {
+			t.Errorf("candidate for %s/%s: %v", focusID, action, candidateErr)
+			return
+		}
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: candidate}, nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	module := newRuntimeV2DriveTestModule(t, hub)
+	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
+	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, module.handleRuntimeV2Drive)
+	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
+	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
+	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || completed.Terminal == nil {
+		current, loadErr := module.bizPtr.LoadRuntimeV2(ctx, "ws-v2", "run-v2")
+		t.Fatalf("file-shell-git drive completion=%+v terminal=%+v aggregate=%+v loadErr=%v err=%v", completed, completed.Terminal, current, loadErr, err)
+	}
+	if content, readErr := os.ReadFile(filepath.Join(deliverable, "main.go")); readErr != nil || string(content) != "package main\n// edited\n" {
+		t.Fatalf("fresh File sequence content=%q err=%v", string(content), readErr)
+	}
+	t.Logf("file-shell-git candidate attempts: %+v", candidateAttempts)
+	if got := strings.TrimSpace(runtimeV2GitOutput(t, deliverable, "rev-list", "--count", "HEAD")); got != "1" {
+		t.Fatalf("fresh Git sequence commit count=%q", got)
+	}
+	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil || persisted.RuntimeState == nil {
+		t.Fatalf("persisted file-shell-git run=%+v err=%v", persisted, err)
+	}
+	state := persisted.RuntimeState
+	if state.Facts.Recovery.PrerequisiteRefreshes < 4 || len(state.PrerequisiteInvalidations) < 4 {
+		t.Fatalf("durable effects did not trigger persisted freshness re-acquisition: recovery=%+v invalidations=%+v", state.Facts.Recovery, state.PrerequisiteInvalidations)
+	}
+	if state.Facts.Recovery.ProviderTransportAttempts != 0 || state.Facts.Failure != nil {
+		t.Fatalf("freshness path consumed unrelated budget or left failure: recovery=%+v failure=%+v", state.Facts.Recovery, state.Facts.Failure)
+	}
+	for key, attempts := range candidateAttempts {
+		for _, attempt := range attempts {
+			if attempt != 0 {
+				t.Fatalf("fresh authority transaction %s started candidate attempt %d, want 0", key, attempt)
+			}
+		}
+	}
+	if attempts := candidateAttempts["focus-git/"+string(runtimecontract.RuntimeActionProduceStateChange)]; len(attempts) < 3 {
+		t.Fatalf("Git init/add/commit did not use refreshed transactions: %+v", candidateAttempts)
+	}
+	for _, receipt := range state.OperationReceipts {
+		if receipt.PrerequisiteStale != nil || receipt.Outcome == runtimecontract.RuntimeOperationOutcomeRejected {
+			t.Fatalf("fresh positive path produced stale/rejected receipt: %+v", receipt)
+		}
+	}
+	aggregate, err := module.bizPtr.LoadRuntimeV2(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivery := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(runs, workspaces, nil, nil), hub, nil)
+	if err := delivery.deliverRuntimeV2Terminal(ctx, aggregate); err != nil {
+		t.Fatal(err)
+	}
+	resultItem, err := results.Get(ctx, "ws-v2/run-v2/result/dod-assessment")
+	if err != nil || resultItem.State != common.ResultStateAccepted {
+		t.Fatalf("accepted Result=%+v err=%v", resultItem, err)
+	}
+	terminalRun, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil || terminalRun.State != common.RunStateCompleted {
+		t.Fatalf("terminal Run=%+v err=%v", terminalRun, err)
+	}
+	workspace, err := workspaces.Get(ctx, "ws-v2")
+	if err != nil || workspace.ActiveRunID != "" {
+		t.Fatalf("terminal Workspace=%+v err=%v", workspace, err)
+	}
+}
+
+func runtimeV2FileShellGitBootstrap() runtimecontract.RuntimeBootstrap {
+	bootstrap := runtimeV2Bootstrap()
+	// This fixture deliberately performs five distinct durable effects
+	// (create, edit, init, add, commit). Each can invalidate a mutable
+	// prerequisite. Its sealed budget therefore exceeds the default production
+	// ceiling so the fixture can prove the positive refresh path rather than
+	// exercising the separate exhaustion-terminal path.
+	bootstrap.RecoveryPolicy.MaxPrerequisiteRefreshes = 8
+	bootstrap.Definition.CapabilityContract = []string{
+		runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileEdit,
+		runtimecontract.RuntimeBlockKindManagedValidationSession, runtimecontract.StepKindGitWrite,
+	}
+	bootstrap.Focuses = []runtimecontract.CoverageFocus{
+		{ID: "focus-file", SliceID: "slice-file", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-file"}, TargetRefs: []string{"main.go"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}},
+		{ID: "focus-edit", SliceID: "slice-edit", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-edit"}, TargetRefs: []string{"main.go"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileEdit}},
+		{ID: "focus-git", SliceID: "slice-git", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-git"}, TargetRefs: []string{"main.go"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.StepKindGitWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}, RequireAssessment: true},
+	}
+	bootstrap.Slices = []runtimecontract.RuntimeAcceptanceSlice{
+		{ID: "slice-file", Title: "file", Scope: "fixture", Priority: 1, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-file"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}, CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll, ResultPolicy: runtimecontract.RuntimeAcceptanceSliceResultAllowed},
+		{ID: "slice-edit", Title: "edit", Scope: "fixture", Priority: 1, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-edit"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll, ResultPolicy: runtimecontract.RuntimeAcceptanceSliceResultAllowed},
+		{ID: "slice-git", Title: "git", Scope: "fixture", Priority: 1, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-git"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}, CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll, ResultPolicy: runtimecontract.RuntimeAcceptanceSliceResultAllowed},
+	}
+	bootstrap.CoverageItems = []runtimecontract.RuntimeCoverageItem{{ID: "cwi-file", SliceID: "slice-file"}, {ID: "cwi-edit", SliceID: "slice-edit"}, {ID: "cwi-git", SliceID: "slice-git"}}
+	bootstrap.Requirements = []runtimecontract.RuntimeRequirement{
+		{Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile, Reason: "workspace manifest"},
+		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileEdit}},
+		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleShell, CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}},
+		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.StepKindGitWrite}},
+		{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileEdit}, Reason: "file owner inventory"},
+		{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, Reason: "shell validation inventory"},
+		{Kind: runtimecontract.PrerequisiteKindCapabilityState, OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable", Reason: "git sequence"},
+		// Every executable capability needs its owner-authored admissibility
+		// prerequisite. Git's inventory is bound to the capability-state receipt
+		// above and must be invalidated/reacquired after the File tree changes;
+		// omitting it would let the fixture generate git/write without its sealed
+		// owner inventory, a bootstrap-contract violation rather than freshness.
+		{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleGit, RequiredCapabilities: []string{runtimecontract.StepKindGitWrite}, Reason: "git owner inventory"},
+	}
+	return bootstrap
+}
+
+func runtimeV2FileShellGitCandidate(command orchestratorevents.RequestRuntimeCandidateCommand) (runtimecontract.RuntimeCandidate, error) {
+	focus := command.Decision.Focus
+	coverageID := focus.CoverageWorkItemIDs[0]
+	switch focus.ID {
+	case "focus-file":
+		switch command.Decision.Action {
+		case runtimecontract.RuntimeActionProduceStateChange:
+			target, content := "main.go", "package main\n"
+			return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{ID: "file-create", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{target}, Parameters: []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "content", String: &content}}}}}}}, nil
+		case runtimecontract.RuntimeActionProduceValidation:
+			return runtimeV2ManagedShellValidationCandidate("validate-created", coverageID, "main.go", "package main"), nil
+		}
+	case "focus-edit":
+		if command.Decision.Action == runtimecontract.RuntimeActionProduceStateChange {
+			path, oldText, newText := "main.go", "package main\n", "package main\n// edited\n"
+			return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{ID: "file-edit", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{path}, Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &path}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}}}}}}}, nil
+		}
+	case "focus-git":
+		switch command.Decision.Action {
+		case runtimecontract.RuntimeActionProduceStateChange:
+			return runtimeV2GitStateCandidateForCoverage(requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence), coverageID, "main.go"), nil
+		case runtimecontract.RuntimeActionProduceValidation:
+			return runtimeV2ManagedShellValidationCandidate("validate-committed", coverageID, "main.go", "edited"), nil
+		case runtimecontract.RuntimeActionProduceAssessment:
+			refs := make([]string, 0)
+			for _, evidence := range command.CandidateContext.Evidence.Accepted {
+				for _, evidenceCoverageID := range evidence.CoverageWorkItemIDs {
+					if evidenceCoverageID == coverageID {
+						refs = append(refs, string(evidence.ID))
+						break
+					}
+				}
+			}
+			return runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{FocusID: focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "git sequence validated", Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: coverageID, Satisfied: true}}, EvidenceRefs: refs}}, nil
+		}
+	}
+	return runtimecontract.RuntimeCandidate{}, fmt.Errorf("unexpected focus/action %s/%s", focus.ID, command.Decision.Action)
+}
+
+func runtimeV2ManagedShellValidationCandidate(id string, coverageID common.CoverageWorkItemID, target, want string) runtimecontract.RuntimeCandidate {
+	command, script := "sh", "test -f "+target+" && grep -q '"+want+"' "+target
+	return runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
+		ID: id, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{target},
+		Parameters: []runtimecontract.OperationParameter{{Name: "command", String: &command}, {Name: "args", StringList: []string{"-c", script}}, {Name: "targetRef", String: &target}},
+	}}}}}
+}
+
+func runtimeV2GitStateCandidateForCoverage(requirementRefs []string, coverageID common.CoverageWorkItemID, target string) runtimecontract.RuntimeCandidate {
+	operations := make([]runtimecontract.StateChangingOperation, 0, len(requirementRefs))
+	for _, ref := range requirementRefs {
+		operation := runtimecontract.RuntimeOperation{ID: "fresh-git-" + ref, Kind: runtimecontract.StepKindGitWrite, RequiredOperationRef: ref, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{target}}
+		switch ref {
+		case "repo-init":
+			value := "init"
+			operation.Parameters = []runtimecontract.OperationParameter{{Name: "operation", String: &value}}
+		case "stage-changes":
+			value := "add"
+			operation.Parameters = []runtimecontract.OperationParameter{{Name: "operation", String: &value}, {Name: "pathspecs", StringList: []string{target}}}
+		case "create-commit":
+			value, message := "commit", "fresh runtime v2 fixture"
+			operation.Parameters = []runtimecontract.OperationParameter{{Name: "operation", String: &value}, {Name: "message", String: &message}}
+		}
+		switch ref {
+		case "stage-changes":
+			if containsRuntimeV2String(requirementRefs, "repo-init") {
+				operation.DependsOn = []string{"fresh-git-repo-init"}
+			}
+		case "create-commit":
+			if containsRuntimeV2String(requirementRefs, "stage-changes") {
+				operation.DependsOn = []string{"fresh-git-stage-changes"}
+			}
+		}
+		operations = append(operations, runtimecontract.StateChangingOperation{Operation: operation})
+	}
+	return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: operations}}
 }
 
 func TestRuntimeV2FileBackedGitStaleRefreshCrashRestartDoesNotReplayOldDispatch(t *testing.T) {
@@ -781,7 +1135,7 @@ func TestRuntimeV2FileBackedGitStaleRefreshCrashRestartDoesNotReplayOldDispatch(
 		delegate: baseRepository, after: true, marker: "git-stale-refresh",
 		match: func(current runtimev2.RuntimeAggregate) bool {
 			return current.ActiveDispatch == nil && current.Decision.Action == runtimecontract.RuntimeActionAcquirePrerequisite &&
-				current.Facts.Recovery.CapabilityStateRefreshes == 1 && len(current.Facts.Resources.CapabilityStates) == 0
+				current.Facts.Recovery.PrerequisiteRefreshes == 1 && len(current.Facts.Resources.CapabilityStates) == 0
 		},
 	}
 	crashingController, err := runtimev2.NewRuntimeController(crashRepository)
@@ -799,8 +1153,8 @@ func TestRuntimeV2FileBackedGitStaleRefreshCrashRestartDoesNotReplayOldDispatch(
 	}()
 	crashed, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil || crashed.RuntimeState == nil || crashed.RuntimeState.ActiveDispatch != nil ||
-		crashed.RuntimeState.Facts.Recovery.CapabilityStateRefreshes != 1 || len(crashed.RuntimeState.Facts.Resources.CapabilityStates) != 0 ||
-		len(crashed.RuntimeState.OperationReceipts) != 1 || crashed.RuntimeState.OperationReceipts[0].CapabilityStateStale == nil || crashed.RuntimeState.EvidenceSequence != 0 {
+		crashed.RuntimeState.Facts.Recovery.PrerequisiteRefreshes != 1 || len(crashed.RuntimeState.Facts.Resources.CapabilityStates) != 0 ||
+		len(crashed.RuntimeState.OperationReceipts) != 1 || crashed.RuntimeState.OperationReceipts[0].PrerequisiteStale == nil || crashed.RuntimeState.EvidenceSequence != 0 {
 		t.Fatalf("stale refresh crash boundary=%+v err=%v", crashed, err)
 	}
 	if err := gitOwner.Stop(ctx); err != nil {
@@ -824,8 +1178,12 @@ func TestRuntimeV2FileBackedGitStaleRefreshCrashRestartDoesNotReplayOldDispatch(
 		candidateCalls++
 		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
 		refs := requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence)
-		if !equalStrings(refs, []string{"create-commit", "stage-changes"}) {
-			t.Fatalf("stale refresh reused old required sequence: %v", refs)
+		expected := []string{"create-commit", "stage-changes"}
+		if candidateCalls == 2 {
+			expected = []string{"create-commit"}
+		}
+		if !equalStrings(refs, expected) {
+			t.Fatalf("stale refresh used wrong required sequence on candidate %d: %v", candidateCalls, refs)
 		}
 		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: runtimeV2GitStateCandidate(refs)}, nil)
 	})
@@ -834,18 +1192,18 @@ func TestRuntimeV2FileBackedGitStaleRefreshCrashRestartDoesNotReplayOldDispatch(
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, newRuntimeV2DriveTestModule(t, hub).handleRuntimeV2Drive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 1 {
+	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 2 {
 		t.Fatalf("stale refresh restart completed=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
 	}
 	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil || persisted.RuntimeState == nil || len(persisted.RuntimeState.OperationReceipts) != 3 {
-		t.Fatalf("stale refresh restart persisted=%+v err=%v", persisted, err)
+		t.Fatalf("stale refresh restart persisted receipts=%+v err=%v", persisted.RuntimeState.OperationReceipts, err)
 	}
 	initReceipts := 0
 	for _, receipt := range persisted.RuntimeState.OperationReceipts {
 		if receipt.OperationID == "git-repo-init" {
 			initReceipts++
-			if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || receipt.CapabilityStateStale == nil {
+			if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || receipt.PrerequisiteStale == nil {
 				t.Fatalf("old init was replayed or reclassified: %+v", receipt)
 			}
 		}
@@ -2120,6 +2478,77 @@ func TestDriveRuntimeV2CandidateFailureStopsAfterSameContractRetry(t *testing.T)
 	if len(requests) != 2 || requests[0].PreviousFailure != nil || requests[1].PreviousFailure == nil ||
 		requests[1].PreviousFailure.Class != runtimecontract.RuntimeCandidateFailureClassProvider || requests[1].PreviousFailure.Reason != "provider unavailable" {
 		t.Fatalf("candidate retry did not carry the persisted first failure: %+v", requests)
+	}
+}
+
+func TestRequestAndSealRuntimeV2CandidateReacquiresProviderCeilingAfterTypedStale(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	facts := runtimeV2Aggregate(t, 1).Facts
+	ceiling := runtimecontract.ProviderCeiling{
+		Target:                   runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ContextWindowTokens:      128000,
+		ProviderMaxOutputTokens:  16384,
+		EffectiveMaxOutputTokens: 4096,
+		MaxInputTokens:           92928,
+		MaxBytes:                 96 * 1024,
+		CapabilityRevision:       "capability-v1",
+		ConfigurationRevision:    "config-v1",
+	}
+	prerequisite := runtimecontract.RuntimePrerequisite{
+		ID: "provider_ceiling:llm", Kind: runtimecontract.PrerequisiteKindProviderCeiling,
+		OwnerModuleID: runtimecontract.RuntimeModuleLLM, MinimumBytes: 32 * 1024,
+	}
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID,
+		ContentHash: "provider-ceiling-v1",
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceProviderConfig, OwnerModuleID: runtimecontract.RuntimeModuleLLM,
+			SubjectRef: "ai-proxy/gpt-4o", Revision: ceiling.ConfigurationRevision,
+		}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	facts.Resources.ProviderCeiling = &ceiling
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
+	repository := &inMemoryRuntimeV2StateRepository{}
+	controller, err := runtimev2.NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialized, err := controller.Initialize(ctx, facts, runtimeV2Definition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	if err := owner.ConfigureRuntimeV2Repository(repository); err != nil {
+		t.Fatal(err)
+	}
+	module := newTestBiz(owner, hub, nil)
+	stale := runtimecontract.RuntimePrerequisiteStale{
+		PrerequisiteID: prerequisite.ID, ObservationID: observation.ObservationID,
+		Domain: runtimecontract.RuntimeResourceProviderConfig, OwnerModuleID: runtimecontract.RuntimeModuleLLM,
+		SubjectRef: "ai-proxy/gpt-4o", ExpectedRevision: "config-v1", ObservedRevision: "config-v2",
+		Reason: "provider configuration changed",
+	}
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Stale: &stale}, nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	invalidated, err := module.requestAndSealRuntimeV2Candidate(ctx, initialized, "stable-prefix-provider-config", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invalidated.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite ||
+		len(invalidated.CandidateAttempts) != 1 || invalidated.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated ||
+		invalidated.CandidateAttempts[0].Failure != nil || invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 ||
+		len(invalidated.Facts.Prerequisites.Pending) != 1 || invalidated.Facts.Resources.ProviderCeiling != nil ||
+		len(invalidated.Facts.Evidence.Accepted) != 0 || len(invalidated.Facts.Evidence.Rejected) != 0 ||
+		invalidated.Facts.Repair.RepairAttempts != 0 || invalidated.Facts.Recovery.ProviderTransportAttempts != 0 {
+		t.Fatalf("provider configuration stale did not return to clean prerequisite acquisition: %+v", invalidated)
 	}
 }
 

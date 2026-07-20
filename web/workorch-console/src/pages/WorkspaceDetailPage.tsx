@@ -42,6 +42,15 @@ const {
   workspaceSetupSmartDraftStep, defaultSoulBindingStages
 } = helpers;
 
+function providerModelTargetLabel(target?: { providerId?: string; modelId?: string }): string {
+  const providerID = target?.providerId?.trim();
+  const modelID = target?.modelId?.trim();
+  if (!providerID && !modelID) {
+    return '-';
+  }
+  return [providerID || 'default provider', modelID || 'default model'].join(' / ');
+}
+
 export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 'selectedWorkspaceId'>) {
   const { message } = AntApp.useApp();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -1176,6 +1185,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     { title: '运行 ID（Run ID）', dataIndex: 'id', copyable: true },
     { title: '目标', dataIndex: 'goalId', copyable: true },
     { title: '验收标准', dataIndex: 'doDId', copyable: true },
+    { title: '封存模型目标', render: (_, item) => providerModelTargetLabel(item.sealedLLMTarget), ellipsis: true },
     { title: '优先级', render: (_, item) => runPriority(item), width: 100 },
     { title: '状态', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
     { title: '阻塞工单', dataIndex: 'blockingTicketId', copyable: true },
@@ -1194,6 +1204,9 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
       )
     }
   ];
+  const activeRun = snapshot?.workspace.activeRunId
+    ? snapshot.runs?.find((item) => item.id === snapshot.workspace.activeRunId)
+    : undefined;
   const runSummary = runStateSummary(snapshot?.runs);
   const outcomeRun = runSnapshot?.run;
   const outcomeGoal = goals.find((item) => item.id === outcomeRun?.goalId);
@@ -1292,6 +1305,8 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
               items={[
                 { key: 'id', label: '工作空间 ID', children: snapshot.workspace.id },
                 { key: 'activeRun', label: '活跃运行', children: snapshot.workspace.activeRunId || '-' },
+                { key: 'nextRunLLMTarget', label: '下次运行默认模型', children: providerModelTargetLabel(snapshot.workspace.defaultLLMTarget) },
+                { key: 'activeRunSealedLLMTarget', label: '当前运行封存模型', children: providerModelTargetLabel(activeRun?.sealedLLMTarget) },
                 { key: 'outcome', label: '业务结果', children: snapshot.outcome?.runId ? `${snapshot.outcome.runId} / ${stateLabel(snapshot.outcome.state)}` : '-' },
                 { key: 'projection', label: '投影摘要', children: projectionStatusSummary(workspaceProjection) },
                 { key: 'description', label: '描述', children: boundedParagraph(snapshot.workspace.description, { rows: 2 }) },

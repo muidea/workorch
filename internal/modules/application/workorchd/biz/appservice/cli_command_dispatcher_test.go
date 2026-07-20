@@ -7,6 +7,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -90,7 +91,7 @@ func TestCLIWorkspaceSnapshotCommandProjectsDetailView(t *testing.T) {
 	}
 }
 
-func TestCLIDecisionResolvePublishesSchedulerContinuation(t *testing.T) {
+func TestCLIDecisionResolveDoesNotPublishSecondSchedulerContinuation(t *testing.T) {
 	session, tickets, _ := newCountingDecisionRuntimeSession(t)
 	const workspaceID = common.WorkspaceID("ws-cli-governance-scheduler")
 	const runID = common.RunID("run-cli-governance-scheduler")
@@ -102,10 +103,10 @@ func TestCLIDecisionResolvePublishesSchedulerContinuation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session command hub: %v", err)
 	}
-	var schedulerCommand workorchdevents.WorkspaceRunRequestedCommand
+	schedulerCalls := 0
 	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, commandHub)
 	observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(ev magicevent.Event, result magicevent.Result) {
-		schedulerCommand, _ = ev.Data().(workorchdevents.WorkspaceRunRequestedCommand)
+		schedulerCalls++
 		result.Set(workorchdevents.WorkspaceRunRequestedResult{Accepted: true}, nil)
 	})
 	t.Cleanup(func() { observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested) })
@@ -128,8 +129,63 @@ func TestCLIDecisionResolvePublishesSchedulerContinuation(t *testing.T) {
 	if !ok || result.Decision.ID != ticketID {
 		t.Fatalf("decision = %+v", data)
 	}
-	if schedulerCommand.WorkspaceID != workspaceID || schedulerCommand.RunID != runID || schedulerCommand.Intent != "replan" || schedulerCommand.Reason != "decision_replan_resolved" || schedulerCommand.DecisionID != string(ticketID) || schedulerCommand.Source != "cli" {
-		t.Fatalf("scheduler command = %#v", schedulerCommand)
+	if schedulerCalls != 0 {
+		t.Fatalf("scheduler continuation calls = %d, want zero; Decision owner/Orchestrator owns the continuation", schedulerCalls)
+	}
+}
+
+// Approval is an owner-local fact.  Unlike a persisted Runtime V2 governance
+// ticket it has no aggregate binding to consume, so the CLI must not manufacture
+// a scheduler Resume after resolving it.  The only Runtime V2 user continuation
+// remains the scoped resume command, whose admission is checked by Orchestrator.
+func TestCLIApprovalResolveDoesNotPublishSchedulerContinuation(t *testing.T) {
+	ctx := context.Background()
+	repository := newAppserviceCountingApprovalRepository()
+	const workspaceID = common.WorkspaceID("ws-cli-approval-scheduler")
+	const runID = common.RunID("run-cli-approval-scheduler")
+	const approvalID = common.ApprovalID("approval-cli-scheduler")
+	if err := repository.Create(ctx, &approvalmodel.Approval{
+		ID: approvalID, WorkspaceID: workspaceID, RunID: runID, StepID: "step-cli-approval-scheduler",
+		Reason: "need operator approval", State: common.ApprovalStatePending,
+	}); err != nil {
+		t.Fatalf("create approval: %v", err)
+	}
+	session := newApprovalOnlySession(t, repository)
+	commandHub, err := session.RequiredCommandHub()
+	if err != nil {
+		t.Fatalf("session command hub: %v", err)
+	}
+	schedulerCalls := 0
+	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, commandHub)
+	observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(_ magicevent.Event, result magicevent.Result) {
+		schedulerCalls++
+		result.Set(workorchdevents.WorkspaceRunRequestedResult{Accepted: true}, nil)
+	})
+	t.Cleanup(func() { observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested) })
+	dispatcher := NewCLICommandDispatcher(session, commandHub, nil)
+	if err := dispatcher.Run(); err != nil {
+		t.Fatalf("run dispatcher: %v", err)
+	}
+	t.Cleanup(dispatcher.Close)
+	event := magicevent.NewEventWithContext(
+		workorchdevents.TopicCLIApprovalApprove, "test", workorchdevents.CommandDestination,
+		magicevent.NewHeader(), ctx,
+		workorchdevents.CLIApprovalApproveCommand{RequestID: "cmd-cli-approval", WorkspaceID: workspaceID, ApprovalID: approvalID},
+	)
+	response := commandHub.Send(event)
+	if response == nil || response.Error() != nil {
+		t.Fatalf("approval response = %+v", response)
+	}
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		t.Fatalf("approval result: %v", resultErr)
+	}
+	resolved, ok := data.(workorchdevents.CLIApprovalApproveResult)
+	if !ok || resolved.Approval.ID != approvalID || resolved.Approval.State != string(common.ApprovalStateApproved) {
+		t.Fatalf("approval = %+v", data)
+	}
+	if schedulerCalls != 0 {
+		t.Fatalf("scheduler continuation calls = %d, want zero; approval resolution is not a Runtime V2 governance binding", schedulerCalls)
 	}
 }
 

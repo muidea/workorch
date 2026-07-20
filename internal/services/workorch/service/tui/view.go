@@ -591,6 +591,22 @@ func renderRuntimeProgressCompact(runtime *backend.RuntimeV2ProgressInfo, width 
 	}
 	b.WriteString(truncateDisplay(fmt.Sprintf("- dispatch %d completed | candidate attempts %d", runtime.CompletedDispatchCount, runtime.CandidateAttemptCount), width))
 	b.WriteString("\n")
+	if state := strings.TrimSpace(runtime.PrerequisiteRefreshState); state != "" {
+		b.WriteString(truncateDisplay(fmt.Sprintf("- prerequisite refresh %s | %d/%d", state, runtime.PrerequisiteRefreshUsed, runtime.PrerequisiteRefreshLimit), width))
+		b.WriteString("\n")
+		for idx, invalidation := range runtime.PrerequisiteInvalidations {
+			if idx == 3 {
+				break
+			}
+			source := strings.TrimSpace(invalidation.Source)
+			resource := strings.TrimSpace(invalidation.ResourceDomain + ":" + invalidation.SubjectRef)
+			if resource == ":" {
+				resource = "-"
+			}
+			b.WriteString(truncateDisplay(fmt.Sprintf("  - %s | %s | %s", nonEmpty(source, "invalidation"), nonEmpty(invalidation.OwnerModuleID, "-"), resource), width))
+			b.WriteString("\n")
+		}
+	}
 	missing := "none"
 	if len(runtime.MissingEvidenceKinds) > 0 {
 		missing = strings.Join(runtime.MissingEvidenceKinds, ",")
@@ -1093,7 +1109,6 @@ func (m AppModel) renderHelpOverlay(width, height int) string {
 		"",
 		"Governance:",
 		"  /decision answer     answer current decision",
-		"  /decision replan     request replan",
 		"  /approval approve    approve request",
 		"  /approval reject     reject request",
 		"",

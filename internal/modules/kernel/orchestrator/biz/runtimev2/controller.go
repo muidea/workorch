@@ -224,6 +224,15 @@ func (c *RuntimeController) CommitPrerequisite(ctx context.Context, workspaceID 
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
+	// A single-operation durable dispatch may have completed its current
+	// coverage before its receipt invalidated mutable prerequisites. Once the
+	// last affected prerequisite has been reacquired, preserve the accepted
+	// evidence and advance the satisfied focus exactly as a non-invalidated
+	// dispatch would. Partial dispatches keep FreshnessReacquireCoverage and
+	// therefore cannot skip their required fresh replacement work.
+	if len(facts.Prerequisites.Pending) == 0 && len(facts.FreshnessReacquireCoverage) == 0 {
+		facts = advanceSatisfiedCoverageFocus(facts)
+	}
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot)
 	if err != nil {
 		return RuntimeAggregate{}, err
@@ -353,7 +362,7 @@ func (c *RuntimeController) RecordCandidateFeasibility(ctx context.Context, work
 		if strings.TrimSpace(persisted.OperationID) != strings.TrimSpace(record.OperationID) {
 			continue
 		}
-		if persisted.AdmissibilitySnapshotID != record.AdmissibilitySnapshotID || persisted.Feasible != record.Feasible || !reflect.DeepEqual(persisted.Failure, record.Failure) {
+		if persisted.AdmissibilitySnapshotID != record.AdmissibilitySnapshotID || persisted.AcquisitionBinding != record.AcquisitionBinding || persisted.Feasible != record.Feasible || !reflect.DeepEqual(persisted.Failure, record.Failure) || !reflect.DeepEqual(persisted.Stale, record.Stale) {
 			return RuntimeAggregate{}, fmt.Errorf("%w: candidate feasibility result for operation %q changed", common.ErrConflict, record.OperationID)
 		}
 		return aggregate, nil
@@ -364,6 +373,10 @@ func (c *RuntimeController) RecordCandidateFeasibility(ctx context.Context, work
 		failure := *record.Failure
 		failure.TargetRefs = append([]string(nil), record.Failure.TargetRefs...)
 		copyRecord.Failure = &failure
+	}
+	if record.Stale != nil {
+		stale := *record.Stale
+		copyRecord.Stale = &stale
 	}
 	aggregate.CandidateAttempts[idx].Feasibilities = append(aggregate.CandidateAttempts[idx].Feasibilities, copyRecord)
 	aggregate.StateRevision++

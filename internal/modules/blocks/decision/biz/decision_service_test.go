@@ -209,6 +209,56 @@ func TestService_RuntimeGovernanceProposalStaysOpenUntilFinalize(t *testing.T) {
 	}
 }
 
+func TestService_RuntimeGovernanceCommittedProposalReplaysExactResolution(t *testing.T) {
+	ctx := context.Background()
+	tickets := memory.NewDecisionTicketRepository()
+	resolutions := memory.NewDecisionResolutionRepository()
+	service := NewService(tickets, resolutions)
+	if err := tickets.Create(ctx, &decisionModel.Ticket{
+		ID:                     "ticket-runtime-committed-replay",
+		WorkspaceID:            "ws-runtime-committed-replay",
+		RunID:                  "run-runtime-committed-replay",
+		StepID:                 "runtime-v2/dispatch-1",
+		Reason:                 "provider recovery needs confirmation",
+		DecisionKind:           "runtime_v2_governance",
+		State:                  common.DecisionTicketStateOpen,
+		AllowedRecoveryActions: []string{decisioncommon.ResolutionTypeProvideMissingInfo},
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	cmd := decisionservice.ResolveTicketCommand{
+		ResolutionID: "resolution-runtime-committed-replay",
+		TicketID:     "ticket-runtime-committed-replay",
+		WorkspaceID:  "ws-runtime-committed-replay",
+		RunID:        "run-runtime-committed-replay",
+		StepID:       "runtime-v2/dispatch-1",
+		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:      mustDecisionPayload(t, map[string]any{"summary": "provider is ready"}),
+	}
+	if _, _, err := service.EnsureRuntimeGovernanceResolutionProposal(ctx, cmd); err != nil {
+		t.Fatalf("persist proposal: %v", err)
+	}
+	if _, _, err := service.FinalizeRuntimeGovernanceResolutionProposal(ctx, cmd); err != nil {
+		t.Fatalf("finalize proposal: %v", err)
+	}
+	replayedTicket, replayedProposal, err := service.EnsureRuntimeGovernanceResolutionProposal(ctx, cmd)
+	if err != nil {
+		t.Fatalf("replay committed proposal: %v", err)
+	}
+	if replayedTicket.State != common.DecisionTicketStateResolved || replayedProposal == nil || replayedProposal.State != decisionModel.RuntimeGovernanceResolutionProposalCommitted || replayedProposal.ResolutionID != cmd.ResolutionID {
+		t.Fatalf("replayed committed proposal = %+v / %+v", replayedTicket, replayedProposal)
+	}
+	resolution, err := resolutions.GetByTicketID(ctx, cmd.TicketID)
+	if err != nil || resolution.ID != cmd.ResolutionID {
+		t.Fatalf("replay changed persisted resolution = %+v err=%v", resolution, err)
+	}
+	changed := cmd
+	changed.Payload = mustDecisionPayload(t, map[string]any{"summary": "changed input"})
+	if _, _, err := service.EnsureRuntimeGovernanceResolutionProposal(ctx, changed); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("changed replay err = %v, want conflict", err)
+	}
+}
+
 func TestService_RuntimeGovernanceRejectsUnallowedActionBeforeProposal(t *testing.T) {
 	ctx := context.Background()
 	tickets := memory.NewDecisionTicketRepository()
@@ -234,8 +284,12 @@ func TestService_RuntimeGovernanceRejectsUnallowedActionBeforeProposal(t *testin
 		StepID:       "runtime-v2/dispatch-1",
 		Type:         decisioncommon.ResolutionTypeReplan,
 	})
-	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("unallowed proposal err = %v, want invalid argument", err)
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unallowed proposal err = %v, want conflict", err)
+	}
+	var actionConflict *decisioncommon.ResolutionActionConflictError
+	if !errors.As(err, &actionConflict) || actionConflict.TicketID != "ticket-runtime-actions" || actionConflict.RequestedType != decisioncommon.ResolutionTypeReplan || len(actionConflict.AllowedActions) != 1 || actionConflict.AllowedActions[0] != decisioncommon.ResolutionTypeProvideMissingInfo {
+		t.Fatalf("unallowed proposal conflict = %#v, want actionable ticket conflict", actionConflict)
 	}
 	ticket, err := tickets.Get(ctx, "ticket-runtime-actions")
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestMapRunProjectsLineageAndLifecycleTimestamps(t *testing.T) {
@@ -34,5 +35,25 @@ func TestMapRunProjectsLineageAndLifecycleTimestamps(t *testing.T) {
 		got.StartedAt != item.StartedAt ||
 		got.EndedAt != item.EndedAt {
 		t.Fatalf("mapped run = %+v, want lineage and timestamps projected", got)
+	}
+}
+
+func TestMapRunProjectsSealedProviderTargetWithoutAliasingBootstrap(t *testing.T) {
+	sealed := runtimecontract.ProviderModelTarget{ProviderID: "provider-sealed", ModelID: "model-sealed"}
+	item := &runmodel.Run{
+		ID:          "run-sealed-target",
+		WorkspaceID: "ws-sealed-target",
+		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{
+			Activation: runtimecontract.RuntimeActivationContext{ProviderTarget: sealed},
+		},
+	}
+
+	got := MapRun(item)
+	if got.SealedLLMTarget == nil || !got.SealedLLMTarget.Same(sealed) {
+		t.Fatalf("sealed target = %+v, want %+v", got.SealedLLMTarget, sealed)
+	}
+	got.SealedLLMTarget.ModelID = "mutated-read-model"
+	if item.RuntimeBootstrap.Activation.ProviderTarget.ModelID != "model-sealed" {
+		t.Fatalf("read model target mutation changed bootstrap = %+v", item.RuntimeBootstrap.Activation.ProviderTarget)
 	}
 }

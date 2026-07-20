@@ -29,6 +29,19 @@ func NormalizeDecisionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, p
 			return ret, decisioncommon.ResolutionTypeProvideMissingInfo
 		}
 	}
+	if ticket != nil && ticket.DecisionKind == "runtime_v2_governance" && resolutionType == decisioncommon.ResolutionTypeReplan && ticketAllowsRuntimeContinuation(ticket) {
+		// Runtime V2 has no replan transition. When this particular ticket
+		// permits its continue resolution, retain the operator's replan intent
+		// for audit and submit the concrete continuation that the persisted
+		// governance binding accepts. The Decision owner will commit that
+		// binding once; Orchestrator owns the resulting singleflight re-drive.
+		ret := CloneDecisionPayload(payload).Merge(workorcheventpayload.New(
+			workorcheventpayload.StringField("requestedResolutionType", decisioncommon.ResolutionTypeReplan),
+			workorcheventpayload.StringField("runtimeContinuationIntent", "resume"),
+			workorcheventpayload.StringField("resolutionNotice", "replan intent normalized to the ticket's Runtime V2 continuation"),
+		))
+		return ret, decisioncommon.ResolutionTypeProvideMissingInfo
+	}
 	if !IsRuntimeRepairExhaustionTicket(ticket) {
 		return payload, resolutionType
 	}
@@ -48,4 +61,16 @@ func NormalizeDecisionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, p
 	default:
 		return ret, decisioncommon.ResolutionTypeProvideMissingInfo
 	}
+}
+
+func ticketAllowsRuntimeContinuation(ticket *decisionmodel.Ticket) bool {
+	if ticket == nil {
+		return false
+	}
+	for _, action := range ticket.AllowedRecoveryActions {
+		if action == decisioncommon.ResolutionTypeProvideMissingInfo {
+			return true
+		}
+	}
+	return false
 }

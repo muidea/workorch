@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
@@ -435,7 +436,17 @@ func writeMethodNotAllowed(w http.ResponseWriter) {
 }
 
 func writeBusinessError(w http.ResponseWriter, err error) {
+	var actionConflict *decisioncommon.ResolutionActionConflictError
 	switch {
+	case errors.As(err, &actionConflict):
+		writeJSON(w, http.StatusConflict, errorResponse{
+			Error:                   actionConflict.Error(),
+			Code:                    "runtime_decision_action_unsupported",
+			TicketID:                string(actionConflict.TicketID),
+			RequestedResolutionType: actionConflict.RequestedType,
+			AllowedActions:          append([]string(nil), actionConflict.AllowedActions...),
+			Remediation:             actionConflict.Remediation,
+		})
 	case errors.Is(err, common.ErrInvalidArgument):
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 	case errors.Is(err, common.ErrBlocked):

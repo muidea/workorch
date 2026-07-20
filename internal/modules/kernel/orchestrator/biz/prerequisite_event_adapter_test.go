@@ -90,9 +90,9 @@ func TestAcquireAndCommitManifestAndProviderCeilingPrerequisites(t *testing.T) {
 		Focus:              runtimecontract.CoverageFocus{ID: "cwi-1"},
 		Activation:         runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "custom-test", ModelID: "model-1"}},
 	}, []runtimev2.RuntimeRequirement{
-		{Kind: runtimecontract.PrerequisiteKindManifest},
+		{Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: filemodule.ModuleID},
 		{Kind: runtimecontract.PrerequisiteKindCapability, SubjectRef: filemodule.ModuleID, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{filemodule.StepKindPatchApply}},
-		{Kind: runtimecontract.PrerequisiteKindProviderCeiling, MinimumBytes: 32 * 1024},
+		{Kind: runtimecontract.PrerequisiteKindProviderCeiling, OwnerModuleID: llmmodule.ModuleID, MinimumBytes: 32 * 1024},
 	})
 	for _, item := range append([]runtimecontract.RuntimePrerequisite(nil), facts.Prerequisites.Pending...) {
 		var err error
@@ -126,6 +126,19 @@ func TestAcquireAndCommitManifestAndProviderCeilingPrerequisites(t *testing.T) {
 		facts.Resources.ProviderCeiling.CapabilityRevision == "" ||
 		facts.Resources.ProviderCeiling.ConfigurationRevision == "" {
 		t.Fatalf("provider ceiling = %+v", facts.Resources.ProviderCeiling)
+	}
+	providerPrerequisiteID := ""
+	for _, prerequisite := range facts.Prerequisites.Satisfied {
+		if prerequisite.Kind == runtimecontract.PrerequisiteKindProviderCeiling {
+			providerPrerequisiteID = prerequisite.ID
+			break
+		}
+	}
+	providerObservation, found := runtimecontract.RuntimePrerequisiteObservationForID(facts.Resources.PrerequisiteObservations, providerPrerequisiteID)
+	if !found || providerObservation.Kind != runtimecontract.PrerequisiteKindProviderCeiling || providerObservation.OwnerModuleID != llmmodule.ModuleID ||
+		len(providerObservation.Dependencies) != 1 || providerObservation.Dependencies[0].Domain != runtimecontract.RuntimeResourceProviderConfig ||
+		providerObservation.Dependencies[0].Revision != facts.Resources.ProviderCeiling.ConfigurationRevision {
+		t.Fatalf("provider ceiling observation = %+v", providerObservation)
 	}
 	if len(facts.Capabilities.StateChangeKinds) != 1 || facts.Capabilities.StateChangeKinds[0] != filemodule.StepKindPatchApply {
 		t.Fatalf("runtime capabilities = %+v", facts.Capabilities)
@@ -187,7 +200,11 @@ func TestAcquireAndCommitTargetSnapshotPrerequisiteAdvancesTypedFacts(t *testing
 		DefinitionRevision: "definition-1",
 		EvidenceRevision:   "evidence-1",
 		Focus:              runtimecontract.CoverageFocus{ID: "cwi-1"},
-	}, []runtimev2.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindTargetSnapshot, SubjectRef: "main.go"}})
+	}, []runtimev2.RuntimeRequirement{{
+		Kind:          runtimecontract.PrerequisiteKindTargetSnapshot,
+		OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		SubjectRef:    "main.go",
+	}})
 	item := facts.Prerequisites.Pending[0]
 	committed, err := AcquireAndCommitTargetSnapshotPrerequisite(ctx, hub, facts, orchestratorevents.AcquireTargetSnapshotCommand{
 		WorkspaceID:                   facts.WorkspaceID,

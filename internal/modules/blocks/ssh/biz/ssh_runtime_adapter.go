@@ -3,6 +3,8 @@ package ssh
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -114,6 +116,13 @@ func (a *RuntimeAdapter) defaultTimeout() time.Duration {
 		return 30 * time.Second
 	}
 	return a.timeout
+}
+
+// admissibilityRevision is a stable identity for local SSH execution policy;
+// it deliberately excludes transient network reachability and credentials.
+func (a *RuntimeAdapter) admissibilityRevision() string {
+	hash := sha256.Sum256([]byte("ssh-policy|timeout=" + a.defaultTimeout().String() + "|private-key-regular-file"))
+	return "ssh-policy-" + hex.EncodeToString(hash[:])[:20]
 }
 
 type sshCommandSpec struct {

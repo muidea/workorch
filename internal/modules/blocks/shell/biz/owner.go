@@ -2,6 +2,7 @@ package shell
 
 import (
 	"context"
+	"strings"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -25,6 +26,10 @@ type Biz struct {
 type Dependencies struct {
 	EventHub          magicevent.Hub
 	BackgroundRoutine task.BackgroundRoutine
+	// RuntimeAdapter is an explicit owner-local dependency used by focused
+	// runtimes and tests. Production leaves it nil so configuration remains the
+	// sole construction source.
+	RuntimeAdapter *RuntimeAdapter
 }
 
 func New(eventHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine, deps ...Dependencies) (*Biz, error) {
@@ -32,7 +37,9 @@ func New(eventHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine, deps
 		return nil, common.ErrInvalidArgument
 	}
 	m := &Biz{Base: basebiz.New(modulecommon.ModuleID, eventHub, backgroundRoutine)}
-	if len(deps) > 0 {
+	if len(deps) > 0 && deps[0].RuntimeAdapter != nil {
+		m.runtimeAdapter = deps[0].RuntimeAdapter
+		return m, nil
 	}
 	cfg, err := workorchconfig.Current()
 	if err != nil {
@@ -126,14 +133,7 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		response.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
 		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindShellCommand, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
 	}
-	observation := orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectNone}
-	if command.Data.StateChanging {
-		observation.ObservedEffectScope = runtimecontract.RuntimeEffectUnknown
-		if response.Status == runtimecontract.RuntimeOperationExecutionStatusAccepted {
-			observation.ObservedEffectScope = runtimecontract.RuntimeEffectWorkspaceDurable
-			observation.Changed = true
-		}
-	}
+	observation := shellMutationReceiptObservation(command.Data.StateChanging, response.Status, operationResult)
 	receipt := orchestratorevents.NewRuntimeOperationReceiptWithObservation(command.Execution, command.OperationID, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, nil, observation)
 	committed, err := orchestratorevents.CommitPersistedRuntimeOperationReceipt(event.Context(), m.EventHub(), ModuleID, command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
 	if err != nil {
@@ -142,6 +142,48 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 	}
 	response.Receipt = committed
 	result.Set(response, nil)
+}
+
+// shellMutationReceiptObservation turns only the Shell owner's bounded,
+// before/after observations into resource changes. The resource identity uses
+// File as the canonical owner of workspace targets/tree: Shell observes the
+// mutation, while Orchestrator performs the neutral intersection against File
+// and Shell prerequisites. No File service/repository is consulted here.
+func shellMutationReceiptObservation(stateChanging bool, status runtimecontract.RuntimeOperationExecutionStatus, result RuntimeCommandResult) orchestratorevents.RuntimeOperationReceiptObservation {
+	observation := orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectNone}
+	if !stateChanging {
+		return observation
+	}
+	observation.ObservedEffectScope = runtimecontract.RuntimeEffectUnknown
+	if status != runtimecontract.RuntimeOperationExecutionStatusAccepted {
+		return observation
+	}
+	changes := make([]runtimecontract.RuntimeResourceChange, 0, len(result.WorkspaceTargetChanges)+1)
+	for _, change := range result.WorkspaceTargetChanges {
+		targetRef := strings.TrimSpace(change.TargetRef)
+		if targetRef == "" || change.BeforeRevision == change.AfterRevision || strings.TrimSpace(change.AfterRevision) == "" {
+			continue
+		}
+		changes = append(changes, runtimecontract.RuntimeResourceChange{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: targetRef, BeforeRevision: change.BeforeRevision, AfterRevision: change.AfterRevision,
+		})
+	}
+	if fingerprint := result.WorkspaceStateChangeFingerprint; strings.TrimSpace(fingerprint.Before) != "" &&
+		strings.TrimSpace(fingerprint.After) != "" && fingerprint.Before != fingerprint.After {
+		changes = append(changes, runtimecontract.RuntimeResourceChange{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", BeforeRevision: fingerprint.Before, AfterRevision: fingerprint.After,
+		})
+	}
+	if len(changes) == 0 {
+		observation.NoOp = true
+		return observation
+	}
+	observation.ObservedEffectScope = runtimecontract.RuntimeEffectWorkspaceDurable
+	observation.Changed = true
+	observation.ResourceChanges = changes
+	return observation
 }
 
 func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {
@@ -170,7 +212,8 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		setCapabilityError(result, err)
 		return
 	}
-	result.Set(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{PrerequisiteID: command.PrerequisiteID, Admissibility: inventory}, nil)
+	observation := m.runtimeAdapter.runtimeAdmissibilityObservation(command.WorkspaceDeliverableDirectory, command.PrerequisiteID, inventory, command.RequiredTargetRefs)
+	result.Set(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{PrerequisiteID: command.PrerequisiteID, Admissibility: inventory, Observation: &observation}, nil)
 }
 
 func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {
@@ -185,10 +228,10 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	failure := m.runtimeAdapter.ProbeRuntimeOperationFeasibility(command.WorkspaceDeliverableDirectory, command.Admissibility, operation)
+	failure, stale := m.runtimeAdapter.ProbeRuntimeOperationFeasibilityWithObservation(command.WorkspaceDeliverableDirectory, command.Admissibility, operation, command.Observation)
 	result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{
 		OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID,
-		Feasible: failure == nil, Failure: failure,
+		Feasible: failure == nil && stale == nil, Failure: failure, Stale: stale,
 	}, nil)
 }
 

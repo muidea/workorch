@@ -2,6 +2,7 @@ package workspaceviewcore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -389,6 +390,14 @@ func (m *Manager) RebuildWorkspace(ctx context.Context, workspaceID string) (err
 	snapshot, err := m.loader.ReadWorkspaceSnapshot(ctx, workspaceID)
 	if err != nil {
 		workspace, readErr := m.loader.ReadWorkspace(ctx, workspaceID)
+		// A delete is authoritative. EventStream may deliver a pre-delete
+		// workspace record after the HTTP deletion path removed its projection.
+		// When both owner reads confirm not-found, converge by removing the
+		// projection entry instead of degrading global readiness.
+		if errors.Is(err, common.ErrNotFound) && errors.Is(readErr, common.ErrNotFound) {
+			m.DeleteWorkspace(workspaceID)
+			return nil
+		}
 		if readErr == nil {
 			m.store.UpsertWorkspace(workspace)
 			m.publishProjectionChanged(ctx, workspaceID, "overview")

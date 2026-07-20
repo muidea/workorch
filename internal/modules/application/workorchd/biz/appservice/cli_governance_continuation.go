@@ -15,12 +15,14 @@ import (
 )
 
 func (d *CLICommandDispatcher) publishDecisionContinuationForRequest(ctx context.Context, requestID string, item appmodelcore.Decision) error {
-	intent := "resume"
 	reason := "decision_resolved"
-	if strings.TrimSpace(item.ResolutionType) == decisioncommon.ResolutionTypeReplan {
-		intent = "replan"
+	if item.ResolutionType == decisioncommon.ResolutionTypeReplan {
 		reason = "decision_replan_resolved"
 	}
+	// A replan-style resolution is an audited Decision intent, never a second
+	// Runtime V2 control verb. The scheduler receives the one supported
+	// continuation command and Orchestrator re-drives the persisted aggregate.
+	const intent = "resume"
 	return d.publishGovernanceContinuation(ctx, governanceContinuationRef{
 		WorkspaceID: item.WorkspaceID,
 		RunID:       item.RunID,
@@ -34,25 +36,6 @@ func (d *CLICommandDispatcher) publishDecisionContinuationForRequest(ctx context
 func (d *CLICommandDispatcher) publishDecisionContinuationsForRequest(ctx context.Context, requestID string, items []appmodelcore.Decision) error {
 	for _, item := range items {
 		if err := d.publishDecisionContinuationForRequest(ctx, requestID, item); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (d *CLICommandDispatcher) publishApprovalContinuationForRequest(ctx context.Context, requestID string, item appmodelcore.Approval) error {
-	return d.publishGovernanceContinuation(ctx, governanceContinuationRef{
-		WorkspaceID: item.WorkspaceID,
-		RunID:       item.RunID,
-		Intent:      "resume",
-		Reason:      "approval_resolved",
-		RequestID:   cliGovernanceContinuationRequestID(requestID, "approval", item.ID, "resume"),
-	})
-}
-
-func (d *CLICommandDispatcher) publishApprovalContinuationsForRequest(ctx context.Context, requestID string, items []appmodelcore.Approval) error {
-	for _, item := range items {
-		if err := d.publishApprovalContinuationForRequest(ctx, requestID, item); err != nil {
 			return err
 		}
 	}

@@ -259,21 +259,52 @@ type ProgressMilestoneInfo struct {
 
 // RuntimeV2ProgressInfo is a product-boundary summary projected from Run.RuntimeState.
 type RuntimeV2ProgressInfo struct {
-	StateRevision          uint64
-	EvidenceSequence       uint64
-	CompletedDispatchCount int
-	ActiveDispatchID       string
-	CandidateAttemptCount  int
-	AcceptedEvidenceCount  int
-	RejectedEvidenceCount  int
-	MissingEvidenceKinds   []string
-	CurrentFocusID         string
-	CurrentAction          string
-	FailureClass           string
-	FailureCode            string
-	FailureSignature       string
-	FailureMessage         string
-	RepairHintCodes        []string
+	StateRevision             uint64
+	EvidenceSequence          uint64
+	CompletedDispatchCount    int
+	ActiveDispatchID          string
+	CandidateAttemptCount     int
+	AcceptedEvidenceCount     int
+	RejectedEvidenceCount     int
+	MissingEvidenceKinds      []string
+	CurrentFocusID            string
+	CurrentAction             string
+	FailureClass              string
+	FailureCode               string
+	FailureSignature          string
+	FailureMessage            string
+	RepairHintCodes           []string
+	PrerequisiteRefreshState  string
+	PrerequisiteRefreshUsed   int
+	PrerequisiteRefreshLimit  int
+	PrerequisiteInvalidations []RuntimePrerequisiteRefreshInvalidationInfo
+}
+
+// RuntimePrerequisiteRefreshInvalidationInfo is display-only freshness audit
+// data. It must not be used by a client to choose or trigger Runtime V2 work.
+type RuntimePrerequisiteRefreshInvalidationInfo struct {
+	Signature        string
+	Source           string
+	PrerequisiteIDs  []string
+	ObservationIDs   []string
+	DispatchID       string
+	OperationID      string
+	ReceiptHash      string
+	OwnerModuleID    string
+	ResourceDomain   string
+	SubjectRef       string
+	ExpectedRevision string
+	ObservedRevision string
+	Reason           string
+	ResourceChanges  []RuntimePrerequisiteResourceChangeInfo
+}
+
+type RuntimePrerequisiteResourceChangeInfo struct {
+	OwnerModuleID  string
+	ResourceDomain string
+	SubjectRef     string
+	BeforeRevision string
+	AfterRevision  string
 }
 
 type AssessmentOutcomeInfo struct {

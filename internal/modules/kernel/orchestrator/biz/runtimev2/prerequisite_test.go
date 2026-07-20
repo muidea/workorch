@@ -193,6 +193,47 @@ func TestCapabilityStatePrerequisiteRequiresOwnerConfirmedSnapshot(t *testing.T)
 	}
 }
 
+func TestOperationAdmissibilityBindingRequiresCommittedOwnerCapabilityState(t *testing.T) {
+	requirements := []RuntimeRequirement{
+		{Kind: runtimecontract.PrerequisiteKindCapabilityState, OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable"},
+		{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleGit, RequiredCapabilities: []string{runtimecontract.StepKindGitWrite}},
+	}
+	baseFacts := validationFacts()
+	baseFacts.ConvergencePolicy.MaxCandidateContextItems = 4
+	facts := PreflightRuntimeFacts(baseFacts, requirements)
+	var capability, admissibility runtimecontract.RuntimePrerequisite
+	for _, prerequisite := range facts.Prerequisites.Pending {
+		switch prerequisite.Kind {
+		case runtimecontract.PrerequisiteKindCapabilityState:
+			capability = prerequisite
+		case runtimecontract.PrerequisiteKindOperationAdmissibility:
+			admissibility = prerequisite
+		}
+	}
+	inventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: admissibility.ID, OwnerModuleID: runtimecontract.RuntimeModuleGit, OperationKinds: []string{runtimecontract.StepKindGitWrite},
+		ObservedRevision: "repo-v1", AcquisitionBinding: "capability-state/ws/run/git/0",
+	}
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	if _, err := CommitPrerequisiteResult(facts, PrerequisiteResult{PrerequisiteID: admissibility.ID, OperationAdmissibility: &inventory}); err == nil {
+		t.Fatal("bound inventory was committed without its capability-state acquisition")
+	}
+	snapshot := runtimecontract.RuntimeCapabilityStateSnapshot{
+		RequirementID: capability.ID, AcquisitionKey: "capability-state/ws/run/git/0", AcquisitionBinding: "capability-state/ws/run/git/0",
+		OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable",
+		ObservedRevision: "repo-v1", ContentHash: "hash-v1", Disposition: runtimecontract.RuntimeCapabilityStateReady,
+		QueryReceiptRef: "capability-state-receipt/capability-state/ws/run/git/0",
+	}
+	snapshot.SnapshotID = runtimecontract.StableRuntimeCapabilityStateSnapshotID(snapshot)
+	committed, err := CommitPrerequisiteResult(facts, PrerequisiteResult{PrerequisiteID: capability.ID, CapabilityState: &snapshot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CommitPrerequisiteResult(committed, PrerequisiteResult{PrerequisiteID: admissibility.ID, OperationAdmissibility: &inventory}); err != nil {
+		t.Fatalf("bound inventory rejected after matching capability-state acquisition: %v", err)
+	}
+}
+
 func TestMergeCapabilityKindsDoesNotOverwrite(t *testing.T) {
 	existing := []string{"file/read", "validation/managed_session"}
 	incoming := []string{"validation/managed_session", "shell/command"}

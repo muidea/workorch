@@ -139,10 +139,22 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 				status = errStatus
 			}
 		}
-		failure := llmruntimev2.CandidateFailureFromError(err)
 		if status == "" {
 			status = llmmodels.RuntimeCandidateStatusFailed
 		}
+		if stale := llmruntimev2.CandidatePrerequisiteStaleFromError(err); stale != nil {
+			m.publishLLMUsageRecorded(event.Context(), audit, usage, status, "")
+			result.Set(orchestratorevents.RequestRuntimeCandidateResult{
+				Transaction: command.Transaction,
+				Stale:       stale,
+				RequestID:   requestID,
+				Status:      status,
+				Audit:       providerRequestAuditView(audit),
+				Usage:       providerUsageView(usage),
+			}, nil)
+			return
+		}
+		failure := llmruntimev2.CandidateFailureFromError(err)
 		m.publishLLMUsageRecorded(event.Context(), audit, usage, status, string(failure.Class))
 		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
 			Transaction: command.Transaction,
@@ -349,10 +361,40 @@ func (m *Biz) handleProviderCeilingPrerequisite(event magicevent.Event, result m
 		setPrerequisiteMagicError(result, err)
 		return
 	}
+	observation := providerCeilingObservation(command.PrerequisiteID, ceiling)
+	if err := observation.Validate(); err != nil {
+		setPrerequisiteMagicError(result, err)
+		return
+	}
 	result.Set(orchestratorevents.AcquireProviderCeilingResult{
 		PrerequisiteID: command.PrerequisiteID,
 		Ceiling:        ceiling,
+		Observation:    &observation,
 	}, nil)
+}
+
+// providerCeilingObservation records the exact configuration revision used to
+// acquire a sealed provider ceiling. The target is immutable for the Run; a
+// later configuration revision is a prerequisite freshness event, never a
+// silent provider/model substitution.
+func providerCeilingObservation(prerequisiteID string, ceiling runtimecontract.ProviderCeiling) runtimecontract.RuntimePrerequisiteObservation {
+	ceiling = ceiling.Normalized()
+	subject := ceiling.Target.ProviderID + "/" + ceiling.Target.ModelID
+	contentHash := fmt.Sprintf("provider-ceiling:%s:%s:%s:%s:%d:%d:%d:%d:%d",
+		ceiling.Target.ProviderID, ceiling.Target.ModelID, ceiling.CapabilityRevision, ceiling.ConfigurationRevision,
+		ceiling.ContextWindowTokens, ceiling.ProviderMaxOutputTokens, ceiling.EffectiveMaxOutputTokens, ceiling.MaxInputTokens, ceiling.MaxBytes)
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisiteID,
+		Kind:           runtimecontract.PrerequisiteKindProviderCeiling,
+		OwnerModuleID:  ModuleID,
+		ContentHash:    contentHash,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceProviderConfig, OwnerModuleID: ModuleID,
+			SubjectRef: subject, Revision: ceiling.ConfigurationRevision,
+		}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	return observation
 }
 
 func setPrerequisiteMagicError(result magicevent.Result, err error) {

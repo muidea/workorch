@@ -133,6 +133,60 @@ func TestMapRuntimeV2ProgressIgnoresUnboundEvidenceBeforeLastFocus(t *testing.T)
 	}
 }
 
+func TestMapRuntimeV2ProgressProjectsPrerequisiteRefreshWithoutCandidateRetry(t *testing.T) {
+	facts := runtimecontract.RuntimeFacts{
+		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def-1", EvidenceRevision: "ev-1",
+		Focus: runtimecontract.CoverageFocus{ID: "focus-1"},
+		Prerequisites: runtimecontract.PrerequisiteState{Pending: []runtimecontract.RuntimePrerequisite{{
+			ID: "operation_admissibility:file", Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+			OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		}}},
+		RecoveryPolicy: runtimecontract.DefaultRuntimeRecoveryPolicy(),
+		Recovery:       runtimecontract.RuntimeRecoveryLedger{PrerequisiteRefreshes: 1},
+	}.Normalized()
+	change := runtimecontract.RuntimeResourceChange{
+		Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		SubjectRef: "main.go", BeforeRevision: "main-v1", AfterRevision: "main-v2",
+	}
+	summary := mapRuntimeV2Progress(runtimecontract.RuntimeStateRecord{
+		Facts: facts,
+		PrerequisiteInvalidations: []runtimecontract.RuntimePrerequisiteInvalidationRecord{{
+			Signature: "resource-change-1", PrerequisiteIDs: []string{"operation_admissibility:file"}, ObservationIDs: []string{"observation-1"},
+			DispatchID: "dispatch-1", OperationID: "write-1", ReceiptHash: "receipt-1", ResourceChanges: []runtimecontract.RuntimeResourceChange{change},
+		}},
+	})
+	if summary.PrerequisiteRefreshState != "prerequisite_refreshing" || summary.PrerequisiteRefreshUsed != 1 ||
+		summary.PrerequisiteRefreshLimit != runtimecontract.DefaultMaxPrerequisiteRefreshes {
+		t.Fatalf("refresh status = %+v", summary)
+	}
+	if summary.CandidateAttemptCount != 0 {
+		t.Fatalf("freshness projection was represented as candidate retry: %+v", summary)
+	}
+	if len(summary.PrerequisiteInvalidations) != 1 {
+		t.Fatalf("invalidation projection = %#v", summary.PrerequisiteInvalidations)
+	}
+	invalidation := summary.PrerequisiteInvalidations[0]
+	if invalidation.Source != "owner_receipt_resource_change" || invalidation.OwnerModuleID != runtimecontract.RuntimeModuleFile ||
+		invalidation.ResourceDomain != string(runtimecontract.RuntimeResourceWorkspaceTarget) || invalidation.SubjectRef != "main.go" ||
+		len(invalidation.ResourceChanges) != 1 || invalidation.ResourceChanges[0].AfterRevision != "main-v2" {
+		t.Fatalf("resource-change source projection = %#v", invalidation)
+	}
+}
+
+func TestMapRuntimeV2ProgressProjectsPrerequisiteRefreshExhausted(t *testing.T) {
+	facts := runtimecontract.RuntimeFacts{
+		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def-1", EvidenceRevision: "ev-1",
+		Focus: runtimecontract.CoverageFocus{ID: "focus-1"}, RecoveryPolicy: runtimecontract.DefaultRuntimeRecoveryPolicy(),
+		Recovery: runtimecontract.RuntimeRecoveryLedger{PrerequisiteRefreshes: runtimecontract.DefaultMaxPrerequisiteRefreshes},
+		Failure:  &runtimecontract.FailureFact{Class: runtimecontract.FailureClassPrerequisiteRefreshExhausted, Code: "prerequisite_refresh_exhausted", Signature: "refresh-1", Message: "refresh exhausted"},
+	}.Normalized()
+	summary := mapRuntimeV2Progress(runtimecontract.RuntimeStateRecord{Facts: facts})
+	if summary.PrerequisiteRefreshState != "prerequisite_refresh_exhausted" ||
+		summary.PrerequisiteRefreshUsed != runtimecontract.DefaultMaxPrerequisiteRefreshes {
+		t.Fatalf("exhausted refresh status = %+v", summary)
+	}
+}
+
 func TestRuntimeV2AwareStepCountUsesDispatchUnits(t *testing.T) {
 	snapshot := readmodelcore.RunSnapshot{
 		TaskProgress: readmodelcore.TaskProgress{

@@ -53,12 +53,25 @@ func AcquireRuntimeOperationAdmissibilityPrerequisite(ctx context.Context, hub m
 	if err := inventory.Validate(); err != nil {
 		return orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{}, err
 	}
+	if binding := strings.TrimSpace(command.CapabilityStateBinding); binding != "" && inventory.AcquisitionBinding != binding {
+		return orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{}, fmt.Errorf("runtime operation admissibility prerequisite %q returned a mismatched capability-state binding", command.PrerequisiteID)
+	}
 	for _, required := range command.RequiredKinds {
 		if !containsRuntimeOperationKind(inventory.OperationKinds, required) {
 			return orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{}, fmt.Errorf("runtime operation admissibility prerequisite %q omitted kind %q", command.PrerequisiteID, required)
 		}
 	}
 	response.Admissibility = inventory
+	if response.Observation != nil {
+		observation := response.Observation.Normalized()
+		if observation.PrerequisiteID != inventory.PrerequisiteID || observation.Kind != runtimecontract.PrerequisiteKindOperationAdmissibility || observation.OwnerModuleID != inventory.OwnerModuleID {
+			return orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{}, fmt.Errorf("runtime operation admissibility prerequisite %q returned a mismatched freshness observation", command.PrerequisiteID)
+		}
+		if err := observation.Validate(); err != nil {
+			return orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{}, err
+		}
+		response.Observation = &observation
+	}
 	return response, nil
 }
 
@@ -81,6 +94,16 @@ func ProbeRuntimeOperationFeasibility(ctx context.Context, hub magicevent.Hub, c
 	}
 	command.Operation = operation
 	command.Admissibility = inventory
+	if command.Observation != nil {
+		observation := command.Observation.Normalized()
+		if observation.PrerequisiteID != inventory.PrerequisiteID || observation.Kind != runtimecontract.PrerequisiteKindOperationAdmissibility || observation.OwnerModuleID != inventory.OwnerModuleID {
+			return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("runtime operation feasibility probe has mismatched freshness observation")
+		}
+		if err := observation.Validate(); err != nil {
+			return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, err
+		}
+		command.Observation = &observation
+	}
 	result := hub.Send(magicevent.NewEventWithContext(
 		orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility,
 		ModuleID,
@@ -100,13 +123,27 @@ func ProbeRuntimeOperationFeasibility(ctx context.Context, hub magicevent.Hub, c
 		return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, prerequisiteMagicError(magicErr)
 	}
 	response, ok := data.(orchestratorevents.ProbeRuntimeOperationFeasibilityResult)
-	if !ok || response.OperationID != operation.ID || response.AdmissibilitySnapshotID != inventory.SnapshotID {
+	if !ok || response.OperationID != operation.ID || response.AdmissibilitySnapshotID != inventory.SnapshotID || response.CapabilityStateBinding != inventory.AcquisitionBinding {
 		return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("runtime operation feasibility probe returned an invalid result")
 	}
 	if response.Feasible {
-		if response.Failure != nil {
+		if response.Failure != nil || response.Stale != nil {
 			return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("feasible runtime operation probe returned failure facts")
 		}
+		return response, nil
+	}
+	if response.Stale != nil {
+		if response.Failure != nil {
+			return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("stale runtime operation probe returned ordinary failure facts")
+		}
+		stale := response.Stale.Normalized()
+		if err := stale.Validate(); err != nil {
+			return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, err
+		}
+		if stale.OwnerModuleID != inventory.OwnerModuleID {
+			return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("stale runtime operation probe returned mismatched owner")
+		}
+		response.Stale = &stale
 		return response, nil
 	}
 	if response.Failure == nil || strings.TrimSpace(string(response.Failure.Class)) == "" || strings.TrimSpace(response.Failure.Code) == "" || strings.TrimSpace(response.Failure.Signature) == "" || strings.TrimSpace(response.Failure.Message) == "" {

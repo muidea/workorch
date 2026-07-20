@@ -63,13 +63,28 @@ func RequestRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command or
 	if err := runtimecontract.ValidateAuthorityTransaction(command.Decision, response.Transaction); err != nil {
 		return orchestratorevents.RequestRuntimeCandidateResult{}, err
 	}
+	if response.Stale != nil {
+		if response.Failure != nil {
+			return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned stale together with a candidate failure")
+		}
+		stale := response.Stale.Normalized()
+		if err := stale.Validate(); err != nil {
+			return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned an invalid runtime prerequisite stale: %w", err)
+		}
+		response.Stale = &stale
+		return response, nil
+	}
 	if response.Failure != nil {
 		if response.Failure.Class == "" || response.Failure.Reason == "" {
 			return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned an invalid runtime candidate failure")
 		}
 		return response, nil
 	}
-	if err := response.Candidate.Validate(command.Decision); err != nil {
+	// Revalidate at the EventHub boundary with the same activation-sealed MCP
+	// metadata that the LLM boundary used.  Calling Validate without activation
+	// discards the exact non-durable server/tool declaration and incorrectly
+	// treats every MCP tool call as mutating.
+	if err := response.Candidate.ValidateWithActivation(command.Decision, command.CandidateContext.Activation); err != nil {
 		return orchestratorevents.RequestRuntimeCandidateResult{}, err
 	}
 	return response, nil

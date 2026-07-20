@@ -136,6 +136,86 @@ func TestFileModuleExecutesConcreteFileWriteEventAndWritesState(t *testing.T) {
 	}
 }
 
+func TestFileOwnerStateChangingReceiptReplaysWithoutSecondWrite(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	receipts := map[string]runtimecontract.RuntimeOperationReceipt{}
+	receiptObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
+	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.QueryRuntimeOperationReceiptCommand)
+		receipt, found := receipts[command.ExecutionKey]
+		result.Set(orchestratorevents.QueryRuntimeOperationReceiptResult{Receipt: &receipt, Found: found}, nil)
+	})
+	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)
+		if receipt, found := receipts[command.Receipt.ExecutionKey]; found {
+			result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: receipt}, nil)
+			return
+		}
+		receipts[command.Receipt.ExecutionKey] = command.Receipt
+		result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: command.Receipt}, nil)
+	})
+	t.Cleanup(func() {
+		receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
+		receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
+	})
+	module := New()
+	if err := module.Configure(Dependencies{EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+	workspace := t.TempDir()
+	command := fileWriteReceiptCommand(workspace, "first\n")
+	first := sendFileWriteReceiptCommand(t, ctx, hub, command)
+	if first.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || !first.Receipt.Changed || first.Receipt.AfterHash == "" {
+		t.Fatalf("first receipt = %+v", first.Receipt)
+	}
+	target := filepath.Join(workspace, "README.md")
+	if content, err := os.ReadFile(target); err != nil || string(content) != "first\n" {
+		t.Fatalf("first file write content=%q err=%v", content, err)
+	}
+	if err := os.WriteFile(target, []byte("external\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command.Data.Content = "replayed\n"
+	replayed := sendFileWriteReceiptCommand(t, ctx, hub, command)
+	if replayed.Receipt.ExecutionKey != first.Receipt.ExecutionKey || replayed.Receipt.AfterHash != first.Receipt.AfterHash {
+		t.Fatalf("replayed receipt=%+v, want persisted=%+v", replayed.Receipt, first.Receipt)
+	}
+	if content, err := os.ReadFile(target); err != nil || string(content) != "external\n" {
+		t.Fatalf("duplicate receipt replay wrote target content=%q err=%v", content, err)
+	}
+}
+
+func fileWriteReceiptCommand(workspace, content string) orchestratorevents.ExecuteFileWriteOperationCommand {
+	return orchestratorevents.ExecuteFileWriteOperationCommand{
+		Execution:   orchestratorevents.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-file/run-file/dispatch-file/write-readme", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable},
+		WorkspaceID: "ws-file", RunID: "run-file", DispatchID: "dispatch-file",
+		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-file", RequiredOutputHash: "output-file"},
+		OperationID: "write-readme", TargetRefs: []string{"README.md"}, EvidenceKind: runtimecontract.EvidenceKindStateChange,
+		WorkspaceDeliverableDirectory: workspace,
+		Data:                          orchestratorevents.FileWriteOperationData{TargetRef: "README.md", Content: content, ContentPresent: true},
+	}
+}
+
+func sendFileWriteReceiptCommand(t *testing.T, ctx context.Context, hub magicevent.Hub, command orchestratorevents.ExecuteFileWriteOperationCommand) orchestratorevents.ExecuteFileWriteOperationResult {
+	t.Helper()
+	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorExecuteFileWriteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, command))
+	data, err := result.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, ok := data.(orchestratorevents.ExecuteFileWriteOperationResult)
+	if !ok {
+		t.Fatalf("response type=%T", data)
+	}
+	return response
+}
+
 func TestFileModuleExecutesConcreteInspectionAndPreviewEvents(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)

@@ -56,7 +56,9 @@ export const recoveryModeLabels: Record<string, string> = {
   wait_decision: '等待决策',
   wait_approval: '等待审批',
   inspect_failure: '排查失败',
-  restart: '可重新启动',
+  // Persisted recovery mode may retain this historical value; the Console
+  // still presents the single user action as resume.
+  restart: '可继续处理',
   none: '无需恢复'
 };
 

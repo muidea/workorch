@@ -5,6 +5,12 @@ set -euo pipefail
 BASE_URL="${WORKORCH_VERIFY_BASE_URL:-${WORKORCH_BASE_URL:-http://127.0.0.1:8080}}"
 TMP_DIR="${WORKORCH_VERIFY_ARTIFACT_DIR:-$(mktemp -d)}"
 KEEP_ARTIFACTS="${WORKORCH_VERIFY_KEEP_ARTIFACTS:-0}"
+CURL_CONNECT_TIMEOUT="${WORKORCH_VERIFY_CURL_CONNECT_TIMEOUT:-5}"
+CURL_MAX_TIME="${WORKORCH_VERIFY_CURL_MAX_TIME:-15}"
+
+curl_get() {
+  curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -fsS "$@"
+}
 
 report_failure() {
   local status=$?
@@ -32,21 +38,21 @@ trap cleanup EXIT
 
 mkdir -p "$TMP_DIR"
 
-curl -fsS "$BASE_URL/healthz" >"$TMP_DIR/healthz.json"
+curl_get "$BASE_URL/healthz" >"$TMP_DIR/healthz.json"
 grep '"status": "ok"' "$TMP_DIR/healthz.json" >/dev/null
-curl -fsS "$BASE_URL/readyz" >"$TMP_DIR/readyz.json"
+curl_get "$BASE_URL/readyz" >"$TMP_DIR/readyz.json"
 grep '"status": "ready"' "$TMP_DIR/readyz.json" >/dev/null
-curl -fsS "$BASE_URL/metrics" >"$TMP_DIR/metrics.txt"
+curl_get "$BASE_URL/metrics" >"$TMP_DIR/metrics.txt"
 grep 'workorch_http_requests_total' "$TMP_DIR/metrics.txt" >/dev/null
 
-curl -fsS "$BASE_URL/console" | grep 'workorch Console' >/dev/null
-curl -fsS "$BASE_URL/console/assets/workorch-console.css" | grep 'workorch-section' >/dev/null
-curl -fsS "$BASE_URL/console/assets/workorch-console.js" >"$TMP_DIR/workorch-console.js"
+curl_get "$BASE_URL/console" | grep 'workorch Console' >/dev/null
+curl_get "$BASE_URL/console/assets/workorch-console.css" | grep 'workorch-section' >/dev/null
+curl_get "$BASE_URL/console/assets/workorch-console.js" >"$TMP_DIR/workorch-console.js"
 cp "$TMP_DIR/workorch-console.js" "$TMP_DIR/workorch-console-all.js"
 grep -oE '[A-Za-z0-9_.-]+-[A-Za-z0-9_-]+\.js' "$TMP_DIR/workorch-console.js" | sort -u >"$TMP_DIR/workorch-console-chunks.txt" || true
 while IFS= read -r chunk; do
   [[ -n "$chunk" ]] || continue
-  curl -fsS "$BASE_URL/console/assets/$chunk" >>"$TMP_DIR/workorch-console-all.js"
+  curl_get "$BASE_URL/console/assets/$chunk" >>"$TMP_DIR/workorch-console-all.js"
   printf '\n' >>"$TMP_DIR/workorch-console-all.js"
 done <"$TMP_DIR/workorch-console-chunks.txt"
 grep 'workorch 控制台' "$TMP_DIR/workorch-console-all.js" >/dev/null
@@ -73,14 +79,14 @@ if grep -E 'workorch management overview|Create run|Run slice|Available slice ca
   exit 1
 fi
 
-curl -fsS "$BASE_URL/api/v1/workorch/configuration" >"$TMP_DIR/configuration.json"
+curl_get "$BASE_URL/api/v1/workorch/configuration" >"$TMP_DIR/configuration.json"
 grep '"configuration"' "$TMP_DIR/configuration.json" >/dev/null
 
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces" >"$TMP_DIR/workspaces.json"
+curl_get "$BASE_URL/api/v1/workorch/workspaces" >"$TMP_DIR/workspaces.json"
 grep '"workspaces"' "$TMP_DIR/workspaces.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs" >"$TMP_DIR/runs.json"
+curl_get "$BASE_URL/api/v1/workorch/runs" >"$TMP_DIR/runs.json"
 grep '"runs"' "$TMP_DIR/runs.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/events?limit=20" >"$TMP_DIR/events.json"
+curl_get "$BASE_URL/api/v1/workorch/events?limit=20" >"$TMP_DIR/events.json"
 grep '"eventRecords"' "$TMP_DIR/events.json" >/dev/null
 
 echo "workorch HTTP verification passed for deployed workorch service $BASE_URL"

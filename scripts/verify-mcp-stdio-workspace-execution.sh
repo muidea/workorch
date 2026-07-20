@@ -3,6 +3,13 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "${1:-}" == "--self-test" ]]; then
+  exec python3 "$ROOT_DIR/scripts/verify_mcp_stdio_mock.py" --self-test
+fi
+if [[ $# -gt 0 ]]; then
+  echo "usage: $0 [--self-test]" >&2
+  exit 2
+fi
 TMP_DIR="$(mktemp -d)"
 BASE_URL="${WORKORCH_MCP_STDIO_VERIFY_BASE_URL:-${WORKORCH_BASE_URL:-http://127.0.0.1:8080}}"
 MOCK_ADDR="${WORKORCH_MCP_STDIO_VERIFY_MOCK_ADDR:-127.0.0.1:18185}"
@@ -335,59 +342,9 @@ start_mock_provider() {
   cat >"$TMP_DIR/llm_mock_provider.py" <<'PY'
 import json
 import os
-import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-def last(pattern, text):
-    matches = re.findall(pattern, text or "")
-    return matches[-1] if matches else ""
-
-def decision_payload(user_content):
-    action = last(r'"Action"\s*:\s*"([^"]+)"', user_content) or last(r'"action"\s*:\s*"([^"]+)"', user_content)
-    focus_id = last(r'"Focus"\s*:\s*\{\s*"ID"\s*:\s*"([^"]+)"', user_content) or last(r'"focusId"\s*:\s*"([^"]+)"', user_content) or "focus-001"
-    coverage_ids = re.findall(r'"(cwi-[A-Za-z0-9._-]+)"', user_content)
-    coverage_ids = list(dict.fromkeys(coverage_ids)) or ["cwi-001"]
-    evidence_refs = re.findall(r'"(workorch://[^"]+|run-[^"]+/graph-[^"]+|run-[^"]+/validation/[^"]+)"', user_content)
-    evidence_refs = list(dict.fromkeys(evidence_refs))
-
-    if action == "produce_assessment":
-        operation_id = "mcp-stdio-call" if focus_id == "focus-002" else "mcp-stdio-validation"
-        current_refs = [item for item in evidence_refs if operation_id in item]
-        return {
-            "focusId": focus_id,
-            "coverageWorkItemIds": coverage_ids[:1],
-            "satisfied": True,
-            "summary": "MCP stdio invocation returned structured tool evidence.",
-            "evidenceRefs": current_refs[:1],
-        }
-
-    if action == "produce_validation":
-        return {
-            "operations": [{
-                "id": "mcp-stdio-validation",
-                "kind": "file/read",
-                "coverageWorkItemIds": coverage_ids[:1],
-                "targetRefs": ["mcp-stdio-validation-source.txt"],
-                "parameters": [
-                    {"name": "path", "string": "mcp-stdio-validation-source.txt"},
-                    {"name": "optional", "boolean": True},
-                    {"name": "maxBytes", "integer": 4096},
-                ],
-            }]
-        }
-
-    return {
-        "operations": [{
-            "id": "mcp-stdio-call",
-            "kind": "mcp/tool_call",
-            "coverageWorkItemIds": coverage_ids[:1],
-            "parameters": [
-                {"name": "serverId", "string": os.environ.get("WORKORCH_MCP_STDIO_VERIFY_SERVER_ID", "mcp-stdio-verify")},
-                {"name": "tool", "string": "repo.summary"},
-                {"name": "input.path", "string": "."},
-            ],
-        }]
-    }
+from verify_mcp_stdio_mock import MockContractError, decision_payload
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -481,7 +438,19 @@ class Handler(BaseHTTPRequestHandler):
         size = int(self.headers.get("Content-Length", "0"))
         payload = json.loads(self.rfile.read(size))
         user_content = "\n".join(str(item.get("content", "")) for item in payload.get("messages") or [])
-        decision = decision_payload(user_content)
+        try:
+            decision = decision_payload(
+                user_content,
+                os.environ.get("WORKORCH_MCP_STDIO_VERIFY_SERVER_ID", "mcp-stdio-verify"),
+            )
+        except MockContractError as error:
+            encoded = json.dumps({"error": {"message": f"mock contract: {error}"}}).encode("utf-8")
+            self.send_response(422)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+            return
         response = {
             "choices": [{
                 "message": {
@@ -502,7 +471,7 @@ class Handler(BaseHTTPRequestHandler):
 host, port_text = os.environ.get("WORKORCH_MCP_STDIO_VERIFY_MOCK_ADDR", "127.0.0.1:18185").split(":", 1)
 ThreadingHTTPServer((host, int(port_text)), Handler).serve_forever()
 PY
-  WORKORCH_MCP_STDIO_VERIFY_MOCK_ADDR="$MOCK_ADDR" WORKORCH_MCP_STDIO_VERIFY_SERVER_ID="$MCP_SERVER_ID" python3 "$TMP_DIR/llm_mock_provider.py" >>"$MOCK_LOG" 2>&1 &
+  PYTHONPATH="$ROOT_DIR/scripts${PYTHONPATH:+:$PYTHONPATH}" WORKORCH_MCP_STDIO_VERIFY_MOCK_ADDR="$MOCK_ADDR" WORKORCH_MCP_STDIO_VERIFY_SERVER_ID="$MCP_SERVER_ID" python3 "$TMP_DIR/llm_mock_provider.py" >>"$MOCK_LOG" 2>&1 &
   MOCK_PID=$!
 }
 
@@ -569,16 +538,12 @@ wait_ready() {
 
 wait_mock() {
   for _ in $(seq 1 "$CURL_READY_ATTEMPTS"); do
-    if curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_READY_MAX_TIME" -fsS -X POST "http://$MOCK_ADDR/v1/chat/completions" \
-      -H 'Content-Type: application/json' \
-      -d '{"messages":[{"role":"user","content":"{\"runId\": \"probe\", \"stepId\": \"probe\"}"}]}' >/dev/null 2>&1; then
+    if curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_READY_MAX_TIME" -fsS "http://$MOCK_ADDR/v1/models" >/dev/null 2>&1; then
       return 0
     fi
     sleep 0.2
   done
-  curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_READY_MAX_TIME" -fsS -X POST "http://$MOCK_ADDR/v1/chat/completions" \
-    -H 'Content-Type: application/json' \
-    -d '{"messages":[{"role":"user","content":"{\"runId\": \"probe\", \"stepId\": \"probe\"}"}]}' >/dev/null
+  curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_READY_MAX_TIME" -fsS "http://$MOCK_ADDR/v1/models" >/dev/null
 }
 
 write_llm_update_payloads() {
@@ -799,14 +764,16 @@ grep '工作空间验收资料' "$TMP_DIR/mcp-resource-capabilities-derived.json
 get_json "$BASE_URL/api/v1/workorch/mcp/capabilities?serverId=$MCP_SERVER_ID&kind=prompt&q=acceptance" "$TMP_DIR/mcp-prompt-capabilities-derived.json"
 grep '验收提示词' "$TMP_DIR/mcp-prompt-capabilities-derived.json" >/dev/null
 put_json "$BASE_URL/api/v1/workorch/mcp/capabilities/$MCP_CAPABILITY_ID" \
-  '{"id":"'"$MCP_CAPABILITY_ID"'","serverId":"'"$MCP_SERVER_ID"'","kind":"tool","name":"repo.summary","displayName":"仓库摘要能力 E2E","description":"通过 MCP stdio 读取仓库摘要，用于能力目录、Workspace 绑定和 Run 证据验收。","category":"代码仓库","tags":["e2e","stdio","repo"],"usageHint":"当 Goal 需要仓库上下文摘要时使用。","inputSummary":"workspaceId、runId、stepId 和工具输入。","outputSummary":"返回仓库摘要 structuredContent。","stageHints":["execution","validation"],"riskLevel":"read_only","enabled":true,"approvalPolicy":"operator","status":"active"}' \
+  '{"id":"'"$MCP_CAPABILITY_ID"'","serverId":"'"$MCP_SERVER_ID"'","kind":"tool","name":"repo.summary","displayName":"仓库摘要能力 E2E","description":"通过 MCP stdio 读取仓库摘要，用于能力目录、Workspace 绑定和 Run 证据验收。","category":"代码仓库","tags":["e2e","stdio","repo"],"usageHint":"当 Goal 需要仓库上下文摘要时使用。","inputSummary":"workspaceId、runId、stepId 和工具输入。","outputSummary":"返回仓库摘要 structuredContent。","stageHints":["execution","validation"],"riskLevel":"read_only","effectScope":"none","idempotencyClass":"safe_to_replay","enabled":true,"approvalPolicy":"operator","status":"active"}' \
   "$TMP_DIR/mcp-capability-updated.json"
 grep '"displayName": "仓库摘要能力 E2E"' "$TMP_DIR/mcp-capability-updated.json" >/dev/null
+grep '"effectScope": "none"' "$TMP_DIR/mcp-capability-updated.json" >/dev/null
+grep '"idempotencyClass": "safe_to_replay"' "$TMP_DIR/mcp-capability-updated.json" >/dev/null
 get_json "$BASE_URL/api/v1/workorch/mcp/capabilities?category=%E4%BB%A3%E7%A0%81%E4%BB%93%E5%BA%93&stage=execution&riskLevel=read_only&enabled=true&q=stdio" "$TMP_DIR/mcp-capabilities-filtered.json"
 grep "\"id\": \"$MCP_CAPABILITY_ID\"" "$TMP_DIR/mcp-capabilities-filtered.json" >/dev/null
 
 post_json "$BASE_URL/api/v1/workorch/workspace-templates" \
-  '{"id":"'"$MCP_TEMPLATE_ID"'","name":"MCP stdio verification","description":"Runtime V2 MCP stdio validation profile","goalText":"Plan and execute one MCP stdio repo.summary tool call, then assess the DoD from the tool evidence.","doDItems":["stdio MCP tool call completes"],"defaultSoulId":"soul-generic-governed-execution","soulBindings":{"planning":"soul-generic-governed-planning","execution":"soul-generic-governed-execution","validation":"soul-generic-governed-validation","decision":"soul-generic-governed-decision","approval":"soul-generic-governed-approval","artifact":"soul-generic-governed-artifact"},"contextHints":{"profileContracts":{"mcp-stdio-e2e":{"deliverableExpectations":[{"id":"mcp_stdio_tool_call","required":true,"evidenceRole":"primary_state_change","description":"MCP stdio tool execution evidence"}],"evidenceRequirements":[{"id":"mcp_stdio_tool_call","scope":"deliverable","evidenceRole":"primary_state_change","requiredEvidenceKinds":["state_change"],"requireDirectEvidence":true,"requireExecutableBehaviorEvidence":true,"acceptedStepKinds":["mcp/tool_call"]}]}}}}' \
+  '{"id":"'"$MCP_TEMPLATE_ID"'","name":"MCP stdio verification","description":"Runtime V2 MCP stdio validation profile","goalText":"Plan and execute one MCP stdio repo.summary tool call, then assess the DoD from the tool evidence.","doDItems":["stdio MCP tool call completes"],"defaultSoulId":"soul-generic-governed-execution","soulBindings":{"planning":"soul-generic-governed-planning","execution":"soul-generic-governed-execution","validation":"soul-generic-governed-validation","decision":"soul-generic-governed-decision","approval":"soul-generic-governed-approval","artifact":"soul-generic-governed-artifact"},"contextHints":{"acceptanceSlicePolicy":{"schemaVersion":"workorch.acceptance_slice_policy.v2","maxWorkItems":1,"maxFocuses":2,"maxCandidateContextItems":16,"completionPolicy":"all_required_items_accepted","resultPolicy":"slice_result_allowed","groups":[{"id":"mcp-stdio-e2e","title":"MCP stdio acceptance","scope":"mcp_stdio","priority":10,"maxWorkItems":1,"match":{"all":true}}]},"profileContracts":{"mcp-stdio-e2e":{"deliverableExpectations":[{"id":"mcp_stdio_tool_call","required":true,"evidenceRole":"supplemental_evidence","description":"MCP stdio tool validation evidence"}],"evidenceRequirements":[{"id":"mcp_stdio_tool_call","scope":"deliverable","evidenceRole":"supplemental_evidence","requiredEvidenceKinds":["validation"],"requireDirectEvidence":true,"requireExecutableBehaviorEvidence":true,"acceptedStepKinds":["mcp/tool_call"]}]}}}}' \
   "$TMP_DIR/mcp-template.json"
 
 post_json "$BASE_URL/api/v1/workorch/workspaces" \

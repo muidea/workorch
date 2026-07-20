@@ -65,5 +65,19 @@ type RuntimeCommandResult struct {
 	RuntimeDiagnostics              runtimecontract.RuntimeDiagnostics
 	ValidationFailureDiagnostic     *runtimecontract.ValidationFailureDiagnostic
 	WorkspaceStateChangeFingerprint runtimecontract.RuntimeWorkspaceStateChangeFingerprint
-	Evidence                        runtimecontract.RuntimeOperationEvidence
+	// WorkspaceTargetChanges is the bounded before/after observation for the
+	// explicitly sealed workspace targets of a state-changing Shell operation.
+	// It remains owner-local until the Shell owner converts it to the typed
+	// receipt ResourceChanges contract.
+	WorkspaceTargetChanges []RuntimeWorkspaceTargetChange
+	Evidence               runtimecontract.RuntimeOperationEvidence
+}
+
+// RuntimeWorkspaceTargetChange is a content-derived observation of one
+// workspace-relative declared target. "missing" is a valid revision: a
+// state-changing Shell command may create a previously absent target.
+type RuntimeWorkspaceTargetChange struct {
+	TargetRef      string
+	BeforeRevision string
+	AfterRevision  string
 }

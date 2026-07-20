@@ -303,6 +303,8 @@ export type Workspace = {
   deliverableDirectory: string;
   state: string;
   activeRunId?: string;
+  // Mutable workspace preference. It applies only to the next activation.
+  defaultLLMTarget?: ProviderModelTarget;
   defaultSoulId?: string;
   soulBindings?: Record<string, string>;
 };
@@ -388,6 +390,8 @@ export type Run = {
   blockingTicketId?: string;
   blockingApprovalId?: string;
   failureReason?: string;
+  // Immutable Runtime V2 activation input; never send it back on Resume.
+  sealedLLMTarget?: ProviderModelTarget;
 };
 
 export type RunHeartbeat = {
@@ -529,13 +533,14 @@ export type WorkspaceExecutionActivationRequest = {
   memoryIds?: string[];
   dialogLanguage?: string;
   priority?: number;
-  intent?: 'resume' | 'restart' | 'replan';
+  // Console has one runtime continuation verb. Replan remains a Decision
+  // resolution intent and is intentionally not a workspace execution command.
+  intent?: 'resume';
   requestId?: string;
   reason?: string;
   source?: string;
   definitionRevision?: string;
   decisionId?: string;
-  restart?: boolean;
 };
 
 export type Soul = {
@@ -1278,6 +1283,54 @@ export type TaskProgress = {
   recovery: RecoveryPlan;
   repairLoop: RepairLoop;
   evidenceRefs?: string[];
+  runtimeV2?: RuntimeV2Progress;
+};
+
+export type RuntimeV2Progress = {
+  stateRevision?: number;
+  evidenceSequence?: number;
+  completedDispatchCount?: number;
+  activeDispatchId?: string;
+  candidateAttemptCount?: number;
+  acceptedEvidenceCount?: number;
+  rejectedEvidenceCount?: number;
+  missingEvidenceKinds?: string[];
+  currentFocusId?: string;
+  currentAction?: string;
+  failureClass?: string;
+  failureCode?: string;
+  failureSignature?: string;
+  failureMessage?: string;
+  repairHintCodes?: string[];
+  prerequisiteRefreshState?: string;
+  prerequisiteRefreshUsed?: number;
+  prerequisiteRefreshLimit?: number;
+  prerequisiteInvalidations?: RuntimePrerequisiteRefreshInvalidation[];
+};
+
+export type RuntimePrerequisiteRefreshInvalidation = {
+  signature?: string;
+  source?: string;
+  prerequisiteIds?: string[];
+  observationIds?: string[];
+  dispatchId?: string;
+  operationId?: string;
+  receiptHash?: string;
+  ownerModuleId?: string;
+  resourceDomain?: string;
+  subjectRef?: string;
+  expectedRevision?: string;
+  observedRevision?: string;
+  reason?: string;
+  resourceChanges?: RuntimePrerequisiteResourceChange[];
+};
+
+export type RuntimePrerequisiteResourceChange = {
+  ownerModuleId?: string;
+  resourceDomain?: string;
+  subjectRef?: string;
+  beforeRevision?: string;
+  afterRevision?: string;
 };
 
 export type TaskDecomposition = {

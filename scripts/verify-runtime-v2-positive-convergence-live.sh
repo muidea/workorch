@@ -8,6 +8,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+if [[ "${1:-}" == "--self-test" ]]; then
+  exec python3 "$ROOT_DIR/scripts/verify_runtime_v2_live_contract.py" --self-test
+fi
+
 BASE_URL="${WORKORCH_BASE_URL:-http://127.0.0.1:8080}"
 MODE="${WORKORCH_E2E_MODE:-positive}"
 ARTIFACT_DIR="$(realpath -m "${WORKORCH_E2E_ARTIFACT_DIR:-${TMPDIR:-/tmp}/workorch-e2e/runtime-v2-positive-convergence-live/$(date -u +%Y%m%dT%H%M%SZ)}")"
@@ -88,6 +92,9 @@ fi
 
 python3 - "$BASE_URL" "$ARTIFACT_DIR" "$WS_A" "$WS_B" "$POLL_INTERVAL" "$TIMEOUT" "$ACTIVATE" "$PROVIDER_ID" "$MODEL_ID" "$MODE" <<'PY'
 import json, os, sys, time, urllib.request, urllib.error, uuid
+
+sys.path.insert(0, os.path.join(os.getcwd(), "scripts"))
+from verify_runtime_v2_live_contract import bounded_git_sequence_errors
 
 base, artifact_dir, ws_a, ws_b, poll_s, timeout_s, activate, provider_id, model_id, mode = sys.argv[1:11]
 poll = float(poll_s)
@@ -225,29 +232,6 @@ def positive_acceptance_errors(detail, bounded):
     )
     if not durable:
         errors.append("no accepted durable owner receipt")
-    return errors
-
-def bounded_git_sequence_errors(detail):
-    operations = acceptance_from_detail(detail).get("operations") or []
-    expected = {"init", "add", "commit"}
-    matched = [
-        item for item in operations
-        if item.get("kind") == "git/write" and item.get("variantId") in expected
-    ]
-    errors = []
-    found = {variant: [] for variant in expected}
-    for item in matched:
-        found[item.get("variantId")].append(item)
-    for variant in sorted(expected):
-        values = found[variant]
-        if len(values) != 1:
-            errors.append(f"git sequence variant {variant} count={len(values)}, want 1")
-            continue
-        if not values[0].get("requiredOperationRef"):
-            errors.append(f"git sequence variant {variant} lacks requiredOperationRef")
-    hashes = {item.get("capabilityStateHash") for item in matched if item.get("capabilityStateHash")}
-    if len(hashes) != 1:
-        errors.append(f"git sequence capabilityStateHash set={sorted(hashes)}, want exactly one non-empty sealed snapshot hash")
     return errors
 
 def governance_binding_errors(detail):
@@ -458,7 +442,10 @@ for ws, label in ((ws_a, "a"), (ws_b, "b")):
             errors.append(f"{label}: expected action=complete got {s.get('action')}")
         errors.extend(f"{label}: {value}" for value in positive_acceptance_errors(detail, mode == "bounded_terminal"))
         if mode == "bounded_terminal" and label == "a":
-            errors.extend(f"{label}: {value}" for value in bounded_git_sequence_errors(detail))
+            errors.extend(
+                f"{label}: {value}"
+                for value in bounded_git_sequence_errors(acceptance_from_detail(detail).get("operations") or [])
+            )
     else:
         before = baseline[ws]
         terminal_states = ("completed", "failed", "cancelled", "superseded")

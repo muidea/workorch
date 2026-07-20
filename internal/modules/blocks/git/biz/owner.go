@@ -107,7 +107,8 @@ func (m *Biz) handleGitCapabilityState(event magicevent.Event, result magicevent
 		setCapabilityError(result, err)
 		return
 	} else if found {
-		result.Set(orchestratorevents.AcquireGitCapabilityStateResult{PrerequisiteID: command.PrerequisiteID, Snapshot: snapshot}, nil)
+		observation := gitCapabilityStateObservation(command.PrerequisiteID, snapshot)
+		result.Set(orchestratorevents.AcquireGitCapabilityStateResult{PrerequisiteID: command.PrerequisiteID, Snapshot: snapshot, Observation: &observation}, nil)
 		return
 	}
 	snapshot, err := m.runtimeAdapter.CapabilityState(event.Context(), command.PrerequisiteID, command.SubjectRef, command.WorkspaceDeliverableDirectory)
@@ -116,6 +117,10 @@ func (m *Biz) handleGitCapabilityState(event magicevent.Event, result magicevent
 		return
 	}
 	snapshot.AcquisitionKey = command.AcquisitionKey
+	// The receipt key is accepted by Git only once it names a durable owner
+	// snapshot.  Downstream components compare this opaque binding but never
+	// derive repository semantics from it.
+	snapshot.AcquisitionBinding = command.AcquisitionKey
 	snapshot.QueryReceiptRef = "capability-state-receipt/" + command.AcquisitionKey
 	snapshot.SnapshotID = runtimecontract.StableRuntimeCapabilityStateSnapshotID(snapshot)
 	snapshot, err = m.capabilityReceipts.StoreIfAbsent(command.WorkspaceID, snapshot)
@@ -123,7 +128,8 @@ func (m *Biz) handleGitCapabilityState(event magicevent.Event, result magicevent
 		setCapabilityError(result, err)
 		return
 	}
-	result.Set(orchestratorevents.AcquireGitCapabilityStateResult{PrerequisiteID: command.PrerequisiteID, Snapshot: snapshot}, nil)
+	observation := gitCapabilityStateObservation(command.PrerequisiteID, snapshot)
+	result.Set(orchestratorevents.AcquireGitCapabilityStateResult{PrerequisiteID: command.PrerequisiteID, Snapshot: snapshot, Observation: &observation}, nil)
 }
 
 func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result magicevent.Result) {
@@ -136,16 +142,37 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		setCapabilityError(result, err)
 		return
 	}
-	// Git's owner snapshot is deliberately acquired through the same read-only
-	// adapter used by the existing capability-state prerequisite.  This keeps
-	// candidate admission inside the Git owner and avoids treating a constant
-	// module marker as proof that repository parameters remain feasible.
-	snapshot, err := m.runtimeAdapter.CapabilityState(event.Context(), command.PrerequisiteID, "workspace_deliverable", command.WorkspaceDeliverableDirectory)
-	if err != nil {
-		setCapabilityError(result, err)
-		return
+	// A capability-bound Git inventory is derived from the exact durable owner
+	// receipt requested by Orchestrator.  It must not perform a second,
+	// independently timed CapabilityState acquisition here.
+	var snapshot runtimecontract.RuntimeCapabilityStateSnapshot
+	var err error
+	binding := strings.TrimSpace(command.CapabilityStateBinding)
+	if binding != "" {
+		if m.capabilityReceipts == nil {
+			setCapabilityError(result, common.ErrInvalidArgument)
+			return
+		}
+		var found bool
+		snapshot, found, err = m.capabilityReceipts.Load(command.WorkspaceID, binding)
+		if err != nil {
+			setCapabilityError(result, err)
+			return
+		}
+		if !found || snapshot.AcquisitionBinding != binding {
+			setCapabilityError(result, fmt.Errorf("%w: git capability acquisition binding %q is unavailable", common.ErrConflict, binding))
+			return
+		}
+	} else {
+		// Owners/profiles without a declared capability-state prerequisite retain
+		// the existing read-only inventory behavior.
+		snapshot, err = m.runtimeAdapter.CapabilityState(event.Context(), command.PrerequisiteID, "workspace_deliverable", command.WorkspaceDeliverableDirectory)
+		if err != nil {
+			setCapabilityError(result, err)
+			return
+		}
 	}
-	inventory, err := orchestratorevents.NewRuntimeOperationAdmissibility(
+	inventory, err := orchestratorevents.NewRuntimeOperationAdmissibilityWithBinding(
 		command.PrerequisiteID,
 		ModuleID,
 		command.RequiredKinds,
@@ -153,12 +180,14 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		nil,
 		[]string{"repository-state-snapshot:" + snapshot.SnapshotID, "owner-execution-policy"},
 		snapshot.ObservedRevision,
+		binding,
 	)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
 	}
-	result.Set(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{PrerequisiteID: command.PrerequisiteID, Admissibility: inventory}, nil)
+	observation := gitAdmissibilityObservation(command.PrerequisiteID, inventory)
+	result.Set(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{PrerequisiteID: command.PrerequisiteID, Admissibility: inventory, Observation: &observation}, nil)
 }
 
 func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {
@@ -173,10 +202,57 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 	}
 	operation := command.Operation.Normalized()
 	failure := m.runtimeOperationFeasibility(event.Context(), command)
+	var stale *runtimecontract.RuntimePrerequisiteStale
+	if failure != nil && failure.Code == "operation_admissibility_stale" && command.Observation != nil {
+		if observed, err := m.runtimeAdapter.CapabilityState(event.Context(), command.Admissibility.PrerequisiteID, "workspace_deliverable", command.WorkspaceDeliverableDirectory); err == nil {
+			stale = gitAdmissibilityStale(*command.Observation, command.Admissibility, observed.ObservedRevision)
+			if stale != nil {
+				failure = nil
+			}
+		}
+	}
 	result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{
 		OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID,
-		Feasible: failure == nil, Failure: failure,
+		CapabilityStateBinding: command.Admissibility.AcquisitionBinding,
+		Feasible:               failure == nil && stale == nil, Failure: failure, Stale: stale,
 	}, nil)
+}
+
+func gitCapabilityStateObservation(prerequisiteID string, snapshot runtimecontract.RuntimeCapabilityStateSnapshot) runtimecontract.RuntimePrerequisiteObservation {
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisiteID, Kind: runtimecontract.PrerequisiteKindCapabilityState, OwnerModuleID: ModuleID, ContentHash: snapshot.ContentHash,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{
+			{Domain: runtimecontract.RuntimeResourceRepositoryState, OwnerModuleID: ModuleID, SubjectRef: snapshot.SubjectRef, Revision: snapshot.ObservedRevision},
+			// CapabilityState reads git status or the root directory to derive the
+			// required sequence. A File effect can therefore invalidate this
+			// observation before Git executes its next sealed operation.
+			{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: snapshot.ObservedRevision},
+		},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	return observation
+}
+
+func gitAdmissibilityObservation(prerequisiteID string, inventory runtimecontract.RuntimeOperationAdmissibility) runtimecontract.RuntimePrerequisiteObservation {
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: ModuleID, ContentHash: inventory.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{
+			{Domain: runtimecontract.RuntimeResourceRepositoryState, OwnerModuleID: ModuleID, SubjectRef: "workspace_deliverable", Revision: inventory.ObservedRevision},
+			{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: inventory.ObservedRevision},
+		},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	return observation
+}
+
+func gitAdmissibilityStale(observation runtimecontract.RuntimePrerequisiteObservation, inventory runtimecontract.RuntimeOperationAdmissibility, observedRevision string) *runtimecontract.RuntimePrerequisiteStale {
+	observation = observation.Normalized()
+	for _, dependency := range observation.Dependencies {
+		if dependency.Domain == runtimecontract.RuntimeResourceRepositoryState && dependency.OwnerModuleID == ModuleID && dependency.SubjectRef == "workspace_deliverable" && dependency.Revision == inventory.ObservedRevision {
+			return &runtimecontract.RuntimePrerequisiteStale{PrerequisiteID: observation.PrerequisiteID, ObservationID: observation.ObservationID, Domain: dependency.Domain, OwnerModuleID: dependency.OwnerModuleID, SubjectRef: dependency.SubjectRef, ExpectedRevision: dependency.Revision, ObservedRevision: observedRevision, Reason: "runtime git operation admissibility snapshot is stale"}
+		}
+	}
+	return nil
 }
 
 // runtimeOperationFeasibility is a read-only candidate-admission check.  It
@@ -185,6 +261,18 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 func (m *Biz) runtimeOperationFeasibility(ctx context.Context, command orchestratorevents.ProbeRuntimeOperationFeasibilityCommand) *runtimecontract.FailureFact {
 	operation := command.Operation.Normalized()
 	inventory := command.Admissibility.Normalized()
+	if binding := strings.TrimSpace(command.CapabilityStateBinding); binding != "" {
+		if binding != inventory.AcquisitionBinding {
+			return orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "operation_admissibility_stale", "runtime git operation admissibility acquisition binding is stale")
+		}
+		if m.capabilityReceipts == nil {
+			return orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "operation_admissibility_binding_unavailable", "runtime git capability acquisition binding is unavailable")
+		}
+		snapshot, found, err := m.capabilityReceipts.Load(command.WorkspaceID, binding)
+		if err != nil || !found || snapshot.AcquisitionBinding != binding || snapshot.ObservedRevision != inventory.ObservedRevision {
+			return orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "operation_admissibility_stale", "runtime git operation admissibility acquisition binding is stale")
+		}
+	}
 	snapshot, err := m.runtimeAdapter.CapabilityState(ctx, inventory.PrerequisiteID, "workspace_deliverable", command.WorkspaceDeliverableDirectory)
 	if err != nil {
 		return orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "git_repository_unavailable", err.Error())
@@ -291,6 +379,8 @@ func (m *Biz) handleGitOperation(event magicevent.Event, result magicevent.Resul
 			observation.NoOp = operationResult.ZeroWork
 			if observation.NoOp {
 				observation.ObservedEffectScope = runtimecontract.RuntimeEffectNone
+			} else if after, afterErr := m.runtimeAdapter.CapabilityState(event.Context(), "runtime-receipt/"+command.OperationID, "workspace_deliverable", command.WorkspaceDeliverableDirectory); afterErr == nil {
+				observation.ResourceChanges = gitReceiptResourceChanges(command.CapabilityStates, after)
 			}
 		}
 	}
@@ -302,6 +392,26 @@ func (m *Biz) handleGitOperation(event magicevent.Event, result magicevent.Resul
 	}
 	response.Receipt = committed
 	result.Set(response, nil)
+}
+
+// gitReceiptResourceChanges reports only revisions directly observed by the
+// Git owner after a durable Git operation. Orchestrator performs the neutral
+// intersection; it never derives repository state from operation kind.
+func gitReceiptResourceChanges(before []runtimecontract.RuntimeCapabilityStateSnapshot, after runtimecontract.RuntimeCapabilityStateSnapshot) []runtimecontract.RuntimeResourceChange {
+	if after.OwnerModuleID != ModuleID || after.CapabilityStateKind != "repository_state" || after.SubjectRef == "" || after.ObservedRevision == "" {
+		return nil
+	}
+	beforeRevision := ""
+	for _, snapshot := range before {
+		if snapshot.OwnerModuleID == ModuleID && snapshot.CapabilityStateKind == "repository_state" && snapshot.SubjectRef == after.SubjectRef {
+			beforeRevision = snapshot.ObservedRevision
+			break
+		}
+	}
+	return []runtimecontract.RuntimeResourceChange{{
+		Domain: runtimecontract.RuntimeResourceRepositoryState, OwnerModuleID: ModuleID, SubjectRef: after.SubjectRef,
+		BeforeRevision: beforeRevision, AfterRevision: after.ObservedRevision,
+	}}
 }
 
 func (m *Biz) runtimeCapabilityStateStaleReceipt(ctx context.Context, command orchestratorevents.ExecuteGitOperationCommand) (*runtimecontract.RuntimeOperationReceipt, error) {
@@ -340,12 +450,13 @@ func (m *Biz) runtimeCapabilityStateStaleReceipt(ctx context.Context, command or
 		if observed.ContentHash == snapshot.ContentHash {
 			continue
 		}
-		failure := &runtimecontract.FailureFact{Class: runtimecontract.FailureClassExecutionFailure, Code: "capability_state_stale", Signature: "capability-state-stale:" + snapshot.SnapshotID, Message: "owner capability state changed after sealed snapshot", TargetRefs: append([]string(nil), command.TargetRefs...)}
+		failure := &runtimecontract.FailureFact{Class: runtimecontract.FailureClassExecutionFailure, Code: "prerequisite_stale", Signature: "capability-state-stale:" + snapshot.SnapshotID, Message: "owner capability state changed after sealed snapshot", TargetRefs: append([]string(nil), command.TargetRefs...)}
 		receipt := orchestratorevents.NewRuntimeOperationReceiptWithObservation(command.Execution, command.OperationID, runtimecontract.RuntimeOperationExecutionStatusRejected, command.TargetRefs, runtimecontract.RuntimeOperationEvidence{Summary: failure.Message}, failure, nil, orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectNone})
-		receipt.CapabilityStateStale = &runtimecontract.RuntimeCapabilityStateStaleDetail{
-			StateRef:   runtimecontract.RuntimeCapabilityStateRef{OwnerModuleID: snapshot.OwnerModuleID, CapabilityStateKind: snapshot.CapabilityStateKind, SubjectRef: snapshot.SubjectRef},
-			SnapshotID: snapshot.SnapshotID, ExpectedHash: snapshot.ContentHash,
-			ObservedRevision: observed.ObservedRevision, ObservedHash: observed.ContentHash, Reason: failure.Message,
+		observation := gitCapabilityStateObservation(snapshot.RequirementID, snapshot)
+		receipt.PrerequisiteStale = &runtimecontract.RuntimePrerequisiteStale{
+			PrerequisiteID: observation.PrerequisiteID, ObservationID: observation.ObservationID,
+			Domain: runtimecontract.RuntimeResourceRepositoryState, OwnerModuleID: ModuleID, SubjectRef: snapshot.SubjectRef,
+			ExpectedRevision: snapshot.ObservedRevision, ObservedRevision: observed.ObservedRevision, Reason: failure.Message,
 		}
 		return &receipt, nil
 	}

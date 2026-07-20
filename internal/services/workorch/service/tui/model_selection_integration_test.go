@@ -112,7 +112,7 @@ func TestModelSelectionFlowMatchesEmbeddedAndRemoteBackends(t *testing.T) {
 			}
 			next, _ = m.Update(saveCmd())
 			m = appModelFromTea(t, next)
-			if m.modelSelectMode || !strings.Contains(m.result, "custom/model-b") || !strings.Contains(m.result, "current run: unchanged") {
+			if m.modelSelectMode || !strings.Contains(m.result, "custom/model-b") || !strings.Contains(m.result, "current-run sealed target: no active sealed target") {
 				t.Fatalf("saved selection result = mode:%v result:%q", m.modelSelectMode, m.result)
 			}
 			if name == "embedded" && (embeddedTarget == nil || embeddedTarget.ProviderID != "custom" || embeddedTarget.ModelID != "model-b") {

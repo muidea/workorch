@@ -128,6 +128,40 @@ func TestRequestCandidateRejectsFilePathAliasAsContractFailureBeforeDispatch(t *
 	}
 }
 
+func TestRequestCandidatePreservesTypedPrerequisiteStaleWithoutCandidateFailure(t *testing.T) {
+	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: "provider_ceiling:llm", Kind: runtimecontract.PrerequisiteKindProviderCeiling,
+		OwnerModuleID: runtimecontract.RuntimeModuleLLM, ContentHash: "provider-ceiling-v1",
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceProviderConfig, OwnerModuleID: runtimecontract.RuntimeModuleLLM,
+			SubjectRef: "ai-proxy/gpt-4o", Revision: "config-v1",
+		}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	stale := runtimecontract.RuntimePrerequisiteStale{
+		PrerequisiteID: observation.PrerequisiteID, ObservationID: observation.ObservationID,
+		Domain: runtimecontract.RuntimeResourceProviderConfig, OwnerModuleID: runtimecontract.RuntimeModuleLLM,
+		SubjectRef: "ai-proxy/gpt-4o", ExpectedRevision: "config-v1", ObservedRevision: "config-v2",
+		Reason: "provider configuration changed",
+	}
+	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+		return llmmodels.RuntimeCandidateGenerationResult{
+			Status: llmmodels.RuntimeCandidateStatusFailed, PrerequisiteStale: &stale,
+		}, errors.New("sealed provider configuration drift")
+	})
+	response, err := RequestCandidate(context.Background(), provider, request)
+	if err == nil {
+		t.Fatal("typed prerequisite stale was converted into a successful candidate")
+	}
+	if response.PrerequisiteStale == nil || response.PrerequisiteStale.ObservationID != observation.ObservationID || response.Candidate.StateChange != nil {
+		t.Fatalf("candidate response lost stale boundary: %+v", response)
+	}
+	if extracted := CandidatePrerequisiteStaleFromError(err); extracted == nil || extracted.ObservedRevision != "config-v2" {
+		t.Fatalf("candidate error did not retain typed stale: %v", err)
+	}
+}
+
 func TestCandidateRetryIsExactlyOnceAndKeepsSealedContract(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedValidation)
 	failure := runtimecontract.RuntimeCandidateFailure{Class: CandidateFailureClassSchema, Reason: `json: unknown field "candidate"`}
@@ -207,6 +241,11 @@ func TestDecodeTypedAssessmentCandidate(t *testing.T) {
 		"focusId":"focus-1",
 		"coverageWorkItemIds":["cwi-1"],
 		"disposition":"satisfied",
+		"items":[{
+			"coverageWorkItemId":"cwi-1",
+			"satisfied":true,
+			"evidenceRefs":["evidence-1"]
+		}],
 		"summary":"current focus is satisfied",
 		"evidenceRefs":["evidence-1"]
 	}`))
@@ -218,6 +257,23 @@ func TestDecodeTypedAssessmentCandidate(t *testing.T) {
 	}
 	if candidate.Assessment == nil || candidate.Assessment.Disposition != runtimecontract.AssessmentDispositionSatisfied || candidate.Assessment.FocusID != "focus-1" {
 		t.Fatalf("assessment candidate = %+v", candidate)
+	}
+	if len(candidate.Assessment.Items) != 1 || candidate.Assessment.Items[0].CoverageWorkItemID != "cwi-1" || !candidate.Assessment.Items[0].Satisfied || len(candidate.Assessment.Items[0].EvidenceRefs) != 1 || candidate.Assessment.Items[0].EvidenceRefs[0] != "evidence-1" {
+		t.Fatalf("assessment item = %+v", candidate.Assessment.Items)
+	}
+}
+
+func TestDecodeTypedAssessmentCandidateRejectsLegacyTopLevelSatisfied(t *testing.T) {
+	_, err := DecodeCandidatePayload(runtimecontract.RuntimeActionProduceAssessment, []byte(`{
+		"focusId":"focus-1",
+		"coverageWorkItemIds":["cwi-1"],
+		"disposition":"satisfied",
+		"satisfied":true,
+		"summary":"current focus is satisfied",
+		"evidenceRefs":["evidence-1"]
+	}`))
+	if err == nil || !strings.Contains(err.Error(), `unknown field "satisfied"`) {
+		t.Fatalf("legacy top-level satisfied error = %v", err)
 	}
 }
 

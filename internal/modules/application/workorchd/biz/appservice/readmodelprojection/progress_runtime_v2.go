@@ -61,6 +61,10 @@ func mapRuntimeV2Progress(state runtimecontract.RuntimeStateRecord) readmodelcor
 		ret.FailureSignature = strings.TrimSpace(facts.Failure.Signature)
 		ret.FailureMessage = strings.TrimSpace(facts.Failure.Message)
 	}
+	ret.PrerequisiteRefreshUsed = facts.Recovery.Used(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh)
+	ret.PrerequisiteRefreshLimit = facts.RecoveryPolicy.Limit(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh)
+	ret.PrerequisiteInvalidations = mapPrerequisiteRefreshInvalidations(state.PrerequisiteInvalidations)
+	ret.PrerequisiteRefreshState = runtimePrerequisiteRefreshState(facts, ret.PrerequisiteInvalidations)
 	hints := runtimecontract.DeriveRuntimeRepairHints(facts)
 	if len(hints) > 0 {
 		ret.RepairHintCodes = make([]string, 0, len(hints))
@@ -69,6 +73,78 @@ func mapRuntimeV2Progress(state runtimecontract.RuntimeStateRecord) readmodelcor
 				ret.RepairHintCodes = append(ret.RepairHintCodes, code)
 			}
 		}
+	}
+	return ret
+}
+
+func runtimePrerequisiteRefreshState(facts runtimecontract.RuntimeFacts, invalidations []readmodelcore.RuntimePrerequisiteRefreshInvalidation) string {
+	if facts.Failure != nil && facts.Failure.Class == runtimecontract.FailureClassPrerequisiteRefreshExhausted {
+		return "prerequisite_refresh_exhausted"
+	}
+	if len(invalidations) == 0 {
+		return ""
+	}
+	pending := make(map[string]struct{}, len(facts.Prerequisites.Pending))
+	for _, prerequisite := range facts.Prerequisites.Pending {
+		if id := strings.TrimSpace(prerequisite.ID); id != "" {
+			pending[id] = struct{}{}
+		}
+	}
+	for _, invalidation := range invalidations {
+		for _, prerequisiteID := range invalidation.PrerequisiteIDs {
+			if _, found := pending[prerequisiteID]; found {
+				return "prerequisite_refreshing"
+			}
+		}
+	}
+	return ""
+}
+
+func mapPrerequisiteRefreshInvalidations(values []runtimecontract.RuntimePrerequisiteInvalidationRecord) []readmodelcore.RuntimePrerequisiteRefreshInvalidation {
+	values = runtimecontract.NormalizeRuntimePrerequisiteInvalidations(values)
+	ret := make([]readmodelcore.RuntimePrerequisiteRefreshInvalidation, 0, len(values))
+	for _, raw := range values {
+		value := raw.Normalized()
+		item := readmodelcore.RuntimePrerequisiteRefreshInvalidation{
+			Signature:       value.Signature,
+			PrerequisiteIDs: append([]string(nil), value.PrerequisiteIDs...),
+			ObservationIDs:  append([]string(nil), value.ObservationIDs...),
+			DispatchID:      value.DispatchID,
+			OperationID:     value.OperationID,
+			ReceiptHash:     value.ReceiptHash,
+		}
+		if value.Stale != nil {
+			stale := value.Stale.Normalized()
+			if value.DispatchID == "" {
+				item.Source = "seal_time_probe_stale"
+			} else {
+				item.Source = "execution_receipt_stale"
+			}
+			item.OwnerModuleID = stale.OwnerModuleID
+			item.ResourceDomain = string(stale.Domain)
+			item.SubjectRef = stale.SubjectRef
+			item.ExpectedRevision = stale.ExpectedRevision
+			item.ObservedRevision = stale.ObservedRevision
+			item.Reason = stale.Reason
+		} else {
+			item.Source = "owner_receipt_resource_change"
+			for _, rawChange := range value.ResourceChanges {
+				change := rawChange.Normalized()
+				item.ResourceChanges = append(item.ResourceChanges, readmodelcore.RuntimePrerequisiteResourceChange{
+					OwnerModuleID: change.OwnerModuleID, ResourceDomain: string(change.Domain), SubjectRef: change.SubjectRef,
+					BeforeRevision: change.BeforeRevision, AfterRevision: change.AfterRevision,
+				})
+			}
+			if len(item.ResourceChanges) == 1 {
+				change := item.ResourceChanges[0]
+				item.OwnerModuleID = change.OwnerModuleID
+				item.ResourceDomain = change.ResourceDomain
+				item.SubjectRef = change.SubjectRef
+				item.ExpectedRevision = change.BeforeRevision
+				item.ObservedRevision = change.AfterRevision
+			}
+		}
+		ret = append(ret, item)
 	}
 	return ret
 }

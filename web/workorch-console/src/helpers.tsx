@@ -478,6 +478,11 @@ export function taskProgressCard(progress?: TaskProgress, repairLoopOverride?: R
   const repairSignalTargets = asStringArray(repairSignals?.targetRefs);
   const repairSignalIdentifiers = asStringArray(repairSignals?.identifiers);
   const repairCompactionFields = asStringArray(repairLoop?.repairInputCompaction?.omittedFields);
+  const prerequisiteRefresh = progress.runtimeV2;
+  const prerequisiteSources = (prerequisiteRefresh?.prerequisiteInvalidations ?? []).map((item) => {
+    const resource = [item.resourceDomain, item.subjectRef].filter(Boolean).join(':');
+    return [item.source, item.ownerModuleId, resource || undefined].filter(Boolean).join(' / ');
+  });
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       <Steps
@@ -511,7 +516,9 @@ export function taskProgressCard(progress?: TaskProgress, repairLoopOverride?: R
           { key: 'repairSignalTargets', label: '失败信号目标', children: compactTags(repairSignalTargets, 4) },
           { key: 'repairSignalIdentifiers', label: '失败信号标识符', children: compactTags(repairSignalIdentifiers, 4) },
           { key: 'repairCompaction', label: '修复输入裁剪', children: repairCompactionFields.length ? compactTags(repairCompactionFields, 4) : '-' },
-          { key: 'repairEvidence', label: '修复证据', children: compactTags(repairLoop?.evidenceRefs ?? [], 4) }
+          { key: 'repairEvidence', label: '修复证据', children: compactTags(repairLoop?.evidenceRefs ?? [], 4) },
+          { key: 'prerequisiteRefresh', label: '前置条件刷新', children: prerequisiteRefresh?.prerequisiteRefreshState ? `${prerequisiteRefresh.prerequisiteRefreshState} (${prerequisiteRefresh.prerequisiteRefreshUsed ?? 0}/${prerequisiteRefresh.prerequisiteRefreshLimit ?? 0})` : '-' },
+          { key: 'prerequisiteSources', label: '刷新来源', children: prerequisiteSources.length ? compactTags(prerequisiteSources, 4) : '-' }
         ]}
       />
       {repairSignals || repairLoop?.repairInputCompaction ? (

@@ -4,7 +4,7 @@ Status: active
 
 Type: roadmap
 
-Last Updated: 2026-07-19
+Last Updated: 2026-07-20
 
 ## Purpose
 
@@ -16,7 +16,8 @@ Last Updated: 2026-07-19
 | --- | --- |
 | Runtime V2 生产主链 | **代码已收口**（Start/Resume → `DriveRuntimeV2` only） |
 | Runtime V2 正向收敛基础闭环 | **completed**；RVC-R17～R26 已 code-landed，RVC-R16 bounded terminal 与 canonical canary liveness 已通过；完成记录迁入 archive |
-| Runtime V2 production admissibility + positive acceptance | **completed**；RPA-1 的 sealed budget、owner feasibility gate 与 fresh deployed bounded/positive acceptance 已通过；完成记录迁入 archive |
+| Runtime V2 production admissibility + positive acceptance | **completed**；RPA-1 首次 gate 与 RPF-1～5 durable-effect freshness 均已经 fresh deployed bounded acceptance 复核 |
+| Runtime V2 prerequisite freshness | **completed**；completion record 已归档，覆盖 observation/change/stale、refresh budget、restart/crash 与跨组件回归 |
 | 22-component framework boundary | **remediation active**；共享 Base Biz、全量本地 structural/race/file-backed 门禁已完成，待外部 deployed restart-fixture matrix |
 | V1 StagePacket / NextAction / graph dispatch 主链 | **已删除** |
 | 设计结论上提 | 见 [00-core/runtime-stage-contract.md](../../00-core/runtime-stage-contract.md)、[current-state.md](../../01-overview/current-state.md) |
@@ -25,7 +26,7 @@ Last Updated: 2026-07-19
 
 | ID | 项 | 说明 | 方案 / 历史过程稿 |
 | --- | --- | --- | --- |
-| ARCH-1 | 22 组件 framework boundary / lifecycle 验证 | Base Biz / Module-root EventHub 拓扑及本地验证已收口；待有重启后的外部目标与三类 fixture manifest 后执行 deployed SM-4 matrix | [go-multi-module-22-component-boundary-remediation.md](go-multi-module-22-component-boundary-remediation.md) |
+| ARCH-1 | 22 组件 framework boundary / lifecycle 验证 | Base Biz / Module-root EventHub 拓扑及本地验证已收口；按 22 组件合同矩阵逐项保持独立回归，待有重启后的外部目标与三类 fixture manifest 后执行 deployed SM-4 matrix | [主方案](go-multi-module-22-component-boundary-remediation.md) / [组件矩阵](component-contract-and-regression-closure-matrix.md) |
 | OPS-1 | 生产目录 V1 retirement 正式 apply | 代码/live 已 complete；等待 clean build + 真实生产目录维护窗口执行 `runtime-v1-retirement --apply` | [deployed-workspace-progress-blocker-component-closure-plan.md](../../90-archive/completed/deployed-workspace-progress-blocker-component-closure-plan.md) |
 | OPT-1 | file-patch deployed live（可选） | 代码迁移已完成；可选补一次 `patch apply + validation + DoD closeout` 的 deployed live | [file-patch-side-effect-owner-migration-plan.md](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
 
@@ -40,7 +41,7 @@ Last Updated: 2026-07-19
 ### → `90-archive/completed/`
 
 - `runtime-v2-positive-convergence-closure-plan.md`（历史 RVC-01～18 completion record；其 deployed 结论已由当前 remediation 复核作废）
-- `runtime-v2-production-admissibility-closure-2026-07-18.md`（RPA-1 complete；fresh bounded terminal 与 positive acceptance 通过）
+- `runtime-v2-production-admissibility-closure-2026-07-18.md`（RPA-1 当时切片完成；首次 inventory/selector/feasibility 与 bounded/positive acceptance 证据保留，durable-effect freshness 已由 RPF 重新打开）
 - `ai-proxy-primary-llm-provider-cutover-design-2026-07-15.md`（code-closed + live 通过）
 - `operation-map-json-contract-audit-2026-07-14.md`
 - `module-block-initiator-inventory-audit-2026-07-09.md`

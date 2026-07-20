@@ -247,3 +247,31 @@ func TestModelClearRequiresConfirmationAndPersistsNil(t *testing.T) {
 		t.Fatalf("clear persisted target = %+v, want nil", be.workspace.lastTarget)
 	}
 }
+
+func TestModelShowDistinguishesNextRunDefaultFromCurrentRunSealedTarget(t *testing.T) {
+	be := &modelSelectionBackend{fakeBE: newFake(t), workspace: &modelSelectionWorkspaceBackend{fakeWS: &fakeWS{}}, config: &modelSelectionConfigBackend{fakeC: &fakeC{}}}
+	m := NewAppModel(be, "ws-model-show", "")
+	nextTarget := runtimecontract.ProviderModelTarget{ProviderID: "provider-next", ModelID: "model-next"}
+	sealedTarget := runtimecontract.ProviderModelTarget{ProviderID: "provider-current", ModelID: "model-current"}
+	m.workspaces = []backend.WorkspaceInfo{{ID: "ws-model-show", State: common.WorkspaceStateActive, DefaultLLMTarget: &nextTarget}}
+	m.activeWorkspaceID = "ws-model-show"
+	entry := m.ensureWorkspaceRuntimeState("ws-model-show")
+	entry.Display.ActiveRunID = "run-model-show"
+	entry.Display.SealedLLMTarget = &sealedTarget
+	entry.HasDisplay = true
+
+	next, _ := m.applyWorkspaceLLMTargetShow(WorkspaceLLMTargetShowMsg{
+		WorkspaceID: "ws-model-show",
+		Config:      &backend.ServiceConfig{DefaultChat: backend.ProviderModelTarget{ProviderID: "provider-system", ModelID: "model-system"}},
+	})
+	got := appModelFromTea(t, next)
+	for _, want := range []string{
+		"next-run workspace default: provider-next/model-next",
+		"current-run sealed target: provider-current/model-current",
+		"system default: provider-system/model-system",
+	} {
+		if !strings.Contains(got.result, want) {
+			t.Fatalf("model show result = %q, missing %q", got.result, want)
+		}
+	}
+}

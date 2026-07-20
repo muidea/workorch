@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-07-19
+Last Updated: 2026-07-20
 
 
 ## LLM Provider（2026-07-15）
@@ -90,9 +90,9 @@ Last Updated: 2026-07-19
 
 ## Remaining Open Work
 
-Runtime V2-only 主链骨架、RVC-R5～R15 foundation、RVC-R17～R26 与 RPA-1 已完成。2026-07-18 的 deployed rerun 已将 capability-state canonical owner 与 discriminated operation variant 进入 sealed authority；随后发现的 `requiredOperationRef` provider-schema/strict-DTO 字段漂移也已收口为 typed mapping 和 file-gate 回归。fresh bounded dual terminal、canonical real canary liveness 与 fresh positive acceptance 均已通过；当前剩余主要是：
+Runtime V2-only 主链骨架、RVC-R5～R15 foundation、RVC-R17～R26 与 RPA-1 首次 inventory/selector/feasibility 切片已完成。2026-07-18 的 deployed rerun 已将 capability-state canonical owner 与 discriminated operation variant 进入 sealed authority；随后发现的 `requiredOperationRef` provider-schema/strict-DTO 字段漂移也已收口为 typed mapping 和 file-gate 回归。2026-07-20 的 RPF-1～5 已通过 owner-local、file-backed restart/crash、CI-safe 和 fresh deployed bounded acceptance：两个脚本拥有的工作区均 `completed/accepted`，随后清理恢复为单一真实工作区。第一次 live attempt 暴露的 Git verifier 误判已以 accepted-receipt-only 合同和 hermetic self-test 收口；证据见[归档 completion record](../90-archive/completed/runtime-v2-prerequisite-freshness-closure.md)。当前剩余主要是：
 
-1. **组件边界 / 生命周期（ARCH-1）**：SM-4 startup recovery、channel-free process lifecycle、owner Service facade、repository DTO 与 test-data isolation 均已有实现/回归证据；2026-07-19 的 go-multi-module-dev 审计发现的共享 Base Biz 缺失和 framework Module 根直接持有 EventHub，现已迁移到 component-local Biz，且本地 structural/race/file-backed 门禁已重跑。仅待提供重启后的外部目标与 `active_no_dispatch`、`active_sealed_dispatch`、`terminal_delivery_pending` 三类 fixture manifest，以执行 deployed SM-4 matrix；方案见 `70-roadmap/active/go-multi-module-22-component-boundary-remediation.md`。
+1. **组件边界 / 生命周期（ARCH-1）**：SM-4 startup recovery、channel-free process lifecycle、owner Service facade、repository DTO 与 test-data isolation 均已有实现/回归证据；2026-07-19 的 go-multi-module-dev 审计发现的共享 Base Biz 缺失和 framework Module 根直接持有 EventHub，现已迁移到 component-local Biz，且本地 structural/race/file-backed 门禁已重跑。22 个组件的职责、typed 交互合同、禁止边界和可单独执行的回归命令已固化在 `70-roadmap/active/component-contract-and-regression-closure-matrix.md`。仅待提供重启后的外部目标与 `active_no_dispatch`、`active_sealed_dispatch`、`terminal_delivery_pending` 三类 fixture manifest，以执行 deployed SM-4 matrix；workspace 删除后的迟到投影还必须验证 `/readyz` 恢复 ready，不能以放宽 readiness 绕过。
 2. **运维切换（OPS-1）**：真实生产目录 `runtime-v1-retirement --apply` + clean build 维护窗口（过程日记已归档，不在 active 放长文）。
 3. **可选验证（OPT-1）**：file-patch `apply + validation + DoD closeout` 的 deployed live 一次。
 4. **延期候选**：LLM context budget 高级项见 `70-roadmap/candidates/`，**不占 active**。

@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -88,6 +89,33 @@ func TestResolveProviderClientForSealedCeilingRejectsConfigDrift(t *testing.T) {
 	fail, ok := err.(llmmodels.ProviderModelFailure)
 	if !ok || fail.Code != llmmodels.ProviderModelFailureConfigurationDrift {
 		t.Fatalf("error = %v, want provider_configuration_drift failure", err)
+	}
+}
+
+// A sealed Run must never recover an unavailable target by silently selecting
+// the current workspace/system default. The typed failure retains the exact
+// sealed identity so Orchestrator can apply its governance/terminal policy.
+func TestResolveProviderClientForSealedCeilingDoesNotFallbackWhenTargetUnavailable(t *testing.T) {
+	cfg := testLLMConfig()
+	cfg.DefaultChat = workorchconfig.ProviderModelTargetConfig{ProviderID: "ai-proxy", ModelID: "fallback-model"}
+	sealed := runtimecontract.ProviderModelTarget{ProviderID: "retired-provider", ModelID: "retired-model"}
+	ceiling := runtimecontract.ProviderCeiling{
+		Target:                   sealed,
+		ContextWindowTokens:      128000,
+		ProviderMaxOutputTokens:  16384,
+		EffectiveMaxOutputTokens: 4096,
+		MaxInputTokens:           92928,
+		MaxBytes:                 371712,
+		CapabilityRevision:       "capability-sha256:retired",
+		ConfigurationRevision:    TargetConfigurationRevision(cfg, sealed),
+	}
+	_, _, err := ResolveProviderClientForSealedCeiling(cfg, ceiling)
+	if err == nil {
+		t.Fatal("expected unavailable sealed target failure")
+	}
+	var failure llmmodels.ProviderModelFailure
+	if !errors.As(err, &failure) || failure.Code != llmmodels.ProviderModelFailureProviderNotFound || !failure.Target.Same(sealed) {
+		t.Fatalf("failure = %#v err=%v, want provider_not_found for sealed target %+v", failure, err, sealed)
 	}
 }
 

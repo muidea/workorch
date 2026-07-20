@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-07-19
+Last Updated: 2026-07-20
 
 ## Purpose
 
@@ -22,7 +22,7 @@ Last Updated: 2026-07-19
 | 2026-07-16：TUI workspace provider/model 选择与持久化 | MODEL-01～18、全量 gate 与 deployed e2e 已通过，计划已迁 `90-archive/completed/` |
 | 2026-07-17：Runtime V2 正向收敛 foundation（RVC-R5～R15） | effect/receipt/directive、exact-fence governance grant、独立预算、typed recovery inventory、schema v2-only 与 file-backed crash/E2E 已落地；2026-07-18 deployed Live 已重新打开后续代码收口 |
 | 2026-07-18：Runtime V2 正向收敛 RVC-R17～R26 | fresh bounded Git/general terminal gate 与 canonical LSP-Bridge/ai-proxy liveness verifier 已通过；pre-R25 alias aggregate 保留历史诊断，不做兼容迁移 |
-| 2026-07-18：Runtime V2 production admissibility + positive acceptance（RPA-1） | owner feasibility inventory/probe、sealed execution budget、分类 verifier 已完成；fresh bounded terminal 与 positive acceptance 均通过 |
+| 2026-07-18：Runtime V2 production admissibility initial slice（RPA-1） | owner feasibility inventory/probe、sealed execution budget、分类 verifier 已完成；其“durable effect 后 freshness”结论已被 2026-07-19 fresh deployed run 反证并由 RPF-1～5 重新打开 |
 
 ## Residual Open
 
@@ -30,7 +30,7 @@ Last Updated: 2026-07-19
 
 | ID | 项 | 说明 | 当前方案 |
 | --- | --- | --- | --- |
-| ARCH-1 | 22 组件 framework boundary 验证/归档 | Base Biz、Module-root EventHub 拓扑及本地 structural/race/file-backed 门禁已完成；待外部重启目标与三类 fixture manifest 执行 deployed SM-4 matrix | [go-multi-module-22-component-boundary-remediation.md](../70-roadmap/active/go-multi-module-22-component-boundary-remediation.md) |
+| ARCH-1 | 22 组件 framework boundary 验证/归档 | Base Biz、Module-root EventHub 拓扑及本地 structural/race/file-backed 门禁已完成；组件职责/typed 合同/独立回归按矩阵逐项收口，待外部重启目标与三类 fixture manifest 执行 deployed SM-4 matrix | [主方案](../70-roadmap/active/go-multi-module-22-component-boundary-remediation.md) / [组件矩阵](../70-roadmap/active/component-contract-and-regression-closure-matrix.md) |
 
 ### B. 运维 / 生产切换
 
@@ -61,9 +61,9 @@ Last Updated: 2026-07-19
 ## Judgment
 
 - **代码主链**：Runtime V2 only；V1 authority 不再是问题来源。
-- **正向收敛基础**：RVC-R5～R26 与 RPA-1 本地代码、file-backed matrix、fresh bounded terminal、canonical real canary liveness、fresh positive acceptance 均已通过。
+- **正向收敛基础**：RVC-R5～R26、RPA-1 首次 inventory/selector/feasibility 与 RPF-1～5 prerequisite freshness 均已通过 code、restart/crash、CI-safe 和 fresh deployed acceptance；RPF completion record 保留在归档计划。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；不得再从已归档 plan 推导实现约束。
-- **Active roadmap**：ARCH-1、OPS-1（+ 可选 OPT-1）；RVC-1 与 RPA-1 已归 archive，其余历史切片在 archive / candidates 检索。
+- **Active roadmap**：ARCH-1、OPS-1（+ 可选 OPT-1）；RPF 和 RPA-1 的 completion record 均归 archive。
 - **清理原则**：失效主链叙述、重复 audit、过程日记、live 产物一律归档或出库，不在 active 保留“假活跃”项。
 
 ## Navigation

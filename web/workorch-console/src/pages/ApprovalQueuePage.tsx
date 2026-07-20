@@ -96,7 +96,7 @@ export function ApprovalQueuePage() {
       const target = approvalTarget;
       setApprovalTarget(undefined);
       approvalForm.resetFields();
-      message.success(`审批${actionLabel(target.action)}，${modelLabels.run} 已由服务端转入后台继续`);
+      message.success(`审批${actionLabel(target.action)}。如关联运行仍处于可恢复阻塞状态，请使用“恢复运行”。`);
       void loadApprovalPage().catch((error: unknown) => message.error(errorMessage(error)));
     } catch (error) {
       message.error(errorMessage(error));
@@ -126,7 +126,7 @@ export function ApprovalQueuePage() {
       for (const [workspaceId, ids] of byWorkspace) {
         await workorchApi.batchResolveApprovals(workspaceId, ids, action);
       }
-      message.success(`${approvalIds.length} 个审批项${actionLabel(action)}，相关${modelLabels.run}已由服务端转入后台继续`);
+      message.success(`${approvalIds.length} 个审批项${actionLabel(action)}。如关联运行仍处于可恢复阻塞状态，请使用“恢复运行”。`);
       setSelectedApprovalKeys([]);
       void loadApprovalPage().catch((error: unknown) => message.error(errorMessage(error)));
     } catch (error) {
@@ -157,7 +157,7 @@ export function ApprovalQueuePage() {
   return (
     <PageContainer
       title="审批队列"
-      subTitle={`处理阻塞${modelLabels.run}的${modelLabels.approval}，批准后运行可继续推进，拒绝后运行失败收口`}
+      subTitle={`处理${modelLabels.approval}事实；Runtime V2 的唯一用户继续命令为“恢复运行”，审批本身不直接驱动运行。`}
       extra={(
         <Space wrap>
           <Button disabled={selectedApprovalKeys.length === 0} onClick={() => void batchResolve('approve')}>批量批准</Button>
@@ -201,7 +201,7 @@ export function ApprovalQueuePage() {
         confirmLoading={approvalSubmitting}
         onCancel={() => setApprovalTarget(undefined)}
         onOk={() => void submitApprovalResolution()}
-        okText={approvalTarget?.action === 'reject' ? '拒绝并转入后台' : '批准并转入后台'}
+        okText={approvalTarget?.action === 'reject' ? '拒绝审批' : '批准审批'}
         okButtonProps={{ danger: approvalTarget?.action === 'reject' }}
         destroyOnHidden
       >

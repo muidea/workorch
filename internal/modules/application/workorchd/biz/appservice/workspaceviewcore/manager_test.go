@@ -15,8 +15,10 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -942,6 +944,56 @@ func TestManagerPublishesProjectionChangedAndIgnoresOwnEvent(t *testing.T) {
 	}
 }
 
+func TestManagerProjectionRebuildNeverIssuesRuntimeAuthorityCommands(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	unsafeCalls := 0
+	orchestratorObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
+	for _, topic := range []string{
+		orchestratorevents.TopicOrchestratorDriveRuntimeV2,
+		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
+		orchestratorevents.TopicOrchestratorExecuteFileEditOperation,
+	} {
+		orchestratorObserver.Subscribe(topic, func(magicevent.Event, magicevent.Result) { unsafeCalls++ })
+	}
+	resultObserver := magicevent.NewSimpleObserver(resultevents.CommandDestination, hub)
+	resultObserver.Subscribe(resultevents.TopicResultCommandCreate, func(magicevent.Event, magicevent.Result) { unsafeCalls++ })
+	t.Cleanup(func() {
+		resultObserver.Unsubscribe(resultevents.TopicResultCommandCreate)
+		for _, topic := range []string{
+			orchestratorevents.TopicOrchestratorDriveRuntimeV2,
+			orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
+			orchestratorevents.TopicOrchestratorExecuteFileEditOperation,
+		} {
+			orchestratorObserver.Unsubscribe(topic)
+		}
+	})
+	published := 0
+	manager := NewManager(ManagerOptions{
+		Loader: fakeProjectionLoader{
+			workspaces: []appmodelcore.Workspace{{ID: "ws-read-only", State: "active"}},
+			snapshots: map[string]readmodelcore.WorkspaceSnapshot{
+				"ws-read-only": {Workspace: readmodelcore.Workspace{ID: "ws-read-only", State: "active"}},
+			},
+		},
+		EventPorts: EventPorts{PublishChanged: func(context.Context, workorchdevents.WorkspaceProjectionChangedData) { published++ }},
+		Schedule:   func(string, func(context.Context)) bool { return true },
+	})
+	if err := manager.RebuildAll(ctx); err != nil {
+		t.Fatalf("RebuildAll: %v", err)
+	}
+	if err := manager.RebuildWorkspace(ctx, "ws-read-only"); err != nil {
+		t.Fatalf("RebuildWorkspace: %v", err)
+	}
+	if unsafeCalls != 0 {
+		t.Fatalf("projection rebuild issued %d authority commands", unsafeCalls)
+	}
+	if published != 2 {
+		t.Fatalf("projection notifications = %d, want baseline and detail only", published)
+	}
+}
+
 func TestManagerPublishesProjectionChangedThroughAsyncHub(t *testing.T) {
 	ctx := context.Background()
 	commandHub := magicevent.NewHub(16)
@@ -1632,6 +1684,20 @@ func (f fakeProjectionLoader) ReadWorkspaceSnapshot(_ context.Context, workspace
 	return readmodelcore.WorkspaceSnapshot{}, errors.New("snapshot not found")
 }
 
+type deletedProjectionLoader struct{}
+
+func (deletedProjectionLoader) ListWorkspaces(context.Context) ([]appmodelcore.Workspace, error) {
+	return nil, nil
+}
+
+func (deletedProjectionLoader) ReadWorkspace(context.Context, string) (appmodelcore.Workspace, error) {
+	return appmodelcore.Workspace{}, fmt.Errorf("workspace deleted: %w", common.ErrNotFound)
+}
+
+func (deletedProjectionLoader) ReadWorkspaceSnapshot(context.Context, string) (readmodelcore.WorkspaceSnapshot, error) {
+	return readmodelcore.WorkspaceSnapshot{}, fmt.Errorf("workspace snapshot deleted: %w", common.ErrNotFound)
+}
+
 type countingProjectionLoader struct {
 	calls int
 }
@@ -2136,6 +2202,30 @@ func TestStoreDeletedWorkspaceClearsGenerationFailure(t *testing.T) {
 	cleared := store.Status()
 	if cleared.State != StateReady || cleared.Degraded || len(cleared.FailedWorkspaceIds) != 0 {
 		t.Fatalf("after ReplaceAll success status = %+v, want ready", cleared)
+	}
+}
+
+func TestManagerRebuildDeletedWorkspaceConvergesWithoutDegradingReadiness(t *testing.T) {
+	manager := NewManager(ManagerOptions{Loader: deletedProjectionLoader{}})
+	manager.store.UpsertWorkspace(appmodelcore.Workspace{ID: "ws-deleted", State: "active"})
+
+	if err := manager.RebuildWorkspace(context.Background(), "ws-deleted"); err != nil {
+		t.Fatalf("RebuildWorkspace deleted workspace error = %v, want nil", err)
+	}
+	items, status, err := manager.ListWorkspaces()
+	if err != nil {
+		t.Fatalf("ListWorkspaces after deleted rebuild error = %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("projected workspaces = %+v, want deleted workspace removed", items)
+	}
+	if status.State != StateReady || status.Degraded || len(status.FailedWorkspaceIds) != 0 {
+		t.Fatalf("status after deleted rebuild = %+v, want ready without failed workspace", status)
+	}
+	for _, metric := range manager.Metrics().WorkspaceRebuilds {
+		if metric.WorkspaceID == "ws-deleted" && metric.FailedTotal != 0 {
+			t.Fatalf("deleted workspace rebuild failure count = %d, want 0", metric.FailedTotal)
+		}
 	}
 }
 

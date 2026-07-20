@@ -431,6 +431,12 @@ func TestRuntimeV2MainlineRecordsInfeasibleCandidateBeforeDispatchSeal(t *testin
 	}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{
+		runtimeV2OperationAdmissibilityPrerequisite(inventory),
+	}
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{
+		runtimeV2FileAdmissibilityObservation(inventory),
+	}
 	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
@@ -458,9 +464,9 @@ func TestRuntimeV2CandidateAdmissionSkipsOwnerProbeForAssessment(t *testing.T) {
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	module := newTestBiz(NewRuntimeOrchestrator(nil, nil, nil, nil), hub, nil)
 	candidate := runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Disposition: runtimecontract.AssessmentDispositionRepairableGap, Summary: "assessment-only"}}
-	failure, err := module.probeRuntimeV2CandidateFeasibility(ctx, runtimev2.RuntimeAggregate{}, t.TempDir(), candidate, 0)
-	if err != nil || failure != nil {
-		t.Fatalf("assessment candidate should not enter owner operation probe: failure=%+v err=%v", failure, err)
+	failure, stale, err := module.probeRuntimeV2CandidateFeasibility(ctx, runtimev2.RuntimeAggregate{}, t.TempDir(), candidate, 0)
+	if err != nil || failure != nil || stale != nil {
+		t.Fatalf("assessment candidate should not enter owner operation probe: failure=%+v stale=%+v err=%v", failure, stale, err)
 	}
 }
 
@@ -524,6 +530,12 @@ func TestRuntimeV2MainlineRetriesCorrectedInfeasibleCandidateBeforeSeal(t *testi
 	inventory := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "operation_admissibility:blocks/file", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{".", "target.txt"}, ObservedRevision: "test-revision"}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{
+		runtimeV2OperationAdmissibilityPrerequisite(inventory),
+	}
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{
+		runtimeV2FileAdmissibilityObservation(inventory),
+	}
 	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
@@ -871,6 +883,34 @@ func runtimeV2Aggregate(t *testing.T, revision uint64) runtimev2.RuntimeAggregat
 		t.Fatal(err)
 	}
 	return runtimev2.RuntimeAggregate{StateRevision: revision, Definition: runtimeV2Definition(), Facts: facts, Decision: decision}
+}
+
+func runtimeV2FileAdmissibilityObservation(inventory runtimecontract.RuntimeOperationAdmissibility) runtimecontract.RuntimePrerequisiteObservation {
+	inventory = inventory.Normalized()
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: inventory.PrerequisiteID,
+		Kind:           runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID:  inventory.OwnerModuleID,
+		ContentHash:    inventory.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain:        runtimecontract.RuntimeResourceWorkspaceTree,
+			OwnerModuleID: inventory.OwnerModuleID,
+			SubjectRef:    "workspace_deliverable",
+			Revision:      inventory.ObservedRevision,
+		}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	return observation
+}
+
+func runtimeV2OperationAdmissibilityPrerequisite(inventory runtimecontract.RuntimeOperationAdmissibility) runtimecontract.RuntimePrerequisite {
+	inventory = inventory.Normalized()
+	return runtimecontract.RuntimePrerequisite{
+		ID:                   inventory.PrerequisiteID,
+		Kind:                 runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID:        inventory.OwnerModuleID,
+		RequiredCapabilities: append([]string(nil), inventory.OperationKinds...),
+	}
 }
 
 func runtimeV2Definition() runtimecontract.RuntimeDefinitionContext {

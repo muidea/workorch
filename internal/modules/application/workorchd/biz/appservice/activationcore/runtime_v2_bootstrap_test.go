@@ -276,3 +276,41 @@ func TestRuntimeV2BootstrapSoftwareDevProfileIncludesManagedValidation(t *testin
 		t.Fatalf("requirements missing managed validation: %+v", bootstrap.Requirements)
 	}
 }
+
+func TestRuntimeV2BootstrapRegistersSelectedReadOnlyMCPToolForValidation(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		MCPCapabilities: []runtimecontract.RuntimeMCPCapabilityContext{{
+			ID: "mcp-1:tool:repo.summary", ServerID: "mcp-1", Kind: "tool", Name: "repo.summary", Enabled: true,
+			EffectScope: string(runtimecontract.RuntimeEffectNone), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
+		}},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{
+			AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
+			StateChangePolicy:     runtimecontract.RuntimeStateChangeAllowedButNotRequired,
+			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+				ID: "mcp-validation",
+				DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{
+					ID: "repository_summary", Required: true, EvidenceRole: "supplemental_evidence",
+				}},
+				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
+					ID: "repository_summary", Scope: "deliverable", EvidenceRole: "supplemental_evidence",
+					RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.StepKindMCPToolCall},
+				}},
+			}},
+		},
+	}
+	bootstrap, err := RuntimeV2Bootstrap(
+		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "obtain a bounded repository summary"},
+		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"repository summary is validated"}},
+		"definition-1", nil, activation,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsBootstrapCapability(bootstrap.Requirements, runtimecontract.RuntimeModuleMCP, runtimecontract.RuntimeCapabilityClassValidation, runtimecontract.StepKindMCPToolCall) {
+		t.Fatalf("selected read-only MCP tool must be acquired as validation capability: %+v", bootstrap.Requirements)
+	}
+	if containsBootstrapCapability(bootstrap.Requirements, runtimecontract.RuntimeModuleMCP, runtimecontract.RuntimeCapabilityClassStateChange, runtimecontract.StepKindMCPToolCall) {
+		t.Fatalf("selected read-only MCP tool must not be acquired as state-change capability: %+v", bootstrap.Requirements)
+	}
+}

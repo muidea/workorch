@@ -283,6 +283,37 @@ func TestReduceRuntimeStateFiltersCapabilitiesByFocusContract(t *testing.T) {
 	}
 }
 
+func TestReduceRuntimeStateDoesNotApplyGitSequenceToFileOnlyFocus(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileEdit}
+	facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindFileEdit, runtimecontract.StepKindGitWrite}
+	facts.Resources.CapabilityStates = []runtimecontract.RuntimeCapabilityStateSnapshot{{
+		RequirementID: "git-state", OwnerModuleID: runtimecontract.RuntimeModuleGit,
+		CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable", ObservedRevision: "repo-v1", ContentHash: "content-v1", SnapshotID: "snapshot-v1",
+		AcquisitionKey: "acquisition-v1", QueryReceiptRef: "receipt-v1",
+		Disposition:               runtimecontract.RuntimeCapabilityStateSequenceRequired,
+		RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{{RequirementID: "repo-init", Kind: runtimecontract.StepKindGitWrite, VariantID: "init"}},
+	}}
+	decision, err := ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(decision.RequiredOutput.AcceptedKinds) != 1 ||
+		decision.RequiredOutput.AcceptedKinds[0] != runtimecontract.StepKindFileEdit || len(decision.RequiredOutput.RequiredOperationSequence) != 0 {
+		t.Fatalf("File-only focus leaked Git sequence into required output: %+v", decision.RequiredOutput)
+	}
+
+	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindGitWrite}
+	decision, err = ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decision.RequiredOutput.RequiredOperationSequence) != 1 || decision.RequiredOutput.RequiredOperationSequence[0].RequirementID != "repo-init" {
+		t.Fatalf("Git focus did not retain its required sequence: %+v", decision.RequiredOutput)
+	}
+}
+
 func TestReduceRuntimeStateKeepsStateChangeAfterRejectedRepair(t *testing.T) {
 	// Validation rejected, then state-change repair also rejected: stay on produce_state_change.
 	// Re-opening produce_validation would anti-replay the same failed validation shape.
@@ -429,6 +460,28 @@ func TestReduceRuntimeStateForcesStateChangeOnlyForUnresolvedValidationFailure(t
 	}
 	if got.Action != runtimecontract.RuntimeActionProduceStateChange {
 		t.Fatalf("action = %s, want produce_state_change immediately after rejected validation", got.Action)
+	}
+}
+
+func TestReduceRuntimeStatePrerequisiteRefreshExhaustionOverridesPendingReacquisition(t *testing.T) {
+	facts := validationFacts()
+	facts.Prerequisites.Pending = []runtimecontract.RuntimePrerequisite{{
+		ID: "manifest:blocks/file", Kind: runtimecontract.PrerequisiteKindManifest,
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, Reason: "fresh manifest required",
+	}}
+	facts.FreshnessReacquireCoverage = []common.CoverageWorkItemID{"cwi-1"}
+	facts.Failure = &runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassPrerequisiteRefreshExhausted,
+		Code:  "prerequisite_refresh_exhausted", Signature: "refresh-budget:receipt-1",
+		Message: "prerequisite refresh budget exhausted after owner resource change",
+	}
+
+	decision, err := ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "prerequisite_refresh_exhausted" {
+		t.Fatalf("decision = %+v, want prerequisite refresh terminal", decision)
 	}
 }
 

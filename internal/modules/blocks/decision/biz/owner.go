@@ -244,8 +244,14 @@ func (m *Biz) executeCommand(ev magicevent.Event) (decisionevents.DecisionComman
 				if err != nil {
 					return decisionevents.DecisionCommandResult{}, err
 				}
-				if err := m.recordAndPublishResolvedTicket(ctx, ticket, resolution, transitioned); err != nil {
-					return decisionevents.DecisionCommandResult{}, err
+				// The aggregate and public Decision resolution are already durable on a
+				// duplicate replay. Re-emitting Decision evidence would create a second
+				// owner-side audit effect even though the Runtime V2 continuation is
+				// only being joined after restart.
+				if transitioned {
+					if err := m.recordAndPublishResolvedTicket(ctx, ticket, resolution, true); err != nil {
+						return decisionevents.DecisionCommandResult{}, err
+					}
 				}
 				return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}, nil
 			case orchestratorevents.RuntimeGovernanceResolutionDispositionStale:

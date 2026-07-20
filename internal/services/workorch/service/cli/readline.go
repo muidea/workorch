@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"syscall"
 	"unicode/utf8"
-	"unsafe"
+
+	"golang.org/x/term"
 )
 
 type readline struct {
@@ -19,7 +19,7 @@ type readline struct {
 }
 
 type termState struct {
-	termios syscall.Termios
+	state *term.State
 }
 
 func newReadline() *readline {
@@ -40,24 +40,11 @@ func (r *readline) addHistory(line string) {
 func (r *readline) makeRaw() error {
 	fd := int(os.Stdin.Fd())
 	r.activeFD = fd
-	var old syscall.Termios
-	if _, _, err := syscall.Syscall6(syscall.SYS_IOCTL, uintptr(fd), syscall.TCGETS, uintptr(unsafe.Pointer(&old)), 0, 0, 0); err != 0 {
+	old, err := term.MakeRaw(fd)
+	if err != nil {
 		return fmt.Errorf("tcgetattr: %v", err)
 	}
-	r.oldState = &termState{termios: old}
-
-	raw := old
-	raw.Iflag &^= syscall.IGNBRK | syscall.BRKINT | syscall.PARMRK | syscall.ISTRIP | syscall.INLCR | syscall.IGNCR | syscall.ICRNL | syscall.IXON
-	raw.Oflag &^= syscall.OPOST
-	raw.Lflag &^= syscall.ECHO | syscall.ECHONL | syscall.ICANON | syscall.ISIG | syscall.IEXTEN
-	raw.Cflag &^= syscall.CSIZE | syscall.PARENB
-	raw.Cflag |= syscall.CS8
-	raw.Cc[syscall.VMIN] = 1
-	raw.Cc[syscall.VTIME] = 0
-
-	if _, _, err := syscall.Syscall6(syscall.SYS_IOCTL, uintptr(fd), syscall.TCSETS, uintptr(unsafe.Pointer(&raw)), 0, 0, 0); err != 0 {
-		return fmt.Errorf("tcsetattr: %v", err)
-	}
+	r.oldState = &termState{state: old}
 	return nil
 }
 
@@ -65,7 +52,7 @@ func (r *readline) restore() {
 	if r.oldState == nil {
 		return
 	}
-	syscall.Syscall6(syscall.SYS_IOCTL, uintptr(r.activeFD), syscall.TCSETS, uintptr(unsafe.Pointer(&r.oldState.termios)), 0, 0, 0)
+	_ = term.Restore(r.activeFD, r.oldState.state)
 	r.oldState = nil
 }
 

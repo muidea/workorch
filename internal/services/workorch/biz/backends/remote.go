@@ -690,8 +690,35 @@ func runtimeV2ProgressFromClient(item *client.RuntimeV2Progress) *RuntimeV2Progr
 		RejectedEvidenceCount: item.RejectedEvidenceCount, MissingEvidenceKinds: append([]string(nil), item.MissingEvidenceKinds...),
 		CurrentFocusID: item.CurrentFocusID, CurrentAction: item.CurrentAction, FailureClass: item.FailureClass,
 		FailureCode: item.FailureCode, FailureSignature: item.FailureSignature, FailureMessage: item.FailureMessage,
-		RepairHintCodes: append([]string(nil), item.RepairHintCodes...),
+		RepairHintCodes:          append([]string(nil), item.RepairHintCodes...),
+		PrerequisiteRefreshState: item.PrerequisiteRefreshState, PrerequisiteRefreshUsed: item.PrerequisiteRefreshUsed,
+		PrerequisiteRefreshLimit:  item.PrerequisiteRefreshLimit,
+		PrerequisiteInvalidations: prerequisiteRefreshInvalidationsFromClient(item.PrerequisiteInvalidations),
 	}
+}
+
+func prerequisiteRefreshInvalidationsFromClient(items []client.RuntimePrerequisiteRefreshInvalidation) []RuntimePrerequisiteRefreshInvalidationInfo {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]RuntimePrerequisiteRefreshInvalidationInfo, 0, len(items))
+	for _, item := range items {
+		value := RuntimePrerequisiteRefreshInvalidationInfo{
+			Signature: item.Signature, Source: item.Source, PrerequisiteIDs: append([]string(nil), item.PrerequisiteIDs...),
+			ObservationIDs: append([]string(nil), item.ObservationIDs...), DispatchID: item.DispatchID, OperationID: item.OperationID,
+			ReceiptHash: item.ReceiptHash, OwnerModuleID: item.OwnerModuleID, ResourceDomain: item.ResourceDomain,
+			SubjectRef: item.SubjectRef, ExpectedRevision: item.ExpectedRevision, ObservedRevision: item.ObservedRevision,
+			Reason: item.Reason,
+		}
+		for _, change := range item.ResourceChanges {
+			value.ResourceChanges = append(value.ResourceChanges, RuntimePrerequisiteResourceChangeInfo{
+				OwnerModuleID: change.OwnerModuleID, ResourceDomain: change.ResourceDomain, SubjectRef: change.SubjectRef,
+				BeforeRevision: change.BeforeRevision, AfterRevision: change.AfterRevision,
+			})
+		}
+		ret = append(ret, value)
+	}
+	return ret
 }
 
 func taskDecompositionInfosFromClient(items []client.TaskDecomposition) []TaskDecompositionInfo {
@@ -1232,10 +1259,6 @@ func (b *remoteRunBackend) Command(ctx context.Context, req WorkspaceRunCommand)
 			return b.resumeWorkspaceExecution(ctx, req.WorkspaceID, mergeActivationRequest(req.Activation, req))
 		}
 		return b.runCommandViaResume(ctx, req, RunCommandIntentResume)
-	case RunCommandIntentRestart:
-		return b.restart(ctx, req.WorkspaceID, mergeActivationRequest(req.Activation, req))
-	case RunCommandIntentReplan:
-		return b.runCommandViaResume(ctx, req, intent)
 	default:
 		return nil, fmt.Errorf("%w: unsupported run command intent %q", common.ErrInvalidArgument, intent)
 	}
@@ -1243,26 +1266,19 @@ func (b *remoteRunBackend) Command(ctx context.Context, req WorkspaceRunCommand)
 
 func (b *remoteRunBackend) runCommandViaResume(ctx context.Context, req WorkspaceRunCommand, intent RunCommandIntent) (*RunInfo, error) {
 	activation := mergeActivationRequest(req.Activation, req)
-	act, err := b.cl.ResumeWorkspaceExecution(ctx, string(req.WorkspaceID), &client.ActivationRequest{
+	payload := &client.ActivationRequest{
 		RunID:              string(req.ExpectedRunID),
-		GoalID:             string(activation.GoalID),
-		DoDID:              string(activation.DoDID),
-		LLMTarget:          clientProviderModelTarget(activation.LLMTarget),
-		SoulID:             string(activation.SoulID),
-		SoulBindings:       commonSoulBindingStrings(activation.SoulBindings),
-		SkillIDs:           skillIDStrings(activation.SkillIDs),
-		MCPServerIDs:       mcpServerIDStrings(activation.MCPServerIDs),
-		CapabilityIDs:      capabilityIDStrings(activation.CapabilityIDs),
-		MemoryIDs:          memoryIDStrings(activation.MemoryIDs),
-		DialogLanguage:     activation.DialogLanguage,
-		Priority:           activation.Priority,
 		Intent:             string(intent),
 		RequestID:          activation.RequestID,
 		Reason:             activation.Reason,
 		Source:             normalizedRunCommandSource(activation.Source),
 		DefinitionRevision: activation.DefinitionRevision,
 		DecisionID:         string(activation.DecisionID),
-	})
+	}
+	// Runtime V2 Resume is scope/metadata-only. Do not let a remote client
+	// re-send the activation payload (especially llmTarget) for an existing
+	// Run: its bootstrap is the immutable provider target authority.
+	act, err := b.cl.ResumeWorkspaceExecution(ctx, string(req.WorkspaceID), payload)
 	if err != nil {
 		return nil, err
 	}
@@ -1291,49 +1307,6 @@ func (b *remoteRunBackend) resumeWorkspaceExecution(ctx context.Context, wsID co
 		Intent:             string(RunCommandIntentResume),
 		DefinitionRevision: req.DefinitionRevision,
 		DecisionID:         string(req.DecisionID),
-	})
-	if err != nil {
-		return nil, err
-	}
-	if act == nil {
-		return nil, nil
-	}
-	return &RunInfo{
-		ID: common.RunID(act.Run.ID), WorkspaceID: common.WorkspaceID(act.Run.WorkspaceID),
-		GoalID: common.GoalID(act.Run.GoalID), DoDID: common.DoDID(act.Run.DoDID),
-		PredecessorRunID:    common.RunID(act.Run.Lineage.PredecessorRunID),
-		PredecessorResultID: common.ResultID(act.Run.Lineage.PredecessorResultID),
-		SuccessorRunID:      common.RunID(act.Run.Lineage.SuccessorRunID),
-		State:               common.RunState(act.Run.State),
-		BlockingTicketID:    common.TicketID(act.Run.BlockingTicketID),
-		BlockingApprovalID:  common.ApprovalID(act.Run.BlockingApprovalID),
-		FailureReason:       act.Run.FailureReason,
-	}, nil
-}
-
-func (b *remoteRunBackend) restart(ctx context.Context, wsID common.WorkspaceID, req ActivateRunRequest) (*RunInfo, error) {
-	if wsID == "" {
-		return nil, fmt.Errorf("%w: workspaceId is required", common.ErrInvalidArgument)
-	}
-	act, err := b.cl.ResumeWorkspaceExecution(ctx, string(wsID), &client.ActivationRequest{
-		GoalID:             string(req.GoalID),
-		DoDID:              string(req.DoDID),
-		LLMTarget:          clientProviderModelTarget(req.LLMTarget),
-		DialogLanguage:     req.DialogLanguage,
-		SoulID:             string(req.SoulID),
-		SoulBindings:       commonSoulBindingStrings(req.SoulBindings),
-		SkillIDs:           skillIDStrings(req.SkillIDs),
-		MCPServerIDs:       mcpServerIDStrings(req.MCPServerIDs),
-		CapabilityIDs:      capabilityIDStrings(req.CapabilityIDs),
-		MemoryIDs:          memoryIDStrings(req.MemoryIDs),
-		Priority:           req.Priority,
-		RequestID:          req.RequestID,
-		Reason:             req.Reason,
-		Source:             normalizedRunCommandSource(req.Source),
-		Intent:             string(RunCommandIntentRestart),
-		DefinitionRevision: req.DefinitionRevision,
-		DecisionID:         string(req.DecisionID),
-		Restart:            true,
 	})
 	if err != nil {
 		return nil, err
@@ -1381,6 +1354,7 @@ func remoteRunInfoFromClientRun(r *client.Run) *RunInfo {
 		BlockingTicketID:    common.TicketID(r.BlockingTicketID),
 		BlockingApprovalID:  common.ApprovalID(r.BlockingApprovalID),
 		FailureReason:       r.FailureReason,
+		SealedLLMTarget:     runtimeProviderTargetFromClient(r.SealedLLMTarget),
 	}
 }
 func (b *remoteRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*RunInfo, error) {
@@ -1391,18 +1365,7 @@ func (b *remoteRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, id 
 	if err != nil {
 		return nil, err
 	}
-	return &RunInfo{
-		ID: common.RunID(r.ID), WorkspaceID: common.WorkspaceID(r.WorkspaceID),
-		GoalID: common.GoalID(r.GoalID), DoDID: common.DoDID(r.DoDID),
-		DefinitionRevision:  r.DefinitionRevision,
-		PredecessorRunID:    common.RunID(r.Lineage.PredecessorRunID),
-		PredecessorResultID: common.ResultID(r.Lineage.PredecessorResultID),
-		SuccessorRunID:      common.RunID(r.Lineage.SuccessorRunID),
-		State:               common.RunState(r.State),
-		BlockingTicketID:    common.TicketID(r.BlockingTicketID),
-		BlockingApprovalID:  common.ApprovalID(r.BlockingApprovalID),
-		FailureReason:       r.FailureReason,
-	}, nil
+	return remoteRunInfoFromClientRun(r), nil
 }
 func (b *remoteRunBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]RunInfo, error) {
 	list, err := b.cl.ListRuns(ctx, string(wsID))
@@ -1411,18 +1374,9 @@ func (b *remoteRunBackend) List(ctx context.Context, wsID common.WorkspaceID) ([
 	}
 	result := make([]RunInfo, 0, len(list))
 	for _, r := range list {
-		result = append(result, RunInfo{
-			ID: common.RunID(r.ID), WorkspaceID: common.WorkspaceID(r.WorkspaceID),
-			GoalID: common.GoalID(r.GoalID), DoDID: common.DoDID(r.DoDID),
-			DefinitionRevision:  r.DefinitionRevision,
-			PredecessorRunID:    common.RunID(r.Lineage.PredecessorRunID),
-			PredecessorResultID: common.ResultID(r.Lineage.PredecessorResultID),
-			SuccessorRunID:      common.RunID(r.Lineage.SuccessorRunID),
-			State:               common.RunState(r.State),
-			BlockingTicketID:    common.TicketID(r.BlockingTicketID),
-			BlockingApprovalID:  common.ApprovalID(r.BlockingApprovalID),
-			FailureReason:       r.FailureReason,
-		})
+		if item := remoteRunInfoFromClientRun(&r); item != nil {
+			result = append(result, *item)
+		}
 	}
 	return result, nil
 }

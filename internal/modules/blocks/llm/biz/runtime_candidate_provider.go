@@ -10,6 +10,7 @@ import (
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -29,6 +30,10 @@ type runtimeCandidateResourceProjection struct {
 	ValidationScratch        *runtimecontract.ValidationScratch               `json:"validationScratch,omitempty"`
 	CapabilityStates         []runtimecontract.RuntimeCapabilityStateSnapshot `json:"capabilityStates,omitempty"`
 	OperationAdmissibilities []runtimecontract.RuntimeOperationAdmissibility  `json:"operationAdmissibilities,omitempty"`
+	// Freshness metadata is C3 authority input. It must never be moved into
+	// C0-C2 because a resource refresh legitimately changes it between
+	// transactions while the provider cache prefix stays stable.
+	PrerequisiteObservations []runtimecontract.RuntimePrerequisiteObservation `json:"prerequisiteObservations,omitempty"`
 }
 
 type runtimeCandidateActivationProjection struct {
@@ -163,6 +168,7 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 	completion, err := m.completeProviderWithSealedCeiling(ctx, *ceiling, providerRequest)
 	completedAt := time.Now().UTC()
 	if err != nil {
+		stale := providerCeilingConfigurationStale(request, err)
 		// Provider may have been contacted; mark submitted when the sealed path reached Complete.
 		// completeProviderWithSealedCeiling only returns after client construction; treat as submitted
 		// once we leave that call with a non-config error. For pre-dispatch errors ProviderSubmitted stays false.
@@ -177,7 +183,7 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 		}
 		return llmmodels.RuntimeCandidateGenerationResult{
 			RequestID: requestID, Audit: audit, Status: llmmodels.RuntimeCandidateStatusFailed,
-			FailureClass: string(failureClass), FailureReason: err.Error(),
+			FailureClass: string(failureClass), FailureReason: err.Error(), PrerequisiteStale: stale,
 		}, err
 	}
 	if budgetSnapshot != nil {
@@ -203,6 +209,52 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 		Audit:     audit,
 		Status:    llmmodels.RuntimeCandidateStatusCompleted,
 	}, nil
+}
+
+// providerCeilingConfigurationStale recognizes the one pre-dispatch LLM
+// condition that is freshness rather than provider transport: the current
+// provider configuration no longer matches the provider-ceiling prerequisite.
+// The returned detail is consumed only by Orchestrator's generic invalidation
+// path; this owner neither retries nor changes the sealed target.
+func providerCeilingConfigurationStale(request llmmodels.RuntimeCandidateRequest, err error) *runtimecontract.RuntimePrerequisiteStale {
+	var failure llmmodels.ProviderModelFailure
+	if !errors.As(err, &failure) || failure.Code != llmmodels.ProviderModelFailureConfigurationDrift {
+		return nil
+	}
+	ceiling := request.CandidateContext.Resources.ProviderCeiling
+	if ceiling == nil {
+		return nil
+	}
+	for _, observation := range request.CandidateContext.Resources.PrerequisiteObservations {
+		observation = observation.Normalized()
+		if observation.Kind != runtimecontract.PrerequisiteKindProviderCeiling || observation.OwnerModuleID != ModuleID {
+			continue
+		}
+		for _, dependency := range observation.Dependencies {
+			if dependency.Domain != runtimecontract.RuntimeResourceProviderConfig || dependency.OwnerModuleID != ModuleID || dependency.Revision != ceiling.ConfigurationRevision {
+				continue
+			}
+			cfg, configErr := workorchconfig.Current()
+			if configErr != nil {
+				return nil
+			}
+			observed := TargetConfigurationRevision(cfg.LLM, ceiling.Target)
+			if observed == "" || observed == dependency.Revision {
+				return nil
+			}
+			stale := runtimecontract.RuntimePrerequisiteStale{
+				PrerequisiteID: observation.PrerequisiteID, ObservationID: observation.ObservationID,
+				Domain: dependency.Domain, OwnerModuleID: dependency.OwnerModuleID, SubjectRef: dependency.SubjectRef,
+				ExpectedRevision: dependency.Revision, ObservedRevision: observed,
+				Reason: "sealed provider configuration revision changed before candidate request",
+			}
+			if stale.Validate() == nil {
+				return &stale
+			}
+			return nil
+		}
+	}
+	return nil
 }
 
 func runtimeCandidateProviderFailureClass(err error, submitted bool) runtimecontract.RuntimeCandidateFailureClass {
@@ -466,6 +518,7 @@ func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidat
 			Manifest: context.Resources.Manifest, TargetSnapshots: context.Resources.TargetSnapshots,
 			FailureTarget: context.Resources.FailureTarget, ValidationScratch: context.Resources.ValidationScratch,
 			CapabilityStates: context.Resources.CapabilityStates, OperationAdmissibilities: context.Resources.OperationAdmissibilities,
+			PrerequisiteObservations: context.Resources.PrerequisiteObservations,
 		},
 		Activation: runtimeCandidateActivationProjection{
 			DialogLanguage: activation.DialogLanguage, CurrentStage: stage, Soul: runtimeV2CandidateSoul(activation, stage),

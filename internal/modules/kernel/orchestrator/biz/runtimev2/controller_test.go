@@ -73,6 +73,50 @@ func TestRuntimeControllerInitializeRunsPreflightReduceAndPersistOnce(t *testing
 	}
 }
 
+func TestCommitPrerequisiteAdvancesSatisfiedFocusAfterFreshnessReacquisition(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := controllerFacts()
+	facts.Focus = runtimecontract.CoverageFocus{
+		ID: "focus-satisfied", SliceID: "slice-satisfied", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-satisfied"},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite},
+	}
+	facts.RemainingFocuses = []runtimecontract.CoverageFocus{{
+		ID: "focus-next", SliceID: "slice-next", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-next"},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite},
+	}}
+	facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{
+		{ID: "cwi-satisfied", SliceID: "slice-satisfied", State: runtimecontract.RuntimeCoverageItemStateSatisfied, EvidenceRefs: []string{"accepted-satisfied"}},
+		{ID: "cwi-next", SliceID: "slice-next", State: runtimecontract.RuntimeCoverageItemStateOpen},
+	}
+	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
+		ID: "accepted-satisfied", Kind: runtimecontract.EvidenceKindStateChange, Revision: facts.EvidenceRevision,
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-satisfied"},
+	}}
+	requirements := []RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "target.txt", Reason: "fresh target"}}
+	aggregate, err := controller.Initialize(context.Background(), facts, controllerDefinition(), requirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aggregate.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(aggregate.Facts.Prerequisites.Pending) != 1 {
+		t.Fatalf("initialized aggregate = %+v", aggregate)
+	}
+
+	committed, err := controller.CommitPrerequisite(context.Background(), "ws-v2", "run-v2", PrerequisiteResult{
+		PrerequisiteID: aggregate.Facts.Prerequisites.Pending[0].ID,
+		TargetSnapshot: &runtimecontract.TargetSnapshot{TargetRef: "target.txt", Content: "fresh", ContentHash: "fresh-hash", ContentState: runtimecontract.SnapshotContentStateComplete},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if committed.Facts.Focus.ID != "focus-next" || len(committed.Facts.RemainingFocuses) != 0 || committed.Decision.Focus.ID != "focus-next" || committed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+		t.Fatalf("fresh prerequisite did not advance satisfied focus: %+v", committed)
+	}
+}
+
 func TestRuntimeControllerInitializeRejectsPersistedOperationContractRevisionMismatch(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)

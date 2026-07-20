@@ -154,21 +154,23 @@ func TestServiceCreateAndFilterCapability(t *testing.T) {
 		t.Fatalf("create server: %v", err)
 	}
 	created, err := service.CreateCapability(ctx, mcpservice.CreateCapabilityCommand{
-		ServerID:      common.MCPServerID("mcp-capability"),
-		Kind:          "resource",
-		Name:          "workspace://acceptance",
-		DisplayName:   "工作空间验收资料",
-		Category:      "验收",
-		StageHints:    []string{"validation", "acceptance"},
-		RiskLevel:     "read_only",
-		Enabled:       true,
-		OutputSummary: "返回 DoD、Result、Artifact 和证据引用。",
+		ServerID:         common.MCPServerID("mcp-capability"),
+		Kind:             "resource",
+		Name:             "workspace://acceptance",
+		DisplayName:      "工作空间验收资料",
+		Category:         "验收",
+		StageHints:       []string{"validation", "acceptance"},
+		RiskLevel:        "read_only",
+		EffectScope:      "none",
+		IdempotencyClass: "safe_to_replay",
+		Enabled:          true,
+		OutputSummary:    "返回 DoD、Result、Artifact 和证据引用。",
 	})
 	if err != nil {
 		t.Fatalf("create capability: %v", err)
 	}
-	if created.ID == "" || created.URI != "" {
-		t.Fatalf("created capability = %+v, want generated id and explicit uri only when provided", created)
+	if created.ID == "" || created.URI != "" || created.EffectScope != "none" || created.IdempotencyClass != "safe_to_replay" {
+		t.Fatalf("created capability = %+v, want generated id, explicit runtime metadata, and uri only when provided", created)
 	}
 	list, err := service.ListCapabilities(ctx, mcpservice.CapabilityQuery{
 		ServerID: common.MCPServerID("mcp-capability"),

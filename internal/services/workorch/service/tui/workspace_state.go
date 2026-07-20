@@ -7,11 +7,13 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type workspaceDisplayState struct {
 	ActiveRunID           string
 	DisplayRunID          string
+	SealedLLMTarget       *runtimecontract.ProviderModelTarget
 	CurrentTask           string
 	DoDItems              []string
 	Transcript            []transcriptItem
@@ -185,6 +187,17 @@ func (m *AppModel) activeWorkspaceOverview() *backend.WorkspaceInfo {
 		return &entry.Overview
 	}
 	return findWorkspace(m.workspaces, m.activeWorkspaceID)
+}
+
+// activeWorkspaceSealedTarget is display-only data copied from the current
+// Run read model. It is deliberately not inferred from the mutable workspace
+// preference and is never used to construct a Resume request.
+func (m *AppModel) activeWorkspaceSealedTarget() *runtimecontract.ProviderModelTarget {
+	entry := m.workspaceRuntimeState(m.activeWorkspaceID)
+	if entry == nil {
+		return nil
+	}
+	return cloneModelTarget(entry.Display.SealedLLMTarget)
 }
 
 func workspaceOverviewHasProjectionAuthority(ws *backend.WorkspaceInfo) bool {
@@ -689,6 +702,13 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	workspaceHasLive := msg.WorkspaceHasLive || msg.Workspace.ActiveRunID != ""
 	activeRun := msg.ActiveRun
 	displayRun := msg.DisplayRun
+	if entry := m.ensureWorkspaceRuntimeState(workspaceID); entry != nil {
+		if workspaceHasLive && activeRun != nil {
+			entry.Display.SealedLLMTarget = cloneModelTarget(activeRun.SealedLLMTarget)
+		} else {
+			entry.Display.SealedLLMTarget = nil
+		}
+	}
 	if displayRun == nil {
 		displayRun = activeRun
 	}
@@ -1222,7 +1242,10 @@ func runtimeV2ProgressEqual(a, b *backend.RuntimeV2ProgressInfo) bool {
 		strings.TrimSpace(a.FailureClass) != strings.TrimSpace(b.FailureClass) ||
 		strings.TrimSpace(a.FailureCode) != strings.TrimSpace(b.FailureCode) ||
 		strings.TrimSpace(a.FailureSignature) != strings.TrimSpace(b.FailureSignature) ||
-		strings.TrimSpace(a.FailureMessage) != strings.TrimSpace(b.FailureMessage) {
+		strings.TrimSpace(a.FailureMessage) != strings.TrimSpace(b.FailureMessage) ||
+		strings.TrimSpace(a.PrerequisiteRefreshState) != strings.TrimSpace(b.PrerequisiteRefreshState) ||
+		a.PrerequisiteRefreshUsed != b.PrerequisiteRefreshUsed ||
+		a.PrerequisiteRefreshLimit != b.PrerequisiteRefreshLimit {
 		return false
 	}
 	if len(a.MissingEvidenceKinds) != len(b.MissingEvidenceKinds) {
@@ -1233,7 +1256,31 @@ func runtimeV2ProgressEqual(a, b *backend.RuntimeV2ProgressInfo) bool {
 			return false
 		}
 	}
-	return stringSliceEqualDisplay(a.RepairHintCodes, b.RepairHintCodes)
+	return stringSliceEqualDisplay(a.RepairHintCodes, b.RepairHintCodes) &&
+		prerequisiteRefreshInvalidationsEqual(a.PrerequisiteInvalidations, b.PrerequisiteInvalidations)
+}
+
+func prerequisiteRefreshInvalidationsEqual(a, b []backend.RuntimePrerequisiteRefreshInvalidationInfo) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for idx := range a {
+		left, right := a[idx], b[idx]
+		if left.Signature != right.Signature || left.Source != right.Source || left.OwnerModuleID != right.OwnerModuleID ||
+			left.ResourceDomain != right.ResourceDomain || left.SubjectRef != right.SubjectRef || left.ExpectedRevision != right.ExpectedRevision ||
+			left.ObservedRevision != right.ObservedRevision || left.Reason != right.Reason || left.DispatchID != right.DispatchID ||
+			left.OperationID != right.OperationID || left.ReceiptHash != right.ReceiptHash ||
+			!stringSliceEqualDisplay(left.PrerequisiteIDs, right.PrerequisiteIDs) || !stringSliceEqualDisplay(left.ObservationIDs, right.ObservationIDs) ||
+			len(left.ResourceChanges) != len(right.ResourceChanges) {
+			return false
+		}
+		for changeIdx := range left.ResourceChanges {
+			if left.ResourceChanges[changeIdx] != right.ResourceChanges[changeIdx] {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func activityFeedDisplayEqual(a, b backend.WorkspaceActivityFeedInfo) bool {
@@ -1322,6 +1369,16 @@ func cloneRuntimeV2(item *backend.RuntimeV2ProgressInfo) *backend.RuntimeV2Progr
 	ret := *item
 	ret.MissingEvidenceKinds = append([]string(nil), item.MissingEvidenceKinds...)
 	ret.RepairHintCodes = append([]string(nil), item.RepairHintCodes...)
+	if len(item.PrerequisiteInvalidations) > 0 {
+		ret.PrerequisiteInvalidations = make([]backend.RuntimePrerequisiteRefreshInvalidationInfo, 0, len(item.PrerequisiteInvalidations))
+		for _, value := range item.PrerequisiteInvalidations {
+			clone := value
+			clone.PrerequisiteIDs = append([]string(nil), value.PrerequisiteIDs...)
+			clone.ObservationIDs = append([]string(nil), value.ObservationIDs...)
+			clone.ResourceChanges = append([]backend.RuntimePrerequisiteResourceChangeInfo(nil), value.ResourceChanges...)
+			ret.PrerequisiteInvalidations = append(ret.PrerequisiteInvalidations, clone)
+		}
+	}
 	return &ret
 }
 
@@ -1474,6 +1531,7 @@ func (m *AppModel) saveActiveWorkspaceDisplayState() {
 	entry.Display = workspaceDisplayState{
 		ActiveRunID:           m.activeRunID,
 		DisplayRunID:          string(entry.RuntimeView.DisplayRunID),
+		SealedLLMTarget:       cloneModelTarget(entry.Display.SealedLLMTarget),
 		CurrentTask:           m.currentTask,
 		DoDItems:              append([]string(nil), m.dodItems...),
 		Transcript:            append([]transcriptItem(nil), m.transcript...),

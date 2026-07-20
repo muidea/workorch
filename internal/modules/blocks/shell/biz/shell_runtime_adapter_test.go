@@ -60,7 +60,7 @@ func TestRuntimeAdapterProbeRejectsMissingGoTestTargetWithoutStartingProcess(t *
 	}
 }
 
-func TestRuntimeAdapterProbeRejectsStaleAdmissibilitySnapshotWithoutStartingProcess(t *testing.T) {
+func TestRuntimeAdapterProbeDoesNotTreatWorkspaceDirectoryMTimeAsAdmissibilityStale(t *testing.T) {
 	workspace := t.TempDir()
 	adapter := NewRuntimeAdapter()
 	inventory, err := adapter.AcquireRuntimeOperationAdmissibility(workspace, "admissibility-shell", []string{runtimemodel.RuntimeBlockKindManagedValidationSession})
@@ -76,12 +76,79 @@ func TestRuntimeAdapterProbeRejectsStaleAdmissibilitySnapshotWithoutStartingProc
 		ID: "stale-validation", Kind: runtimemodel.RuntimeBlockKindManagedValidationSession,
 		Parameters: []runtimemodel.OperationParameter{{Name: "command", String: &command}, {Name: "args", StringList: args}},
 	})
-	if failure == nil || failure.Code != "operation_admissibility_stale" {
-		t.Fatalf("stale inventory feasibility failure = %+v", failure)
+	if failure == nil || failure.Code != "validation_target_missing" {
+		t.Fatalf("workspace mutation incorrectly changed shell freshness semantics: %+v", failure)
 	}
 	content, err := os.ReadFile(filepath.Join(workspace, "changed-after-inventory"))
 	if err != nil || string(content) != "unchanged by probe\n" {
 		t.Fatalf("probe changed workspace content=%q err=%v", content, err)
+	}
+}
+
+func TestRuntimeAdapterProbeReturnsTypedStaleForObservedValidationTargetChange(t *testing.T) {
+	workspace := t.TempDir()
+	targetRef := "target.txt"
+	if err := os.WriteFile(filepath.Join(workspace, targetRef), []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	adapter := NewRuntimeAdapter()
+	inventory, err := adapter.AcquireRuntimeOperationAdmissibility(workspace, "admissibility-shell", []string{runtimemodel.StepKindShellCommand})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation := adapter.runtimeAdmissibilityObservation(workspace, inventory.PrerequisiteID, inventory, []string{targetRef})
+	if err := observation.Validate(); err != nil {
+		t.Fatalf("observation: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, targetRef), []byte("after\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := "pwd"
+	failure, stale := adapter.ProbeRuntimeOperationFeasibilityWithObservation(workspace, inventory, runtimemodel.RuntimeOperation{
+		ID: "shell-target-stale", Kind: runtimemodel.StepKindShellCommand, Parameters: []runtimemodel.OperationParameter{{Name: "command", String: &command}},
+	}, &observation)
+	if failure != nil || stale == nil || stale.SubjectRef != targetRef || stale.ExpectedRevision == stale.ObservedRevision {
+		t.Fatalf("target mutation did not return typed stale: failure=%+v stale=%+v", failure, stale)
+	}
+	if stale.OwnerModuleID != runtimemodel.RuntimeModuleFile {
+		t.Fatalf("validation target stale owner = %q, want File resource owner", stale.OwnerModuleID)
+	}
+	if !runtimemodel.RuntimeFreshnessDependencyIntersectsChange(observation.Dependencies[1], runtimemodel.RuntimeResourceChange{
+		Domain: runtimemodel.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimemodel.RuntimeModuleFile,
+		SubjectRef: targetRef, AfterRevision: stale.ObservedRevision,
+	}) {
+		t.Fatalf("File target change does not intersect Shell validation observation: %+v", observation.Dependencies)
+	}
+}
+
+func TestRuntimeAdapterObservationTracksMissingValidationTargetForFileCreate(t *testing.T) {
+	workspace := t.TempDir()
+	targetRef := "main.go"
+	adapter := NewRuntimeAdapter()
+	inventory, err := adapter.AcquireRuntimeOperationAdmissibility(workspace, "admissibility-shell", []string{runtimemodel.StepKindShellCommand})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation := adapter.runtimeAdmissibilityObservation(workspace, inventory.PrerequisiteID, inventory, []string{targetRef})
+	if err := observation.Validate(); err != nil {
+		t.Fatalf("missing-target observation: %v", err)
+	}
+	var targetDependency *runtimemodel.RuntimeFreshnessDependency
+	for idx := range observation.Dependencies {
+		dependency := observation.Dependencies[idx]
+		if dependency.Domain == runtimemodel.RuntimeResourceWorkspaceTarget {
+			targetDependency = &dependency
+			break
+		}
+	}
+	if targetDependency == nil || targetDependency.OwnerModuleID != runtimemodel.RuntimeModuleFile || targetDependency.Revision != "missing" {
+		t.Fatalf("missing target dependency = %+v", observation.Dependencies)
+	}
+	if !runtimemodel.RuntimeFreshnessDependencyIntersectsChange(*targetDependency, runtimemodel.RuntimeResourceChange{
+		Domain: runtimemodel.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimemodel.RuntimeModuleFile,
+		SubjectRef: targetRef, AfterRevision: "main-v1",
+	}) {
+		t.Fatalf("File create does not intersect missing Shell validation target: %+v", targetDependency)
 	}
 }
 

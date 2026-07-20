@@ -159,44 +159,66 @@ func boundedAdmissibilityTargetRefs(required, available []string, maxItems int) 
 // ProbeRuntimeOperationFeasibility checks target admissibility without applying
 // a patch, writing a file, or creating an execution receipt.
 func (a *RuntimeAdapter) ProbeRuntimeOperationFeasibility(workspaceDirectory string, inventory runtimemodel.RuntimeOperationAdmissibility, operation runtimemodel.RuntimeOperation) *runtimemodel.FailureFact {
+	failure, _ := a.ProbeRuntimeOperationFeasibilityWithObservation(workspaceDirectory, inventory, operation, nil)
+	return failure
+}
+
+// ProbeRuntimeOperationFeasibilityWithObservation is the owner read-only
+// admission gate. A changed inventory revision is a freshness transition, not
+// a candidate-contract failure, when Orchestrator supplied the persisted
+// observation bound to that inventory.
+func (a *RuntimeAdapter) ProbeRuntimeOperationFeasibilityWithObservation(workspaceDirectory string, inventory runtimemodel.RuntimeOperationAdmissibility, operation runtimemodel.RuntimeOperation, observation *runtimemodel.RuntimePrerequisiteObservation) (*runtimemodel.FailureFact, *runtimemodel.RuntimePrerequisiteStale) {
 	operation = operation.Normalized()
 	inventory = inventory.Normalized()
 	manifest, manifestErr := a.AcquireWorkspaceManifest(workspaceDirectory)
 	if manifestErr != nil {
-		return fileOperationInfeasible(operation, "operation_admissibility_unavailable", manifestErr.Error(), nil)
+		return fileOperationInfeasible(operation, "operation_admissibility_unavailable", manifestErr.Error(), nil), nil
 	}
 	if inventory.ObservedRevision != manifest.Revision {
-		return fileOperationInfeasible(operation, "operation_admissibility_stale", "runtime file operation admissibility snapshot is stale", nil)
+		if observation != nil {
+			value := observation.Normalized()
+			for _, dependency := range value.Dependencies {
+				if dependency.Domain == runtimemodel.RuntimeResourceWorkspaceTree && dependency.OwnerModuleID == runtimemodel.RuntimeModuleFile && dependency.SubjectRef == "workspace_deliverable" && dependency.Revision == inventory.ObservedRevision {
+					return nil, &runtimemodel.RuntimePrerequisiteStale{
+						PrerequisiteID: value.PrerequisiteID, ObservationID: value.ObservationID,
+						Domain: dependency.Domain, OwnerModuleID: dependency.OwnerModuleID, SubjectRef: dependency.SubjectRef,
+						ExpectedRevision: dependency.Revision, ObservedRevision: manifest.Revision,
+						Reason: "runtime file operation admissibility snapshot is stale",
+					}
+				}
+			}
+		}
+		return fileOperationInfeasible(operation, "operation_admissibility_stale", "runtime file operation admissibility snapshot is stale", nil), nil
 	}
 	targetRef := fileOperationTargetRef(operation)
 	if targetRef == "" {
-		return fileOperationInfeasible(operation, "operation_target_missing", "runtime file operation requires a concrete workspace-relative target", nil)
+		return fileOperationInfeasible(operation, "operation_target_missing", "runtime file operation requires a concrete workspace-relative target", nil), nil
 	}
 	_, target, rel, err := guardedWorkspacePath(workspaceDirectory, targetRef, false)
 	if err != nil {
-		return fileOperationInfeasible(operation, "operation_target_invalid", err.Error(), []string{targetRef})
+		return fileOperationInfeasible(operation, "operation_target_invalid", err.Error(), []string{targetRef}), nil
 	}
 	info, statErr := os.Stat(target)
 	requiresRegular := fileOperationRequiresRegularTarget(operation)
 	if statErr == nil {
 		if !fileInventoryContainsTarget(inventory, targetRef) {
-			return fileOperationInfeasible(operation, "operation_target_not_admissible", "runtime file operation target is absent from the owner admissibility inventory", []string{targetRef})
+			return fileOperationInfeasible(operation, "operation_target_not_admissible", "runtime file operation target is absent from the owner admissibility inventory", []string{targetRef}), nil
 		}
 		if requiresRegular && !info.Mode().IsRegular() {
-			return fileOperationInfeasible(operation, "operation_target_not_regular", "runtime file operation target is not a regular file", []string{filepath.ToSlash(rel)})
+			return fileOperationInfeasible(operation, "operation_target_not_regular", "runtime file operation target is not a regular file", []string{filepath.ToSlash(rel)}), nil
 		}
-		return nil
+		return nil, nil
 	}
 	if statErr != nil && !os.IsNotExist(statErr) {
-		return fileOperationInfeasible(operation, "operation_target_unreadable", statErr.Error(), []string{filepath.ToSlash(rel)})
+		return fileOperationInfeasible(operation, "operation_target_unreadable", statErr.Error(), []string{filepath.ToSlash(rel)}), nil
 	}
 	if fileOperationRequiresExistingTarget(operation) {
-		return fileOperationInfeasible(operation, "operation_target_missing", "runtime file operation requires an existing regular file", []string{filepath.ToSlash(rel)})
+		return fileOperationInfeasible(operation, "operation_target_missing", "runtime file operation requires an existing regular file", []string{filepath.ToSlash(rel)}), nil
 	}
 	if !fileInventoryContainsTarget(inventory, targetRef) && !fileInventoryAllowsNewTarget(inventory) {
-		return fileOperationInfeasible(operation, "operation_target_not_admissible", "runtime file operation target is absent from the owner admissibility inventory", []string{targetRef})
+		return fileOperationInfeasible(operation, "operation_target_not_admissible", "runtime file operation target is absent from the owner admissibility inventory", []string{targetRef}), nil
 	}
-	return nil
+	return nil, nil
 }
 
 func fileInventoryContainsTarget(inventory runtimemodel.RuntimeOperationAdmissibility, targetRef string) bool {

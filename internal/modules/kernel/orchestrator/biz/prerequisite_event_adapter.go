@@ -60,6 +60,7 @@ func AcquireAndCommitTargetSnapshotPrerequisite(ctx context.Context, hub magicev
 	return runtimev2.CommitPrerequisiteResult(facts, runtimev2.PrerequisiteResult{
 		PrerequisiteID: response.PrerequisiteID,
 		TargetSnapshot: &response.Snapshot,
+		Observation:    response.Observation,
 	})
 }
 
@@ -88,6 +89,7 @@ func AcquireAndCommitWorkspaceManifestPrerequisite(ctx context.Context, hub magi
 	return runtimev2.CommitPrerequisiteResult(facts, runtimev2.PrerequisiteResult{
 		PrerequisiteID: response.PrerequisiteID,
 		Manifest:       &response.Manifest,
+		Observation:    response.Observation,
 	})
 }
 
@@ -116,6 +118,7 @@ func AcquireAndCommitProviderCeilingPrerequisite(ctx context.Context, hub magice
 	return runtimev2.CommitPrerequisiteResult(facts, runtimev2.PrerequisiteResult{
 		PrerequisiteID:  response.PrerequisiteID,
 		ProviderCeiling: &response.Ceiling,
+		Observation:     response.Observation,
 	})
 }
 
@@ -144,6 +147,7 @@ func AcquireAndCommitRuntimeCapabilitiesPrerequisite(ctx context.Context, hub ma
 	return runtimev2.CommitPrerequisiteResult(facts, runtimev2.PrerequisiteResult{
 		PrerequisiteID: response.PrerequisiteID,
 		Capabilities:   &response.Capabilities,
+		Observation:    response.Observation,
 	})
 }
 

@@ -82,20 +82,8 @@ func ActivateWorkspaceExecutionView(ctx context.Context, request ActivateWorkspa
 				return WorkspaceExecutionActivationSnapshot(workspace, startedRun, goal, dod), nil
 			}
 			if replaceErr == nil {
-				providerTargetStale, err := ActiveRunProviderTargetStale(ctx, run, cmd.LLMTarget, workspace.DefaultLLMTarget)
-				if err != nil {
+				if err := RejectActiveRunProviderTargetOverride(run, cmd.LLMTarget); err != nil {
 					return readmodelcore.WorkspaceExecutionActivation{}, err
-				}
-				if providerTargetStale {
-					runID, err := createReplacementWorkspaceExecutionRun(ctx, request, workspace, goal, dod, run.ID)
-					if err != nil {
-						return readmodelcore.WorkspaceExecutionActivation{}, err
-					}
-					startedRun, err := ownerreadports.ReadRunByOwnerCommand(ctx, request.Hub, runID)
-					if err != nil {
-						return readmodelcore.WorkspaceExecutionActivation{}, err
-					}
-					return WorkspaceExecutionActivationSnapshot(workspace, startedRun, goal, dod), nil
 				}
 			}
 			if run.State == common.RunStatePending {

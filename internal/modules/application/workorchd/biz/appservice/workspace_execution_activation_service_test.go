@@ -3184,7 +3184,7 @@ func TestActivateWorkspaceExecutionWithBackendReturnsActiveRun(t *testing.T) {
 	}
 }
 
-func TestActivateWorkspaceExecutionWithBackendReplacesActiveRunWhenWorkspaceModelChanges(t *testing.T) {
+func TestActivateWorkspaceExecutionWithBackendResumesSealedActiveRunWhenWorkspaceModelChanges(t *testing.T) {
 	useActivationLLMConfig(t, "", "")
 	dataRoot := t.TempDir()
 	cleanupSharedBackendSession(t, "file", dataRoot)
@@ -3247,24 +3247,31 @@ func TestActivateWorkspaceExecutionWithBackendReplacesActiveRunWhenWorkspaceMode
 	if _, err := UpdateWorkspaceLLMTargetWithSession(ctx, session, workspace.ID, &changedTarget); err != nil {
 		t.Fatalf("UpdateWorkspaceLLMTargetWithSession: %v", err)
 	}
+	if _, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{LLMTarget: &changedTarget}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("active Run explicit model override err=%v, want conflict", err)
+	}
 
 	continued, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{})
 	if err != nil {
 		t.Fatalf("resume activation after model change: %v", err)
 	}
-	if continued.Run.ID == string(oldRunID) {
-		t.Fatalf("continued run id = %q, want replacement for model drift", continued.Run.ID)
+	if continued.Run.ID != string(oldRunID) {
+		t.Fatalf("continued run id = %q, want sealed active run %q", continued.Run.ID, oldRunID)
 	}
 	continuedOwnerRun := runtimeV2OwnerRunWithBackend(t, ctx, "file", dataRoot, workspace.ID, continued.Run.ID)
-	if got := continuedOwnerRun.RuntimeBootstrap.Activation.ProviderTarget; !got.Same(changedTarget) {
-		t.Fatalf("replacement provider target = %+v, want %+v", got, changedTarget)
+	if got := continuedOwnerRun.RuntimeBootstrap.Activation.ProviderTarget; !got.Same(initialBootstrap.Activation.ProviderTarget) {
+		t.Fatalf("resumed provider target = %+v, want sealed %+v", got, initialBootstrap.Activation.ProviderTarget)
 	}
 	oldRun, err := exports.Repositories.Runs.Get(common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspace.ID)), oldRunID)
 	if err != nil {
-		t.Fatalf("read superseded run: %v", err)
+		t.Fatalf("read resumed run: %v", err)
 	}
-	if oldRun.State != common.RunStateSuperseded {
-		t.Fatalf("old run state = %q, want superseded", oldRun.State)
+	if oldRun.State != common.RunStateActive {
+		t.Fatalf("resumed run state = %q, want active", oldRun.State)
+	}
+	updatedWorkspace, err := exports.Repositories.Workspaces.Get(ownerCtx, common.WorkspaceID(workspace.ID))
+	if err != nil || updatedWorkspace.DefaultLLMTarget == nil || !updatedWorkspace.DefaultLLMTarget.Same(changedTarget) {
+		t.Fatalf("workspace next-run provider target=%+v err=%v, want %+v", updatedWorkspace, err, changedTarget)
 	}
 }
 

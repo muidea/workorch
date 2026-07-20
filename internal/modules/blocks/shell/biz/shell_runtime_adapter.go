@@ -3,11 +3,14 @@ package shell
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -80,11 +83,15 @@ func (a *RuntimeAdapter) AcquireRuntimeOperationAdmissibility(workspaceDirectory
 		return runtimemodel.RuntimeOperationAdmissibility{}, err
 	}
 	inventory := runtimemodel.RuntimeOperationAdmissibility{
-		PrerequisiteID:   prerequisiteID,
-		OwnerModuleID:    runtimemodel.RuntimeModuleShell,
-		OperationKinds:   append([]string(nil), operationKinds...),
-		ConstraintRefs:   []string{"workspace-working-directory", "executable-on-path", "bounded-timeout", "validation-target-must-exist"},
-		ObservedRevision: fmt.Sprintf("%d", info.ModTime().UTC().UnixNano()),
+		PrerequisiteID: prerequisiteID,
+		OwnerModuleID:  runtimemodel.RuntimeModuleShell,
+		OperationKinds: append([]string(nil), operationKinds...),
+		ConstraintRefs: []string{"workspace-working-directory", "executable-on-path", "bounded-timeout", "validation-target-must-exist"},
+		// Directory mtime changes whenever a workspace child is created. It is
+		// neither Shell policy nor a validation-input revision, and using it here
+		// turns a preceding File effect into a false candidate failure. Shell's
+		// inventory is instead bound to its own stable execution policy.
+		ObservedRevision: a.runtimeAdmissibilityPolicyRevision(),
 	}
 	inventory.SnapshotID = runtimemodel.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	if err := inventory.Validate(); err != nil {
@@ -97,47 +104,136 @@ func (a *RuntimeAdapter) AcquireRuntimeOperationAdmissibility(workspaceDirectory
 // starting a process. It deliberately shares the execution policy helpers so
 // candidate admission and owner execution cannot disagree on basic viability.
 func (a *RuntimeAdapter) ProbeRuntimeOperationFeasibility(workspaceDirectory string, inventory runtimemodel.RuntimeOperationAdmissibility, operation runtimemodel.RuntimeOperation) *runtimemodel.FailureFact {
+	failure, _ := a.ProbeRuntimeOperationFeasibilityWithObservation(workspaceDirectory, inventory, operation, nil)
+	return failure
+}
+
+func (a *RuntimeAdapter) ProbeRuntimeOperationFeasibilityWithObservation(workspaceDirectory string, inventory runtimemodel.RuntimeOperationAdmissibility, operation runtimemodel.RuntimeOperation, observation *runtimemodel.RuntimePrerequisiteObservation) (*runtimemodel.FailureFact, *runtimemodel.RuntimePrerequisiteStale) {
 	operation = operation.Normalized()
 	inventory = inventory.Normalized()
 	request, err := shellProbeRequestFromOperation(workspaceDirectory, operation)
 	if err != nil {
-		return shellOperationInfeasible(operation, "shell_operation_invalid", err)
+		return shellOperationInfeasible(operation, "shell_operation_invalid", err), nil
 	}
 	command, args, err := shellCommandSpec(request.Command, request.Args)
 	if err != nil {
-		return shellOperationInfeasible(operation, "shell_command_invalid", err)
+		return shellOperationInfeasible(operation, "shell_command_invalid", err), nil
 	}
 	directory, err := filepath.Abs(strings.TrimSpace(request.WorkspaceDeliverableDirectory))
 	if err != nil || directory == "" {
-		return shellOperationInfeasible(operation, "shell_working_directory_invalid", common.ErrInvalidArgument)
+		return shellOperationInfeasible(operation, "shell_working_directory_invalid", common.ErrInvalidArgument), nil
 	}
 	info, statErr := os.Stat(directory)
 	if statErr != nil || !info.IsDir() {
 		if statErr == nil {
 			statErr = common.ErrInvalidArgument
 		}
-		return shellOperationInfeasible(operation, "shell_working_directory_unavailable", statErr)
+		return shellOperationInfeasible(operation, "shell_working_directory_unavailable", statErr), nil
 	}
-	if inventory.ObservedRevision != fmt.Sprintf("%d", info.ModTime().UTC().UnixNano()) {
-		return shellOperationInfeasible(operation, "operation_admissibility_stale", fmt.Errorf("runtime shell operation admissibility snapshot is stale"))
+	if inventory.ObservedRevision != a.runtimeAdmissibilityPolicyRevision() {
+		if observation != nil {
+			value := observation.Normalized()
+			for _, dependency := range value.Dependencies {
+				if dependency.Domain == runtimemodel.RuntimeResourceOwnerCatalog && dependency.OwnerModuleID == runtimemodel.RuntimeModuleShell && dependency.SubjectRef == "shell_runtime_policy" && dependency.Revision == inventory.ObservedRevision {
+					return nil, &runtimemodel.RuntimePrerequisiteStale{PrerequisiteID: value.PrerequisiteID, ObservationID: value.ObservationID, Domain: dependency.Domain, OwnerModuleID: dependency.OwnerModuleID, SubjectRef: dependency.SubjectRef, ExpectedRevision: dependency.Revision, ObservedRevision: a.runtimeAdmissibilityPolicyRevision(), Reason: "runtime shell operation policy changed"}
+				}
+			}
+		}
+		return shellOperationInfeasible(operation, "operation_admissibility_stale", fmt.Errorf("runtime shell operation admissibility policy is stale")), nil
+	}
+	if observation != nil {
+		for _, dependency := range observation.Normalized().Dependencies {
+			// The Shell owner observes this target, but File is the owner that
+			// reports durable workspace_target revisions. The dependency must use
+			// the resource owner so a File receipt intersects it exactly.
+			if dependency.Domain != runtimemodel.RuntimeResourceWorkspaceTarget || dependency.OwnerModuleID != runtimemodel.RuntimeModuleFile {
+				continue
+			}
+			if observedRevision, ok := shellWorkspaceTargetRevision(directory, dependency.SubjectRef); !ok || observedRevision != dependency.Revision {
+				if !ok {
+					observedRevision = "missing"
+				}
+				return nil, &runtimemodel.RuntimePrerequisiteStale{PrerequisiteID: observation.PrerequisiteID, ObservationID: observation.ObservationID, Domain: dependency.Domain, OwnerModuleID: dependency.OwnerModuleID, SubjectRef: dependency.SubjectRef, ExpectedRevision: dependency.Revision, ObservedRevision: observedRevision, Reason: "runtime shell validation target changed after admissibility acquisition"}
+			}
+		}
 	}
 	execCommand, execArgs, _ := normalizeShellExecutionCommand(command, args)
 	if _, lookErr := exec.LookPath(execCommand); lookErr != nil {
-		return shellOperationInfeasible(operation, "shell_executable_unavailable", lookErr)
+		return shellOperationInfeasible(operation, "shell_executable_unavailable", lookErr), nil
 	}
 	if err := validateShellCommandPolicy(execCommand, execArgs, directory, shellInputHasManagedValidation(request)); err != nil {
-		return shellOperationInfeasible(operation, "shell_command_policy_rejected", err)
+		return shellOperationInfeasible(operation, "shell_command_policy_rejected", err), nil
 	}
 	if err := validateValidationShellEvidencePolicy(request.ValidationEvidence, execCommand, execArgs); err != nil {
-		return shellOperationInfeasible(operation, "shell_validation_contract_rejected", err)
+		return shellOperationInfeasible(operation, "shell_validation_contract_rejected", err), nil
 	}
 	if _, err := shellCommandTimeout(request.TimeoutMillis, a.timeout); err != nil {
-		return shellOperationInfeasible(operation, "shell_command_timeout_policy_rejected", err)
+		return shellOperationInfeasible(operation, "shell_command_timeout_policy_rejected", err), nil
 	}
 	if err := validateShellValidationPreflight(directory, execCommand, execArgs, request); err != nil {
-		return shellOperationInfeasible(operation, "validation_target_missing", err)
+		return shellOperationInfeasible(operation, "validation_target_missing", err), nil
 	}
-	return nil
+	return nil, nil
+}
+
+func (a *RuntimeAdapter) runtimeAdmissibilityPolicyRevision() string {
+	keys := make([]string, 0, len(a.envAllowlist))
+	for key := range a.envAllowlist {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	h := sha256.New()
+	_, _ = fmt.Fprintf(h, "timeout=%s;", a.timeout)
+	for _, key := range keys {
+		_, _ = fmt.Fprintf(h, "env=%s;", key)
+	}
+	return "shell-policy-" + hex.EncodeToString(h.Sum(nil))[:20]
+}
+
+func (a *RuntimeAdapter) runtimeAdmissibilityObservation(workspaceDirectory, prerequisiteID string, inventory runtimemodel.RuntimeOperationAdmissibility, targetRefs []string) runtimemodel.RuntimePrerequisiteObservation {
+	dependencies := []runtimemodel.RuntimeFreshnessDependency{{
+		Domain: runtimemodel.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimemodel.RuntimeModuleShell, SubjectRef: "shell_runtime_policy", Revision: inventory.ObservedRevision,
+	}}
+	for _, targetRef := range targetRefs {
+		revision, ok := shellWorkspaceTargetRevision(workspaceDirectory, targetRef)
+		if !ok {
+			// Absence is itself an observed target revision. Keeping it allows a
+			// File create receipt to invalidate this Shell observation before a
+			// later validation treats the new target as if it had been acquired.
+			revision = "missing"
+		}
+		dependencies = append(dependencies, runtimemodel.RuntimeFreshnessDependency{
+			Domain: runtimemodel.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimemodel.RuntimeModuleFile, SubjectRef: strings.TrimSpace(targetRef), Revision: revision,
+		})
+	}
+	observation := runtimemodel.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisiteID, Kind: runtimemodel.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimemodel.RuntimeModuleShell,
+		ContentHash: inventory.SnapshotID, Dependencies: dependencies,
+	}
+	observation.ObservationID = runtimemodel.StableRuntimePrerequisiteObservationID(observation)
+	return observation
+}
+
+func shellWorkspaceTargetRevision(workspaceDirectory, targetRef string) (string, bool) {
+	workspaceDirectory = strings.TrimSpace(workspaceDirectory)
+	targetRef = strings.TrimSpace(targetRef)
+	if workspaceDirectory == "" || targetRef == "" || filepath.IsAbs(targetRef) {
+		return "", false
+	}
+	root, err := filepath.Abs(workspaceDirectory)
+	if err != nil {
+		return "", false
+	}
+	target := filepath.Join(root, filepath.Clean(targetRef))
+	if target != root && !strings.HasPrefix(target, root+string(filepath.Separator)) {
+		return "", false
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		return "", false
+	}
+	hash := sha256.Sum256(data)
+	return hex.EncodeToString(hash[:]), true
 }
 
 func shellProbeRequestFromOperation(workspaceDirectory string, operation runtimemodel.RuntimeOperation) (RuntimeCommandRequest, error) {
@@ -248,6 +344,7 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 		return finalizeShellResult(output, err)
 	}
 	beforeChange := workspaceStateChangeFingerprint(ctx, deliverableDirectory, request.StateChanging)
+	beforeTargets := shellWorkspaceTargetRevisions(deliverableDirectory, request)
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -317,6 +414,28 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 		attachShellValidationFailureDiagnostic(&output, request, execCommand, exitCode, false, false, err)
 		return finalizeShellResult(output, err)
 	}
+	if request.StateChanging {
+		afterTargets := shellWorkspaceTargetRevisions(deliverableDirectory, request)
+		output.WorkspaceTargetChanges = shellWorkspaceTargetChanges(beforeTargets, afterTargets)
+		if !shellWorkspaceTargetChangesChanged(output.WorkspaceTargetChanges) {
+			err := fmt.Errorf("%w: state-changing shell command produced no observable workspace delta for its declared targets", common.ErrInvalidArgument)
+			output.Status = "failed"
+			output.Stage = "shell_state_changing_no_progress"
+			output.FailureReason = "state_changing_no_workspace_delta"
+			output.ZeroWork = true
+			output.EvidenceQuality = string(common.EvidenceQualityInconclusive)
+			output.EvidenceReason = "state-changing shell command completed without changing an explicitly declared workspace target"
+			output.RuntimeDiagnostics = runtimemodel.RuntimeDiagnostics{
+				Kind:          "state_changing_no_progress",
+				Operation:     "shell/command",
+				TargetRef:     strings.TrimSpace(request.TargetRef),
+				FailureReason: "state_changing_no_workspace_delta",
+			}
+			attachManagedValidationResources(&output, request, pid, startedAt, time.Now().UTC(), "failed")
+			attachShellValidationFailureDiagnostic(&output, request, execCommand, exitCode, false, false, err)
+			return finalizeShellResult(output, err)
+		}
+	}
 	if beforeChange.Available {
 		afterChange := workspaceStateChangeFingerprint(ctx, deliverableDirectory, true)
 		if afterChange.Available {
@@ -346,6 +465,74 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 	}
 	attachManagedValidationResources(&output, request, pid, startedAt, time.Now().UTC(), "released")
 	return finalizeShellResult(output, nil)
+}
+
+func shellWorkspaceTargetRevisions(deliverableDirectory string, request RuntimeCommandRequest) map[string]string {
+	if !request.StateChanging {
+		return nil
+	}
+	root, err := filepath.Abs(strings.TrimSpace(deliverableDirectory))
+	if err != nil || root == "" {
+		return nil
+	}
+	refs := append([]string{request.TargetRef}, request.TargetRefs...)
+	ret := make(map[string]string, len(refs))
+	for _, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		if ref == "" || filepath.IsAbs(ref) {
+			continue
+		}
+		target := filepath.Join(root, filepath.Clean(ref))
+		if target != root && !strings.HasPrefix(target, root+string(filepath.Separator)) {
+			continue
+		}
+		data, readErr := os.ReadFile(target)
+		if readErr != nil {
+			if os.IsNotExist(readErr) {
+				ret[ref] = "missing"
+			}
+			continue
+		}
+		hash := sha256.Sum256(data)
+		ret[ref] = hex.EncodeToString(hash[:])
+	}
+	return ret
+}
+
+func shellWorkspaceTargetChanges(before map[string]string, after map[string]string) []RuntimeWorkspaceTargetChange {
+	seen := make(map[string]struct{}, len(before)+len(after))
+	for ref := range before {
+		seen[ref] = struct{}{}
+	}
+	for ref := range after {
+		seen[ref] = struct{}{}
+	}
+	refs := make([]string, 0, len(seen))
+	for ref := range seen {
+		refs = append(refs, ref)
+	}
+	sort.Strings(refs)
+	ret := make([]RuntimeWorkspaceTargetChange, 0, len(refs))
+	for _, ref := range refs {
+		beforeRevision, afterRevision := before[ref], after[ref]
+		if beforeRevision == "" {
+			beforeRevision = "missing"
+		}
+		if afterRevision == "" {
+			afterRevision = "missing"
+		}
+		ret = append(ret, RuntimeWorkspaceTargetChange{TargetRef: ref, BeforeRevision: beforeRevision, AfterRevision: afterRevision})
+	}
+	return ret
+}
+
+func shellWorkspaceTargetChangesChanged(values []RuntimeWorkspaceTargetChange) bool {
+	for _, value := range values {
+		if strings.TrimSpace(value.TargetRef) != "" && value.BeforeRevision != value.AfterRevision {
+			return true
+		}
+	}
+	return false
 }
 
 type shellWorkspaceChangeFingerprint struct {

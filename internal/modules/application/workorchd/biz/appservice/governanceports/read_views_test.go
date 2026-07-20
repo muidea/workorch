@@ -7,6 +7,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
@@ -169,6 +170,91 @@ func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 	}
 	if resumePublished {
 		t.Fatal("governance port published direct orchestrator resume; continuation must be owned by workorchd scheduler")
+	}
+}
+
+func TestResolveDecisionViewNormalizesRuntimeV2ReplanToAllowedContinuation(t *testing.T) {
+	ctx := context.Background()
+	testHub := newGovernanceMagicTestHub(t)
+	hub := testHub.rawHub
+	workspaceID := common.WorkspaceID("ws-governance-runtime-replan")
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) decisionevents.DecisionCommandResult {
+		cmd, ok := data.(decisionevents.GetTicketCommand)
+		if !ok || cmd.WorkspaceID != workspaceID || cmd.TicketID != "ticket-runtime-replan" {
+			t.Fatalf("get ticket command = %#v", data)
+		}
+		return decisionevents.DecisionCommandResult{Ticket: &decisionmodel.Ticket{
+			ID:                     "ticket-runtime-replan",
+			WorkspaceID:            workspaceID,
+			RunID:                  "run-runtime-replan",
+			DecisionKind:           "runtime_v2_governance",
+			State:                  common.DecisionTicketStateOpen,
+			AllowedRecoveryActions: []string{decisioncommon.ResolutionTypeProvideMissingInfo},
+		}}
+	})
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) decisionevents.DecisionCommandResult {
+		cmd, ok := data.(decisionevents.EnsureResolvedCommand)
+		if !ok {
+			t.Fatalf("resolve command payload = %T", data)
+		}
+		if cmd.Type != decisioncommon.ResolutionTypeProvideMissingInfo {
+			t.Fatalf("normalized resolution type = %q, want continue resolution", cmd.Type)
+		}
+		payload := workorcheventpayload.New(cmd.Payload...)
+		if requested, _ := payload.String("requestedResolutionType"); requested != decisioncommon.ResolutionTypeReplan {
+			t.Fatalf("requestedResolutionType = %q, want replan", requested)
+		}
+		if intent, _ := payload.String("runtimeContinuationIntent"); intent != "resume" {
+			t.Fatalf("runtimeContinuationIntent = %q, want resume", intent)
+		}
+		return decisionevents.DecisionCommandResult{
+			Ticket:     &decisionmodel.Ticket{ID: "ticket-runtime-replan", WorkspaceID: workspaceID, RunID: "run-runtime-replan", DecisionKind: "runtime_v2_governance", State: common.DecisionTicketStateResolved},
+			Resolution: &decisionmodel.Resolution{ID: "resolution-runtime-replan", TicketID: "ticket-runtime-replan", Type: cmd.Type, Payload: payload},
+		}
+	})
+
+	item, err := ResolveDecisionView(ctx, hub, nil, "ticket-runtime-replan", appmodelcore.ResolveDecisionCommand{
+		ResolutionType:    decisioncommon.ResolutionTypeReplan,
+		ResolutionPayload: mustGovernancePayload(t, map[string]any{"answer": "please retry with the revised plan"}),
+	}, workspaceID)
+	if err != nil {
+		t.Fatalf("ResolveDecisionView err = %v", err)
+	}
+	if item.State != string(common.DecisionTicketStateResolved) || item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo {
+		t.Fatalf("decision = %+v, want resolved continuation", item)
+	}
+}
+
+func TestResolveDecisionViewReturnsActionableConflictForUnsupportedRuntimeV2Replan(t *testing.T) {
+	ctx := context.Background()
+	testHub := newGovernanceMagicTestHub(t)
+	hub := testHub.rawHub
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) decisionevents.DecisionCommandResult {
+		return decisionevents.DecisionCommandResult{Ticket: &decisionmodel.Ticket{
+			ID:                     "ticket-runtime-replan-conflict",
+			WorkspaceID:            "ws-governance-runtime-replan-conflict",
+			RunID:                  "run-runtime-replan-conflict",
+			DecisionKind:           "runtime_v2_governance",
+			State:                  common.DecisionTicketStateOpen,
+			AllowedRecoveryActions: []string{decisioncommon.ResolutionTypeRejectCurrentPath},
+		}}
+	})
+	resolved := false
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(any) decisionevents.DecisionCommandResult {
+		resolved = true
+		return decisionevents.DecisionCommandResult{}
+	})
+
+	_, err := ResolveDecisionView(ctx, hub, nil, "ticket-runtime-replan-conflict", appmodelcore.ResolveDecisionCommand{ResolutionType: decisioncommon.ResolutionTypeReplan}, "ws-governance-runtime-replan-conflict")
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("ResolveDecisionView err = %v, want conflict", err)
+	}
+	var actionConflict *decisioncommon.ResolutionActionConflictError
+	if !errors.As(err, &actionConflict) || actionConflict.TicketID != "ticket-runtime-replan-conflict" || actionConflict.RequestedType != decisioncommon.ResolutionTypeReplan || len(actionConflict.AllowedActions) != 1 || actionConflict.AllowedActions[0] != decisioncommon.ResolutionTypeRejectCurrentPath {
+		t.Fatalf("action conflict = %#v, want ticket-specific remediation", actionConflict)
+	}
+	if resolved {
+		t.Fatal("unsupported replan resolved the ticket")
 	}
 }
 
@@ -402,8 +488,14 @@ func TestBatchResolveDecisionViewsRejectsMixedAllowedActionsBeforeWrites(t *test
 		TicketIDs: []string{"ticket-action-a", "ticket-action-b"}, ResolutionType: "provide_missing_info",
 		ResolutionPayload: mustGovernancePayload(t, map[string]any{"answer": "continue"}),
 	}, workspaceID)
-	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("mixed allowed action batch err = %v, want invalid argument", err)
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("mixed allowed action batch err = %v, want ticket action conflict", err)
+	}
+	var actionConflict *decisioncommon.ResolutionActionConflictError
+	if !errors.As(err, &actionConflict) || actionConflict.TicketID != "ticket-action-b" ||
+		actionConflict.RequestedType != decisioncommon.ResolutionTypeProvideMissingInfo ||
+		len(actionConflict.AllowedActions) != 1 || actionConflict.AllowedActions[0] != decisioncommon.ResolutionTypeReplan {
+		t.Fatalf("mixed allowed action conflict = %#v, want ticket-specific remediation", actionConflict)
 	}
 	if resolvedCount != 0 {
 		t.Fatalf("mixed allowed action batch wrote %d resolutions, want zero", resolvedCount)

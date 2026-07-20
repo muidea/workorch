@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -19,6 +20,9 @@ func TestRuntimeCandidateProviderClassifiesAuthenticationConfigurationAndTransie
 	}
 	if got := runtimeCandidateProviderFailureClass(&ProviderHTTPStatusError{StatusCode: 503, Body: "unavailable"}, true); got != runtimecontract.RuntimeCandidateFailureClassProviderTransient {
 		t.Fatalf("503 class = %s", got)
+	}
+	if got := runtimeCandidateProviderFailureClass(context.DeadlineExceeded, true); got != runtimecontract.RuntimeCandidateFailureClassProviderTransient {
+		t.Fatalf("deadline class = %s, want ordinary provider transport failure", got)
 	}
 }
 
@@ -166,6 +170,28 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 	}
 	if retryRequest.ContextBudget.CachePlan.StablePrefixHash != request.ContextBudget.CachePlan.StablePrefixHash || retryRequest.PromptContext.Sections[0].Content != contractSection {
 		t.Fatalf("retry changed stable provider contract: initial=%+v retry=%+v", request.ContextBudget.CachePlan, retryRequest.ContextBudget.CachePlan)
+	}
+	freshContext := runtimecontract.RuntimeCandidateContextFromFacts(facts)
+	freshObservation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: "admissibility-file", Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile, ContentHash: "admissibility-v2",
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: "tree-v2"}},
+	}
+	freshObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(freshObservation)
+	freshContext.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{freshObservation}
+	freshRequest, err := runtimeV2ProviderRequest(llmmodels.RuntimeCandidateRequest{
+		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix,
+		DefinitionContext: definition, CandidateContext: freshContext,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for idx := 0; idx < 3; idx++ {
+		if freshRequest.PromptContext.Sections[idx].Content != request.PromptContext.Sections[idx].Content {
+			t.Fatalf("freshness metadata drifted stable C%d section", idx)
+		}
+	}
+	if !strings.Contains(freshRequest.PromptContext.Sections[3].Content, `"prerequisiteObservations"`) || !strings.Contains(freshRequest.PromptContext.Sections[3].Content, "tree-v2") {
+		t.Fatalf("freshness metadata was not rendered in volatile C3: %s", freshRequest.PromptContext.Sections[3].Content)
 	}
 	limitedContext := runtimecontract.RuntimeCandidateContextFromFacts(facts)
 	limitedContext.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{

@@ -42,6 +42,15 @@ func ReduceRuntimeStateWithDirective(facts runtimecontract.RuntimeFacts, previou
 
 func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision, error) {
 	base := runtimecontract.RuntimeDecision{Focus: facts.Focus}
+	// A refresh budget is an authority terminal, even though the change that
+	// exhausted it has already reopened its mutable prerequisites. Letting the
+	// generic pending-prerequisite branch win here would request a new candidate
+	// from the old facts after the budget is spent, disguising exhaustion as
+	// retry bookkeeping. SM-2 must instead seal the explicit terminal and leave
+	// SM-4 to deliver it idempotently.
+	if facts.Failure != nil && facts.Failure.Class == runtimecontract.FailureClassPrerequisiteRefreshExhausted {
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "prerequisite_refresh_exhausted", facts.Failure.Message), nil
+	}
 	if len(facts.Prerequisites.Pending) > 0 {
 		ids := make([]string, 0, len(facts.Prerequisites.Pending))
 		for _, prerequisite := range facts.Prerequisites.Pending {
@@ -55,6 +64,9 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 			PrerequisiteIDs: ids,
 		}
 		return base, nil
+	}
+	if len(facts.FreshnessReacquireCoverage) > 0 {
+		return stateChangeDecision(base, facts)
 	}
 	if facts.Failure != nil {
 		if facts.Failure.Class == runtimecontract.FailureClassExecutionFailure &&
@@ -86,6 +98,8 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "runtime_contract_defect", facts.Failure.Message), nil
 		case runtimecontract.FailureClassCandidateExhausted:
 			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "candidate_retry_exhausted", facts.Failure.Message), nil
+		case runtimecontract.FailureClassPrerequisiteRefreshExhausted:
+			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "prerequisite_refresh_exhausted", facts.Failure.Message), nil
 		case runtimecontract.FailureClassGovernanceRejected:
 			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "governance_rejected", facts.Failure.Message), nil
 		}
@@ -200,15 +214,33 @@ func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecont
 		RequiredEvidenceKinds:     []string{runtimecontract.EvidenceKindStateChange},
 		CoverageWorkItemIDs:       facts.Focus.CoverageWorkItemIDs,
 		TargetRefs:                facts.Focus.TargetRefs,
-		RequiredOperationSequence: requiredCapabilityStateSequence(facts),
+		RequiredOperationSequence: requiredCapabilityStateSequence(facts, acceptedKinds),
 	}
 	return base, nil
 }
 
-func requiredCapabilityStateSequence(facts runtimecontract.RuntimeFacts) []runtimecontract.RuntimeRequiredOperationVariant {
+// requiredCapabilityStateSequence only contributes a capability owner's
+// sequence when the current focus admits that owner's operation kind. A
+// persisted Git sequence must not make an unrelated File-only focus emit Git
+// operations merely because both capabilities were acquired for the Run.
+func requiredCapabilityStateSequence(facts runtimecontract.RuntimeFacts, acceptedKinds []string) []runtimecontract.RuntimeRequiredOperationVariant {
 	ret := []runtimecontract.RuntimeRequiredOperationVariant{}
+	accepted := make(map[string]struct{}, len(acceptedKinds))
+	for _, kind := range acceptedKinds {
+		accepted[runtimecontract.CanonicalRuntimeBlockKind(kind)] = struct{}{}
+	}
 	for _, snapshot := range facts.Resources.CapabilityStates {
-		if snapshot.Disposition == runtimecontract.RuntimeCapabilityStateSequenceRequired {
+		if snapshot.Disposition != runtimecontract.RuntimeCapabilityStateSequenceRequired {
+			continue
+		}
+		allAdmitted := len(snapshot.RequiredOperationSequence) != 0
+		for _, requirement := range snapshot.RequiredOperationSequence {
+			if _, found := accepted[runtimecontract.CanonicalRuntimeBlockKind(requirement.Kind)]; !found {
+				allAdmitted = false
+				break
+			}
+		}
+		if allAdmitted {
 			ret = append(ret, snapshot.RequiredOperationSequence...)
 		}
 	}

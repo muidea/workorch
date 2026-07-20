@@ -14,6 +14,11 @@ type RuntimeDispatchState string
 const (
 	RuntimeDispatchStateSealed    RuntimeDispatchState = "sealed"
 	RuntimeDispatchStateCommitted RuntimeDispatchState = "committed"
+	// RuntimeDispatchStateInvalidated records a sealed dispatch whose remaining
+	// work cannot continue after a prerequisite observation became stale. Any
+	// accepted effects before invalidation remain represented by their receipt
+	// and evidence; unexecuted operations never become rejected evidence.
+	RuntimeDispatchStateInvalidated RuntimeDispatchState = "invalidated"
 )
 
 type RuntimeDispatchRecord struct {
@@ -43,6 +48,9 @@ const (
 	RuntimeCandidateAttemptStatePending  RuntimeCandidateAttemptState = "pending"
 	RuntimeCandidateAttemptStateFailed   RuntimeCandidateAttemptState = "failed"
 	RuntimeCandidateAttemptStateAccepted RuntimeCandidateAttemptState = "accepted"
+	// Invalidated is a freshness transition, not a candidate failure. The next
+	// candidate is attempt 0 under a newly sealed authority transaction.
+	RuntimeCandidateAttemptStateInvalidated RuntimeCandidateAttemptState = "invalidated"
 )
 
 // RuntimeCandidateFeasibilityRecord is the durable, read-only SM-3 admission
@@ -52,8 +60,10 @@ const (
 type RuntimeCandidateFeasibilityRecord struct {
 	OperationID             string
 	AdmissibilitySnapshotID string
+	AcquisitionBinding      string
 	Feasible                bool
 	Failure                 *FailureFact
+	Stale                   *RuntimePrerequisiteStale
 }
 
 type RuntimeCandidateAttemptRecord struct {
@@ -68,6 +78,7 @@ type RuntimeCandidateAttemptRecord struct {
 	Proposal      *RuntimeCandidate
 	Feasibilities []RuntimeCandidateFeasibilityRecord
 	Failure       *RuntimeCandidateFailure
+	Stale         *RuntimePrerequisiteStale
 }
 
 // RuntimeStateRecord 是 Runtime V2 在 Run owner 中持久化的唯一正式状态。
@@ -91,6 +102,9 @@ type RuntimeStateRecord struct {
 	// OperationReceipts are owner-authored terminal receipts persisted before
 	// capability owners return execution results (schema v2 / INV-03/INV-04).
 	OperationReceipts []RuntimeOperationReceipt
+	// PrerequisiteInvalidations provide a persisted idempotency fence for
+	// freshness refreshes across duplicate events, CAS retries and restart.
+	PrerequisiteInvalidations []RuntimePrerequisiteInvalidationRecord
 	// Termination is the SM-1 administrative cancel/supersede record (schema v2).
 	// completed/failed do not use this field.
 	Termination *RuntimeTerminationRecord
@@ -159,6 +173,11 @@ func (r RuntimeStateRecord) Validate() error {
 	}
 	if err := ValidateRuntimeOperationReceipts(r.OperationReceipts); err != nil {
 		return err
+	}
+	for _, invalidation := range r.PrerequisiteInvalidations {
+		if err := invalidation.Validate(); err != nil {
+			return fmt.Errorf("runtime prerequisite invalidation: %w", err)
+		}
 	}
 	for _, request := range r.GovernanceRequests {
 		matched := r.ActiveDispatch != nil && r.ActiveDispatch.ID == request.DispatchID &&
@@ -289,7 +308,7 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 		bySnapshot[value.Transaction.AuthoritySnapshotID] = append(bySnapshot[value.Transaction.AuthoritySnapshotID], value)
 		switch value.State {
 		case RuntimeCandidateAttemptStatePending, RuntimeCandidateAttemptStateAccepted:
-			if value.Failure != nil {
+			if value.Failure != nil || value.Stale != nil {
 				return fmt.Errorf("runtime candidate attempt %s state %s cannot carry failure", key, value.State)
 			}
 			if value.State == RuntimeCandidateAttemptStateAccepted && value.Proposal != nil {
@@ -301,6 +320,16 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 		case RuntimeCandidateAttemptStateFailed:
 			if value.Failure == nil || value.Failure.Class == "" || strings.TrimSpace(value.Failure.Reason) == "" {
 				return fmt.Errorf("failed runtime candidate attempt %s requires typed failure", key)
+			}
+			if value.Stale != nil {
+				return fmt.Errorf("failed runtime candidate attempt %s cannot carry freshness stale", key)
+			}
+		case RuntimeCandidateAttemptStateInvalidated:
+			if value.Failure != nil || value.Proposal != nil || len(value.Feasibilities) != 0 || value.Stale == nil {
+				return fmt.Errorf("invalidated runtime candidate attempt %s requires only typed stale", key)
+			}
+			if err := value.Stale.Validate(); err != nil {
+				return fmt.Errorf("invalidated runtime candidate attempt %s stale: %w", key, err)
 			}
 		default:
 			return fmt.Errorf("runtime candidate attempt %s has invalid state %q", key, value.State)
@@ -338,8 +367,17 @@ func ValidateRuntimeCandidateFeasibilityRecords(values []RuntimeCandidateFeasibi
 		}
 		seen[operationID] = struct{}{}
 		if value.Feasible {
-			if value.Failure != nil {
+			if value.Failure != nil || value.Stale != nil {
 				return fmt.Errorf("feasible runtime candidate operation %q cannot carry failure", operationID)
+			}
+			continue
+		}
+		if value.Stale != nil {
+			if value.Failure != nil {
+				return fmt.Errorf("stale runtime candidate operation %q cannot carry failure", operationID)
+			}
+			if err := value.Stale.Validate(); err != nil {
+				return fmt.Errorf("stale runtime candidate operation %q: %w", operationID, err)
 			}
 			continue
 		}
@@ -396,6 +434,9 @@ func StableAuthorityContractID(workspaceID common.WorkspaceID, runID common.RunI
 	writeHashString(h, transaction.DefinitionRevision)
 	writeHashString(h, transaction.EvidenceRevision)
 	writeHashString(h, transaction.CapabilityStateHash)
+	if transaction.PrerequisiteFreshnessHash != "" {
+		writeHashString(h, transaction.PrerequisiteFreshnessHash)
+	}
 	writeHashString(h, transaction.OperationContractRevision)
 	return "authority-contract-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
@@ -407,6 +448,7 @@ func SameAuthorityContract(left AuthorityTransaction, right AuthorityTransaction
 		left.DefinitionRevision == right.DefinitionRevision &&
 		left.EvidenceRevision == right.EvidenceRevision &&
 		left.CapabilityStateHash == right.CapabilityStateHash &&
+		left.PrerequisiteFreshnessHash == right.PrerequisiteFreshnessHash &&
 		left.OperationContractRevision == right.OperationContractRevision
 }
 
@@ -450,6 +492,10 @@ func (r RuntimeStateRecord) Clone() RuntimeStateRecord {
 			failure := *attempt.Failure
 			ret.CandidateAttempts[idx].Failure = &failure
 		}
+		if attempt.Stale != nil {
+			stale := *attempt.Stale
+			ret.CandidateAttempts[idx].Stale = &stale
+		}
 	}
 	ret.GovernanceRequests = append([]RuntimeGovernanceRequestRecord(nil), r.GovernanceRequests...)
 	ret.GovernanceResolutions = append([]RuntimeGovernanceResolutionRecord(nil), r.GovernanceResolutions...)
@@ -458,6 +504,7 @@ func (r RuntimeStateRecord) Clone() RuntimeStateRecord {
 		ret.OperationGovernanceBindings[idx] = r.OperationGovernanceBindings[idx].Clone()
 	}
 	ret.OperationReceipts = NormalizeRuntimeOperationReceipts(r.OperationReceipts)
+	ret.PrerequisiteInvalidations = NormalizeRuntimePrerequisiteInvalidations(r.PrerequisiteInvalidations)
 	if r.Termination != nil {
 		term := r.Termination.Clone()
 		ret.Termination = &term
@@ -476,6 +523,10 @@ func cloneRuntimeCandidateFeasibilities(values []RuntimeCandidateFeasibilityReco
 			failure := *value.Failure
 			failure.TargetRefs = append([]string(nil), value.Failure.TargetRefs...)
 			ret[idx].Failure = &failure
+		}
+		if value.Stale != nil {
+			stale := *value.Stale
+			ret[idx].Stale = &stale
 		}
 	}
 	return ret
@@ -516,7 +567,7 @@ func (d RuntimeDispatchRecord) ValidateWithActivation(decision RuntimeDecision, 
 	if d.CandidateHash != StableRuntimeCandidateHash(d.Candidate) {
 		return fmt.Errorf("runtime dispatch candidate hash mismatch")
 	}
-	if d.State != RuntimeDispatchStateSealed && d.State != RuntimeDispatchStateCommitted {
+	if d.State != RuntimeDispatchStateSealed && d.State != RuntimeDispatchStateCommitted && d.State != RuntimeDispatchStateInvalidated {
 		return fmt.Errorf("runtime dispatch has invalid state %q", d.State)
 	}
 	available := runtimeCandidateOperationIDs(d.Candidate)

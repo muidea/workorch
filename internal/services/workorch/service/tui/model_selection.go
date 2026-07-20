@@ -47,6 +47,13 @@ func (m *AppModel) activeWorkspaceOverviewTarget() *runtimecontract.ProviderMode
 	return ws.DefaultLLMTarget
 }
 
+func displayModelTarget(target *runtimecontract.ProviderModelTarget, empty string) string {
+	if target == nil || target.Validate() != nil {
+		return empty
+	}
+	return target.ProviderID + "/" + target.ModelID
+}
+
 func cloneModelTarget(input *runtimecontract.ProviderModelTarget) *runtimecontract.ProviderModelTarget {
 	if input == nil {
 		return nil
@@ -275,13 +282,11 @@ func (m *AppModel) applyWorkspaceLLMTargetUpdated(msg WorkspaceLLMTargetUpdatedM
 	if msg.Workspace != nil {
 		m.upsertWorkspace(*msg.Workspace)
 	}
-	label := "inherit system default"
-	if msg.Target != nil {
-		label = msg.Target.ProviderID + "/" + msg.Target.ModelID
-	}
+	label := displayModelTarget(msg.Target, "inherit system default")
+	sealed := displayModelTarget(m.activeWorkspaceSealedTarget(), "no active sealed target")
 	m.cancelModelSelection()
 	m.lastError = nil
-	m.result = "Workspace model updated\n- future runs: " + label + "\n- current run: unchanged"
+	m.result = "Workspace model updated\n- next-run workspace default: " + label + "\n- current-run sealed target: " + sealed
 	switch m.activeWorkspacePromptMode() {
 	case workspacePromptModeDecision:
 		m.result += "\n- next: resolve the current decision, then use /run resume"
@@ -303,15 +308,13 @@ func (m *AppModel) applyWorkspaceLLMTargetShow(msg WorkspaceLLMTargetShowMsg) (t
 		m.setLastError(msg.Error)
 		return m, nil
 	}
-	workspaceTarget := "inherit system default"
-	if target := m.activeWorkspaceOverviewTarget(); target != nil {
-		workspaceTarget = target.ProviderID + "/" + target.ModelID
-	}
+	workspaceTarget := displayModelTarget(m.activeWorkspaceOverviewTarget(), "inherit system default")
 	systemTarget := "unavailable"
 	if msg.Config != nil {
 		systemTarget = msg.Config.DefaultChat.ProviderID + "/" + msg.Config.DefaultChat.ModelID
 	}
-	m.result = "Workspace model configuration\n- workspace: " + workspaceTarget + "\n- system default: " + systemTarget + "\n- current run: sealed target is unchanged"
+	sealedTarget := displayModelTarget(m.activeWorkspaceSealedTarget(), "no active sealed target")
+	m.result = "Workspace model configuration\n- next-run workspace default: " + workspaceTarget + "\n- current-run sealed target: " + sealedTarget + "\n- system default: " + systemTarget
 	m.progressText = "Showing workspace model configuration"
 	m.lastError = nil
 	m.resetMainViewport()

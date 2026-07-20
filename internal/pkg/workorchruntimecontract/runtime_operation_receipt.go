@@ -49,19 +49,29 @@ type RuntimeOperationExecutionRecord struct {
 // RuntimeOperationReceipt is the owner-persisted receipt for one ExecutionKey.
 // Orchestrator commits evidence only from sealed expectation + this receipt (INV-03).
 type RuntimeOperationReceipt struct {
-	ExecutionKey         string
-	Fence                uint64
-	OperationID          string
-	Outcome              RuntimeOperationOutcome
-	ObservedEffectScope  RuntimeEffectScope
-	Changed              bool
-	NoOp                 bool
-	TargetRefs           []string
-	BeforeHash           string
-	AfterHash            string
-	Evidence             RuntimeOperationEvidence
-	Failure              *FailureFact
-	Governance           *RuntimeGovernanceRequirement
+	ExecutionKey        string
+	Fence               uint64
+	OperationID         string
+	Outcome             RuntimeOperationOutcome
+	ObservedEffectScope RuntimeEffectScope
+	Changed             bool
+	NoOp                bool
+	TargetRefs          []string
+	BeforeHash          string
+	AfterHash           string
+	Evidence            RuntimeOperationEvidence
+	Failure             *FailureFact
+	Governance          *RuntimeGovernanceRequirement
+	// ResourceChanges are owner-observed durable revisions changed by this
+	// sealed operation. Orchestrator uses them only to invalidate intersecting
+	// prerequisite observations.
+	ResourceChanges []RuntimeResourceChange
+	// PrerequisiteStale is the generic freshness conflict contract. It is
+	// intentionally separate from FailureFact so stale never spends candidate
+	// retry or repair budget.
+	PrerequisiteStale *RuntimePrerequisiteStale
+	// CapabilityStateStale remains readable for existing persisted v2 records
+	// during the rollout. New owners must use PrerequisiteStale.
 	CapabilityStateStale *RuntimeCapabilityStateStaleDetail
 	IdempotentReplay     bool
 	CompletedAt          string
@@ -286,6 +296,7 @@ func (r RuntimeOperationReceipt) Normalized() RuntimeOperationReceipt {
 	r.Evidence.Summary = strings.TrimSpace(r.Evidence.Summary)
 	r.Evidence.ContentHash = strings.TrimSpace(r.Evidence.ContentHash)
 	r.Evidence.EvidenceRefs = normalizeStrings(r.Evidence.EvidenceRefs)
+	r.ResourceChanges = NormalizeRuntimeResourceChanges(r.ResourceChanges)
 	if r.Failure != nil {
 		failure := *r.Failure
 		failure.Class = FailureClass(strings.TrimSpace(string(failure.Class)))
@@ -298,6 +309,10 @@ func (r RuntimeOperationReceipt) Normalized() RuntimeOperationReceipt {
 	if r.Governance != nil {
 		gov := r.Governance.Normalized()
 		r.Governance = &gov
+	}
+	if r.PrerequisiteStale != nil {
+		value := r.PrerequisiteStale.Normalized()
+		r.PrerequisiteStale = &value
 	}
 	if r.CapabilityStateStale != nil {
 		value := *r.CapabilityStateStale
@@ -366,6 +381,26 @@ func (r RuntimeOperationReceipt) Validate() error {
 			return fmt.Errorf("capability-state stale receipt requires rejected exact stale detail")
 		}
 	}
+	if r.PrerequisiteStale != nil {
+		if r.CapabilityStateStale != nil || r.Outcome != RuntimeOperationOutcomeRejected || r.Failure == nil ||
+			(r.Failure.Code != "prerequisite_stale" && r.Failure.Code != "operation_admissibility_stale" && r.Failure.Code != "capability_state_stale") {
+			return fmt.Errorf("prerequisite stale receipt requires rejected generic stale detail")
+		}
+		if err := r.PrerequisiteStale.Validate(); err != nil {
+			return err
+		}
+		if r.Changed || r.NoOp || len(r.ResourceChanges) != 0 || r.ObservedEffectScope != RuntimeEffectNone {
+			return fmt.Errorf("prerequisite stale receipt cannot report an effect or resource change")
+		}
+	}
+	for _, change := range r.ResourceChanges {
+		if err := change.Validate(); err != nil {
+			return err
+		}
+	}
+	if len(r.ResourceChanges) > 0 && (!r.Changed || !RuntimeEffectIsDurable(r.ObservedEffectScope)) {
+		return fmt.Errorf("resource changes require a durable changed operation receipt")
+	}
 	if r.CompletedAt != "" {
 		if _, err := time.Parse(time.RFC3339, r.CompletedAt); err != nil {
 			if _, err2 := time.Parse(time.RFC3339Nano, r.CompletedAt); err2 != nil {
@@ -390,6 +425,11 @@ func (r RuntimeOperationReceipt) Clone() RuntimeOperationReceipt {
 		detail := *r.CapabilityStateStale
 		ret.CapabilityStateStale = &detail
 	}
+	if r.PrerequisiteStale != nil {
+		detail := *r.PrerequisiteStale
+		ret.PrerequisiteStale = &detail
+	}
+	ret.ResourceChanges = append([]RuntimeResourceChange(nil), r.ResourceChanges...)
 	if r.Evidence.ExitCode != nil {
 		code := *r.Evidence.ExitCode
 		ret.Evidence.ExitCode = &code
@@ -493,6 +533,26 @@ func StableRuntimeOperationReceiptHash(receipt RuntimeOperationReceipt) string {
 		writeHashString(h, receipt.Governance.Reason)
 		writeHashString(h, receipt.Governance.RequestedAction)
 		writeHashString(h, receipt.Governance.RiskLevel)
+	}
+	for _, change := range receipt.ResourceChanges {
+		writeHashString(h, string(change.Domain))
+		writeHashString(h, change.OwnerModuleID)
+		writeHashString(h, change.SubjectRef)
+		writeHashString(h, change.BeforeRevision)
+		writeHashString(h, change.AfterRevision)
+	}
+	if receipt.PrerequisiteStale == nil {
+		writeHashString(h, "prerequisite-stale:nil")
+	} else {
+		detail := receipt.PrerequisiteStale
+		writeHashString(h, detail.PrerequisiteID)
+		writeHashString(h, detail.ObservationID)
+		writeHashString(h, string(detail.Domain))
+		writeHashString(h, detail.OwnerModuleID)
+		writeHashString(h, detail.SubjectRef)
+		writeHashString(h, detail.ExpectedRevision)
+		writeHashString(h, detail.ObservedRevision)
+		writeHashString(h, detail.Reason)
 	}
 	if receipt.CapabilityStateStale == nil {
 		writeHashString(h, "capability-state-stale:nil")

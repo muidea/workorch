@@ -16,3 +16,4 @@ internal/modules/application/**/.workorch-workspaces/
 internal/modules/application/**/workspaces/
 
 .workorch-e2e/
+scripts/__pycache__/

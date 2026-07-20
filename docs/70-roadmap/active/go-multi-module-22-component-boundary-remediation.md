@@ -4,7 +4,7 @@ Status: active
 
 Type: remediation plan
 
-Last Updated: 2026-07-19
+Last Updated: 2026-07-20
 
 ## Implementation Progress
 
@@ -43,6 +43,13 @@ Repository verification recorded on 2026-07-19:
 - Run and Orchestrator targeted `-race` suites;
 - `make verify-runtime-v2-positive-convergence-file`, `make build`, and the
   two-iteration `make verify-managed-service-smoke` lifecycle check.
+- Workspace projection now treats a delayed event for an already-deleted
+  workspace as a successful delete convergence only when both typed workspace
+  and snapshot reads return `ErrNotFound`; it removes the stale projection
+  entry instead of degrading `/readyz`. The direct regression is
+  `TestManagerRebuildDeletedWorkspaceConvergesWithoutDegradingReadiness`.
+  This post-cleanup correction still requires deployment/restart verification
+  against the external SM-4 target.
 
 The recorded commands above predate GMM-R8 and are only regression evidence
 for the then-current topology. Fresh post-migration repository verification
@@ -71,6 +78,12 @@ SoT，Orchestrator 实现仍以
 `internal/modules/kernel/orchestrator/readme.md` 与
 `internal/pkg/workorchruntimecontract` 为准。本方案只约束组件边界、生命周期
 交付和内部合同收口，不创建第二份 Runtime V2 状态语义。
+
+按 22 个组件逐一实施时，必须同时遵循
+[component-contract-and-regression-closure-matrix.md](component-contract-and-regression-closure-matrix.md)。
+该矩阵是本方案的执行层：逐项定义状态权威、入站/出站 typed EventHub 合同、禁止
+边界、组件级回归和跨组件/部署完成条件；本文件仍保留整改背景、全局设计和 ARCH-1
+最终验收。
 
 ## Audit Baseline
 
@@ -111,7 +124,7 @@ SoT，Orchestrator 实现仍以
   `task.BackgroundRoutine`；
 - 22 个组件及 `internal/services/workorch` 的测试通过；
 - `make verify-boundary-contract`、相关范围 `go vet` 通过；
-- fresh deployed Runtime V2 bounded terminal 与 positive acceptance 已通过。
+- 2026-07-18 deployed Runtime V2 bounded terminal 与当时 positive acceptance 已通过；该证据只作为 boundary remediation 基线。durable effect 后 prerequisite freshness 随后由 [RPF completion record](../../90-archive/completed/runtime-v2-prerequisite-freshness-closure.md) 重新打开并于 2026-07-20 完成。
 
 这些正向事实是整改必须保持的回归基线，不得为了移除结构债务而破坏现有
 Runtime V2 功能。
@@ -865,6 +878,8 @@ owner snapshot/observability，验证三类 fixture 自动到达 terminal 或 go
 9. 22 个组件 direct tests、race tests、全量 tests、vet、boundary、build 通过。
 10. file-backed crash/restart matrix 与 fresh deployed positive acceptance 通过。
 11. `current-state`、module readme、active matrix 和 verification 文档与最终实现一致。
+12. [组件合同与独立回归矩阵](component-contract-and-regression-closure-matrix.md)中每个
+    组件均达到 `C`；任何 deployed `D` 项不得以本地全仓测试或人工 Resume 替代。
 
 ## Closure Documentation
 

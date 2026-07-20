@@ -16,8 +16,8 @@ func TestNormalizeRunCommandIntent(t *testing.T) {
 	}{
 		{name: "default resume", input: "", want: RunCommandIntentResume},
 		{name: "resume", input: RunCommandIntentResume, want: RunCommandIntentResume},
-		{name: "restart", input: RunCommandIntentRestart, want: RunCommandIntentRestart},
-		{name: "replan", input: RunCommandIntentReplan, want: RunCommandIntentReplan},
+		{name: "restart is historical only", input: RunCommandIntentRestart, wantErr: true},
+		{name: "replan is Decision-only", input: RunCommandIntentReplan, wantErr: true},
 		{name: "recover is not canonical", input: RunCommandIntent("recover"), wantErr: true},
 		{name: "unsupported intent", input: RunCommandIntent("unsupported"), wantErr: true},
 	} {
@@ -58,31 +58,11 @@ func TestValidateWorkspaceRunCommandScopeContract(t *testing.T) {
 			want:    RunCommandIntentResume,
 			wantErr: false,
 		},
-		{
-			name:    "restart workspace command",
-			req:     WorkspaceRunCommand{WorkspaceID: "ws-run-command", Intent: RunCommandIntentRestart},
-			want:    RunCommandIntentRestart,
-			wantErr: false,
-		},
-		{
-			name:    "replan scoped run command",
-			req:     WorkspaceRunCommand{WorkspaceID: "ws-run-command", ExpectedRunID: "run-command", Intent: RunCommandIntentReplan},
-			want:    RunCommandIntentReplan,
-			wantErr: false,
-		},
+		{name: "restart command is rejected", req: WorkspaceRunCommand{WorkspaceID: "ws-run-command", Intent: RunCommandIntentRestart}, wantErr: true},
+		{name: "replan command is rejected", req: WorkspaceRunCommand{WorkspaceID: "ws-run-command", ExpectedRunID: "run-command", Intent: RunCommandIntentReplan}, wantErr: true},
 		{
 			name:    "workspace required",
 			req:     WorkspaceRunCommand{ExpectedRunID: "run-command", Intent: RunCommandIntentResume},
-			wantErr: true,
-		},
-		{
-			name:    "restart rejects run scope",
-			req:     WorkspaceRunCommand{WorkspaceID: "ws-run-command", ExpectedRunID: "run-command", Intent: RunCommandIntentRestart},
-			wantErr: true,
-		},
-		{
-			name:    "replan requires run scope",
-			req:     WorkspaceRunCommand{WorkspaceID: "ws-run-command", Intent: RunCommandIntentReplan},
 			wantErr: true,
 		},
 	} {

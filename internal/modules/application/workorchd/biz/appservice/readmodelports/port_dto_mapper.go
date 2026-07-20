@@ -134,6 +134,7 @@ func PortRunInfo(item appmodelcore.Run) port.RunInfo {
 		BlockingTicketID:    common.TicketID(item.BlockingTicketID),
 		BlockingApprovalID:  common.ApprovalID(item.BlockingApprovalID),
 		FailureReason:       item.FailureReason,
+		SealedLLMTarget:     cloneRuntimeProviderTarget(item.SealedLLMTarget),
 	}
 }
 
@@ -543,8 +544,35 @@ func portRuntimeV2ProgressInfo(item *readmodelcore.RuntimeV2Progress) *port.Runt
 		RejectedEvidenceCount: item.RejectedEvidenceCount, MissingEvidenceKinds: append([]string(nil), item.MissingEvidenceKinds...),
 		CurrentFocusID: item.CurrentFocusID, CurrentAction: item.CurrentAction, FailureClass: item.FailureClass,
 		FailureCode: item.FailureCode, FailureSignature: item.FailureSignature, FailureMessage: item.FailureMessage,
-		RepairHintCodes: append([]string(nil), item.RepairHintCodes...),
+		RepairHintCodes:          append([]string(nil), item.RepairHintCodes...),
+		PrerequisiteRefreshState: item.PrerequisiteRefreshState, PrerequisiteRefreshUsed: item.PrerequisiteRefreshUsed,
+		PrerequisiteRefreshLimit:  item.PrerequisiteRefreshLimit,
+		PrerequisiteInvalidations: portPrerequisiteRefreshInvalidations(item.PrerequisiteInvalidations),
 	}
+}
+
+func portPrerequisiteRefreshInvalidations(items []readmodelcore.RuntimePrerequisiteRefreshInvalidation) []port.RuntimePrerequisiteRefreshInvalidationInfo {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]port.RuntimePrerequisiteRefreshInvalidationInfo, 0, len(items))
+	for _, item := range items {
+		value := port.RuntimePrerequisiteRefreshInvalidationInfo{
+			Signature: item.Signature, Source: item.Source, PrerequisiteIDs: append([]string(nil), item.PrerequisiteIDs...),
+			ObservationIDs: append([]string(nil), item.ObservationIDs...), DispatchID: item.DispatchID, OperationID: item.OperationID,
+			ReceiptHash: item.ReceiptHash, OwnerModuleID: item.OwnerModuleID, ResourceDomain: item.ResourceDomain,
+			SubjectRef: item.SubjectRef, ExpectedRevision: item.ExpectedRevision, ObservedRevision: item.ObservedRevision,
+			Reason: item.Reason,
+		}
+		for _, change := range item.ResourceChanges {
+			value.ResourceChanges = append(value.ResourceChanges, port.RuntimePrerequisiteResourceChangeInfo{
+				OwnerModuleID: change.OwnerModuleID, ResourceDomain: change.ResourceDomain, SubjectRef: change.SubjectRef,
+				BeforeRevision: change.BeforeRevision, AfterRevision: change.AfterRevision,
+			})
+		}
+		ret = append(ret, value)
+	}
+	return ret
 }
 
 func portRecoveryPlanInfo(item readmodelcore.RecoveryPlan) port.RecoveryPlanInfo {

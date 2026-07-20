@@ -33,6 +33,19 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 	}
 	generation, err := provider.GenerateCandidate(ctx, request)
 	if err != nil {
+		if stale := generation.PrerequisiteStale; stale != nil {
+			staleCopy := stale.Normalized()
+			if validateErr := staleCopy.Validate(); validateErr != nil {
+				return llmmodels.RuntimeCandidateResponse{}, candidateRequestError(CandidateFailureClassInternal, fmt.Errorf("invalid LLM prerequisite stale: %w", validateErr), generation.Audit, generation.RequestID, generation.Status)
+			}
+			return llmmodels.RuntimeCandidateResponse{
+				Transaction: request.Transaction,
+				Audit:       generation.Audit, Usage: generation.Usage,
+				RequestID:         generation.RequestID,
+				Status:            firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusFailed),
+				PrerequisiteStale: &staleCopy,
+			}, candidateRequestErrorWithStale(err, generation.Audit, generation.RequestID, generation.Status, staleCopy)
+		}
 		failureClass := runtimecontract.RuntimeCandidateFailureClass(strings.TrimSpace(generation.FailureClass))
 		if failureClass == "" {
 			failureClass = CandidateFailureClassProvider
@@ -80,6 +93,7 @@ type CandidateRequestError struct {
 	Audit     *llmmodels.ProviderRequestAudit
 	RequestID string
 	Status    string
+	Stale     *runtimecontract.RuntimePrerequisiteStale
 }
 
 func (e *CandidateRequestError) Error() string {
@@ -118,8 +132,24 @@ func CandidateAuditFromError(err error) (*llmmodels.ProviderRequestAudit, string
 	return nil, "", ""
 }
 
+// CandidatePrerequisiteStaleFromError extracts an owner-confirmed stale
+// observation without turning it into a candidate/provider failure.
+func CandidatePrerequisiteStaleFromError(err error) *runtimecontract.RuntimePrerequisiteStale {
+	var typed *CandidateRequestError
+	if !errors.As(err, &typed) || typed == nil || typed.Stale == nil {
+		return nil
+	}
+	stale := typed.Stale.Normalized()
+	return &stale
+}
+
 func candidateRequestError(class CandidateFailureClass, err error, audit *llmmodels.ProviderRequestAudit, requestID, status string) error {
 	return &CandidateRequestError{Class: class, Err: err, Audit: audit, RequestID: requestID, Status: status}
+}
+
+func candidateRequestErrorWithStale(err error, audit *llmmodels.ProviderRequestAudit, requestID, status string, stale runtimecontract.RuntimePrerequisiteStale) error {
+	stale = stale.Normalized()
+	return &CandidateRequestError{Class: CandidateFailureClassInternal, Err: err, Audit: audit, RequestID: requestID, Status: status, Stale: &stale}
 }
 
 func firstNonEmpty(values ...string) string {

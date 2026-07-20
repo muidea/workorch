@@ -23,7 +23,10 @@ func TestRuntimeV2ActivationContextUsesConcreteSelectionSnapshots(t *testing.T) 
 		appmodelcore.SoulRouting{Bindings: map[string]appmodelcore.SoulRoutingBinding{"execution": {SoulID: "soul-execution", Source: "workspace_stage_binding"}}},
 		[]contextregistrycore.Skill{{ID: "skill-1", Name: "skill", Instruction: "skill instructions"}},
 		[]string{"mcp-1"},
-		[]*mcpmodel.Capability{{ID: "cap-1", ServerID: "mcp-1", Kind: "tool", Name: "read", Enabled: true}},
+		[]*mcpmodel.Capability{{
+			ID: "cap-1", ServerID: "mcp-1", Kind: "tool", Name: "read", Enabled: true,
+			EffectScope: "none", IdempotencyClass: "safe_to_replay",
+		}},
 		[]*memorymodel.MemoryItem{{ID: "memory-1", MemoryType: "fact", Summary: "memory summary", Content: "memory content"}},
 		[]workorcheventpayload.Payload{workorcheventpayload.New(
 			workorcheventpayload.StringField("id", "policy-1"),
@@ -70,6 +73,11 @@ func TestRuntimeV2ActivationContextUsesConcreteSelectionSnapshots(t *testing.T) 
 	if activation.DefaultSoul == nil || activation.DefaultSoul.Instructions != "default instructions" || len(activation.StageSoulBindings) != 1 ||
 		activation.StageSoulBindings[0].Soul.Instructions != "execution instructions" || len(activation.Skills) != 1 || len(activation.MCPCapabilities) != 1 || len(activation.Memories) != 1 || len(activation.EvidencePolicies) != 1 {
 		t.Fatalf("runtime activation = %+v", activation)
+	}
+	if capability := activation.MCPCapabilities[0]; capability.OperationKind != runtimecontract.StepKindMCPToolCall ||
+		capability.EffectScope != string(runtimecontract.RuntimeEffectNone) ||
+		capability.IdempotencyClass != string(runtimecontract.RuntimeOperationIdempotencySafeToReplay) {
+		t.Fatalf("sealed runtime MCP capability = %+v, want explicit non-durable replay-safe tool metadata", capability)
 	}
 	if activation.ExecutionContract.StateChangePolicy != "must_produce_state_change" || activation.ExecutionContract.MaxRepairAttemptsPerFocus != 7 ||
 		len(activation.ExecutionContract.CapabilityUsagePolicies) != 1 || len(activation.ExecutionContract.ValidationPolicies) != 1 ||

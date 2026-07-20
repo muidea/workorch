@@ -498,6 +498,12 @@ func (b *eventHubRunBackend) Command(ctx context.Context, req WorkspaceRunComman
 		return nil, err
 	}
 	activation := mergeActivationRequest(req.Activation, req)
+	// An existing Runtime V2 Run is resumed from its persisted bootstrap. Do not
+	// place activation data on the EventHub command: in particular llmTarget
+	// must not become an alternate provider/model patch channel.
+	if intent == RunCommandIntentResume && req.ExpectedRunID != "" {
+		activation = ActivateRunRequest{}
+	}
 	source := normalizedRunCommandSource(firstNonEmptyBackendString(req.Source, activation.Source))
 	if b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument

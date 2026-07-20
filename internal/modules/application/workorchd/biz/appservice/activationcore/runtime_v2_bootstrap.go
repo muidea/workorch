@@ -56,7 +56,7 @@ func RuntimeV2Bootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defi
 		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleShell, CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, Reason: "managed validation capability required"},
 		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleDecision, CapabilityClass: runtimecontract.RuntimeCapabilityClassGovernance, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindDecisionRequest}, Reason: "governance capability required"},
 	}
-	profileRequirements, err := runtimeV2ProfileCapabilityRequirements(activation.ExecutionContract.ProfileContracts)
+	profileRequirements, err := runtimeV2ProfileCapabilityRequirements(activation.ExecutionContract.ProfileContracts, activation.MCPCapabilities)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +194,7 @@ func runtimeV2ProfileCapabilityKinds(profiles []runtimecontract.RuntimeProfileCo
 	return ret, nil
 }
 
-func runtimeV2ProfileCapabilityRequirements(profiles []runtimecontract.RuntimeProfileContract) ([]runtimecontract.RuntimeRequirement, error) {
+func runtimeV2ProfileCapabilityRequirements(profiles []runtimecontract.RuntimeProfileContract, mcpCapabilities []runtimecontract.RuntimeMCPCapabilityContext) ([]runtimecontract.RuntimeRequirement, error) {
 	ret := []runtimecontract.RuntimeRequirement{}
 	seen := map[string]struct{}{}
 	for _, profile := range runtimecontract.NormalizeRuntimeProfileContracts(profiles) {
@@ -208,13 +208,7 @@ func runtimeV2ProfileCapabilityRequirements(profiles []runtimecontract.RuntimePr
 				if descriptor.OwnerModuleID == "" {
 					return nil, fmt.Errorf("profile accepted step kind %q has no owner module", kind)
 				}
-				// Descriptor CapabilityClass is the inventory authority. Evidence role may only
-				// tighten a validation kind into a state-change requirement when the profile
-				// explicitly treats the evidence as primary_state_change / accepted variants.
-				capabilityClass := descriptor.CapabilityClass
-				if requirement.EvidenceRole == "primary_state_change" || len(requirement.AcceptedOperationVariants) > 0 {
-					capabilityClass = runtimecontract.RuntimeCapabilityClassStateChange
-				}
+				capabilityClass := runtimeV2ProfileCapabilityClass(requirement, canonical, descriptor, mcpCapabilities)
 				key := descriptor.OwnerModuleID + "|" + string(capabilityClass) + "|" + canonical
 				if _, exists := seen[key]; exists {
 					continue
@@ -228,4 +222,33 @@ func runtimeV2ProfileCapabilityRequirements(profiles []runtimecontract.RuntimePr
 		}
 	}
 	return ret, nil
+}
+
+// runtimeV2ProfileCapabilityClass maps a profile evidence requirement to the
+// inventory class that the owner must acquire for this Run.  Most operation
+// descriptors have a fixed class.  MCP tool calls are intentionally different:
+// their concrete effect is capability-owner metadata sealed in Activation, so a
+// selected non-durable tool can satisfy validation while a durable tool cannot.
+// This only changes the capability inventory; candidate seal still verifies the
+// exact server/tool and sealed effect scope before execution.
+func runtimeV2ProfileCapabilityClass(requirement runtimecontract.RuntimeProfileEvidenceRequirement, kind string, descriptor runtimecontract.RuntimeOperationDescriptor, mcpCapabilities []runtimecontract.RuntimeMCPCapabilityContext) runtimecontract.RuntimeCapabilityClass {
+	if requirement.EvidenceRole == "primary_state_change" || len(requirement.AcceptedOperationVariants) > 0 {
+		return runtimecontract.RuntimeCapabilityClassStateChange
+	}
+	if kind != runtimecontract.StepKindMCPToolCall {
+		return descriptor.CapabilityClass
+	}
+	sealedCapabilities := make([]runtimecontract.RuntimeMCPCapabilityContext, 0, len(mcpCapabilities))
+	for _, capability := range mcpCapabilities {
+		sealedCapabilities = append(sealedCapabilities, runtimecontract.SealMCPCapabilityEffect(capability))
+	}
+	if runtimecontract.OperationEffectCompatibleWithSealedCapabilities(
+		kind,
+		runtimecontract.RuntimeActionProduceValidation,
+		runtimecontract.RuntimeCapabilities{ValidationKinds: []string{kind}},
+		sealedCapabilities,
+	) {
+		return runtimecontract.RuntimeCapabilityClassValidation
+	}
+	return descriptor.CapabilityClass
 }

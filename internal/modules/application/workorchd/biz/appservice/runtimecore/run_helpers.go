@@ -87,5 +87,11 @@ func MapRun(item *runmodel.Run) appmodelcore.Run {
 		state := item.RuntimeState.Clone()
 		ret.RuntimeState = &state
 	}
+	if item.RuntimeBootstrap != nil {
+		target := item.RuntimeBootstrap.Activation.ProviderTarget.Normalized()
+		if target.Validate() == nil {
+			ret.SealedLLMTarget = &target
+		}
+	}
 	return ret
 }

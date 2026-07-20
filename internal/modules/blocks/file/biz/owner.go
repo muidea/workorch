@@ -2,6 +2,7 @@ package file
 
 import (
 	"context"
+	"strings"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -207,7 +208,7 @@ func (m *Biz) handleFileEditOperation(event magicevent.Event, result magicevent.
 	if executeErr != nil {
 		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindFileEdit, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
 	}
-	receipt, ok := m.commitRuntimeOperationReceipt(event.Context(), result, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, nil, fileMutationReceiptObservation(response.Status, operationResult))
+	receipt, ok := m.commitRuntimeOperationReceipt(event.Context(), result, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, nil, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, response.Status, operationResult))
 	if !ok {
 		return
 	}
@@ -251,7 +252,7 @@ func (m *Biz) handleFileWriteOperation(event magicevent.Event, result magicevent
 	if response.Failure != nil && response.Failure.Code == "approval_required" {
 		governance = &runtimecontract.RuntimeGovernanceRequirement{Kind: runtimecontract.GovernanceApproval, SubjectRef: command.Data.TargetRef, Reason: response.Failure.Message, RequestedAction: runtimecontract.StepKindFileWrite, RiskLevel: "high"}
 	}
-	receipt, ok := m.commitRuntimeOperationReceipt(event.Context(), result, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, governance, fileMutationReceiptObservation(response.Status, operationResult))
+	receipt, ok := m.commitRuntimeOperationReceipt(event.Context(), result, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, governance, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, response.Status, operationResult))
 	if !ok {
 		return
 	}
@@ -301,7 +302,7 @@ func (m *Biz) handlePatchApplyOperation(event magicevent.Event, result magiceven
 	if response.Failure != nil && response.Failure.Code == "approval_required" {
 		governance = &runtimecontract.RuntimeGovernanceRequirement{Kind: runtimecontract.GovernanceApproval, SubjectRef: command.Data.TargetRef, Reason: response.Failure.Message, RequestedAction: runtimecontract.RuntimeBlockKindPatchApply, RiskLevel: "high"}
 	}
-	receipt, ok := m.commitRuntimeOperationReceipt(event.Context(), result, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, governance, fileMutationReceiptObservation(response.Status, operationResult))
+	receipt, ok := m.commitRuntimeOperationReceipt(event.Context(), result, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.Execution, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, governance, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, response.Status, operationResult))
 	if !ok {
 		return
 	}
@@ -396,7 +397,8 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 	if setPrerequisiteError(result, err) {
 		return
 	}
-	result.Set(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{PrerequisiteID: command.PrerequisiteID, Admissibility: inventory}, nil)
+	observation := fileAdmissibilityObservation(command.PrerequisiteID, inventory, command.RequiredTargetRefs)
+	result.Set(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{PrerequisiteID: command.PrerequisiteID, Admissibility: inventory, Observation: &observation}, nil)
 }
 
 func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {
@@ -411,10 +413,10 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		setPrerequisiteError(result, common.ErrInvalidArgument)
 		return
 	}
-	failure := m.runtimeAdapter.ProbeRuntimeOperationFeasibility(command.WorkspaceDeliverableDirectory, command.Admissibility, operation)
+	failure, stale := m.runtimeAdapter.ProbeRuntimeOperationFeasibilityWithObservation(command.WorkspaceDeliverableDirectory, command.Admissibility, operation, command.Observation)
 	result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{
 		OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID,
-		Feasible: failure == nil, Failure: failure,
+		Feasible: failure == nil && stale == nil, Failure: failure, Stale: stale,
 	}, nil)
 }
 
@@ -428,7 +430,8 @@ func (m *Biz) handleAcquireWorkspaceManifest(event magicevent.Event, result magi
 	if setPrerequisiteError(result, err) {
 		return
 	}
-	result.Set(orchestratorevents.AcquireWorkspaceManifestResult{PrerequisiteID: command.PrerequisiteID, Manifest: manifest}, nil)
+	observation := fileManifestObservation(command.PrerequisiteID, manifest)
+	result.Set(orchestratorevents.AcquireWorkspaceManifestResult{PrerequisiteID: command.PrerequisiteID, Manifest: manifest, Observation: &observation}, nil)
 }
 
 func (m *Biz) handleAcquireTargetSnapshot(event magicevent.Event, result magicevent.Result) {
@@ -441,7 +444,8 @@ func (m *Biz) handleAcquireTargetSnapshot(event magicevent.Event, result magicev
 	if setPrerequisiteError(result, err) {
 		return
 	}
-	result.Set(orchestratorevents.AcquireTargetSnapshotResult{PrerequisiteID: command.PrerequisiteID, Snapshot: snapshot}, nil)
+	observation := fileTargetSnapshotObservation(command.PrerequisiteID, snapshot)
+	result.Set(orchestratorevents.AcquireTargetSnapshotResult{PrerequisiteID: command.PrerequisiteID, Snapshot: snapshot, Observation: &observation}, nil)
 }
 
 func setPrerequisiteError(result magicevent.Result, err error) bool {
@@ -478,7 +482,7 @@ func fileReadOnlyReceiptObservation() orchestratorevents.RuntimeOperationReceipt
 	return orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectNone}
 }
 
-func fileMutationReceiptObservation(status runtimecontract.RuntimeOperationExecutionStatus, result RuntimeFileOperationResult) orchestratorevents.RuntimeOperationReceiptObservation {
+func fileMutationReceiptObservation(workspaceDirectory string, targetRefs []string, status runtimecontract.RuntimeOperationExecutionStatus, result RuntimeFileOperationResult) orchestratorevents.RuntimeOperationReceiptObservation {
 	observation := orchestratorevents.RuntimeOperationReceiptObservation{
 		ObservedEffectScope: runtimecontract.RuntimeEffectUnknown,
 		BeforeHash:          result.BeforeHash,
@@ -492,6 +496,56 @@ func fileMutationReceiptObservation(status runtimecontract.RuntimeOperationExecu
 	observation.NoOp = !observation.Changed
 	if observation.NoOp {
 		observation.ObservedEffectScope = runtimecontract.RuntimeEffectNone
+		return observation
 	}
+	for _, targetRef := range targetRefs {
+		targetRef = strings.TrimSpace(targetRef)
+		if targetRef == "" {
+			continue
+		}
+		observation.ResourceChanges = append(observation.ResourceChanges, runtimecontract.RuntimeResourceChange{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: ModuleID, SubjectRef: targetRef,
+			BeforeRevision: result.BeforeHash, AfterRevision: result.AfterHash,
+		})
+	}
+	if manifest, err := NewRuntimeAdapter().AcquireWorkspaceManifest(workspaceDirectory); err == nil && manifest.Revision != "" {
+		observation.ResourceChanges = append(observation.ResourceChanges, runtimecontract.RuntimeResourceChange{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: ModuleID, SubjectRef: "workspace_deliverable", AfterRevision: manifest.Revision,
+		})
+	}
+	return observation
+}
+
+func fileManifestObservation(prerequisiteID string, manifest runtimecontract.WorkspaceManifest) runtimecontract.RuntimePrerequisiteObservation {
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisiteID, Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: ModuleID, ContentHash: manifest.Revision,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: ModuleID, SubjectRef: "workspace_deliverable", Revision: manifest.Revision}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	return observation
+}
+
+func fileTargetSnapshotObservation(prerequisiteID string, snapshot runtimecontract.TargetSnapshot) runtimecontract.RuntimePrerequisiteObservation {
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisiteID, Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: ModuleID, ContentHash: snapshot.ContentHash,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: ModuleID, SubjectRef: snapshot.TargetRef, Revision: snapshot.ContentHash}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	return observation
+}
+
+func fileAdmissibilityObservation(prerequisiteID string, inventory runtimecontract.RuntimeOperationAdmissibility, requiredTargetRefs []string) runtimecontract.RuntimePrerequisiteObservation {
+	dependencies := []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: ModuleID, SubjectRef: "workspace_deliverable", Revision: inventory.ObservedRevision}}
+	for _, targetRef := range requiredTargetRefs {
+		targetRef = strings.TrimSpace(targetRef)
+		if targetRef == "" {
+			continue
+		}
+		dependencies = append(dependencies, runtimecontract.RuntimeFreshnessDependency{Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: ModuleID, SubjectRef: targetRef, Revision: inventory.ObservedRevision})
+	}
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: ModuleID, ContentHash: inventory.SnapshotID, Dependencies: dependencies,
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
 	return observation
 }

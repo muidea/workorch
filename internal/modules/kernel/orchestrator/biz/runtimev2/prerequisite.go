@@ -20,6 +20,7 @@ type PrerequisiteResult struct {
 	ProviderCeiling        *runtimecontract.ProviderCeiling
 	CapabilityState        *runtimecontract.RuntimeCapabilityStateSnapshot
 	OperationAdmissibility *runtimecontract.RuntimeOperationAdmissibility
+	Observation            *runtimecontract.RuntimePrerequisiteObservation
 }
 
 func PreflightRuntimeFacts(facts runtimecontract.RuntimeFacts, requirements []RuntimeRequirement) runtimecontract.RuntimeFacts {
@@ -64,6 +65,16 @@ func CommitPrerequisiteResult(facts runtimecontract.RuntimeFacts, result Prerequ
 	}
 	if err := applyPrerequisiteResult(&facts, *completed, result); err != nil {
 		return runtimecontract.RuntimeFacts{}, err
+	}
+	if result.Observation != nil {
+		observation := result.Observation.Normalized()
+		if observation.PrerequisiteID != completed.ID || observation.Kind != completed.Kind || observation.OwnerModuleID != completed.OwnerModuleID {
+			return runtimecontract.RuntimeFacts{}, fmt.Errorf("prerequisite observation does not match completed prerequisite %q", completed.ID)
+		}
+		if err := observation.Validate(); err != nil {
+			return runtimecontract.RuntimeFacts{}, fmt.Errorf("invalid prerequisite observation: %w", err)
+		}
+		facts.Resources.PrerequisiteObservations = append(facts.Resources.PrerequisiteObservations, observation)
 	}
 	next := make([]runtimecontract.RuntimePrerequisite, 0, len(facts.Prerequisites.Pending)-1)
 	for _, item := range facts.Prerequisites.Pending {
@@ -138,6 +149,9 @@ func applyPrerequisiteResult(facts *runtimecontract.RuntimeFacts, prerequisite r
 		if err := inventory.Validate(); err != nil {
 			return fmt.Errorf("operation admissibility prerequisite returned invalid inventory: %w", err)
 		}
+		if inventory.AcquisitionBinding != "" && !runtimeCapabilityStateBindingExists(facts.Resources.CapabilityStates, inventory.OwnerModuleID, inventory.AcquisitionBinding) {
+			return fmt.Errorf("operation admissibility inventory references an unknown owner capability-state acquisition binding")
+		}
 		maxItems := facts.ConvergencePolicy.MaxCandidateContextItems
 		if maxItems < 1 || len(inventory.TargetRefs) > maxItems || len(inventory.SelectorRefs) > maxItems {
 			return fmt.Errorf("operation admissibility inventory exceeds sealed candidate context bound")
@@ -162,6 +176,18 @@ func applyPrerequisiteResult(facts *runtimecontract.RuntimeFacts, prerequisite r
 		return fmt.Errorf("unsupported prerequisite kind %q", prerequisite.Kind)
 	}
 	return nil
+}
+
+func runtimeCapabilityStateBindingExists(values []runtimecontract.RuntimeCapabilityStateSnapshot, owner, binding string) bool {
+	for _, snapshot := range values {
+		if snapshot.OwnerModuleID != owner {
+			continue
+		}
+		if snapshot.AcquisitionBinding == binding || (snapshot.AcquisitionBinding == "" && snapshot.AcquisitionKey == binding) {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeRequirementSatisfied(facts runtimecontract.RuntimeFacts, requirement RuntimeRequirement) bool {

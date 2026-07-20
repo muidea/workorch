@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -97,13 +98,12 @@ type HTTPProvider struct {
 
 func NewHTTPProvider(config llmmodels.ProviderConfig) *HTTPProvider {
 	config = normalizedProviderConfigForRuntime(config)
-	timeout := config.Timeout
-	if timeout <= 0 {
-		timeout = defaultProviderTimeout
-	}
 	return &HTTPProvider{
 		config: config,
-		client: &http.Client{Timeout: timeout},
+		// The provider deadline belongs to the request context (see
+		// requestContext). A client-wide timeout races it and can return while
+		// leaving the server-side request context active.
+		client: &http.Client{},
 	}
 }
 
@@ -112,7 +112,35 @@ func NewHTTPProviderWithClient(config llmmodels.ProviderConfig, client *http.Cli
 		return NewHTTPProvider(config)
 	}
 	config = normalizedProviderConfigForRuntime(config)
-	return &HTTPProvider{config: config, client: client}
+	// Do not mutate the caller's client. The shallow copy preserves its
+	// transport and protocol behavior while moving timeout authority to the
+	// request context consistently for both constructed and injected clients.
+	clientCopy := *client
+	clientCopy.Timeout = 0
+	return &HTTPProvider{config: config, client: &clientCopy}
+}
+
+// requestContext makes the configured provider deadline part of the actual
+// request contract. http.Client.Timeout alone can return to the caller while
+// the request context remains live on the server, which leaves a stale active
+// connection during a provider timeout. The derived context is also used by
+// streaming, embedding and Anthropic-compatible surfaces.
+func (p *HTTPProvider) requestContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	timeout := p.config.Timeout
+	if timeout <= 0 {
+		timeout = defaultProviderTimeout
+	}
+	return context.WithTimeout(ctx, timeout)
+}
+
+func providerRequestError(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("llm provider request timeout: %w", err)
+	}
+	return err
 }
 
 func (p *HTTPProvider) Complete(ctx context.Context, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, error) {
@@ -150,7 +178,9 @@ func (p *HTTPProvider) completeOpenAICompatible(ctx context.Context, request llm
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	requestCtx, cancel := p.requestContext(ctx)
+	defer cancel()
+	httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
@@ -160,7 +190,7 @@ func (p *HTTPProvider) completeOpenAICompatible(ctx context.Context, request llm
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return llmmodels.ProviderCompletionResult{}, err
+		return llmmodels.ProviderCompletionResult{}, providerRequestError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
@@ -228,7 +258,9 @@ func (p *HTTPProvider) streamOpenAICompatible(ctx context.Context, request llmmo
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	requestCtx, cancel := p.requestContext(ctx)
+	defer cancel()
+	httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
@@ -238,7 +270,7 @@ func (p *HTTPProvider) streamOpenAICompatible(ctx context.Context, request llmmo
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return llmmodels.ProviderCompletionResult{}, err
+		return llmmodels.ProviderCompletionResult{}, providerRequestError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
@@ -285,7 +317,9 @@ func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbe
 	if err != nil {
 		return llmmodels.ProviderEmbeddingResult{}, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	requestCtx, cancel := p.requestContext(ctx)
+	defer cancel()
+	httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return llmmodels.ProviderEmbeddingResult{}, err
 	}
@@ -295,7 +329,7 @@ func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbe
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return llmmodels.ProviderEmbeddingResult{}, err
+		return llmmodels.ProviderEmbeddingResult{}, providerRequestError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
@@ -424,14 +458,16 @@ func (p *HTTPProvider) completeAnthropicCompatible(ctx context.Context, request 
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	requestCtx, cancel := p.requestContext(ctx)
+	defer cancel()
+	httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
 	p.setAnthropicHeaders(httpReq)
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return llmmodels.ProviderCompletionResult{}, err
+		return llmmodels.ProviderCompletionResult{}, providerRequestError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
@@ -471,14 +507,16 @@ func (p *HTTPProvider) streamAnthropicCompatible(ctx context.Context, request ll
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	requestCtx, cancel := p.requestContext(ctx)
+	defer cancel()
+	httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
 	p.setAnthropicHeaders(httpReq)
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return llmmodels.ProviderCompletionResult{}, err
+		return llmmodels.ProviderCompletionResult{}, providerRequestError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {

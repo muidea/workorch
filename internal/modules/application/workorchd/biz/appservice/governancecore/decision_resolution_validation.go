@@ -41,7 +41,7 @@ func ValidateDecisionResolutionTypeForTicket(ticket *decisionmodel.Ticket, resol
 			return nil
 		}
 	}
-	return fmt.Errorf("%w: resolution type %q is not allowed for ticket %s", common.ErrInvalidArgument, resolutionType, ticket.ID)
+	return decisioncommon.NewResolutionActionConflict(ticket.ID, resolutionType, ticket.AllowedRecoveryActions)
 }
 
 func EnsureDecisionTicketWorkspaceScope(runtimeWorkspaceID common.WorkspaceID, item *decisionmodel.Ticket) error {

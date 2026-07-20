@@ -2,6 +2,7 @@ package activationports
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
@@ -99,7 +100,7 @@ func TestSealedRunProviderTargetDoesNotDriftAfterWorkspacePreferenceChanges(t *t
 	}
 }
 
-func TestActiveRunProviderTargetStaleUsesDesiredActivationTarget(t *testing.T) {
+func TestRejectActiveRunProviderTargetOverride(t *testing.T) {
 	sealed := runtimecontract.ProviderModelTarget{ProviderID: "provider-a", ModelID: "model-a"}
 	run := &runmodel.Run{
 		ID: "run-provider-target-stale",
@@ -108,29 +109,15 @@ func TestActiveRunProviderTargetStaleUsesDesiredActivationTarget(t *testing.T) {
 		},
 	}
 
-	stale, err := ActiveRunProviderTargetStale(context.Background(), run, nil, &sealed)
-	if err != nil {
-		t.Fatal(err)
+	if err := RejectActiveRunProviderTargetOverride(run, nil); err != nil {
+		t.Fatalf("nil target override: %v", err)
 	}
-	if stale {
-		t.Fatal("unchanged workspace provider target marked stale")
+	if err := RejectActiveRunProviderTargetOverride(run, &sealed); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("same target override err=%v, want conflict", err)
 	}
 
 	changed := runtimecontract.ProviderModelTarget{ProviderID: "provider-b", ModelID: "model-b"}
-	stale, err = ActiveRunProviderTargetStale(context.Background(), run, nil, &changed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !stale {
-		t.Fatal("changed workspace provider target did not require a new activation")
-	}
-
-	explicit := runtimecontract.ProviderModelTarget{ProviderID: "provider-c", ModelID: "model-c"}
-	stale, err = ActiveRunProviderTargetStale(context.Background(), run, &explicit, &sealed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !stale {
-		t.Fatal("explicit provider target did not take precedence for stale detection")
+	if err := RejectActiveRunProviderTargetOverride(run, &changed); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("changed target override err=%v, want conflict", err)
 	}
 }

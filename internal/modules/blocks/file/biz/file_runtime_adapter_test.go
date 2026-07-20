@@ -39,6 +39,57 @@ func TestRuntimeAdapterProbeRejectsDirectoryPatchTargetWithoutMutation(t *testin
 	}
 }
 
+func TestFileMutationReceiptObservationReportsAfterRevisionForAllStateChangingHandlers(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "target.txt"), []byte("after\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// File edit, file write and patch apply all call this owner-local receipt
+	// constructor. Keep the variants explicit here so a future handler cannot
+	// bypass the required owner-observed target/tree revisions.
+	for _, variant := range []string{"file_edit", "file_write", "patch_apply"} {
+		t.Run(variant, func(t *testing.T) {
+			observation := fileMutationReceiptObservation(workspace, []string{"target.txt"}, runtimecontract.RuntimeOperationExecutionStatusAccepted, RuntimeFileOperationResult{
+				BeforeHash: "before-" + variant, AfterHash: "after-" + variant,
+			})
+			if observation.ObservedEffectScope != runtimecontract.RuntimeEffectWorkspaceDurable || !observation.Changed || observation.NoOp {
+				t.Fatalf("%s receipt observation state = %+v", variant, observation)
+			}
+			var target, tree *runtimecontract.RuntimeResourceChange
+			for idx := range observation.ResourceChanges {
+				change := observation.ResourceChanges[idx]
+				switch {
+				case change.Domain == runtimecontract.RuntimeResourceWorkspaceTarget && change.SubjectRef == "target.txt":
+					target = &change
+				case change.Domain == runtimecontract.RuntimeResourceWorkspaceTree && change.SubjectRef == "workspace_deliverable":
+					tree = &change
+				}
+			}
+			if target == nil || target.OwnerModuleID != ModuleID || target.BeforeRevision != "before-"+variant || target.AfterRevision != "after-"+variant {
+				t.Fatalf("%s target resource change = %+v", variant, observation.ResourceChanges)
+			}
+			if tree == nil || tree.OwnerModuleID != ModuleID || tree.AfterRevision == "" {
+				t.Fatalf("%s workspace tree resource change = %+v", variant, observation.ResourceChanges)
+			}
+		})
+	}
+	for _, testCase := range []struct {
+		name   string
+		status runtimecontract.RuntimeOperationExecutionStatus
+		result RuntimeFileOperationResult
+	}{
+		{name: "accepted_no_op", status: runtimecontract.RuntimeOperationExecutionStatusAccepted, result: RuntimeFileOperationResult{BeforeHash: "same", AfterHash: "same"}},
+		{name: "rejected", status: runtimecontract.RuntimeOperationExecutionStatusRejected, result: RuntimeFileOperationResult{BeforeHash: "before", AfterHash: "after"}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			observation := fileMutationReceiptObservation(workspace, []string{"target.txt"}, testCase.status, testCase.result)
+			if len(observation.ResourceChanges) != 0 || observation.Changed {
+				t.Fatalf("%s fabricated durable resource changes: %+v", testCase.name, observation)
+			}
+		})
+	}
+}
+
 func TestRuntimeAdapterProbeRejectsStaleAdmissibilitySnapshotWithoutMutation(t *testing.T) {
 	workspace := t.TempDir()
 	path := filepath.Join(workspace, "main.go")
@@ -115,6 +166,42 @@ func TestRuntimeAdapterProbeAllowsSelectedNewFileWriteTargetWithoutMutation(t *t
 	}
 	if _, err := os.Stat(filepath.Join(workspace, target)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("feasibility probe created target: %v", err)
+	}
+}
+
+func TestRuntimeAdapterProbeReportsTypedStaleAfterExternalWorkspaceMutation(t *testing.T) {
+	workspace := t.TempDir()
+	target := filepath.Join(workspace, "main.go")
+	if err := os.WriteFile(target, []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	adapter := NewRuntimeAdapter()
+	inventory, err := adapter.AcquireRuntimeOperationAdmissibility(
+		workspace, "admissibility-file", []string{runtimecontract.StepKindFileEdit}, []string{"main.go"}, 4,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation := fileAdmissibilityObservation("admissibility-file", inventory, []string{"main.go"})
+	if err := os.WriteFile(target, []byte("package main\n// externally changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := "main.go"
+	failure, stale := adapter.ProbeRuntimeOperationFeasibilityWithObservation(workspace, inventory, runtimecontract.RuntimeOperation{
+		ID: "edit-main", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{path},
+		Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &path}},
+	}, &observation)
+	if failure != nil || stale == nil {
+		t.Fatalf("external mutation probe failure/stale=%+v/%+v, want typed stale", failure, stale)
+	}
+	if stale.PrerequisiteID != observation.PrerequisiteID || stale.ObservationID != observation.ObservationID ||
+		stale.Domain != runtimecontract.RuntimeResourceWorkspaceTree || stale.OwnerModuleID != ModuleID ||
+		stale.ExpectedRevision != inventory.ObservedRevision || stale.ObservedRevision == inventory.ObservedRevision {
+		t.Fatalf("stale = %+v, want exact file-owned observation drift", stale)
+	}
+	content, err := os.ReadFile(target)
+	if err != nil || string(content) != "package main\n// externally changed\n" {
+		t.Fatalf("probe mutated externally changed target content=%q err=%v", content, err)
 	}
 }
 

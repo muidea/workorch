@@ -126,6 +126,7 @@ const (
 	FailureClassExecutionFailure             FailureClass = "execution_failure"
 	FailureClassNoProgressExhausted          FailureClass = "no_progress_exhausted"
 	FailureClassCandidateExhausted           FailureClass = "candidate_retry_exhausted"
+	FailureClassPrerequisiteRefreshExhausted FailureClass = "prerequisite_refresh_exhausted"
 	FailureClassGovernanceRejected           FailureClass = "governance_rejected"
 )
 
@@ -211,9 +212,14 @@ type RuntimeFacts struct {
 	// focus. When set it overrides raw MissingRequiredEvidenceKinds for candidate
 	// action selection (INV-05).
 	RepairDirective *RuntimeRepairDirective
-	Coverage        []RuntimeCoverageItemFact
-	Feasibility     *RuntimeFeasibilityFact
-	Slices          []RuntimeAcceptanceSlice
+	// FreshnessReacquireCoverage records focus coverage whose accepted evidence
+	// is retained as lineage but whose partial sealed dispatch was invalidated.
+	// It is not repair debt: after prerequisite acquisition reducer must issue a
+	// fresh state-change candidate before this coverage can close.
+	FreshnessReacquireCoverage []common.CoverageWorkItemID
+	Coverage                   []RuntimeCoverageItemFact
+	Feasibility                *RuntimeFeasibilityFact
+	Slices                     []RuntimeAcceptanceSlice
 }
 
 // RuntimeFeasibilityFact is the persisted result of the pre-candidate
@@ -250,25 +256,34 @@ type RuntimeResourceFacts struct {
 	ProviderCeiling          *ProviderCeiling
 	CapabilityStates         []RuntimeCapabilityStateSnapshot
 	OperationAdmissibilities []RuntimeOperationAdmissibility
+	// PrerequisiteObservations bind mutable owner facts to the exact resource
+	// revisions they observed. They are additional freshness metadata, not a
+	// replacement for the typed facts above.
+	PrerequisiteObservations []RuntimePrerequisiteObservation
 }
 
 // RuntimeOperationAdmissibility is a bounded, owner-authored parameter
 // inventory for candidate rendering and feasibility probes. It intentionally
 // describes admissible references rather than an owner-specific work plan.
 type RuntimeOperationAdmissibility struct {
-	PrerequisiteID   string
-	SnapshotID       string
-	OwnerModuleID    string
-	OperationKinds   []string
-	TargetRefs       []string
-	SelectorRefs     []string
-	ConstraintRefs   []string
-	ObservedRevision string
+	PrerequisiteID string
+	SnapshotID     string
+	// AcquisitionBinding is an opaque owner-authored link to a capability
+	// snapshot acquired in the same owner observation.  It is optional for
+	// owners that do not declare a capability-state prerequisite.
+	AcquisitionBinding string
+	OwnerModuleID      string
+	OperationKinds     []string
+	TargetRefs         []string
+	SelectorRefs       []string
+	ConstraintRefs     []string
+	ObservedRevision   string
 }
 
 func (a RuntimeOperationAdmissibility) Normalized() RuntimeOperationAdmissibility {
 	a.PrerequisiteID = strings.TrimSpace(a.PrerequisiteID)
 	a.SnapshotID = strings.TrimSpace(a.SnapshotID)
+	a.AcquisitionBinding = strings.TrimSpace(a.AcquisitionBinding)
 	a.OwnerModuleID = strings.TrimSpace(a.OwnerModuleID)
 	a.OperationKinds = canonicalizeOperationKinds(a.OperationKinds)
 	a.TargetRefs = normalizeStrings(a.TargetRefs)
@@ -300,6 +315,7 @@ func StableRuntimeOperationAdmissibilitySnapshotID(value RuntimeOperationAdmissi
 	h := sha256.New()
 	writeHashString(h, value.PrerequisiteID)
 	writeHashString(h, value.OwnerModuleID)
+	writeHashString(h, value.AcquisitionBinding)
 	writeHashStrings(h, value.OperationKinds)
 	writeHashStrings(h, value.TargetRefs)
 	writeHashStrings(h, value.SelectorRefs)
@@ -327,9 +343,13 @@ type RuntimeRequiredOperationVariant struct {
 }
 
 type RuntimeCapabilityStateSnapshot struct {
-	RequirementID             string
-	SnapshotID                string
-	AcquisitionKey            string
+	RequirementID  string
+	SnapshotID     string
+	AcquisitionKey string
+	// AcquisitionBinding is the opaque binding emitted by the owner for this
+	// persisted acquisition. It may equal AcquisitionKey, but consumers must
+	// compare it only as an opaque value.
+	AcquisitionBinding        string
 	OwnerModuleID             string
 	CapabilityStateKind       string
 	SubjectRef                string
@@ -480,6 +500,7 @@ type AuthoritySnapshot struct {
 	DefinitionRevision        string
 	EvidenceRevision          string
 	CapabilityStateHash       string
+	PrerequisiteFreshnessHash string
 	OperationContractRevision string
 	Attempt                   int
 	RuntimeContractVersion    string
@@ -508,6 +529,7 @@ type AuthorityTransaction struct {
 	DefinitionRevision        string
 	EvidenceRevision          string
 	CapabilityStateHash       string
+	PrerequisiteFreshnessHash string
 	OperationContractRevision string
 	Attempt                   int
 }
@@ -530,7 +552,9 @@ func (f RuntimeFacts) Normalized() RuntimeFacts {
 	f.StateChange = f.StateChange.Normalized()
 	f.ConvergencePolicy = f.ConvergencePolicy.Normalized()
 	f.RecoveryPolicy = f.RecoveryPolicy.Normalized()
+	f.Recovery = f.Recovery.Normalized()
 	f.Repair = f.Repair.Normalized()
+	f.FreshnessReacquireCoverage = normalizeCoverageWorkItemIDs(f.FreshnessReacquireCoverage)
 	f.Coverage = NormalizeRuntimeCoverageFacts(f.Coverage)
 	f.Slices = NormalizeRuntimeAcceptanceSlices(f.Slices)
 	if f.Feasibility != nil {
@@ -603,6 +627,21 @@ func (f RuntimeFacts) Validate() error {
 	for _, admissibility := range f.Resources.OperationAdmissibilities {
 		if err := admissibility.Validate(); err != nil {
 			return fmt.Errorf("runtime operation admissibility: %w", err)
+		}
+	}
+	for _, observation := range f.Resources.PrerequisiteObservations {
+		if err := observation.Validate(); err != nil {
+			return fmt.Errorf("runtime prerequisite observation: %w", err)
+		}
+		matched := false
+		for _, prerequisite := range f.Prerequisites.Satisfied {
+			if prerequisite.ID == observation.PrerequisiteID && prerequisite.Kind == observation.Kind && prerequisite.OwnerModuleID == observation.OwnerModuleID {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return fmt.Errorf("runtime prerequisite observation %q has no matching satisfied prerequisite", observation.PrerequisiteID)
 		}
 	}
 	seenFocus := map[string]struct{}{f.Focus.ID: {}}
@@ -703,6 +742,7 @@ func (r RuntimeResourceFacts) Normalized() RuntimeResourceFacts {
 	}
 	r.CapabilityStates = NormalizeRuntimeCapabilityStateSnapshots(r.CapabilityStates)
 	r.OperationAdmissibilities = NormalizeRuntimeOperationAdmissibilities(r.OperationAdmissibilities)
+	r.PrerequisiteObservations = NormalizeRuntimePrerequisiteObservations(r.PrerequisiteObservations)
 	return r
 }
 
@@ -732,6 +772,7 @@ func NormalizeRuntimeCapabilityStateSnapshots(values []RuntimeCapabilityStateSna
 		value.RequirementID = strings.TrimSpace(value.RequirementID)
 		value.SnapshotID = strings.TrimSpace(value.SnapshotID)
 		value.AcquisitionKey = strings.TrimSpace(value.AcquisitionKey)
+		value.AcquisitionBinding = strings.TrimSpace(value.AcquisitionBinding)
 		value.OwnerModuleID = strings.TrimSpace(value.OwnerModuleID)
 		value.CapabilityStateKind = strings.TrimSpace(value.CapabilityStateKind)
 		value.SubjectRef = strings.TrimSpace(value.SubjectRef)
@@ -765,6 +806,7 @@ func StableRuntimeCapabilityStateHash(values []RuntimeCapabilityStateSnapshot) s
 		writeHashString(h, value.RequirementID)
 		writeHashString(h, value.SnapshotID)
 		writeHashString(h, value.AcquisitionKey)
+		writeHashString(h, value.AcquisitionBinding)
 		writeHashString(h, value.OwnerModuleID)
 		writeHashString(h, value.CapabilityStateKind)
 		writeHashString(h, value.SubjectRef)
@@ -786,6 +828,7 @@ func StableRuntimeCapabilityStateSnapshotID(value RuntimeCapabilityStateSnapshot
 	value = NormalizeRuntimeCapabilityStateSnapshots([]RuntimeCapabilityStateSnapshot{value})[0]
 	h := sha256.New()
 	writeHashString(h, value.AcquisitionKey)
+	writeHashString(h, value.AcquisitionBinding)
 	writeHashString(h, value.OwnerModuleID)
 	writeHashString(h, value.CapabilityStateKind)
 	writeHashString(h, value.SubjectRef)
@@ -928,6 +971,7 @@ func SealRuntimeDecision(facts RuntimeFacts, decision RuntimeDecision, attempt i
 		DefinitionRevision:        facts.DefinitionRevision,
 		EvidenceRevision:          facts.EvidenceRevision,
 		CapabilityStateHash:       StableRuntimeCapabilityStateHash(facts.Resources.CapabilityStates),
+		PrerequisiteFreshnessHash: StableRuntimePrerequisiteFreshnessHash(facts.Resources.PrerequisiteObservations),
 		OperationContractRevision: facts.Activation.ExecutionContract.OperationContractRevision,
 		Attempt:                   attempt,
 		RuntimeContractVersion:    RuntimeContractVersionV2,
@@ -983,6 +1027,7 @@ func (d RuntimeDecision) AuthorityTransaction() AuthorityTransaction {
 		DefinitionRevision:        snapshot.DefinitionRevision,
 		EvidenceRevision:          snapshot.EvidenceRevision,
 		CapabilityStateHash:       snapshot.CapabilityStateHash,
+		PrerequisiteFreshnessHash: snapshot.PrerequisiteFreshnessHash,
 		OperationContractRevision: snapshot.OperationContractRevision,
 		Attempt:                   snapshot.Attempt,
 	}
@@ -1043,6 +1088,9 @@ func stableAuthoritySnapshotID(snapshot AuthoritySnapshot) string {
 	writeHashString(h, snapshot.DefinitionRevision)
 	writeHashString(h, snapshot.EvidenceRevision)
 	writeHashString(h, snapshot.CapabilityStateHash)
+	if snapshot.PrerequisiteFreshnessHash != "" {
+		writeHashString(h, snapshot.PrerequisiteFreshnessHash)
+	}
 	writeHashString(h, snapshot.OperationContractRevision)
 	writeHashString(h, fmt.Sprintf("%d", snapshot.Attempt))
 	writeHashString(h, snapshot.RuntimeContractVersion)

@@ -71,6 +71,8 @@ func MapAcceptanceProjection(run readmodelcore.Run) readmodelcore.AcceptanceProj
 		MaxCASReloadAttempts:         facts.RecoveryPolicy.MaxCASReloadAttempts, CASReloadAttempts: facts.Recovery.CASReloadAttempts,
 		MaxTerminalDeliveryAttempts: facts.RecoveryPolicy.MaxTerminalDeliveryAttempts,
 		TerminalDeliveryAttempts:    facts.Recovery.TerminalDeliveryAttempts,
+		MaxPrerequisiteRefreshes:    facts.RecoveryPolicy.MaxPrerequisiteRefreshes,
+		PrerequisiteRefreshes:       facts.Recovery.Used(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh),
 	}
 	if facts.RepairDirective != nil {
 		directive := facts.RepairDirective.Normalized()

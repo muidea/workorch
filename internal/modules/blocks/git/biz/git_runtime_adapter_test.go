@@ -368,6 +368,45 @@ func TestRuntimeAdapterCommitRejectsPathspec(t *testing.T) {
 	}
 }
 
+func TestCapabilityStateReacquiresSequenceAfterStageChanges(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	repo := newTestRepo(t)
+	writeFile(t, filepath.Join(repo, "README.md"), "changed\n")
+	adapter := NewRuntimeAdapter(true)
+
+	beforeStage, err := adapter.CapabilityState(context.Background(), "git-capability", "workspace_deliverable", repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := beforeStage.RequiredOperationSequence; len(got) != 2 || got[0].RequirementID != "stage-changes" || got[0].VariantID != gitcommon.OperationAdd ||
+		got[1].RequirementID != "create-commit" || got[1].VariantID != gitcommon.OperationCommit || len(got[1].DependsOnRequirementIDs) != 1 || got[1].DependsOnRequirementIDs[0] != "stage-changes" {
+		t.Fatalf("pre-stage sequence = %+v, want stage then commit", got)
+	}
+
+	runGitForTest(t, repo, "add", "README.md")
+	afterStage, err := adapter.CapabilityState(context.Background(), "git-capability", "workspace_deliverable", repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterStage.SnapshotID == beforeStage.SnapshotID || afterStage.ObservedRevision == beforeStage.ObservedRevision {
+		t.Fatalf("post-stage snapshot was reused: before=%+v after=%+v", beforeStage, afterStage)
+	}
+	if got := afterStage.RequiredOperationSequence; len(got) != 1 || got[0].RequirementID != "create-commit" || got[0].VariantID != gitcommon.OperationCommit || len(got[0].DependsOnRequirementIDs) != 0 {
+		t.Fatalf("post-stage sequence = %+v, want only fresh create-commit", got)
+	}
+
+	runGitForTest(t, repo, "commit", "-m", "docs: stage capability state")
+	afterCommit, err := adapter.CapabilityState(context.Background(), "git-capability", "workspace_deliverable", repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterCommit.SnapshotID == afterStage.SnapshotID || len(afterCommit.RequiredOperationSequence) != 0 {
+		t.Fatalf("post-commit capability snapshot = %+v, want new ready snapshot", afterCommit)
+	}
+}
+
 func TestRuntimeAdapterFailsOutsideGitRepository(t *testing.T) {
 	dir := t.TempDir()
 	adapter := NewRuntimeAdapter(true)

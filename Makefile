@@ -394,7 +394,8 @@ RELEASE_PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 release: go-deps console-build
 	@rm -rf $(RELEASE_OUT)
 	@mkdir -p $(RELEASE_OUT)
-	@for platform in $(RELEASE_PLATFORMS); do \
+	@set -e; \
+	for platform in $(RELEASE_PLATFORMS); do \
 		os=$$(echo $$platform | cut -d/ -f1); \
 		arch=$$(echo $$platform | cut -d/ -f2); \
 		out=$(RELEASE_OUT)/workorch-$(RELEASE_TAG)-$$os-$$arch; \

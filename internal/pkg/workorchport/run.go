@@ -22,6 +22,7 @@ type RunInfo struct {
 	BlockingTicketID    common.TicketID
 	BlockingApprovalID  common.ApprovalID
 	FailureReason       string
+	SealedLLMTarget     *runtimecontract.ProviderModelTarget
 }
 
 type ActivateRunRequest struct {
@@ -46,17 +47,26 @@ type ActivateRunRequest struct {
 type RunCommandIntent string
 
 const (
-	RunCommandIntentResume  RunCommandIntent = "resume"
+	// RunCommandIntentResume is the only executable Runtime V2 user
+	// continuation. Historical restart/replan values may be displayed from
+	// persisted records, but callers must not submit them as commands.
+	RunCommandIntentResume RunCommandIntent = "resume"
+	// RunCommandIntentRestart is retained only to decode/display historical
+	// records. NormalizeRunCommandIntent rejects it for command submission.
 	RunCommandIntentRestart RunCommandIntent = "restart"
-	RunCommandIntentReplan  RunCommandIntent = "replan"
+	// RunCommandIntentReplan is a Decision ingress audit intent, never a
+	// Runtime V2 workspace-run command.
+	RunCommandIntentReplan RunCommandIntent = "replan"
 )
 
 func NormalizeRunCommandIntent(intent RunCommandIntent) (RunCommandIntent, error) {
 	switch intent {
 	case "":
 		return RunCommandIntentResume, nil
-	case RunCommandIntentResume, RunCommandIntentRestart, RunCommandIntentReplan:
-		return intent, nil
+	case RunCommandIntentResume:
+		return RunCommandIntentResume, nil
+	case RunCommandIntentRestart, RunCommandIntentReplan:
+		return "", fmt.Errorf("%w: runtime continuation command must be resume, got %q", common.ErrInvalidArgument, intent)
 	default:
 		return "", fmt.Errorf("%w: unsupported run command intent %q", common.ErrInvalidArgument, intent)
 	}
@@ -69,16 +79,6 @@ func ValidateWorkspaceRunCommand(req WorkspaceRunCommand) (RunCommandIntent, err
 	intent, err := NormalizeRunCommandIntent(req.Intent)
 	if err != nil {
 		return "", err
-	}
-	switch intent {
-	case RunCommandIntentRestart:
-		if req.ExpectedRunID != "" {
-			return "", fmt.Errorf("%w: workspace restart must not target runId", common.ErrInvalidArgument)
-		}
-	case RunCommandIntentReplan:
-		if req.ExpectedRunID == "" {
-			return "", fmt.Errorf("%w: expectedRunId is required for %s", common.ErrInvalidArgument, intent)
-		}
 	}
 	return intent, nil
 }

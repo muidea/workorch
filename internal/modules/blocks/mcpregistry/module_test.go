@@ -138,23 +138,25 @@ func TestModuleMCPCapabilityCommandsUseStructuredRegistryContract(t *testing.T) 
 
 	createCapabilityResult := sendMCPCommand(t, ctx, hub, mcpevents.TopicMCPCommandCreateCapability,
 		mcpevents.CreateCapabilityCommand{
-			ID:             "mcp-server-contract:tool:repo.summary",
-			ServerID:       "mcp-server-contract",
-			Kind:           "tool",
-			Name:           "repo.summary",
-			DisplayName:    "Repository Summary",
-			Description:    "Structured repository summary capability",
-			Category:       "repository",
-			Tags:           []string{"read", "summary"},
-			UsageHint:      "Use for bounded repository summary.",
-			InputSummary:   "path/ref",
-			OutputSummary:  "bounded summary",
-			StageHints:     []string{"planning", "validation"},
-			RiskLevel:      "read_only",
-			Schema:         mustMCPPayload(t, map[string]any{"type": "object", "required": []string{"path"}}),
-			Enabled:        true,
-			ApprovalPolicy: "read_only",
-			Status:         "active",
+			ID:               "mcp-server-contract:tool:repo.summary",
+			ServerID:         "mcp-server-contract",
+			Kind:             "tool",
+			Name:             "repo.summary",
+			DisplayName:      "Repository Summary",
+			Description:      "Structured repository summary capability",
+			Category:         "repository",
+			Tags:             []string{"read", "summary"},
+			UsageHint:        "Use for bounded repository summary.",
+			InputSummary:     "path/ref",
+			OutputSummary:    "bounded summary",
+			StageHints:       []string{"planning", "validation"},
+			RiskLevel:        "read_only",
+			EffectScope:      "none",
+			IdempotencyClass: "safe_to_replay",
+			Schema:           mustMCPPayload(t, map[string]any{"type": "object", "required": []string{"path"}}),
+			Enabled:          true,
+			ApprovalPolicy:   "read_only",
+			Status:           "active",
 		},
 	)
 	capability := createCapabilityResult.Capability
@@ -165,6 +167,8 @@ func TestModuleMCPCapabilityCommandsUseStructuredRegistryContract(t *testing.T) 
 	if capability.Kind != "tool" ||
 		capability.Category != "repository" ||
 		capability.RiskLevel != "read_only" ||
+		capability.EffectScope != "none" ||
+		capability.IdempotencyClass != "safe_to_replay" ||
 		capability.ApprovalPolicy != "read_only" ||
 		len(capability.StageHints) != 2 ||
 		schemaType != "object" {

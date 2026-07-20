@@ -112,6 +112,7 @@ type RuntimeOperationReceiptObservation struct {
 	NoOp                bool
 	BeforeHash          string
 	AfterHash           string
+	ResourceChanges     []runtimecontract.RuntimeResourceChange
 }
 
 func NewRuntimeOperationReceiptWithObservation(execution RuntimeOperationExecutionEnvelope, operationID string, status runtimecontract.RuntimeOperationExecutionStatus, targetRefs []string, evidence runtimecontract.RuntimeOperationEvidence, failure *runtimecontract.FailureFact, governance *runtimecontract.RuntimeGovernanceRequirement, observation RuntimeOperationReceiptObservation) runtimecontract.RuntimeOperationReceipt {
@@ -119,7 +120,8 @@ func NewRuntimeOperationReceiptWithObservation(execution RuntimeOperationExecuti
 		ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, OperationID: strings.TrimSpace(operationID),
 		ObservedEffectScope: observation.ObservedEffectScope, Changed: observation.Changed, NoOp: observation.NoOp,
 		BeforeHash: strings.TrimSpace(observation.BeforeHash), AfterHash: strings.TrimSpace(observation.AfterHash),
-		TargetRefs: append([]string(nil), targetRefs...), Evidence: evidence,
+		ResourceChanges: append([]runtimecontract.RuntimeResourceChange(nil), observation.ResourceChanges...),
+		TargetRefs:      append([]string(nil), targetRefs...), Evidence: evidence,
 		CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if receipt.ObservedEffectScope == "" {

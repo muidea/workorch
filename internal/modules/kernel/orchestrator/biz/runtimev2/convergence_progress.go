@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -16,27 +17,34 @@ func RuntimeConvergenceProgressSignature(aggregate RuntimeAggregate) string {
 	facts := aggregate.Facts.Normalized()
 	decision := aggregate.Decision
 	progress := struct {
-		Focus                 runtimecontract.CoverageFocus
-		RemainingFocuses      []runtimecontract.CoverageFocus
-		EvidenceRevision      string
-		Failure               *runtimecontract.FailureFact
-		Prerequisites         runtimecontract.PrerequisiteState
-		Repair                runtimecontract.RuntimeRepairLedger
-		Coverage              []runtimecontract.RuntimeCoverageItemFact
-		Feasibility           *runtimecontract.RuntimeFeasibilityFact
-		State                 runtimecontract.ConvergenceState
-		Action                runtimecontract.RuntimeAction
-		RequiredOutput        runtimecontract.RequiredOutputContract
-		Terminal              *runtimecontract.TerminalOutcome
-		ActiveDispatch        *runtimeConvergenceDispatchProgress
-		CompletedDispatches   []runtimeConvergenceDispatchProgress
-		GovernanceRequests    []runtimecontract.RuntimeGovernanceRequestRecord
-		GovernanceResolutions []runtimecontract.RuntimeGovernanceResolutionRecord
+		Focus                      runtimecontract.CoverageFocus
+		RemainingFocuses           []runtimecontract.CoverageFocus
+		EvidenceRevision           string
+		Failure                    *runtimecontract.FailureFact
+		Prerequisites              runtimecontract.PrerequisiteState
+		Repair                     runtimecontract.RuntimeRepairLedger
+		Recovery                   runtimecontract.RuntimeRecoveryLedger
+		FreshnessReacquireCoverage []common.CoverageWorkItemID
+		PrerequisiteObservations   []runtimecontract.RuntimePrerequisiteObservation
+		PrerequisiteInvalidations  []runtimecontract.RuntimePrerequisiteInvalidationRecord
+		Coverage                   []runtimecontract.RuntimeCoverageItemFact
+		Feasibility                *runtimecontract.RuntimeFeasibilityFact
+		State                      runtimecontract.ConvergenceState
+		Action                     runtimecontract.RuntimeAction
+		RequiredOutput             runtimecontract.RequiredOutputContract
+		Terminal                   *runtimecontract.TerminalOutcome
+		ActiveDispatch             *runtimeConvergenceDispatchProgress
+		CompletedDispatches        []runtimeConvergenceDispatchProgress
+		GovernanceRequests         []runtimecontract.RuntimeGovernanceRequestRecord
+		GovernanceResolutions      []runtimecontract.RuntimeGovernanceResolutionRecord
 	}{
 		Focus: facts.Focus, RemainingFocuses: facts.RemainingFocuses,
 		EvidenceRevision: facts.EvidenceRevision, Failure: facts.Failure,
-		Prerequisites: facts.Prerequisites, Repair: facts.Repair,
-		Coverage: facts.Coverage, Feasibility: facts.Feasibility,
+		Prerequisites: facts.Prerequisites, Repair: facts.Repair, Recovery: facts.Recovery,
+		FreshnessReacquireCoverage: facts.FreshnessReacquireCoverage,
+		PrerequisiteObservations:   facts.Resources.PrerequisiteObservations,
+		PrerequisiteInvalidations:  append([]runtimecontract.RuntimePrerequisiteInvalidationRecord(nil), aggregate.PrerequisiteInvalidations...),
+		Coverage:                   facts.Coverage, Feasibility: facts.Feasibility,
 		State: decision.State, Action: decision.Action,
 		RequiredOutput: decision.RequiredOutput.Normalized(), Terminal: decision.Terminal,
 		GovernanceRequests:    append([]runtimecontract.RuntimeGovernanceRequestRecord(nil), aggregate.GovernanceRequests...),

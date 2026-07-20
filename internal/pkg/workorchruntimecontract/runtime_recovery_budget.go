@@ -7,18 +7,25 @@ const (
 	DefaultMaxOperationRecoveryAttempts = 3
 	DefaultMaxCASReloadAttempts         = 5
 	DefaultMaxTerminalDeliveryAttempts  = 5
-	DefaultMaxCapabilityStateRefreshes  = 3
-	RuntimeRecoveryBudgetLimit          = 100
+	DefaultMaxPrerequisiteRefreshes     = 3
+	// DefaultMaxCapabilityStateRefreshes is retained while existing persisted
+	// v2 records and focused tests migrate to the unified prerequisite budget.
+	DefaultMaxCapabilityStateRefreshes = DefaultMaxPrerequisiteRefreshes
+	RuntimeRecoveryBudgetLimit         = 100
 )
 
 type RuntimeRecoveryBudgetKind string
 
 const (
-	RuntimeRecoveryBudgetProviderTransport      RuntimeRecoveryBudgetKind = "provider_transport"
-	RuntimeRecoveryBudgetOperationRecovery      RuntimeRecoveryBudgetKind = "operation_recovery"
-	RuntimeRecoveryBudgetCASReload              RuntimeRecoveryBudgetKind = "cas_reload"
-	RuntimeRecoveryBudgetTerminalDelivery       RuntimeRecoveryBudgetKind = "terminal_delivery"
-	RuntimeRecoveryBudgetCapabilityStateRefresh RuntimeRecoveryBudgetKind = "capability_state_refresh"
+	RuntimeRecoveryBudgetProviderTransport   RuntimeRecoveryBudgetKind = "provider_transport"
+	RuntimeRecoveryBudgetOperationRecovery   RuntimeRecoveryBudgetKind = "operation_recovery"
+	RuntimeRecoveryBudgetCASReload           RuntimeRecoveryBudgetKind = "cas_reload"
+	RuntimeRecoveryBudgetTerminalDelivery    RuntimeRecoveryBudgetKind = "terminal_delivery"
+	RuntimeRecoveryBudgetPrerequisiteRefresh RuntimeRecoveryBudgetKind = "prerequisite_refresh"
+	// RuntimeRecoveryBudgetCapabilityStateRefresh is a source-compatible alias
+	// for the unified budget. It deliberately has the new persisted value so a
+	// stale capability-state receipt cannot take a separate budget path.
+	RuntimeRecoveryBudgetCapabilityStateRefresh RuntimeRecoveryBudgetKind = RuntimeRecoveryBudgetPrerequisiteRefresh
 )
 
 type RuntimeRecoveryPolicy struct {
@@ -26,7 +33,10 @@ type RuntimeRecoveryPolicy struct {
 	MaxOperationRecoveryAttempts int
 	MaxCASReloadAttempts         int
 	MaxTerminalDeliveryAttempts  int
-	MaxCapabilityStateRefreshes  int
+	MaxPrerequisiteRefreshes     int
+	// Deprecated: retained only to decode/reconcile existing aggregates during
+	// rollout. New activation code must set MaxPrerequisiteRefreshes.
+	MaxCapabilityStateRefreshes int
 }
 
 type RuntimeRecoveryLedger struct {
@@ -34,7 +44,9 @@ type RuntimeRecoveryLedger struct {
 	OperationRecoveryAttempts int
 	CASReloadAttempts         int
 	TerminalDeliveryAttempts  int
-	CapabilityStateRefreshes  int
+	PrerequisiteRefreshes     int
+	// Deprecated mirror of PrerequisiteRefreshes for existing v2 records.
+	CapabilityStateRefreshes int
 }
 
 func DefaultRuntimeRecoveryPolicy() RuntimeRecoveryPolicy {
@@ -43,7 +55,7 @@ func DefaultRuntimeRecoveryPolicy() RuntimeRecoveryPolicy {
 		MaxOperationRecoveryAttempts: DefaultMaxOperationRecoveryAttempts,
 		MaxCASReloadAttempts:         DefaultMaxCASReloadAttempts,
 		MaxTerminalDeliveryAttempts:  DefaultMaxTerminalDeliveryAttempts,
-		MaxCapabilityStateRefreshes:  DefaultMaxCapabilityStateRefreshes,
+		MaxPrerequisiteRefreshes:     DefaultMaxPrerequisiteRefreshes,
 	}
 }
 
@@ -61,8 +73,15 @@ func (p RuntimeRecoveryPolicy) Normalized() RuntimeRecoveryPolicy {
 	if p.MaxTerminalDeliveryAttempts <= 0 {
 		p.MaxTerminalDeliveryAttempts = defaults.MaxTerminalDeliveryAttempts
 	}
+	if p.MaxPrerequisiteRefreshes <= 0 {
+		if p.MaxCapabilityStateRefreshes > 0 {
+			p.MaxPrerequisiteRefreshes = p.MaxCapabilityStateRefreshes
+		} else {
+			p.MaxPrerequisiteRefreshes = defaults.MaxPrerequisiteRefreshes
+		}
+	}
 	if p.MaxCapabilityStateRefreshes <= 0 {
-		p.MaxCapabilityStateRefreshes = defaults.MaxCapabilityStateRefreshes
+		p.MaxCapabilityStateRefreshes = p.MaxPrerequisiteRefreshes
 	}
 	return p
 }
@@ -74,7 +93,7 @@ func (p RuntimeRecoveryPolicy) Validate() error {
 		"MaxOperationRecoveryAttempts": p.MaxOperationRecoveryAttempts,
 		"MaxCASReloadAttempts":         p.MaxCASReloadAttempts,
 		"MaxTerminalDeliveryAttempts":  p.MaxTerminalDeliveryAttempts,
-		"MaxCapabilityStateRefreshes":  p.MaxCapabilityStateRefreshes,
+		"MaxPrerequisiteRefreshes":     p.MaxPrerequisiteRefreshes,
 	} {
 		if value < 1 || value > RuntimeRecoveryBudgetLimit {
 			return fmt.Errorf("%s must be in 1..%d", name, RuntimeRecoveryBudgetLimit)
@@ -84,6 +103,7 @@ func (p RuntimeRecoveryPolicy) Validate() error {
 }
 
 func (l RuntimeRecoveryLedger) Validate(policy RuntimeRecoveryPolicy) error {
+	l = l.Normalized()
 	policy = policy.Normalized()
 	if err := policy.Validate(); err != nil {
 		return err
@@ -93,7 +113,7 @@ func (l RuntimeRecoveryLedger) Validate(policy RuntimeRecoveryPolicy) error {
 		"OperationRecoveryAttempts": l.OperationRecoveryAttempts,
 		"CASReloadAttempts":         l.CASReloadAttempts,
 		"TerminalDeliveryAttempts":  l.TerminalDeliveryAttempts,
-		"CapabilityStateRefreshes":  l.CapabilityStateRefreshes,
+		"PrerequisiteRefreshes":     l.PrerequisiteRefreshes,
 	} {
 		if value < 0 {
 			return fmt.Errorf("%s cannot be negative", name)
@@ -102,7 +122,22 @@ func (l RuntimeRecoveryLedger) Validate(policy RuntimeRecoveryPolicy) error {
 	return nil
 }
 
+// Normalized reconciles the legacy capability-state counter into the unified
+// prerequisite counter at the persistence boundary. New writers always keep
+// both fields equal during the rollout, so duplicate delivery cannot reopen a
+// second budget.
+func (l RuntimeRecoveryLedger) Normalized() RuntimeRecoveryLedger {
+	if l.PrerequisiteRefreshes == 0 && l.CapabilityStateRefreshes > 0 {
+		l.PrerequisiteRefreshes = l.CapabilityStateRefreshes
+	}
+	if l.CapabilityStateRefreshes == 0 && l.PrerequisiteRefreshes > 0 {
+		l.CapabilityStateRefreshes = l.PrerequisiteRefreshes
+	}
+	return l
+}
+
 func (l RuntimeRecoveryLedger) Used(kind RuntimeRecoveryBudgetKind) int {
+	l = l.Normalized()
 	switch kind {
 	case RuntimeRecoveryBudgetProviderTransport:
 		return l.ProviderTransportAttempts
@@ -112,7 +147,10 @@ func (l RuntimeRecoveryLedger) Used(kind RuntimeRecoveryBudgetKind) int {
 		return l.CASReloadAttempts
 	case RuntimeRecoveryBudgetTerminalDelivery:
 		return l.TerminalDeliveryAttempts
-	case RuntimeRecoveryBudgetCapabilityStateRefresh:
+	case RuntimeRecoveryBudgetPrerequisiteRefresh:
+		if l.PrerequisiteRefreshes != 0 {
+			return l.PrerequisiteRefreshes
+		}
 		return l.CapabilityStateRefreshes
 	default:
 		return 0
@@ -130,8 +168,8 @@ func (p RuntimeRecoveryPolicy) Limit(kind RuntimeRecoveryBudgetKind) int {
 		return p.MaxCASReloadAttempts
 	case RuntimeRecoveryBudgetTerminalDelivery:
 		return p.MaxTerminalDeliveryAttempts
-	case RuntimeRecoveryBudgetCapabilityStateRefresh:
-		return p.MaxCapabilityStateRefreshes
+	case RuntimeRecoveryBudgetPrerequisiteRefresh:
+		return p.MaxPrerequisiteRefreshes
 	default:
 		return 0
 	}
@@ -153,8 +191,9 @@ func (l RuntimeRecoveryLedger) Consume(kind RuntimeRecoveryBudgetKind, policy Ru
 		l.CASReloadAttempts++
 	case RuntimeRecoveryBudgetTerminalDelivery:
 		l.TerminalDeliveryAttempts++
-	case RuntimeRecoveryBudgetCapabilityStateRefresh:
-		l.CapabilityStateRefreshes++
+	case RuntimeRecoveryBudgetPrerequisiteRefresh:
+		l.PrerequisiteRefreshes++
+		l.CapabilityStateRefreshes = l.PrerequisiteRefreshes
 	}
 	return l, true, nil
 }

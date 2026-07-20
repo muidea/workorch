@@ -9,10 +9,17 @@ import (
 )
 
 func NewRuntimeOperationAdmissibility(prerequisiteID, ownerModuleID string, operationKinds, targetRefs, selectorRefs, constraintRefs []string, observedRevision string) (runtimecontract.RuntimeOperationAdmissibility, error) {
+	return NewRuntimeOperationAdmissibilityWithBinding(prerequisiteID, ownerModuleID, operationKinds, targetRefs, selectorRefs, constraintRefs, observedRevision, "")
+}
+
+// NewRuntimeOperationAdmissibilityWithBinding creates an inventory attached to
+// one opaque owner capability acquisition. The binding is intentionally not
+// interpreted by the generic event contract.
+func NewRuntimeOperationAdmissibilityWithBinding(prerequisiteID, ownerModuleID string, operationKinds, targetRefs, selectorRefs, constraintRefs []string, observedRevision, acquisitionBinding string) (runtimecontract.RuntimeOperationAdmissibility, error) {
 	inventory := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: prerequisiteID, OwnerModuleID: ownerModuleID,
 		OperationKinds: operationKinds, TargetRefs: targetRefs, SelectorRefs: selectorRefs,
-		ConstraintRefs: constraintRefs, ObservedRevision: observedRevision,
+		ConstraintRefs: constraintRefs, ObservedRevision: observedRevision, AcquisitionBinding: acquisitionBinding,
 	}.Normalized()
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	if err := inventory.Validate(); err != nil {

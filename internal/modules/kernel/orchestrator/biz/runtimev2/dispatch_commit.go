@@ -15,8 +15,9 @@ import (
 type DispatchState string
 
 const (
-	DispatchStateSealed    DispatchState = "sealed"
-	DispatchStateCommitted DispatchState = "committed"
+	DispatchStateSealed      DispatchState = "sealed"
+	DispatchStateCommitted   DispatchState = "committed"
+	DispatchStateInvalidated DispatchState = "invalidated"
 )
 
 type SealedDispatch struct {
@@ -94,6 +95,7 @@ type RuntimeAggregate struct {
 	GovernanceResolutions       []runtimecontract.RuntimeGovernanceResolutionRecord
 	OperationGovernanceBindings []runtimecontract.RuntimeOperationGovernanceBinding
 	OperationReceipts           []runtimecontract.RuntimeOperationReceipt
+	PrerequisiteInvalidations   []runtimecontract.RuntimePrerequisiteInvalidationRecord
 	// Termination is the SM-1 administrative cancel/supersede record (INV-08).
 	Termination *runtimecontract.RuntimeTerminationRecord
 }
@@ -209,7 +211,7 @@ func (d SealedDispatch) ValidateWithActivation(decision runtimecontract.RuntimeD
 	if d.CandidateHash != runtimecontract.StableRuntimeCandidateHash(d.Candidate) {
 		return fmt.Errorf("sealed dispatch candidate hash mismatch")
 	}
-	if d.State != DispatchStateSealed && d.State != DispatchStateCommitted {
+	if d.State != DispatchStateSealed && d.State != DispatchStateCommitted && d.State != DispatchStateInvalidated {
 		return fmt.Errorf("sealed dispatch has invalid state %q", d.State)
 	}
 	for _, operationID := range d.CompletedOperationIDs {
@@ -420,13 +422,40 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 	aggregate.ProcessedEventIDs = appendNormalizedString(aggregate.ProcessedEventIDs, evidence.EventID)
 	dispatch := *aggregate.ActiveDispatch
 	dispatch.CompletedOperationIDs = appendNormalizedString(dispatch.CompletedOperationIDs, evidence.OperationID)
-	dispatchCompleted := evidence.Status == ExecutionEvidenceStatusRejected || len(dispatch.CompletedOperationIDs) == candidateOperationCount(dispatch.Candidate)
+	freshnessInvalidated := false
+	if evidence.Status == ExecutionEvidenceStatusAccepted && evidence.Receipt != nil {
+		freshnessInvalidated, err = applyReceiptResourceChangeInvalidation(&aggregate, evidence.DispatchID, evidence.OperationID, *evidence.Receipt)
+		if err != nil {
+			return EvidenceCommitResult{}, err
+		}
+		// The accepted effect remains durable evidence, but an invalidated
+		// multi-operation dispatch has not completed the sealed operation set.
+		// Reopen its coverage binding so reducer cannot skip the refreshed
+		// prerequisite and the remaining required operation(s).
+		if freshnessInvalidated && len(dispatch.CompletedOperationIDs) < candidateOperationCount(dispatch.Candidate) {
+			aggregate.Facts.Coverage = reopenCoverageForEvidence(aggregate.Facts.Coverage, fact)
+			aggregate.Facts.FreshnessReacquireCoverage = append(aggregate.Facts.FreshnessReacquireCoverage, fact.CoverageWorkItemIDs...)
+		} else if evidence.Status == ExecutionEvidenceStatusAccepted {
+			aggregate.Facts.FreshnessReacquireCoverage = removeFreshnessReacquireCoverage(aggregate.Facts.FreshnessReacquireCoverage, fact.CoverageWorkItemIDs)
+		}
+	}
+	dispatchCompleted := freshnessInvalidated || evidence.Status == ExecutionEvidenceStatusRejected || len(dispatch.CompletedOperationIDs) == candidateOperationCount(dispatch.Candidate)
 	if dispatchCompleted {
-		dispatch.State = DispatchStateCommitted
+		if freshnessInvalidated {
+			dispatch.State = DispatchStateInvalidated
+		} else {
+			dispatch.State = DispatchStateCommitted
+		}
 		aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
 		aggregate.ActiveDispatch = nil
-		aggregate.Facts = advanceSatisfiedCoverageFocus(aggregate.Facts)
-		facts, nextDecision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
+		if !freshnessInvalidated {
+			aggregate.Facts = advanceSatisfiedCoverageFocus(aggregate.Facts)
+		}
+		var previousSnapshot *runtimecontract.AuthoritySnapshot
+		if !freshnessInvalidated {
+			previousSnapshot = &aggregate.Decision.AuthoritySnapshot
+		}
+		facts, nextDecision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, previousSnapshot)
 		if err != nil {
 			return EvidenceCommitResult{}, err
 		}
@@ -494,6 +523,45 @@ func closeCoverageForEvidence(coverage []runtimecontract.RuntimeCoverageItemFact
 	return runtimecontract.NormalizeRuntimeCoverageFacts(coverage)
 }
 
+// reopenCoverageForEvidence keeps accepted evidence as lineage while making
+// the work item available to the fresh transaction that must replace an
+// invalidated partial dispatch. Only the matching evidence reference is
+// removed; evidence itself is never rewritten or rejected.
+func reopenCoverageForEvidence(coverage []runtimecontract.RuntimeCoverageItemFact, evidence runtimecontract.EvidenceFact) []runtimecontract.RuntimeCoverageItemFact {
+	matched := map[common.CoverageWorkItemID]struct{}{}
+	for _, id := range evidence.CoverageWorkItemIDs {
+		matched[id] = struct{}{}
+	}
+	for idx := range coverage {
+		if _, ok := matched[coverage[idx].ID]; !ok {
+			continue
+		}
+		coverage[idx].State = runtimecontract.RuntimeCoverageItemStateOpen
+		kept := make([]string, 0, len(coverage[idx].EvidenceRefs))
+		for _, ref := range coverage[idx].EvidenceRefs {
+			if ref != string(evidence.ID) {
+				kept = append(kept, ref)
+			}
+		}
+		coverage[idx].EvidenceRefs = kept
+	}
+	return runtimecontract.NormalizeRuntimeCoverageFacts(coverage)
+}
+
+func removeFreshnessReacquireCoverage(values []common.CoverageWorkItemID, completed []common.CoverageWorkItemID) []common.CoverageWorkItemID {
+	removed := map[common.CoverageWorkItemID]struct{}{}
+	for _, id := range completed {
+		removed[id] = struct{}{}
+	}
+	kept := make([]common.CoverageWorkItemID, 0, len(values))
+	for _, id := range values {
+		if _, ok := removed[id]; !ok {
+			kept = append(kept, id)
+		}
+	}
+	return kept
+}
+
 func (a RuntimeAggregate) Validate() error {
 	if a.Facts.WorkspaceID == "" || a.Facts.RunID == "" {
 		return fmt.Errorf("runtime aggregate requires workspace and run scope")
@@ -554,6 +622,11 @@ func (a RuntimeAggregate) Validate() error {
 	}
 	if err := runtimecontract.ValidateRuntimeOperationReceipts(a.OperationReceipts); err != nil {
 		return err
+	}
+	for _, invalidation := range a.PrerequisiteInvalidations {
+		if err := invalidation.Validate(); err != nil {
+			return fmt.Errorf("runtime aggregate prerequisite invalidation: %w", err)
+		}
 	}
 	for _, request := range a.GovernanceRequests {
 		matched := a.ActiveDispatch != nil && a.ActiveDispatch.ID == request.DispatchID &&

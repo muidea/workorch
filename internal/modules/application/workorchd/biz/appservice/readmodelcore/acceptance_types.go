@@ -55,6 +55,8 @@ type ConvergenceBudget struct {
 	CASReloadAttempts            int    `json:"casReloadAttempts,omitempty"`
 	MaxTerminalDeliveryAttempts  int    `json:"maxTerminalDeliveryAttempts,omitempty"`
 	TerminalDeliveryAttempts     int    `json:"terminalDeliveryAttempts,omitempty"`
+	MaxPrerequisiteRefreshes     int    `json:"maxPrerequisiteRefreshes,omitempty"`
+	PrerequisiteRefreshes        int    `json:"prerequisiteRefreshes,omitempty"`
 }
 
 type AcceptanceSummary struct {

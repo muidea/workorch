@@ -4,7 +4,7 @@ Status: active
 
 Type: archive
 
-Last Updated: 2026-07-17
+Last Updated: 2026-07-20
 
 ## Purpose
 
@@ -44,6 +44,11 @@ Last Updated: 2026-07-17
 | `docs-domain-module-flow-reorganization-plan.md` | 目录重组历史计划 |
 | `tui-data-stability-command-optimization-plan.md` | TUI 数据稳定化过程收口 |
 | `tui-workspace-model-selection-closure-plan.md` | `/model` 完成 providerId/modelId 选择、workspace 持久化、Runtime V2 新 Run 优先级与 deployed e2e 收口 |
+| `runtime-v2-prerequisite-freshness-closure.md` | RPF-1～5 completed：freshness/invalidation/recovery/restart 与 fresh deployed bounded acceptance 已通过 |
+| `runtime-v2-code-closure-execution-spec.md` | 逐卡职责、typed EventHub 合同、Git receipt-only live verifier 与最终证据 |
+| `runtime-v2-prerequisite-freshness-component-closure-matrix.md` | 组件 owner、独立回归与交接门完成记录 |
+| `runtime-v2-system-component-closure-supplement.md` | Resume/Decision、模型封存、provider 失败与 read surface 收口 |
+| `runtime-v2-residual-code-closure-runbook.md` | 残余 owner/runtime cards 的执行与验收记录 |
 
 ## 2026-07-14 Runtime V2 Docs Refresh Ingest
 

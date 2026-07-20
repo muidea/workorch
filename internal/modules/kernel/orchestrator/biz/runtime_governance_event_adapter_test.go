@@ -4,6 +4,7 @@ package orchestrator
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -14,6 +15,7 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	"github.com/muidea/workorch/internal/pkg/common"
+	filerepository "github.com/muidea/workorch/internal/pkg/repository/file"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -162,5 +164,191 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 	}
 	if background.asyncFunctionCalls != 1 || background.lastAsyncFunction == nil {
 		t.Fatalf("Runtime V2 governance continuation calls=%d fn=%v", background.asyncFunctionCalls, background.lastAsyncFunction != nil)
+	}
+}
+
+// TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce covers
+// the durable Decision -> Orchestrator recovery boundary.  The initial
+// resolution is fully committed, then every EventHub owner and every file
+// repository instance is rebuilt.  A retry with the same resolution identity
+// must join the persisted Orchestrator continuation rather than being rejected
+// by Decision or creating another candidate/evidence/budget charge.
+func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	runsPath := filepath.Join(root, "runs.json")
+	workspacesPath := filepath.Join(root, "workspaces.json")
+	ticketsPath := filepath.Join(root, "decision-tickets.json")
+	resolutionsPath := filepath.Join(root, "decision-resolutions.json")
+
+	runs := filerepository.NewRunRepository(runsPath)
+	workspaces := filerepository.NewWorkspaceRepository(workspacesPath)
+	definition := runtimeV2Definition()
+	definition.CapabilityContract = append(definition.CapabilityContract, "decision/resolution")
+	if err := runs.Create(ctx, runtimeV2RunForTest(common.RunStateActive, definition)); err != nil {
+		t.Fatal(err)
+	}
+	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
+		t.Fatal(err)
+	}
+
+	hub := magicevent.NewHub(16)
+	background := &recordingBackgroundRoutine{}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	decisionOwner := decisionmodule.New()
+	if err := decisionOwner.Configure(decisionmodule.Dependencies{
+		Tickets: filerepository.NewDecisionTicketRepository(ticketsPath), Resolutions: filerepository.NewDecisionResolutionRepository(resolutionsPath), EventHub: hub,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := decisionOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	biz := orchestratorbiz.NewRuntimeOrchestrator(runs, workspaces, nil, nil)
+	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	module := newTestBiz(biz, hub, background)
+	module.evidenceRecords = memory.NewEvidenceRecordRepository()
+	facts := runtimeV2Aggregate(t, 1).Facts
+	facts.Capabilities.GovernanceKinds = []string{"decision/resolution"}
+	facts.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassGovernanceDependency, Signature: "external-approval", Message: "需要外部裁决"}
+	initialized, err := biz.InitializeRuntimeV2(ctx, facts, definition, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidateCalls := 0
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		candidateCalls++
+		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
+			Transaction: command.Transaction,
+			Candidate: runtimecontract.RuntimeCandidate{Governance: &runtimecontract.GovernanceCandidate{ExternalDependency: runtimecontract.ExternalDependency{
+				Kind: "external-approval", SubjectRef: "subject-1", Reason: "需要外部裁决",
+			}}},
+		}, nil)
+	})
+	observer := magicevent.NewSimpleObserver(ModuleID, hub)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution, module.handleRuntimeV2GovernanceResolution)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, module.handleRuntimeV2GovernanceTicketResolution)
+	observer.Subscribe(decisionevents.TopicDecisionCommandRecordEvidence, module.handleDecisionEvidenceCommand)
+
+	sealed, err := module.requestAndSealRuntimeV2CandidateWithRetry(ctx, initialized, "stable-prefix")
+	if err != nil || sealed.ActiveDispatch == nil || len(sealed.GovernanceRequests) != 1 {
+		t.Fatalf("initial governed aggregate=%+v err=%v", sealed, err)
+	}
+	request := sealed.GovernanceRequests[0]
+	resolve := decisionevents.EnsureResolvedCommand{
+		ResolutionID: "resolution-file-restart", TicketID: request.TicketID,
+		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID,
+		StepID: common.StepID("runtime-v2/" + sealed.ActiveDispatch.ID), DecisionKind: "runtime_v2_governance",
+		Type:    decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload: mustRuntimeGovernancePayload(t, map[string]any{"summary": "治理已完成"}),
+	}
+	initialResult := hub.Send(magicevent.NewEventWithContext(
+		decisionevents.TopicDecisionCommandEnsureResolved, "runtime-v2-file-restart", decisionevents.CommandDestination,
+		magicevent.NewHeader(), ctx, resolve,
+	))
+	if initialResult == nil || initialResult.Error() != nil {
+		t.Fatalf("initial decision resolution=%+v", initialResult)
+	}
+	committed, err := biz.LoadRuntimeV2(ctx, facts.WorkspaceID, facts.RunID)
+	if err != nil || len(committed.GovernanceResolutions) != 1 || len(committed.Facts.Evidence.Accepted) != 1 || len(committed.CandidateAttempts) != 1 || committed.ActiveDispatch != nil || candidateCalls != 0 {
+		t.Fatalf("initial persisted governance aggregate=%+v candidateCalls=%d err=%v", committed, candidateCalls, err)
+	}
+	if background.asyncFunctionCalls != 1 || background.lastAsyncFunction == nil {
+		t.Fatalf("initial continuation scheduling calls=%d", background.asyncFunctionCalls)
+	}
+	if err := decisionOwner.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate)
+	observer.Unsubscribe(decisionevents.TopicDecisionCommandRecordEvidence)
+	observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket)
+	observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution)
+	hub.Terminate(ctx)
+
+	// Reconstruct process-local infrastructure and repository instances from the
+	// same durable files; no old EventHub observer or controller is reused.
+	restartedHub := magicevent.NewHub(16)
+	restartedRuns := filerepository.NewRunRepository(runsPath)
+	restartedWorkspaces := filerepository.NewWorkspaceRepository(workspacesPath)
+	restartedRunOwner := runmodule.New()
+	if err := restartedRunOwner.Configure(runmodule.Dependencies{Runs: restartedRuns, EventHub: restartedHub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := restartedRunOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = restartedRunOwner.Stop(ctx) })
+	restartedDecisionOwner := decisionmodule.New()
+	if err := restartedDecisionOwner.Configure(decisionmodule.Dependencies{
+		Tickets: filerepository.NewDecisionTicketRepository(ticketsPath), Resolutions: filerepository.NewDecisionResolutionRepository(resolutionsPath), EventHub: restartedHub,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := restartedDecisionOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = restartedDecisionOwner.Stop(ctx) })
+	restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(restartedRuns, restartedWorkspaces, nil, nil)
+	if err := restartedBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: restartedHub}); err != nil {
+		t.Fatal(err)
+	}
+	restartedBackground := &recordingBackgroundRoutine{}
+	restartedModule := newTestBiz(restartedBiz, restartedHub, restartedBackground)
+	restartedModule.evidenceRecords = memory.NewEvidenceRecordRepository()
+	restartedObserver := magicevent.NewSimpleObserver(ModuleID, restartedHub)
+	restartedObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution, restartedModule.handleRuntimeV2GovernanceResolution)
+	restartedObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, restartedModule.handleRuntimeV2GovernanceTicketResolution)
+	restartedObserver.Subscribe(decisionevents.TopicDecisionCommandRecordEvidence, restartedModule.handleDecisionEvidenceCommand)
+	t.Cleanup(func() {
+		restartedObserver.Unsubscribe(decisionevents.TopicDecisionCommandRecordEvidence)
+		restartedObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket)
+		restartedObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution)
+		restartedHub.Terminate(ctx)
+	})
+
+	for replay := 0; replay < 2; replay++ {
+		result := restartedHub.Send(magicevent.NewEventWithContext(
+			decisionevents.TopicDecisionCommandEnsureResolved, "runtime-v2-file-restart", decisionevents.CommandDestination,
+			magicevent.NewHeader(), ctx, resolve,
+		))
+		if result == nil || result.Error() != nil {
+			t.Fatalf("replay %d resolution=%+v", replay, result)
+		}
+		data, getErr := result.Get()
+		response, ok := data.(decisionevents.DecisionCommandResult)
+		if getErr != nil || !ok || response.Ticket == nil || response.Resolution == nil || response.Resolution.ID != resolve.ResolutionID {
+			t.Fatalf("replay %d result=%+v getErr=%v", replay, data, getErr)
+		}
+	}
+	reloaded, err := restartedBiz.LoadRuntimeV2(ctx, facts.WorkspaceID, facts.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.StateRevision != committed.StateRevision || len(reloaded.GovernanceResolutions) != 1 || len(reloaded.Facts.Evidence.Accepted) != 1 ||
+		len(reloaded.CandidateAttempts) != len(committed.CandidateAttempts) || len(reloaded.OperationReceipts) != 0 {
+		t.Fatalf("duplicate replay changed persisted authority: before=%+v after=%+v", committed, reloaded)
+	}
+	if candidateCalls != 0 || restartedBackground.asyncFunctionCalls != 1 || restartedBackground.lastAsyncFunction == nil {
+		t.Fatalf("restart replay candidateCalls=%d continuationCalls=%d", candidateCalls, restartedBackground.asyncFunctionCalls)
+	}
+	if reloaded.Facts.Recovery.ProviderTransportAttempts != committed.Facts.Recovery.ProviderTransportAttempts ||
+		reloaded.Facts.Recovery.OperationRecoveryAttempts != committed.Facts.Recovery.OperationRecoveryAttempts ||
+		reloaded.Facts.Recovery.CASReloadAttempts != committed.Facts.Recovery.CASReloadAttempts ||
+		reloaded.Facts.Recovery.TerminalDeliveryAttempts != committed.Facts.Recovery.TerminalDeliveryAttempts ||
+		reloaded.Facts.Recovery.PrerequisiteRefreshes != committed.Facts.Recovery.PrerequisiteRefreshes {
+		t.Fatalf("duplicate replay charged recovery budget: before=%+v after=%+v", committed.Facts.Recovery, reloaded.Facts.Recovery)
 	}
 }

@@ -16,7 +16,11 @@ DATA_DIR="$TMP_DIR/.workorch-data"
 BINARY="${WORKORCH_MANAGED_VERIFY_BINARY:-$ROOT_DIR/bin/workorch}"
 GO_TEST_PACKAGES="${WORKORCH_MANAGED_GO_TEST_PACKAGES:-./...}"
 GO_TEST_FLAGS="${WORKORCH_MANAGED_GO_TEST_FLAGS:--count=1}"
-VERIFY_TARGET="${WORKORCH_MANAGED_VERIFY_TARGET:-verify-e2e-full}"
+# The default managed gate is the Runtime V2 M1 -> M3 queue. The historical
+# verify-e2e-full aggregate contains retired V1 fixture protocols and remains
+# runnable only when explicitly requested; it is not a Runtime V2 acceptance
+# substitute.
+VERIFY_TARGET="${WORKORCH_MANAGED_VERIFY_TARGET:-runtime-v2-managed}"
 MAX_CONCURRENT_RUNS="${WORKORCH_MANAGED_MAX_CONCURRENT_RUNS:-1}"
 STALE_DISPATCHED_STEP_MIN_AGE="${WORKORCH_MANAGED_STALE_DISPATCHED_STEP_MIN_AGE:-10m}"
 LLM_CONFIG_JSON="${WORKORCH_MANAGED_LLM_CONFIG_JSON:-}"
@@ -106,15 +110,16 @@ run_step() {
   fi
   if "$@" >"$log_file" 2>&1; then
     return 0
+  else
+    local status=$?
+    echo "command failed: $label" >&2
+    echo "command log: $log_file" >&2
+    if [[ -f "$log_file" ]]; then
+      echo "--- command output tail ---" >&2
+      tail -n "$FAILURE_LOG_TAIL_LINES" "$log_file" >&2 || true
+    fi
+    return "$status"
   fi
-  local status=$?
-  echo "command failed: $label" >&2
-  echo "command log: $log_file" >&2
-  if [[ -f "$log_file" ]]; then
-    echo "--- command output tail ---" >&2
-    tail -n "$FAILURE_LOG_TAIL_LINES" "$log_file" >&2 || true
-  fi
-  return "$status"
 }
 
 write_runtime_state() {
@@ -335,6 +340,16 @@ export WORKORCH_REAL_RUNTIME_KEEP_ARTIFACTS="${WORKORCH_REAL_RUNTIME_KEEP_ARTIFA
 export WORKORCH_TUI_LONG_OUTPUT_ARTIFACT_DIR="${WORKORCH_TUI_LONG_OUTPUT_ARTIFACT_DIR:-$TMP_DIR/verify-tui-long-output}"
 export WORKORCH_TUI_LONG_OUTPUT_KEEP_ARTIFACTS="${WORKORCH_TUI_LONG_OUTPUT_KEEP_ARTIFACTS:-$KEEP_ARTIFACTS}"
 
-run_step make "$VERIFY_TARGET"
+run_runtime_v2_managed_targets() {
+  run_step make verify-llm
+  run_step make verify-mcp-stdio
+  run_step make verify-ci-mvp-file
+}
+
+if [[ "$VERIFY_TARGET" == "runtime-v2-managed" ]]; then
+  run_runtime_v2_managed_targets
+else
+  run_step make "$VERIFY_TARGET"
+fi
 
 echo "managed WorkOrch verification passed for $BASE_URL target=$VERIFY_TARGET"

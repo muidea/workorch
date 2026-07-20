@@ -38,6 +38,7 @@ type AcquireTargetSnapshotCommand struct {
 type AcquireTargetSnapshotResult struct {
 	PrerequisiteID string
 	Snapshot       runtimecontract.TargetSnapshot
+	Observation    *runtimecontract.RuntimePrerequisiteObservation
 }
 
 type AcquireWorkspaceManifestCommand struct {
@@ -51,6 +52,7 @@ type AcquireWorkspaceManifestCommand struct {
 type AcquireWorkspaceManifestResult struct {
 	PrerequisiteID string
 	Manifest       runtimecontract.WorkspaceManifest
+	Observation    *runtimecontract.RuntimePrerequisiteObservation
 }
 
 type AcquireProviderCeilingCommand struct {
@@ -65,6 +67,7 @@ type AcquireProviderCeilingCommand struct {
 type AcquireProviderCeilingResult struct {
 	PrerequisiteID string
 	Ceiling        runtimecontract.ProviderCeiling
+	Observation    *runtimecontract.RuntimePrerequisiteObservation
 }
 
 type AcquireRuntimeCapabilitiesCommand struct {
@@ -80,6 +83,7 @@ type AcquireRuntimeCapabilitiesCommand struct {
 type AcquireRuntimeCapabilitiesResult struct {
 	PrerequisiteID string
 	Capabilities   runtimecontract.RuntimeCapabilities
+	Observation    *runtimecontract.RuntimePrerequisiteObservation
 }
 
 // AcquireRuntimeOperationAdmissibilityCommand requests a bounded, read-only
@@ -95,12 +99,16 @@ type AcquireRuntimeOperationAdmissibilityCommand struct {
 	WorkspaceDeliverableDirectory string
 	RequiredKinds                 []string
 	RequiredTargetRefs            []string
-	MaxItems                      int
+	// CapabilityStateBinding requests an inventory derived from this exact
+	// owner capability acquisition. Empty means the owner has no such binding.
+	CapabilityStateBinding string
+	MaxItems               int
 }
 
 type AcquireRuntimeOperationAdmissibilityResult struct {
 	PrerequisiteID string
 	Admissibility  runtimecontract.RuntimeOperationAdmissibility
+	Observation    *runtimecontract.RuntimePrerequisiteObservation
 }
 
 // ProbeRuntimeOperationFeasibilityCommand is an SM-3 admission check for one
@@ -113,13 +121,22 @@ type ProbeRuntimeOperationFeasibilityCommand struct {
 	WorkspaceDeliverableDirectory string
 	Operation                     runtimecontract.RuntimeOperation
 	Admissibility                 runtimecontract.RuntimeOperationAdmissibility
+	// CapabilityStateBinding must equal Admissibility.AcquisitionBinding when
+	// the inventory was derived from a capability-state acquisition.
+	CapabilityStateBinding string
+	// Observation is the persisted freshness metadata for Admissibility. It is
+	// supplied by Orchestrator so an owner can return an exact typed stale
+	// detail without reconstructing authority from local process state.
+	Observation *runtimecontract.RuntimePrerequisiteObservation
 }
 
 type ProbeRuntimeOperationFeasibilityResult struct {
 	OperationID             string
 	AdmissibilitySnapshotID string
+	CapabilityStateBinding  string
 	Feasible                bool
 	Failure                 *runtimecontract.FailureFact
+	Stale                   *runtimecontract.RuntimePrerequisiteStale
 }
 
 type AcquireGitCapabilityStateCommand struct {
@@ -136,6 +153,7 @@ type AcquireGitCapabilityStateCommand struct {
 type AcquireGitCapabilityStateResult struct {
 	PrerequisiteID string
 	Snapshot       runtimecontract.RuntimeCapabilityStateSnapshot
+	Observation    *runtimecontract.RuntimePrerequisiteObservation
 }
 
 type RequestRuntimeCandidateCommand struct {
@@ -154,6 +172,10 @@ type RequestRuntimeCandidateResult struct {
 	Transaction runtimecontract.AuthorityTransaction
 	Candidate   runtimecontract.RuntimeCandidate
 	Failure     *runtimecontract.RuntimeCandidateFailure
+	// Stale is an owner-confirmed pre-candidate freshness outcome. It is
+	// mutually exclusive with Candidate and Failure; Orchestrator invalidates
+	// and reacquires without spending candidate or provider-recovery budget.
+	Stale *runtimecontract.RuntimePrerequisiteStale
 	// RequestID correlates this result with the persisted LLM usage audit record.
 	RequestID string
 	// Status is completed | failed when a provider request audit is available.

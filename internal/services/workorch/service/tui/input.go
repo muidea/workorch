@@ -396,7 +396,6 @@ func (m AppModel) contextualSlashCommandSuggestions() []slashCommandSuggestion {
 	case workspacePromptModeDecision:
 		return []slashCommandSuggestion{
 			{Command: "/decision answer", Insert: "/decision answer ", Description: "answer current ticket", Contextual: true},
-			{Command: "/decision replan", Insert: "/decision replan ", Description: "request replan", Contextual: true},
 			{Command: "/decision terminate", Insert: "/decision terminate ", Description: "terminate current path", Contextual: true},
 			{Command: "/decision show", Description: "show current ticket", Contextual: true},
 			{Command: "/decision list", Description: "list open tickets", Contextual: true},

@@ -30,6 +30,11 @@ type RuntimeCandidateGenerationResult struct {
 	FailureClass string `json:"failureClass,omitempty"`
 	// FailureReason is a redacted human-readable failure summary.
 	FailureReason string `json:"failureReason,omitempty"`
+	// PrerequisiteStale is present only when the LLM owner has confirmed that
+	// a persisted prerequisite observation no longer represents the sealed
+	// provider target. It is not a provider failure and cannot produce a
+	// candidate.
+	PrerequisiteStale *runtimecontract.RuntimePrerequisiteStale `json:"prerequisiteStale,omitempty"`
 }
 
 // ProviderRequestAudit is the sealed, secret-free audit surface for one provider request.
@@ -69,6 +74,9 @@ type RuntimeCandidateResponse struct {
 	RequestID string `json:"requestId,omitempty"`
 	// Status mirrors generation status (completed | failed) when audit is available.
 	Status string `json:"status,omitempty"`
+	// PrerequisiteStale preserves an owner-confirmed pre-candidate freshness
+	// outcome. Orchestrator owns the resulting invalidation and reacquisition.
+	PrerequisiteStale *runtimecontract.RuntimePrerequisiteStale `json:"prerequisiteStale,omitempty"`
 }
 
 const (

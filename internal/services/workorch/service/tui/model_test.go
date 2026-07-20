@@ -735,81 +735,24 @@ func TestModelRunResumeIgnoresStaleRunIDFromAnotherWorkspace(t *testing.T) {
 	}
 }
 
-func TestModelRunRestartCompatibilityAliasUsesResume(t *testing.T) {
-	be := newRecordingBE(t, common.RunStateCompleted)
-	m := NewAppModel(be, "ws-1", "")
-	m.activeRunID = "run-resume"
-	m.currentTask = "已有目标"
-	m.result = "old final result"
-	m.artifacts = []string{"old-artifact"}
-	m.setInput("/run restart 补充信息：继续基于现有目标修复")
-
-	next, cmd := m.submitInput()
-	if cmd == nil {
-		t.Fatal("expected restart command")
-	}
-	msg := cmd()
-	next, _ = next.(*AppModel).Update(msg)
-	m = asModel(next)
-
-	if len(be.goals) != 0 {
-		t.Fatalf("goals = %v, want no goal created for restart input", be.goals)
-	}
-	if len(be.resumes) != 0 {
-		t.Fatalf("resumes = %v, want terminal run to activate a new run", be.resumes)
-	}
-	if len(be.activations) != 1 {
-		t.Fatalf("activations = %d, want unified resume activation", len(be.activations))
-	}
-	if len(be.restarts) != 0 {
-		t.Fatalf("restarts = %d, want no TUI restart intent", len(be.restarts))
-	}
-	if len(be.runCommands) != 1 ||
-		be.runCommands[0].WorkspaceID != "ws-1" ||
-		be.runCommands[0].ExpectedRunID != "" ||
-		be.runCommands[0].Intent != backend.RunCommandIntentResume ||
-		be.runCommands[0].Reason != "user_requested" ||
-		be.runCommands[0].Source != "tui" {
-		t.Fatalf("runCommands = %+v, want workspace-scoped TUI resume command", be.runCommands)
-	}
-	if m.activeRunID != "run-new" || !m.running {
-		t.Fatalf("run state = %q/%v, want restarted run-new/running", m.activeRunID, m.running)
-	}
-	if m.result != "" || len(m.artifacts) != 0 {
-		t.Fatalf("old run display not cleared: result=%q artifacts=%v ", m.result, m.artifacts)
-	}
-}
-
-func TestModelRunRestartSlashCommandAliasesWorkspaceResume(t *testing.T) {
+func TestModelRunRestartIsNotATUICommand(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateActive)
 	m := NewAppModel(be, "ws-1", "")
 	m.activeRunID = "run-resume"
-	m.currentTask = "已有目标"
 	m.setInput("/run restart 重新执行并纳入刚补充的信息")
 
 	next, cmd := m.submitInput()
-	if cmd == nil {
-		t.Fatal("expected restart command")
+	m = asModel(next)
+	if cmd != nil || m.lastError == nil || !strings.Contains(m.lastError.Error(), "unknown run subcommand") {
+		t.Fatalf("restart command=%v error=%v, want rejected non-canonical command", cmd, m.lastError)
 	}
-	msg := cmd()
-	_, _ = next.(*AppModel).Update(msg)
-
-	if len(be.goals) != 0 {
-		t.Fatalf("goals = %v, want no goal created for /run restart", be.goals)
-	}
-	if len(be.resumes) != 0 {
-		t.Fatalf("resumes = %v, want /run restart to activate directly", be.resumes)
-	}
-	if len(be.activations) != 1 {
-		t.Fatalf("activations = %d, want unified resume activation", len(be.activations))
-	}
-	if len(be.restarts) != 0 || len(be.runCommands) != 1 || be.runCommands[0].Intent != backend.RunCommandIntentResume {
-		t.Fatalf("restarts/runCommands = %d/%+v, want restart alias normalized to resume", len(be.restarts), be.runCommands)
+	if len(be.activations) != 0 || len(be.runCommands) != 0 || len(be.restarts) != 0 {
+		t.Fatalf("restart triggered backend work: activations=%d commands=%+v restarts=%d", len(be.activations), be.runCommands, len(be.restarts))
 	}
 }
 
 func TestModelNonCanonicalRunCommandsAreNotSupported(t *testing.T) {
-	for _, input := range []string{"/resume", "/restart", "/rerun", "/run", "/run rerun"} {
+	for _, input := range []string{"/resume", "/restart", "/rerun", "/run", "/run restart", "/run rerun"} {
 		m := NewAppModel(newFake(t), "ws-1", "")
 		m.activeRunID = "run-1"
 		m.progress = progressRunning
@@ -1395,7 +1338,7 @@ func TestModelDecisionSlashCompletionSuggestsContextSubcommands(t *testing.T) {
 	m.height = 16
 
 	view := stripANSI(m.View())
-	if !strings.Contains(view, "/decision answer") || !strings.Contains(view, "/decision replan") {
+	if !strings.Contains(view, "/decision answer") || strings.Contains(view, "/decision replan") {
 		t.Fatalf("decision suggestions missing contextual subcommands:\n%s", view)
 	}
 
@@ -1423,14 +1366,14 @@ func TestModelSlashCompletionArrowSelectionControlsCompletedCommand(t *testing.T
 
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = asModel(next)
-	if m.input != "/decision replan " {
-		t.Fatalf("completion = %q, want selected /decision replan", m.input)
+	if m.input != "/decision terminate " {
+		t.Fatalf("completion = %q, want selected /decision terminate", m.input)
 	}
 
 	m.setInput("/decision ")
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
 	m = asModel(next)
-	if m.slashCursor != 4 {
+	if m.slashCursor != 3 {
 		t.Fatalf("slashCursor = %d, want wrap to last suggestion", m.slashCursor)
 	}
 }
@@ -1451,12 +1394,29 @@ func TestModelApprovalSlashCompletionSuggestsContextSubcommands(t *testing.T) {
 	}
 }
 
-func TestModelDecisionReplanSlashSubcommandUsesExplicitResolutionType(t *testing.T) {
+func TestModelDecisionReplanIsNotATUICommand(t *testing.T) {
+	be := &decisionRecordingBE{fakeBE: newFake(t)}
+	m := NewAppModel(be, "ws-1", "")
+	projectDecisionBlocker(&m, "ws-1", "run-1", "ticket-1")
+	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-1", WorkspaceID: "ws-1", RunID: "run-1", State: "open"}
+	m.setInput("/decision replan 请重新规划当前路径")
+
+	next, cmd := m.submitInput()
+	m = asModel(next)
+	if cmd != nil || m.lastError == nil || !strings.Contains(m.lastError.Error(), "unknown decision subcommand") {
+		t.Fatalf("replan command=%v error=%v, want rejected non-canonical TUI command", cmd, m.lastError)
+	}
+	if len(be.decisions) != 0 {
+		t.Fatalf("replan command resolved ticket: %+v", be.decisions)
+	}
+}
+
+func TestModelDecisionAnswerNormalizesReplanIntent(t *testing.T) {
 	be := &decisionRecordingBE{fakeBE: newFake(t)}
 	m := NewAppModel(be, "ws-1", "")
 	projectDecisionBlocker(&m, "ws-1", "run-1", "ticket-1")
 	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-1", WorkspaceID: "ws-1", RunID: "run-1", State: "open", Question: "choose next"}
-	m.setInput("/decision replan 重新规划当前路径")
+	m.setInput("/decision answer 请重新规划当前路径")
 
 	next, cmd := m.submitInput()
 	if cmd == nil {
@@ -1471,10 +1431,10 @@ func TestModelDecisionReplanSlashSubcommandUsesExplicitResolutionType(t *testing
 	}
 	req := be.decisions[0]
 	if req.TicketID != "ticket-1" || req.ResolutionType != backend.DecisionResolutionTypeReplan {
-		t.Fatalf("decision request = %+v, want explicit replan for ticket-1", req)
+		t.Fatalf("decision request = %+v, want normalized replan for ticket-1", req)
 	}
 	answer, _ := req.Payload.String("answer")
-	if answer != "重新规划当前路径" {
+	if answer != "请重新规划当前路径" {
 		t.Fatalf("payload = %+v, want note as answer", req.Payload)
 	}
 	if m.blockingDecision != nil {
@@ -1498,7 +1458,7 @@ func TestModelDecisionReplanAfterWorkspaceSwitchUsesOverviewBlocker(t *testing.T
 	m = asModel(next)
 	m.blockingDecision = nil
 	m.decisions = nil
-	m.setInput("/decision replan")
+	m.setInput("/decision answer 请重新规划")
 
 	next, cmd := m.submitInput()
 	if cmd == nil {
@@ -1539,7 +1499,7 @@ func TestModelDecisionReplanAfterWorkspaceSwitchReplacesStaleBlocker(t *testing.
 		t.Fatalf("blocking decision = %+v, want ticket-b from active overview", m.blockingDecision)
 	}
 
-	m.setInput("/decision replan")
+	m.setInput("/decision answer 请重新规划")
 	next, cmd := m.submitInput()
 	if cmd == nil {
 		t.Fatal("expected decision resolve command for active workspace")
@@ -1572,7 +1532,7 @@ func TestModelDecisionReplanUsesCurrentOverviewTicketOverStaleLocalBlocker(t *te
 	m.activeRunID = "run-current"
 	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-stale", WorkspaceID: "ws-1", RunID: "run-stale", State: "open"}
 	m.decisions = []backend.DecisionInfo{{ID: "ticket-stale", WorkspaceID: "ws-1", RunID: "run-stale", State: "open"}}
-	m.setInput("/decision replan")
+	m.setInput("/decision answer 请重新规划")
 
 	next, cmd := m.submitInput()
 	if cmd == nil {
@@ -1607,7 +1567,7 @@ func TestModelDecisionReplanUsesServerProjectionEvenAfterOptimisticResolvedMark(
 	m.markDecisionResolvedForWorkspace("ws-1", "ticket-1", "run-1")
 	m.markDecisionResolved("ticket-1", "ws-1", "run-1")
 	m.blockingDecision = nil
-	m.setInput("/decision replan")
+	m.setInput("/decision answer 请重新规划")
 
 	next, cmd := m.submitInput()
 	if cmd == nil {
@@ -1666,7 +1626,7 @@ func TestModelDecisionReplanDoesNotUseLocalBlockerWhenServerProjectionIsLive(t *
 	m.activeRunID = "run-1"
 	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-stale", WorkspaceID: "ws-1", RunID: "run-1", State: "open"}
 	m.decisions = []backend.DecisionInfo{*m.blockingDecision}
-	m.setInput("/decision replan")
+	m.setInput("/decision answer 请重新规划")
 
 	next, cmd := m.submitInput()
 	m = asModel(next)
@@ -3978,11 +3938,11 @@ func TestModelWorkspaceSwitchToDecisionWorkspaceSuggestsDecisionCommandsBeforeDe
 	if !strings.Contains(view, "ws-b460b00 decision > /") {
 		t.Fatalf("decision prompt missing after switch:\n%s", view)
 	}
-	if !strings.Contains(view, "/decision answer") || !strings.Contains(view, "/decision replan") {
+	if !strings.Contains(view, "/decision answer") || strings.Contains(view, "/decision replan") {
 		t.Fatalf("decision command suggestions missing before detail load:\n%s", view)
 	}
 	suggestions := m.slashCommandSuggestions("/")
-	if len(suggestions) < 2 || suggestions[0].Command != "/decision answer" || suggestions[1].Command != "/decision replan" {
+	if len(suggestions) < 2 || suggestions[0].Command != "/decision answer" || suggestions[1].Command != "/decision terminate" {
 		t.Fatalf("suggestions = %+v, want decision commands first", suggestions)
 	}
 

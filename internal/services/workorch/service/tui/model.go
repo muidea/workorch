@@ -954,18 +954,6 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 				m.progressText = "Checking workspace run state"
 			}
 			return m, ResumeRun(m.be, m.activeWorkspaceID), true
-		case "restart": // Compatibility alias; TUI presents only /run resume.
-			m.clearInput()
-			m.cancelWorkspaceSelection()
-			if cmd := m.blockActiveWorkspaceResume(""); cmd != nil {
-				m.lastError = nil
-				return m, cmd, true
-			}
-			m.clearRunDisplayState()
-			m.lastError = nil
-			m.progress = progressSubmitting
-			m.progressText = "Resuming workspace execution"
-			return m, ResumeRun(m.be, m.activeWorkspaceID), true
 		default:
 			m.lastError = fmt.Errorf("unknown run subcommand: %s", subcommand)
 			return m, nil, true
@@ -1003,17 +991,6 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 			m.lastError = nil
 			m.appendTranscript("Decision", rest)
 			return m, ResolveDecision(m.be, m.activeWorkspaceID, ticketID, rest), true
-		case "replan":
-			if !m.ensureActiveBlockingDecisionFromOverview() {
-				m.lastError = fmt.Errorf("no blocking decision")
-				return m, nil, true
-			}
-			answer := nonEmpty(rest, "replan")
-			ticketID := string(m.blockingDecision.ID)
-			m.clearInput()
-			m.lastError = nil
-			m.appendTranscript("Decision", answer)
-			return m, ResolveDecisionWithType(m.be, m.activeWorkspaceID, ticketID, backend.DecisionResolutionTypeReplan, answer), true
 		case "terminate", "reject":
 			if !m.ensureActiveBlockingDecisionFromOverview() {
 				m.lastError = fmt.Errorf("no blocking decision")
@@ -1218,7 +1195,6 @@ func renderDecisionCommandResult(current *backend.DecisionInfo, items []backend.
 		}
 		b.WriteString("\nCommands\n")
 		b.WriteString("- /decision answer <text>\n")
-		b.WriteString("- /decision replan [note]\n")
 		b.WriteString("- /decision terminate [note]")
 		return b.String()
 	}

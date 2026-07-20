@@ -6,7 +6,6 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
-	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func TestEventHubRunBackendSendsTypedSchedulerCommand(t *testing.T) {
@@ -31,15 +30,7 @@ func TestEventHubRunBackendSendsTypedSchedulerCommand(t *testing.T) {
 		Priority:           9,
 		DefinitionRevision: "revision-typed-backend",
 		DecisionID:         "ticket-typed-backend",
-		Activation: ActivateRunRequest{
-			GoalID:        "goal-typed-backend",
-			DoDID:         "dod-typed-backend",
-			SoulID:        "soul-typed-backend",
-			SkillIDs:      []common.SkillID{"skill-typed-backend"},
-			MCPServerIDs:  []common.MCPServerID{"mcp-typed-backend"},
-			CapabilityIDs: []common.MCPCapabilityID{"capability-typed-backend"},
-			MemoryIDs:     []common.MemoryID{"memory-typed-backend"},
-		},
+		Activation:         ActivateRunRequest{GoalID: "goal-typed-backend", DoDID: "dod-typed-backend"},
 	})
 	if err != nil {
 		t.Fatalf("run command: type=%T value=%#v text=%v", err, err, err)
@@ -47,7 +38,7 @@ func TestEventHubRunBackendSendsTypedSchedulerCommand(t *testing.T) {
 	if captured.WorkspaceID != "ws-typed-backend" || captured.RunID != "run-typed-backend" || captured.Intent != "resume" || captured.Priority != 9 {
 		t.Fatalf("captured command = %+v", captured)
 	}
-	if captured.GoalID != "goal-typed-backend" || len(captured.SkillIDs) != 1 || captured.SkillIDs[0] != "skill-typed-backend" {
-		t.Fatalf("captured activation contract = %+v", captured)
+	if captured.GoalID != "" || captured.DoDID != "" || captured.LLMTarget != nil || captured.SoulID != "" || len(captured.SkillIDs) != 0 || len(captured.MCPServerIDs) != 0 || len(captured.CapabilityIDs) != 0 || len(captured.MemoryIDs) != 0 {
+		t.Fatalf("captured resume override = %+v", captured)
 	}
 }

@@ -305,14 +305,17 @@ def state_change_ops(request):
 
 def assessment_payload(request, satisfied=True, summary="Runtime V2 assessment completed."):
     refs = list(request.get("evidenceRefs") or [])
-    if satisfied and not refs:
-        refs = ["workorch://workspace/runtime-validation-source.txt"]
-    if not satisfied:
-        refs = []
+    coverage = list(request.get("coverage") or [])
+    items = [{
+        "coverageWorkItemId": coverage_work_item_id,
+        "satisfied": bool(satisfied),
+        "evidenceRefs": refs if satisfied else [],
+    } for coverage_work_item_id in coverage]
     return {
         "focusId": request["focusId"],
-        "coverageWorkItemIds": request["coverage"][:1],
-        "satisfied": bool(satisfied),
+        "coverageWorkItemIds": coverage,
+        "disposition": "satisfied" if satisfied else "repairable_gap",
+        "items": items,
         "summary": summary,
         "evidenceRefs": refs,
     }

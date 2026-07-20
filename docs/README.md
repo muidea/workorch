@@ -2,7 +2,7 @@
 
 Status: active
 
-Last Updated: 2026-07-16
+Last Updated: 2026-07-20
 
 ## Purpose
 
@@ -33,6 +33,10 @@ Last Updated: 2026-07-16
   [current-state.md](01-overview/current-state.md),
   [current-unclosed-matrix.md](01-overview/current-unclosed-matrix.md),
   [unfinished-todo-index.md](01-overview/unfinished-todo-index.md)
+- Runtime V2 prerequisite freshness completion record：
+  [归档执行规格](90-archive/completed/runtime-v2-code-closure-execution-spec.md)、
+  [归档组件交互与独立回归矩阵](90-archive/completed/runtime-v2-prerequisite-freshness-component-closure-matrix.md)、
+  [归档残余代码收口手册](90-archive/completed/runtime-v2-residual-code-closure-runbook.md)
 - 上下文组织 / request cache：
   [runtime-request-cache-note.md](00-core/runtime-request-cache-note.md),
   [context-assembly-flow.md](20-runtime-flow/context-assembly-flow.md),
@@ -96,7 +100,7 @@ Last Updated: 2026-07-16
 - 权威层已按 V2 刷新：`00-core` 双层映射、`01-overview` 事实入口、`20-runtime-flow` / `30-module-architecture` 主链。
 - 2026-07-14：约 146 份 completed / V1-absorbed plan 已迁 `90-archive/completed/`。
 - **2026-07-16 文档清理**：`active/` 假活跃产品/审计/收口日记全部归档；dated live verification 迁 `records/`；`60-verification/artifacts/**` 出库。
-- **Active 仅保留 residual 索引**（OPS-1 生产 apply + 可选 OPT-1）；过程日记只在 archive 检索。
+- **RPF-1～5 prerequisite freshness 已完成**：归档执行规格保留组件职责、typed EventHub 交接、逐组件直接回归、交接门与 fresh deployed evidence；active 仅保留 ARCH-1、OPS-1 与可选 OPT-1。过程日记只在 archive 检索。
 - **已废止作为生产主链叙述**：StagePacket、NextAction、graph dispatch checkpoint、ExecutionContextPatch、自动 replan successor。
 - 根目录正式导航：本文。历史目录重组计划见 `90-archive/completed/docs-domain-module-flow-reorganization-plan.md`。
 

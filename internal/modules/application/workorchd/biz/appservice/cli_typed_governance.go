@@ -14,9 +14,6 @@ func (d *CLICommandDispatcher) handleTypedCLIGovernance(event magicevent.Event, 
 	case workorchdevents.CLIDecisionResolveCommand:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.Request.WorkspaceID)
 		item, err := ResolveDecisionWithSession(ctx, d.borrow(), string(command.Request.TicketID), appmodelcore.ResolveDecisionCommand{ResolutionType: command.Request.ResolutionType, ResolutionPayload: command.Request.Payload.Clone()})
-		if err == nil {
-			err = d.publishDecisionContinuationForRequest(ctx, command.RequestID, item)
-		}
 		if setTypedCLIError(result, err) {
 			return
 		}
@@ -28,9 +25,6 @@ func (d *CLICommandDispatcher) handleTypedCLIGovernance(event magicevent.Event, 
 			ids = append(ids, string(id))
 		}
 		items, err := BatchResolveDecisionsWithSession(ctx, d.borrow(), appmodelcore.BatchResolveDecisionCommand{TicketIDs: ids, ResolutionType: command.ResolutionType, ResolutionPayload: command.Payload.Clone()})
-		if err == nil {
-			err = d.publishDecisionContinuationsForRequest(ctx, command.RequestID, items)
-		}
 		if setTypedCLIError(result, err) {
 			return
 		}
@@ -52,9 +46,6 @@ func (d *CLICommandDispatcher) handleTypedCLIGovernance(event magicevent.Event, 
 	case workorchdevents.CLIApprovalApproveCommand:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
 		item, err := ResolveApprovalWithSession(ctx, d.borrow(), string(command.ApprovalID), appmodelcore.ResolveApprovalCommand{Action: "approve", Payload: command.Payload.Clone()})
-		if err == nil {
-			err = d.publishApprovalContinuationForRequest(ctx, command.RequestID, item)
-		}
 		if setTypedCLIError(result, err) {
 			return
 		}
@@ -62,9 +53,6 @@ func (d *CLICommandDispatcher) handleTypedCLIGovernance(event magicevent.Event, 
 	case workorchdevents.CLIApprovalRejectCommand:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
 		item, err := ResolveApprovalWithSession(ctx, d.borrow(), string(command.ApprovalID), appmodelcore.ResolveApprovalCommand{Action: "reject", Payload: command.Payload.Clone()})
-		if err == nil {
-			err = d.publishApprovalContinuationForRequest(ctx, command.RequestID, item)
-		}
 		if setTypedCLIError(result, err) {
 			return
 		}
@@ -76,9 +64,6 @@ func (d *CLICommandDispatcher) handleTypedCLIGovernance(event magicevent.Event, 
 			ids = append(ids, string(id))
 		}
 		items, err := BatchResolveApprovalsWithSession(ctx, d.borrow(), appmodelcore.BatchResolveApprovalCommand{ApprovalIDs: ids, Action: command.Action, Payload: command.Payload.Clone()})
-		if err == nil {
-			err = d.publishApprovalContinuationsForRequest(ctx, command.RequestID, items)
-		}
 		if setTypedCLIError(result, err) {
 			return
 		}

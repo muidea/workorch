@@ -212,6 +212,9 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 		if result.Receipt.ExecutionKey != execution.ExecutionKey || result.Receipt.OperationID != operation.ID {
 			return RuntimeAggregate{}, fmt.Errorf("owner receipt does not match claimed execution")
 		}
+		if result.Receipt.PrerequisiteStale != nil {
+			return c.InvalidateActiveDispatchForPrerequisiteStale(ctx, workspaceID, runID, dispatch.ID, result.Receipt)
+		}
 		if result.Receipt.CapabilityStateStale != nil {
 			return c.RefreshCapabilityStateAfterStaleReceipt(ctx, workspaceID, runID, dispatch.ID, result.Receipt)
 		}

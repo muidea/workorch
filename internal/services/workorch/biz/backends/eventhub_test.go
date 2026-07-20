@@ -217,13 +217,13 @@ func TestCLIWorkspaceSnapshotResultCarriesTypedSnapshot(t *testing.T) {
 	}
 }
 
-func TestEventHubRunRestartPublishesUnifiedWorkspaceRunCommand(t *testing.T) {
+func TestEventHubRunRestartIsRejectedBeforePublishing(t *testing.T) {
 	ctx := context.Background()
 	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
-	var captured workorchdevents.WorkspaceRunRequestedCommand
+	published := 0
 	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, commandHub)
 	observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(event magicevent.Event, result magicevent.Result) {
-		captured, _ = event.Data().(workorchdevents.WorkspaceRunRequestedCommand)
+		published++
 		result.Set(workorchdevents.WorkspaceRunRequestedResult{Accepted: true}, nil)
 	})
 	defer observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested)
@@ -250,15 +250,48 @@ func TestEventHubRunRestartPublishesUnifiedWorkspaceRunCommand(t *testing.T) {
 			CapabilityIDs: []common.MCPCapabilityID{"mcp-restart-unified:tool:validate"},
 			MemoryIDs:     []common.MemoryID{"memory-restart-unified"},
 		},
+	}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("restart err=%v, want invalid argument", err)
+	}
+	if published != 0 {
+		t.Fatalf("restart published %d workspace commands", published)
+	}
+}
+
+func TestEventHubRunResumeForExistingRunOmitsActivationOverrides(t *testing.T) {
+	ctx := context.Background()
+	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
+	var captured workorchdevents.WorkspaceRunRequestedCommand
+	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, commandHub)
+	observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(event magicevent.Event, result magicevent.Result) {
+		captured, _ = event.Data().(workorchdevents.WorkspaceRunRequestedCommand)
+		result.Set(workorchdevents.WorkspaceRunRequestedResult{Accepted: true}, nil)
+	})
+	defer observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested)
+
+	if _, err := be.Run().Command(ctx, WorkspaceRunCommand{
+		WorkspaceID:   "ws-resume-scoped",
+		ExpectedRunID: "run-resume-scoped",
+		Intent:        RunCommandIntentResume,
+		RequestID:     "request-resume-scoped",
+		Reason:        "user_requested",
+		Source:        "test",
+		Activation: ActivateRunRequest{
+			GoalID:    "goal-must-not-send",
+			DoDID:     "dod-must-not-send",
+			LLMTarget: &runtimecontract.ProviderModelTarget{ProviderID: "provider-must-not-send", ModelID: "model-must-not-send"},
+			SoulID:    "soul-must-not-send",
+			SkillIDs:  []common.SkillID{"skill-must-not-send"},
+		},
 	}); err != nil {
-		t.Fatalf("restart: %v", err)
+		t.Fatalf("resume: %v", err)
 	}
 
-	if captured.WorkspaceID != "ws-restart-unified" || captured.Intent != string(RunCommandIntentRestart) || captured.RequestID != "request-restart-unified" || captured.Reason != "test_restart_unified" || captured.Source != "test" || captured.DefinitionRevision != "rev-restart-unified" || captured.DecisionID != "ticket-restart-unified" || captured.Priority != 7 || captured.GoalID != "goal-restart-unified" || captured.DoDID != "dod-restart-unified" || captured.LLMTarget == nil || captured.LLMTarget.ProviderID != "provider-restart-unified" || captured.SoulID != "soul-restart-unified" {
-		t.Fatalf("workspace run restart command = %+v", captured)
+	if captured.WorkspaceID != "ws-resume-scoped" || captured.RunID != "run-resume-scoped" || captured.Intent != string(RunCommandIntentResume) || captured.RequestID != "request-resume-scoped" {
+		t.Fatalf("resume command scope = %+v", captured)
 	}
-	if captured.SoulBindings["validation"] != "soul-validation-restart-unified" || len(captured.SkillIDs) != 1 || len(captured.MCPServerIDs) != 1 || len(captured.CapabilityIDs) != 1 || len(captured.MemoryIDs) != 1 {
-		t.Fatalf("workspace run activation contract = %+v", captured)
+	if captured.LLMTarget != nil || captured.GoalID != "" || captured.DoDID != "" || captured.SoulID != "" || len(captured.SkillIDs) != 0 || len(captured.SoulBindings) != 0 || len(captured.MCPServerIDs) != 0 || len(captured.CapabilityIDs) != 0 || len(captured.MemoryIDs) != 0 {
+		t.Fatalf("resume command carries activation override = %+v", captured)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -96,6 +97,36 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 	}
 	if result.Usage != nil {
 		t.Fatalf("usage = %+v, want nil when provider response has no usage", result.Usage)
+	}
+}
+
+func TestHTTPProviderCompleteCancelsConfiguredDeadline(t *testing.T) {
+	cancelled := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		// Drain the bounded JSON request before waiting for cancellation. The
+		// server otherwise keeps the client connection occupied by an unread
+		// request body, which masks the request-context cancellation being
+		// asserted here.
+		_, _ = io.Copy(io.Discard, r.Body)
+		_ = r.Body.Close()
+		<-r.Context().Done()
+		close(cancelled)
+	}))
+	defer server.Close()
+	provider := NewHTTPProvider(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		BaseURL:  server.URL + "/v1",
+		Model:    "test-model",
+		Timeout:  20 * time.Millisecond,
+	})
+	_, err := provider.Complete(context.Background(), llmProviderRequest())
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "timeout") {
+		t.Fatalf("completion error = %v, want configured deadline timeout", err)
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("provider request context was not cancelled after configured deadline")
 	}
 }
 

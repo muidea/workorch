@@ -1,27 +1,22 @@
 package activationports
 
 import (
-	"context"
-
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// ActiveRunProviderTargetStale reports whether a workspace-scoped resume must
-// create a new Runtime V2 activation because the desired provider/model target
-// differs from the target sealed into the existing Run.
-func ActiveRunProviderTargetStale(
-	ctx context.Context,
-	run *runmodel.Run,
-	requested *runtimecontract.ProviderModelTarget,
-	workspaceDefault *runtimecontract.ProviderModelTarget,
-) (bool, error) {
+// RejectActiveRunProviderTargetOverride preserves the Run's sealed provider
+// target. A workspace default is intentionally not an argument: it applies to
+// the next activation only and must never turn Resume into a replacement Run.
+// Even an equal target is rejected: Resume is scope-only and must not accept a
+// provider/model override channel that could later become a mutation path.
+func RejectActiveRunProviderTargetOverride(run *runmodel.Run, requested *runtimecontract.ProviderModelTarget) error {
 	if run == nil || run.RuntimeBootstrap == nil {
-		return true, nil
+		return common.ErrInvalidArgument
 	}
-	desired, err := configuredActivationProviderTarget(ctx, requested, workspaceDefault)
-	if err != nil {
-		return false, err
+	if requested == nil {
+		return nil
 	}
-	return !run.RuntimeBootstrap.Activation.ProviderTarget.Same(desired), nil
+	return common.ErrConflict
 }

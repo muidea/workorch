@@ -95,6 +95,45 @@ func TestApplyWorkspaceRuntimeViewRendersProgressAndActivity(t *testing.T) {
 	}
 }
 
+func TestRenderRuntimeProgressDisplaysPrerequisiteRefreshSeparately(t *testing.T) {
+	text := stripANSI(renderRuntimeProgressCompact(&backend.RuntimeV2ProgressInfo{
+		StateRevision: 8, CandidateAttemptCount: 0,
+		PrerequisiteRefreshState: "prerequisite_refreshing", PrerequisiteRefreshUsed: 1, PrerequisiteRefreshLimit: 3,
+		PrerequisiteInvalidations: []backend.RuntimePrerequisiteRefreshInvalidationInfo{{
+			Source: "owner_receipt_resource_change", OwnerModuleID: "file", ResourceDomain: "workspace_target", SubjectRef: "main.go",
+		}},
+	}, 160))
+	if !strings.Contains(text, "prerequisite refresh prerequisite_refreshing | 1/3") ||
+		!strings.Contains(text, "owner_receipt_resource_change | file | workspace_target:main.go") {
+		t.Fatalf("freshness display missing: %q", text)
+	}
+	if !strings.Contains(text, "candidate attempts 0") {
+		t.Fatalf("freshness was not kept separate from candidate attempts: %q", text)
+	}
+}
+
+func TestRenderRuntimeProgressKeepsProviderTransportFailureSeparateFromFreshness(t *testing.T) {
+	text := stripANSI(renderRuntimeProgressCompact(&backend.RuntimeV2ProgressInfo{
+		FailureClass:             "provider_transport",
+		FailureCode:              "deadline_exceeded",
+		FailureMessage:           "POST /v1/chat/completions: context deadline exceeded",
+		PrerequisiteRefreshState: "prerequisite_refreshing",
+		PrerequisiteRefreshUsed:  1,
+		PrerequisiteRefreshLimit: 3,
+		PrerequisiteInvalidations: []backend.RuntimePrerequisiteRefreshInvalidationInfo{{
+			Source: "execution_receipt_stale", OwnerModuleID: "llm", ResourceDomain: "provider_config", SubjectRef: "ai-proxy/model-a",
+		}},
+	}, 180))
+	if !strings.Contains(text, "prerequisite refresh prerequisite_refreshing | 1/3") ||
+		!strings.Contains(text, "execution_receipt_stale | llm | provider_config:ai-proxy/model-a") ||
+		!strings.Contains(text, "failure POST /v1/chat/completions: context deadline exceeded") {
+		t.Fatalf("runtime display conflated provider transport and freshness: %q", text)
+	}
+	if strings.Contains(text, "candidate attempts 1") {
+		t.Fatalf("transport/freshness display fabricated a candidate retry: %q", text)
+	}
+}
+
 func TestRuntimeViewFollowTailAndUserScrolledUnread(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-follow", "")
 	m.width = 120

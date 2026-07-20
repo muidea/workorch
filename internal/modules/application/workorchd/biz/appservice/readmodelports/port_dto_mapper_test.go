@@ -3,9 +3,11 @@ package readmodelports
 import (
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func mustPortEventPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
@@ -113,6 +115,22 @@ func TestPortWorkspaceSnapshotInfoPreservesTypedProjectionFields(t *testing.T) {
 	}
 }
 
+func TestPortRunInfoPreservesSealedTargetWithoutAliasing(t *testing.T) {
+	sealed := runtimecontract.ProviderModelTarget{ProviderID: "provider-read", ModelID: "model-read"}
+	got := PortRunInfo(appmodelcore.Run{
+		ID:              "run-read",
+		WorkspaceID:     "ws-read",
+		SealedLLMTarget: &sealed,
+	})
+	if got.SealedLLMTarget == nil || !got.SealedLLMTarget.Same(sealed) {
+		t.Fatalf("sealed target = %+v, want %+v", got.SealedLLMTarget, sealed)
+	}
+	got.SealedLLMTarget.ModelID = "mutated-port-value"
+	if sealed.ModelID != "model-read" {
+		t.Fatalf("port mapping aliases app model target: %+v", sealed)
+	}
+}
+
 func TestPortWorkspaceSnapshotInfoDoesNotFallbackToPayloadSummaryMap(t *testing.T) {
 	got := PortWorkspaceSnapshotInfo(readmodelcore.WorkspaceSnapshot{
 		EventRecords: []readmodelcore.EventRecord{{
@@ -123,5 +141,27 @@ func TestPortWorkspaceSnapshotInfoDoesNotFallbackToPayloadSummaryMap(t *testing.
 	})
 	if len(got.EventRecords) != 0 {
 		t.Fatalf("event records = %+v, want summary-only map record rejected", got.EventRecords)
+	}
+}
+
+func TestPortRuntimeV2ProgressPreservesPrerequisiteRefreshAudit(t *testing.T) {
+	got := portRuntimeV2ProgressInfo(&readmodelcore.RuntimeV2Progress{
+		PrerequisiteRefreshState: "prerequisite_refreshing", PrerequisiteRefreshUsed: 1, PrerequisiteRefreshLimit: 3,
+		PrerequisiteInvalidations: []readmodelcore.RuntimePrerequisiteRefreshInvalidation{{
+			Signature: "resource-change-1", Source: "owner_receipt_resource_change", OwnerModuleID: "file",
+			ResourceDomain: "workspace_target", SubjectRef: "main.go",
+			ResourceChanges: []readmodelcore.RuntimePrerequisiteResourceChange{{
+				OwnerModuleID: "file", ResourceDomain: "workspace_target", SubjectRef: "main.go", BeforeRevision: "v1", AfterRevision: "v2",
+			}},
+		}},
+	})
+	if got == nil || got.PrerequisiteRefreshState != "prerequisite_refreshing" || got.PrerequisiteRefreshUsed != 1 ||
+		got.PrerequisiteRefreshLimit != 3 || len(got.PrerequisiteInvalidations) != 1 {
+		t.Fatalf("runtime v2 refresh port = %+v", got)
+	}
+	invalidation := got.PrerequisiteInvalidations[0]
+	if invalidation.Source != "owner_receipt_resource_change" || invalidation.ResourceDomain != "workspace_target" ||
+		invalidation.SubjectRef != "main.go" || len(invalidation.ResourceChanges) != 1 || invalidation.ResourceChanges[0].AfterRevision != "v2" {
+		t.Fatalf("runtime v2 refresh source port = %+v", invalidation)
 	}
 }
