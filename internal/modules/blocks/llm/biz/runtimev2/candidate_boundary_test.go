@@ -128,6 +128,29 @@ func TestRequestCandidateRejectsFilePathAliasAsContractFailureBeforeDispatch(t *
 	}
 }
 
+func TestRequestCandidateClassifiesOutputLimitSchemaTruncation(t *testing.T) {
+	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
+	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+		return llmmodels.RuntimeCandidateGenerationResult{
+			Payload: []byte(`{"operations":[{"id":"patch-1"`), Status: llmmodels.RuntimeCandidateStatusCompleted,
+			Usage: &llmmodels.ProviderUsage{OutputTokens: 4096, TotalTokens: 24000},
+			Audit: &llmmodels.ProviderRequestAudit{
+				Status: llmmodels.RuntimeCandidateStatusCompleted, ProviderSubmitted: true,
+				ContextBudget: &llmmodels.ProviderContextBudget{EffectiveMaxOutputTokens: 4096},
+			},
+		}, nil
+	})
+	_, err := RequestCandidate(context.Background(), provider, request)
+	if err == nil {
+		t.Fatal("truncated candidate payload was accepted")
+	}
+	failure := CandidateFailureFromError(err)
+	if failure.Class != CandidateFailureClassSchema || failure.Code != "candidate_response_truncated" || failure.Signature != "candidate-response-truncated" ||
+		!strings.Contains(failure.Reason, "sealed output token limit") || !strings.Contains(strings.ToLower(failure.Reason), "unexpected eof") {
+		t.Fatalf("truncated candidate failure = %+v", failure)
+	}
+}
+
 func TestRequestCandidatePreservesTypedPrerequisiteStaleWithoutCandidateFailure(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
 	observation := runtimecontract.RuntimePrerequisiteObservation{

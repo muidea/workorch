@@ -27,7 +27,7 @@ func NormalizeRuntimeRejectedOperationShapes(values []RuntimeRejectedOperationSh
 	byHash := map[string]RuntimeRejectedOperationShape{}
 	for _, value := range values {
 		value.Operation = value.Operation.Normalized()
-		value.Hash = stableRuntimeOperationShape(value.Operation)
+		value.Hash = StableRuntimeOperationShape(value.Operation)
 		value.EvidenceID = common.EvidenceRecordID(strings.TrimSpace(string(value.EvidenceID)))
 		value.FailureClass = FailureClass(strings.TrimSpace(string(value.FailureClass)))
 		value.FailureCode = strings.TrimSpace(value.FailureCode)
@@ -50,139 +50,10 @@ func NormalizeRuntimeRejectedOperationShapes(values []RuntimeRejectedOperationSh
 	return nilIfEmpty(ret)
 }
 
-// ValidateCandidateAgainstRejectedShapes rejects candidates that only replay
-// still-active rejected operation shapes on the current focus.
-//
-// A rejected shape is active only when no later accepted evidence exists on the
-// same focus. Successful repair therefore clears the block and allows the same
-// validation/state-change shape to run again.
-//
-// Shape hashing stays domain-neutral but includes structural parameters that
-// distinguish corrected retries (args, oldText/newText/baseHash, dynamic input.*).
-func ValidateCandidateAgainstRejectedShapes(facts RuntimeFacts, completedDispatches []RuntimeDispatchRecord, candidateAttempts []RuntimeCandidateAttemptRecord, candidate RuntimeCandidate) error {
-	facts = facts.Normalized()
-	rejectedShapes := activeRejectedOperationShapeSet(facts, completedDispatches, candidateAttempts)
-	if len(rejectedShapes) == 0 {
-		return nil
-	}
-	operations := candidateRuntimeOperations(candidate)
-	if len(operations) == 0 {
-		return nil
-	}
-	replayCount := 0
-	for _, operation := range operations {
-		shape := stableRuntimeOperationShape(operation)
-		if _, ok := rejectedShapes[shape]; ok {
-			replayCount++
-		}
-	}
-	if replayCount == 0 {
-		return nil
-	}
-	if replayCount == len(operations) {
-		return fmt.Errorf("runtime candidate replays active rejected operation shape(s); change kind, targets, or structural parameters before retry")
-	}
-	return fmt.Errorf("runtime candidate includes %d operation(s) that replay active rejected shape(s); remove or rewrite those operations", replayCount)
-}
-
-// ActiveRejectedOperationShapes includes both rejected execution evidence and
-// owner feasibility rejections recorded before a dispatch is sealed. The latter
-// are candidate facts rather than evidence, but they are still exact rejected
-// operation shapes and must constrain attempt 1 for the same focus.
-func ActiveRejectedOperationShapes(facts RuntimeFacts, completedDispatches []RuntimeDispatchRecord, candidateAttempts []RuntimeCandidateAttemptRecord) []RuntimeRejectedOperationShape {
-	dispatchByID := make(map[string]RuntimeDispatchRecord, len(completedDispatches))
-	for _, dispatch := range completedDispatches {
-		dispatchByID[strings.TrimSpace(dispatch.ID)] = dispatch
-	}
-	latestAcceptedRevision := latestAcceptedEvidenceRevision(facts)
-	ret := make([]RuntimeRejectedOperationShape, 0, len(facts.Evidence.Rejected))
-	for _, evidence := range facts.Evidence.Rejected {
-		if !EvidenceAppliesToCurrentFocus(facts, evidence) {
-			continue
-		}
-		// Successful later progress supersedes earlier rejected shapes.
-		if latestAcceptedRevision != "" && !evidenceRevisionAfter(evidence.Revision, latestAcceptedRevision) {
-			continue
-		}
-		dispatch, ok := dispatchByID[strings.TrimSpace(evidence.DispatchID)]
-		if !ok {
-			continue
-		}
-		for _, operation := range candidateRuntimeOperations(dispatch.Candidate) {
-			if operation.Normalized().ID != strings.TrimSpace(evidence.OperationID) {
-				continue
-			}
-			ret = append(ret, RuntimeRejectedOperationShape{
-				Hash: stableRuntimeOperationShape(operation), Operation: operation.Normalized(), EvidenceID: evidence.ID,
-				FailureClass: evidence.FailureClass, FailureCode: evidence.FailureCode,
-				FailureSignature: evidence.FailureSignature, FailureMessage: evidence.FailureMessage,
-			})
-		}
-	}
-	// A later accepted current-focus evidence supersedes feasibility rejections
-	// exactly as it supersedes rejected execution evidence. An infeasible
-	// proposal remains active when it was created from the same evidence
-	// revision as the latest accepted fact (for example state-change followed by
-	// validation), and expires only after a later accepted repair.
-	for _, attempt := range candidateAttempts {
-		if attempt.State != RuntimeCandidateAttemptStateFailed || attempt.Failure == nil ||
-			attempt.Failure.Class != RuntimeCandidateFailureClassInfeasible ||
-			attempt.Transaction.FocusID != facts.Focus.ID || attempt.Proposal == nil ||
-			(latestAcceptedRevision != "" && attempt.Transaction.EvidenceRevision != latestAcceptedRevision && !evidenceRevisionAfter(attempt.Transaction.EvidenceRevision, latestAcceptedRevision)) {
-			continue
-		}
-		for _, feasibility := range attempt.Feasibilities {
-			if feasibility.Feasible || feasibility.Failure == nil {
-				continue
-			}
-			for _, operation := range candidateRuntimeOperations(*attempt.Proposal) {
-				if operation.Normalized().ID != strings.TrimSpace(feasibility.OperationID) {
-					continue
-				}
-				ret = append(ret, RuntimeRejectedOperationShape{
-					Hash: stableRuntimeOperationShape(operation), Operation: operation.Normalized(),
-					FailureClass: feasibility.Failure.Class, FailureCode: feasibility.Failure.Code,
-					FailureSignature: feasibility.Failure.Signature, FailureMessage: feasibility.Failure.Message,
-				})
-			}
-		}
-	}
-	return NormalizeRuntimeRejectedOperationShapes(ret)
-}
-
-func activeRejectedOperationShapeSet(facts RuntimeFacts, completedDispatches []RuntimeDispatchRecord, candidateAttempts []RuntimeCandidateAttemptRecord) map[string]struct{} {
-	ret := map[string]struct{}{}
-	for _, shape := range ActiveRejectedOperationShapes(facts, completedDispatches, candidateAttempts) {
-		ret[shape.Hash] = struct{}{}
-	}
-	return ret
-}
-
-func latestAcceptedEvidenceRevision(facts RuntimeFacts) string {
-	latest := ""
-	for _, evidence := range facts.Evidence.Accepted {
-		if !EvidenceAppliesToCurrentFocus(facts, evidence) {
-			continue
-		}
-		if latest == "" || evidenceRevisionAfter(evidence.Revision, latest) {
-			latest = evidence.Revision
-		}
-	}
-	return latest
-}
-
-func candidateRuntimeOperations(candidate RuntimeCandidate) []RuntimeOperation {
-	switch {
-	case candidate.StateChange != nil:
-		return stateChangingRuntimeOperations(candidate.StateChange.Operations)
-	case candidate.Validation != nil:
-		return validationRuntimeOperations(candidate.Validation.Operations)
-	default:
-		return nil
-	}
-}
-
-func stableRuntimeOperationShape(operation RuntimeOperation) string {
+// StableRuntimeOperationShape derives the domain-neutral identity of an operation.
+// It is a pure contract helper: callers decide whether a matching shape is active
+// or admissible in their own owner state machine.
+func StableRuntimeOperationShape(operation RuntimeOperation) string {
 	operation = operation.Normalized()
 	h := sha256.New()
 	writeHashString(h, operation.Kind)
@@ -301,71 +172,4 @@ func operationShapeTargets(operation RuntimeOperation) []string {
 	add(operationStringParameter(operation.Parameters, "path"))
 	sort.Strings(ret)
 	return ret
-}
-
-// ValidateCandidateAgainstMissingValidationGap rejects state-changing retries when
-// the only remaining required evidence kind is validation and accepted state_change
-// evidence already exists. This is domain-neutral evidence routing.
-func ValidateCandidateAgainstMissingValidationGap(facts RuntimeFacts, decision RuntimeDecision, candidate RuntimeCandidate) error {
-	facts = facts.Normalized()
-	if decision.Action != RuntimeActionProduceStateChange {
-		return nil
-	}
-	// INV-05: anti-replay must not switch action when a repair directive requires state-change.
-	if facts.RepairDirective != nil && facts.RepairDirective.FocusID == facts.Focus.ID &&
-		facts.RepairDirective.RequiredAction == RuntimeActionProduceStateChange {
-		return nil
-	}
-	missing := MissingRequiredEvidenceKinds(facts)
-	if !(len(missing) == 1 && missing[0] == EvidenceKindValidation) {
-		return nil
-	}
-	hasAcceptedStateChange := false
-	for _, evidence := range facts.Evidence.Accepted {
-		if evidenceAppliesToFocus(facts.Focus, evidence) && evidence.Kind == EvidenceKindStateChange {
-			hasAcceptedStateChange = true
-			break
-		}
-	}
-	if !hasAcceptedStateChange {
-		return nil
-	}
-	// Only block when latest focus-local failure is itself a state_change rejection.
-	// Validation failures should not permanently ban state_change if a later repair
-	// decision intentionally requests it; the missing-only-validation case with a
-	// recent state_change failure is the empty-retry pattern we stop.
-	if !latestFocusFailureIsStateChange(facts) {
-		return nil
-	}
-	if len(candidateRuntimeOperations(candidate)) == 0 {
-		return nil
-	}
-	return fmt.Errorf("runtime candidate continues state-changing retries while only validation evidence is missing; produce_validation instead")
-}
-
-func latestFocusFailureIsStateChange(facts RuntimeFacts) bool {
-	latestRevision := ""
-	isStateChange := false
-	for _, evidence := range facts.Evidence.Rejected {
-		if !evidenceAppliesToFocus(facts.Focus, evidence) {
-			continue
-		}
-		if evidence.Kind != EvidenceKindStateChange {
-			continue
-		}
-		if latestRevision == "" || evidenceRevisionAfter(evidence.Revision, latestRevision) {
-			latestRevision = evidence.Revision
-			isStateChange = true
-		}
-	}
-	// If a later rejected validation exists, state-change is not the latest failure class.
-	for _, evidence := range facts.Evidence.Rejected {
-		if !evidenceAppliesToFocus(facts.Focus, evidence) || evidence.Kind != EvidenceKindValidation {
-			continue
-		}
-		if latestRevision == "" || evidenceRevisionAfter(evidence.Revision, latestRevision) {
-			return false
-		}
-	}
-	return isStateChange
 }

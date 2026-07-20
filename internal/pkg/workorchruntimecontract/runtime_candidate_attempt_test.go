@@ -1,6 +1,9 @@
 package workorchruntimecontract
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRuntimeCandidateAttemptScopeValidationRequiresExplicitContractAndRejectsDuplicate(t *testing.T) {
 	facts := testRuntimeFacts()
@@ -72,5 +75,30 @@ func TestRuntimeCandidateFeasibilityRecordValidationRejectsAmbiguousOrAcceptedLe
 	}
 	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, []RuntimeCandidateAttemptRecord{attempt}); err == nil {
 		t.Fatal("accepted candidate attempt retained an unsealed feasibility ledger")
+	}
+}
+
+func TestRuntimeStateRecordRejectsTerminalDecisionWithPendingCandidateAttempt(t *testing.T) {
+	facts := testRuntimeFacts()
+	decision := validDecisionForState(ConvergenceStateFailed)
+	transaction := decision.AuthorityTransaction()
+	record := RuntimeStateRecord{
+		SchemaVersion: RuntimeStateSchemaVersionCurrent,
+		StateRevision: 1,
+		Definition: RuntimeDefinitionContext{
+			Revision: facts.DefinitionRevision, GoalID: "goal-1", GoalDefinition: "goal",
+			DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/write"},
+		},
+		Facts: facts, Decision: decision,
+		CandidateAttempts: []RuntimeCandidateAttemptRecord{{
+			AuthorityContractID: StableAuthorityContractID(facts.WorkspaceID, facts.RunID, transaction),
+			Transaction:         transaction,
+			Attempt:             0,
+			StablePrefixHash:    "stable-prefix",
+			State:               RuntimeCandidateAttemptStatePending,
+		}},
+	}
+	if err := record.Validate(); err == nil || !strings.Contains(err.Error(), "terminal runtime state cannot retain a pending candidate attempt") {
+		t.Fatalf("terminal runtime state with pending candidate attempt err=%v", err)
 	}
 }

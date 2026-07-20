@@ -686,6 +686,114 @@ func TestRuntimeV2MainlineRestartsFromPersistedCandidateProposalWithoutProviderR
 	}
 }
 
+func TestRuntimeV2MainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	runs := memory.NewRunRepository()
+	if err := runs.Create(ctx, runtimeV2RunForTest(common.RunStateActive, runtimeV2Definition())); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+
+	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	repository := runtimeV2StateRepository{hub: hub}
+	if err := biz.ConfigureRuntimeV2Repository(repository); err != nil {
+		t.Fatal(err)
+	}
+	initialized, err := biz.InitializeRuntimeV2(ctx, runtimeV2Aggregate(t, 1).Facts, runtimeV2Definition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayedOperation := runtimecontract.RuntimeOperation{
+		ID: "replayed-edit", Kind: runtimecontract.StepKindFileEdit,
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"},
+		Parameters: runtimeV2FileEditParameters("target.txt"),
+	}
+	rejectedCandidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: replayedOperation}}}}
+	previousDispatch, err := runtimev2.SealDispatchWithActivation(initialized.Decision, rejectedCandidate, initialized.Facts.Activation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousDispatch.State = runtimev2.DispatchStateCommitted
+	seeded := initialized
+	seeded.CompletedDispatches = []runtimev2.SealedDispatch{previousDispatch}
+	seeded.Facts.Evidence.Rejected = []runtimecontract.EvidenceFact{{
+		ID: "rejected-edit", Kind: runtimecontract.EvidenceKindStateChange, DispatchID: previousDispatch.ID, OperationID: replayedOperation.ID,
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Revision: "evidence-v2-00000000000000000001",
+		FailureClass: runtimecontract.FailureClassCandidateContractFailure, FailureCode: "base_mismatch", FailureSignature: "rejected-edit",
+	}}
+	seeded.Facts.EvidenceRevision = "evidence-v2-00000000000000000001"
+	// The current authority must be sealed against the updated evidence lineage;
+	// the rejected dispatch itself remains history, never an active candidate.
+	seeded.Facts, seeded.Decision, err = runtimev2.ReduceRuntimeStateWithDirective(seeded.Facts, &initialized.Decision.AuthoritySnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seeded.StateRevision++
+	if err := repository.Save(ctx, seeded, initialized.StateRevision); err != nil {
+		t.Fatal(err)
+	}
+
+	var requests []orchestratorevents.RequestRuntimeCandidateCommand
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		requests = append(requests, command)
+		candidate := runtimecontract.RuntimeCandidate{}
+		if command.CandidateAttempt == 0 {
+			newOperation := replayedOperation
+			newOperation.ID = "new-edit"
+			newText := "corrected"
+			newOperation.Parameters = runtimeV2FileEditParameters("target.txt")
+			newOperation.Parameters[2].String = &newText
+			candidate.StateChange = &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: replayedOperation}, {Operation: newOperation}}}
+		} else {
+			if command.PreviousFailure == nil || command.PreviousFailure.Code != "candidate_partially_replays_rejected_shape" {
+				t.Errorf("retry missing typed partial replay failure: %+v", command.PreviousFailure)
+			}
+			corrected := replayedOperation
+			corrected.ID = "corrected-edit"
+			newText := "corrected"
+			corrected.Parameters = runtimeV2FileEditParameters("target.txt")
+			corrected.Parameters[2].String = &newText
+			candidate.StateChange = &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: corrected}}}
+		}
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: candidate}, nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+
+	module := newTestBiz(biz, hub, nil)
+	first, err := module.requestAndSealRuntimeV2Candidate(ctx, seeded, "partial-replay-prefix", 0)
+	if err != nil || len(requests) != 1 || len(first.CandidateAttempts) != 1 || first.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.CandidateAttempts[0].Failure == nil || first.CandidateAttempts[0].Failure.Code != "candidate_partially_replays_rejected_shape" || first.Decision.Action == runtimecontract.RuntimeActionFail {
+		t.Fatalf("partial replay did not atomically close attempt 0 before restart: aggregate=%+v err=%v requests=%+v", first, err, requests)
+	}
+	restarted, err := biz.LoadRuntimeV2(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := module.requestAndSealRuntimeV2CandidateWithRetry(ctx, restarted, "partial-replay-prefix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(requests) != 2 || sealed.ActiveDispatch == nil || len(sealed.CandidateAttempts) != 2 ||
+		sealed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || sealed.CandidateAttempts[0].Failure == nil ||
+		sealed.CandidateAttempts[0].Failure.Code != "candidate_partially_replays_rejected_shape" ||
+		sealed.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStateAccepted || sealed.Decision.Action == runtimecontract.RuntimeActionFail {
+		t.Fatalf("partial replay did not converge through typed retry: requests=%+v aggregate=%+v", requests, sealed)
+	}
+	if requests[0].StablePrefixHash != requests[1].StablePrefixHash || requests[0].Transaction != requests[1].Transaction {
+		t.Fatalf("partial replay retry drifted the sealed request contract: %+v", requests)
+	}
+}
+
 func TestRuntimeV2MainlineRestartSkipsPersistedFeasibilityProbe(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)

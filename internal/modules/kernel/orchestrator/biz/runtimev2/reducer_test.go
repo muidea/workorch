@@ -485,6 +485,39 @@ func TestReduceRuntimeStatePrerequisiteRefreshExhaustionOverridesPendingReacquis
 	}
 }
 
+func TestReduceRuntimeStateDeterminedTerminalFailureOverridesFreshnessReacquisition(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		failureClass runtimecontract.FailureClass
+		terminalCode string
+	}{
+		{name: "candidate retry exhausted", failureClass: runtimecontract.FailureClassCandidateExhausted, terminalCode: "candidate_retry_exhausted"},
+		{name: "runtime contract defect", failureClass: runtimecontract.FailureClassRuntimeContractMisalignment, terminalCode: "runtime_contract_defect"},
+		{name: "governance rejected", failureClass: runtimecontract.FailureClassGovernanceRejected, terminalCode: "governance_rejected"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			facts := validationFacts()
+			facts.Prerequisites.Pending = []runtimecontract.RuntimePrerequisite{{
+				ID: "manifest:blocks/file", Kind: runtimecontract.PrerequisiteKindManifest,
+				OwnerModuleID: runtimecontract.RuntimeModuleFile, Reason: "fresh manifest required",
+			}}
+			facts.FreshnessReacquireCoverage = []common.CoverageWorkItemID{"cwi-1"}
+			facts.Failure = &runtimecontract.FailureFact{
+				Class: tt.failureClass, Code: tt.terminalCode, Signature: tt.terminalCode,
+				Message: "determined failure must close the current authority",
+			}
+
+			decision, err := ReduceRuntimeState(facts, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != tt.terminalCode {
+				t.Fatalf("decision = %+v, want terminal %s", decision, tt.terminalCode)
+			}
+		})
+	}
+}
+
 func validationFacts() runtimecontract.RuntimeFacts {
 	return runtimecontract.RuntimeFacts{
 		Activation:         runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},

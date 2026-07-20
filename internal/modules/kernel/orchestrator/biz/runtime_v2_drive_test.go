@@ -2446,6 +2446,10 @@ func TestDriveRuntimeV2CandidateFailureStopsAfterSameContractRetry(t *testing.T)
 	module := newRuntimeV2DriveTestModule(t, hub)
 	facts := runtimeV2Aggregate(t, 1).Facts
 	facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindDecisionRequest}
+	// Live-equivalent shape: an accepted durable operation invalidated mutable
+	// prerequisite observations, so freshness reacquisition debt remains while a
+	// later candidate contract consumes its bounded attempt 0/1 budget.
+	facts.FreshnessReacquireCoverage = append([]common.CoverageWorkItemID(nil), facts.Focus.CoverageWorkItemIDs...)
 	if _, err := module.bizPtr.InitializeRuntimeV2(ctx, facts, bootstrap.Definition, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -2460,7 +2464,8 @@ func TestDriveRuntimeV2CandidateFailureStopsAfterSameContractRetry(t *testing.T)
 		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
 			Transaction: command.Transaction,
 			Failure: &runtimecontract.RuntimeCandidateFailure{
-				Class: runtimecontract.RuntimeCandidateFailureClassProvider, Reason: "provider unavailable",
+				Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_response_truncated",
+				Signature: "candidate-response-truncated", Reason: "provider response ended before candidate JSON completed: unexpected EOF",
 			},
 		}, nil)
 	})
@@ -2479,7 +2484,8 @@ func TestDriveRuntimeV2CandidateFailureStopsAfterSameContractRetry(t *testing.T)
 		t.Fatalf("completed=%+v requestCount=%d, want bounded terminal after two requests", completed, requestCount)
 	}
 	if len(requests) != 2 || requests[0].PreviousFailure != nil || requests[1].PreviousFailure == nil ||
-		requests[1].PreviousFailure.Class != runtimecontract.RuntimeCandidateFailureClassProvider || requests[1].PreviousFailure.Reason != "provider unavailable" {
+		requests[1].PreviousFailure.Class != runtimecontract.RuntimeCandidateFailureClassSchema || requests[1].PreviousFailure.Code != "candidate_response_truncated" ||
+		requests[1].PreviousFailure.Signature != "candidate-response-truncated" || requests[1].PreviousFailure.Reason != "provider response ended before candidate JSON completed: unexpected EOF" {
 		t.Fatalf("candidate retry did not carry the persisted first failure: %+v", requests)
 	}
 }

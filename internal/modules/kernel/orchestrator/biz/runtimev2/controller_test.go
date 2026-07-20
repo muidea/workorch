@@ -503,6 +503,81 @@ func TestRuntimeControllerCandidateRetryIsPersistedAndLimitedToTwoAttempts(t *te
 	}
 }
 
+func TestRuntimeControllerCandidateRetryExhaustionClosesAtomicallyWithFreshnessDebt(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid", Reason: "unexpected EOF",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	repository.aggregate.Facts.FreshnessReacquireCoverage = append([]common.CoverageWorkItemID(nil), repository.aggregate.Facts.Focus.CoverageWorkItemIDs...)
+	savesBeforeFailure := repository.saves
+
+	terminal, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid", Reason: "unexpected EOF",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repository.saves != savesBeforeFailure+1 {
+		t.Fatalf("attempt failure saves = %d, want one atomic save after %d", repository.saves, savesBeforeFailure)
+	}
+	if terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "candidate_retry_exhausted" || hasPendingCandidateAttempt(terminal.CandidateAttempts) {
+		t.Fatalf("attempt 1 failure did not atomically close terminal authority: %+v", terminal)
+	}
+	last := terminal.CandidateAttempts[len(terminal.CandidateAttempts)-1]
+	if last.Attempt != 1 || last.State != runtimecontract.RuntimeCandidateAttemptStateFailed || last.Failure == nil || last.Failure.Code != "candidate_schema_invalid" {
+		t.Fatalf("attempt 1 record = %+v", last)
+	}
+}
+
+func TestRuntimeControllerTerminalDriveFailureClosesPendingCandidateWithFreshnessDebt(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	repository.aggregate.Facts.FreshnessReacquireCoverage = append([]common.CoverageWorkItemID(nil), repository.aggregate.Facts.Focus.CoverageWorkItemIDs...)
+	savesBeforeFailure := repository.saves
+
+	terminal, err := controller.RecordFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_v2_drive_failed",
+		Signature: "runtime-v2-drive-failed", Message: "candidate transaction could not be closed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repository.saves != savesBeforeFailure+1 {
+		t.Fatalf("drive failure saves = %d, want one atomic save after %d", repository.saves, savesBeforeFailure)
+	}
+	if terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "runtime_contract_defect" || hasPendingCandidateAttempt(terminal.CandidateAttempts) {
+		t.Fatalf("drive failure did not close terminal authority and candidate transaction: %+v", terminal)
+	}
+	attempt := terminal.CandidateAttempts[len(terminal.CandidateAttempts)-1]
+	if attempt.State != runtimecontract.RuntimeCandidateAttemptStateFailed || attempt.Failure == nil || attempt.Failure.Class != runtimecontract.RuntimeCandidateFailureClassInternal || attempt.Failure.Code != "runtime_v2_drive_failed" {
+		t.Fatalf("terminal candidate closure = %+v", attempt)
+	}
+}
+
 func TestRuntimeControllerReopensInvalidatedAttemptZeroWithoutCandidateDebt(t *testing.T) {
 	aggregate := stateChangeAggregate(t)
 	transaction := aggregate.Decision.AuthorityTransaction()

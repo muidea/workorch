@@ -147,6 +147,12 @@ func (r RuntimeStateRecord) Validate() error {
 	if err := ValidateRuntimeCandidateAttemptRecordsForScope(r.Facts.WorkspaceID, r.Facts.RunID, r.CandidateAttempts); err != nil {
 		return err
 	}
+	if isTerminalRuntimeDecision(r.Decision) && hasPendingRuntimeCandidateAttempt(r.CandidateAttempts) {
+		return fmt.Errorf("terminal runtime state cannot retain a pending candidate attempt")
+	}
+	if hasUnreducedCurrentCandidateRetryFailure(r.Decision, r.CandidateAttempts) {
+		return fmt.Errorf("current runtime authority retains a failed candidate attempt 1 without reducer transition")
+	}
 	for _, attempt := range r.CandidateAttempts {
 		// A pending proposal is the exact candidate that can be resumed into the
 		// feasibility gate. Validate it again at aggregate load so corrupted
@@ -291,6 +297,33 @@ func (r RuntimeStateRecord) Validate() error {
 		}
 	}
 	return nil
+}
+
+func isTerminalRuntimeDecision(decision RuntimeDecision) bool {
+	return decision.Action == RuntimeActionComplete || decision.Action == RuntimeActionFail || decision.Terminal != nil
+}
+
+func hasPendingRuntimeCandidateAttempt(values []RuntimeCandidateAttemptRecord) bool {
+	for _, value := range values {
+		if value.State == RuntimeCandidateAttemptStatePending {
+			return true
+		}
+	}
+	return false
+}
+
+// hasUnreducedCurrentCandidateRetryFailure identifies the only illegal
+// half-closed retry state: attempt 1 failed while the same authority still
+// requests its original candidate. A valid exhaustion or repair transition
+// must re-reduce facts and therefore seal a different authority decision.
+func hasUnreducedCurrentCandidateRetryFailure(decision RuntimeDecision, values []RuntimeCandidateAttemptRecord) bool {
+	current := decision.AuthorityTransaction()
+	for _, value := range values {
+		if value.Attempt == 1 && value.State == RuntimeCandidateAttemptStateFailed && SameAuthorityContract(value.Transaction, current) {
+			return true
+		}
+	}
+	return false
 }
 
 func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptRecord) error {

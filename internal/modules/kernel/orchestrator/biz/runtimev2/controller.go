@@ -17,6 +17,14 @@ type RuntimeController struct {
 	dispatch   *DispatchCoordinator
 }
 
+// CandidateAdmissionCommitResult couples the persisted aggregate with the
+// expected, typed admission outcome. Callers must branch on Admission rather
+// than parse an error message.
+type CandidateAdmissionCommitResult struct {
+	Aggregate RuntimeAggregate
+	Admission CandidateAdmissionResult
+}
+
 func NewRuntimeController(repository RuntimeStateRepository) (*RuntimeController, error) {
 	if repository == nil {
 		return nil, common.ErrInvalidArgument
@@ -132,6 +140,9 @@ func (c *RuntimeController) RecordFeasibilityFact(ctx context.Context, workspace
 	aggregate.Facts = facts
 	aggregate.Decision = decision
 	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
 	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -163,7 +174,11 @@ func (c *RuntimeController) RecordFailureFact(ctx context.Context, workspaceID c
 	}
 	aggregate.Facts = facts
 	aggregate.Decision = decision
+	closePendingCandidateAttemptsForTerminal(&aggregate, fact)
 	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
 	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -326,45 +341,65 @@ func (c *RuntimeController) BeginCandidateAttempt(ctx context.Context, workspace
 	return aggregate, nil
 }
 
-// RecordCandidateProposal persists a schema-valid provider proposal before the
-// feasibility probe. A restart can then reuse this exact proposal without a
-// second provider request or an extra candidate attempt.
-func (c *RuntimeController) RecordCandidateProposal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimecontract.RuntimeCandidate) (RuntimeAggregate, error) {
+// AdmitCandidateProposal atomically persists a candidate proposal or closes the
+// pending attempt with its typed admission rejection. A restart therefore never
+// observes a rejected provider candidate as an open SM-3 transaction.
+func (c *RuntimeController) AdmitCandidateProposal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimecontract.RuntimeCandidate) (CandidateAdmissionCommitResult, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
+		return CandidateAdmissionCommitResult{}, common.ErrInvalidArgument
 	}
 	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
 	if err != nil {
-		return RuntimeAggregate{}, err
+		return CandidateAdmissionCommitResult{}, err
 	}
 	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
 	idx, record, ok := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
 	if !ok {
-		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d is not pending", common.ErrConflict, attempt)
+		if duplicate, found := duplicateRejectedCandidateAdmission(aggregate, attempt, candidate); found {
+			return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: duplicate}, nil
+		}
+		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: candidate attempt %d is not pending", common.ErrConflict, attempt)
 	}
-	if err := candidate.ValidateWithActivation(aggregate.Decision, aggregate.Facts.Activation); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := runtimecontract.ValidateCandidateAgainstRejectedShapes(aggregate.Facts, sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches), aggregate.CandidateAttempts, candidate); err != nil {
-		return RuntimeAggregate{}, err
+	admission := EvaluateCandidateAdmission(aggregate, candidate)
+	if !admission.Accepted() {
+		expectedRevision := aggregate.StateRevision
+		// A structurally valid rejected proposal is useful durable diagnostics and
+		// allows the next attempt to explain exactly what was rejected. Invalid
+		// candidates cannot be persisted because state validation must remain
+		// schema-safe even after a failed attempt.
+		if candidate.ValidateWithActivation(aggregate.Decision, aggregate.Facts.Activation) == nil {
+			proposal := candidate
+			aggregate.CandidateAttempts[idx].Proposal = &proposal
+		}
+		if err := closeCandidateAttempt(&aggregate, idx, attempt, *admission.Failure); err != nil {
+			return CandidateAdmissionCommitResult{}, err
+		}
+		aggregate.StateRevision++
+		if err := aggregate.Validate(); err != nil {
+			return CandidateAdmissionCommitResult{}, err
+		}
+		if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+			return CandidateAdmissionCommitResult{}, err
+		}
+		return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: admission}, nil
 	}
 	if record.Proposal != nil {
 		if runtimecontract.StableRuntimeCandidateHash(*record.Proposal) != runtimecontract.StableRuntimeCandidateHash(candidate) {
-			return RuntimeAggregate{}, fmt.Errorf("%w: pending candidate attempt proposal changed", common.ErrConflict)
+			return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: pending candidate attempt proposal changed", common.ErrConflict)
 		}
-		return aggregate, nil
+		return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: admission}, nil
 	}
 	expectedRevision := aggregate.StateRevision
 	proposal := candidate
 	aggregate.CandidateAttempts[idx].Proposal = &proposal
 	aggregate.StateRevision++
 	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
+		return CandidateAdmissionCommitResult{}, err
 	}
 	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
-		return RuntimeAggregate{}, err
+		return CandidateAdmissionCommitResult{}, err
 	}
-	return aggregate, nil
+	return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: admission}, nil
 }
 
 // RecordCandidateFeasibility persists one completed, side-effect-free owner
@@ -442,37 +477,63 @@ func candidateProposalContainsOperation(candidate runtimecontract.RuntimeCandida
 	return false
 }
 
-func (c *RuntimeController) AcceptCandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimecontract.RuntimeCandidate) (RuntimeAggregate, error) {
+// AdmitAndSealCandidateAttempt is the final SM-3 admission fence. It atomically
+// closes an expected rejection or atomically accepts the attempt and seals its
+// dispatch. Feasibility/invariant defects remain ordinary errors because they
+// are not provider-correctable candidate outcomes.
+func (c *RuntimeController) AdmitAndSealCandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimecontract.RuntimeCandidate) (CandidateAdmissionCommitResult, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
+		return CandidateAdmissionCommitResult{}, common.ErrInvalidArgument
 	}
 	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
 	if err != nil {
-		return RuntimeAggregate{}, err
+		return CandidateAdmissionCommitResult{}, err
 	}
 	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
 	idx, record, ok := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
 	if !ok {
-		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d is not pending", common.ErrConflict, attempt)
+		if duplicate, found := duplicateRejectedCandidateAdmission(aggregate, attempt, candidate); found {
+			return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: duplicate}, nil
+		}
+		if acceptedCandidateAdmissionDuplicate(aggregate, attempt, candidate) {
+			return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: acceptedCandidateAdmission()}, nil
+		}
+		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: candidate attempt %d is not pending", common.ErrConflict, attempt)
 	}
-	if err := runtimecontract.ValidateCandidateAgainstRejectedShapes(aggregate.Facts, sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches), aggregate.CandidateAttempts, candidate); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := runtimecontract.ValidateCandidateAgainstMissingValidationGap(aggregate.Facts, aggregate.Decision, candidate); err != nil {
-		return RuntimeAggregate{}, err
+	admission := EvaluateCandidateAdmission(aggregate, candidate)
+	if !admission.Accepted() {
+		expectedRevision := aggregate.StateRevision
+		// Final admission may be reached directly after a restart or alternate
+		// owner probe. Preserve a schema-valid rejected candidate here too, so
+		// duplicate delivery has the same durable identity as proposal admission.
+		if candidate.ValidateWithActivation(aggregate.Decision, aggregate.Facts.Activation) == nil {
+			proposal := candidate
+			aggregate.CandidateAttempts[idx].Proposal = &proposal
+		}
+		if err := closeCandidateAttempt(&aggregate, idx, attempt, *admission.Failure); err != nil {
+			return CandidateAdmissionCommitResult{}, err
+		}
+		aggregate.StateRevision++
+		if err := aggregate.Validate(); err != nil {
+			return CandidateAdmissionCommitResult{}, err
+		}
+		if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+			return CandidateAdmissionCommitResult{}, err
+		}
+		return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: admission}, nil
 	}
 	if err := validateCandidateAdmissionFeasibility(aggregate.Facts, candidate, record); err != nil {
-		return RuntimeAggregate{}, err
+		return CandidateAdmissionCommitResult{}, err
 	}
 	dispatch, err := SealDispatchWithActivation(aggregate.Decision, candidate, aggregate.Facts.Activation)
 	if err != nil {
-		return RuntimeAggregate{}, err
+		return CandidateAdmissionCommitResult{}, err
 	}
 	if record.Transaction != dispatch.Transaction || aggregate.ActiveDispatch != nil {
-		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt does not match current dispatch state", common.ErrConflict)
+		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: candidate attempt does not match current dispatch state", common.ErrConflict)
 	}
 	if record.Proposal != nil && runtimecontract.StableRuntimeCandidateHash(*record.Proposal) != runtimecontract.StableRuntimeCandidateHash(candidate) {
-		return RuntimeAggregate{}, fmt.Errorf("%w: accepted candidate does not match the persisted proposal", common.ErrConflict)
+		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: accepted candidate does not match the persisted proposal", common.ErrConflict)
 	}
 	expectedRevision := aggregate.StateRevision
 	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateAccepted
@@ -481,12 +542,12 @@ func (c *RuntimeController) AcceptCandidateAttempt(ctx context.Context, workspac
 	aggregate.ActiveDispatch = &dispatch
 	aggregate.StateRevision++
 	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
+		return CandidateAdmissionCommitResult{}, err
 	}
 	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
-		return RuntimeAggregate{}, err
+		return CandidateAdmissionCommitResult{}, err
 	}
-	return aggregate, nil
+	return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: admission}, nil
 }
 
 // validateCandidateAdmissionFeasibility is the final write-side fence for
@@ -567,6 +628,25 @@ func (c *RuntimeController) FailCandidateAttempt(ctx context.Context, workspaceI
 		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d is not pending", common.ErrConflict, attempt)
 	}
 	expectedRevision := aggregate.StateRevision
+	if err := closeCandidateAttempt(&aggregate, idx, attempt, failure); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return aggregate, nil
+}
+
+// closeCandidateAttempt applies the only failed exit from a pending SM-3
+// candidate attempt. Its caller owns the aggregate CAS boundary.
+func closeCandidateAttempt(aggregate *RuntimeAggregate, idx, attempt int, failure runtimecontract.RuntimeCandidateFailure) error {
+	if aggregate == nil || idx < 0 || idx >= len(aggregate.CandidateAttempts) || failure.Class == "" || strings.TrimSpace(failure.Reason) == "" {
+		return common.ErrInvalidArgument
+	}
 	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateFailed
 	failureCopy := failure
 	aggregate.CandidateAttempts[idx].Failure = &failureCopy
@@ -591,19 +671,40 @@ func (c *RuntimeController) FailCandidateAttempt(ctx context.Context, workspaceI
 	if needsReduce {
 		facts, decision, reduceErr := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
 		if reduceErr != nil {
-			return RuntimeAggregate{}, reduceErr
+			return reduceErr
 		}
 		aggregate.Facts = facts
 		aggregate.Decision = decision
 	}
-	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
+	return nil
+}
+
+// closePendingCandidateAttemptsForTerminal closes any in-flight SM-3 request
+// when an SM-2/SM-4 failure fact has already sealed terminal authority. This is
+// part of the same aggregate CAS: a terminal Run must never persist an open
+// provider transaction that a restart could replay.
+func closePendingCandidateAttemptsForTerminal(aggregate *RuntimeAggregate, fact runtimecontract.FailureFact) {
+	if aggregate == nil || (aggregate.Decision.Action != runtimecontract.RuntimeActionFail && aggregate.Decision.Action != runtimecontract.RuntimeActionComplete && aggregate.Decision.Terminal == nil) {
+		return
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
-		return RuntimeAggregate{}, err
+	failure := runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassInternal, Code: strings.TrimSpace(fact.Code),
+		Signature: strings.TrimSpace(fact.Signature), Reason: strings.TrimSpace(fact.Message),
 	}
-	return aggregate, nil
+	if failure.Code == "" {
+		failure.Code = "runtime_terminal_failure"
+	}
+	if failure.Signature == "" {
+		failure.Signature = failure.Code
+	}
+	for idx := range aggregate.CandidateAttempts {
+		if aggregate.CandidateAttempts[idx].State != runtimecontract.RuntimeCandidateAttemptStatePending {
+			continue
+		}
+		failureCopy := failure
+		aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateFailed
+		aggregate.CandidateAttempts[idx].Failure = &failureCopy
+	}
 }
 
 func candidateAttemptsForContract(values []runtimecontract.RuntimeCandidateAttemptRecord, workspaceID common.WorkspaceID, runID common.RunID, contractID string) []runtimecontract.RuntimeCandidateAttemptRecord {
@@ -632,6 +733,49 @@ func pendingCandidateAttempt(values []runtimecontract.RuntimeCandidateAttemptRec
 		}
 	}
 	return -1, runtimecontract.RuntimeCandidateAttemptRecord{}, false
+}
+
+// duplicateRejectedCandidateAdmission identifies a completed expected rejection
+// by its durable candidate/failure identity. It deliberately performs no write:
+// a duplicated provider delivery must observe the original SM-3 result, not
+// consume another attempt or reconstruct authority from the current decision.
+func duplicateRejectedCandidateAdmission(aggregate RuntimeAggregate, attempt int, candidate runtimecontract.RuntimeCandidate) (CandidateAdmissionResult, bool) {
+	candidateHash := runtimecontract.StableRuntimeCandidateHash(candidate)
+	for _, record := range aggregate.CandidateAttempts {
+		if record.Attempt != attempt || record.State != runtimecontract.RuntimeCandidateAttemptStateFailed || record.Failure == nil {
+			continue
+		}
+		if record.Proposal != nil {
+			if runtimecontract.StableRuntimeCandidateHash(*record.Proposal) != candidateHash {
+				continue
+			}
+		} else if record.Failure.Code != candidateAdmissionCodeInvalid || candidate.ValidateWithActivation(aggregate.Decision, aggregate.Facts.Activation) == nil || record.Failure.Signature != candidateAdmissionInvalidSignature(candidate) {
+			continue
+		}
+		failure := *record.Failure
+		return CandidateAdmissionResult{Disposition: CandidateAdmissionRejectedContract, Failure: &failure}, true
+	}
+	return CandidateAdmissionResult{}, false
+}
+
+// acceptedCandidateAdmissionDuplicate proves that an already sealed candidate
+// is the same delivery. The dispatch candidate hash is the durable seal fence.
+func acceptedCandidateAdmissionDuplicate(aggregate RuntimeAggregate, attempt int, candidate runtimecontract.RuntimeCandidate) bool {
+	wanted := runtimecontract.StableRuntimeCandidateHash(candidate)
+	for _, record := range aggregate.CandidateAttempts {
+		if record.Attempt != attempt || record.State != runtimecontract.RuntimeCandidateAttemptStateAccepted {
+			continue
+		}
+		if aggregate.ActiveDispatch != nil && aggregate.ActiveDispatch.Transaction == record.Transaction && aggregate.ActiveDispatch.CandidateHash == wanted {
+			return true
+		}
+		for _, dispatch := range aggregate.CompletedDispatches {
+			if dispatch.Transaction == record.Transaction && dispatch.CandidateHash == wanted {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (c *RuntimeController) CommitEvidence(ctx context.Context, evidence ExecutionEvidence) (EvidenceCommitResult, error) {

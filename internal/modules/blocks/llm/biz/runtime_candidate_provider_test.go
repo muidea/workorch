@@ -101,9 +101,15 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 		},
 	}
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, facts.Activation.ExecutionContract)
+	rejectedPath := "main.go"
+	rejectedShape := runtimecontract.RuntimeRejectedOperationShape{
+		Operation:        runtimecontract.RuntimeOperation{ID: "rejected-edit", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{rejectedPath}, Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &rejectedPath}}},
+		FailureSignature: "rejected-shape-signature",
+	}
+	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(facts, decision, []runtimecontract.RuntimeRejectedOperationShape{rejectedShape})
 	request, err := runtimeV2ProviderRequest(llmmodels.RuntimeCandidateRequest{
 		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix,
-		DefinitionContext: definition, CandidateContext: runtimecontract.RuntimeCandidateContextFromFacts(facts),
+		DefinitionContext: definition, CandidateContext: candidateContext,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -154,10 +160,18 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 			t.Fatalf("provider request lost typed profile contract %q: %s", value, capabilitySection)
 		}
 	}
+	for idx := 0; idx < 3; idx++ {
+		if strings.Contains(request.PromptContext.Sections[idx].Content, "rejected-shape-signature") {
+			t.Fatalf("rejected shape leaked into stable C%d section: %s", idx, request.PromptContext.Sections[idx].Content)
+		}
+	}
+	if !strings.Contains(request.PromptContext.Sections[3].Content, "rejectedOperationShapes") || !strings.Contains(request.PromptContext.Sections[3].Content, "rejected-shape-signature") {
+		t.Fatalf("rejected shape is not rendered in volatile candidate context: %s", request.PromptContext.Sections[3].Content)
+	}
 	retryFailure := runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassSchema, Reason: `json: unknown field "candidate"`}
 	retryRequest, err := runtimeV2ProviderRequest(llmmodels.RuntimeCandidateRequest{
 		Decision: decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1, PreviousFailure: &retryFailure, StablePrefixHash: prefix,
-		DefinitionContext: definition, CandidateContext: runtimecontract.RuntimeCandidateContextFromFacts(facts),
+		DefinitionContext: definition, CandidateContext: candidateContext,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -436,9 +450,9 @@ func TestRuntimeV2CandidateContextPublishesExactRejectedShapes(t *testing.T) {
 	decision := runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceValidation, RequiredOutput: runtimecontract.RequiredOutputContract{
 		Kind: runtimecontract.RequiredOutputKindValidation, AcceptedKinds: []string{runtimecontract.StepKindFileRead}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	}}
-	context := runtimecontract.RuntimeCandidateContextForDecision(facts, decision, []runtimecontract.RuntimeDispatchRecord{{
-		ID: "dispatch-1", Candidate: runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: operation}}}},
-	}}, nil)
+	context := runtimecontract.RuntimeCandidateContextForDecision(facts, decision, []runtimecontract.RuntimeRejectedOperationShape{{
+		Operation: operation, FailureSignature: "sig-1",
+	}})
 	projection := runtimeV2CandidateContextProjection(context, decision.Action)
 	if len(projection.AdmissibleOperationKinds) != 1 || len(projection.RejectedOperationShapes) != 1 || projection.RejectedOperationShapes[0].FailureSignature != "sig-1" {
 		t.Fatalf("candidate admissibility projection = %+v", projection)

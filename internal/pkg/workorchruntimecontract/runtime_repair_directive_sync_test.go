@@ -86,13 +86,6 @@ func TestApplyRepairDirectiveActionOverridesMissingEvidence(t *testing.T) {
 	if decision.Action != RuntimeActionProduceStateChange {
 		t.Fatalf("action = %s, want produce_state_change", decision.Action)
 	}
-	// Anti-replay must not reject state-change when directive requires it.
-	candidate := RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{
-		Operation: RuntimeOperation{ID: "op-1", Kind: StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"a.go"}},
-	}}}}
-	if err := ValidateCandidateAgainstMissingValidationGap(facts, decision, candidate); err != nil {
-		t.Fatalf("anti-replay must not override directive: %v", err)
-	}
 }
 
 func TestDeriveRuntimeRepairHintsObeysDirective(t *testing.T) {

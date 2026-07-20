@@ -35,10 +35,7 @@ func TestDispatchCommitAdvancesEvidenceAndReducerExactlyOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	candidate := stateChangeCandidate()
-	sealed, err := coordinator.PersistDispatch(context.Background(), repository.aggregate.Decision, candidate)
-	if err != nil {
-		t.Fatal(err)
-	}
+	sealed := sealCandidateForTest(t, repository, candidate)
 	if sealed.ActiveDispatch == nil || sealed.ActiveDispatch.Transaction != repository.aggregate.Decision.AuthorityTransaction() || sealed.ActiveDispatch.CandidateHash != runtimecontract.StableRuntimeCandidateHash(candidate) {
 		t.Fatalf("sealed dispatch = %+v", sealed.ActiveDispatch)
 	}
@@ -100,10 +97,7 @@ func TestRejectedValidationEvidenceAtomicallyReturnsToStateChange(t *testing.T) 
 	aggregate := validationAggregate(t)
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	coordinator, _ := NewDispatchCoordinator(repository)
-	sealed, err := coordinator.PersistDispatch(context.Background(), aggregate.Decision, validationCandidate())
-	if err != nil {
-		t.Fatal(err)
-	}
+	sealed := sealCandidateForTest(t, repository, validationCandidate())
 	commitEvidence := ExecutionEvidence{
 		EventID: "event-validation-failed", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
@@ -140,10 +134,7 @@ func TestRejectedTextReplaceConsumesRepairBudgetAndRequiresFreshTargetSnapshot(t
 			{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText},
 		},
 	}}}}}
-	sealed, err := coordinator.PersistDispatch(context.Background(), aggregate.Decision, candidate)
-	if err != nil {
-		t.Fatal(err)
-	}
+	sealed := sealCandidateForTest(t, repository, candidate)
 	evidence := ExecutionEvidence{
 		EventID: "event-patch-conflict", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
@@ -197,11 +188,7 @@ func TestRejectedTextReplaceConsumesRepairBudgetAndRequiresFreshTargetSnapshot(t
 
 func TestCoordinatorRestartRecoversPersistedDispatchWithoutProcessState(t *testing.T) {
 	repository := &durableRuntimeStateRepository{aggregate: stateChangeAggregate(t)}
-	first, _ := NewDispatchCoordinator(repository)
-	sealed, err := first.PersistDispatch(context.Background(), repository.aggregate.Decision, stateChangeCandidate())
-	if err != nil {
-		t.Fatal(err)
-	}
+	sealed := sealCandidateForTest(t, repository, stateChangeCandidate())
 	second, _ := NewDispatchCoordinator(repository)
 	commitEvidence := ExecutionEvidence{
 		EventID: "event-after-restart", WorkspaceID: "ws-1", RunID: "run-1",
@@ -226,10 +213,7 @@ func TestDispatchCoordinatorCommitsMultiOperationDispatchOnlyAfterAllOperations(
 			return operation
 		}()},
 	}}}
-	sealed, err := coordinator.PersistDispatch(context.Background(), repository.aggregate.Decision, candidate)
-	if err != nil {
-		t.Fatal(err)
-	}
+	sealed := sealCandidateForTest(t, repository, candidate)
 	firstEvidence := ExecutionEvidence{
 		EventID: "event-write-1", WorkspaceID: "ws-1", RunID: "run-1", DispatchID: sealed.ActiveDispatch.ID,
 		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "write-1",
@@ -276,10 +260,7 @@ func TestDispatchCommitAdvancesToNextCoverageFocusDeterministically(t *testing.T
 	aggregate.Decision = decision
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	coordinator, _ := NewDispatchCoordinator(repository)
-	sealed, err := coordinator.PersistDispatch(context.Background(), aggregate.Decision, stateChangeCandidate())
-	if err != nil {
-		t.Fatal(err)
-	}
+	sealed := sealCandidateForTest(t, repository, stateChangeCandidate())
 	commitEvidence := ExecutionEvidence{
 		EventID: "event-focus-1", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
@@ -308,6 +289,92 @@ func stateChangeAggregate(t *testing.T) RuntimeAggregate {
 		t.Fatal(err)
 	}
 	return RuntimeAggregate{StateRevision: 1, Definition: dispatchDefinition(), Facts: facts, Decision: decision}
+}
+
+func TestRuntimeAggregateRejectsTerminalDecisionWithPendingCandidateAttempt(t *testing.T) {
+	aggregate := stateChangeAggregate(t)
+	transaction := aggregate.Decision.AuthorityTransaction()
+	aggregate.CandidateAttempts = []runtimecontract.RuntimeCandidateAttemptRecord{{
+		AuthorityContractID: runtimecontract.StableAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction),
+		Transaction:         transaction,
+		Attempt:             0,
+		StablePrefixHash:    "pending-prefix",
+		State:               runtimecontract.RuntimeCandidateAttemptStatePending,
+	}}
+
+	for _, terminal := range []runtimecontract.RuntimeDecision{
+		sealedTerminalDecision(t, aggregate.Facts, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "failed"),
+		sealedTerminalDecision(t, aggregate.Facts, runtimecontract.ConvergenceStateComplete, runtimecontract.RuntimeActionComplete, "complete"),
+	} {
+		aggregate.Decision = terminal
+		if err := aggregate.Validate(); err == nil {
+			t.Fatalf("terminal decision %+v accepted a pending candidate attempt", terminal)
+		}
+	}
+}
+
+func TestRuntimeAggregateRequiresReducerTransitionAfterCandidateAttemptOneFailure(t *testing.T) {
+	aggregate := stateChangeAggregate(t)
+	transaction := aggregate.Decision.AuthorityTransaction()
+	contractID := runtimecontract.StableAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction)
+	failure := &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_replays_rejected_shape", Reason: "replayed shape"}
+	aggregate.CandidateAttempts = []runtimecontract.RuntimeCandidateAttemptRecord{
+		{AuthorityContractID: contractID, Transaction: transaction, Attempt: 0, StablePrefixHash: "stable-prefix", State: runtimecontract.RuntimeCandidateAttemptStateFailed, Failure: failure},
+		{AuthorityContractID: contractID, Transaction: transaction, Attempt: 1, StablePrefixHash: "stable-prefix", State: runtimecontract.RuntimeCandidateAttemptStateFailed, Failure: failure},
+	}
+	if err := aggregate.Validate(); err == nil {
+		t.Fatal("same-authority attempt 1 failure was accepted without a reducer transition")
+	}
+	aggregate.Facts.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateExhausted, Code: "candidate_retry_exhausted", Signature: "candidate-retry-exhausted", Message: "replayed shape"}
+	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Facts = facts
+	aggregate.Decision = decision
+	if err := aggregate.Validate(); err != nil {
+		t.Fatalf("reduced exhausted candidate state rejected: %v", err)
+	}
+}
+
+func sealedTerminalDecision(t *testing.T, facts runtimecontract.RuntimeFacts, state runtimecontract.ConvergenceState, action runtimecontract.RuntimeAction, code string) runtimecontract.RuntimeDecision {
+	t.Helper()
+	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
+		State: state, Action: action, Focus: facts.Focus,
+		RequiredOutput: runtimecontract.RequiredOutputContract{Kind: runtimecontract.RequiredOutputKindNone},
+		Terminal:       &runtimecontract.TerminalOutcome{Code: code},
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return decision
+}
+
+// sealCandidateForTest builds a persisted post-seal fixture without retaining a
+// production alternate dispatch entry point. Production code must use the
+// RuntimeController candidate-attempt admission path.
+func sealCandidateForTest(t *testing.T, repository *durableRuntimeStateRepository, candidate runtimecontract.RuntimeCandidate) RuntimeAggregate {
+	t.Helper()
+	aggregate := repository.aggregate
+	dispatch, err := SealDispatchWithActivation(aggregate.Decision, candidate, aggregate.Facts.Activation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transaction := aggregate.Decision.AuthorityTransaction()
+	aggregate.CandidateAttempts = append(aggregate.CandidateAttempts, runtimecontract.RuntimeCandidateAttemptRecord{
+		AuthorityContractID: runtimecontract.StableAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction),
+		Transaction:         transaction,
+		Attempt:             0,
+		StablePrefixHash:    "test-sealed-dispatch",
+		State:               runtimecontract.RuntimeCandidateAttemptStateAccepted,
+	})
+	aggregate.ActiveDispatch = &dispatch
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	repository.aggregate = aggregate
+	return aggregate
 }
 
 func validationAggregate(t *testing.T) RuntimeAggregate {

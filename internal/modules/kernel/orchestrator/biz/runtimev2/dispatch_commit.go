@@ -230,39 +230,6 @@ func (d SealedDispatch) ValidateWithActivation(decision runtimecontract.RuntimeD
 	return nil
 }
 
-func (c *DispatchCoordinator) PersistDispatch(ctx context.Context, decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate) (RuntimeAggregate, error) {
-	if c == nil || c.repository == nil {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	dispatch, err := SealDispatch(decision, candidate)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	aggregate, err := c.repository.Load(ctx, dispatch.WorkspaceID, dispatch.RunID)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if aggregate.Decision.AuthoritySnapshot.ID != decision.AuthoritySnapshot.ID {
-		return RuntimeAggregate{}, fmt.Errorf("cannot persist dispatch for stale authority snapshot")
-	}
-	if aggregate.ActiveDispatch != nil {
-		if aggregate.ActiveDispatch.ID == dispatch.ID {
-			return aggregate, nil
-		}
-		return RuntimeAggregate{}, fmt.Errorf("authority snapshot already has a different active dispatch")
-	}
-	expectedRevision := aggregate.StateRevision
-	aggregate.ActiveDispatch = &dispatch
-	aggregate.StateRevision++
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	return aggregate, nil
-}
-
 func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence ExecutionEvidence) (EvidenceCommitResult, error) {
 	if c == nil || c.repository == nil {
 		return EvidenceCommitResult{}, common.ErrInvalidArgument
@@ -594,6 +561,12 @@ func (a RuntimeAggregate) Validate() error {
 	if err := runtimecontract.ValidateRuntimeCandidateAttemptRecordsForScope(a.Facts.WorkspaceID, a.Facts.RunID, a.CandidateAttempts); err != nil {
 		return err
 	}
+	if (isTerminalRuntimeAction(a.Decision.Action) || a.Decision.Terminal != nil) && hasPendingCandidateAttempt(a.CandidateAttempts) {
+		return fmt.Errorf("terminal runtime aggregate cannot retain a pending candidate attempt")
+	}
+	if hasUnreducedCurrentCandidateRetryFailure(a.Decision, a.CandidateAttempts) {
+		return fmt.Errorf("current runtime authority retains a failed candidate attempt 1 without reducer transition")
+	}
 	for _, attempt := range a.CandidateAttempts {
 		if attempt.State != runtimecontract.RuntimeCandidateAttemptStateAccepted {
 			continue
@@ -701,6 +674,25 @@ func (a RuntimeAggregate) Validate() error {
 		}
 	}
 	return nil
+}
+
+func hasPendingCandidateAttempt(values []runtimecontract.RuntimeCandidateAttemptRecord) bool {
+	for _, value := range values {
+		if value.State == runtimecontract.RuntimeCandidateAttemptStatePending {
+			return true
+		}
+	}
+	return false
+}
+
+func hasUnreducedCurrentCandidateRetryFailure(decision runtimecontract.RuntimeDecision, values []runtimecontract.RuntimeCandidateAttemptRecord) bool {
+	current := decision.AuthorityTransaction()
+	for _, value := range values {
+		if value.Attempt == 1 && value.State == runtimecontract.RuntimeCandidateAttemptStateFailed && runtimecontract.SameAuthorityContract(value.Transaction, current) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e ExecutionEvidence) Validate() error {

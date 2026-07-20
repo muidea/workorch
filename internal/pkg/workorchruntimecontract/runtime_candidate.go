@@ -58,10 +58,13 @@ func RuntimeCandidateContextFromFacts(facts RuntimeFacts) RuntimeCandidateContex
 	return ctx.Normalized()
 }
 
-func RuntimeCandidateContextForDecision(facts RuntimeFacts, decision RuntimeDecision, completedDispatches []RuntimeDispatchRecord, candidateAttempts []RuntimeCandidateAttemptRecord) RuntimeCandidateContext {
+// RuntimeCandidateContextForDecision builds a transport DTO from already-derived
+// owner facts. It must not inspect dispatch or attempt ledgers to rebuild
+// authority; those facts belong to the Orchestrator candidate-admission owner.
+func RuntimeCandidateContextForDecision(facts RuntimeFacts, decision RuntimeDecision, rejectedShapes []RuntimeRejectedOperationShape) RuntimeCandidateContext {
 	context := RuntimeCandidateContextFromFacts(facts)
 	context.AdmissibleOperationKinds = FeasibleOperationKindsWithActivation(decision.RequiredOutput, facts.Capabilities, facts.Activation.MCPCapabilities)
-	context.RejectedOperationShapes = ActiveRejectedOperationShapes(facts, completedDispatches, candidateAttempts)
+	context.RejectedOperationShapes = NormalizeRuntimeRejectedOperationShapes(rejectedShapes)
 	return context.Normalized()
 }
 

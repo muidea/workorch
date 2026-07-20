@@ -18,6 +18,7 @@ Last Updated: 2026-07-20
 | Runtime V2 正向收敛基础闭环 | **completed**；RVC-R17～R26 已 code-landed，RVC-R16 bounded terminal 与 canonical canary liveness 已通过；完成记录迁入 archive |
 | Runtime V2 production admissibility + positive acceptance | **completed**；RPA-1 首次 gate 与 RPF-1～5 durable-effect freshness 均已经 fresh deployed bounded acceptance 复核 |
 | Runtime V2 prerequisite freshness | **completed**；completion record 已归档，覆盖 observation/change/stale、refresh budget、restart/crash 与跨组件回归 |
+| Runtime V2 candidate admission transaction | **remediation active**；2026-07-20 live `run-009` 证明 partial replay rejection 可绕过 attempt failure 并形成 terminal+pending aggregate，按 typed admission + atomic closure 收口 |
 | 22-component framework boundary | **remediation active**；共享 Base Biz、全量本地 structural/race/file-backed 门禁已完成，待外部 deployed restart-fixture matrix |
 | V1 StagePacket / NextAction / graph dispatch 主链 | **已删除** |
 | 设计结论上提 | 见 [00-core/runtime-stage-contract.md](../../00-core/runtime-stage-contract.md)、[current-state.md](../../01-overview/current-state.md) |
@@ -26,6 +27,7 @@ Last Updated: 2026-07-20
 
 | ID | 项 | 说明 | 方案 / 历史过程稿 |
 | --- | --- | --- | --- |
+| RCA-1 | Runtime V2 candidate admission transaction closure | 将 active rejected shape / replay admission authority 从 contract package 收回 Orchestrator，删除错误文本分类，原子闭合 attempt 0/1，并禁止 terminal aggregate 残留 pending attempt | [细化收口方案](runtime-v2-candidate-admission-transaction-closure.md) |
 | ARCH-1 | 22 组件 framework boundary / lifecycle 验证 | Base Biz / Module-root EventHub 拓扑及本地验证已收口；按 22 组件合同矩阵逐项保持独立回归，待有重启后的外部目标与三类 fixture manifest 后执行 deployed SM-4 matrix | [主方案](go-multi-module-22-component-boundary-remediation.md) / [组件矩阵](component-contract-and-regression-closure-matrix.md) |
 | OPS-1 | 生产目录 V1 retirement 正式 apply | 代码/live 已 complete；等待 clean build + 真实生产目录维护窗口执行 `runtime-v1-retirement --apply` | [deployed-workspace-progress-blocker-component-closure-plan.md](../../90-archive/completed/deployed-workspace-progress-blocker-component-closure-plan.md) |
 | OPT-1 | file-patch deployed live（可选） | 代码迁移已完成；可选补一次 `patch apply + validation + DoD closeout` 的 deployed live | [file-patch-side-effect-owner-migration-plan.md](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |

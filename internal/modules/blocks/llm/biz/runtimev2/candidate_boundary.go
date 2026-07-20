@@ -60,13 +60,14 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 	}
 	candidate, err := DecodeCandidatePayload(request.Decision.Action, generation.Payload)
 	if err != nil {
+		code, signature, reason := candidateSchemaFailureIdentity(generation, err)
 		return llmmodels.RuntimeCandidateResponse{
 			Transaction: request.Transaction,
 			Audit:       generation.Audit,
 			Usage:       generation.Usage,
 			RequestID:   generation.RequestID,
 			Status:      firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted),
-		}, candidateRequestError(CandidateFailureClassSchema, err, generation.Audit, generation.RequestID, generation.Status)
+		}, candidateRequestErrorWithIdentity(CandidateFailureClassSchema, code, signature, errors.New(reason), generation.Audit, generation.RequestID, generation.Status)
 	}
 	if err := candidate.ValidateWithActivation(request.Decision, request.CandidateContext.Activation); err != nil {
 		return llmmodels.RuntimeCandidateResponse{
@@ -89,6 +90,8 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 
 type CandidateRequestError struct {
 	Class     CandidateFailureClass
+	Code      string
+	Signature string
 	Err       error
 	Audit     *llmmodels.ProviderRequestAudit
 	RequestID string
@@ -119,6 +122,8 @@ func CandidateFailureFromError(err error) runtimecontract.RuntimeCandidateFailur
 	var typed *CandidateRequestError
 	if errors.As(err, &typed) {
 		failure.Class = typed.Class
+		failure.Code = typed.Code
+		failure.Signature = typed.Signature
 	}
 	return failure
 }
@@ -145,6 +150,33 @@ func CandidatePrerequisiteStaleFromError(err error) *runtimecontract.RuntimePrer
 
 func candidateRequestError(class CandidateFailureClass, err error, audit *llmmodels.ProviderRequestAudit, requestID, status string) error {
 	return &CandidateRequestError{Class: class, Err: err, Audit: audit, RequestID: requestID, Status: status}
+}
+
+func candidateRequestErrorWithIdentity(class CandidateFailureClass, code, signature string, err error, audit *llmmodels.ProviderRequestAudit, requestID, status string) error {
+	return &CandidateRequestError{
+		Class: class, Code: strings.TrimSpace(code), Signature: strings.TrimSpace(signature),
+		Err: err, Audit: audit, RequestID: requestID, Status: status,
+	}
+}
+
+func candidateSchemaFailureIdentity(generation llmmodels.RuntimeCandidateGenerationResult, decodeErr error) (string, string, string) {
+	reason := "candidate payload schema is invalid"
+	if decodeErr != nil {
+		reason = decodeErr.Error()
+	}
+	if candidatePayloadReachedOutputLimit(generation, decodeErr) {
+		return "candidate_response_truncated", "candidate-response-truncated", "provider response reached the sealed output token limit before candidate JSON completed: " + reason
+	}
+	return "candidate_schema_invalid", "candidate-schema-invalid", reason
+}
+
+func candidatePayloadReachedOutputLimit(generation llmmodels.RuntimeCandidateGenerationResult, decodeErr error) bool {
+	if decodeErr == nil || (!errors.Is(decodeErr, io.ErrUnexpectedEOF) && !strings.Contains(strings.ToLower(decodeErr.Error()), "unexpected eof")) ||
+		generation.Usage == nil || generation.Audit == nil || generation.Audit.ContextBudget == nil {
+		return false
+	}
+	limit := generation.Audit.ContextBudget.EffectiveMaxOutputTokens
+	return limit > 0 && generation.Usage.OutputTokens >= limit
 }
 
 func candidateRequestErrorWithStale(err error, audit *llmmodels.ProviderRequestAudit, requestID, status string, stale runtimecontract.RuntimePrerequisiteStale) error {

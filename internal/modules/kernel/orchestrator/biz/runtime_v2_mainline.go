@@ -244,8 +244,7 @@ func (m *Biz) requestAndSealRuntimeV2Candidate(
 			CandidateContext: runtimecontract.RuntimeCandidateContextForDecision(
 				aggregate.Facts,
 				aggregate.Decision,
-				runtimeV2CompletedDispatchRecords(aggregate.CompletedDispatches),
-				aggregate.CandidateAttempts,
+				runtimev2.ActiveRejectedOperationShapes(aggregate),
 			),
 		})
 		if requestErr != nil {
@@ -284,14 +283,13 @@ func (m *Biz) requestAndSealRuntimeV2Candidate(
 			}
 			return failed, nil
 		}
-		aggregate, err = m.bizPtr.RecordRuntimeV2CandidateProposal(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, response.Candidate)
-		if err != nil {
-			if isRuntimeCandidateReplayError(err) {
-				return m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, runtimecontract.RuntimeCandidateFailure{
-					Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: err.Error(),
-				})
-			}
-			return runtimev2.RuntimeAggregate{}, err
+		proposal, proposalErr := m.bizPtr.AdmitRuntimeV2CandidateProposal(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, response.Candidate)
+		if proposalErr != nil {
+			return runtimev2.RuntimeAggregate{}, proposalErr
+		}
+		aggregate = proposal.Aggregate
+		if !proposal.Admission.Accepted() {
+			return aggregate, nil
 		}
 		candidate, proposalPersisted = runtimeV2PendingCandidateProposal(aggregate, candidateAttempt)
 		if !proposalPersisted {
@@ -315,16 +313,11 @@ func (m *Biz) requestAndSealRuntimeV2Candidate(
 			return m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, *feasibilityFailure)
 		}
 	}
-	accepted, err := m.bizPtr.AcceptRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, candidate)
-	if err != nil {
-		if isRuntimeCandidateReplayError(err) {
-			return m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, runtimecontract.RuntimeCandidateFailure{
-				Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: err.Error(),
-			})
-		}
-		return runtimev2.RuntimeAggregate{}, err
+	sealed, sealErr := m.bizPtr.AdmitAndSealRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, candidate)
+	if sealErr != nil {
+		return runtimev2.RuntimeAggregate{}, sealErr
 	}
-	return accepted, nil
+	return sealed.Aggregate, nil
 }
 
 func runtimeV2PendingCandidateProposal(aggregate runtimev2.RuntimeAggregate, attempt int) (runtimecontract.RuntimeCandidate, bool) {
@@ -522,25 +515,6 @@ func orderedRuntimeV2CandidateOperations(candidate runtimecontract.RuntimeCandid
 	return ordered, nil
 }
 
-func runtimeV2CompletedDispatchRecords(values []runtimev2.SealedDispatch) []runtimecontract.RuntimeDispatchRecord {
-	ret := make([]runtimecontract.RuntimeDispatchRecord, len(values))
-	for idx := range values {
-		ret[idx] = runtimeDispatchRecordFromAggregate(values[idx])
-	}
-	return ret
-}
-
-func isRuntimeCandidateReplayError(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "replays active rejected operation shape") ||
-		strings.Contains(message, "replays rejected operation shape") ||
-		strings.Contains(message, "replay rejected shape") ||
-		strings.Contains(message, "only validation evidence is missing")
-}
-
 func runtimeV2PreviousCandidateFailure(aggregate runtimev2.RuntimeAggregate, candidateAttempt int) (*runtimecontract.RuntimeCandidateFailure, error) {
 	if candidateAttempt == 0 {
 		return nil, nil
@@ -641,9 +615,13 @@ func (m *Biz) sealRuntimeV2GovernanceCandidate(ctx context.Context, aggregate ru
 	if err != nil {
 		return runtimev2.RuntimeAggregate{}, err
 	}
-	return m.bizPtr.AcceptRuntimeV2CandidateAttempt(ctx, pending.Facts.WorkspaceID, pending.Facts.RunID, attempt, runtimecontract.RuntimeCandidate{
+	sealed, err := m.bizPtr.AdmitAndSealRuntimeV2CandidateAttempt(ctx, pending.Facts.WorkspaceID, pending.Facts.RunID, attempt, runtimecontract.RuntimeCandidate{
 		Governance: &runtimecontract.GovernanceCandidate{ExternalDependency: dependency},
 	})
+	if err != nil {
+		return runtimev2.RuntimeAggregate{}, err
+	}
+	return sealed.Aggregate, nil
 }
 
 func runtimeV2GovernanceDependency(aggregate runtimev2.RuntimeAggregate) runtimecontract.ExternalDependency {

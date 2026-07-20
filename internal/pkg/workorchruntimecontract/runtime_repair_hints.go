@@ -117,7 +117,7 @@ func countActiveRejectedFailureSignature(facts RuntimeFacts, signature string) i
 	if signature == "" {
 		return 0
 	}
-	latestAccepted := latestAcceptedEvidenceRevision(facts)
+	latestAccepted := latestAcceptedEvidenceRevisionForRepairHints(facts)
 	count := 0
 	for _, evidence := range facts.Evidence.Rejected {
 		if !evidenceAppliesToFocus(facts.Focus, evidence) {
@@ -132,6 +132,22 @@ func countActiveRejectedFailureSignature(facts RuntimeFacts, signature string) i
 		count++
 	}
 	return count
+}
+
+// latestAcceptedEvidenceRevisionForRepairHints is a pure evidence-summary
+// helper used only for repair-hint scoring. Candidate admission derives its
+// persisted lineage inside the Orchestrator owner.
+func latestAcceptedEvidenceRevisionForRepairHints(facts RuntimeFacts) string {
+	latest := ""
+	for _, evidence := range facts.Evidence.Accepted {
+		if !EvidenceAppliesToCurrentFocus(facts, evidence) {
+			continue
+		}
+		if latest == "" || evidenceRevisionAfter(evidence.Revision, latest) {
+			latest = evidence.Revision
+		}
+	}
+	return latest
 }
 
 // EvidenceAppliesToCurrentFocus is the authority rule for attributing evidence to the

@@ -85,11 +85,11 @@ func (o *RuntimeOrchestrator) BeginRuntimeV2CandidateAttempt(ctx context.Context
 	return o.runtimeV2Controller.BeginCandidateAttempt(ctx, workspaceID, runID, attempt, stablePrefixHash)
 }
 
-func (o *RuntimeOrchestrator) RecordRuntimeV2CandidateProposal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimemodel.RuntimeCandidate) (runtimev2.RuntimeAggregate, error) {
+func (o *RuntimeOrchestrator) AdmitRuntimeV2CandidateProposal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimemodel.RuntimeCandidate) (runtimev2.CandidateAdmissionCommitResult, error) {
 	if o == nil || o.runtimeV2Controller == nil {
-		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+		return runtimev2.CandidateAdmissionCommitResult{}, common.ErrInvalidArgument
 	}
-	return o.runtimeV2Controller.RecordCandidateProposal(ctx, workspaceID, runID, attempt, candidate)
+	return o.runtimeV2Controller.AdmitCandidateProposal(ctx, workspaceID, runID, attempt, candidate)
 }
 
 func (o *RuntimeOrchestrator) RecordRuntimeV2CandidateFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, record runtimemodel.RuntimeCandidateFeasibilityRecord) (runtimev2.RuntimeAggregate, error) {
@@ -120,11 +120,11 @@ func (o *RuntimeOrchestrator) CommitRuntimeV2OperationReceipt(ctx context.Contex
 	return o.runtimeV2Controller.CommitOperationReceipt(ctx, workspaceID, runID, dispatchID, fence, receipt)
 }
 
-func (o *RuntimeOrchestrator) AcceptRuntimeV2CandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimemodel.RuntimeCandidate) (runtimev2.RuntimeAggregate, error) {
+func (o *RuntimeOrchestrator) AdmitAndSealRuntimeV2CandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimemodel.RuntimeCandidate) (runtimev2.CandidateAdmissionCommitResult, error) {
 	if o == nil || o.runtimeV2Controller == nil {
-		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+		return runtimev2.CandidateAdmissionCommitResult{}, common.ErrInvalidArgument
 	}
-	return o.runtimeV2Controller.AcceptCandidateAttempt(ctx, workspaceID, runID, attempt, candidate)
+	return o.runtimeV2Controller.AdmitAndSealCandidateAttempt(ctx, workspaceID, runID, attempt, candidate)
 }
 
 func (o *RuntimeOrchestrator) FailRuntimeV2CandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, failure runtimemodel.RuntimeCandidateFailure) (runtimev2.RuntimeAggregate, error) {

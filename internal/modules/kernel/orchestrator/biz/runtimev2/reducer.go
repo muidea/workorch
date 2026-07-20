@@ -42,14 +42,15 @@ func ReduceRuntimeStateWithDirective(facts runtimecontract.RuntimeFacts, previou
 
 func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision, error) {
 	base := runtimecontract.RuntimeDecision{Focus: facts.Focus}
-	// A refresh budget is an authority terminal, even though the change that
-	// exhausted it has already reopened its mutable prerequisites. Letting the
-	// generic pending-prerequisite branch win here would request a new candidate
-	// from the old facts after the budget is spent, disguising exhaustion as
-	// retry bookkeeping. SM-2 must instead seal the explicit terminal and leave
-	// SM-4 to deliver it idempotently.
-	if facts.Failure != nil && facts.Failure.Class == runtimecontract.FailureClassPrerequisiteRefreshExhausted {
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "prerequisite_refresh_exhausted", facts.Failure.Message), nil
+	// A failure whose persisted budget/disposition already determines governance
+	// or terminal authority must win before mutable prerequisite bookkeeping.
+	// Otherwise an unrelated freshness reacquisition can hide candidate
+	// exhaustion or a runtime contract defect and leave SM-3 half closed while
+	// SM-4 keeps presenting the Run as resumable.
+	if decision, handled, err := reduceDeterminedFailure(base, facts); err != nil {
+		return runtimecontract.RuntimeDecision{}, err
+	} else if handled {
+		return decision, nil
 	}
 	if len(facts.Prerequisites.Pending) > 0 {
 		ids := make([]string, 0, len(facts.Prerequisites.Pending))
@@ -69,45 +70,13 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 		return stateChangeDecision(base, facts)
 	}
 	if facts.Failure != nil {
-		if facts.Failure.Class == runtimecontract.FailureClassExecutionFailure &&
-			(facts.Repair.Exhausted || facts.Repair.RepairAttempts >= facts.ConvergencePolicy.MaxRepairAttemptsPerFocus) {
-			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "no_progress_exhausted", facts.Failure.Message), nil
-		}
 		switch facts.Failure.Class {
-		case runtimecontract.FailureClassProviderTransient:
-			if facts.Recovery.ProviderTransportAttempts < facts.RecoveryPolicy.MaxProviderTransportAttempts {
-				break
-			}
-			if len(facts.Capabilities.GovernanceKinds) > 0 {
-				return governanceDecision(base, facts, facts.Failure.Message)
-			}
-			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "provider_transport_exhausted", facts.Failure.Message), nil
-		case runtimecontract.FailureClassOwnerTransientUnavailable:
-			if facts.Recovery.OperationRecoveryAttempts < facts.RecoveryPolicy.MaxOperationRecoveryAttempts {
-				break
-			}
-			if len(facts.Capabilities.GovernanceKinds) > 0 {
-				return governanceDecision(base, facts, facts.Failure.Message)
-			}
-			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "operation_recovery_exhausted", facts.Failure.Message), nil
-		case runtimecontract.FailureClassGovernanceDependency, runtimecontract.FailureClassGovernanceRequired,
-			runtimecontract.FailureClassProviderAuthentication, runtimecontract.FailureClassProviderConfiguration,
-			runtimecontract.FailureClassOperationOutcomeUnknown:
-			return governanceDecision(base, facts, facts.Failure.Message)
-		case runtimecontract.FailureClassRuntimeContractMisalignment:
-			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "runtime_contract_defect", facts.Failure.Message), nil
 		case runtimecontract.FailureClassCandidateInfeasible:
 			// Owner feasibility may reject a validation candidate before a dispatch
 			// exists. The activation-sealed validation policy marks that as a
 			// same-focus implementation repair; this remains neutral to the owner
 			// failure code and operation domain.
 			return stateChangeDecision(base, facts)
-		case runtimecontract.FailureClassCandidateExhausted:
-			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "candidate_retry_exhausted", facts.Failure.Message), nil
-		case runtimecontract.FailureClassPrerequisiteRefreshExhausted:
-			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "prerequisite_refresh_exhausted", facts.Failure.Message), nil
-		case runtimecontract.FailureClassGovernanceRejected:
-			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "governance_rejected", facts.Failure.Message), nil
 		}
 	}
 	if feasibilityBlocksCurrentAction(facts) {
@@ -164,6 +133,56 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 		return validationDecision(base, facts)
 	}
 	return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "unsupported_evidence_gap", fmt.Sprintf("unsupported required evidence kinds: %s", strings.Join(missing, ","))), nil
+}
+
+// reduceDeterminedFailure owns the SM-2 ordering rule for failure facts whose
+// next authority is already determined. It intentionally lives in the
+// Orchestrator owner: the shared runtime contract validates persisted shapes but
+// does not choose governance or terminal transitions.
+func reduceDeterminedFailure(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision, bool, error) {
+	if facts.Failure == nil {
+		return runtimecontract.RuntimeDecision{}, false, nil
+	}
+	failure := facts.Failure
+	if failure.Class == runtimecontract.FailureClassExecutionFailure &&
+		(facts.Repair.Exhausted || facts.Repair.RepairAttempts >= facts.ConvergencePolicy.MaxRepairAttemptsPerFocus) {
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "no_progress_exhausted", failure.Message), true, nil
+	}
+	switch failure.Class {
+	case runtimecontract.FailureClassProviderTransient:
+		if facts.Recovery.ProviderTransportAttempts < facts.RecoveryPolicy.MaxProviderTransportAttempts {
+			return runtimecontract.RuntimeDecision{}, false, nil
+		}
+		if len(facts.Capabilities.GovernanceKinds) > 0 {
+			decision, err := governanceDecision(base, facts, failure.Message)
+			return decision, true, err
+		}
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "provider_transport_exhausted", failure.Message), true, nil
+	case runtimecontract.FailureClassOwnerTransientUnavailable:
+		if facts.Recovery.OperationRecoveryAttempts < facts.RecoveryPolicy.MaxOperationRecoveryAttempts {
+			return runtimecontract.RuntimeDecision{}, false, nil
+		}
+		if len(facts.Capabilities.GovernanceKinds) > 0 {
+			decision, err := governanceDecision(base, facts, failure.Message)
+			return decision, true, err
+		}
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "operation_recovery_exhausted", failure.Message), true, nil
+	case runtimecontract.FailureClassGovernanceDependency, runtimecontract.FailureClassGovernanceRequired,
+		runtimecontract.FailureClassProviderAuthentication, runtimecontract.FailureClassProviderConfiguration,
+		runtimecontract.FailureClassOperationOutcomeUnknown:
+		decision, err := governanceDecision(base, facts, failure.Message)
+		return decision, true, err
+	case runtimecontract.FailureClassRuntimeContractMisalignment:
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "runtime_contract_defect", failure.Message), true, nil
+	case runtimecontract.FailureClassCandidateExhausted:
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "candidate_retry_exhausted", failure.Message), true, nil
+	case runtimecontract.FailureClassPrerequisiteRefreshExhausted:
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "prerequisite_refresh_exhausted", failure.Message), true, nil
+	case runtimecontract.FailureClassGovernanceRejected:
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "governance_rejected", failure.Message), true, nil
+	default:
+		return runtimecontract.RuntimeDecision{}, false, nil
+	}
 }
 
 func feasibilityBlocksCurrentAction(facts runtimecontract.RuntimeFacts) bool {

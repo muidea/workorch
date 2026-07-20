@@ -139,14 +139,7 @@ func TestActiveDispatchPrerequisiteStaleInvalidatesWithoutRejectedEvidence(t *te
 	aggregate := stateChangeAggregate(t)
 	prerequisite, observation := addFreshFileAdmissibilityObservation(t, &aggregate)
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
-	coordinator, err := NewDispatchCoordinator(repository)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sealed, err := coordinator.PersistDispatch(ctx, aggregate.Decision, stateChangeCandidate())
-	if err != nil {
-		t.Fatal(err)
-	}
+	sealed := sealCandidateForTest(t, repository, stateChangeCandidate())
 	execution := &repository.aggregate.ActiveDispatch.OperationExecutions[0]
 	execution.Fence = 1
 	execution.State = runtimecontract.OperationExecutionOwnerCommitted
@@ -206,10 +199,7 @@ func TestAcceptedReceiptResourceChangeInvalidatesRemainingDispatch(t *testing.T)
 			return operation
 		}()},
 	}}}
-	sealed, err := coordinator.PersistDispatch(ctx, aggregate.Decision, candidate)
-	if err != nil {
-		t.Fatal(err)
-	}
+	sealed := sealCandidateForTest(t, repository, candidate)
 	evidence := ExecutionEvidence{
 		EventID: "event-freshness-resource-change", WorkspaceID: "ws-1", RunID: "run-1", DispatchID: sealed.ActiveDispatch.ID,
 		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "write-1",
