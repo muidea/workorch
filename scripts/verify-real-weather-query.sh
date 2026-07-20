@@ -3,7 +3,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BASE_URL="${WORKORCH_REAL_WEATHER_BASE_URL:-${WORKORCH_BASE_URL:-http://127.0.0.1:8080}}"
+BASE_URL="${WORKORCH_REAL_WEATHER_BASE_URL:-${WORKORCH_BASE_URL:-}}"
+source "$ROOT_DIR/scripts/lib/verify-isolated-runtime.sh"
+workorch_verify_require_isolated_runtime "$BASE_URL" "verify-real-weather-query"
 PROVIDER_ID="${WORKORCH_REAL_WEATHER_PROVIDER_ID:-}"
 VERIFY_SUFFIX="${WORKORCH_REAL_WEATHER_VERIFY_SUFFIX:-$$}"
 MCP_SERVER_ID="${WORKORCH_REAL_WEATHER_MCP_SERVER_ID:-mcp-weather-real-$VERIFY_SUFFIX}"

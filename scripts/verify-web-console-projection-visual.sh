@@ -6,6 +6,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC_DIR="$ROOT_DIR/web/workorch-console/src"
 DIST_ASSETS="$ROOT_DIR/web/consoleassets/dist/assets"
 BASE_URL="${WORKORCH_WEB_CONSOLE_VISUAL_BASE_URL:-${WORKORCH_BASE_URL:-}}"
+if [[ -n "$BASE_URL" ]]; then
+  source "$ROOT_DIR/scripts/lib/verify-isolated-runtime.sh"
+  workorch_verify_require_isolated_runtime "$BASE_URL" "verify-web-console-projection-visual runtime mode"
+fi
 TMP_DIR="${WORKORCH_WEB_CONSOLE_VISUAL_ARTIFACT_DIR:-$(mktemp -d)}"
 KEEP_ARTIFACTS="${WORKORCH_WEB_CONSOLE_VISUAL_KEEP_ARTIFACTS:-1}"
 RUNTIME_BASE_URL=""

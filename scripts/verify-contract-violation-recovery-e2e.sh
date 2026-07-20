@@ -3,9 +3,11 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BASE_URL="${WORKORCH_CONTRACT_VIOLATION_VERIFY_BASE_URL:-${WORKORCH_BASE_URL:-}}"
+source "$ROOT_DIR/scripts/lib/verify-isolated-runtime.sh"
+workorch_verify_require_isolated_runtime "$BASE_URL" "verify-contract-violation-recovery-e2e"
 TMP_DIR="${WORKORCH_CONTRACT_VIOLATION_VERIFY_ARTIFACT_DIR:-$(mktemp -d)}"
 KEEP_TMP="${WORKORCH_VERIFY_KEEP_TMP:-0}"
-BASE_URL="${WORKORCH_CONTRACT_VIOLATION_VERIFY_BASE_URL:-${WORKORCH_BASE_URL:-http://127.0.0.1:8080}}"
 MOCK_ADDR="${WORKORCH_CONTRACT_VIOLATION_VERIFY_MOCK_ADDR:-}"
 MOCK_BASE_URL=""
 VERIFY_SUFFIX="${WORKORCH_CONTRACT_VIOLATION_VERIFY_SUFFIX:-$$}"

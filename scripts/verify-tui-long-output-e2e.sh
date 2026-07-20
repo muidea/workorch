@@ -3,8 +3,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BASE_URL="${WORKORCH_TUI_LONG_OUTPUT_BASE_URL:-${WORKORCH_BASE_URL:-}}"
+source "$ROOT_DIR/scripts/lib/verify-isolated-runtime.sh"
+workorch_verify_require_isolated_runtime "$BASE_URL" "verify-tui-long-output-e2e"
 TMP_DIR="${WORKORCH_TUI_LONG_OUTPUT_ARTIFACT_DIR:-$(mktemp -d)}"
-BASE_URL="${WORKORCH_TUI_LONG_OUTPUT_BASE_URL:-${WORKORCH_BASE_URL:-http://127.0.0.1:8080}}"
 MOCK_ADDR="${WORKORCH_TUI_LONG_OUTPUT_MOCK_ADDR:-127.0.0.1:18182}"
 MOCK_BASE_URL="http://$MOCK_ADDR/v1"
 VERIFY_SUFFIX="${WORKORCH_TUI_LONG_OUTPUT_SUFFIX:-$$}"

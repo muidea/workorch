@@ -2,7 +2,10 @@
 
 set -euo pipefail
 
-BASE_URL="${WORKORCH_TEMPLATE_SOUL_VERIFY_BASE_URL:-${WORKORCH_BASE_URL:-http://127.0.0.1:8080}}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BASE_URL="${WORKORCH_TEMPLATE_SOUL_VERIFY_BASE_URL:-${WORKORCH_BASE_URL:-}}"
+source "$ROOT_DIR/scripts/lib/verify-isolated-runtime.sh"
+workorch_verify_require_isolated_runtime "$BASE_URL" "verify-workspace-template-soul"
 TMP_DIR="${WORKORCH_TEMPLATE_SOUL_VERIFY_ARTIFACT_DIR:-$(mktemp -d)}"
 KEEP_ARTIFACTS="${WORKORCH_TEMPLATE_SOUL_VERIFY_KEEP_ARTIFACTS:-0}"
 VERIFY_SUFFIX="${WORKORCH_TEMPLATE_SOUL_VERIFY_SUFFIX:-$(date +%s)-$$}"

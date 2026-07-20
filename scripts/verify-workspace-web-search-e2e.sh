@@ -2,8 +2,11 @@
 
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BASE_URL="${WORKORCH_WEB_SEARCH_E2E_BASE_URL:-${WORKORCH_BASE_URL:-}}"
+source "$ROOT_DIR/scripts/lib/verify-isolated-runtime.sh"
+workorch_verify_require_isolated_runtime "$BASE_URL" "verify-workspace-web-search-e2e"
 TMP_DIR="$(mktemp -d)"
-BASE_URL="${WORKORCH_WEB_SEARCH_E2E_BASE_URL:-${WORKORCH_BASE_URL:-http://127.0.0.1:8080}}"
 KEEP_ARTIFACTS="${WORKORCH_WEB_SEARCH_E2E_KEEP_ARTIFACTS:-0}"
 LLM_MOCK_ADDR="${WORKORCH_WEB_SEARCH_E2E_LLM_MOCK_ADDR:-127.0.0.1:18191}"
 WEB_MOCK_ADDR="${WORKORCH_WEB_SEARCH_E2E_WEB_MOCK_ADDR:-127.0.0.1:18192}"

@@ -16,6 +16,7 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/scripts/lib/verify-isolated-runtime.sh"
 STAMP="${WORKORCH_TUI_REFRESH_VERIFY_STAMP:-$(date -u +%Y%m%dT%H%M%SZ)}"
 DEFAULT_ARTIFACT_DIR="${TMPDIR:-/tmp}/workorch-live-artifacts/tui-runtime-refresh-live-$STAMP"
 ARTIFACT_DIR="${WORKORCH_TUI_REFRESH_VERIFY_ARTIFACT_DIR:-$DEFAULT_ARTIFACT_DIR}"
@@ -25,6 +26,7 @@ DATA_DIR="${WORKORCH_TUI_REFRESH_VERIFY_DATA_DIR:-$ARTIFACT_DIR/data}"
 SERVER_LOG="$ARTIFACT_DIR/workorch-server.log"
 REPORT_JSON="$ARTIFACT_DIR/report.json"
 SUMMARY_MD="$ARTIFACT_DIR/SUMMARY.md"
+ISOLATION_STATE_FILE="$ARTIFACT_DIR/managed-runtime-state.json"
 BINARY="${WORKORCH_TUI_REFRESH_VERIFY_BINARY:-$ROOT_DIR/bin/workorch}"
 VERIFY_SUFFIX="${WORKORCH_TUI_REFRESH_VERIFY_SUFFIX:-$$}"
 WS_A="${WORKORCH_TUI_REFRESH_VERIFY_WORKSPACE_A_TITLE:-tui-refresh-ws-a-$VERIFY_SUFFIX}"
@@ -118,6 +120,7 @@ stop_server() {
     done
   fi
   wait "$SERVER_PID" >/dev/null 2>&1 || true
+  workorch_verify_write_isolation_state "$ISOLATION_STATE_FILE" "stopped" "$BASE_URL" "$SERVER_PID" "$CONFIG_DIR" "$DATA_DIR"
   SERVER_PID=""
 }
 
@@ -206,6 +209,8 @@ start_server() {
     if curl -fsS "$BASE_URL/healthz" >/dev/null 2>&1 &&
       curl -fsS "$BASE_URL/readyz" >"$ARTIFACT_DIR/readyz.json" 2>/dev/null; then
       if grep -q '"status"[[:space:]]*:[[:space:]]*"ready"' "$ARTIFACT_DIR/readyz.json"; then
+        workorch_verify_write_isolation_state "$ISOLATION_STATE_FILE" "running" "$BASE_URL" "$SERVER_PID" "$CONFIG_DIR" "$DATA_DIR"
+        export WORKORCH_VERIFY_ISOLATION_STATE_FILE="$ISOLATION_STATE_FILE"
         echo "server ready pid=$SERVER_PID addr=$ADDR log=$log_file"
         return 0
       fi

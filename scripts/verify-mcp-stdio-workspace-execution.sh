@@ -10,8 +10,10 @@ if [[ $# -gt 0 ]]; then
   echo "usage: $0 [--self-test]" >&2
   exit 2
 fi
+BASE_URL="${WORKORCH_MCP_STDIO_VERIFY_BASE_URL:-${WORKORCH_BASE_URL:-}}"
+source "$ROOT_DIR/scripts/lib/verify-isolated-runtime.sh"
+workorch_verify_require_isolated_runtime "$BASE_URL" "verify-mcp-stdio-workspace-execution"
 TMP_DIR="$(mktemp -d)"
-BASE_URL="${WORKORCH_MCP_STDIO_VERIFY_BASE_URL:-${WORKORCH_BASE_URL:-http://127.0.0.1:8080}}"
 MOCK_ADDR="${WORKORCH_MCP_STDIO_VERIFY_MOCK_ADDR:-127.0.0.1:18185}"
 MOCK_BASE_URL="http://$MOCK_ADDR/v1"
 VERIFY_SUFFIX="${WORKORCH_MCP_STDIO_VERIFY_SUFFIX:-$$}"

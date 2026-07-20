@@ -2,7 +2,10 @@
 
 set -euo pipefail
 
-BASE_URL="${WORKORCH_REAL_VECTOR_MEMORY_BASE_URL:-http://127.0.0.1:8080}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BASE_URL="${WORKORCH_REAL_VECTOR_MEMORY_BASE_URL:-${WORKORCH_BASE_URL:-}}"
+source "$ROOT_DIR/scripts/lib/verify-isolated-runtime.sh"
+workorch_verify_require_isolated_runtime "$BASE_URL" "verify-real-vector-memory-recall"
 MOCK_ADDR="${WORKORCH_REAL_VECTOR_MEMORY_MOCK_ADDR:-127.0.0.1:18189}"
 MOCK_BASE_URL="http://$MOCK_ADDR/v1"
 PROVIDER_ID="${WORKORCH_REAL_VECTOR_MEMORY_PROVIDER_ID:-verify}"

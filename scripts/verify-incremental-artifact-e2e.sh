@@ -3,8 +3,10 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BASE_URL="${WORKORCH_INCREMENTAL_ARTIFACT_VERIFY_BASE_URL:-${WORKORCH_BASE_URL:-}}"
+source "$ROOT_DIR/scripts/lib/verify-isolated-runtime.sh"
+workorch_verify_require_isolated_runtime "$BASE_URL" "verify-incremental-artifact-e2e"
 TMP_DIR="$(mktemp -d)"
-BASE_URL="${WORKORCH_INCREMENTAL_ARTIFACT_VERIFY_BASE_URL:-${WORKORCH_BASE_URL:-http://127.0.0.1:8080}}"
 MOCK_ADDR="${WORKORCH_INCREMENTAL_ARTIFACT_VERIFY_MOCK_ADDR:-127.0.0.1:18187}"
 MOCK_BASE_URL="http://$MOCK_ADDR/v1"
 VERIFY_SUFFIX="${WORKORCH_INCREMENTAL_ARTIFACT_VERIFY_SUFFIX:-$$}"

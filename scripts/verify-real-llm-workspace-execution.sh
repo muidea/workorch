@@ -2,7 +2,10 @@
 
 set -euo pipefail
 
-BASE_URL="${WORKORCH_REAL_LLM_BASE_URL:-http://127.0.0.1:8080}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BASE_URL="${WORKORCH_REAL_LLM_BASE_URL:-${WORKORCH_BASE_URL:-}}"
+source "$ROOT_DIR/scripts/lib/verify-isolated-runtime.sh"
+workorch_verify_require_isolated_runtime "$BASE_URL" "verify-real-llm-workspace-execution"
 PROVIDER_ID="${WORKORCH_REAL_LLM_PROVIDER_ID:-}"
 TMP_DIR="${WORKORCH_REAL_LLM_ARTIFACT_DIR:-$(mktemp -d)}"
 KEEP_ARTIFACTS="${WORKORCH_REAL_LLM_KEEP_ARTIFACTS:-1}"

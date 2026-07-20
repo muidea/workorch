@@ -3,6 +3,7 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/scripts/lib/verify-isolated-runtime.sh"
 TMP_DIR="$(mktemp -d)"
 KEEP_TMP="${WORKORCH_RUN_RESUME_VERIFY_KEEP_TMP:-0}"
 MANAGE_INSTANCE="${WORKORCH_RUN_RESUME_VERIFY_MANAGE_INSTANCE:-0}"
@@ -39,8 +40,8 @@ PY
 if [[ "$MANAGE_INSTANCE" == "1" || "$MANAGE_INSTANCE" == "true" ]]; then
   SERVER_ADDR="$(select_addr)"
   BASE_URL="http://$SERVER_ADDR"
-elif [[ -z "$BASE_URL" ]]; then
-  BASE_URL="http://127.0.0.1:8080"
+else
+  workorch_verify_require_isolated_runtime "$BASE_URL" "verify-run-resume-gap-confirmation-e2e"
 fi
 
 curl() {

@@ -2,9 +2,12 @@
 
 set -Eeuo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BASE_URL="${WORKORCH_PROJECTION_VERIFY_BASE_URL:-${WORKORCH_BASE_URL:-}}"
+source "$ROOT_DIR/scripts/lib/verify-isolated-runtime.sh"
+workorch_verify_require_isolated_runtime "$BASE_URL" "verify-workorch-projection-workspace-switch"
 TMP_DIR="$(mktemp -d)"
 KEEP_TMP="${WORKORCH_PROJECTION_VERIFY_KEEP_TMP:-0}"
-BASE_URL="${WORKORCH_PROJECTION_VERIFY_BASE_URL:-${WORKORCH_BASE_URL:-http://127.0.0.1:8080}}"
 VERIFY_SUFFIX="${WORKORCH_PROJECTION_VERIFY_SUFFIX:-$$}"
 SCRIPT_TIMEOUT_SECONDS="${WORKORCH_PROJECTION_VERIFY_TIMEOUT_SECONDS:-90}"
 CURL_CONNECT_TIMEOUT="${WORKORCH_VERIFY_CURL_CONNECT_TIMEOUT_SECONDS:-5}"
