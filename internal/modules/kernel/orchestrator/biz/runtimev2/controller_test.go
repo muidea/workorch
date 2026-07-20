@@ -503,6 +503,63 @@ func TestRuntimeControllerCandidateRetryIsPersistedAndLimitedToTwoAttempts(t *te
 	}
 }
 
+func TestRuntimeControllerReopensInvalidatedAttemptZeroWithoutCandidateDebt(t *testing.T) {
+	aggregate := stateChangeAggregate(t)
+	transaction := aggregate.Decision.AuthorityTransaction()
+	stale := runtimecontract.RuntimePrerequisiteStale{
+		PrerequisiteID: "operation-admissibility", ObservationID: "observation-v1",
+		Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		SubjectRef: "workspace_deliverable", ExpectedRevision: "tree-v1", ObservedRevision: "tree-v2", Reason: "workspace changed",
+	}
+	signature := runtimecontract.StableRuntimePrerequisiteStaleSignature(stale)
+	aggregate.CandidateAttempts = []runtimecontract.RuntimeCandidateAttemptRecord{{
+		AuthorityContractID: runtimecontract.StableAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction),
+		Transaction:         transaction, Attempt: 0, StablePrefixHash: "stable-prefix", State: runtimecontract.RuntimeCandidateAttemptStateInvalidated,
+		Stale: &stale,
+	}}
+	aggregate.PrerequisiteInvalidations = []runtimecontract.RuntimePrerequisiteInvalidationRecord{{
+		Signature: signature, PrerequisiteIDs: []string{stale.PrerequisiteID}, ObservationIDs: []string{stale.ObservationID}, Stale: &stale,
+	}}
+	repository := &controllerRepository{aggregate: &aggregate}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	beforeRevision := aggregate.StateRevision
+	if _, err := controller.BeginCandidateAttempt(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "drifted-prefix"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("stable-prefix drift err=%v, want conflict", err)
+	}
+	if repository.saves != 0 || repository.aggregate.StateRevision != beforeRevision {
+		t.Fatalf("stable-prefix drift mutated aggregate: revision=%d saves=%d", repository.aggregate.StateRevision, repository.saves)
+	}
+	reopened, err := controller.BeginCandidateAttempt(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "stable-prefix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.StateRevision != beforeRevision+1 || len(reopened.CandidateAttempts) != 1 {
+		t.Fatalf("invalidated attempt was not atomically reopened: %+v", reopened)
+	}
+	record := reopened.CandidateAttempts[0]
+	if record.Attempt != 0 || record.State != runtimecontract.RuntimeCandidateAttemptStatePending || record.StablePrefixHash != "stable-prefix" ||
+		record.Transaction != reopened.Decision.AuthorityTransaction() || record.Proposal != nil || len(record.Feasibilities) != 0 || record.Failure != nil || record.Stale != nil {
+		t.Fatalf("reopened attempt = %+v", record)
+	}
+	if len(reopened.PrerequisiteInvalidations) != 1 || reopened.PrerequisiteInvalidations[0].Signature != signature {
+		t.Fatalf("freshness audit was not retained: %+v", reopened.PrerequisiteInvalidations)
+	}
+	if repository.saves != 1 {
+		t.Fatalf("reopen saves=%d, want 1", repository.saves)
+	}
+	duplicate, err := controller.BeginCandidateAttempt(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "stable-prefix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if duplicate.StateRevision != reopened.StateRevision || repository.saves != 1 || len(duplicate.CandidateAttempts) != 1 {
+		t.Fatalf("duplicate reopen was not idempotent: aggregate=%+v saves=%d", duplicate, repository.saves)
+	}
+}
+
 func TestRuntimeControllerCandidateFailureDoesNotResealPreExistingExecutionFailure(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
@@ -634,6 +691,86 @@ func TestRuntimeControllerInternalCandidateFailureIsImmediatelyTerminal(t *testi
 	}
 	if terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "runtime_contract_defect" {
 		t.Fatalf("terminal decision = %+v", terminal.Decision)
+	}
+}
+
+func TestFailInfeasibleValidationCandidateRoutesToSealedStateChangeRepair(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := controllerFacts()
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	facts.Capabilities = runtimecontract.RuntimeCapabilities{
+		StateChangeKinds: []string{runtimecontract.StepKindFileWrite},
+		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}
+	facts.Activation.ExecutionContract.ValidationPolicies = []runtimecontract.RuntimeValidationPolicy{{
+		ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+		ValidationFailureImpliesStateChange: true,
+	}}
+	initialized, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if initialized.Decision.Action != runtimecontract.RuntimeActionProduceValidation {
+		t.Fatalf("initial decision = %+v, want validation", initialized.Decision)
+	}
+	if _, err := controller.BeginCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	repaired, err := controller.FailCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassInfeasible, Code: "owner_target_missing", Signature: "owner/target/missing", Reason: "validation target is unavailable",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repaired.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || repaired.Decision.RequiredOutput.Kind != runtimecontract.RequiredOutputKindStateChange {
+		t.Fatalf("infeasible validation did not route to state-change repair: %+v", repaired.Decision)
+	}
+	if repaired.Facts.Failure == nil || repaired.Facts.Failure.Class != runtimecontract.FailureClassCandidateInfeasible || repaired.Facts.Failure.Code != "owner_target_missing" {
+		t.Fatalf("repair failure fact = %+v", repaired.Facts.Failure)
+	}
+	if len(repaired.CandidateAttempts) != 1 || repaired.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed {
+		t.Fatalf("original validation attempt was not retained as a failed admission record: %+v", repaired.CandidateAttempts)
+	}
+}
+
+func TestFailInfeasibleValidationCandidateKeepsValidationWhenPolicyAllowsAlternative(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := controllerFacts()
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	facts.Capabilities = runtimecontract.RuntimeCapabilities{
+		StateChangeKinds: []string{runtimecontract.StepKindFileWrite},
+		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}
+	facts.Activation.ExecutionContract.ValidationPolicies = []runtimecontract.RuntimeValidationPolicy{{
+		ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+		ValidationFailureImpliesStateChange: false,
+	}}
+	initialized, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if initialized.Decision.Action != runtimecontract.RuntimeActionProduceValidation {
+		t.Fatalf("initial decision = %+v, want validation", initialized.Decision)
+	}
+	if _, err := controller.BeginCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	continued, err := controller.FailCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassInfeasible, Code: "owner_target_missing", Reason: "validation target is unavailable",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if continued.Decision.Action != runtimecontract.RuntimeActionProduceValidation || continued.Facts.Failure != nil {
+		t.Fatalf("alternative-validation policy changed authority unexpectedly: %+v", continued)
 	}
 }
 

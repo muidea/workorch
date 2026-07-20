@@ -139,7 +139,7 @@ func (m *Biz) resolveRuntimeV2Prerequisite(
 		state, err := AcquireGitCapabilityStatePrerequisite(ctx, m.EventHub(), prerequisite.OwnerModuleID, events.AcquireGitCapabilityStateCommand{
 			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
 			PrerequisiteID: prerequisite.ID, WorkspaceDeliverableDirectory: deliverableDirectory, CapabilityStateKind: prerequisite.CapabilityStateKind, SubjectRef: prerequisite.SubjectRef,
-			AcquisitionKey: stableRuntimeV2CapabilityStateAcquisitionKey(commandScope.workspaceID, commandScope.runID, prerequisite.ID, aggregate.Facts.Recovery.CapabilityStateRefreshes),
+			AcquisitionKey: stableRuntimeV2CapabilityStateAcquisitionKey(commandScope.workspaceID, commandScope.runID, prerequisite.ID, runtimeV2CapabilityStateAcquisitionGeneration(aggregate.Facts.Recovery)),
 		})
 		if err != nil {
 			return runtimev2.PrerequisiteResult{}, err
@@ -199,6 +199,15 @@ func stableRuntimeV2CapabilityStateAcquisitionKey(workspaceID common.WorkspaceID
 	return fmt.Sprintf("capability-state/%s/%s/%s/%d", workspaceID, runID, strings.TrimSpace(prerequisiteID), refreshGeneration)
 }
 
+// runtimeV2CapabilityStateAcquisitionGeneration advances whenever an event
+// invalidates capability-state freshness. Both read-only stale recovery and
+// accepted owner resource changes require a new owner query; unrelated retry
+// ledgers must not change the durable acquisition key.
+func runtimeV2CapabilityStateAcquisitionGeneration(recovery runtimecontract.RuntimeRecoveryLedger) int {
+	recovery = recovery.Normalized()
+	return recovery.PrerequisiteRefreshes + recovery.PrerequisiteResourceChangeRefreshes
+}
+
 func (m *Biz) requestAndSealRuntimeV2Candidate(
 	ctx context.Context,
 	aggregate runtimev2.RuntimeAggregate,
@@ -236,6 +245,7 @@ func (m *Biz) requestAndSealRuntimeV2Candidate(
 				aggregate.Facts,
 				aggregate.Decision,
 				runtimeV2CompletedDispatchRecords(aggregate.CompletedDispatches),
+				aggregate.CandidateAttempts,
 			),
 		})
 		if requestErr != nil {
@@ -276,6 +286,11 @@ func (m *Biz) requestAndSealRuntimeV2Candidate(
 		}
 		aggregate, err = m.bizPtr.RecordRuntimeV2CandidateProposal(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, response.Candidate)
 		if err != nil {
+			if isRuntimeCandidateReplayError(err) {
+				return m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, runtimecontract.RuntimeCandidateFailure{
+					Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: err.Error(),
+				})
+			}
 			return runtimev2.RuntimeAggregate{}, err
 		}
 		candidate, proposalPersisted = runtimeV2PendingCandidateProposal(aggregate, candidateAttempt)
@@ -563,6 +578,13 @@ func (m *Biz) requestAndSealRuntimeV2CandidateWithRetry(
 		if aggregate.Decision.Action == runtimecontract.RuntimeActionFail || aggregate.Decision.Action == runtimecontract.RuntimeActionComplete {
 			return aggregate, nil
 		}
+		// A candidate proposal or its read-only owner feasibility probe may
+		// invalidate a mutable prerequisite. That transition belongs to SM-2;
+		// return it to the outer drive so prerequisite acquisition runs before
+		// any new SM-3 candidate attempt is requested.
+		if aggregate.Decision.Action == runtimecontract.RuntimeActionAcquirePrerequisite {
+			return aggregate, nil
+		}
 		if aggregate.Decision.Action == runtimecontract.RuntimeActionRequestGovernance {
 			next, err := m.sealRuntimeV2GovernanceCandidate(ctx, aggregate, stablePrefixHash)
 			if err != nil {
@@ -579,7 +601,7 @@ func (m *Biz) requestAndSealRuntimeV2CandidateWithRetry(
 					Signature: "candidate-retry-exhausted", Message: "candidate authority contract exhausted its sealed attempt 0/1 budget",
 				})
 			}
-			return runtimev2.RuntimeAggregate{}, fmt.Errorf("%w: no candidate attempt is available for authority snapshot %s", common.ErrConflict, aggregate.Decision.AuthoritySnapshot.ID)
+			return runtimev2.RuntimeAggregate{}, fmt.Errorf("%w: no candidate attempt is available for authority snapshot %s contract %s", common.ErrConflict, aggregate.Decision.AuthoritySnapshot.ID, runtimecontract.StableAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Decision.AuthorityTransaction()))
 		}
 		next, err := m.requestAndSealRuntimeV2Candidate(ctx, aggregate, stablePrefixHash, attempt)
 		if err != nil {
@@ -705,6 +727,8 @@ func nextRuntimeV2CandidateAttempt(aggregate runtimev2.RuntimeAggregate) (int, b
 			return 1, true
 		}
 		return 0, false
+	case runtimecontract.RuntimeCandidateAttemptStateInvalidated:
+		return 0, true
 	default:
 		return 0, false
 	}

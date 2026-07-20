@@ -6,8 +6,12 @@ import "strings"
 // New classes separate provider, owner, CAS, contract, and delivery failures so budgets
 // and reducer disposition stay independent (INV budgets).
 const (
-	FailureClassCandidateSchemaFailure    FailureClass = "candidate_schema_failure"
-	FailureClassCandidateContractFailure  FailureClass = "candidate_contract_failure"
+	FailureClassCandidateSchemaFailure   FailureClass = "candidate_schema_failure"
+	FailureClassCandidateContractFailure FailureClass = "candidate_contract_failure"
+	// FailureClassCandidateInfeasible is a typed owner feasibility rejection
+	// promoted by the orchestrator only when activation policy requires a
+	// same-focus repair instead of another candidate under the old authority.
+	FailureClassCandidateInfeasible       FailureClass = "candidate_infeasible"
 	FailureClassProviderTransient         FailureClass = "provider_transient"
 	FailureClassProviderAuthentication    FailureClass = "provider_authentication"
 	FailureClassProviderConfiguration     FailureClass = "provider_configuration"
@@ -53,7 +57,7 @@ func FailureClassDisposition(class FailureClass) RuntimeFailureDisposition {
 		return RuntimeFailureDispositionGovernance
 	case FailureClassOwnerTransientUnavailable:
 		return RuntimeFailureDispositionOperationRecovery
-	case FailureClassExecutionRejected, FailureClassExecutionFailure,
+	case FailureClassCandidateInfeasible, FailureClassExecutionRejected, FailureClassExecutionFailure,
 		FailureClassBuildFailure, FailureClassEffectMismatch:
 		return RuntimeFailureDispositionSameFocusRepair
 	case FailureClassOperationOutcomeUnknown:

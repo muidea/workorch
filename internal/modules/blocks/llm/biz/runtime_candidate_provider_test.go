@@ -438,7 +438,7 @@ func TestRuntimeV2CandidateContextPublishesExactRejectedShapes(t *testing.T) {
 	}}
 	context := runtimecontract.RuntimeCandidateContextForDecision(facts, decision, []runtimecontract.RuntimeDispatchRecord{{
 		ID: "dispatch-1", Candidate: runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: operation}}}},
-	}})
+	}}, nil)
 	projection := runtimeV2CandidateContextProjection(context, decision.Action)
 	if len(projection.AdmissibleOperationKinds) != 1 || len(projection.RejectedOperationShapes) != 1 || projection.RejectedOperationShapes[0].FailureSignature != "sig-1" {
 		t.Fatalf("candidate admissibility projection = %+v", projection)

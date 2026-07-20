@@ -58,10 +58,10 @@ func RuntimeCandidateContextFromFacts(facts RuntimeFacts) RuntimeCandidateContex
 	return ctx.Normalized()
 }
 
-func RuntimeCandidateContextForDecision(facts RuntimeFacts, decision RuntimeDecision, completedDispatches []RuntimeDispatchRecord) RuntimeCandidateContext {
+func RuntimeCandidateContextForDecision(facts RuntimeFacts, decision RuntimeDecision, completedDispatches []RuntimeDispatchRecord, candidateAttempts []RuntimeCandidateAttemptRecord) RuntimeCandidateContext {
 	context := RuntimeCandidateContextFromFacts(facts)
 	context.AdmissibleOperationKinds = FeasibleOperationKindsWithActivation(decision.RequiredOutput, facts.Capabilities, facts.Activation.MCPCapabilities)
-	context.RejectedOperationShapes = ActiveRejectedOperationShapes(facts, completedDispatches)
+	context.RejectedOperationShapes = ActiveRejectedOperationShapes(facts, completedDispatches, candidateAttempts)
 	return context.Normalized()
 }
 

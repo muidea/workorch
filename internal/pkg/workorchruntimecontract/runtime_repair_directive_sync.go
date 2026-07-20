@@ -158,6 +158,9 @@ func buildRepairDirectiveFromDecision(facts RuntimeFacts, decision RuntimeDecisi
 	if facts.Failure != nil && facts.Failure.Class == FailureClassExecutionRejected {
 		trigger = RuntimeRepairTriggerExecutionRejected
 	}
+	if facts.Failure != nil && facts.Failure.Class == FailureClassCandidateInfeasible {
+		trigger = RuntimeRepairTriggerCandidateInfeasible
+	}
 	attempt := 0
 	if facts.RepairDirective != nil && facts.RepairDirective.FocusID == facts.Focus.ID {
 		attempt = facts.RepairDirective.RepairAttempt

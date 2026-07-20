@@ -96,6 +96,12 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 			return governanceDecision(base, facts, facts.Failure.Message)
 		case runtimecontract.FailureClassRuntimeContractMisalignment:
 			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "runtime_contract_defect", facts.Failure.Message), nil
+		case runtimecontract.FailureClassCandidateInfeasible:
+			// Owner feasibility may reject a validation candidate before a dispatch
+			// exists. The activation-sealed validation policy marks that as a
+			// same-focus implementation repair; this remains neutral to the owner
+			// failure code and operation domain.
+			return stateChangeDecision(base, facts)
 		case runtimecontract.FailureClassCandidateExhausted:
 			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "candidate_retry_exhausted", facts.Failure.Message), nil
 		case runtimecontract.FailureClassPrerequisiteRefreshExhausted:

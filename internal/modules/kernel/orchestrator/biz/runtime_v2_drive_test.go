@@ -630,19 +630,20 @@ func TestRuntimeV2FileBackedGitQueryReceiptCrashBeforePrerequisiteCommitReusesSn
 	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		candidateCalls++
 		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
-		if candidateCalls == 1 && (len(command.CandidateContext.Resources.CapabilityStates) != 1 ||
-			command.CandidateContext.Resources.CapabilityStates[0].SnapshotID != queried.SnapshotID ||
-			command.CandidateContext.Resources.CapabilityStates[0].AcquisitionKey != queried.AcquisitionKey ||
-			command.CandidateContext.Resources.CapabilityStates[0].QueryReceiptRef != queried.QueryReceiptRef) {
-			t.Fatalf("restart did not reuse durable query receipt in first candidate: %+v", command.CandidateContext.Resources.CapabilityStates)
-		}
-		if candidateCalls == 1 {
-			firstCandidateReusedQueryReceipt = true
-		}
 		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
 			Transaction: command.Transaction,
 			Candidate:   runtimeV2GitStateCandidate(requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence)),
 		}, nil)
+		if candidateCalls == 1 && (len(command.CandidateContext.Resources.CapabilityStates) != 1 ||
+			command.CandidateContext.Resources.CapabilityStates[0].SnapshotID != queried.SnapshotID ||
+			command.CandidateContext.Resources.CapabilityStates[0].AcquisitionKey != queried.AcquisitionKey ||
+			command.CandidateContext.Resources.CapabilityStates[0].QueryReceiptRef != queried.QueryReceiptRef) {
+			t.Errorf("restart did not reuse durable query receipt in first candidate: %+v", command.CandidateContext.Resources.CapabilityStates)
+			return
+		}
+		if candidateCalls == 1 {
+			firstCandidateReusedQueryReceipt = true
+		}
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
 	restarted := newRuntimeV2DriveTestModule(t, hub)
@@ -754,17 +755,18 @@ func TestRuntimeV2FileBackedGitSnapshotCommitCrashBeforeCandidateReusesCommitted
 	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		candidateCalls++
 		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
-		if candidateCalls == 1 && (len(command.CandidateContext.Resources.CapabilityStates) != 1 || command.CandidateContext.Resources.CapabilityStates[0].SnapshotID != committedSnapshot.SnapshotID ||
-			command.CandidateContext.Resources.CapabilityStates[0].AcquisitionKey != committedSnapshot.AcquisitionKey) {
-			t.Fatalf("candidate did not reuse committed capability snapshot: %+v", command.CandidateContext.Resources.CapabilityStates)
-		}
-		if candidateCalls == 1 {
-			firstCandidateReusedSnapshot = true
-		}
 		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
 			Transaction: command.Transaction,
 			Candidate:   runtimeV2GitStateCandidate(requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence)),
 		}, nil)
+		if candidateCalls == 1 && (len(command.CandidateContext.Resources.CapabilityStates) != 1 || command.CandidateContext.Resources.CapabilityStates[0].SnapshotID != committedSnapshot.SnapshotID ||
+			command.CandidateContext.Resources.CapabilityStates[0].AcquisitionKey != committedSnapshot.AcquisitionKey) {
+			t.Errorf("candidate did not reuse committed capability snapshot: %+v", command.CandidateContext.Resources.CapabilityStates)
+			return
+		}
+		if candidateCalls == 1 {
+			firstCandidateReusedSnapshot = true
+		}
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
@@ -871,6 +873,8 @@ func TestDriveRuntimeV2FileBackedFreshFileShellGitAcceptance(t *testing.T) {
 		candidate, candidateErr := runtimeV2FileShellGitCandidate(command)
 		if candidateErr != nil {
 			t.Errorf("candidate for %s/%s: %v", focusID, action, candidateErr)
+			failure := runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: candidateErr.Error()}
+			result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Failure: &failure}, nil)
 			return
 		}
 		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: candidate}, nil)
@@ -897,7 +901,7 @@ func TestDriveRuntimeV2FileBackedFreshFileShellGitAcceptance(t *testing.T) {
 		t.Fatalf("persisted file-shell-git run=%+v err=%v", persisted, err)
 	}
 	state := persisted.RuntimeState
-	if state.Facts.Recovery.PrerequisiteRefreshes < 4 || len(state.PrerequisiteInvalidations) < 4 {
+	if state.Facts.Recovery.PrerequisiteRefreshes != 0 || state.Facts.Recovery.PrerequisiteResourceChangeRefreshes < 4 || len(state.PrerequisiteInvalidations) < 4 {
 		t.Fatalf("durable effects did not trigger persisted freshness re-acquisition: recovery=%+v invalidations=%+v", state.Facts.Recovery, state.PrerequisiteInvalidations)
 	}
 	if state.Facts.Recovery.ProviderTransportAttempts != 0 || state.Facts.Failure != nil {
@@ -1177,14 +1181,14 @@ func TestRuntimeV2FileBackedGitStaleRefreshCrashRestartDoesNotReplayOldDispatch(
 		candidateCalls++
 		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
 		refs := requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence)
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: runtimeV2GitStateCandidate(refs)}, nil)
 		expected := []string{"create-commit", "stage-changes"}
 		if candidateCalls == 2 {
 			expected = []string{"create-commit"}
 		}
 		if !equalStrings(refs, expected) {
-			t.Fatalf("stale refresh used wrong required sequence on candidate %d: %v", candidateCalls, refs)
+			t.Errorf("stale refresh used wrong required sequence on candidate %d: %v", candidateCalls, refs)
 		}
-		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: runtimeV2GitStateCandidate(refs)}, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)

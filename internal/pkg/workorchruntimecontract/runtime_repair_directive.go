@@ -125,11 +125,12 @@ func (r RuntimeTerminationRecord) Clone() RuntimeTerminationRecord {
 type RuntimeRepairTrigger string
 
 const (
-	RuntimeRepairTriggerRejectedValidation RuntimeRepairTrigger = "rejected_validation"
-	RuntimeRepairTriggerAssessmentGap      RuntimeRepairTrigger = "assessment_gap"
-	RuntimeRepairTriggerExecutionRejected  RuntimeRepairTrigger = "execution_rejected"
-	RuntimeRepairTriggerEffectMismatch     RuntimeRepairTrigger = "effect_mismatch"
-	RuntimeRepairTriggerMissingEvidence    RuntimeRepairTrigger = "missing_evidence"
+	RuntimeRepairTriggerRejectedValidation  RuntimeRepairTrigger = "rejected_validation"
+	RuntimeRepairTriggerAssessmentGap       RuntimeRepairTrigger = "assessment_gap"
+	RuntimeRepairTriggerExecutionRejected   RuntimeRepairTrigger = "execution_rejected"
+	RuntimeRepairTriggerCandidateInfeasible RuntimeRepairTrigger = "candidate_infeasible"
+	RuntimeRepairTriggerEffectMismatch      RuntimeRepairTrigger = "effect_mismatch"
+	RuntimeRepairTriggerMissingEvidence     RuntimeRepairTrigger = "missing_evidence"
 )
 
 // RuntimeRepairDirective is the single persisted next-action authority for a focus (INV-05).
@@ -157,7 +158,7 @@ func (t RuntimeRepairTrigger) Normalized() RuntimeRepairTrigger {
 func ValidRuntimeRepairTrigger(trigger RuntimeRepairTrigger) bool {
 	switch trigger.Normalized() {
 	case RuntimeRepairTriggerRejectedValidation, RuntimeRepairTriggerAssessmentGap,
-		RuntimeRepairTriggerExecutionRejected, RuntimeRepairTriggerEffectMismatch,
+		RuntimeRepairTriggerExecutionRejected, RuntimeRepairTriggerCandidateInfeasible, RuntimeRepairTriggerEffectMismatch,
 		RuntimeRepairTriggerMissingEvidence:
 		return true
 	default:

@@ -37,10 +37,10 @@ func TestValidateCandidateAgainstRejectedShapesBlocksOnlyActiveShapes(t *testing
 		ID: "dispatch-1", Candidate: RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{Operation: op}}}},
 	}}
 	replay := RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{Operation: op}}}}
-	if err := ValidateCandidateAgainstRejectedShapes(facts, dispatches, replay); err == nil || !strings.Contains(err.Error(), "replays active rejected operation shape") {
+	if err := ValidateCandidateAgainstRejectedShapes(facts, dispatches, nil, replay); err == nil || !strings.Contains(err.Error(), "replays active rejected operation shape") {
 		t.Fatalf("expected active replay rejection, got %v", err)
 	}
-	shapes := ActiveRejectedOperationShapes(facts, dispatches)
+	shapes := ActiveRejectedOperationShapes(facts, dispatches, nil)
 	if len(shapes) != 1 || shapes[0].Operation.Kind != RuntimeBlockKindPatchApply || shapes[0].FailureSignature != "sig-1" || shapes[0].Hash == "" {
 		t.Fatalf("active rejected shapes = %+v", shapes)
 	}
@@ -50,8 +50,51 @@ func TestValidateCandidateAgainstRejectedShapesBlocksOnlyActiveShapes(t *testing
 		ID: "acc-1", Kind: EvidenceKindStateChange, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		Revision: "evidence-v2-00000000000000000002",
 	}}
-	if err := ValidateCandidateAgainstRejectedShapes(facts, dispatches, replay); err != nil {
+	if err := ValidateCandidateAgainstRejectedShapes(facts, dispatches, nil, replay); err != nil {
 		t.Fatalf("replay after accepted progress should be allowed: %v", err)
+	}
+}
+
+func TestValidateCandidateAgainstRejectedShapesIncludesInfeasibleProposal(t *testing.T) {
+	command := "go"
+	args := []string{"test", "./..."}
+	op := RuntimeOperation{
+		ID: "validation-1", Kind: RuntimeBlockKindManagedValidationSession,
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		Parameters:          []OperationParameter{{Name: "command", String: &command}, {Name: "args", StringList: args}},
+	}
+	facts := RuntimeFacts{
+		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def-1", EvidenceRevision: "ev-1",
+		Focus: CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindValidation}},
+	}.Normalized()
+	attempts := []RuntimeCandidateAttemptRecord{{
+		AuthorityContractID: "authority-contract-1", Transaction: AuthorityTransaction{FocusID: "focus-1", EvidenceRevision: "evidence-v2-00000000000000000001"}, Attempt: 0,
+		StablePrefixHash: "prefix", State: RuntimeCandidateAttemptStateFailed,
+		Proposal: &RuntimeCandidate{Validation: &ValidationCandidate{Operations: []ValidationOperation{{Operation: op}}}},
+		Feasibilities: []RuntimeCandidateFeasibilityRecord{{
+			OperationID: "validation-1", AdmissibilitySnapshotID: "inventory-1", Feasible: false,
+			Failure: &FailureFact{Class: FailureClassCandidateContractFailure, Code: "owner_target_missing", Signature: "owner/target/missing", Message: "target is unavailable"},
+		}},
+		Failure: &RuntimeCandidateFailure{Class: RuntimeCandidateFailureClassInfeasible, Code: "owner_target_missing", Signature: "owner/target/missing", Reason: "target is unavailable"},
+	}}
+	replay := RuntimeCandidate{Validation: &ValidationCandidate{Operations: []ValidationOperation{{Operation: op}}}}
+	if err := ValidateCandidateAgainstRejectedShapes(facts, nil, attempts, replay); err == nil || !strings.Contains(err.Error(), "replays active rejected operation shape") {
+		t.Fatalf("expected infeasible proposal replay rejection, got %v", err)
+	}
+	shapes := ActiveRejectedOperationShapes(facts, nil, attempts)
+	if len(shapes) != 1 || shapes[0].FailureCode != "owner_target_missing" || shapes[0].Operation.Kind != RuntimeBlockKindManagedValidationSession {
+		t.Fatalf("infeasible rejected shapes = %+v", shapes)
+	}
+	// State-change accepted at the proposal's base revision does not supersede
+	// the subsequent validation failure.
+	facts.Evidence.Accepted = []EvidenceFact{{ID: "base-state-change", Kind: EvidenceKindStateChange, Revision: "evidence-v2-00000000000000000001", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}}
+	if err := ValidateCandidateAgainstRejectedShapes(facts, nil, attempts, replay); err == nil {
+		t.Fatal("same-revision state-change must not clear an infeasible validation shape")
+	}
+	// A successful same-focus repair supersedes the pre-dispatch rejection.
+	facts.Evidence.Accepted = []EvidenceFact{{ID: "repair", Kind: EvidenceKindStateChange, Revision: "evidence-v2-00000000000000000002", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}}
+	if err := ValidateCandidateAgainstRejectedShapes(facts, nil, attempts, replay); err != nil {
+		t.Fatalf("replay after accepted repair should be allowed: %v", err)
 	}
 }
 
@@ -139,7 +182,7 @@ func TestValidateCandidateAgainstRejectedShapesDoesNotClearOnUnboundEvidenceBefo
 	}.Normalized()
 	dispatches := []RuntimeDispatchRecord{{ID: "dispatch-1", Candidate: RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{Operation: op}}}}}}
 	candidate := RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{Operation: op}}}}
-	if err := ValidateCandidateAgainstRejectedShapes(facts, dispatches, candidate); err == nil || !strings.Contains(err.Error(), "replays active rejected operation shape") {
+	if err := ValidateCandidateAgainstRejectedShapes(facts, dispatches, nil, candidate); err == nil || !strings.Contains(err.Error(), "replays active rejected operation shape") {
 		t.Fatalf("unbound evidence before the last focus must not clear the rejected shape, got %v", err)
 	}
 }

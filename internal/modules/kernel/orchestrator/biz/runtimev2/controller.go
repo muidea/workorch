@@ -272,6 +272,34 @@ func (c *RuntimeController) BeginCandidateAttempt(ctx context.Context, workspace
 		if record.State == runtimecontract.RuntimeCandidateAttemptStatePending && record.StablePrefixHash == stablePrefixHash && record.Transaction == transaction {
 			return aggregate, nil
 		}
+		// Freshness invalidation does not consume the sealed attempt budget. If
+		// prerequisite re-acquisition converges to the same stable authority
+		// contract, recycle the persisted attempt 0 into a new pending proposal.
+		// The separate prerequisite invalidation ledger retains the stale audit.
+		if attempt == 0 && record.State == runtimecontract.RuntimeCandidateAttemptStateInvalidated && record.StablePrefixHash == stablePrefixHash {
+			expectedRevision := aggregate.StateRevision
+			for idx := range aggregate.CandidateAttempts {
+				candidateAttempt := &aggregate.CandidateAttempts[idx]
+				if runtimecontract.CandidateAttemptAuthorityContractID(workspaceID, runID, *candidateAttempt) != contractID || candidateAttempt.Attempt != attempt {
+					continue
+				}
+				candidateAttempt.Transaction = transaction
+				candidateAttempt.StablePrefixHash = stablePrefixHash
+				candidateAttempt.State = runtimecontract.RuntimeCandidateAttemptStatePending
+				candidateAttempt.Proposal = nil
+				candidateAttempt.Feasibilities = nil
+				candidateAttempt.Failure = nil
+				candidateAttempt.Stale = nil
+				aggregate.StateRevision++
+				if err := aggregate.Validate(); err != nil {
+					return RuntimeAggregate{}, err
+				}
+				if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+					return RuntimeAggregate{}, err
+				}
+				return aggregate, nil
+			}
+		}
 		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d is already %s", common.ErrConflict, attempt, record.State)
 	}
 	if attempt == 0 {
@@ -315,6 +343,9 @@ func (c *RuntimeController) RecordCandidateProposal(ctx context.Context, workspa
 		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d is not pending", common.ErrConflict, attempt)
 	}
 	if err := candidate.ValidateWithActivation(aggregate.Decision, aggregate.Facts.Activation); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := runtimecontract.ValidateCandidateAgainstRejectedShapes(aggregate.Facts, sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches), aggregate.CandidateAttempts, candidate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if record.Proposal != nil {
@@ -424,7 +455,7 @@ func (c *RuntimeController) AcceptCandidateAttempt(ctx context.Context, workspac
 	if !ok {
 		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d is not pending", common.ErrConflict, attempt)
 	}
-	if err := runtimecontract.ValidateCandidateAgainstRejectedShapes(aggregate.Facts, sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches), candidate); err != nil {
+	if err := runtimecontract.ValidateCandidateAgainstRejectedShapes(aggregate.Facts, sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches), aggregate.CandidateAttempts, candidate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := runtimecontract.ValidateCandidateAgainstMissingValidationGap(aggregate.Facts, aggregate.Decision, candidate); err != nil {
@@ -539,18 +570,25 @@ func (c *RuntimeController) FailCandidateAttempt(ctx context.Context, workspaceI
 	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateFailed
 	failureCopy := failure
 	aggregate.CandidateAttempts[idx].Failure = &failureCopy
-	createdTerminalFailure := false
-	if failure.Class == runtimecontract.RuntimeCandidateFailureClassInternal {
+	needsReduce := false
+	if failure.Class == runtimecontract.RuntimeCandidateFailureClassInfeasible && aggregate.Decision.Action == runtimecontract.RuntimeActionProduceValidation &&
+		runtimecontract.RuntimeValidationFailureRequiresStateChange(aggregate.Facts.Activation.ExecutionContract.ValidationPolicies, runtimecontract.EvidenceKindValidation) {
+		aggregate.Facts.Failure = &runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassCandidateInfeasible, Code: failure.Code, Signature: failure.Signature,
+			Message: failure.Reason, TargetRefs: append([]string(nil), failure.TargetRefs...),
+		}
+		needsReduce = true
+	} else if failure.Class == runtimecontract.RuntimeCandidateFailureClassInternal {
 		aggregate.Facts.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeContractMisalignment, Signature: "candidate-internal", Message: failure.Reason}
-		createdTerminalFailure = true
+		needsReduce = true
 	} else if attempt == 1 {
 		aggregate.Facts.Failure = &runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassCandidateExhausted, Code: "candidate_retry_exhausted",
 			Signature: "candidate-retry-exhausted", Message: failure.Reason,
 		}
-		createdTerminalFailure = true
+		needsReduce = true
 	}
-	if createdTerminalFailure {
+	if needsReduce {
 		facts, decision, reduceErr := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
 		if reduceErr != nil {
 			return RuntimeAggregate{}, reduceErr

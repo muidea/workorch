@@ -59,9 +59,9 @@ func NormalizeRuntimeRejectedOperationShapes(values []RuntimeRejectedOperationSh
 //
 // Shape hashing stays domain-neutral but includes structural parameters that
 // distinguish corrected retries (args, oldText/newText/baseHash, dynamic input.*).
-func ValidateCandidateAgainstRejectedShapes(facts RuntimeFacts, completedDispatches []RuntimeDispatchRecord, candidate RuntimeCandidate) error {
+func ValidateCandidateAgainstRejectedShapes(facts RuntimeFacts, completedDispatches []RuntimeDispatchRecord, candidateAttempts []RuntimeCandidateAttemptRecord, candidate RuntimeCandidate) error {
 	facts = facts.Normalized()
-	rejectedShapes := activeRejectedOperationShapeSet(facts, completedDispatches)
+	rejectedShapes := activeRejectedOperationShapeSet(facts, completedDispatches, candidateAttempts)
 	if len(rejectedShapes) == 0 {
 		return nil
 	}
@@ -85,7 +85,11 @@ func ValidateCandidateAgainstRejectedShapes(facts RuntimeFacts, completedDispatc
 	return fmt.Errorf("runtime candidate includes %d operation(s) that replay active rejected shape(s); remove or rewrite those operations", replayCount)
 }
 
-func ActiveRejectedOperationShapes(facts RuntimeFacts, completedDispatches []RuntimeDispatchRecord) []RuntimeRejectedOperationShape {
+// ActiveRejectedOperationShapes includes both rejected execution evidence and
+// owner feasibility rejections recorded before a dispatch is sealed. The latter
+// are candidate facts rather than evidence, but they are still exact rejected
+// operation shapes and must constrain attempt 1 for the same focus.
+func ActiveRejectedOperationShapes(facts RuntimeFacts, completedDispatches []RuntimeDispatchRecord, candidateAttempts []RuntimeCandidateAttemptRecord) []RuntimeRejectedOperationShape {
 	dispatchByID := make(map[string]RuntimeDispatchRecord, len(completedDispatches))
 	for _, dispatch := range completedDispatches {
 		dispatchByID[strings.TrimSpace(dispatch.ID)] = dispatch
@@ -115,12 +119,40 @@ func ActiveRejectedOperationShapes(facts RuntimeFacts, completedDispatches []Run
 			})
 		}
 	}
+	// A later accepted current-focus evidence supersedes feasibility rejections
+	// exactly as it supersedes rejected execution evidence. An infeasible
+	// proposal remains active when it was created from the same evidence
+	// revision as the latest accepted fact (for example state-change followed by
+	// validation), and expires only after a later accepted repair.
+	for _, attempt := range candidateAttempts {
+		if attempt.State != RuntimeCandidateAttemptStateFailed || attempt.Failure == nil ||
+			attempt.Failure.Class != RuntimeCandidateFailureClassInfeasible ||
+			attempt.Transaction.FocusID != facts.Focus.ID || attempt.Proposal == nil ||
+			(latestAcceptedRevision != "" && attempt.Transaction.EvidenceRevision != latestAcceptedRevision && !evidenceRevisionAfter(attempt.Transaction.EvidenceRevision, latestAcceptedRevision)) {
+			continue
+		}
+		for _, feasibility := range attempt.Feasibilities {
+			if feasibility.Feasible || feasibility.Failure == nil {
+				continue
+			}
+			for _, operation := range candidateRuntimeOperations(*attempt.Proposal) {
+				if operation.Normalized().ID != strings.TrimSpace(feasibility.OperationID) {
+					continue
+				}
+				ret = append(ret, RuntimeRejectedOperationShape{
+					Hash: stableRuntimeOperationShape(operation), Operation: operation.Normalized(),
+					FailureClass: feasibility.Failure.Class, FailureCode: feasibility.Failure.Code,
+					FailureSignature: feasibility.Failure.Signature, FailureMessage: feasibility.Failure.Message,
+				})
+			}
+		}
+	}
 	return NormalizeRuntimeRejectedOperationShapes(ret)
 }
 
-func activeRejectedOperationShapeSet(facts RuntimeFacts, completedDispatches []RuntimeDispatchRecord) map[string]struct{} {
+func activeRejectedOperationShapeSet(facts RuntimeFacts, completedDispatches []RuntimeDispatchRecord, candidateAttempts []RuntimeCandidateAttemptRecord) map[string]struct{} {
 	ret := map[string]struct{}{}
-	for _, shape := range ActiveRejectedOperationShapes(facts, completedDispatches) {
+	for _, shape := range ActiveRejectedOperationShapes(facts, completedDispatches, candidateAttempts) {
 		ret[shape.Hash] = struct{}{}
 	}
 	return ret
