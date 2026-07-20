@@ -117,6 +117,48 @@ func TestApplyRuntimeV2ProgressHealthyRunDoesNotMarkRepairActive(t *testing.T) {
 	}
 }
 
+func TestApplyRuntimeV2ProgressDoesNotTreatStateChangeEvidenceAsValidation(t *testing.T) {
+	progress := readmodelcore.TaskProgress{
+		WorkspaceID: "ws-1", RunID: "run-1", State: string(common.RunStateFailed),
+		Milestones: []readmodelcore.ProgressMilestone{{ID: "validation", State: "pending"}},
+	}
+	run := &runmodel.Run{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateFailed, RuntimeState: &runtimecontract.RuntimeStateRecord{
+		Facts: runtimecontract.RuntimeFacts{
+			WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def", EvidenceRevision: "ev",
+			Focus:    runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}},
+			Evidence: runtimecontract.EvidenceLedger{Accepted: []runtimecontract.EvidenceFact{{ID: "state-change", Kind: runtimecontract.EvidenceKindStateChange, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}}},
+		},
+	}}
+	applyRuntimeV2Progress(&progress, run)
+	if progress.RuntimeV2 == nil || progress.RuntimeV2.AcceptedEvidenceCount != 1 || progress.RuntimeV2.AcceptedValidationEvidenceCount != 0 {
+		t.Fatalf("evidence-kind projection = %+v", progress.RuntimeV2)
+	}
+	if got := progress.Milestones[0]; got.State != "failed" || len(got.EvidenceRefs) != 0 {
+		t.Fatalf("state-change evidence fabricated validation completion: %+v", got)
+	}
+}
+
+func TestApplyRuntimeV2ProgressCompletesValidationOnlyWithValidationEvidence(t *testing.T) {
+	progress := readmodelcore.TaskProgress{
+		WorkspaceID: "ws-1", RunID: "run-1", State: string(common.RunStateActive),
+		Milestones: []readmodelcore.ProgressMilestone{{ID: "validation", State: "pending"}},
+	}
+	run := &runmodel.Run{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive, RuntimeState: &runtimecontract.RuntimeStateRecord{
+		Facts: runtimecontract.RuntimeFacts{
+			WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def", EvidenceRevision: "ev",
+			Focus:    runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}},
+			Evidence: runtimecontract.EvidenceLedger{Accepted: []runtimecontract.EvidenceFact{{ID: "validation", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}}},
+		},
+	}}
+	applyRuntimeV2Progress(&progress, run)
+	if progress.RuntimeV2 == nil || progress.RuntimeV2.AcceptedValidationEvidenceCount != 1 {
+		t.Fatalf("validation evidence count = %+v", progress.RuntimeV2)
+	}
+	if got := progress.Milestones[0]; got.State != "completed" || len(got.EvidenceRefs) != 1 || got.EvidenceRefs[0] != "runtime-v2/validation-evidence" {
+		t.Fatalf("validation evidence did not complete validation milestone: %+v", got)
+	}
+}
+
 func TestMapRuntimeV2ProgressIgnoresUnboundEvidenceBeforeLastFocus(t *testing.T) {
 	state := runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def-1", EvidenceRevision: "ev-1",

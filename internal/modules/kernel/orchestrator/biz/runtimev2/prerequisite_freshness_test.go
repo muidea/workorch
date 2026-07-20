@@ -242,7 +242,8 @@ func TestAcceptedReceiptResourceChangeInvalidatesRemainingDispatch(t *testing.T)
 	if !committed.DispatchCompleted || committed.Aggregate.ActiveDispatch != nil || len(committed.Aggregate.CompletedDispatches) != 1 ||
 		committed.Aggregate.CompletedDispatches[0].State != DispatchStateInvalidated ||
 		len(committed.Aggregate.Facts.Evidence.Accepted) != 1 || len(committed.Aggregate.Facts.Evidence.Rejected) != 0 ||
-		committed.Aggregate.Facts.Repair.RepairAttempts != 0 || committed.Aggregate.Facts.Recovery.PrerequisiteRefreshes != 1 ||
+		committed.Aggregate.Facts.Repair.RepairAttempts != 0 || committed.Aggregate.Facts.Recovery.PrerequisiteRefreshes != 0 ||
+		committed.Aggregate.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 ||
 		committed.Aggregate.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(committed.Aggregate.Facts.FreshnessReacquireCoverage) != 1 ||
 		committed.Aggregate.Facts.FreshnessReacquireCoverage[0] != "cwi-1" {
 		t.Fatalf("accepted resource change did not atomically invalidate remaining dispatch: %+v", committed.Aggregate)
@@ -256,8 +257,35 @@ func TestAcceptedReceiptResourceChangeInvalidatesRemainingDispatch(t *testing.T)
 		t.Fatalf("invalidation did not retain owner resource-change source: %#v", changes)
 	}
 	duplicate, err := coordinator.CommitEvidence(ctx, evidence)
-	if err != nil || duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.Facts.Recovery.PrerequisiteRefreshes != 1 {
+	if err != nil || duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.Facts.Recovery.PrerequisiteRefreshes != 0 ||
+		duplicate.Aggregate.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 {
 		t.Fatalf("duplicate resource-change evidence changed refresh budget: aggregate=%+v err=%v", duplicate.Aggregate, err)
+	}
+}
+
+func TestAcceptedReceiptResourceChangeExhaustionSealsTerminalFact(t *testing.T) {
+	aggregate := stateChangeAggregate(t)
+	_, _ = addFreshFileAdmissibilityObservation(t, &aggregate)
+	aggregate.Facts.RecoveryPolicy.MaxPrerequisiteResourceChangeRefreshes = 1
+	aggregate.Facts.Recovery.PrerequisiteResourceChangeRefreshes = 1
+
+	changed, err := applyReceiptResourceChangeInvalidation(&aggregate, "dispatch-1", "write-1", runtimecontract.RuntimeOperationReceipt{
+		ResourceChanges: []runtimecontract.RuntimeResourceChange{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", BeforeRevision: "tree-v1", AfterRevision: "tree-v2",
+		}},
+	})
+	if err != nil || !changed {
+		t.Fatalf("resource-change invalidation = changed:%v err:%v", changed, err)
+	}
+	if aggregate.Facts.Recovery.PrerequisiteRefreshes != 0 || aggregate.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 ||
+		aggregate.Facts.Failure == nil || aggregate.Facts.Failure.Class != runtimecontract.FailureClassPrerequisiteRefreshExhausted ||
+		aggregate.Facts.Failure.Code != "prerequisite_receipt_refresh_exhausted" {
+		t.Fatalf("resource-change exhaustion did not preserve independent terminal fact: %+v", aggregate.Facts)
+	}
+	_, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil)
+	if err != nil || decision.Action != runtimecontract.RuntimeActionFail {
+		t.Fatalf("resource-change exhaustion decision = %+v err=%v", decision, err)
 	}
 }
 
@@ -313,6 +341,7 @@ func TestFileTargetChangeInvalidatesShellValidationObservation(t *testing.T) {
 func addFreshFileAdmissibilityObservation(t *testing.T, aggregate *RuntimeAggregate) (runtimecontract.RuntimePrerequisite, runtimecontract.RuntimePrerequisiteObservation) {
 	t.Helper()
 	aggregate.Facts.RecoveryPolicy.MaxPrerequisiteRefreshes = 2
+	aggregate.Facts.RecoveryPolicy.MaxPrerequisiteResourceChangeRefreshes = 2
 	inventory := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "operation_admissibility:file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		OperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: []string{"main.go", "other.go"}, ObservedRevision: "tree-v1",

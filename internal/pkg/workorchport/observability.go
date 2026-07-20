@@ -259,25 +259,28 @@ type ProgressMilestoneInfo struct {
 
 // RuntimeV2ProgressInfo is a product-boundary summary projected from Run.RuntimeState.
 type RuntimeV2ProgressInfo struct {
-	StateRevision             uint64
-	EvidenceSequence          uint64
-	CompletedDispatchCount    int
-	ActiveDispatchID          string
-	CandidateAttemptCount     int
-	AcceptedEvidenceCount     int
-	RejectedEvidenceCount     int
-	MissingEvidenceKinds      []string
-	CurrentFocusID            string
-	CurrentAction             string
-	FailureClass              string
-	FailureCode               string
-	FailureSignature          string
-	FailureMessage            string
-	RepairHintCodes           []string
-	PrerequisiteRefreshState  string
-	PrerequisiteRefreshUsed   int
-	PrerequisiteRefreshLimit  int
-	PrerequisiteInvalidations []RuntimePrerequisiteRefreshInvalidationInfo
+	StateRevision                          uint64
+	EvidenceSequence                       uint64
+	CompletedDispatchCount                 int
+	ActiveDispatchID                       string
+	CandidateAttemptCount                  int
+	AcceptedEvidenceCount                  int
+	AcceptedValidationEvidenceCount        int
+	RejectedEvidenceCount                  int
+	MissingEvidenceKinds                   []string
+	CurrentFocusID                         string
+	CurrentAction                          string
+	FailureClass                           string
+	FailureCode                            string
+	FailureSignature                       string
+	FailureMessage                         string
+	RepairHintCodes                        []string
+	PrerequisiteRefreshState               string
+	PrerequisiteRefreshUsed                int
+	PrerequisiteRefreshLimit               int
+	PrerequisiteResourceChangeRefreshUsed  int
+	PrerequisiteResourceChangeRefreshLimit int
+	PrerequisiteInvalidations              []RuntimePrerequisiteRefreshInvalidationInfo
 }
 
 // RuntimePrerequisiteRefreshInvalidationInfo is display-only freshness audit

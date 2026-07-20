@@ -116,6 +116,7 @@ func TestRemoteSchedulerDiagnosticsPreservesContinuationReadback(t *testing.T) {
 func TestRuntimeV2ProgressFromClientPreservesPrerequisiteRefreshAudit(t *testing.T) {
 	got := runtimeV2ProgressFromClient(&client.RuntimeV2Progress{
 		PrerequisiteRefreshState: "prerequisite_refreshing", PrerequisiteRefreshUsed: 1, PrerequisiteRefreshLimit: 3,
+		AcceptedValidationEvidenceCount: 2, PrerequisiteResourceChangeRefreshUsed: 4, PrerequisiteResourceChangeRefreshLimit: 8,
 		PrerequisiteInvalidations: []client.RuntimePrerequisiteRefreshInvalidation{{
 			Signature: "stale-1", Source: "execution_receipt_stale", OwnerModuleID: runtimecontract.RuntimeModuleGit,
 			ResourceDomain: string(runtimecontract.RuntimeResourceRepositoryState), SubjectRef: "workspace_deliverable",
@@ -123,7 +124,8 @@ func TestRuntimeV2ProgressFromClientPreservesPrerequisiteRefreshAudit(t *testing
 		}},
 	})
 	if got == nil || got.PrerequisiteRefreshState != "prerequisite_refreshing" || got.PrerequisiteRefreshUsed != 1 ||
-		got.PrerequisiteRefreshLimit != 3 || len(got.PrerequisiteInvalidations) != 1 {
+		got.PrerequisiteRefreshLimit != 3 || got.AcceptedValidationEvidenceCount != 2 ||
+		got.PrerequisiteResourceChangeRefreshUsed != 4 || got.PrerequisiteResourceChangeRefreshLimit != 8 || len(got.PrerequisiteInvalidations) != 1 {
 		t.Fatalf("remote refresh progress = %+v", got)
 	}
 	invalidation := got.PrerequisiteInvalidations[0]

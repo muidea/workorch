@@ -103,7 +103,7 @@ func TestRenderRuntimeProgressDisplaysPrerequisiteRefreshSeparately(t *testing.T
 			Source: "owner_receipt_resource_change", OwnerModuleID: "file", ResourceDomain: "workspace_target", SubjectRef: "main.go",
 		}},
 	}, 160))
-	if !strings.Contains(text, "prerequisite refresh prerequisite_refreshing | 1/3") ||
+	if !strings.Contains(text, "prerequisite refresh prerequisite_refreshing | stale 1/3") ||
 		!strings.Contains(text, "owner_receipt_resource_change | file | workspace_target:main.go") {
 		t.Fatalf("freshness display missing: %q", text)
 	}
@@ -124,7 +124,7 @@ func TestRenderRuntimeProgressKeepsProviderTransportFailureSeparateFromFreshness
 			Source: "execution_receipt_stale", OwnerModuleID: "llm", ResourceDomain: "provider_config", SubjectRef: "ai-proxy/model-a",
 		}},
 	}, 180))
-	if !strings.Contains(text, "prerequisite refresh prerequisite_refreshing | 1/3") ||
+	if !strings.Contains(text, "prerequisite refresh prerequisite_refreshing | stale 1/3") ||
 		!strings.Contains(text, "execution_receipt_stale | llm | provider_config:ai-proxy/model-a") ||
 		!strings.Contains(text, "failure POST /v1/chat/completions: context deadline exceeded") {
 		t.Fatalf("runtime display conflated provider transport and freshness: %q", text)

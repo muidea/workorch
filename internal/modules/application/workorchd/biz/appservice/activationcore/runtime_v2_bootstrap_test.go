@@ -57,6 +57,10 @@ func TestRuntimeV2BootstrapBuildsOrderedDoDFocuses(t *testing.T) {
 	if facts.Focus.ID != "focus-001" || len(facts.RemainingFocuses) != 2 || facts.EvidenceRevision != runtimecontract.InitialRuntimeEvidenceRevision {
 		t.Fatalf("initial facts = %+v", facts)
 	}
+	if bootstrap.RecoveryPolicy.MaxPrerequisiteRefreshes != runtimecontract.DefaultMaxPrerequisiteRefreshes ||
+		bootstrap.RecoveryPolicy.MaxPrerequisiteResourceChangeRefreshes != runtimecontract.DefaultMaxPrerequisiteResourceChangeRefreshes {
+		t.Fatalf("activation did not seal separate freshness budgets: %+v", bootstrap.RecoveryPolicy)
+	}
 }
 
 func containsBootstrapOperationAdmissibility(requirements []runtimecontract.RuntimeRequirement, owner string, kinds ...string) bool {

@@ -1238,6 +1238,7 @@ func runtimeV2ProgressEqual(a, b *backend.RuntimeV2ProgressInfo) bool {
 		a.CompletedDispatchCount != b.CompletedDispatchCount ||
 		a.CandidateAttemptCount != b.CandidateAttemptCount ||
 		a.AcceptedEvidenceCount != b.AcceptedEvidenceCount ||
+		a.AcceptedValidationEvidenceCount != b.AcceptedValidationEvidenceCount ||
 		a.RejectedEvidenceCount != b.RejectedEvidenceCount ||
 		strings.TrimSpace(a.FailureClass) != strings.TrimSpace(b.FailureClass) ||
 		strings.TrimSpace(a.FailureCode) != strings.TrimSpace(b.FailureCode) ||
@@ -1245,7 +1246,9 @@ func runtimeV2ProgressEqual(a, b *backend.RuntimeV2ProgressInfo) bool {
 		strings.TrimSpace(a.FailureMessage) != strings.TrimSpace(b.FailureMessage) ||
 		strings.TrimSpace(a.PrerequisiteRefreshState) != strings.TrimSpace(b.PrerequisiteRefreshState) ||
 		a.PrerequisiteRefreshUsed != b.PrerequisiteRefreshUsed ||
-		a.PrerequisiteRefreshLimit != b.PrerequisiteRefreshLimit {
+		a.PrerequisiteRefreshLimit != b.PrerequisiteRefreshLimit ||
+		a.PrerequisiteResourceChangeRefreshUsed != b.PrerequisiteResourceChangeRefreshUsed ||
+		a.PrerequisiteResourceChangeRefreshLimit != b.PrerequisiteResourceChangeRefreshLimit {
 		return false
 	}
 	if len(a.MissingEvidenceKinds) != len(b.MissingEvidenceKinds) {

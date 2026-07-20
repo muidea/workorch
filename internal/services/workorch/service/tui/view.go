@@ -592,7 +592,11 @@ func renderRuntimeProgressCompact(runtime *backend.RuntimeV2ProgressInfo, width 
 	b.WriteString(truncateDisplay(fmt.Sprintf("- dispatch %d completed | candidate attempts %d", runtime.CompletedDispatchCount, runtime.CandidateAttemptCount), width))
 	b.WriteString("\n")
 	if state := strings.TrimSpace(runtime.PrerequisiteRefreshState); state != "" {
-		b.WriteString(truncateDisplay(fmt.Sprintf("- prerequisite refresh %s | %d/%d", state, runtime.PrerequisiteRefreshUsed, runtime.PrerequisiteRefreshLimit), width))
+		refresh := fmt.Sprintf("- prerequisite refresh %s | stale %d/%d", state, runtime.PrerequisiteRefreshUsed, runtime.PrerequisiteRefreshLimit)
+		if runtime.PrerequisiteResourceChangeRefreshUsed > 0 || runtime.PrerequisiteResourceChangeRefreshLimit > 0 {
+			refresh += fmt.Sprintf(" | resource %d/%d", runtime.PrerequisiteResourceChangeRefreshUsed, runtime.PrerequisiteResourceChangeRefreshLimit)
+		}
+		b.WriteString(truncateDisplay(refresh, width))
 		b.WriteString("\n")
 		for idx, invalidation := range runtime.PrerequisiteInvalidations {
 			if idx == 3 {

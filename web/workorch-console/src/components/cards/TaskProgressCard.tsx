@@ -118,7 +118,7 @@ export const TaskProgressCard = React.memo(function TaskProgressCard({ progress,
           { key: 'repairSignalIdentifiers', label: '失败信号标识符', children: <CompactTags tags={repairSignalIdentifiers} maxVisible={4} /> },
           { key: 'repairCompaction', label: '修复输入裁剪', children: repairCompactionFields.length ? <CompactTags tags={repairCompactionFields} maxVisible={4} /> : '-' },
           { key: 'repairEvidence', label: '修复证据', children: <CompactTags tags={repairLoop?.evidenceRefs ?? []} maxVisible={4} /> },
-          { key: 'prerequisiteRefresh', label: '前置条件刷新', children: prerequisiteRefresh?.prerequisiteRefreshState ? `${prerequisiteRefresh.prerequisiteRefreshState} (${prerequisiteRefresh.prerequisiteRefreshUsed ?? 0}/${prerequisiteRefresh.prerequisiteRefreshLimit ?? 0})` : '-' },
+          { key: 'prerequisiteRefresh', label: '前置条件刷新', children: prerequisiteRefresh?.prerequisiteRefreshState ? `${prerequisiteRefresh.prerequisiteRefreshState}（stale ${prerequisiteRefresh.prerequisiteRefreshUsed ?? 0}/${prerequisiteRefresh.prerequisiteRefreshLimit ?? 0}；resource ${prerequisiteRefresh.prerequisiteResourceChangeRefreshUsed ?? 0}/${prerequisiteRefresh.prerequisiteResourceChangeRefreshLimit ?? 0}）` : '-' },
           { key: 'prerequisiteSources', label: '刷新来源', children: prerequisiteSources.length ? <CompactTags tags={prerequisiteSources} maxVisible={4} /> : '-' }
         ]}
       />

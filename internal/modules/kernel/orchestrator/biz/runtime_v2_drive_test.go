@@ -944,10 +944,9 @@ func runtimeV2FileShellGitBootstrap() runtimecontract.RuntimeBootstrap {
 	bootstrap := runtimeV2Bootstrap()
 	// This fixture deliberately performs five distinct durable effects
 	// (create, edit, init, add, commit). Each can invalidate a mutable
-	// prerequisite. Its sealed budget therefore exceeds the default production
-	// ceiling so the fixture can prove the positive refresh path rather than
-	// exercising the separate exhaustion-terminal path.
-	bootstrap.RecoveryPolicy.MaxPrerequisiteRefreshes = 8
+	// prerequisite. The activation-sealed resource-change allowance covers this
+	// normal progressing path; stale/no-progress recovery remains independent.
+	bootstrap.RecoveryPolicy.MaxPrerequisiteResourceChangeRefreshes = 8
 	bootstrap.Definition.CapabilityContract = []string{
 		runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileEdit,
 		runtimecontract.RuntimeBlockKindManagedValidationSession, runtimecontract.StepKindGitWrite,

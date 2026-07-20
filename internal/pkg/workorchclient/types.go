@@ -626,25 +626,28 @@ type ProgressMilestone struct {
 }
 
 type RuntimeV2Progress struct {
-	StateRevision             uint64                                   `json:"stateRevision,omitempty"`
-	EvidenceSequence          uint64                                   `json:"evidenceSequence,omitempty"`
-	CompletedDispatchCount    int                                      `json:"completedDispatchCount"`
-	ActiveDispatchID          string                                   `json:"activeDispatchId,omitempty"`
-	CandidateAttemptCount     int                                      `json:"candidateAttemptCount"`
-	AcceptedEvidenceCount     int                                      `json:"acceptedEvidenceCount"`
-	RejectedEvidenceCount     int                                      `json:"rejectedEvidenceCount"`
-	MissingEvidenceKinds      []string                                 `json:"missingEvidenceKinds,omitempty"`
-	CurrentFocusID            string                                   `json:"currentFocusId,omitempty"`
-	CurrentAction             string                                   `json:"currentAction,omitempty"`
-	FailureClass              string                                   `json:"failureClass,omitempty"`
-	FailureCode               string                                   `json:"failureCode,omitempty"`
-	FailureSignature          string                                   `json:"failureSignature,omitempty"`
-	FailureMessage            string                                   `json:"failureMessage,omitempty"`
-	RepairHintCodes           []string                                 `json:"repairHintCodes,omitempty"`
-	PrerequisiteRefreshState  string                                   `json:"prerequisiteRefreshState,omitempty"`
-	PrerequisiteRefreshUsed   int                                      `json:"prerequisiteRefreshUsed,omitempty"`
-	PrerequisiteRefreshLimit  int                                      `json:"prerequisiteRefreshLimit,omitempty"`
-	PrerequisiteInvalidations []RuntimePrerequisiteRefreshInvalidation `json:"prerequisiteInvalidations,omitempty"`
+	StateRevision                          uint64                                   `json:"stateRevision,omitempty"`
+	EvidenceSequence                       uint64                                   `json:"evidenceSequence,omitempty"`
+	CompletedDispatchCount                 int                                      `json:"completedDispatchCount"`
+	ActiveDispatchID                       string                                   `json:"activeDispatchId,omitempty"`
+	CandidateAttemptCount                  int                                      `json:"candidateAttemptCount"`
+	AcceptedEvidenceCount                  int                                      `json:"acceptedEvidenceCount"`
+	AcceptedValidationEvidenceCount        int                                      `json:"acceptedValidationEvidenceCount"`
+	RejectedEvidenceCount                  int                                      `json:"rejectedEvidenceCount"`
+	MissingEvidenceKinds                   []string                                 `json:"missingEvidenceKinds,omitempty"`
+	CurrentFocusID                         string                                   `json:"currentFocusId,omitempty"`
+	CurrentAction                          string                                   `json:"currentAction,omitempty"`
+	FailureClass                           string                                   `json:"failureClass,omitempty"`
+	FailureCode                            string                                   `json:"failureCode,omitempty"`
+	FailureSignature                       string                                   `json:"failureSignature,omitempty"`
+	FailureMessage                         string                                   `json:"failureMessage,omitempty"`
+	RepairHintCodes                        []string                                 `json:"repairHintCodes,omitempty"`
+	PrerequisiteRefreshState               string                                   `json:"prerequisiteRefreshState,omitempty"`
+	PrerequisiteRefreshUsed                int                                      `json:"prerequisiteRefreshUsed,omitempty"`
+	PrerequisiteRefreshLimit               int                                      `json:"prerequisiteRefreshLimit,omitempty"`
+	PrerequisiteResourceChangeRefreshUsed  int                                      `json:"prerequisiteResourceChangeRefreshUsed,omitempty"`
+	PrerequisiteResourceChangeRefreshLimit int                                      `json:"prerequisiteResourceChangeRefreshLimit,omitempty"`
+	PrerequisiteInvalidations              []RuntimePrerequisiteRefreshInvalidation `json:"prerequisiteInvalidations,omitempty"`
 }
 
 type RuntimePrerequisiteRefreshInvalidation struct {

@@ -28,10 +28,14 @@ func applyRuntimeV2Progress(progress *readmodelcore.TaskProgress, run *runmodel.
 func mapRuntimeV2Progress(state runtimecontract.RuntimeStateRecord) readmodelcore.RuntimeV2Progress {
 	facts := state.Facts.Normalized()
 	accepted := 0
+	acceptedValidation := 0
 	rejected := 0
 	for _, evidence := range facts.Evidence.Accepted {
 		if runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) {
 			accepted++
+			if evidence.Kind == runtimecontract.EvidenceKindValidation {
+				acceptedValidation++
+			}
 		}
 	}
 	for _, evidence := range facts.Evidence.Rejected {
@@ -44,16 +48,17 @@ func mapRuntimeV2Progress(state runtimecontract.RuntimeStateRecord) readmodelcor
 		activeDispatchID = strings.TrimSpace(state.ActiveDispatch.ID)
 	}
 	ret := readmodelcore.RuntimeV2Progress{
-		StateRevision:          state.StateRevision,
-		EvidenceSequence:       state.EvidenceSequence,
-		CompletedDispatchCount: len(state.CompletedDispatches),
-		CandidateAttemptCount:  len(state.CandidateAttempts),
-		AcceptedEvidenceCount:  accepted,
-		RejectedEvidenceCount:  rejected,
-		MissingEvidenceKinds:   runtimecontract.MissingRequiredEvidenceKinds(facts),
-		CurrentFocusID:         strings.TrimSpace(facts.Focus.ID),
-		CurrentAction:          string(state.Decision.Action),
-		ActiveDispatchID:       activeDispatchID,
+		StateRevision:                   state.StateRevision,
+		EvidenceSequence:                state.EvidenceSequence,
+		CompletedDispatchCount:          len(state.CompletedDispatches),
+		CandidateAttemptCount:           len(state.CandidateAttempts),
+		AcceptedEvidenceCount:           accepted,
+		AcceptedValidationEvidenceCount: acceptedValidation,
+		RejectedEvidenceCount:           rejected,
+		MissingEvidenceKinds:            runtimecontract.MissingRequiredEvidenceKinds(facts),
+		CurrentFocusID:                  strings.TrimSpace(facts.Focus.ID),
+		CurrentAction:                   string(state.Decision.Action),
+		ActiveDispatchID:                activeDispatchID,
 	}
 	if facts.Failure != nil {
 		ret.FailureClass = string(facts.Failure.Class)
@@ -63,6 +68,8 @@ func mapRuntimeV2Progress(state runtimecontract.RuntimeStateRecord) readmodelcor
 	}
 	ret.PrerequisiteRefreshUsed = facts.Recovery.Used(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh)
 	ret.PrerequisiteRefreshLimit = facts.RecoveryPolicy.Limit(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh)
+	ret.PrerequisiteResourceChangeRefreshUsed = facts.Recovery.Used(runtimecontract.RuntimeRecoveryBudgetPrerequisiteResourceChangeRefresh)
+	ret.PrerequisiteResourceChangeRefreshLimit = facts.RecoveryPolicy.Limit(runtimecontract.RuntimeRecoveryBudgetPrerequisiteResourceChangeRefresh)
 	ret.PrerequisiteInvalidations = mapPrerequisiteRefreshInvalidations(state.PrerequisiteInvalidations)
 	ret.PrerequisiteRefreshState = runtimePrerequisiteRefreshState(facts, ret.PrerequisiteInvalidations)
 	hints := runtimecontract.DeriveRuntimeRepairHints(facts)
@@ -79,6 +86,9 @@ func mapRuntimeV2Progress(state runtimecontract.RuntimeStateRecord) readmodelcor
 
 func runtimePrerequisiteRefreshState(facts runtimecontract.RuntimeFacts, invalidations []readmodelcore.RuntimePrerequisiteRefreshInvalidation) string {
 	if facts.Failure != nil && facts.Failure.Class == runtimecontract.FailureClassPrerequisiteRefreshExhausted {
+		if facts.Failure.Code == "prerequisite_receipt_refresh_exhausted" {
+			return "prerequisite_receipt_refresh_exhausted"
+		}
 		return "prerequisite_refresh_exhausted"
 	}
 	if len(invalidations) == 0 {
@@ -175,9 +185,9 @@ func applyRuntimeV2ProgressToMilestones(progress *readmodelcore.TaskProgress, su
 			}
 		case "validation":
 			switch {
-			case terminalFailed && missingValidation:
+			case terminalFailed && summary.AcceptedValidationEvidenceCount == 0:
 				item.State = "failed"
-			case !missingValidation && summary.AcceptedEvidenceCount > 0:
+			case summary.AcceptedValidationEvidenceCount > 0:
 				item.State = "completed"
 				item.EvidenceRefs = compactUniqueStrings(append(item.EvidenceRefs, "runtime-v2/validation-evidence"))
 			case missingValidation && summary.RejectedEvidenceCount > 0:

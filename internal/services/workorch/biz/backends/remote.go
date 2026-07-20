@@ -687,13 +687,16 @@ func runtimeV2ProgressFromClient(item *client.RuntimeV2Progress) *RuntimeV2Progr
 		StateRevision: item.StateRevision, EvidenceSequence: item.EvidenceSequence,
 		CompletedDispatchCount: item.CompletedDispatchCount, ActiveDispatchID: item.ActiveDispatchID,
 		CandidateAttemptCount: item.CandidateAttemptCount, AcceptedEvidenceCount: item.AcceptedEvidenceCount,
-		RejectedEvidenceCount: item.RejectedEvidenceCount, MissingEvidenceKinds: append([]string(nil), item.MissingEvidenceKinds...),
+		AcceptedValidationEvidenceCount: item.AcceptedValidationEvidenceCount,
+		RejectedEvidenceCount:           item.RejectedEvidenceCount, MissingEvidenceKinds: append([]string(nil), item.MissingEvidenceKinds...),
 		CurrentFocusID: item.CurrentFocusID, CurrentAction: item.CurrentAction, FailureClass: item.FailureClass,
 		FailureCode: item.FailureCode, FailureSignature: item.FailureSignature, FailureMessage: item.FailureMessage,
 		RepairHintCodes:          append([]string(nil), item.RepairHintCodes...),
 		PrerequisiteRefreshState: item.PrerequisiteRefreshState, PrerequisiteRefreshUsed: item.PrerequisiteRefreshUsed,
-		PrerequisiteRefreshLimit:  item.PrerequisiteRefreshLimit,
-		PrerequisiteInvalidations: prerequisiteRefreshInvalidationsFromClient(item.PrerequisiteInvalidations),
+		PrerequisiteRefreshLimit:               item.PrerequisiteRefreshLimit,
+		PrerequisiteResourceChangeRefreshUsed:  item.PrerequisiteResourceChangeRefreshUsed,
+		PrerequisiteResourceChangeRefreshLimit: item.PrerequisiteResourceChangeRefreshLimit,
+		PrerequisiteInvalidations:              prerequisiteRefreshInvalidationsFromClient(item.PrerequisiteInvalidations),
 	}
 }
 

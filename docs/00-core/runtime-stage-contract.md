@@ -213,6 +213,7 @@ current focus
 - reducer 是 `RuntimeFacts -> RuntimeDecision + AuthoritySnapshot + AuthorityTransaction` 的唯一权威。
 - prerequisite 未完成时不得请求 candidate；manifest、target snapshot、failure target、capability、validation scratch、provider ceiling 等只能通过 owner typed prerequisite acquisition 完成。profile 声明 capability-state prerequisite 时，持久化 owner identity 必须等于该 profile accepted operation descriptor 的 canonical owner，禁止使用 EventHub destination alias。
 - `RequiredOutputContract` 必须由 current focus、owner-confirmed capabilities、evidence policy 与 side-effect compatibility 的中立交集产生。
+- freshness 重取必须保留安全性：accepted owner receipt 的真实资源 revision 变化仍须使相交 prerequisite 失效并重新获取；但它属于正常的有进展执行，必须消费 activation 时封存的 `prerequisite_receipt_refresh` 独立预算。read-only stale/no-progress、重复/无效 receipt 仍消费独立的 `prerequisite_refresh` 预算；两者都受上限约束，duplicate 不得重复消费，且不得由 TUI/Web 或动态运行配置改变。
 - authority feasibility gate 必须在请求 LLM 前证明至少存在一个可执行、action-compatible、side-effect-compatible 的 concrete operation kind；不存在时不得让 LLM 猜测。current focus 存在 active rejected operation shape 时，candidate volatile context 必须同时携带精确 typed operation、shape hash、failure lineage 与 admissible operation kinds，不能只给出自然语言“不要重复”。
 - “required evidence 齐备”必须同时满足 kind、coverage binding、current-run、freshness、quality、claim alignment、accepted/rejected operation contract 等适用门禁；不能只按 evidence 数量判断。
 - Run 级 `must_produce_state_change` 表示整个 Run 必须产生至少一次与 active coverage 对齐的 primary state-change evidence，不表示每个 DoD focus 都必须修改 workspace。
@@ -337,6 +338,7 @@ owner projection lane (one-way derived delivery)
 - projection health 按当前 stream generation/current workspace entries 计算；historical/deleted workspace failure counter 不得永久保持 degraded。
 - projection/read model 可以展示 progress、repair、usage、lineage、health，但不能产生 RuntimeAction、candidate、evidence acceptance 或 terminal。
 - read model 必须把 SM-3 candidate contract attempt 与 SM-2 focus repair ledger 分开展示；focus advance 后不得让历史 candidate failure/repeated reason 继续把当前 heartbeat 标记为 ineffective retry，required evidence 也不得在 `produce_assessment` 时被误报为 missing evidence。
+- validation milestone 只能由当前 focus 适用的 accepted `validation` kind evidence 标记完成；任意 accepted state-change evidence、dispatch 数量或 terminal 状态都不能伪造 validation evidence ref。投影只展示这一事实，不能反向驱动 SM-1～SM-4。
 
 禁止迁移：
 

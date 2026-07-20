@@ -168,7 +168,10 @@ func applyReceiptResourceChangeInvalidation(aggregate *RuntimeAggregate, dispatc
 	if len(prerequisiteIDs) == 0 {
 		return false, nil
 	}
-	ledger, consumed, err := facts.Recovery.Consume(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh, facts.RecoveryPolicy)
+	// A resource-changing accepted receipt is forward progress, not a stale
+	// recovery. Keep its bounded re-acquisition allowance separate so normal
+	// multi-owner workflows cannot exhaust the stale/no-progress budget.
+	ledger, consumed, err := facts.Recovery.Consume(runtimecontract.RuntimeRecoveryBudgetPrerequisiteResourceChangeRefresh, facts.RecoveryPolicy)
 	if err != nil {
 		return false, err
 	}
@@ -181,8 +184,8 @@ func applyReceiptResourceChangeInvalidation(aggregate *RuntimeAggregate, dispatc
 	})
 	if !consumed {
 		aggregate.Facts.Failure = &runtimecontract.FailureFact{
-			Class: runtimecontract.FailureClassPrerequisiteRefreshExhausted, Code: "prerequisite_refresh_exhausted",
-			Signature: signature, Message: "prerequisite refresh budget exhausted after owner resource change",
+			Class: runtimecontract.FailureClassPrerequisiteRefreshExhausted, Code: "prerequisite_receipt_refresh_exhausted",
+			Signature: signature, Message: "prerequisite receipt refresh budget exhausted after owner resource revision",
 		}
 	}
 	return true, nil

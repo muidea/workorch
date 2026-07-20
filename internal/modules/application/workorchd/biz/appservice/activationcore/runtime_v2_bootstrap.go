@@ -89,6 +89,10 @@ func RuntimeV2Bootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defi
 	if maxRetries, ok := runtimecontract.RuntimeValidationRetryLimit(activation.ExecutionContract.ValidationPolicies, runtimecontract.EvidenceKindValidation); ok {
 		convergencePolicy.MaxValidationOnlyRetriesPerFocus = maxRetries
 	}
+	// Recovery policy is compiled once into the bootstrap. In particular, normal
+	// owner resource-change refreshes and stale/no-progress recovery have
+	// separate typed allowances; Resume only reads this sealed policy.
+	recoveryPolicy := runtimecontract.DefaultRuntimeRecoveryPolicy()
 	bootstrap := runtimecontract.RuntimeBootstrap{
 		SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 		Activation:    activation,
@@ -104,7 +108,7 @@ func RuntimeV2Bootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defi
 		Requirements:           requirements,
 		StateChangeRequirement: stateChangeRequirement,
 		ConvergencePolicy:      convergencePolicy,
-		RecoveryPolicy:         runtimecontract.DefaultRuntimeRecoveryPolicy(),
+		RecoveryPolicy:         recoveryPolicy,
 	}
 	bootstrap = bootstrap.Normalized()
 	if err := bootstrap.Validate(); err != nil {

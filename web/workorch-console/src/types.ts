@@ -1293,6 +1293,7 @@ export type RuntimeV2Progress = {
   activeDispatchId?: string;
   candidateAttemptCount?: number;
   acceptedEvidenceCount?: number;
+  acceptedValidationEvidenceCount?: number;
   rejectedEvidenceCount?: number;
   missingEvidenceKinds?: string[];
   currentFocusId?: string;
@@ -1305,6 +1306,8 @@ export type RuntimeV2Progress = {
   prerequisiteRefreshState?: string;
   prerequisiteRefreshUsed?: number;
   prerequisiteRefreshLimit?: number;
+  prerequisiteResourceChangeRefreshUsed?: number;
+  prerequisiteResourceChangeRefreshLimit?: number;
   prerequisiteInvalidations?: RuntimePrerequisiteRefreshInvalidation[];
 };
 

@@ -541,13 +541,16 @@ func portRuntimeV2ProgressInfo(item *readmodelcore.RuntimeV2Progress) *port.Runt
 		StateRevision: item.StateRevision, EvidenceSequence: item.EvidenceSequence,
 		CompletedDispatchCount: item.CompletedDispatchCount, ActiveDispatchID: item.ActiveDispatchID,
 		CandidateAttemptCount: item.CandidateAttemptCount, AcceptedEvidenceCount: item.AcceptedEvidenceCount,
-		RejectedEvidenceCount: item.RejectedEvidenceCount, MissingEvidenceKinds: append([]string(nil), item.MissingEvidenceKinds...),
+		AcceptedValidationEvidenceCount: item.AcceptedValidationEvidenceCount,
+		RejectedEvidenceCount:           item.RejectedEvidenceCount, MissingEvidenceKinds: append([]string(nil), item.MissingEvidenceKinds...),
 		CurrentFocusID: item.CurrentFocusID, CurrentAction: item.CurrentAction, FailureClass: item.FailureClass,
 		FailureCode: item.FailureCode, FailureSignature: item.FailureSignature, FailureMessage: item.FailureMessage,
 		RepairHintCodes:          append([]string(nil), item.RepairHintCodes...),
 		PrerequisiteRefreshState: item.PrerequisiteRefreshState, PrerequisiteRefreshUsed: item.PrerequisiteRefreshUsed,
-		PrerequisiteRefreshLimit:  item.PrerequisiteRefreshLimit,
-		PrerequisiteInvalidations: portPrerequisiteRefreshInvalidations(item.PrerequisiteInvalidations),
+		PrerequisiteRefreshLimit:               item.PrerequisiteRefreshLimit,
+		PrerequisiteResourceChangeRefreshUsed:  item.PrerequisiteResourceChangeRefreshUsed,
+		PrerequisiteResourceChangeRefreshLimit: item.PrerequisiteResourceChangeRefreshLimit,
+		PrerequisiteInvalidations:              portPrerequisiteRefreshInvalidations(item.PrerequisiteInvalidations),
 	}
 }
 
