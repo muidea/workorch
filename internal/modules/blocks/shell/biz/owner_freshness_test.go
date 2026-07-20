@@ -3,6 +3,7 @@ package shell
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -12,6 +13,72 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestShellOwnerZeroWorkValidationReceiptReplaysQualityWithoutReexecution(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go is not available")
+	}
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	receipts := map[string]runtimecontract.RuntimeOperationReceipt{}
+	receiptObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
+	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.QueryRuntimeOperationReceiptCommand)
+		receipt, found := receipts[command.ExecutionKey]
+		result.Set(orchestratorevents.QueryRuntimeOperationReceiptResult{Receipt: &receipt, Found: found}, nil)
+	})
+	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)
+		if receipt, found := receipts[command.Receipt.ExecutionKey]; found {
+			result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: receipt}, nil)
+			return
+		}
+		receipts[command.Receipt.ExecutionKey] = command.Receipt
+		result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: command.Receipt}, nil)
+	})
+	t.Cleanup(func() {
+		receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
+		receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
+	})
+
+	owner := &Biz{Base: basebiz.New(modulecommon.ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter()}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+	workspace := newGoValidationWorkspace(t, "package fixture\nimport \"testing\"\nfunc TestExisting(t *testing.T) {}\n")
+	command := orchestratorevents.ExecuteShellOperationCommand{
+		Execution: orchestratorevents.RuntimeOperationExecutionEnvelope{
+			ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/validate", Fence: 1,
+			ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
+		},
+		WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell",
+		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
+		OperationID: "validate", EvidenceKind: runtimecontract.EvidenceKindValidation,
+		WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"fixture_test.go"},
+		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
+			ID: "zero-work", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "go", ArgsContain: []string{"test"},
+			ZeroWorkMarkers: []string{"no tests to run", "[no tests to run]"}, WorkEvidenceMarkers: []string{"=== RUN", "--- PASS:"},
+			QualityOnZeroWork: "inconclusive", EvidenceReason: "no matching validation checks", EvidenceTags: []string{"zero_work"},
+		}},
+		Data: orchestratorevents.ShellOperationData{
+			Command: "go", Args: []string{"test", "-v", "-run", "TestMissing", "./..."}, TargetRefs: []string{"fixture_test.go"},
+		},
+	}
+	first := sendShellStateChangingReceiptCommand(t, ctx, hub, command)
+	if first.Receipt.Evidence.Quality != "inconclusive" || !first.Receipt.Evidence.ZeroWork ||
+		first.Receipt.Evidence.Validation == nil || first.Receipt.Evidence.EvidenceReason != "no matching validation checks" {
+		t.Fatalf("zero-work receipt = %+v", first.Receipt)
+	}
+	firstHash := runtimecontract.StableRuntimeOperationReceiptHash(first.Receipt)
+	command.Data.Args = []string{"test", "-v", "-run", "TestExisting", "./..."}
+	replayed := sendShellStateChangingReceiptCommand(t, ctx, hub, command)
+	if runtimecontract.StableRuntimeOperationReceiptHash(replayed.Receipt) != firstHash ||
+		replayed.Receipt.Evidence.Quality != first.Receipt.Evidence.Quality || !replayed.Receipt.Evidence.ZeroWork {
+		t.Fatalf("replayed validation receipt changed quality: first=%+v replayed=%+v", first.Receipt, replayed.Receipt)
+	}
+}
 
 func TestShellOwnerStateChangingReceiptReportsFileResourcesAndReplays(t *testing.T) {
 	ctx := context.Background()

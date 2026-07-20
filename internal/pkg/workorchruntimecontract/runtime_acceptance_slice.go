@@ -69,6 +69,7 @@ type RuntimeCoverageItem struct {
 	SliceID     string
 	SourceScope string
 	SourceID    string
+	TargetText  string
 	Order       int
 }
 
@@ -77,6 +78,9 @@ type RuntimeCoverageItemState string
 type RuntimeCoverageItemFact struct {
 	ID               common.CoverageWorkItemID
 	SliceID          string
+	SourceScope      string
+	SourceID         string
+	TargetText       string
 	State            RuntimeCoverageItemState
 	EvidenceRefs     []string
 	LastAssessmentID string
@@ -96,7 +100,10 @@ func InitialRuntimeCoverageFacts(items []RuntimeCoverageItem) []RuntimeCoverageI
 			continue
 		}
 		seen[item.ID] = struct{}{}
-		ret = append(ret, RuntimeCoverageItemFact{ID: item.ID, SliceID: item.SliceID, State: RuntimeCoverageItemStateOpen})
+		ret = append(ret, RuntimeCoverageItemFact{
+			ID: item.ID, SliceID: item.SliceID, SourceScope: item.SourceScope, SourceID: item.SourceID,
+			TargetText: item.TargetText, State: RuntimeCoverageItemStateOpen,
+		})
 	}
 	return NormalizeRuntimeCoverageFacts(ret)
 }
@@ -107,6 +114,9 @@ func NormalizeRuntimeCoverageFacts(values []RuntimeCoverageItemFact) []RuntimeCo
 	for _, value := range values {
 		value.ID = common.CoverageWorkItemID(strings.TrimSpace(string(value.ID)))
 		value.SliceID = strings.TrimSpace(value.SliceID)
+		value.SourceScope = strings.TrimSpace(value.SourceScope)
+		value.SourceID = strings.TrimSpace(value.SourceID)
+		value.TargetText = strings.TrimSpace(value.TargetText)
 		value.State = RuntimeCoverageItemState(strings.TrimSpace(string(value.State)))
 		value.EvidenceRefs = normalizeStrings(value.EvidenceRefs)
 		value.LastAssessmentID = strings.TrimSpace(value.LastAssessmentID)
@@ -224,6 +234,7 @@ func (c RuntimeCoverageItem) Normalized() RuntimeCoverageItem {
 	c.SliceID = strings.TrimSpace(c.SliceID)
 	c.SourceScope = strings.TrimSpace(c.SourceScope)
 	c.SourceID = strings.TrimSpace(c.SourceID)
+	c.TargetText = strings.TrimSpace(c.TargetText)
 	return c
 }
 

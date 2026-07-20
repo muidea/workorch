@@ -967,8 +967,7 @@
         ],
         "workEvidenceMarkers": [
           "=== RUN",
-          "--- PASS:",
-          "ok  "
+          "--- PASS:"
         ],
         "qualityOnZeroWork": "inconclusive",
         "zeroWork": true,

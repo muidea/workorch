@@ -296,6 +296,13 @@ func (r RuntimeOperationReceipt) Normalized() RuntimeOperationReceipt {
 	r.Evidence.Summary = strings.TrimSpace(r.Evidence.Summary)
 	r.Evidence.ContentHash = strings.TrimSpace(r.Evidence.ContentHash)
 	r.Evidence.EvidenceRefs = normalizeStrings(r.Evidence.EvidenceRefs)
+	r.Evidence.Quality = common.EvidenceQuality(strings.TrimSpace(string(r.Evidence.Quality)))
+	r.Evidence.EvidenceReason = strings.TrimSpace(r.Evidence.EvidenceReason)
+	r.Evidence.EvidenceTags = normalizeStrings(r.Evidence.EvidenceTags)
+	if r.Evidence.Validation != nil {
+		observation := r.Evidence.Validation.Clone()
+		r.Evidence.Validation = &observation
+	}
 	r.ResourceChanges = NormalizeRuntimeResourceChanges(r.ResourceChanges)
 	if r.Failure != nil {
 		failure := *r.Failure
@@ -511,6 +518,20 @@ func StableRuntimeOperationReceiptHash(receipt RuntimeOperationReceipt) string {
 	writeHashString(h, receipt.Evidence.Summary)
 	writeHashString(h, receipt.Evidence.ContentHash)
 	writeHashStrings(h, receipt.Evidence.EvidenceRefs)
+	writeHashString(h, string(receipt.Evidence.Quality))
+	writeHashString(h, fmt.Sprintf("%t", receipt.Evidence.ZeroWork))
+	writeHashString(h, receipt.Evidence.EvidenceReason)
+	writeHashStrings(h, receipt.Evidence.EvidenceTags)
+	if receipt.Evidence.Validation == nil {
+		writeHashString(h, "validation:nil")
+	} else {
+		observation := receipt.Evidence.Validation.Normalized()
+		writeHashStrings(h, observation.ExecutedChecks)
+		writeHashStrings(h, observation.PassedChecks)
+		writeHashStrings(h, observation.FailedChecks)
+		writeHashStrings(h, observation.SkippedChecks)
+		writeHashString(h, observation.OutputPreview)
+	}
 	if receipt.Evidence.ExitCode == nil {
 		writeHashString(h, "exit:nil")
 	} else {

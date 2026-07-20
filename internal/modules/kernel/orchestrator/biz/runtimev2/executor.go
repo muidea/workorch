@@ -229,6 +229,9 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 		if failure := runtimeOperationEffectMismatchFailure(aggregate.Decision, execution, operation, result.Receipt); failure != nil {
 			result.Status = ExecutionEvidenceStatusRejected
 			result.Failure = failure
+		} else if failure := runtimeOperationEvidenceQualityFailure(operation, result.Receipt.Evidence); failure != nil {
+			result.Status = ExecutionEvidenceStatusRejected
+			result.Failure = failure
 		}
 		if err := validateRuntimeOperationExecutionResult(aggregate.Decision, operation, result); err != nil {
 			return RuntimeAggregate{}, err
@@ -429,11 +432,15 @@ func operationExecutionRecord(values []runtimecontract.RuntimeOperationExecution
 
 func (c *RuntimeController) commitPersistedOperationReceiptEvidence(ctx context.Context, aggregate RuntimeAggregate, dispatch SealedDispatch, operation runtimecontract.RuntimeOperation, receipt runtimecontract.RuntimeOperationReceipt) (EvidenceCommitResult, error) {
 	status := ExecutionEvidenceStatusAccepted
+	failure := receipt.Failure
 	switch receipt.Outcome {
 	case runtimecontract.RuntimeOperationOutcomeRejected:
 		status = ExecutionEvidenceStatusRejected
 	case runtimecontract.RuntimeOperationOutcomeAccepted, runtimecontract.RuntimeOperationOutcomeNoOp:
-		// commit below
+		if qualityFailure := runtimeOperationEvidenceQualityFailure(operation, receipt.Evidence); qualityFailure != nil {
+			status = ExecutionEvidenceStatusRejected
+			failure = qualityFailure
+		}
 	default:
 		return EvidenceCommitResult{}, fmt.Errorf("operation receipt outcome %q cannot commit ordinary evidence", receipt.Outcome)
 	}
@@ -442,9 +449,38 @@ func (c *RuntimeController) commitPersistedOperationReceiptEvidence(ctx context.
 		EventID: "runtime-receipt|" + hash, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		DispatchID: dispatch.ID, AuthoritySnapshotID: dispatch.Transaction.AuthoritySnapshotID,
 		OperationID: operation.ID, Status: status, SourceRef: "runtime-receipt/" + receipt.ExecutionKey,
-		Failure: receipt.Failure, Evidence: receipt.Evidence, ObservedEffectScope: receipt.ObservedEffectScope, NoOp: receipt.NoOp,
+		Failure: failure, Evidence: receipt.Evidence, ObservedEffectScope: receipt.ObservedEffectScope, NoOp: receipt.NoOp,
 		OwnerReceiptRef: "runtime-receipt/" + receipt.ExecutionKey, OwnerReceiptHash: hash, Receipt: &receipt,
 	})
+}
+
+func runtimeOperationEvidenceQualityFailure(operation runtimecontract.RuntimeOperation, evidence runtimecontract.RuntimeOperationEvidence) *runtimecontract.FailureFact {
+	operation = operation.Normalized()
+	if operation.Kind != runtimecontract.RuntimeBlockKindManagedValidationSession && operation.Kind != runtimecontract.StepKindShellCommand {
+		return nil
+	}
+	quality := common.EvidenceQuality(strings.TrimSpace(string(evidence.Quality)))
+	if !evidence.ZeroWork && quality != common.EvidenceQualityInconclusive && quality != common.EvidenceQualityInvalid && quality != common.EvidenceQualitySkipped {
+		return nil
+	}
+	reason := strings.TrimSpace(evidence.EvidenceReason)
+	if reason == "" {
+		reason = "validation operation completed without acceptable execution evidence"
+	}
+	qualityLabel := strings.TrimSpace(string(quality))
+	if qualityLabel == "" {
+		qualityLabel = "zero_work"
+	}
+	coverage := make([]string, 0, len(operation.CoverageWorkItemIDs))
+	for _, id := range operation.CoverageWorkItemIDs {
+		coverage = append(coverage, string(id))
+	}
+	return &runtimecontract.FailureFact{
+		Class:     runtimecontract.FailureClassCoverageAssessmentIncomplete,
+		Code:      "validation_evidence_inconclusive",
+		Signature: strings.Join([]string{"validation-evidence", operation.Kind, qualityLabel, strings.Join(coverage, ",")}, "/"),
+		Message:   reason, TargetRefs: append([]string(nil), operation.TargetRefs...),
+	}
 }
 
 func (c *RuntimeController) claimOperationExecution(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, operationID string) (RuntimeAggregate, error) {

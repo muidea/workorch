@@ -107,13 +107,52 @@ type EvidenceFact struct {
 	ExitCode            *int64
 	EvidenceRefs        []string
 	CoverageWorkItemIDs []common.CoverageWorkItemID
+	Quality             common.EvidenceQuality
+	ZeroWork            bool
+	EvidenceReason      string
+	EvidenceTags        []string
+	Validation          *RuntimeValidationObservation
 }
 
 type RuntimeOperationEvidence struct {
-	Summary      string
-	ContentHash  string
-	ExitCode     *int64
-	EvidenceRefs []string
+	Summary        string
+	ContentHash    string
+	ExitCode       *int64
+	EvidenceRefs   []string
+	Quality        common.EvidenceQuality
+	ZeroWork       bool
+	EvidenceReason string
+	EvidenceTags   []string
+	Validation     *RuntimeValidationObservation
+}
+
+// RuntimeValidationObservation is an owner-reported, domain-neutral summary of
+// validation work. Capability owners may derive it from tool-specific output,
+// while Orchestrator only consumes the typed quality and check identities.
+type RuntimeValidationObservation struct {
+	ExecutedChecks []string
+	PassedChecks   []string
+	FailedChecks   []string
+	SkippedChecks  []string
+	OutputPreview  string
+}
+
+func (o RuntimeValidationObservation) Normalized() RuntimeValidationObservation {
+	o.ExecutedChecks = normalizeStrings(o.ExecutedChecks)
+	o.PassedChecks = normalizeStrings(o.PassedChecks)
+	o.FailedChecks = normalizeStrings(o.FailedChecks)
+	o.SkippedChecks = normalizeStrings(o.SkippedChecks)
+	o.OutputPreview = strings.TrimSpace(o.OutputPreview)
+	return o
+}
+
+func (o RuntimeValidationObservation) Clone() RuntimeValidationObservation {
+	o = o.Normalized()
+	o.ExecutedChecks = append([]string(nil), o.ExecutedChecks...)
+	o.PassedChecks = append([]string(nil), o.PassedChecks...)
+	o.FailedChecks = append([]string(nil), o.FailedChecks...)
+	o.SkippedChecks = append([]string(nil), o.SkippedChecks...)
+	return o
 }
 
 type FailureClass string
@@ -1261,6 +1300,13 @@ func normalizeEvidenceFacts(values []EvidenceFact) []EvidenceFact {
 		value.ContentHash = strings.TrimSpace(value.ContentHash)
 		value.EvidenceRefs = normalizeStrings(value.EvidenceRefs)
 		value.CoverageWorkItemIDs = normalizeCoverageWorkItemIDs(value.CoverageWorkItemIDs)
+		value.Quality = common.EvidenceQuality(strings.TrimSpace(string(value.Quality)))
+		value.EvidenceReason = strings.TrimSpace(value.EvidenceReason)
+		value.EvidenceTags = normalizeStrings(value.EvidenceTags)
+		if value.Validation != nil {
+			observation := value.Validation.Clone()
+			value.Validation = &observation
+		}
 		if value.ExitCode != nil {
 			exitCode := *value.ExitCode
 			value.ExitCode = &exitCode

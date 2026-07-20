@@ -332,6 +332,9 @@ func TestCompileRuntimeV2CoverageSlicesBoundLargeDoD(t *testing.T) {
 	if compiled.CoverageItems[0].ID != "cwi-001" || compiled.CoverageItems[9].ID != "cwi-010" {
 		t.Fatalf("coverage item ids = %+v", compiled.CoverageItems)
 	}
+	if compiled.CoverageItems[0].TargetText != "行为A" || compiled.CoverageItems[9].TargetText != "行为J" {
+		t.Fatalf("coverage item claim text = %+v", compiled.CoverageItems)
+	}
 }
 
 func TestCompileRuntimeV2CoverageRejectsInvalidSliceMax(t *testing.T) {

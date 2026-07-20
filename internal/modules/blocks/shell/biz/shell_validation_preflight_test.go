@@ -34,6 +34,23 @@ func TestValidateGoTestValidationPreflightWithTests(t *testing.T) {
 	}
 }
 
+func TestExecuteOperationValidationPreflightRejectsMissingDeclaredTarget(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main_test.go"), []byte("package main\nimport \"testing\"\nfunc TestHealthz(t *testing.T) {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewRuntimeAdapter().ExecuteOperation(context.Background(), RuntimeCommandRequest{
+		WorkspaceDeliverableDirectory: dir,
+		Command:                       "go",
+		Args:                          []string{"test", "-v", "./..."},
+		TargetRefs:                    []string{"missing_test.go"},
+	})
+	if err == nil || result.Stage != "shell_validation_preflight_failed" || result.FailureCode != "validation_target_missing" ||
+		!strings.Contains(result.FailureMessage, "does not exist") {
+		t.Fatalf("missing declared validation target result=%+v err=%v", result, err)
+	}
+}
+
 func TestExecuteOperationValidationPreflightReturnsStructuredFailure(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644); err != nil {

@@ -59,6 +59,7 @@
 - Runtime V2 candidate command/result 同样由 Orchestrator 定义；请求封存完整 authority transaction，LLM block 返回的 candidate 必须绑定同一 snapshot，transaction 漂移不得进入执行。
 - candidate request 携带从 persisted facts 与 completed sealed dispatch 构造的 typed `RuntimeCandidateContext`，明确当前 focus、accepted/rejected evidence、精确 active rejected operation shapes、admissible operation kinds、failure、capabilities、manifest、target snapshot、validation scratch 与 provider ceiling；LLM block 不从 V1 map 或临时上下文重建 authority。
 - Runtime V2 dispatch 在执行前持久化 `SealedDispatch`、完整 transaction、candidate hash 和 typed step input；execution evidence 只有在 snapshot、dispatch 与 operation 一致时才能提交并触发下一次 reducer。
+- capability owner 的 validation receipt 必须持久化中立 quality/zero-work/check observation，并纳入 stable receipt hash；SM-3 在普通响应与 exact-fence restart recovery 两条路径执行同一质量裁决，弱验证只进入 rejected evidence，不得因 owner exit code 为 0 关闭 coverage。
 - Runtime V2 aggregate 通过 Run owner 的 EventHub update 合同持久化；Orchestrator 使用 expected revision 执行 CAS，不直接访问 Run repository，也不把 aggregate 编码进 `map[string]any`。
 - Runtime V2 初始化时封存 typed Goal/DoD definition context；后续 candidate request 与重启恢复只能读取 Run owner 中持久化的定义快照，不能由调用方临时重建。
 - `InitializeRuntimeV2FromRun` 只读取 Run owner 已持久化的 typed bootstrap，生成 initial facts 并执行 preflight/reducer；Orchestrator 不解析 V1 execution context map 来重建定义或 focus。
@@ -70,6 +71,7 @@
 - 多 operation dispatch 按 dependency graph 确定性执行；每个 operation 独立提交 evidence，全部成功或任一失败后才结束 dispatch 并再次 reducer。
 - RuntimeFacts 持久化当前 focus 与有序 remaining focus queue；当前 focus 的 required evidence 满足后，evidence commit 原子切换到下一 focus，再调用同一 reducer。
 - 显式声明 `RequireAssessment` 的 focus 在执行证据齐备后进入 typed `need_assessment` authority；LLM 只能返回绑定当前 focus/coverage 的 `AssessmentCandidate`，Orchestrator 校验其 evidence refs 来自当前 Run 的 accepted evidence 后写入 assessment ledger。
+- SM-2 在 assessment commit 前执行 item-level evidence gate：weak evidence 永不关闭 coverage；profile 显式声明 executable/claim evidence 时，再校验 passed-check observation 与中立 claim signal。门禁失败写入 `assessment_evidence_quality_gap` repairable assessment，并由 reducer 在封存预算内继续同 focus repair。
 - 最后一个 assessment 关闭或 typed terminal failure 形成后，Orchestrator 从 current-run evidence/coverage/assessment ledger 稳定打包 Result/closeout，再通过 Result owner 的具体 EventHub create command写入 accepted/rejected outcome，最后投影 Run/Workspace terminal；Result block 不参与 acceptance 裁决。
 - CoverageFocus 可携带 evidence role、accepted/rejected step kinds 与 accepted operations；reducer 只在 owner 已确认的 capability kinds 中做中立交集/排除，并把结果封入 `RequiredOutputContract`。若声明 accepted operations，candidate 至少包含一个匹配的具体 operation 参数，不能用同 step kind 的其他动作替代。
 - candidate attempt 0/1 的 pending、failed、accepted 状态随 aggregate 持久化；attempt 1 必须复用相同 transaction 和 stable prefix，第二次失败后只能进入 governance 或 terminal。

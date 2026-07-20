@@ -49,6 +49,30 @@ type acceptingOperationExecutor struct {
 	called int
 }
 
+type qualityOperationExecutor struct {
+	owner    *RuntimeController
+	evidence runtimecontract.RuntimeOperationEvidence
+	called   int
+}
+
+func (e *qualityOperationExecutor) ExecuteRuntimeOperation(ctx context.Context, request RuntimeOperationExecutionRequest) (RuntimeOperationExecutionResult, error) {
+	e.called++
+	receipt := runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID,
+		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: request.Execution.ExpectedEffectScope,
+		Evidence: e.evidence,
+	}
+	_, committed, err := e.owner.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+	if err != nil {
+		return RuntimeOperationExecutionResult{}, err
+	}
+	return RuntimeOperationExecutionResult{
+		EventID: "event-" + request.Operation.ID, OperationID: request.Operation.ID, EvidenceKind: request.EvidenceKind,
+		Status: ExecutionEvidenceStatusAccepted, SourceRef: "runtime://" + request.Operation.ID,
+		Evidence: committed.Evidence, Receipt: committed,
+	}, nil
+}
+
 func (e *acceptingOperationExecutor) ExecuteRuntimeOperation(ctx context.Context, request RuntimeOperationExecutionRequest) (RuntimeOperationExecutionResult, error) {
 	e.called++
 	receipt := runtimecontract.RuntimeOperationReceipt{
@@ -339,6 +363,79 @@ func TestRuntimeControllerRoutesDurableNoOpReceiptToStructuredSameFocusRepair(t 
 	}
 }
 
+func TestRuntimeControllerRejectsAcceptedOwnerReceiptWithInconclusiveValidationEvidence(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, _ := NewRuntimeController(repository)
+	aggregate, err := controller.Initialize(context.Background(), validationQualityFacts(), controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := beginAndAcceptCandidate(t, controller, aggregate, managedValidationCandidate("validate-zero-work")); err != nil {
+		t.Fatal(err)
+	}
+	executor := &qualityOperationExecutor{owner: controller, evidence: runtimecontract.RuntimeOperationEvidence{
+		Summary: "command completed", Quality: common.EvidenceQualityInconclusive, ZeroWork: true,
+		EvidenceReason: "no matching validation checks", EvidenceTags: []string{"zero_work"},
+		Validation: &runtimecontract.RuntimeValidationObservation{OutputPreview: "no tests to run"},
+	}}
+	progressed, err := controller.ExecuteActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executor.called != 1 || progressed.ActiveDispatch != nil || progressed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange ||
+		progressed.Decision.Terminal != nil || progressed.Facts.Focus.ID != "focus-v2" {
+		t.Fatalf("inconclusive validation did not return to same-focus repair: %+v calls=%d", progressed, executor.called)
+	}
+	if len(progressed.Facts.Evidence.Accepted) != 0 || len(progressed.Facts.Evidence.Rejected) != 1 || progressed.Facts.Failure == nil ||
+		progressed.Facts.Failure.Class != runtimecontract.FailureClassCoverageAssessmentIncomplete ||
+		progressed.Facts.Failure.Code != "validation_evidence_inconclusive" {
+		t.Fatalf("inconclusive validation adjudication = evidence=%+v failure=%+v", progressed.Facts.Evidence, progressed.Facts.Failure)
+	}
+}
+
+func TestRuntimeControllerRestartRejectsPersistedInconclusiveValidationReceiptWithoutReexecution(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, _ := NewRuntimeController(repository)
+	aggregate, err := controller.Initialize(context.Background(), validationQualityFacts(), controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, managedValidationCandidate("validate-zero-work"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := controller.claimOperationExecution(context.Background(), "ws-v2", "run-v2", "validate-zero-work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, ok := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, "validate-zero-work")
+	if !ok {
+		t.Fatal("claimed validation execution is missing")
+	}
+	receipt := runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: execution.ExecutionKey, OperationID: "validate-zero-work",
+		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: runtimecontract.RuntimeEffectNone,
+		Evidence: runtimecontract.RuntimeOperationEvidence{
+			Summary: "command completed", Quality: common.EvidenceQualityInconclusive, ZeroWork: true,
+			EvidenceReason: "no matching validation checks", Validation: &runtimecontract.RuntimeValidationObservation{OutputPreview: "no tests to run"},
+		},
+	}
+	if _, _, err := controller.CommitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted, _ := NewRuntimeController(repository)
+	executor := &failIfExecutedOperationExecutor{}
+	progressed, err := restarted.ExecuteActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executor.called || len(progressed.Facts.Evidence.Accepted) != 0 || len(progressed.Facts.Evidence.Rejected) != 1 ||
+		progressed.Facts.Failure == nil || progressed.Facts.Failure.Code != "validation_evidence_inconclusive" {
+		t.Fatalf("restart quality adjudication replayed or accepted weak evidence: %+v called=%v", progressed, executor.called)
+	}
+}
+
 func beginAndAcceptCandidate(t *testing.T, controller *RuntimeController, aggregate RuntimeAggregate, candidate runtimecontract.RuntimeCandidate) (RuntimeAggregate, error) {
 	t.Helper()
 	if _, err := controller.BeginCandidateAttempt(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "stable-prefix"); err != nil {
@@ -354,4 +451,26 @@ func multiOperationCandidate() runtimecontract.RuntimeCandidate {
 		{Operation: runtimecontract.RuntimeOperation{ID: "write-b", Kind: "file/write", DependsOn: []string{"write-a"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"b.txt"}, Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &contentB}}}},
 		{Operation: runtimecontract.RuntimeOperation{ID: "write-a", Kind: "file/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"a.txt"}, Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &contentA}}}},
 	}}}
+}
+
+func validationQualityFacts() runtimecontract.RuntimeFacts {
+	facts := controllerFacts()
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
+	facts.Capabilities = runtimecontract.RuntimeCapabilities{
+		StateChangeKinds: []string{runtimecontract.StepKindFileWrite},
+		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}
+	return facts
+}
+
+func managedValidationCandidate(operationID string) runtimecontract.RuntimeCandidate {
+	command := "true"
+	return runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{
+		Operation: runtimecontract.RuntimeOperation{
+			ID: operationID, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"},
+			Parameters: []runtimecontract.OperationParameter{{Name: "command", String: &command}},
+		},
+	}}}}
 }

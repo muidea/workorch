@@ -236,7 +236,8 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 				requireAssessment = requireAssessment || item.policy.RequireAssessment
 				texts = append(texts, item.unit.text)
 				coverageItems = append(coverageItems, runtimecontract.RuntimeCoverageItem{
-					ID: item.itemID, SliceID: sliceID, SourceScope: item.unit.sourceScope, SourceID: item.unit.sourceID, Order: item.unit.order,
+					ID: item.itemID, SliceID: sliceID, SourceScope: item.unit.sourceScope, SourceID: item.unit.sourceID,
+					TargetText: item.unit.text, Order: item.unit.order,
 				}.Normalized())
 			}
 			focusSeq++

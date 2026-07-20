@@ -306,6 +306,12 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 		Summary: evidence.Evidence.Summary, ContentHash: evidence.Evidence.ContentHash,
 		ExitCode: evidence.Evidence.ExitCode, EvidenceRefs: append([]string(nil), evidence.Evidence.EvidenceRefs...),
 		CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), committedOperation.CoverageWorkItemIDs...),
+		Quality:             evidence.Evidence.Quality, ZeroWork: evidence.Evidence.ZeroWork,
+		EvidenceReason: evidence.Evidence.EvidenceReason, EvidenceTags: append([]string(nil), evidence.Evidence.EvidenceTags...),
+	}
+	if evidence.Evidence.Validation != nil {
+		observation := evidence.Evidence.Validation.Clone()
+		fact.Validation = &observation
 	}
 	// Mark operation execution as evidence_committed when ledger present.
 	aggregate.ActiveDispatch.OperationExecutions = markOperationExecutionEvidenceCommitted(

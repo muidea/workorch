@@ -841,6 +841,7 @@ func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID co
 			item.EvidenceRefs = append([]string(nil), refs...)
 		}
 	}
+	assessment = applyAssessmentEvidenceGate(aggregate, assessment)
 	assessment.CoverageWorkItemIDs = runtimeAssessmentCoverageIDs(assessment.CoverageWorkItemIDs, aggregate.Facts.Focus.CoverageWorkItemIDs)
 	aggregate.Facts.Coverage = applyAssessmentCoverage(aggregate.Facts.Coverage, assessment, aggregate.Facts.Focus.ID, aggregate.Facts.Focus.SliceID, aggregate.ActiveDispatch.ID)
 	if assessment.Disposition == runtimecontract.AssessmentDispositionSatisfied {

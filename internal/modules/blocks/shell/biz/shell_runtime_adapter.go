@@ -395,6 +395,7 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 		output.MaxOutputBytes = MaxCommandOutputBytes
 	}
 	applyShellEvidencePolicies(request.EvidencePolicies, command, args, &output)
+	attachShellValidationObservation(&output, command, args)
 	if runCtx.Err() == context.DeadlineExceeded {
 		output.Status = "timeout"
 		output.Stage = "shell_command_timeout"
@@ -1093,6 +1094,9 @@ func validateShellValidationPreflight(deliverableDirectory string, command strin
 	if !shellRequestLooksLikeValidation(request, command, args) {
 		return nil
 	}
+	if err := validateDeclaredValidationTargets(deliverableDirectory, request.TargetRefs); err != nil {
+		return err
+	}
 	base := filepath.Base(strings.TrimSpace(command))
 	switch base {
 	case "go":
@@ -1100,6 +1104,27 @@ func validateShellValidationPreflight(deliverableDirectory string, command strin
 	default:
 		return nil
 	}
+}
+
+func validateDeclaredValidationTargets(deliverableDirectory string, targetRefs []string) error {
+	root, err := filepath.Abs(strings.TrimSpace(deliverableDirectory))
+	if err != nil || root == "" {
+		return common.ErrInvalidArgument
+	}
+	for _, targetRef := range normalizeShellStrings(targetRefs) {
+		if filepath.IsAbs(targetRef) {
+			return fmt.Errorf("%w: validation target %q must be workspace-relative", common.ErrInvalidArgument, targetRef)
+		}
+		target := filepath.Join(root, filepath.FromSlash(targetRef))
+		rel, relErr := filepath.Rel(root, target)
+		if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("%w: validation target %q escapes workspace", common.ErrInvalidArgument, targetRef)
+		}
+		if _, statErr := os.Stat(target); statErr != nil {
+			return fmt.Errorf("%w: validation target %q does not exist", common.ErrInvalidArgument, targetRef)
+		}
+	}
+	return nil
 }
 
 func shellRequestLooksLikeValidation(request RuntimeCommandRequest, command string, args []string) bool {
@@ -1673,7 +1698,15 @@ func finalizeShellResult(output RuntimeCommandResult, executeErr error) (Runtime
 	}
 	output.Summary = summary
 	exitCode := output.ExitCode
-	output.Evidence = runtimemodel.RuntimeOperationEvidence{Summary: summary, ExitCode: &exitCode}
+	output.Evidence = runtimemodel.RuntimeOperationEvidence{
+		Summary: summary, ExitCode: &exitCode,
+		Quality: common.EvidenceQuality(strings.TrimSpace(output.EvidenceQuality)), ZeroWork: output.ZeroWork,
+		EvidenceReason: output.EvidenceReason, EvidenceTags: append([]string(nil), output.EvidenceTags...),
+	}
+	if output.ValidationObservation != nil {
+		observation := output.ValidationObservation.Clone()
+		output.Evidence.Validation = &observation
+	}
 	return output, executeErr
 }
 

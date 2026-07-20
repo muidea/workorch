@@ -65,6 +65,7 @@ type RuntimeCommandResult struct {
 	RuntimeDiagnostics              runtimecontract.RuntimeDiagnostics
 	ValidationFailureDiagnostic     *runtimecontract.ValidationFailureDiagnostic
 	WorkspaceStateChangeFingerprint runtimecontract.RuntimeWorkspaceStateChangeFingerprint
+	ValidationObservation           *runtimecontract.RuntimeValidationObservation
 	// WorkspaceTargetChanges is the bounded before/after observation for the
 	// explicitly sealed workspace targets of a state-changing Shell operation.
 	// It remains owner-local until the Shell owner converts it to the typed

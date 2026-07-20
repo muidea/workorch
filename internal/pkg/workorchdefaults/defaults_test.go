@@ -121,6 +121,11 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	markers := policy["workEvidenceMarkers"].([]any)
 	assertStringListContains(t, markers, "=== RUN")
 	assertStringListContains(t, markers, "--- PASS:")
+	for _, raw := range markers {
+		if marker, _ := raw.(string); strings.TrimSpace(marker) == "ok" {
+			t.Fatalf("software-dev workEvidenceMarkers contains overly broad marker %q", marker)
+		}
+	}
 	requirements, ok := policy["coverageRequirements"].([]any)
 	if !ok || len(requirements) < 2 {
 		t.Fatalf("software-dev evidence policy coverageRequirements = %+v, want coverage bindings", policy["coverageRequirements"])
