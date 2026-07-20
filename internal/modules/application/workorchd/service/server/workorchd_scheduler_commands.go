@@ -58,6 +58,32 @@ func (s *serverState) publishWorkorchDSchedulerCommand(ctx context.Context, topi
 	return nil
 }
 
+// enqueueWorkorchDSchedulerCommand is the HTTP acceptance boundary. It records
+// the command as queued before submitting background work so a 202 response
+// never implies that activation bootstrap already completed. The background
+// task uses the process context plus explicit workspace scope; it must not
+// retain the request context after the handler returns.
+func (s *serverState) enqueueWorkorchDSchedulerCommand(topic string, command workorchdevents.WorkspaceRunRequestedCommand) error {
+	if s == nil || s.workspaceRunScheduler == nil || strings.TrimSpace(topic) == "" {
+		return common.ErrInvalidArgument
+	}
+	command = prepareHTTPSchedulerCommand(topic, command)
+	workspaceID := strings.TrimSpace(string(command.WorkspaceID))
+	s.projectQueuedSchedulerCommand(command)
+	if !s.scheduleBackground("workspace_execution_activation", func(ctx context.Context) {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceID))
+		if err := s.publishWorkorchDSchedulerCommand(ctx, topic, command); err != nil {
+			s.projectRejectedSchedulerCommand(command, err)
+		}
+	}) {
+		err := fmt.Errorf("%w: workspace execution activation could not be queued", common.ErrConflict)
+		s.recordSchedulerCommandEnqueueFailure(topic, workspaceID, strings.TrimSpace(string(command.RunID)), err.Error())
+		s.projectRejectedSchedulerCommand(command, err)
+		return err
+	}
+	return nil
+}
+
 func schedulerCommandSource(source string, fallback string) string {
 	source = strings.TrimSpace(source)
 	if source != "" {
@@ -213,6 +239,28 @@ func (s *serverState) projectAcceptedSchedulerCommand(command workorchdevents.Wo
 		DefinitionRevision: strings.TrimSpace(command.DefinitionRevision),
 		DecisionID:         strings.TrimSpace(command.DecisionID),
 		AcceptedAt:         time.Now().UTC().Format(time.RFC3339Nano),
+	})
+}
+
+func (s *serverState) projectQueuedSchedulerCommand(command workorchdevents.WorkspaceRunRequestedCommand) {
+	if s == nil || s.workspaceProjection == nil {
+		return
+	}
+	workspaceID := strings.TrimSpace(string(command.WorkspaceID))
+	if workspaceID == "" {
+		return
+	}
+	s.workspaceProjection.ApplyRunCommandQueued(workspaceviewcore.RunCommandQueuedUpdate{
+		WorkspaceID:        workspaceID,
+		RunID:              strings.TrimSpace(string(command.RunID)),
+		Intent:             strings.TrimSpace(command.Intent),
+		Reason:             strings.TrimSpace(command.Reason),
+		RequestID:          strings.TrimSpace(command.RequestID),
+		IdempotencyKey:     schedulerCommandIdempotencyKey(command),
+		Source:             strings.TrimSpace(command.Source),
+		DefinitionRevision: strings.TrimSpace(command.DefinitionRevision),
+		DecisionID:         strings.TrimSpace(command.DecisionID),
+		QueuedAt:           time.Now().UTC().Format(time.RFC3339Nano),
 	})
 }
 

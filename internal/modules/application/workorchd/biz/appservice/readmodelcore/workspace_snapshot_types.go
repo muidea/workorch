@@ -78,6 +78,7 @@ type RunCommandStatus struct {
 	Source             string `json:"source,omitempty"`
 	DefinitionRevision string `json:"definitionRevision,omitempty"`
 	DecisionID         string `json:"decisionId,omitempty"`
+	QueuedAt           string `json:"queuedAt,omitempty"`
 	AcceptedAt         string `json:"acceptedAt,omitempty"`
 	RejectedAt         string `json:"rejectedAt,omitempty"`
 	Error              string `json:"error,omitempty"`

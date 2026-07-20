@@ -6,7 +6,7 @@ import { modelLabels } from '../utils/constants';
 import { useSSE } from '../hooks';
 import { errorMessage, shortId, stateTag, stateLabel, boundedParagraph, metricGrid } from '../utils';
 import { projectionStatusSummary, workspaceBoardActivationRequest, workspaceBoardActivationHint } from '../helpers';
-import type { ControlPlaneProps, ProjectionStatus, Workspace, WorkspaceExecutionActivationRequest } from '../types';
+import type { ControlPlaneProps, ProjectionStatus, ServiceConfiguration, Workspace, WorkspaceExecutionActivationRequest } from '../types';
 import { WorkspaceSetupModal } from './components/WorkspaceSetupModal';
 
 type WorkspaceBoardCardItem = {
@@ -21,6 +21,7 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
   const { message } = AntApp.useApp();
   const [boardItems, setBoardItems] = useState<WorkspaceBoardCardItem[]>([]);
   const [projection, setProjection] = useState<ProjectionStatus | undefined>(undefined);
+  const [configuration, setConfiguration] = useState<ServiceConfiguration | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [workspaceSetupOpen, setWorkspaceSetupOpen] = useState(false);
 
@@ -41,9 +42,18 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
     }
   }, [message]);
 
+  const loadConfiguration = useCallback(async () => {
+    try {
+      setConfiguration(await workorchApi.readConfiguration());
+    } catch (error) {
+      message.error(`模型配置加载失败：${errorMessage(error)}`);
+    }
+  }, [message]);
+
   useEffect(() => {
     void loadBoard();
-  }, [loadBoard]);
+    void loadConfiguration();
+  }, [loadBoard, loadConfiguration]);
 
   useSSE((event) => {
     if (!isWorkspaceProjectionChangedEvent(event)) {
@@ -74,9 +84,9 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
   const resumeWorkspaceExecution = async (workspace: Workspace) => {
     const detail = await workorchApi.readWorkspaceSnapshotProjection(workspace.id);
     const item = { snapshot: detail.snapshot };
-    const request = workspaceBoardActivationRequest(item);
+    const request = workspaceBoardActivationRequest(item, configuration);
     if (!request) {
-      message.warning(workspaceBoardActivationHint(item));
+      message.warning(workspaceBoardActivationHint(item, configuration));
       return;
     }
     message.info('工作空间执行已提交，正在后台处理');
@@ -94,7 +104,7 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
       subTitle={boardItems.length > 0 && projection
         ? projectionStatusSummary(projection)
         : '创建工作空间后，可在这里查看目标、运行、治理阻塞和交付状态'}
-      extra={<Space><Button type="primary" onClick={() => setWorkspaceSetupOpen(true)}>创建工作空间</Button><Button onClick={() => void loadBoard()} loading={loading}>刷新</Button></Space>}
+      extra={<Space><Button type="primary" onClick={() => setWorkspaceSetupOpen(true)}>创建工作空间</Button><Button onClick={() => { void loadBoard(); void loadConfiguration(); }} loading={loading}>刷新</Button></Space>}
     >
       {boardItems.length === 0 && !loading ? (
         <ProCard className="workspace-board-empty" bordered>

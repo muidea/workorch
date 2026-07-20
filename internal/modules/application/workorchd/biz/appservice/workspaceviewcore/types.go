@@ -85,6 +85,20 @@ type RunCommandAcceptedUpdate struct {
 	AcceptedAt         string
 }
 
+type RunCommandQueuedUpdate struct {
+	WorkspaceID        string
+	RunID              string
+	Intent             string
+	Reason             string
+	RequestID          string
+	IdempotencyKey     string
+	Source             string
+	DefinitionRevision string
+	DecisionID         string
+	Revision           int64
+	QueuedAt           string
+}
+
 type RunCommandRejectedUpdate struct {
 	WorkspaceID        string
 	RunID              string

@@ -271,6 +271,33 @@ func (p directWorkspaceRunScheduler) DispatchRuntimeRun(ctx context.Context, wor
 	return nil
 }
 
+type blockingWorkspaceRunScheduler struct {
+	state   *serverState
+	started chan struct{}
+	release chan struct{}
+}
+
+type failingWorkspaceRunScheduler struct{ err error }
+
+func (p failingWorkspaceRunScheduler) SubmitWorkspaceRun(context.Context, workorchdevents.WorkspaceRunRequestedCommand) error {
+	return p.err
+}
+
+func (p failingWorkspaceRunScheduler) DispatchRuntimeRun(context.Context, string, string, string) error {
+	return common.ErrInvalidArgument
+}
+
+func (p *blockingWorkspaceRunScheduler) SubmitWorkspaceRun(_ context.Context, command workorchdevents.WorkspaceRunRequestedCommand) error {
+	close(p.started)
+	<-p.release
+	p.state.projectAcceptedSchedulerCommand(command)
+	return nil
+}
+
+func (p *blockingWorkspaceRunScheduler) DispatchRuntimeRun(context.Context, string, string, string) error {
+	return common.ErrInvalidArgument
+}
+
 func newOwnerRuntimeSession(t *testing.T, backend string, dataRoot string) *appservice.RuntimeSession {
 	t.Helper()
 	runtime, err := testkit.TryNewRuntime(backend, dataRoot, nil)
@@ -5269,6 +5296,94 @@ func TestWorkorchDActivationHTTPProjectsRequestID(t *testing.T) {
 	}
 }
 
+func TestWorkorchDActivationHTTPReturnsWhileSchedulerIsStillRunning(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
+	handler := newMuxWithState(state)
+	workspace := createWorkspaceForHTTP(t, handler, "async activation", "workspaces/async-activation")
+	scheduler := &blockingWorkspaceRunScheduler{
+		state: state, started: make(chan struct{}), release: make(chan struct{}),
+	}
+	state.workspaceRunScheduler = scheduler
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{
+		"intent":"resume",
+		"requestId":"request-http-async-activation",
+		"reason":"user_requested",
+		"source":"web"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(rec, req)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("activation HTTP handler waited for scheduler completion")
+	}
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("activation status = %d, want 202, body=%s", rec.Code, rec.Body.String())
+	}
+	select {
+	case <-scheduler.started:
+	case <-time.After(time.Second):
+		t.Fatal("background scheduler did not start")
+	}
+	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.RunCommand == nil || snapshot.RunCommand.State != "queued" || snapshot.RunCommand.RequestID != "request-http-async-activation" || snapshot.RunCommand.QueuedAt == "" {
+		t.Fatalf("queued run command = %+v", snapshot.RunCommand)
+	}
+
+	close(scheduler.release)
+	waitForCondition(t, time.Second, func() bool {
+		latest, _, readErr := state.readProjectedWorkspaceSnapshot(workspace.ID)
+		return readErr == nil && latest.RunCommand != nil && latest.RunCommand.State == "accepted"
+	})
+	accepted, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accepted.RunCommand.QueuedAt == "" || accepted.RunCommand.AcceptedAt == "" {
+		t.Fatalf("accepted run command = %+v, want queued and accepted timestamps", accepted.RunCommand)
+	}
+}
+
+func TestWorkorchDActivationHTTPProjectsBackgroundSchedulerFailure(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
+	handler := newMuxWithState(state)
+	workspace := createWorkspaceForHTTP(t, handler, "failed async activation", "workspaces/failed-async-activation")
+	state.workspaceRunScheduler = failingWorkspaceRunScheduler{err: errors.New("scheduler submission failed")}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{
+		"intent":"resume",
+		"requestId":"request-http-async-failure",
+		"source":"web"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("activation status = %d, want 202, body=%s", rec.Code, rec.Body.String())
+	}
+	waitForCondition(t, time.Second, func() bool {
+		snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
+		return err == nil && snapshot.RunCommand != nil && snapshot.RunCommand.State == "rejected"
+	})
+	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.RunCommand.RequestID != "request-http-async-failure" || snapshot.RunCommand.QueuedAt == "" || snapshot.RunCommand.RejectedAt == "" || !strings.Contains(snapshot.RunCommand.Error, "scheduler submission failed") {
+		t.Fatalf("rejected run command = %+v", snapshot.RunCommand)
+	}
+}
+
 func TestWorkorchDRunResumeHTTPRejectsLegacyReplanIntent(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
@@ -5392,6 +5507,10 @@ func TestWorkorchDWorkspaceRestartHTTPProjectsRestartIntent(t *testing.T) {
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("workspace restart status = %d, want 202, body=%s", rec.Code, rec.Body.String())
 	}
+	waitForCondition(t, time.Second, func() bool {
+		snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
+		return err == nil && snapshot.RunCommand != nil && snapshot.RunCommand.State == "accepted"
+	})
 	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
 	if err != nil {
 		t.Fatalf("read projected workspace snapshot: %v", err)
@@ -5407,6 +5526,34 @@ func TestWorkorchDWorkspaceRestartHTTPProjectsRestartIntent(t *testing.T) {
 		snapshot.RunCommand.DefinitionRevision != "rev-http-restart" ||
 		snapshot.RunCommand.DecisionID != "ticket-http-restart" {
 		t.Fatalf("projected run command = %+v, want HTTP restart command metadata", snapshot.RunCommand)
+	}
+}
+
+func TestWorkorchDActivationEnqueueFailureProjectsRejected(t *testing.T) {
+	routine := &recordingBackgroundRoutine{err: errors.New("background unavailable")}
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
+	state.workspaceRunScheduler = directWorkspaceRunScheduler{state: state}
+	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-enqueue-failure", State: "active"},
+	})
+	handler := newMuxWithState(state)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/ws-enqueue-failure/execution-activations", strings.NewReader(`{
+		"intent":"resume",
+		"requestId":"request-enqueue-failure",
+		"source":"web"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("enqueue failure status = %d, want 409, body=%s", rec.Code, rec.Body.String())
+	}
+	snapshot, _, readErr := state.readProjectedWorkspaceSnapshot("ws-enqueue-failure")
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if snapshot.RunCommand == nil || snapshot.RunCommand.State != "rejected" || snapshot.RunCommand.RequestID != "request-enqueue-failure" || snapshot.RunCommand.QueuedAt == "" || snapshot.RunCommand.Error == "" {
+		t.Fatalf("rejected run command = %+v", snapshot.RunCommand)
 	}
 }
 

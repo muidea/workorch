@@ -487,6 +487,7 @@ export type RunCommandStatus = {
   source?: string;
   definitionRevision?: string;
   decisionId?: string;
+  queuedAt?: string;
   acceptedAt?: string;
   rejectedAt?: string;
   error?: string;

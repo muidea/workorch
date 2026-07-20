@@ -79,6 +79,14 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 			return stateChangeDecision(base, facts)
 		}
 	}
+	// SM-2 must interpret a newly rejected validation before consulting the
+	// feasibility fact sealed for the previous validation action. When the
+	// activation policy requires implementation repair, that older fact no
+	// longer describes the current action and must not escalate the Run to
+	// governance before the reducer can select produce_state_change.
+	if needsStateChangeAfterRejectedValidation(facts) {
+		return stateChangeDecision(base, facts)
+	}
 	if feasibilityBlocksCurrentAction(facts) {
 		if len(facts.Capabilities.GovernanceKinds) == 0 {
 			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "capability_unavailable", firstNonEmpty(facts.Feasibility.Reason, "current focus has no feasible operation under sealed capabilities")), nil
@@ -91,9 +99,6 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 		return runtimecontract.RuntimeDecision{}, err
 	} else if ok {
 		return decision, nil
-	}
-	if needsStateChangeAfterRejectedValidation(facts) {
-		return stateChangeDecision(base, facts)
 	}
 	missing := missingEvidenceKinds(facts)
 	if len(missing) == 0 {

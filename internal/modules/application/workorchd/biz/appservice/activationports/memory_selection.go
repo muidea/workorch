@@ -66,6 +66,18 @@ func SelectedMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*m
 	if len(opts.IDs) > 0 {
 		return selectedExplicitMemoryItems(ctx, opts)
 	}
+	// Read the owner baseline before attempting semantic recall. An empty owner
+	// inventory has nothing to rank, so issuing an embedding request only adds
+	// provider latency and can incorrectly mark a clean empty selection as
+	// degraded. The same baseline is reused if semantic recall later degrades,
+	// avoiding a second cross-owner list command.
+	listItems, listEvidence, err := selectedWorkspaceListMemoryItems(ctx, opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	if listEvidence == nil || len(listEvidence.CandidateMemoryIDs) == 0 {
+		return listItems, listEvidence, nil
+	}
 	semanticItems, semanticEvidence, semanticHandled := semanticMemoryItems(ctx, opts)
 	if semanticHandled {
 		selected := activationcore.VisibleMemoryItems(semanticItems, 8)
@@ -82,10 +94,6 @@ func SelectedMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*m
 		}
 		// Degraded semantic recall must fall back to workspace list baseline while
 		// preserving degraded evidence for audit.
-		listItems, listEvidence, err := selectedWorkspaceListMemoryItems(ctx, opts)
-		if err != nil {
-			return nil, semanticEvidence, err
-		}
 		if listEvidence == nil {
 			listEvidence = &MemorySelectionEvidence{Status: "selected"}
 		}
@@ -96,5 +104,5 @@ func SelectedMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*m
 		listEvidence.FallbackFrom = "semantic_vector_search"
 		return listItems, listEvidence, nil
 	}
-	return selectedWorkspaceListMemoryItems(ctx, opts)
+	return listItems, listEvidence, nil
 }

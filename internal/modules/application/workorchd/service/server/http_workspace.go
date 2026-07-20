@@ -517,11 +517,10 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 		}
 		command.Intent = intent
 		command = prepareHTTPSchedulerCommand(topic, command)
-		if err := state.publishWorkorchDSchedulerCommand(r.Context(), topic, command); err != nil {
+		if err := state.enqueueWorkorchDSchedulerCommand(topic, command); err != nil {
 			writeBusinessError(w, err)
 			return
 		}
-		state.rebuildProjectedWorkspace(r.Context(), workspaceID)
 		writeJSON(w, http.StatusAccepted, schedulerAcceptedHTTPBody(state.config, "execution-activation", command))
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/soul-bindings", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {

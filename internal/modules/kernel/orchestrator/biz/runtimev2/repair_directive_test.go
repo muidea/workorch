@@ -116,3 +116,55 @@ func TestNormalStateChangeDoesNotCreateRepairDirective(t *testing.T) {
 		t.Fatalf("normal state change = decision=%+v directive=%+v", decision, facts.RepairDirective)
 	}
 }
+
+func TestRejectedValidationSupersedesPersistedValidationDirectiveAndFeasibility(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
+	facts.Focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.RuntimeBlockKindManagedValidationSession}
+	facts.Activation.ExecutionContract.ValidationPolicies = []runtimecontract.RuntimeValidationPolicy{{
+		ID:                                  "validation-repair",
+		Scope:                               "focus",
+		AppliesToEvidenceKinds:              []string{runtimecontract.EvidenceKindValidation},
+		ValidationFailureImpliesStateChange: true,
+	}}
+	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
+		ID: "accepted-state-change", Kind: runtimecontract.EvidenceKindStateChange,
+		Revision: "evidence-v2-00000000000000000002", CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+	}}
+	facts.Evidence.Rejected = []runtimecontract.EvidenceFact{{
+		ID: "rejected-validation", Kind: runtimecontract.EvidenceKindValidation,
+		Revision: "evidence-v2-00000000000000000004", FailureClass: runtimecontract.FailureClassExecutionFailure,
+		FailureCode: "shell_exit_nonzero", FailureMessage: "validation exited non-zero",
+		CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+	}}
+	facts.EvidenceRevision = "evidence-v2-00000000000000000004"
+	facts.Feasibility = &runtimecontract.RuntimeFeasibilityFact{
+		FocusID: facts.Focus.ID, Action: runtimecontract.RuntimeActionProduceValidation,
+		RequiredOperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		Reason:                 "previous validation action has no feasible operation",
+	}
+	facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{
+		ID: "repair-cwi-1-produce_validation-1", FocusID: facts.Focus.ID,
+		Trigger:                    runtimecontract.RuntimeRepairTriggerMissingEvidence,
+		RequiredAction:             runtimecontract.RuntimeActionProduceValidation,
+		RequiredEffectScopes:       []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
+		RequiredEvidenceKinds:      []string{runtimecontract.EvidenceKindValidation},
+		AllowedOperationKinds:      []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		CoverageWorkItemIDs:        facts.Focus.CoverageWorkItemIDs,
+		SupersedesEvidenceRevision: "evidence-v2-00000000000000000002",
+	}
+
+	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionProduceStateChange || decision.State != runtimecontract.ConvergenceStateNeedStateChange {
+		t.Fatalf("decision = %+v, want produce_state_change without governance", decision)
+	}
+	if facts.RepairDirective == nil || facts.RepairDirective.RequiredAction != runtimecontract.RuntimeActionProduceStateChange {
+		t.Fatalf("directive = %+v, want superseding state-change repair", facts.RepairDirective)
+	}
+	if facts.RepairDirective.Trigger != runtimecontract.RuntimeRepairTriggerRejectedValidation {
+		t.Fatalf("directive trigger = %s, want rejected_validation", facts.RepairDirective.Trigger)
+	}
+}

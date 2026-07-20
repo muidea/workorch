@@ -215,6 +215,8 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
 
   const readyDoDs = dods.filter((item) => item.state === 'ready' || item.state === 'satisfied');
   const activationLLMTargetOptions = helpers.chatTargetOptions(configuration, activationAdvancedLLM);
+  const activationReadyTarget = helpers.activationReadyChatTarget(configuration);
+  const standardActivationLLMTargetOptions = helpers.chatTargetOptions(configuration, false);
   const defaultChatModelId = configuration?.llm.defaultChat?.modelId;
   const defaultChatProviderId = configuration?.llm.defaultChat?.providerId || 'ai-proxy';
   // Readiness for system default: catalog ready models or custom provider models that declare chat_completions.
@@ -227,7 +229,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
       )
   );
   // Disable submit when neither a selectable ready model nor a ready defaultChat is available.
-  const activationLLMReady = activationLLMTargetOptions.length > 0 || defaultChatReady;
+  const activationLLMReady = Boolean(activationReadyTarget);
   const soulBindingStages = soulBindings?.availableStages?.length ? soulBindings.availableStages : defaultSoulBindingStages;
   const soulOptions = souls.map((item) => ({
     value: item.id,
@@ -1060,13 +1062,17 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     const selectedCapabilityServerIds = (request.capabilityIds ?? [])
       .map((capabilityId) => mcpCapabilities.find((item) => item.id === capabilityId)?.serverId)
       .filter((value): value is string => Boolean(value));
-    const selectedModelId = request.llmTarget?.modelId?.trim();
+    const selectedModelId = request.llmTarget?.modelId?.trim() || activationReadyTarget?.modelId;
     const normalizedLLMTarget = selectedModelId
       ? {
-          providerId: request.llmTarget?.providerId?.trim() || 'ai-proxy',
+          providerId: request.llmTarget?.providerId?.trim() || activationReadyTarget?.providerId || 'ai-proxy',
           modelId: selectedModelId
         }
       : undefined;
+    if (!normalizedLLMTarget) {
+      message.error('当前没有 ready 的对话模型，请先完成模型配置');
+      return;
+    }
     const { llmTargetKey: _llmTargetKey, ...activationRequest } = request;
     const requestWithCapabilityServers: WorkspaceExecutionActivationRequest = {
       ...activationRequest,
@@ -1122,14 +1128,16 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   };
 
   const requestWorkspaceActivation = () => {
-    setActivationAdvancedLLM(false);
+    const target = activationReadyTarget;
+    const standardTargetReady = standardActivationLLMTargetOptions.some(
+      (item) => item.providerId === target?.providerId && item.modelId === target?.modelId
+    );
+    setActivationAdvancedLLM(Boolean(target && !standardTargetReady));
     activationForm.setFieldsValue({
       goalId: goals[0]?.id,
       doDId: readyDoDs[0]?.id,
-      llmTarget: configuration?.llm.defaultChat ? { providerId: configuration.llm.defaultChat.providerId || 'ai-proxy', modelId: configuration.llm.defaultChat.modelId } : { providerId: 'ai-proxy' },
-      llmTargetKey: configuration?.llm.defaultChat?.modelId
-        ? `${configuration.llm.defaultChat.providerId || 'ai-proxy'}/${configuration.llm.defaultChat.modelId}`
-        : undefined,
+      llmTarget: target,
+      llmTargetKey: target ? `${target.providerId}/${target.modelId}` : undefined,
       soulId: undefined,
       soulBindings: {},
       skillIds: [],
@@ -2781,9 +2789,16 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
             <Space>
               <Button
                 type={!activationAdvancedLLM ? 'primary' : 'default'}
+                disabled={standardActivationLLMTargetOptions.length === 0}
                 onClick={() => {
                   setActivationAdvancedLLM(false);
-                  activationForm.setFieldValue(['llmTarget', 'providerId'], 'ai-proxy');
+                  const standardTarget = standardActivationLLMTargetOptions.find(
+                    (item) => item.providerId === activationReadyTarget?.providerId && item.modelId === activationReadyTarget?.modelId
+                  ) ?? standardActivationLLMTargetOptions[0];
+                  activationForm.setFieldsValue({
+                    llmTargetKey: standardTarget?.value,
+                    llmTarget: standardTarget ? { providerId: standardTarget.providerId, modelId: standardTarget.modelId } : undefined
+                  });
                 }}
               >
                 普通（ai-proxy）
@@ -2799,29 +2814,23 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           <Form.Item
             name="llmTargetKey"
             label="LLM 模型"
+            rules={[{ required: true, message: '请选择 ready 的对话模型' }]}
             extra={
               !activationLLMReady
                 ? '当前没有 ready 的对话模型；请先在配置页刷新 catalog 或声明自定义模型 operations'
                 : defaultChatModelId
-                  ? `未选择时使用系统默认：${defaultChatProviderId}/${defaultChatModelId}${defaultChatReady ? '' : '（默认目标当前未 ready，请显式选择 ready 模型）'}`
-                  : '未选择时使用系统默认对话模型'
+                  ? `系统默认：${defaultChatProviderId}/${defaultChatModelId}${defaultChatReady ? '' : `（未 ready，已自动选择 ${activationReadyTarget?.providerId}/${activationReadyTarget?.modelId}）`}`
+                  : `已自动选择 ready 模型：${activationReadyTarget?.providerId}/${activationReadyTarget?.modelId}`
             }
           >
             <Select
-              allowClear
               showSearch
-              placeholder="使用系统默认对话模型"
+              placeholder="选择 ready 对话模型"
               options={activationLLMTargetOptions.map((item) => ({
                 value: item.value,
                 label: item.label
               }))}
               onChange={(value?: string) => {
-                if (!value) {
-                  activationForm.setFieldsValue({
-                    llmTarget: { providerId: 'ai-proxy', modelId: undefined }
-                  });
-                  return;
-                }
                 const selected = activationLLMTargetOptions.find((item) => item.value === value);
                 activationForm.setFieldsValue({
                   llmTarget: {

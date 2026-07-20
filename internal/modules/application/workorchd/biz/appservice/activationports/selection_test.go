@@ -69,6 +69,35 @@ func TestSelectedWorkspaceMemoryItemsReadsExplicitIDsWithWorkspaceScope(t *testi
 	}
 }
 
+func TestSelectedWorkspaceMemoryItemsSkipsSemanticRecallForEmptyOwnerInventory(t *testing.T) {
+	ctx := context.Background()
+	runtime := newOwnerRuntime()
+	t.Cleanup(func() {
+		if err := runtime.Shutdown(context.Background()); err != nil {
+			t.Errorf("shutdown runtime: %v", err)
+		}
+	})
+	exports := testRuntimeExports(runtime)
+
+	items, evidence, err := SelectedWorkspaceMemoryItems(ctx, WorkspaceMemorySelectionRequest{
+		WorkspaceID: "ws-empty-memory-inventory",
+		Hub:         exports.Infrastructure.CommandHub,
+		Goal:        &workspacemodel.Goal{Text: "activate without stored memory"},
+		DefaultEmbeddingProviderLoader: func(context.Context) (runtimecontract.ProviderModelTarget, error) {
+			return runtimecontract.ProviderModelTarget{ProviderID: "unreachable-provider", ModelID: "embedding-model"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("SelectedWorkspaceMemoryItems err = %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("items = %+v, want empty", items)
+	}
+	if evidence == nil || evidence.Policy != "deterministic_workspace_list" || evidence.FallbackFrom != "" {
+		t.Fatalf("evidence = %+v, want direct empty owner baseline without semantic fallback", evidence)
+	}
+}
+
 func TestSelectedWorkspaceMCPAllowsEmptySelectionWithoutHub(t *testing.T) {
 	result, err := SelectedWorkspaceMCP(context.Background(), WorkspaceMCPSelectionRequest{})
 	if err != nil {

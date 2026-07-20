@@ -231,7 +231,7 @@ export function convergenceStatusDescriptions(status?: ConvergenceStatus) {
 
 export function runCommandDescriptions(snapshot?: WorkspaceSnapshot) {
   const command = snapshot?.runCommand;
-  if (!command || (!command.intent && !command.requestId && !command.acceptedAt && !command.rejectedAt)) {
+  if (!command || (!command.intent && !command.requestId && !command.queuedAt && !command.acceptedAt && !command.rejectedAt)) {
     return [{ key: 'runCommand', label: '调度 ACK', children: '-' }];
   }
   const commandState = command.state || (command.rejectedAt ? 'rejected' : command.acceptedAt ? 'accepted' : 'pending');
@@ -245,6 +245,7 @@ export function runCommandDescriptions(snapshot?: WorkspaceSnapshot) {
     { key: 'error', label: '错误', children: command.error || '-' },
     { key: 'decisionId', label: '关联决策', children: command.decisionId || '-' },
     { key: 'definitionRevision', label: '定义 Revision', children: command.definitionRevision || '-' },
+    { key: 'queuedAt', label: '入队时间', children: command.queuedAt || '-' },
     { key: 'acceptedAt', label: '接收时间', children: command.acceptedAt || '-' },
     { key: 'rejectedAt', label: '拒绝时间', children: command.rejectedAt || '-' },
     { key: 'revision', label: '投影 Revision', children: command.revision ?? '-' }
@@ -2509,6 +2510,25 @@ export function chatTargetOptions(configuration?: ServiceConfiguration, includeC
   }))];
 }
 
+// Resolve the concrete chat target carried by every Web activation request.
+// A configured default is usable only when it is present in the ready catalog
+// or in a custom provider's declared chat operations. If it is stale, choose
+// the first ready target instead of sending the stale default through hidden
+// form fields or relying on backend fallback.
+export function activationReadyChatTarget(configuration?: ServiceConfiguration) {
+  const options = chatTargetOptions(configuration, true);
+  const defaultProviderId = configuration?.llm.defaultChat?.providerId?.trim() || 'ai-proxy';
+  const defaultModelId = configuration?.llm.defaultChat?.modelId?.trim();
+  const selected = defaultModelId
+    ? options.find((item) => item.providerId === defaultProviderId && item.modelId === defaultModelId)
+    : undefined;
+  const target = selected ?? options[0];
+  if (!target) {
+    return undefined;
+  }
+  return { providerId: target.providerId, modelId: target.modelId };
+}
+
 
 
 
@@ -2911,22 +2931,26 @@ export function readyDoDs(dods: DoD[]) {
   return dods.filter((item) => item.state === 'ready' || item.state === 'satisfied');
 }
 
-export function workspaceBoardActivationRequest(item: WorkspaceBoardItem): WorkspaceExecutionActivationRequest | undefined {
+export function workspaceBoardActivationRequest(item: WorkspaceBoardItem, configuration?: ServiceConfiguration): WorkspaceExecutionActivationRequest | undefined {
+  const llmTarget = activationReadyChatTarget(configuration);
+  if (!llmTarget) {
+    return undefined;
+  }
   const projectedRun = workspaceProjectionRun(item.snapshot);
   if (projectedRun && isTerminalRunState(projectedRun.state) && projectedRun.goalId && projectedRun.doDId) {
-    return { goalId: projectedRun.goalId, doDId: projectedRun.doDId };
+    return { goalId: projectedRun.goalId, doDId: projectedRun.doDId, llmTarget };
   }
 
   const goals = item.snapshot.goals ?? [];
   const availableDoDs = readyDoDs(item.snapshot.dods ?? []);
   if (goals.length === 1 && availableDoDs.length === 1) {
-    return { goalId: goals[0].id, doDId: availableDoDs[0].id };
+    return { goalId: goals[0].id, doDId: availableDoDs[0].id, llmTarget };
   }
 
   return undefined;
 }
 
-export function workspaceBoardActivationHint(item: WorkspaceBoardItem) {
+export function workspaceBoardActivationHint(item: WorkspaceBoardItem, configuration?: ServiceConfiguration) {
   const goals = item.snapshot.goals ?? [];
   const availableDoDs = readyDoDs(item.snapshot.dods ?? []);
   if (goals.length === 0) {
@@ -2937,6 +2961,9 @@ export function workspaceBoardActivationHint(item: WorkspaceBoardItem) {
   }
   if (goals.length > 1 || availableDoDs.length > 1) {
     return `当前工作空间存在多个目标或验收标准，请进入工作空间选择明确的${modelLabels.goal}/${modelLabels.dod}后再提交执行`;
+  }
+  if (!activationReadyChatTarget(configuration)) {
+    return '当前没有 ready 的对话模型；请先在配置页刷新 catalog 或声明自定义模型 operations';
   }
   return '当前工作空间无法确定执行上下文，请进入工作空间核对后再提交执行';
 }
