@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { App as AntApp, Button, Descriptions, Empty, Form, Input, List, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, ProCard, ProTable } from './components/proCompat';
-import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, ConvergenceStatus, CustomProviderDraft, CustomProviderModelDraft, Decision, DoD, EventPayload, EventPayloadValue, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, ConvergenceStatus, CustomProviderDraft, CustomProviderModelDraft, Decision, DoD, EventPayload, EventPayloadValue, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, ProviderModelTarget, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import { modelLabels, progressKindLabels, recoveryActionLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels } from './utils/constants';
 import { stateLabel as canonicalStateLabel } from './utils/format';
@@ -2322,7 +2322,49 @@ export function runPriority(item: Run) {
   return direct !== undefined && direct !== null ? direct : '-';
 }
 
-export function llmConfigurationFormValues(configuration: ServiceConfiguration): UpdateLLMConfigurationRequest {
+export type LLMConfigurationFormValues = Omit<UpdateLLMConfigurationRequest, 'defaultChat' | 'defaultEmbedding'> & {
+  defaultChatTargetKey?: string;
+  defaultEmbeddingTargetKey?: string;
+};
+
+export type ProviderModelTargetOption = {
+  value: string;
+  label: string;
+  providerId: string;
+  modelId: string;
+  source: 'catalog' | 'custom' | 'configured';
+  ready: boolean;
+  disabled?: boolean;
+};
+
+export function providerModelTargetKey(providerId?: string, modelId?: string) {
+  const normalizedProviderId = providerId?.trim();
+  const normalizedModelId = modelId?.trim();
+  if (!normalizedProviderId || !normalizedModelId) {
+    return undefined;
+  }
+  return `${encodeURIComponent(normalizedProviderId)}/${encodeURIComponent(normalizedModelId)}`;
+}
+
+export function parseProviderModelTargetKey(value?: string): ProviderModelTarget | undefined {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return undefined;
+  }
+  const separator = normalized.indexOf('/');
+  if (separator <= 0 || separator === normalized.length - 1) {
+    return undefined;
+  }
+  try {
+    const providerId = decodeURIComponent(normalized.slice(0, separator)).trim();
+    const modelId = decodeURIComponent(normalized.slice(separator + 1)).trim();
+    return providerId && modelId ? { providerId, modelId } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function llmConfigurationFormValues(configuration: ServiceConfiguration): LLMConfigurationFormValues {
   return {
     aiProxy: {
       baseURL: configuration.llm.aiProxy?.baseUrl,
@@ -2333,14 +2375,14 @@ export function llmConfigurationFormValues(configuration: ServiceConfiguration):
       maxCatalogResponseBytes: configuration.llm.aiProxy?.maxCatalogResponseBytes,
       maxCatalogModels: configuration.llm.aiProxy?.maxCatalogModels
     },
-    defaultChat: {
-      providerID: configuration.llm.defaultChat?.providerId,
-      modelID: configuration.llm.defaultChat?.modelId
-    },
-    defaultEmbedding: configuration.llm.defaultEmbedding ? {
-      providerID: configuration.llm.defaultEmbedding.providerId,
-      modelID: configuration.llm.defaultEmbedding.modelId
-    } : undefined,
+    defaultChatTargetKey: providerModelTargetKey(
+      configuration.llm.defaultChat?.providerId,
+      configuration.llm.defaultChat?.modelId
+    ),
+    defaultEmbeddingTargetKey: providerModelTargetKey(
+      configuration.llm.defaultEmbedding?.providerId,
+      configuration.llm.defaultEmbedding?.modelId
+    ),
     budget: {
       contextUtilizationRatio: configuration.llm.budget?.contextUtilizationRatio,
       estimatedTokensPerByte: configuration.llm.budget?.estimatedTokensPerByte,
@@ -2368,6 +2410,85 @@ export function readyCatalogModels(configuration?: ServiceConfiguration, operati
   return models;
 }
 
+export function readyCatalogTargetOptions(configuration?: ServiceConfiguration, operation?: string): ProviderModelTargetOption[] {
+  return readyCatalogModels(configuration, operation).flatMap((item) => {
+    const providerId = item.providerId?.trim() || configuration?.llm.catalog?.providerId?.trim() || 'ai-proxy';
+    const modelId = item.modelId?.trim();
+    const value = providerModelTargetKey(providerId, modelId);
+    if (!value || !modelId) {
+      return [];
+    }
+    return [{
+      value,
+      label: `${providerId}/${modelId}${item.routeOwner ? ` (${item.routeOwner})` : ''}`,
+      providerId,
+      modelId,
+      source: 'catalog' as const,
+      ready: true
+    }];
+  });
+}
+
+export function customProviderDraftTargetOptions(drafts: CustomProviderDraft[], operation?: string): ProviderModelTargetOption[] {
+  const options: ProviderModelTargetOption[] = [];
+  for (const provider of drafts) {
+    const providerId = provider.id?.trim();
+    if (!providerId) {
+      continue;
+    }
+    for (const model of provider.models ?? []) {
+      const modelId = model.id?.trim();
+      const ops = model.operations ?? [];
+      if (!modelId || ops.length === 0 || (operation && !ops.includes(operation))) {
+        continue;
+      }
+      const value = providerModelTargetKey(providerId, modelId);
+      if (!value) {
+        continue;
+      }
+      options.push({
+        value,
+        label: `[custom] ${providerId}/${modelId}`,
+        providerId,
+        modelId,
+        source: 'custom',
+        ready: true
+      });
+    }
+  }
+  return options;
+}
+
+export function configurationModelTargetOptions(
+  configuration: ServiceConfiguration | undefined,
+  operation: string,
+  configuredTarget: ProviderModelTarget | undefined,
+  customProviderDrafts: CustomProviderDraft[]
+): ProviderModelTargetOption[] {
+  const options = [
+    ...readyCatalogTargetOptions(configuration, operation),
+    ...customProviderDraftTargetOptions(customProviderDrafts, operation)
+  ];
+  const unique = new Map(options.map((item) => [item.value, item]));
+  const configuredValue = providerModelTargetKey(configuredTarget?.providerId, configuredTarget?.modelId);
+  if (configuredValue && !unique.has(configuredValue)) {
+    const providerId = configuredTarget?.providerId?.trim();
+    const modelId = configuredTarget?.modelId?.trim();
+    if (providerId && modelId) {
+      unique.set(configuredValue, {
+        value: configuredValue,
+        label: `${providerId}/${modelId}（已配置但未 ready）`,
+        providerId,
+        modelId,
+        source: 'configured',
+        ready: false,
+        disabled: true
+      });
+    }
+  }
+  return Array.from(unique.values());
+}
+
 export function customProviderTargetOptions(configuration?: ServiceConfiguration, operation?: string) {
   const providers = configuration?.llm.customProviders ?? [];
   const options: Array<{ value: string; label: string; providerId: string; modelId: string }> = [];
@@ -2381,8 +2502,12 @@ export function customProviderTargetOptions(configuration?: ServiceConfiguration
       if (operation && !ops.includes(operation)) {
         continue;
       }
+      const value = providerModelTargetKey(provider.id, model.id);
+      if (!value) {
+        continue;
+      }
       options.push({
-        value: `${provider.id}/${model.id}`,
+        value,
         label: `[custom] ${provider.id} / ${model.id}`,
         providerId: provider.id,
         modelId: model.id
@@ -2494,10 +2619,10 @@ export function customProvidersUpdatePayload(drafts: CustomProviderDraft[]): Non
 }
 
 export function chatTargetOptions(configuration?: ServiceConfiguration, includeCustom = false) {
-  const catalog = readyCatalogModels(configuration, 'chat_completions').map((item) => ({
-    value: `ai-proxy/${item.modelId}`,
-    label: `${item.modelId}${item.routeOwner ? ` / ${item.routeOwner}` : ''}`,
-    providerId: item.providerId || 'ai-proxy',
+  const catalog = readyCatalogTargetOptions(configuration, 'chat_completions').map((item) => ({
+    value: item.value,
+    label: item.label,
+    providerId: item.providerId,
     modelId: item.modelId,
     source: 'catalog' as const
   }));

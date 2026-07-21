@@ -93,6 +93,44 @@ func TestWebWorkspaceExecutionCommandSurfaceMatchesRunIntentContract(t *testing.
 	}
 }
 
+func TestWebLLMConfigurationUsesProviderScopedModelTargets(t *testing.T) {
+	pageData := string(readWebConsoleFile(t, "src/pages/ConfigurationPage.tsx"))
+	for _, forbidden := range []string{
+		`name={['defaultChat', 'providerID']} hidden`,
+		`name={['defaultEmbedding', 'providerID']} hidden`,
+		`value: item.modelId`,
+	} {
+		if strings.Contains(pageData, forbidden) {
+			t.Fatalf("ConfigurationPage retains provider-blind model selection %q", forbidden)
+		}
+	}
+	for _, want := range []string{
+		`name="defaultChatTargetKey"`,
+		`name="defaultEmbeddingTargetKey"`,
+		`parseProviderModelTargetKey(values.defaultChatTargetKey)`,
+		`item.ready && item.value === values.defaultChatTargetKey`,
+	} {
+		if !strings.Contains(pageData, want) {
+			t.Fatalf("ConfigurationPage missing provider-scoped model target contract %q", want)
+		}
+	}
+
+	helperData := string(readWebConsoleFile(t, "src/helpers.tsx"))
+	for _, want := range []string{
+		"export function providerModelTargetKey",
+		"export function parseProviderModelTargetKey",
+		"encodeURIComponent(normalizedProviderId)",
+		"decodeURIComponent(normalized.slice(separator + 1))",
+		"（已配置但未 ready）",
+		"source: 'configured'",
+		"disabled: true",
+	} {
+		if !strings.Contains(helperData, want) {
+			t.Fatalf("LLM target helper missing round-trip/readiness contract %q", want)
+		}
+	}
+}
+
 func readWebConsoleFile(t *testing.T, relPath string) []byte {
 	t.Helper()
 	_, currentFile, _, ok := runtime.Caller(0)

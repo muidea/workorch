@@ -1137,7 +1137,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
       goalId: goals[0]?.id,
       doDId: readyDoDs[0]?.id,
       llmTarget: target,
-      llmTargetKey: target ? `${target.providerId}/${target.modelId}` : undefined,
+      llmTargetKey: helpers.providerModelTargetKey(target?.providerId, target?.modelId),
       soulId: undefined,
       soulBindings: {},
       skillIds: [],

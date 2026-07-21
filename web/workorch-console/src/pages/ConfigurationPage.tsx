@@ -16,12 +16,13 @@ import { workorchApi } from '../api';
 import {
   customProviderDraftsFromConfiguration,
   customProvidersUpdatePayload,
+  configurationModelTargetOptions,
   errorMessage,
   llmConfigurationFormValues,
   nextCustomProviderDraft,
   nextCustomProviderModelDraft,
   nextWebSearchProviderDraft,
-  readyCatalogModels,
+  parseProviderModelTargetKey,
   splitHeaderLines,
   SoulDefinitionManager,
   validateHeaderLines,
@@ -29,6 +30,7 @@ import {
   webSearchProviderDraftFromTemplate,
   webSearchProviderFormValues,
   WorkspaceTemplateManager,
+  type LLMConfigurationFormValues,
   type WebSearchProviderFormValues
 } from '../helpers';
 
@@ -39,7 +41,7 @@ function configNumberText(value: number | undefined) {
 export function ConfigurationPage() {
   const { message } = AntApp.useApp();
   const [serverForm] = Form.useForm<UpdateServerConfigurationRequest>();
-  const [llmForm] = Form.useForm<UpdateLLMConfigurationRequest>();
+  const [llmForm] = Form.useForm<LLMConfigurationFormValues>();
   const [webSearchProviderEditorForm] = Form.useForm<WebSearchProviderFormValues>();
   const [configuration, setConfiguration] = useState<ServiceConfiguration | undefined>(undefined);
   const [souls, setSouls] = useState<Soul[]>([]);
@@ -110,9 +112,34 @@ export function ConfigurationPage() {
     }
   };
 
-  const saveLLMConfiguration = async (values: UpdateLLMConfigurationRequest) => {
+  const saveLLMConfiguration = async (values: LLMConfigurationFormValues) => {
     setSaving(true);
     try {
+      const selectableChatTargets = configurationModelTargetOptions(
+        configuration,
+        'chat_completions',
+        configuration?.llm.defaultChat,
+        customProviderDrafts
+      );
+      const defaultChat = parseProviderModelTargetKey(values.defaultChatTargetKey);
+      if (!defaultChat || !selectableChatTargets.some((item) => item.ready && item.value === values.defaultChatTargetKey)) {
+        message.error('请选择完整且 ready 的默认对话模型（Provider/Model）');
+        return;
+      }
+      const selectableEmbeddingTargets = configurationModelTargetOptions(
+        configuration,
+        'embeddings',
+        configuration?.llm.defaultEmbedding,
+        customProviderDrafts
+      );
+      const defaultEmbedding = parseProviderModelTargetKey(values.defaultEmbeddingTargetKey);
+      if (values.defaultEmbeddingTargetKey && (
+        !defaultEmbedding ||
+        !selectableEmbeddingTargets.some((item) => item.ready && item.value === values.defaultEmbeddingTargetKey)
+      )) {
+        message.error('请选择完整且 ready 的默认 Embedding 模型（Provider/Model）');
+        return;
+      }
       const payload: UpdateLLMConfigurationRequest = {
         aiProxy: {
           baseURL: values.aiProxy?.baseURL?.trim(),
@@ -125,15 +152,15 @@ export function ConfigurationPage() {
           maxCatalogModels: values.aiProxy?.maxCatalogModels
         },
         defaultChat: {
-          providerID: values.defaultChat?.providerID?.trim() || 'ai-proxy',
-          modelID: values.defaultChat?.modelID?.trim()
+          providerID: defaultChat.providerId,
+          modelID: defaultChat.modelId
         },
-        defaultEmbedding: values.defaultEmbedding?.modelID?.trim() ? {
-          providerID: values.defaultEmbedding.providerID?.trim() || 'ai-proxy',
-          modelID: values.defaultEmbedding.modelID.trim()
+        defaultEmbedding: defaultEmbedding ? {
+          providerID: defaultEmbedding.providerId,
+          modelID: defaultEmbedding.modelId
         } : undefined,
-        clearDefaultEmbedding: !values.defaultEmbedding?.modelID?.trim(),
-        clearAIProxyApiKey: Boolean((values as UpdateLLMConfigurationRequest).clearAIProxyApiKey),
+        clearDefaultEmbedding: !defaultEmbedding,
+        clearAIProxyApiKey: Boolean(values.clearAIProxyApiKey),
         budget: values.budget
       };
       if (payload.clearAIProxyApiKey) {
@@ -214,16 +241,18 @@ export function ConfigurationPage() {
   const runtimeGit = configuration?.runtime.git;
   const llmOutput = configuration?.runtime.llmOutput;
   const catalog = configuration?.llm.catalog;
-  const readyChatModels = useMemo(() => readyCatalogModels(configuration, 'chat_completions'), [configuration]);
-  const readyEmbeddingModels = useMemo(() => readyCatalogModels(configuration, 'embeddings'), [configuration]);
-  const chatModelOptions = readyChatModels.map((item) => ({
-    value: item.modelId,
-    label: `${item.modelId}${item.routeOwner ? ` (${item.routeOwner})` : ''}`
-  }));
-  const embeddingModelOptions = readyEmbeddingModels.map((item) => ({
-    value: item.modelId,
-    label: `${item.modelId}${item.routeOwner ? ` (${item.routeOwner})` : ''}`
-  }));
+  const chatModelOptions = useMemo(() => configurationModelTargetOptions(
+    configuration,
+    'chat_completions',
+    configuration?.llm.defaultChat,
+    customProviderDrafts
+  ), [configuration, customProviderDrafts]);
+  const embeddingModelOptions = useMemo(() => configurationModelTargetOptions(
+    configuration,
+    'embeddings',
+    configuration?.llm.defaultEmbedding,
+    customProviderDrafts
+  ), [configuration, customProviderDrafts]);
   const selectedCustomProvider = customProviderDrafts[selectedCustomProviderIndex];
   const selectedCustomModel = selectedCustomProvider?.models?.[selectedCustomModelIndex];
 
@@ -479,7 +508,7 @@ export function ConfigurationPage() {
                 )}
               >
                 <Typography.Paragraph type="secondary">
-                  WorkOrch 默认连接内置 ai-proxy。模型列表来自 `/v1/models` 精确目录；默认对话/embedding 模型必须显式选择，不会静默挑第一个。
+                  WorkOrch 默认连接内置 ai-proxy。内置模型来自 `/v1/models` 精确目录，自定义模型来自高级 Provider 声明；默认目标按 Provider/Model 完整选择，不会静默匹配同名模型。
                 </Typography.Paragraph>
                 <Space direction="vertical" size="middle" style={{ width: '100%' }}>
                   <ProCard title="连接与默认模型">
@@ -496,20 +525,35 @@ export function ConfigurationPage() {
                       <Form.Item name={['aiProxy', 'timeout']} label="请求超时">
                         <Input placeholder="180s" />
                       </Form.Item>
-                      <Form.Item name={['defaultChat', 'providerID']} hidden initialValue="ai-proxy">
-                        <Input />
-                      </Form.Item>
-                      <Form.Item name={['defaultChat', 'modelID']} label="默认对话模型" rules={[{ required: true, message: '请选择默认对话模型' }]}>
+                      <Form.Item
+                        name="defaultChatTargetKey"
+                        label="默认对话模型"
+                        rules={[
+                          { required: true, message: '请选择默认对话模型' },
+                          {
+                            validator: (_, value?: string) => chatModelOptions.some((item) => item.ready && item.value === value)
+                              ? Promise.resolve()
+                              : Promise.reject(new Error('已配置目标当前未 ready，请选择 ready 的 Provider/Model'))
+                          }
+                        ]}
+                      >
                         <Select
                           showSearch
-                          placeholder={readyChatModels.length ? '选择 ready chat 模型' : '请先刷新模型目录'}
+                          placeholder={chatModelOptions.some((item) => item.ready) ? '选择 ready chat 模型' : '请先刷新模型目录或配置自定义 Provider'}
                           options={chatModelOptions}
                         />
                       </Form.Item>
-                      <Form.Item name={['defaultEmbedding', 'providerID']} hidden initialValue="ai-proxy">
-                        <Input />
-                      </Form.Item>
-                      <Form.Item name={['defaultEmbedding', 'modelID']} label="默认 Embedding 模型">
+                      <Form.Item
+                        name="defaultEmbeddingTargetKey"
+                        label="默认 Embedding 模型"
+                        rules={[
+                          {
+                            validator: (_, value?: string) => !value || embeddingModelOptions.some((item) => item.ready && item.value === value)
+                              ? Promise.resolve()
+                              : Promise.reject(new Error('已配置目标当前未 ready，请选择 ready 的 Provider/Model 或清空'))
+                          }
+                        ]}
+                      >
                         <Select
                           allowClear
                           showSearch
