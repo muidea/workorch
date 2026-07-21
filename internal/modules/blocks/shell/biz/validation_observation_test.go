@@ -46,6 +46,35 @@ func TestExisting(t *testing.T) {}
 	}
 }
 
+func TestRuntimeAdapterMarksUnconfiguredGoTestZeroWorkAsInconclusive(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go is not available")
+	}
+	workspace := newGoValidationWorkspace(t, `package fixture
+
+import "testing"
+
+func TestExisting(t *testing.T) {}
+`)
+	result, err := NewRuntimeAdapter().ExecuteOperation(context.Background(), RuntimeCommandRequest{
+		WorkspaceDeliverableDirectory: workspace,
+		Command:                       "go",
+		Args:                          []string{"test", "-v", "-run", "TestMissing", "./..."},
+		TargetRefs:                    []string{"fixture_test.go"},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteOperation: %v output=%+v", err, result)
+	}
+	if !result.ZeroWork || result.Evidence.Quality != common.EvidenceQualityInconclusive ||
+		result.Evidence.EvidenceReason != "validation command reported no executed checks" {
+		t.Fatalf("unconfigured zero-work evidence = %+v", result.Evidence)
+	}
+	if result.Evidence.Validation == nil || len(result.Evidence.Validation.ExecutedChecks) != 0 ||
+		len(result.Evidence.Validation.PassedChecks) != 0 || len(result.Evidence.Validation.SkippedChecks) != 0 {
+		t.Fatalf("unconfigured zero-work observation = %+v", result.Evidence.Validation)
+	}
+}
+
 func TestRuntimeAdapterObservesTopLevelPassedAndSkippedGoChecks(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go is not available")

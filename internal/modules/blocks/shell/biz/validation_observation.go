@@ -14,12 +14,22 @@ func attachShellValidationObservation(output *RuntimeCommandResult, command stri
 		return
 	}
 	observation := goTestValidationObservation(output.Stdout, output.Stderr)
-	if preview := strings.TrimSpace(strings.Join([]string{output.Stdout, output.Stderr}, "\n")); preview != "" {
+	rawOutput := strings.Join([]string{output.Stdout, output.Stderr}, "\n")
+	if preview := strings.TrimSpace(rawOutput); preview != "" {
 		observation.OutputPreview = shellPreview(common.RedactSensitiveString(preview), 2048)
 	}
 	observation = observation.Normalized()
 	output.ValidationObservation = &observation
 	if output.ZeroWork || strings.TrimSpace(output.EvidenceQuality) == string(common.EvidenceQualityInconclusive) {
+		return
+	}
+	if output.ExitCode == 0 && goTestObservationIsExplicitZeroWork(observation, rawOutput) {
+		output.ZeroWork = true
+		output.EvidenceQuality = string(common.EvidenceQualityInconclusive)
+		if strings.TrimSpace(output.EvidenceReason) == "" {
+			output.EvidenceReason = "validation command reported no executed checks"
+		}
+		output.EvidenceTags = appendUniqueShellEvidenceTag(output.EvidenceTags, "zero_work")
 		return
 	}
 	if goTestObservationIsAllSkipped(observation) {
@@ -33,6 +43,18 @@ func attachShellValidationObservation(output *RuntimeCommandResult, command stri
 	if output.ExitCode == 0 {
 		output.EvidenceQuality = string(common.EvidenceQualityValid)
 	}
+}
+
+// goTestObservationIsExplicitZeroWork recognizes the tool-level zero-work
+// signal only when the parsed observation contains no executable check. It is
+// intentionally independent of workspace/profile semantics and complements
+// configured evidence policies for callers that did not supply markers.
+func goTestObservationIsExplicitZeroWork(observation runtimecontract.RuntimeValidationObservation, rawOutput string) bool {
+	observation = observation.Normalized()
+	if len(observation.ExecutedChecks) != 0 || len(observation.PassedChecks) != 0 || len(observation.FailedChecks) != 0 || len(observation.SkippedChecks) != 0 {
+		return false
+	}
+	return strings.Contains(strings.ToLower(rawOutput), "no tests to run")
 }
 
 // goTestObservationIsAllSkipped is intentionally expressed only in terms of the

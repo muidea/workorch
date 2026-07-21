@@ -3,13 +3,14 @@ package models
 import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 
 type RuntimeCandidateRequest struct {
-	Decision          runtimecontract.RuntimeDecision
-	Transaction       runtimecontract.AuthorityTransaction
-	CandidateAttempt  int
-	PreviousFailure   *runtimecontract.RuntimeCandidateFailure
-	StablePrefixHash  string
-	DefinitionContext runtimecontract.RuntimeDefinitionContext
-	CandidateContext  runtimecontract.RuntimeCandidateContext
+	Decision           runtimecontract.RuntimeDecision
+	Transaction        runtimecontract.AuthorityTransaction
+	CandidateAttempt   int
+	PreviousFailure    *runtimecontract.RuntimeCandidateFailure
+	StablePrefixHash   string
+	DefinitionContext  runtimecontract.RuntimeDefinitionContext
+	CandidateContext   runtimecontract.RuntimeCandidateContext
+	OutputContinuation *runtimecontract.RuntimeCandidateOutputContinuationRequest
 }
 
 // RuntimeCandidateGenerationResult is the typed provider outcome for a Runtime V2 candidate
@@ -76,7 +77,8 @@ type RuntimeCandidateResponse struct {
 	Status string `json:"status,omitempty"`
 	// PrerequisiteStale preserves an owner-confirmed pre-candidate freshness
 	// outcome. Orchestrator owns the resulting invalidation and reacquisition.
-	PrerequisiteStale *runtimecontract.RuntimePrerequisiteStale `json:"prerequisiteStale,omitempty"`
+	PrerequisiteStale *runtimecontract.RuntimePrerequisiteStale       `json:"prerequisiteStale,omitempty"`
+	OutputFragment    *runtimecontract.RuntimeCandidateOutputFragment `json:"outputFragment,omitempty"`
 }
 
 const (

@@ -58,8 +58,25 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 			Status:      firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusFailed),
 		}, candidateRequestError(failureClass, err, generation.Audit, generation.RequestID, generation.Status)
 	}
+	// A suffix request intentionally uses raw text output rather than the
+	// structured JSON response mode. Its bytes are owned and sequenced by the
+	// Orchestrator; decode occurs only after the complete document is assembled.
+	if request.OutputContinuation != nil {
+		if err := request.OutputContinuation.Validate(); err != nil {
+			return llmmodels.RuntimeCandidateResponse{}, candidateRequestError(CandidateFailureClassInternal, err, generation.Audit, generation.RequestID, generation.Status)
+		}
+		fragment := runtimecontract.RuntimeCandidateOutputFragment{Content: append([]byte(nil), generation.Payload...), ReachedProviderLimit: candidatePayloadReachedOutputLimit(generation, io.ErrUnexpectedEOF)}
+		if err := fragment.Validate(); err != nil {
+			return llmmodels.RuntimeCandidateResponse{}, candidateRequestError(CandidateFailureClassSchema, err, generation.Audit, generation.RequestID, generation.Status)
+		}
+		return llmmodels.RuntimeCandidateResponse{Transaction: request.Transaction, OutputFragment: &fragment, Audit: generation.Audit, Usage: generation.Usage, RequestID: generation.RequestID, Status: firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted)}, nil
+	}
 	candidate, err := DecodeCandidatePayload(request.Decision.Action, generation.Payload)
 	if err != nil {
+		if candidatePayloadReachedOutputLimit(generation, err) {
+			fragment := runtimecontract.RuntimeCandidateOutputFragment{Content: append([]byte(nil), generation.Payload...), ReachedProviderLimit: true}
+			return llmmodels.RuntimeCandidateResponse{Transaction: request.Transaction, OutputFragment: &fragment, Audit: generation.Audit, Usage: generation.Usage, RequestID: generation.RequestID, Status: firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted)}, nil
+		}
 		code, signature, reason := candidateSchemaFailureIdentity(generation, err)
 		return llmmodels.RuntimeCandidateResponse{
 			Transaction: request.Transaction,
@@ -359,6 +376,11 @@ func validateCandidateRequest(request llmmodels.RuntimeCandidateRequest) error {
 	}
 	if err := runtimecontract.ValidateAuthorityTransaction(request.Decision, request.Transaction); err != nil {
 		return err
+	}
+	if request.OutputContinuation != nil {
+		if err := request.OutputContinuation.Validate(); err != nil {
+			return err
+		}
 	}
 	switch request.Decision.Action {
 	case runtimecontract.RuntimeActionProduceStateChange, runtimecontract.RuntimeActionProduceValidation, runtimecontract.RuntimeActionProduceAssessment, runtimecontract.RuntimeActionRequestGovernance:

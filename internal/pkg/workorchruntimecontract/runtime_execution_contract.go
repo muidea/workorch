@@ -17,11 +17,15 @@ type RuntimeExecutionContract struct {
 	OperationContractRevision string
 	StateChangePolicy         RuntimeStateChangePolicy
 	MaxRepairAttemptsPerFocus int
-	CapabilityUsagePolicies   []RuntimeCapabilityUsagePolicy
-	ValidationPolicies        []RuntimeValidationPolicy
-	ProfileContracts          []RuntimeProfileContract
-	AcceptanceSlicePolicy     *RuntimeAcceptanceSlicePolicy
-	TemplateStagePolicy       *RuntimeTemplateStagePolicy
+	// CandidateOutputContinuation is compiled during activation.  It bounds
+	// the provider-output continuation protocol for this Run; Resume must not
+	// consult mutable process configuration to change that budget.
+	CandidateOutputContinuation RuntimeCandidateOutputContinuationPolicy
+	CapabilityUsagePolicies     []RuntimeCapabilityUsagePolicy
+	ValidationPolicies          []RuntimeValidationPolicy
+	ProfileContracts            []RuntimeProfileContract
+	AcceptanceSlicePolicy       *RuntimeAcceptanceSlicePolicy
+	TemplateStagePolicy         *RuntimeTemplateStagePolicy
 }
 
 type RuntimeCapabilityUsagePolicy struct {
@@ -44,6 +48,7 @@ func (c RuntimeExecutionContract) Normalized() RuntimeExecutionContract {
 	if c.StateChangePolicy == "" {
 		c.StateChangePolicy = RuntimeStateChangeAllowedButNotRequired
 	}
+	c.CandidateOutputContinuation = c.CandidateOutputContinuation.Normalized()
 	c.CapabilityUsagePolicies = normalizeRuntimeCapabilityUsagePolicies(c.CapabilityUsagePolicies)
 	c.ValidationPolicies = NormalizeRuntimeValidationPolicies(c.ValidationPolicies)
 	c.ProfileContracts = NormalizeRuntimeProfileContracts(c.ProfileContracts)
@@ -73,6 +78,9 @@ func (c RuntimeExecutionContract) Validate() error {
 	if c.MaxRepairAttemptsPerFocus < 0 || c.MaxRepairAttemptsPerFocus > MaxRepairAttemptsPerFocusLimit {
 		return fmt.Errorf("runtime execution contract max repair attempts must be in 0..%d", MaxRepairAttemptsPerFocusLimit)
 	}
+	if err := c.CandidateOutputContinuation.Validate(); err != nil {
+		return err
+	}
 	if err := ValidateRuntimeValidationPolicies(c.ValidationPolicies); err != nil {
 		return err
 	}
@@ -96,6 +104,7 @@ func SameRuntimeExecutionContract(left RuntimeExecutionContract, right RuntimeEx
 	left = left.Normalized()
 	right = right.Normalized()
 	if left.OperationContractRevision != right.OperationContractRevision || left.StateChangePolicy != right.StateChangePolicy || left.MaxRepairAttemptsPerFocus != right.MaxRepairAttemptsPerFocus ||
+		left.CandidateOutputContinuation != right.CandidateOutputContinuation ||
 		len(left.CapabilityUsagePolicies) != len(right.CapabilityUsagePolicies) ||
 		!sameRuntimeValidationPolicies(left.ValidationPolicies, right.ValidationPolicies) ||
 		!SameRuntimeProfileContracts(left.ProfileContracts, right.ProfileContracts) || !SameRuntimeTemplateStagePolicy(left.TemplateStagePolicy, right.TemplateStagePolicy) ||

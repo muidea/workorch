@@ -121,8 +121,10 @@ type ProviderModelTargetConfig struct {
 type LLMContextBudgetPolicyConfig struct {
 	ContextUtilizationRatio float64 `json:"contextUtilizationRatio" toml:"contextUtilizationRatio"`
 	EstimatedTokensPerByte  float64 `json:"estimatedTokensPerByte" toml:"estimatedTokensPerByte"`
-	DefaultMaxOutputTokens  int     `json:"defaultMaxOutputTokens" toml:"defaultMaxOutputTokens"`
-	MaxRequestBytes         int     `json:"maxRequestBytes" toml:"maxRequestBytes"`
+	// DefaultMaxOutputTokens is an optional local safety cap. Zero preserves the
+	// exact output capability returned by the selected provider catalog.
+	DefaultMaxOutputTokens int `json:"defaultMaxOutputTokens" toml:"defaultMaxOutputTokens"`
+	MaxRequestBytes        int `json:"maxRequestBytes" toml:"maxRequestBytes"`
 }
 
 type AIProxyModelOverrideConfig struct {
@@ -211,7 +213,7 @@ func DefaultLLMContextBudgetPolicyConfig() LLMContextBudgetPolicyConfig {
 	return LLMContextBudgetPolicyConfig{
 		ContextUtilizationRatio: 0.75,
 		EstimatedTokensPerByte:  0.25,
-		DefaultMaxOutputTokens:  4096,
+		DefaultMaxOutputTokens:  0,
 		MaxRequestBytes:         4 << 20,
 	}
 }
@@ -460,9 +462,6 @@ func NormalizeLLMConfig(cfg LLMConfig) (LLMConfig, error) {
 	}
 	if cfg.Budget.EstimatedTokensPerByte <= 0 {
 		cfg.Budget.EstimatedTokensPerByte = defaults.Budget.EstimatedTokensPerByte
-	}
-	if cfg.Budget.DefaultMaxOutputTokens <= 0 {
-		cfg.Budget.DefaultMaxOutputTokens = defaults.Budget.DefaultMaxOutputTokens
 	}
 	if cfg.Budget.MaxRequestBytes <= 0 {
 		cfg.Budget.MaxRequestBytes = defaults.Budget.MaxRequestBytes
@@ -722,8 +721,8 @@ func validateLLMContextBudgetPolicyConfig(cfg LLMContextBudgetPolicyConfig) erro
 	if cfg.EstimatedTokensPerByte <= 0 {
 		return fmt.Errorf("%w: llm.budget.estimatedTokensPerByte must be positive", common.ErrInvalidArgument)
 	}
-	if cfg.DefaultMaxOutputTokens <= 0 {
-		return fmt.Errorf("%w: llm.budget.defaultMaxOutputTokens must be positive", common.ErrInvalidArgument)
+	if cfg.DefaultMaxOutputTokens < 0 {
+		return fmt.Errorf("%w: llm.budget.defaultMaxOutputTokens must be zero or positive", common.ErrInvalidArgument)
 	}
 	if cfg.MaxRequestBytes <= 0 {
 		return fmt.Errorf("%w: llm.budget.maxRequestBytes must be positive", common.ErrInvalidArgument)

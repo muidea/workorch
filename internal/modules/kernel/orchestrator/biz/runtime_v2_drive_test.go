@@ -2490,6 +2490,169 @@ func TestDriveRuntimeV2CandidateFailureStopsAfterSameContractRetry(t *testing.T)
 	}
 }
 
+func TestRequestAndSealRuntimeV2CandidateContinuesProviderLimitedOutput(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	facts := runtimeV2Aggregate(t, 1).Facts
+	facts.Activation.ExecutionContract.CandidateOutputContinuation = runtimecontract.RuntimeCandidateOutputContinuationPolicy{MaxChunks: 2, TailBytes: 12}
+	repository := &inMemoryRuntimeV2StateRepository{}
+	controller, err := runtimev2.NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialized, err := controller.Initialize(ctx, facts, runtimeV2Definition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	continuations := memory.NewArtifactContinuationRepository()
+	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
+	if err := owner.ConfigureRuntimeV2Repository(repository); err != nil {
+		t.Fatal(err)
+	}
+	module := newTestBiz(owner, hub, nil)
+	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
+	first := `{"operations":[{"id":"op-1","kind":"file/edit","coverageWorkItemIds":["cwi-v2"],`
+	second := `"targetRefs":["target.txt"],"parameters":[{"name":"path","string":"target.txt"},{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`
+	calls := 0
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		calls++
+		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		response := orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction}
+		if command.OutputContinuation == nil {
+			response.OutputFragment = &runtimecontract.RuntimeCandidateOutputFragment{Content: []byte(first), ReachedProviderLimit: true}
+		} else {
+			if command.OutputContinuation.Sequence != 2 || command.OutputContinuation.PreviousChunkTail != first[len(first)-12:] || command.StablePrefixHash != prefix {
+				t.Fatalf("continuation command = %+v", command)
+			}
+			response.OutputFragment = &runtimecontract.RuntimeCandidateOutputFragment{Content: []byte(second)}
+		}
+		result.Set(response, nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	completed, err := module.requestAndSealRuntimeV2CandidateWithRetry(ctx, initialized, prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 || completed.ActiveDispatch == nil || len(completed.CandidateAttempts) != 1 || completed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateAccepted {
+		t.Fatalf("candidate output continuation completion = %+v calls=%d", completed, calls)
+	}
+	id := runtimecontract.StableRuntimeCandidateOutputContinuationID(completed.Facts.WorkspaceID, completed.Facts.RunID, initialized.Decision.AuthorityTransaction(), 0)
+	continuation, err := continuations.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if continuation.State != common.ArtifactContinuationStateApplied || !continuation.FinalReceived || len(continuation.ReceivedSequences) != 2 || continuation.AuthorityTransaction != initialized.Decision.AuthorityTransaction() || continuation.StablePrefixHash != prefix {
+		t.Fatalf("persisted candidate output continuation = %+v", continuation)
+	}
+}
+
+func TestRequestAndSealRuntimeV2CandidateRestartsFromPersistedOutputChunk(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	facts := runtimeV2Aggregate(t, 1).Facts
+	facts.Activation.ExecutionContract.CandidateOutputContinuation = runtimecontract.RuntimeCandidateOutputContinuationPolicy{MaxChunks: 2, TailBytes: 12}
+	state := &inMemoryRuntimeV2StateRepository{}
+	controller, err := runtimev2.NewRuntimeController(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialized, err := controller.Initialize(ctx, facts, runtimeV2Definition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	continuations := memory.NewArtifactContinuationRepository()
+	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
+	if err := owner.ConfigureRuntimeV2Repository(state); err != nil {
+		t.Fatal(err)
+	}
+	module := newTestBiz(owner, hub, nil)
+	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
+	pending, err := owner.BeginRuntimeV2CandidateAttempt(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID, 0, prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := pending.Facts.Activation.ExecutionContract.CandidateOutputContinuation
+	id := runtimecontract.StableRuntimeCandidateOutputContinuationID(pending.Facts.WorkspaceID, pending.Facts.RunID, pending.Decision.AuthorityTransaction(), 0)
+	continuation, err := loadOrCreateRuntimeCandidateOutputContinuation(ctx, continuations, id, pending, 0, prefix, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := `{"operations":[{"id":"op-1","kind":"file/edit","coverageWorkItemIds":["cwi-v2"],`
+	if err := recordRuntimeCandidateOutputChunk(ctx, continuations, continuation, 1, []byte(first), ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := reconcileRuntimeCandidateOutputContinuation(ctx, continuations, continuation); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		calls++
+		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		if command.OutputContinuation == nil || command.OutputContinuation.Sequence != 2 || command.OutputContinuation.PreviousChunkTail != first[len(first)-12:] {
+			t.Fatalf("restart continuation command = %+v", command)
+		}
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, OutputFragment: &runtimecontract.RuntimeCandidateOutputFragment{Content: []byte(`"targetRefs":["target.txt"],"parameters":[{"name":"path","string":"target.txt"},{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)}}, nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	completed, err := module.requestAndSealRuntimeV2CandidateWithRetry(ctx, pending, prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || completed.ActiveDispatch == nil || completed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateAccepted {
+		t.Fatalf("restart continuation completion = %+v calls=%d", completed, calls)
+	}
+}
+
+func TestRequestAndSealRuntimeV2CandidateFailsWhenOutputContinuationBudgetExhausted(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	facts := runtimeV2Aggregate(t, 1).Facts
+	facts.Activation.ExecutionContract.CandidateOutputContinuation = runtimecontract.RuntimeCandidateOutputContinuationPolicy{MaxChunks: 1, TailBytes: 8}
+	state := &inMemoryRuntimeV2StateRepository{}
+	controller, err := runtimev2.NewRuntimeController(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialized, err := controller.Initialize(ctx, facts, runtimeV2Definition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	continuations := memory.NewArtifactContinuationRepository()
+	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
+	if err := owner.ConfigureRuntimeV2Repository(state); err != nil {
+		t.Fatal(err)
+	}
+	module := newTestBiz(owner, hub, nil)
+	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		fragment := runtimecontract.RuntimeCandidateOutputFragment{Content: []byte(`{"operations":[`), ReachedProviderLimit: true}
+		if command.OutputContinuation != nil {
+			fragment.Content = []byte(`{"id":"op-1"`)
+		}
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, OutputFragment: &fragment}, nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	failed, err := module.requestAndSealRuntimeV2CandidateWithRetry(ctx, initialized, prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.Decision.Action != runtimecontract.RuntimeActionFail || failed.Decision.Terminal == nil || failed.Decision.Terminal.Code != "candidate_output_continuation_exhausted" {
+		t.Fatalf("candidate output continuation exhaustion = %+v", failed.Decision)
+	}
+	id := runtimecontract.StableRuntimeCandidateOutputContinuationID(failed.Facts.WorkspaceID, failed.Facts.RunID, initialized.Decision.AuthorityTransaction(), 0)
+	continuation, err := continuations.Get(ctx, id)
+	if err != nil || continuation.State != common.ArtifactContinuationStateFailed {
+		t.Fatalf("failed continuation = %+v err=%v", continuation, err)
+	}
+}
+
 func TestRequestAndSealRuntimeV2CandidateReacquiresProviderCeilingAfterTypedStale(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)

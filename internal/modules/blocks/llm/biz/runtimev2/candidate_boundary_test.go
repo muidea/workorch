@@ -140,14 +140,12 @@ func TestRequestCandidateClassifiesOutputLimitSchemaTruncation(t *testing.T) {
 			},
 		}, nil
 	})
-	_, err := RequestCandidate(context.Background(), provider, request)
-	if err == nil {
-		t.Fatal("truncated candidate payload was accepted")
+	response, err := RequestCandidate(context.Background(), provider, request)
+	if err != nil {
+		t.Fatal(err)
 	}
-	failure := CandidateFailureFromError(err)
-	if failure.Class != CandidateFailureClassSchema || failure.Code != "candidate_response_truncated" || failure.Signature != "candidate-response-truncated" ||
-		!strings.Contains(failure.Reason, "sealed output token limit") || !strings.Contains(strings.ToLower(failure.Reason), "unexpected eof") {
-		t.Fatalf("truncated candidate failure = %+v", failure)
+	if response.OutputFragment == nil || !response.OutputFragment.ReachedProviderLimit || string(response.OutputFragment.Content) != `{"operations":[{"id":"patch-1"` {
+		t.Fatalf("truncated candidate output fragment = %+v", response.OutputFragment)
 	}
 }
 

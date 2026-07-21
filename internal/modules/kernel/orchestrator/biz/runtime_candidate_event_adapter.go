@@ -32,6 +32,11 @@ func RequestRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command or
 	if err := command.CandidateContext.Validate(command.Decision); err != nil {
 		return orchestratorevents.RequestRuntimeCandidateResult{}, err
 	}
+	if command.OutputContinuation != nil {
+		if err := command.OutputContinuation.Validate(); err != nil {
+			return orchestratorevents.RequestRuntimeCandidateResult{}, err
+		}
+	}
 	if err := validateRuntimeCandidateRetryContract(command.CandidateAttempt, command.PreviousFailure); err != nil {
 		return orchestratorevents.RequestRuntimeCandidateResult{}, err
 	}
@@ -75,10 +80,28 @@ func RequestRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command or
 		return response, nil
 	}
 	if response.Failure != nil {
+		if response.OutputFragment != nil {
+			return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned an output fragment together with a candidate failure")
+		}
 		if response.Failure.Class == "" || response.Failure.Reason == "" {
 			return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned an invalid runtime candidate failure")
 		}
 		return response, nil
+	}
+	if response.OutputFragment != nil {
+		if err := response.OutputFragment.Validate(); err != nil {
+			return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned an invalid runtime candidate output fragment: %w", err)
+		}
+		if response.Candidate != (runtimecontract.RuntimeCandidate{}) {
+			return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned an output fragment together with a candidate")
+		}
+		if command.OutputContinuation == nil && !response.OutputFragment.ReachedProviderLimit {
+			return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("initial runtime candidate output fragment must reach the provider output limit")
+		}
+		return response, nil
+	}
+	if command.OutputContinuation != nil {
+		return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("runtime candidate output continuation returned neither a fragment nor a failure")
 	}
 	// Revalidate at the EventHub boundary with the same activation-sealed MCP
 	// metadata that the LLM boundary used.  Calling Validate without activation

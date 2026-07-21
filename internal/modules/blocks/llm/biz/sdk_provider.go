@@ -56,8 +56,8 @@ func (p *OpenAIProvider) Complete(ctx context.Context, request llmmodels.Provide
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, providerSDKError("openai", err)
 	}
-	content := strings.TrimSpace(firstOpenAIChoiceContent(completion))
-	if content == "" {
+	content := providerCompletionContent(request, firstOpenAIChoiceContent(completion))
+	if strings.TrimSpace(content) == "" {
 		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider response content is empty", common.ErrInvalidArgument)
 	}
 	return llmmodels.ProviderCompletionResult{
@@ -99,8 +99,8 @@ func (p *OpenAIProvider) StreamComplete(ctx context.Context, request llmmodels.P
 			return llmmodels.ProviderCompletionResult{}, err
 		}
 	}
-	content := strings.TrimSpace(builder.String())
-	if content == "" {
+	content := providerCompletionContent(request, builder.String())
+	if strings.TrimSpace(content) == "" {
 		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider streamed response content is empty", common.ErrInvalidArgument)
 	}
 	return llmmodels.ProviderCompletionResult{
@@ -166,9 +166,11 @@ func (p *OpenAIProvider) chatParams(request llmmodels.ProviderRequest) openai.Ch
 		Messages:    chatMessages,
 		Model:       shared.ChatModel(p.config.Model),
 		Temperature: openai.Float(providerTemperature(p.config)),
-		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
+	}
+	if !request.RawTextOutput {
+		params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{
 			OfJSONObject: &shared.ResponseFormatJSONObjectParam{Type: "json_object"},
-		},
+		}
 	}
 	if maxTokens := maxOutputTokens(p.config); maxTokens > 0 {
 		params.MaxCompletionTokens = openai.Int(maxTokens)
@@ -224,8 +226,8 @@ func (p *AnthropicProvider) Complete(ctx context.Context, request llmmodels.Prov
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, providerSDKError("anthropic", err)
 	}
-	content := strings.TrimSpace(firstAnthropicText(message))
-	if content == "" {
+	content := providerCompletionContent(request, firstAnthropicText(message))
+	if strings.TrimSpace(content) == "" {
 		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider response content is empty", common.ErrInvalidArgument)
 	}
 	return llmmodels.ProviderCompletionResult{
@@ -266,11 +268,11 @@ func (p *AnthropicProvider) StreamComplete(ctx context.Context, request llmmodel
 			return llmmodels.ProviderCompletionResult{}, err
 		}
 	}
-	content := strings.TrimSpace(builder.String())
-	if content == "" {
-		content = strings.TrimSpace(firstAnthropicText(&message))
+	content := providerCompletionContent(request, builder.String())
+	if strings.TrimSpace(content) == "" {
+		content = providerCompletionContent(request, firstAnthropicText(&message))
 	}
-	if content == "" {
+	if strings.TrimSpace(content) == "" {
 		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider streamed response content is empty", common.ErrInvalidArgument)
 	}
 	return llmmodels.ProviderCompletionResult{

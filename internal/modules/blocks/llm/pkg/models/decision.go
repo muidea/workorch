@@ -1,18 +1,22 @@
 package models
 
 type ProviderRequest struct {
-	WorkspaceID    string                 `json:"workspaceId"`
-	RunID          string                 `json:"runId"`
-	StepID         string                 `json:"stepId"`
-	Kind           string                 `json:"kind"`
-	Model          string                 `json:"model"`
-	SystemLocale   string                 `json:"systemLocale,omitempty"`
-	DialogLanguage string                 `json:"dialogLanguage,omitempty"`
-	Schema         string                 `json:"schema"`
-	TraceRefs      map[string]string      `json:"traceRefs,omitempty"`
-	Config         RedactedProviderConfig `json:"config"`
-	PromptContext  *PromptContext         `json:"promptContext,omitempty"`
-	ContextBudget  *ProviderContextBudget `json:"contextBudget,omitempty"`
+	WorkspaceID    string `json:"workspaceId"`
+	RunID          string `json:"runId"`
+	StepID         string `json:"stepId"`
+	Kind           string `json:"kind"`
+	Model          string `json:"model"`
+	SystemLocale   string `json:"systemLocale,omitempty"`
+	DialogLanguage string `json:"dialogLanguage,omitempty"`
+	Schema         string `json:"schema"`
+	// RawTextOutput disables provider JSON-object mode for an explicitly typed
+	// continuation suffix. All ordinary Runtime V2 candidate requests remain
+	// schema-constrained JSON objects.
+	RawTextOutput bool                   `json:"rawTextOutput,omitempty"`
+	TraceRefs     map[string]string      `json:"traceRefs,omitempty"`
+	Config        RedactedProviderConfig `json:"config"`
+	PromptContext *PromptContext         `json:"promptContext,omitempty"`
+	ContextBudget *ProviderContextBudget `json:"contextBudget,omitempty"`
 }
 
 type PromptContext struct {

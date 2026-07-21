@@ -133,6 +133,61 @@ make verify-runtime-v2-positive-convergence-file
 文件 verifier 已纳入 VPC Shell、effective progress、discovery 与 async metrics focused
 tests，并使用 `/tmp/workorch-e2e`，不写入用户配置或 repository runtime data。
 
+## Post-deployment verification addendum — 2026-07-21
+
+最新二进制在 `ws-fa686f29f54bc493/run-004` 中确认 VPC-2 至 VPC-5 的收敛行为已经生效：
+连续两次 accepted-but-no-progress validation 后，reducer 按封存上限从
+`produce_validation` 升级为 `produce_state_change`，未再重放 validation-only candidate。
+Run 最终以 `candidate_retry_exhausted` 有界失败，且 terminal projection、workspace
+active-run release 与 eventstream projection 均已完成。
+
+同次验证重新发现两个必须纳入 VPC-6 fresh deployed gate 的输入/请求合同缺口：
+
+1. `go test` 明确输出 `no tests to run`、但没有任何 parsed check 时，未配置 marker 的
+   Shell receipt 曾错误标为 `valid`。Shell 现必须将该通用 tool-level zero-work signal
+   固化为 `inconclusive + ZeroWork=true`；该规则只比较 owner observation 与工具输出，
+   不解释 workspace、LSP 或测试名称。
+2. `produce_state_change` 的两次 same-contract provider 请求均用尽 sealed
+   `effectiveMaxOutputTokens=4096`，JSON 在边界处 EOF；Provider catalog 允许的输出上限为
+   `65536`，且 stable prefix 未漂移。这不是 transport、model selection 或 Resume 缺陷，也
+   **不能**通过把静态默认值改为 8192 或其他固定值收口：任何固定值都可能不足。Catalog 值
+   必须继续作为 provider hard capability。`defaultMaxOutputTokens=0` 表示直接采用 selected
+   catalog 值；正数才是显式本地 safety cap。超过 provider hard limit 的合法候选必须进入
+   Runtime V2 的 typed continuation/chunk protocol，而不是耗尽 same-contract candidate retry
+   后 terminal。现有 artifact-continuation DTO、repository 与 read model 已存在；V2 主链
+   已补入 bounded candidate-output continuation：初始 EOF fragment 与每个 suffix 均先由
+   Orchestrator 持久化，再拼接、严格解码并回到原有 candidate admission/seal。该协议不把
+   suffix 计为 attempt 1，也不允许 LLM 选择 sequence、transaction 或 chunk budget。
+
+第一项影响 Shell 的 SM-3 receipt input。第二项需要扩展 SM-2/SM-3 的 candidate output
+continuation 合同，并保持 SM-1 lifecycle 与 SM-4 recovery/projection 不变；`pkg` 只能承载
+DTO、hash、normalize/clone 与纯比较，不能选择输出模式或推进 aggregate 状态迁移。
+
+### VPC-7 — Provider-limited candidate output continuation
+
+**Affected machines:** SM-3 candidate generation/seal; SM-4 restart recovery. SM-1 不变；
+SM-2 仍只在完整 candidate admission 后选择下一 action。
+
+**Contract:** activation 将 `maxChunkRetryAttempts` 与 `previousChunkTailBytes` 编译为
+`RuntimeExecutionContract.CandidateOutputContinuation`。初始 structured response 在 output
+token limit EOF 时返回 typed fragment；Orchestrator 建立 deterministic continuation ID，按
+`1..N` 持久化 content hash、tail、transaction、attempt 与 stable prefix。suffix call 只能
+携带 Orchestrator-sealed sequence/tail，采用 raw text provider mode；完整 payload 仅通过
+`workorchruntimecontract` 的无状态严格 decoder 转为 DTO，随后仍由原 admission/seal
+authority 裁决。任何 sequence/hash/tail/transaction 冲突、assembly decode 失败或封存 chunk
+budget 耗尽都生成 typed terminal，不回退为无限 candidate retry。
+
+**Independent regression:**
+
+```text
+go test ./internal/modules/blocks/llm/biz/runtimev2 -run 'TestRequestCandidate.*OutputLimit' -count=1
+go test ./internal/modules/kernel/orchestrator/biz -run 'TestRequestAndSealRuntimeV2Candidate.*Output' -count=1
+```
+
+必测：首段+suffix 成功、restart 从已落盘首段继续、duplicate chunk/hash 冲突、final assembly
+decode failure、chunk budget exhaustion、stable prefix/transaction 一致，以及 raw fragment 不进入
+普通 read model。live 验证必须新建 Run；旧 Run 的 sealed 4096 ceiling 与既有 terminal 不迁移。
+
 ## Scope and Non-Goals
 
 ### In scope
@@ -457,6 +512,7 @@ make release-check
 | VPC-4 | Orchestrator prerequisite/reducer；capability observer | policy/discovery DTO、profile config | core 的 LSP/Go/tool-name hard-code |
 | VPC-5 | `workorchd/service/server` metrics observer/tests | run typed notification/read model | direct Orchestrator repository、metrics Resume |
 | VPC-6 | verifier/tests/docs | `/tmp/workorch-e2e` artifacts | 仓库 runtime data、用户 config 污染 |
+| VPC-7 | `orchestrator/biz/runtime_v2_candidate_continuation.go` | LLM typed boundary/provider raw-text mode、activation-sealed contract、artifact repository tests | `pkg` 状态迁移、Run/Result/LLM action authority |
 
 ## Commit and Review Slices
 

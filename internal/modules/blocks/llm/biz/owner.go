@@ -117,13 +117,14 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 		return
 	}
 	response, err := llmruntimev2.RequestCandidate(event.Context(), m.candidateProvider, llmmodels.RuntimeCandidateRequest{
-		Decision:          command.Decision,
-		Transaction:       command.Transaction,
-		CandidateAttempt:  command.CandidateAttempt,
-		PreviousFailure:   command.PreviousFailure,
-		StablePrefixHash:  command.StablePrefixHash,
-		DefinitionContext: command.DefinitionContext,
-		CandidateContext:  command.CandidateContext,
+		Decision:           command.Decision,
+		Transaction:        command.Transaction,
+		CandidateAttempt:   command.CandidateAttempt,
+		PreviousFailure:    command.PreviousFailure,
+		StablePrefixHash:   command.StablePrefixHash,
+		DefinitionContext:  command.DefinitionContext,
+		CandidateContext:   command.CandidateContext,
+		OutputContinuation: command.OutputContinuation,
 	})
 	// Always attempt to persist sealed request audit when generation produced one.
 	// Audit may also ride on CandidateRequestError for failed provider calls.
@@ -171,12 +172,13 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 	}
 	m.publishLLMUsageRecorded(event.Context(), audit, usage, status, "")
 	result.Set(orchestratorevents.RequestRuntimeCandidateResult{
-		Transaction: response.Transaction,
-		Candidate:   response.Candidate,
-		RequestID:   requestID,
-		Status:      status,
-		Audit:       providerRequestAuditView(audit),
-		Usage:       providerUsageView(usage),
+		Transaction:    response.Transaction,
+		Candidate:      response.Candidate,
+		OutputFragment: response.OutputFragment,
+		RequestID:      requestID,
+		Status:         status,
+		Audit:          providerRequestAuditView(audit),
+		Usage:          providerUsageView(usage),
 	}, nil)
 }
 

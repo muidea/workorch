@@ -25,6 +25,16 @@ type EmbeddingProvider interface {
 type ProviderConfigLoader func() (string, map[string]llmmodels.ProviderConfig, error)
 type ProviderConfigRevision func() uint64
 
+// providerCompletionContent preserves byte-for-byte suffixes for the typed
+// Runtime V2 candidate continuation protocol. Ordinary structured requests
+// retain the established whitespace normalization.
+func providerCompletionContent(request llmmodels.ProviderRequest, content string) string {
+	if request.RawTextOutput {
+		return content
+	}
+	return strings.TrimSpace(content)
+}
+
 func NewProviderFromConfig(config llmmodels.ProviderConfig) Provider {
 	switch strings.TrimSpace(config.Provider) {
 	case llmcommon.ProviderOpenAI:

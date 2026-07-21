@@ -300,6 +300,10 @@ func sealedAuditFromRequest(
 	status, failureClass string,
 	responseBytes int,
 ) *llmmodels.ProviderRequestAudit {
+	kind := "runtime_v2_candidate"
+	if request.OutputContinuation != nil {
+		kind = "runtime_v2_candidate_output_continuation"
+	}
 	ceiling := request.CandidateContext.Resources.ProviderCeiling
 	target := runtimecontract.ProviderModelTarget{}
 	capabilityRevision := ""
@@ -341,7 +345,7 @@ func sealedAuditFromRequest(
 		CapabilityRevision:    capabilityRevision,
 		ConfigurationRevision: configurationRevision,
 		StablePrefixHash:      request.StablePrefixHash,
-		Kind:                  "runtime_v2_candidate",
+		Kind:                  kind,
 		ContextBudget:         cloneProviderContextBudget(budget),
 		ProviderSubmitted:     submitted,
 		Status:                status,
@@ -437,12 +441,13 @@ func runtimeV2ProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmod
 		return llmmodels.ProviderRequest{}, err
 	}
 	dynamicJSON, err := json.Marshal(struct {
-		Decision       runtimecontract.RuntimeDecision          `json:"decision"`
-		Transaction    runtimecontract.AuthorityTransaction     `json:"transaction"`
-		Attempt        int                                      `json:"candidateAttempt"`
-		OutputContract runtimeCandidateOutputContractProjection `json:"outputContract"`
-		Retry          *runtimeCandidateRetryProjection         `json:"retry,omitempty"`
-		Context        runtimeCandidateContextProjection        `json:"context"`
+		Decision           runtimecontract.RuntimeDecision                            `json:"decision"`
+		Transaction        runtimecontract.AuthorityTransaction                       `json:"transaction"`
+		Attempt            int                                                        `json:"candidateAttempt"`
+		OutputContract     runtimeCandidateOutputContractProjection                   `json:"outputContract"`
+		Retry              *runtimeCandidateRetryProjection                           `json:"retry,omitempty"`
+		Context            runtimeCandidateContextProjection                          `json:"context"`
+		OutputContinuation *runtimecontract.RuntimeCandidateOutputContinuationRequest `json:"outputContinuation,omitempty"`
 	}{
 		request.Decision,
 		request.Transaction,
@@ -450,6 +455,7 @@ func runtimeV2ProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmod
 		runtimeV2CandidateOutputContract(request.Decision),
 		runtimeV2CandidateRetry(request.CandidateAttempt, request.PreviousFailure),
 		runtimeV2CandidateContextProjection(candidateContext, request.Decision.Action),
+		request.OutputContinuation,
 	})
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
@@ -477,6 +483,12 @@ func runtimeV2ProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmod
 				StablePrefixHash: wantPrefix, RenderedStablePrefixHash: wantPrefix,
 			},
 		},
+	}
+	if request.OutputContinuation != nil {
+		providerRequest.Kind = "runtime_v2_candidate_output_continuation"
+		providerRequest.Schema = ""
+		providerRequest.RawTextOutput = true
+		providerRequest.PromptContext.Sections[3].Content = string(dynamicJSON) + "\n\nReturn only the exact next bytes of the candidate JSON document after outputContinuation.previousChunkTail. Do not repeat the tail, do not start a new JSON object, and do not use markdown."
 	}
 	payload, err := json.Marshal(providerRequest)
 	if err != nil {

@@ -165,7 +165,7 @@ func (p *HTTPProvider) completeOpenAICompatible(ctx context.Context, request llm
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
-	payload, err := json.Marshal(chatCompletionRequest{
+	requestPayload := chatCompletionRequest{
 		Model:               p.config.Model,
 		Messages:            chatMessagesForRequest(&request),
 		PromptCacheKey:      promptCacheKeyForRequest(p.config, request),
@@ -173,8 +173,9 @@ func (p *HTTPProvider) completeOpenAICompatible(ctx context.Context, request llm
 		MaxCompletionTokens: maxOutputTokens(p.config),
 		ReasoningEffort:     p.config.InferenceProfile.ReasoningEffort,
 		Thinking:            compatibleThinkingConfig(p.config),
-		ResponseFormat:      map[string]string{"type": "json_object"},
-	})
+		ResponseFormat:      responseFormatForRequest(request),
+	}
+	payload, err := json.Marshal(requestPayload)
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
@@ -211,8 +212,8 @@ func (p *HTTPProvider) completeOpenAICompatible(ctx context.Context, request llm
 	if len(decoded.Choices) == 0 {
 		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider response schema invalid: choices are required", common.ErrInvalidArgument)
 	}
-	content := strings.TrimSpace(decoded.FirstContent())
-	if content == "" {
+	content := providerCompletionContent(request, decoded.FirstContent())
+	if strings.TrimSpace(content) == "" {
 		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider response schema invalid: first choice content is empty", common.ErrInvalidArgument)
 	}
 	return llmmodels.ProviderCompletionResult{
@@ -243,7 +244,7 @@ func (p *HTTPProvider) streamOpenAICompatible(ctx context.Context, request llmmo
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
-	payload, err := json.Marshal(chatCompletionRequest{
+	requestPayload := chatCompletionRequest{
 		Model:               p.config.Model,
 		Messages:            chatMessagesForRequest(&request),
 		PromptCacheKey:      promptCacheKeyForRequest(p.config, request),
@@ -251,10 +252,11 @@ func (p *HTTPProvider) streamOpenAICompatible(ctx context.Context, request llmmo
 		MaxCompletionTokens: maxOutputTokens(p.config),
 		ReasoningEffort:     p.config.InferenceProfile.ReasoningEffort,
 		Thinking:            compatibleThinkingConfig(p.config),
-		ResponseFormat:      map[string]string{"type": "json_object"},
+		ResponseFormat:      responseFormatForRequest(request),
 		Stream:              true,
 		StreamOptions:       &chatCompletionStreamOptions{IncludeUsage: true},
-	})
+	}
+	payload, err := json.Marshal(requestPayload)
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
@@ -281,14 +283,21 @@ func (p *HTTPProvider) streamOpenAICompatible(ctx context.Context, request llmmo
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
-	content = strings.TrimSpace(content)
-	if content == "" {
+	content = providerCompletionContent(request, content)
+	if strings.TrimSpace(content) == "" {
 		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider streamed response content is empty", common.ErrInvalidArgument)
 	}
 	return llmmodels.ProviderCompletionResult{
 		Payload: []byte(content),
 		Usage:   usage,
 	}, nil
+}
+
+func responseFormatForRequest(request llmmodels.ProviderRequest) map[string]string {
+	if request.RawTextOutput {
+		return nil
+	}
+	return map[string]string{"type": "json_object"}
 }
 
 func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbeddingRequest) (llmmodels.ProviderEmbeddingResult, error) {
@@ -527,8 +536,8 @@ func (p *HTTPProvider) streamAnthropicCompatible(ctx context.Context, request ll
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
-	content = strings.TrimSpace(content)
-	if content == "" {
+	content = providerCompletionContent(request, content)
+	if strings.TrimSpace(content) == "" {
 		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider streamed response content is empty", common.ErrInvalidArgument)
 	}
 	return llmmodels.ProviderCompletionResult{

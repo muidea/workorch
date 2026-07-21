@@ -165,6 +165,7 @@ const (
 	FailureClassExecutionFailure             FailureClass = "execution_failure"
 	FailureClassNoProgressExhausted          FailureClass = "no_progress_exhausted"
 	FailureClassCandidateExhausted           FailureClass = "candidate_retry_exhausted"
+	FailureClassCandidateOutputExhausted     FailureClass = "candidate_output_continuation_exhausted"
 	FailureClassPrerequisiteRefreshExhausted FailureClass = "prerequisite_refresh_exhausted"
 	FailureClassGovernanceRejected           FailureClass = "governance_rejected"
 )

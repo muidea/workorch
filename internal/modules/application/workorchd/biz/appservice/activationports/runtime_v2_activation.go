@@ -98,6 +98,11 @@ func runtimeV2ExecutionContract(input map[string]any) runtimecontract.RuntimeExe
 		StateChangePolicy:         runtimecontract.RuntimeStateChangePolicy(runtimeV2String(input["stateChangePolicy"])),
 		MaxRepairAttemptsPerFocus: runtimeV2Int(input["maxRepairAttemptsPerFocus"]),
 	}
+	if continuation := runtimeV2Map(input["candidateOutputContinuation"]); len(continuation) > 0 {
+		ret.CandidateOutputContinuation = runtimecontract.RuntimeCandidateOutputContinuationPolicy{
+			MaxChunks: runtimeV2Int(continuation["maxChunks"]), TailBytes: runtimeV2Int(continuation["tailBytes"]),
+		}
+	}
 	for _, item := range runtimeV2MapSlice(input["capabilityUsagePolicies"]) {
 		ret.CapabilityUsagePolicies = append(ret.CapabilityUsagePolicies, runtimecontract.RuntimeCapabilityUsagePolicy{
 			ID: runtimeV2String(item["id"]), Scope: runtimeV2String(item["scope"]),

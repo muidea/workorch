@@ -164,14 +164,20 @@ func deriveBudgetProfile(
 			Target:  target,
 		}
 	}
-	if budget.ContextUtilizationRatio <= 0 || budget.ContextUtilizationRatio > 1 || budget.EstimatedTokensPerByte <= 0 || budget.DefaultMaxOutputTokens <= 0 || budget.MaxRequestBytes <= 0 {
+	if budget.ContextUtilizationRatio <= 0 || budget.ContextUtilizationRatio > 1 || budget.EstimatedTokensPerByte <= 0 || budget.DefaultMaxOutputTokens < 0 || budget.MaxRequestBytes <= 0 {
 		return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{
 			Code:    llmmodels.ProviderModelFailureConfigurationInvalid,
 			Message: "budget policy is invalid",
 			Target:  target,
 		}
 	}
-	requestedOutputTokens := budget.DefaultMaxOutputTokens
+	// The catalog declares the selected model's concrete single-response
+	// capability. A zero local budget means do not silently shrink that
+	// capability; a positive value is an explicit deployment safety cap.
+	requestedOutputTokens := providerMaxOutputTokens
+	if budget.DefaultMaxOutputTokens > 0 {
+		requestedOutputTokens = budget.DefaultMaxOutputTokens
+	}
 	if modelConfiguredMaxOutput > 0 {
 		requestedOutputTokens = modelConfiguredMaxOutput
 	}

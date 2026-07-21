@@ -129,6 +129,12 @@ func applyConfiguredRuntimeRepairLimit(ctx context.Context, executionContract ma
 	if configuration.Runtime.MaxRuntimeRepairAttempts > 0 && executionContract != nil {
 		executionContract["maxRepairAttemptsPerFocus"] = configuration.Runtime.MaxRuntimeRepairAttempts
 	}
+	if executionContract != nil {
+		executionContract["candidateOutputContinuation"] = map[string]any{
+			"maxChunks": configuration.Runtime.LLMOutput.MaxChunkRetryAttempts,
+			"tailBytes": configuration.Runtime.LLMOutput.PreviousChunkTailBytes,
+		}
+	}
 	return nil
 }
 

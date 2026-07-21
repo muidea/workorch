@@ -69,7 +69,7 @@ modelID = "text-embedding-3-large"
 [llm.budget]
 contextUtilizationRatio = 0.75
 estimatedTokensPerByte = 0.25
-defaultMaxOutputTokens = 4096
+defaultMaxOutputTokens = 0
 maxRequestBytes = 4194304
 
 [webSearch]
@@ -150,7 +150,7 @@ maxRepeatedSamePrompt = 1
 	}
 	if cfg.LLM.Budget.ContextUtilizationRatio != 0.75 ||
 		cfg.LLM.Budget.EstimatedTokensPerByte != 0.25 ||
-		cfg.LLM.Budget.DefaultMaxOutputTokens != 4096 ||
+		cfg.LLM.Budget.DefaultMaxOutputTokens != 0 ||
 		cfg.LLM.Budget.MaxRequestBytes != 4194304 {
 		t.Fatalf("budget = %+v, want configured budget policy", cfg.LLM.Budget)
 	}

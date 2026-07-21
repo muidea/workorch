@@ -169,6 +169,10 @@ type RequestRuntimeCandidateCommand struct {
 	StablePrefixHash  string
 	DefinitionContext runtimecontract.RuntimeDefinitionContext
 	CandidateContext  runtimecontract.RuntimeCandidateContext
+	// OutputContinuation is absent for the initial structured-candidate
+	// request.  When present it requests the next raw suffix for a persisted,
+	// bounded candidate-output continuation.
+	OutputContinuation *runtimecontract.RuntimeCandidateOutputContinuationRequest
 }
 
 type RequestRuntimeCandidateResult struct {
@@ -188,6 +192,10 @@ type RequestRuntimeCandidateResult struct {
 	Audit *runtimecontract.ProviderRequestAuditView
 	// Usage is provider-reported token usage when available.
 	Usage *runtimecontract.ProviderUsageView
+	// OutputFragment is mutually exclusive with Candidate, Failure and Stale.
+	// The Orchestrator persists it in its own artifact repository before making
+	// another suffix request or assembling the candidate document.
+	OutputFragment *runtimecontract.RuntimeCandidateOutputFragment
 }
 
 type RuntimeV2DriveDisposition string

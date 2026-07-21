@@ -236,6 +236,11 @@ func (m *Biz) requestAndSealRuntimeV2Candidate(
 	transaction := aggregate.Decision.AuthorityTransaction()
 	candidate, proposalPersisted := runtimeV2PendingCandidateProposal(aggregate, candidateAttempt)
 	if !proposalPersisted {
+		if continuation, found, continuationErr := m.openRuntimeV2CandidateOutputContinuation(ctx, aggregate, candidateAttempt, stablePrefixHash); continuationErr != nil {
+			return runtimev2.RuntimeAggregate{}, continuationErr
+		} else if found {
+			return m.continueRuntimeV2CandidateOutput(ctx, aggregate, stablePrefixHash, candidateAttempt, continuation)
+		}
 		previousFailure, previousErr := runtimeV2PreviousCandidateFailure(aggregate, candidateAttempt)
 		if previousErr != nil {
 			return runtimev2.RuntimeAggregate{}, previousErr
@@ -263,6 +268,9 @@ func (m *Biz) requestAndSealRuntimeV2Candidate(
 		}
 		if response.Stale != nil {
 			return m.bizPtr.InvalidateRuntimeV2CandidateAttemptForPrerequisiteStale(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, *response.Stale)
+		}
+		if response.OutputFragment != nil {
+			return m.continueRuntimeV2CandidateOutput(ctx, aggregate, stablePrefixHash, candidateAttempt, *response.OutputFragment)
 		}
 		if response.Failure != nil {
 			if response.Failure.Class == runtimecontract.RuntimeCandidateFailureClassProviderTransient {
