@@ -358,7 +358,6 @@ func (s *serverState) executeWorkspaceRuntimeV2Activation(ctx context.Context, r
 		s.notifyRunStatusChanged()
 		return err
 	}
-	s.metrics.observeRunOutcome(activation.Run)
 	s.notifyRunStatusChangedForRun(activation.Run)
 	return nil
 }

@@ -15,6 +15,7 @@ func TestRunStateChangedDataFromModelIncludesRuntimeV2Progress(t *testing.T) {
 			StateRevision: 7,
 			Facts: runtimecontract.RuntimeFacts{
 				WorkspaceID: "ws-1", RunID: "run-1", Focus: runtimecontract.CoverageFocus{ID: "focus-003"},
+				Repair: runtimecontract.RuntimeRepairLedger{RepairAttempts: 3},
 			},
 			Decision: runtimecontract.RuntimeDecision{
 				State: runtimecontract.ConvergenceStateNeedStateChange, Action: runtimecontract.RuntimeActionProduceStateChange,
@@ -25,7 +26,7 @@ func TestRunStateChangedDataFromModelIncludesRuntimeV2Progress(t *testing.T) {
 	data := RunStateChangedDataFromModel(run)
 	if data.RuntimeStateRevision != 7 || data.RuntimeConvergenceState != runtimecontract.ConvergenceStateNeedStateChange ||
 		data.RuntimeAction != runtimecontract.RuntimeActionProduceStateChange || data.RuntimeFocusID != "focus-003" ||
-		data.AuthoritySnapshotID != "authority-003" {
+		data.AuthoritySnapshotID != "authority-003" || data.RepairAttempts != 3 {
 		t.Fatalf("runtime progress data = %+v", data)
 	}
 }

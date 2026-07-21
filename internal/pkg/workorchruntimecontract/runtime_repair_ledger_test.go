@@ -61,12 +61,13 @@ func TestRuntimeRepairLedgerProgressResetsWindowsButPreservesFocusTotal(t *testi
 	ledger := RuntimeRepairLedger{
 		FocusID: "focus-1", SliceID: "slice-1", RepairAttempts: 4,
 		ValidationOnlyRetries: 1, NoProgressCount: 2,
-		SignatureCounts: []RuntimeFailureSignatureCount{{Signature: "same-gap", Count: 3}},
-		LastCycleID:     "cycle-4", ActiveGap: &RuntimeAssessmentGap{Reason: "gap"}, Exhausted: true,
+		SignatureCounts:           []RuntimeFailureSignatureCount{{Signature: "same-gap", Count: 3}},
+		NoProgressOperationShapes: []RuntimeRejectedOperationShape{{Operation: RuntimeOperation{Kind: StepKindShellCommand}}},
+		LastCycleID:               "cycle-4", ActiveGap: &RuntimeAssessmentGap{Reason: "gap"}, Exhausted: true,
 	}
 	progressed := ledger.NoteProgress("evidence-5")
 	if progressed.RepairAttempts != 4 || progressed.ValidationOnlyRetries != 0 || progressed.NoProgressCount != 0 ||
-		len(progressed.SignatureCounts) != 0 || progressed.LastCycleID != "" || progressed.ActiveGap != nil || progressed.Exhausted ||
+		len(progressed.SignatureCounts) != 0 || len(progressed.NoProgressOperationShapes) != 0 || progressed.LastCycleID != "" || progressed.ActiveGap != nil || progressed.Exhausted ||
 		progressed.LastProgressRevision != "evidence-5" {
 		t.Fatalf("same-focus progress reset = %+v", progressed)
 	}

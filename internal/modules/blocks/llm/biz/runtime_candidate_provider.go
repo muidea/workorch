@@ -49,26 +49,27 @@ type runtimeCandidateActivationProjection struct {
 }
 
 type runtimeCandidateContextProjection struct {
-	WorkspaceID              common.WorkspaceID                              `json:"workspaceId"`
-	RunID                    common.RunID                                    `json:"runId"`
-	DefinitionRevision       string                                          `json:"definitionRevision"`
-	EvidenceRevision         string                                          `json:"evidenceRevision"`
-	Focus                    runtimecontract.CoverageFocus                   `json:"focus"`
-	RequiredAction           runtimecontract.RuntimeAction                   `json:"requiredAction"`
-	RequiredEffectScopes     []runtimecontract.RuntimeEffectScope            `json:"requiredEffectScopes,omitempty"`
-	RequiredEvidenceKinds    []string                                        `json:"requiredEvidenceKinds,omitempty"`
-	RepairDirective          *runtimecontract.RuntimeRepairDirective         `json:"repairDirective,omitempty"`
-	MissingEvidenceKinds     []string                                        `json:"missingEvidenceKinds,omitempty"`
-	AllowedEvidenceRefs      []string                                        `json:"allowedAcceptedEvidenceRefs,omitempty"`
-	Evidence                 runtimecontract.EvidenceLedger                  `json:"evidence"`
-	Assessments              []runtimecontract.RuntimeAssessmentFact         `json:"assessments,omitempty"`
-	Failure                  *runtimecontract.FailureFact                    `json:"failure,omitempty"`
-	RepairHints              []runtimecontract.RuntimeRepairHint             `json:"repairHints,omitempty"`
-	AdmissibleOperationKinds []string                                        `json:"admissibleOperationKinds,omitempty"`
-	RejectedOperationShapes  []runtimecontract.RuntimeRejectedOperationShape `json:"rejectedOperationShapes,omitempty"`
-	Capabilities             runtimecontract.RuntimeCapabilities             `json:"capabilities"`
-	Resources                runtimeCandidateResourceProjection              `json:"resources"`
-	Activation               runtimeCandidateActivationProjection            `json:"activation"`
+	WorkspaceID               common.WorkspaceID                              `json:"workspaceId"`
+	RunID                     common.RunID                                    `json:"runId"`
+	DefinitionRevision        string                                          `json:"definitionRevision"`
+	EvidenceRevision          string                                          `json:"evidenceRevision"`
+	Focus                     runtimecontract.CoverageFocus                   `json:"focus"`
+	RequiredAction            runtimecontract.RuntimeAction                   `json:"requiredAction"`
+	RequiredEffectScopes      []runtimecontract.RuntimeEffectScope            `json:"requiredEffectScopes,omitempty"`
+	RequiredEvidenceKinds     []string                                        `json:"requiredEvidenceKinds,omitempty"`
+	RepairDirective           *runtimecontract.RuntimeRepairDirective         `json:"repairDirective,omitempty"`
+	MissingEvidenceKinds      []string                                        `json:"missingEvidenceKinds,omitempty"`
+	AllowedEvidenceRefs       []string                                        `json:"allowedAcceptedEvidenceRefs,omitempty"`
+	Evidence                  runtimecontract.EvidenceLedger                  `json:"evidence"`
+	Assessments               []runtimecontract.RuntimeAssessmentFact         `json:"assessments,omitempty"`
+	Failure                   *runtimecontract.FailureFact                    `json:"failure,omitempty"`
+	RepairHints               []runtimecontract.RuntimeRepairHint             `json:"repairHints,omitempty"`
+	AdmissibleOperationKinds  []string                                        `json:"admissibleOperationKinds,omitempty"`
+	RejectedOperationShapes   []runtimecontract.RuntimeRejectedOperationShape `json:"rejectedOperationShapes,omitempty"`
+	NoProgressOperationShapes []runtimecontract.RuntimeRejectedOperationShape `json:"noProgressOperationShapes,omitempty"`
+	Capabilities              runtimecontract.RuntimeCapabilities             `json:"capabilities"`
+	Resources                 runtimeCandidateResourceProjection              `json:"resources"`
+	Activation                runtimeCandidateActivationProjection            `json:"activation"`
 }
 
 type runtimeCandidateOutputContractProjection struct {
@@ -513,7 +514,8 @@ func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidat
 		AllowedEvidenceRefs:  runtimecontract.AcceptedEvidenceRefsForFocus(facts), Evidence: context.Evidence,
 		Assessments: context.Assessments, Failure: context.Failure, RepairHints: runtimecontract.DeriveRuntimeRepairHints(facts),
 		AdmissibleOperationKinds: context.AdmissibleOperationKinds, RejectedOperationShapes: context.RejectedOperationShapes,
-		Capabilities: context.Capabilities,
+		NoProgressOperationShapes: context.NoProgressOperationShapes,
+		Capabilities:              context.Capabilities,
 		Resources: runtimeCandidateResourceProjection{
 			Manifest: context.Resources.Manifest, TargetSnapshots: context.Resources.TargetSnapshots,
 			FailureTarget: context.Resources.FailureTarget, ValidationScratch: context.Resources.ValidationScratch,

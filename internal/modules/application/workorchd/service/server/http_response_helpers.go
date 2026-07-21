@@ -121,7 +121,7 @@ func (m *serverMetrics) render(config Config, projection *workspaceProjectionMan
 	if m != nil {
 		body += m.schedulerDiagnostics.renderMetrics()
 	}
-	return body + renderEventRecordIOMetrics() + renderWorkspaceProjectionMetrics(projection)
+	return body + renderEventRecordIOMetrics() + renderWorkspaceProjectionMetrics(projection, m)
 }
 
 func renderEventRecordIOMetrics() string {
@@ -142,7 +142,7 @@ func renderEventRecordIOMetrics() string {
 	)
 }
 
-func renderWorkspaceProjectionMetrics(projection *workspaceProjectionManager) string {
+func renderWorkspaceProjectionMetrics(projection *workspaceProjectionManager, serverMetrics *serverMetrics) string {
 	var metrics workspaceProjectionMetrics
 	if projection != nil {
 		metrics = projection.Metrics()
@@ -182,7 +182,11 @@ func renderWorkspaceProjectionMetrics(projection *workspaceProjectionManager) st
 	b.WriteString("# TYPE workorch_convergence_open_focuses gauge\n")
 	b.WriteString(fmt.Sprintf("workorch_convergence_open_focuses %d\n", metrics.ConvergenceOpenFocuses))
 	b.WriteString("# TYPE workorch_convergence_repair_attempts_total counter\n")
-	b.WriteString(fmt.Sprintf("workorch_convergence_repair_attempts_total %d\n", metrics.ConvergenceRepairAttemptsTotal))
+	repairAttempts := uint64(metrics.ConvergenceRepairAttemptsTotal)
+	if serverMetrics != nil {
+		repairAttempts = serverMetrics.convergenceRepairAttempts.Load()
+	}
+	b.WriteString(fmt.Sprintf("workorch_convergence_repair_attempts_total %d\n", repairAttempts))
 	b.WriteString("# TYPE workorch_convergence_no_delta_rounds_total counter\n")
 	b.WriteString(fmt.Sprintf("workorch_convergence_no_delta_rounds_total %d\n", metrics.ConvergenceNoDeltaRoundsTotal))
 	b.WriteString("# TYPE workorch_convergence_budget_escalations_total counter\n")

@@ -23,3 +23,17 @@ func TestRuntimeValidationPolicyRetryLimitIsTypedAndDeterministic(t *testing.T) 
 		t.Fatal("expected conflicting validation retry policy to fail")
 	}
 }
+
+func TestRequiredRuntimeValidationDiscoverySourcesArePureAndScoped(t *testing.T) {
+	policies := []RuntimeValidationPolicy{
+		{ID: "validation", Scope: "workspace", AppliesToEvidenceKinds: []string{EvidenceKindValidation}, DiscoveryRequired: true,
+			DiscoverySources: []string{RuntimeValidationDiscoverySourceProjectFiles, RuntimeValidationDiscoverySourceWorkspaceManifest}},
+		{ID: "state", Scope: "workspace", AppliesToEvidenceKinds: []string{EvidenceKindStateChange}, DiscoveryRequired: true,
+			DiscoverySources: []string{RuntimeValidationDiscoverySourceAvailableCapabilities}},
+	}
+	got := RequiredRuntimeValidationDiscoverySources(policies, EvidenceKindValidation)
+	want := []string{RuntimeValidationDiscoverySourceProjectFiles, RuntimeValidationDiscoverySourceWorkspaceManifest}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("validation discovery sources = %v, want %v", got, want)
+	}
+}

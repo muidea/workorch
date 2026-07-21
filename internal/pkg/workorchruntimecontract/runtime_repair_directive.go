@@ -145,6 +145,7 @@ type RuntimeRepairDirective struct {
 	RequiredEvidenceKinds      []string
 	AllowedOperationKinds      []string
 	RejectedOperationShapes    []RuntimeRejectedOperationShape
+	NoProgressOperationShapes  []RuntimeRejectedOperationShape
 	CoverageWorkItemIDs        []common.CoverageWorkItemID
 	TargetRefs                 []string
 	SupersedesEvidenceRevision string
@@ -184,6 +185,7 @@ func (d RuntimeRepairDirective) Normalized() RuntimeRepairDirective {
 	d.RequiredEvidenceKinds = normalizeStrings(d.RequiredEvidenceKinds)
 	d.AllowedOperationKinds = normalizeStrings(d.AllowedOperationKinds)
 	d.RejectedOperationShapes = NormalizeRuntimeRejectedOperationShapes(d.RejectedOperationShapes)
+	d.NoProgressOperationShapes = NormalizeRuntimeRejectedOperationShapes(d.NoProgressOperationShapes)
 	d.CoverageWorkItemIDs = normalizeCoverageWorkItemIDs(d.CoverageWorkItemIDs)
 	d.TargetRefs = normalizeStrings(d.TargetRefs)
 	d.SupersedesEvidenceRevision = strings.TrimSpace(d.SupersedesEvidenceRevision)
@@ -229,6 +231,11 @@ func (d RuntimeRepairDirective) Clone() RuntimeRepairDirective {
 		copy(shapes, ret.RejectedOperationShapes)
 		ret.RejectedOperationShapes = shapes
 	}
+	if len(ret.NoProgressOperationShapes) > 0 {
+		shapes := make([]RuntimeRejectedOperationShape, len(ret.NoProgressOperationShapes))
+		copy(shapes, ret.NoProgressOperationShapes)
+		ret.NoProgressOperationShapes = shapes
+	}
 	return ret
 }
 
@@ -267,6 +274,14 @@ func SameRuntimeRepairDirective(left *RuntimeRepairDirective, right *RuntimeRepa
 	}
 	for idx := range l.RejectedOperationShapes {
 		if l.RejectedOperationShapes[idx].Hash != r.RejectedOperationShapes[idx].Hash {
+			return false
+		}
+	}
+	if len(l.NoProgressOperationShapes) != len(r.NoProgressOperationShapes) {
+		return false
+	}
+	for idx := range l.NoProgressOperationShapes {
+		if l.NoProgressOperationShapes[idx].Hash != r.NoProgressOperationShapes[idx].Hash {
 			return false
 		}
 	}

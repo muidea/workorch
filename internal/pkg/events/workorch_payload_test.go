@@ -34,6 +34,7 @@ func TestTypedEventPayloadDecodersRoundTrip(t *testing.T) {
 		RuntimeAction:           "request_governance",
 		RuntimeFocusID:          "focus-typed",
 		AuthoritySnapshotID:     "authority-typed",
+		RuntimeRepairAttempts:   3,
 	}
 	decodedRun, ok := DecodeRunEventPayload(run.EventPayload())
 	if !ok || decodedRun != run {

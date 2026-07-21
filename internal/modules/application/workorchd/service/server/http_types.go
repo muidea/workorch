@@ -807,11 +807,43 @@ type serverMetrics struct {
 	runInFlight                  atomic.Int64
 	runQueueWaiting              atomic.Int64
 	runQueuedTotal               atomic.Uint64
+	convergenceRepairAttempts    atomic.Uint64
+	runtimeMetricsMu             sync.Mutex
+	observedTerminalStates       map[string]struct{}
+	observedRepairAttempts       map[string]int
 	schedulerDiagnostics         *schedulerDiagnosticsStore
 }
 
-func (m *serverMetrics) observeRunOutcome(run appservice.Run) {
-	switch run.State {
+// observeRunState is an SM-4 observer only. The Run owner/eventstream own the
+// source state; this process-local method deduplicates terminal snapshots and
+// derives monotonic repair deltas without resuming or writing any owner state.
+func (m *serverMetrics) observeRunState(workspaceID, runID, state string, runtimeRevision uint64, repairAttempts int) {
+	if m == nil || strings.TrimSpace(runID) == "" {
+		return
+	}
+	state = strings.TrimSpace(state)
+	m.runtimeMetricsMu.Lock()
+	defer m.runtimeMetricsMu.Unlock()
+	if m.observedTerminalStates == nil {
+		m.observedTerminalStates = make(map[string]struct{})
+	}
+	if m.observedRepairAttempts == nil {
+		m.observedRepairAttempts = make(map[string]int)
+	}
+	runKey := strings.TrimSpace(workspaceID) + "/" + strings.TrimSpace(runID)
+	if repairAttempts > m.observedRepairAttempts[runKey] {
+		m.convergenceRepairAttempts.Add(uint64(repairAttempts - m.observedRepairAttempts[runKey]))
+		m.observedRepairAttempts[runKey] = repairAttempts
+	}
+	if !terminalRunState(state) {
+		return
+	}
+	terminalKey := fmt.Sprintf("%s/%s/%d", runKey, state, runtimeRevision)
+	if _, observed := m.observedTerminalStates[terminalKey]; observed {
+		return
+	}
+	m.observedTerminalStates[terminalKey] = struct{}{}
+	switch state {
 	case string(common.RunStateCompleted):
 		m.runSucceeded.Add(1)
 	case string(common.RunStateFailed):
@@ -1056,7 +1088,7 @@ func newServerStateWithRuntimeSessionAndBackground(config Config, session *appse
 		config:                       config,
 		eventReplay:                  newSSEReplayBuffer(defaultSSEReplayLimit),
 		streamSubscribers:            make(map[uint64]chan streamEvent),
-		metrics:                      &serverMetrics{schedulerDiagnostics: diagnostics},
+		metrics:                      &serverMetrics{schedulerDiagnostics: diagnostics, observedTerminalStates: make(map[string]struct{}), observedRepairAttempts: make(map[string]int)},
 		validate:                     defaultValidate,
 		createWorkspace:              defaultCreateWorkspace,
 		deleteWorkspace:              defaultDeleteWorkspace,

@@ -124,7 +124,16 @@ func (s *serverState) RecordEventRecordAppended(_ context.Context, data eventstr
 		return
 	}
 	payload := data.Payload.Map()
-	s.notifyRunStatusChangedForRun(appservice.Run{ID: runID, WorkspaceID: strings.TrimSpace(string(data.WorkspaceID)), State: schedulerStringValue(payload, events.PayloadKeyState)})
+	workspaceID := strings.TrimSpace(string(data.WorkspaceID))
+	state := schedulerStringValue(payload, events.PayloadKeyState)
+	s.metrics.observeRunState(
+		workspaceID,
+		runID,
+		state,
+		uint64(schedulerInt(payload, events.PayloadKeyRuntimeStateRevision)),
+		schedulerInt(payload, events.PayloadKeyRuntimeRepairAttempts),
+	)
+	s.notifyRunStatusChangedForRun(appservice.Run{ID: runID, WorkspaceID: workspaceID, State: state})
 }
 
 func eventRecordStreamEvent(data eventstreamevents.EventRecordData) (streamEvent, bool) {

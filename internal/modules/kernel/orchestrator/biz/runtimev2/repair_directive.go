@@ -166,6 +166,7 @@ func buildRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimeco
 		directive.SupersedesEvidenceRevision = facts.RepairDirective.SupersedesEvidenceRevision
 		directive.RejectedOperationShapes = append([]runtimecontract.RuntimeRejectedOperationShape(nil), facts.RepairDirective.RejectedOperationShapes...)
 	}
+	directive.NoProgressOperationShapes = append([]runtimecontract.RuntimeRejectedOperationShape(nil), facts.Repair.NoProgressOperationShapes...)
 	if directive.SupersedesEvidenceRevision == "" {
 		directive.SupersedesEvidenceRevision = facts.EvidenceRevision
 	}

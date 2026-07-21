@@ -117,7 +117,11 @@ func (m *Biz) resolveRuntimeV2Prerequisite(
 			return runtimev2.PrerequisiteResult{}, err
 		}
 		capabilities := facts.Capabilities
-		return runtimev2.PrerequisiteResult{PrerequisiteID: prerequisite.ID, Capabilities: &capabilities}, nil
+		var observation *runtimecontract.RuntimePrerequisiteObservation
+		if value, observed := runtimecontract.RuntimePrerequisiteObservationForID(facts.Resources.PrerequisiteObservations, prerequisite.ID); observed {
+			observation = &value
+		}
+		return runtimev2.PrerequisiteResult{PrerequisiteID: prerequisite.ID, Capabilities: &capabilities, Observation: observation}, nil
 	case runtimecontract.PrerequisiteKindOperationAdmissibility:
 		binding, bindingErr := runtimeV2CapabilityStateBinding(aggregate.Facts, prerequisite.OwnerModuleID)
 		if bindingErr != nil {
@@ -751,6 +755,14 @@ func runtimeV2FeasibilityFact(aggregate runtimev2.RuntimeAggregate) (*runtimecon
 		return nil, nil
 	}
 	required := aggregate.Decision.RequiredOutput.Normalized()
+	if aggregate.Decision.Action == runtimecontract.RuntimeActionProduceValidation {
+		if missing := runtimeV2MissingValidationDiscoverySources(aggregate.Facts); len(missing) > 0 {
+			return &runtimecontract.RuntimeFeasibilityFact{
+				FocusID: aggregate.Facts.Focus.ID, Action: aggregate.Decision.Action,
+				Reason: fmt.Sprintf("runtime validation discovery prerequisites are not fresh: %s", strings.Join(missing, ", ")),
+			}, nil
+		}
+	}
 	if len(required.AcceptedKinds) == 0 {
 		return &runtimecontract.RuntimeFeasibilityFact{
 			FocusID: aggregate.Facts.Focus.ID, Action: aggregate.Decision.Action,
@@ -767,4 +779,81 @@ func runtimeV2FeasibilityFact(aggregate runtimev2.RuntimeAggregate) (*runtimecon
 		}, nil
 	}
 	return nil, nil
+}
+
+// runtimeV2MissingValidationDiscoverySources evaluates the profile-selected,
+// owner-neutral discovery vocabulary against committed prerequisite facts. The
+// bootstrap already requests each of these facts through typed owner commands;
+// this gate makes a missing/stale observation a persisted SM-2 feasibility
+// input instead of allowing an ungrounded provider request.
+func runtimeV2MissingValidationDiscoverySources(facts runtimecontract.RuntimeFacts) []string {
+	required := runtimecontract.RequiredRuntimeValidationDiscoverySources(
+		facts.Activation.ExecutionContract.ValidationPolicies,
+		runtimecontract.EvidenceKindValidation,
+	)
+	if len(required) == 0 {
+		return nil
+	}
+	facts = facts.Normalized()
+	missing := make([]string, 0, len(required))
+	for _, source := range required {
+		if runtimeV2ValidationDiscoverySourceSatisfied(facts, source) {
+			continue
+		}
+		missing = append(missing, source)
+	}
+	return missing
+}
+
+func runtimeV2ValidationDiscoverySourceSatisfied(facts runtimecontract.RuntimeFacts, source string) bool {
+	hasObservation := func(prerequisiteID string, kind runtimecontract.PrerequisiteKind) bool {
+		observation, found := runtimecontract.RuntimePrerequisiteObservationForID(facts.Resources.PrerequisiteObservations, prerequisiteID)
+		return found && observation.Kind == kind && observation.ContentHash != ""
+	}
+	switch strings.TrimSpace(source) {
+	case runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest:
+		if facts.Resources.Manifest == nil || strings.TrimSpace(facts.Resources.Manifest.Revision) == "" {
+			return false
+		}
+		for _, prerequisite := range facts.Prerequisites.Satisfied {
+			if prerequisite.Kind == runtimecontract.PrerequisiteKindManifest && hasObservation(prerequisite.ID, prerequisite.Kind) {
+				return true
+			}
+		}
+		return false
+	case runtimecontract.RuntimeValidationDiscoverySourceProjectFiles:
+		for _, prerequisite := range facts.Prerequisites.Satisfied {
+			if prerequisite.Kind != runtimecontract.PrerequisiteKindManifest || !hasObservation(prerequisite.ID, prerequisite.Kind) {
+				continue
+			}
+			observation, _ := runtimecontract.RuntimePrerequisiteObservationForID(facts.Resources.PrerequisiteObservations, prerequisite.ID)
+			for _, dependency := range observation.Dependencies {
+				if dependency.Domain == runtimecontract.RuntimeResourceWorkspaceTree {
+					return true
+				}
+			}
+		}
+		return false
+	case runtimecontract.RuntimeValidationDiscoverySourceDeclaredCommands:
+		for _, inventory := range facts.Resources.OperationAdmissibilities {
+			if len(inventory.OperationKinds) > 0 && hasObservation(inventory.PrerequisiteID, runtimecontract.PrerequisiteKindOperationAdmissibility) {
+				return true
+			}
+		}
+		return false
+	case runtimecontract.RuntimeValidationDiscoverySourceAvailableCapabilities:
+		if len(facts.Capabilities.StateChangeKinds)+len(facts.Capabilities.ValidationKinds)+len(facts.Capabilities.GovernanceKinds) == 0 {
+			return false
+		}
+		for _, prerequisite := range facts.Prerequisites.Satisfied {
+			if prerequisite.Kind == runtimecontract.PrerequisiteKindCapability && hasObservation(prerequisite.ID, prerequisite.Kind) {
+				return true
+			}
+		}
+		return false
+	default:
+		// An unknown profile source cannot be inferred by core. It remains
+		// unsatisfied until a typed owner observation contract is introduced.
+		return false
+	}
 }

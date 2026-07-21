@@ -21,10 +21,12 @@ const (
 	candidateAdmissionCodeInvalid                     = "candidate_admission_invalid"
 	candidateAdmissionCodeReplaysRejectedShape        = "candidate_replays_rejected_shape"
 	candidateAdmissionCodePartiallyReplaysRejected    = "candidate_partially_replays_rejected_shape"
+	candidateAdmissionCodeReplaysNoProgressShape      = "candidate_replays_no_progress_shape"
 	candidateAdmissionCodeActionEvidenceMismatch      = "candidate_action_evidence_mismatch"
 	candidateAdmissionSignatureInvalid                = "candidate-admission-invalid"
 	candidateAdmissionSignatureReplaysRejectedShape   = "candidate-replays-rejected-shape"
 	candidateAdmissionSignaturePartialReplay          = "candidate-partially-replays-rejected-shape"
+	candidateAdmissionSignatureNoProgressReplay       = "candidate-replays-no-progress-shape"
 	candidateAdmissionSignatureActionEvidenceMismatch = "candidate-action-evidence-mismatch"
 )
 
@@ -64,8 +66,32 @@ func EvaluateCandidateAdmission(aggregate RuntimeAggregate, candidate workorchru
 	if result := rejectCandidateReplay(aggregate, candidate); !result.Accepted() {
 		return result
 	}
+	if result := rejectCandidateNoProgressReplay(aggregate, candidate); !result.Accepted() {
+		return result
+	}
 	if result := rejectCandidateMissingValidationGap(aggregate.Facts, aggregate.Decision, candidate); !result.Accepted() {
 		return result
+	}
+	return acceptedCandidateAdmission()
+}
+
+func rejectCandidateNoProgressReplay(aggregate RuntimeAggregate, candidate workorchruntimecontract.RuntimeCandidate) CandidateAdmissionResult {
+	ledger := aggregate.Facts.Repair.Normalized()
+	if ledger.FocusID != aggregate.Facts.Focus.ID || len(ledger.NoProgressOperationShapes) == 0 {
+		return acceptedCandidateAdmission()
+	}
+	blocked := make(map[string]struct{}, len(ledger.NoProgressOperationShapes))
+	for _, shape := range ledger.NoProgressOperationShapes {
+		blocked[shape.Hash] = struct{}{}
+	}
+	for _, operation := range candidateRuntimeOperations(candidate) {
+		if _, found := blocked[workorchruntimecontract.StableRuntimeOperationShape(operation)]; found {
+			return rejectedCandidateAdmission(
+				candidateAdmissionCodeReplaysNoProgressShape,
+				candidateAdmissionSignatureNoProgressReplay,
+				"runtime candidate replays an accepted operation shape that did not resolve the active gap; change kind, targets, or structural parameters before retry",
+			)
+		}
 	}
 	return acceptedCandidateAdmission()
 }

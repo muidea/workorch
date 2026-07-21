@@ -68,7 +68,8 @@ func CommitPrerequisiteResult(facts runtimecontract.RuntimeFacts, result Prerequ
 	}
 	if result.Observation != nil {
 		observation := result.Observation.Normalized()
-		if observation.PrerequisiteID != completed.ID || observation.Kind != completed.Kind || observation.OwnerModuleID != completed.OwnerModuleID {
+		if observation.PrerequisiteID != completed.ID || observation.Kind != completed.Kind ||
+			(completed.OwnerModuleID != "" && observation.OwnerModuleID != completed.OwnerModuleID) {
 			return runtimecontract.RuntimeFacts{}, fmt.Errorf("prerequisite observation does not match completed prerequisite %q", completed.ID)
 		}
 		if err := observation.Validate(); err != nil {

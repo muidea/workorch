@@ -1,7 +1,10 @@
 package events
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
@@ -1006,7 +1009,32 @@ func ResolveRuntimeCapabilities(command AcquireRuntimeCapabilitiesCommand, modul
 	default:
 		return AcquireRuntimeCapabilitiesResult{}, fmt.Errorf("invalid runtime capability class %q", command.CapabilityClass)
 	}
-	return AcquireRuntimeCapabilitiesResult{PrerequisiteID: command.PrerequisiteID, Capabilities: capabilities}, nil
+	observation := runtimeCapabilityObservation(command, moduleID, resolved)
+	return AcquireRuntimeCapabilitiesResult{PrerequisiteID: command.PrerequisiteID, Capabilities: capabilities, Observation: &observation}, nil
+}
+
+// runtimeCapabilityObservation is emitted by the capability owner along with
+// its typed inventory. It records only an owner-neutral catalog revision;
+// Orchestrator persists and invalidates it but does not probe or invent owner
+// capabilities itself.
+func runtimeCapabilityObservation(command AcquireRuntimeCapabilitiesCommand, moduleID string, kinds []string) runtimecontract.RuntimePrerequisiteObservation {
+	kinds = append([]string(nil), kinds...)
+	sort.Strings(kinds)
+	material := strings.Join([]string{moduleID, string(command.CapabilityClass), strings.Join(kinds, ",")}, "|")
+	digest := sha256.Sum256([]byte(material))
+	revision := "capability-catalog-" + hex.EncodeToString(digest[:])[:20]
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: command.PrerequisiteID,
+		Kind:           runtimecontract.PrerequisiteKindCapability,
+		OwnerModuleID:  moduleID,
+		ContentHash:    revision,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: moduleID,
+			SubjectRef: "runtime_capabilities", Revision: revision,
+		}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	return observation
 }
 
 type ListRunEvidenceCommand struct {

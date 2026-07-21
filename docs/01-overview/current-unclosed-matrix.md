@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-07-20
+Last Updated: 2026-07-21
 
 ## Purpose
 
@@ -27,31 +27,37 @@ Last Updated: 2026-07-20
 
 ## Residual Open
 
-### A. 运行单元架构 / 生命周期
+### A. Runtime V2 正向收敛
+
+| ID | 项 | 说明 | 当前方案 |
+| --- | --- | --- | --- |
+| RUNTIME-VPC | validation evidence / effective progress / escalation | 2026-07-21 fresh deployed `run-003` 反证：all-skipped validation 被 Shell 标 valid，Orchestrator 将任意 current-focus accepted evidence 视为 progress 并清空 validation-only ledger，导致相同 gap 重复至 `no_progress_exhausted`；同时 discovery 缺少 owner grounding，异步 terminal metrics 未计数 | [详细收口方案](../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md) |
+
+### B. 运行单元架构 / 生命周期
 
 | ID | 项 | 说明 | 当前方案 |
 | --- | --- | --- | --- |
 | ARCH-1 | 22 组件 framework boundary 验证/归档 | Base Biz、Module-root EventHub 拓扑及本地 structural/race/file-backed 门禁已完成；组件职责/typed 合同/独立回归按矩阵逐项收口，待外部重启目标与三类 fixture manifest 执行 deployed SM-4 matrix | [主方案](../70-roadmap/active/go-multi-module-22-component-boundary-remediation.md) / [组件矩阵](../70-roadmap/active/component-contract-and-regression-closure-matrix.md) |
 
-### B. 运维 / 生产切换
+### C. 运维 / 生产切换
 
 | ID | 项 | 说明 | 历史过程稿 |
 | --- | --- | --- | --- |
 | OPS-1 | 生产目录 V1 retirement 正式 apply | 代码/live complete；等待 clean build + 真实生产目录维护窗口执行 `runtime-v1-retirement --apply` | [deployed-workspace-progress-blocker…](../90-archive/completed/deployed-workspace-progress-blocker-component-closure-plan.md) |
 
-### C. 可选验证
+### D. 可选验证
 
 | ID | 项 | 说明 | 历史过程稿 |
 | --- | --- | --- | --- |
 | OPT-1 | file-patch deployed live | 可选：`patch apply + validation + DoD closeout` 一次 deployed live | [file-patch-side-effect-owner-migration-plan.md](../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
 
-### D. 延期候选（非 active）
+### E. 延期候选（非 active）
 
 | ID | 项 | 说明 |
 | --- | --- | --- |
 | CAND-LLM-BUDGET | LLM context budget 高级项 | provider failover、真实 tokenizer/原生 usage 精度、context-too-large 差异化等 → [candidates](../70-roadmap/candidates/next-stage-demand-candidates.md) |
 
-### E. 文档维护
+### F. 文档维护
 
 | ID | 项 | 说明 |
 | --- | --- | --- |
@@ -62,9 +68,9 @@ Last Updated: 2026-07-20
 ## Judgment
 
 - **代码主链**：Runtime V2 only；V1 authority 不再是问题来源。
-- **正向收敛基础**：RVC-R5～R26、RPA-1 首次 inventory/selector/feasibility 与 RPF-1～5 prerequisite freshness 均已通过 code、restart/crash、CI-safe 和 fresh deployed acceptance；RPF completion record 保留在归档计划。
+- **正向收敛基础**：RVC-R5～R26、RPA-1 首次 inventory/selector/feasibility、RPF-1～5 prerequisite freshness 与 RCA transaction 结论仍作为已完成基线；但它们没有关闭 2026-07-21 暴露的 validation evidence → effective progress → same-gap escalation 缺口，现由 RUNTIME-VPC 重新打开。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；不得再从已归档 plan 推导实现约束。
-- **Active roadmap**：ARCH-1、OPS-1（+ 可选 OPT-1）；RCA-1、RPF 和 RPA-1 的 completion record 均归 archive。
+- **Active roadmap**：RUNTIME-VPC、ARCH-1、OPS-1（+ 可选 OPT-1）；RCA-1、RPF 和 RPA-1 的历史 completion record 均归 archive，但不得覆盖新的 deployed 反证。
 - **清理原则**：失效主链叙述、重复 audit、过程日记、live 产物一律归档或出库，不在 active 保留“假活跃”项。
 
 ## Navigation

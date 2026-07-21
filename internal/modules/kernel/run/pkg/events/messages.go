@@ -111,6 +111,9 @@ type RunStateChangedData struct {
 	RuntimeAction           runtimecontract.RuntimeAction
 	RuntimeFocusID          string
 	AuthoritySnapshotID     string
+	// RepairAttempts is a monotonic snapshot of the persisted SM-2 ledger.
+	// Consumers observe deltas only; it does not grant them transition authority.
+	RepairAttempts int
 }
 
 func RunStateChangedDataFromModel(run *runmodel.Run) RunStateChangedData {
@@ -133,6 +136,7 @@ func RunStateChangedDataFromModel(run *runmodel.Run) RunStateChangedData {
 		ret.RuntimeAction = run.RuntimeState.Decision.Action
 		ret.RuntimeFocusID = run.RuntimeState.Facts.Focus.ID
 		ret.AuthoritySnapshotID = run.RuntimeState.Decision.AuthoritySnapshot.ID
+		ret.RepairAttempts = run.RuntimeState.Facts.Repair.Normalized().RepairAttempts
 	}
 	return ret
 }

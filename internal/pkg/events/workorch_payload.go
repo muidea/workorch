@@ -185,6 +185,7 @@ const (
 	PayloadKeyRuntimeAction          = "runtimeAction"
 	PayloadKeyRuntimeFocusID         = "runtimeFocusId"
 	PayloadKeyAuthoritySnapshotID    = "authoritySnapshotId"
+	PayloadKeyRuntimeRepairAttempts  = "runtimeRepairAttempts"
 )
 
 type WorkspacePayloadData struct {
@@ -208,6 +209,7 @@ type RunPayloadData struct {
 	RuntimeAction           string
 	RuntimeFocusID          string
 	AuthoritySnapshotID     string
+	RuntimeRepairAttempts   int
 }
 
 type GoalPayloadData struct {
@@ -416,6 +418,9 @@ func (data RunPayloadData) EventPayload() workorcheventpayload.Payload {
 	fields = appendOptionalPayloadString(fields, PayloadKeyRuntimeAction, data.RuntimeAction)
 	fields = appendOptionalPayloadString(fields, PayloadKeyRuntimeFocusID, data.RuntimeFocusID)
 	fields = appendOptionalPayloadString(fields, PayloadKeyAuthoritySnapshotID, data.AuthoritySnapshotID)
+	if data.RuntimeRepairAttempts > 0 {
+		fields = append(fields, workorcheventpayload.IntField(PayloadKeyRuntimeRepairAttempts, int64(data.RuntimeRepairAttempts)))
+	}
 	return workorcheventpayload.New(fields...)
 }
 
@@ -552,6 +557,10 @@ func DecodeRunEventPayload(payload workorcheventpayload.Payload) (RunPayloadData
 	if !ok {
 		return RunPayloadData{}, false
 	}
+	runtimeRepairAttempts, ok := optionalEventPayloadInt(payload, PayloadKeyRuntimeRepairAttempts)
+	if !ok {
+		return RunPayloadData{}, false
+	}
 	return RunPayloadData{
 		GoalID:                  common.GoalID(goalID),
 		DoDID:                   common.DoDID(dodID),
@@ -564,6 +573,7 @@ func DecodeRunEventPayload(payload workorcheventpayload.Payload) (RunPayloadData
 		RuntimeAction:           runtimeAction,
 		RuntimeFocusID:          runtimeFocusID,
 		AuthoritySnapshotID:     authoritySnapshotID,
+		RuntimeRepairAttempts:   runtimeRepairAttempts,
 	}, true
 }
 

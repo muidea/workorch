@@ -82,6 +82,38 @@ func TestSkipped(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterMarksAllSkippedGoChecksAsSkippedEvidence(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go is not available")
+	}
+	workspace := newGoValidationWorkspace(t, `package fixture
+
+import "testing"
+
+func TestSkippedOne(t *testing.T) { t.Skip("not applicable") }
+func TestSkippedTwo(t *testing.T) { t.Skip("not applicable") }
+`)
+	result, err := NewRuntimeAdapter().ExecuteOperation(context.Background(), RuntimeCommandRequest{
+		WorkspaceDeliverableDirectory: workspace,
+		Command:                       "go",
+		Args:                          []string{"test", "-v", "./..."},
+		TargetRefs:                    []string{"fixture_test.go"},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteOperation: %v output=%+v", err, result)
+	}
+	observation := result.Evidence.Validation
+	if result.Evidence.Quality != common.EvidenceQualitySkipped || observation == nil ||
+		result.Evidence.EvidenceReason != "all observed validation checks were skipped" {
+		t.Fatalf("all-skipped evidence = %+v", result.Evidence)
+	}
+	if !equalValidationChecks(observation.ExecutedChecks, []string{"TestSkippedOne", "TestSkippedTwo"}) ||
+		!equalValidationChecks(observation.SkippedChecks, []string{"TestSkippedOne", "TestSkippedTwo"}) ||
+		len(observation.PassedChecks) != 0 || len(observation.FailedChecks) != 0 {
+		t.Fatalf("all-skipped observation = %+v", observation)
+	}
+}
+
 func newGoValidationWorkspace(t *testing.T, testSource string) string {
 	t.Helper()
 	workspace := t.TempDir()

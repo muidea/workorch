@@ -27,6 +27,17 @@ type RuntimeValidationPolicy struct {
 	Notes                                      []string
 }
 
+// Validation discovery source IDs are neutral contract vocabulary. Profiles
+// select which sources a validation policy needs; the Orchestrator only binds
+// those IDs to already-persisted owner observations and never probes an
+// environment itself.
+const (
+	RuntimeValidationDiscoverySourceWorkspaceManifest     = "workspace_manifest"
+	RuntimeValidationDiscoverySourceProjectFiles          = "project_files"
+	RuntimeValidationDiscoverySourceDeclaredCommands      = "declared_commands"
+	RuntimeValidationDiscoverySourceAvailableCapabilities = "available_capabilities"
+)
+
 func NormalizeRuntimeValidationPolicies(values []RuntimeValidationPolicy) []RuntimeValidationPolicy {
 	byID := make(map[string]RuntimeValidationPolicy, len(values))
 	for _, value := range values {
@@ -107,6 +118,22 @@ func RuntimeValidationRetryLimit(values []RuntimeValidationPolicy, evidenceKind 
 		return value.MaxValidationOnlyRetriesPerFocus, true
 	}
 	return 0, false
+}
+
+// RequiredRuntimeValidationDiscoverySources returns the normalized union of
+// sources required for a particular evidence kind. It is intentionally a pure
+// policy projection: determining whether an owner observation satisfies a
+// source remains an SM-2 Orchestrator decision.
+func RequiredRuntimeValidationDiscoverySources(values []RuntimeValidationPolicy, evidenceKind string) []string {
+	evidenceKind = strings.TrimSpace(evidenceKind)
+	ret := make([]string, 0)
+	for _, value := range NormalizeRuntimeValidationPolicies(values) {
+		if !value.DiscoveryRequired || !containsStringValue(value.AppliesToEvidenceKinds, evidenceKind) {
+			continue
+		}
+		ret = append(ret, value.DiscoverySources...)
+	}
+	return normalizeStrings(ret)
 }
 
 func sameRuntimeValidationPolicies(left, right []RuntimeValidationPolicy) bool {

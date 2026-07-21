@@ -34,10 +34,14 @@ type RuntimeRepairLedger struct {
 	ValidationOnlyRetries int
 	NoProgressCount       int
 	SignatureCounts       []RuntimeFailureSignatureCount
-	LastCycleID           string
-	LastProgressRevision  string
-	LastProgressAt        string
-	Exhausted             bool
+	// NoProgressOperationShapes records accepted operation structures that did
+	// not yet resolve the active same-focus repair gap. It is volatile SM-3
+	// context; callers in Orchestrator decide when a receipt belongs here.
+	NoProgressOperationShapes []RuntimeRejectedOperationShape
+	LastCycleID               string
+	LastProgressRevision      string
+	LastProgressAt            string
+	Exhausted                 bool
 }
 
 type RuntimeFailureSignatureCount struct {
@@ -97,6 +101,7 @@ func (l RuntimeRepairLedger) Normalized() RuntimeRepairLedger {
 		sort.SliceStable(counts, func(i, j int) bool { return counts[i].Signature < counts[j].Signature })
 		l.SignatureCounts = counts
 	}
+	l.NoProgressOperationShapes = NormalizeRuntimeRejectedOperationShapes(l.NoProgressOperationShapes)
 	return l
 }
 
@@ -176,12 +181,22 @@ func (l RuntimeRepairLedger) NoteProgress(revision string) RuntimeRepairLedger {
 	l.NoProgressCount = 0
 	l.ValidationOnlyRetries = 0
 	l.SignatureCounts = nil
+	l.NoProgressOperationShapes = nil
 	l.LastCycleID = ""
 	l.ActiveGap = nil
 	l.Exhausted = false
 	if strings.TrimSpace(revision) != "" {
 		l.LastProgressRevision = strings.TrimSpace(revision)
 	}
+	return l
+}
+
+// RecordNoProgressOperationShape is a pure ledger update. It deliberately does
+// not decide whether a receipt made progress; that decision remains in the
+// Orchestrator state machine.
+func (l RuntimeRepairLedger) RecordNoProgressOperationShape(shape RuntimeRejectedOperationShape) RuntimeRepairLedger {
+	l = l.Normalized()
+	l.NoProgressOperationShapes = NormalizeRuntimeRejectedOperationShapes(append(l.NoProgressOperationShapes, shape))
 	return l
 }
 

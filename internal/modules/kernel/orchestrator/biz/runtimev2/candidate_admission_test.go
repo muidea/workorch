@@ -112,6 +112,34 @@ func TestEvaluateCandidateAdmissionRespectsRepairDirectiveForValidationGap(t *te
 	}
 }
 
+func TestEvaluateCandidateAdmissionRejectsAcceptedNoProgressShape(t *testing.T) {
+	aggregate := validationAggregate(t)
+	candidate := validationCandidate()
+	operation := candidate.Validation.Operations[0].Operation
+	aggregate.Facts.Repair = runtimecontract.RuntimeRepairLedger{
+		FocusID: aggregate.Facts.Focus.ID,
+		NoProgressOperationShapes: []runtimecontract.RuntimeRejectedOperationShape{{
+			Operation: operation, FailureCode: "accepted_validation_pending_assessment",
+		}},
+	}
+	result := EvaluateCandidateAdmission(aggregate, candidate)
+	if result.Disposition != CandidateAdmissionRejectedContract || result.Failure == nil || result.Failure.Code != candidateAdmissionCodeReplaysNoProgressShape {
+		t.Fatalf("accepted no-progress replay admission = %+v", result)
+	}
+	changed := operation
+	changed.ID = "validate-other"
+	command := "true --other"
+	changed.Parameters = append([]runtimecontract.OperationParameter(nil), changed.Parameters...)
+	for idx := range changed.Parameters {
+		if changed.Parameters[idx].Name == "command" {
+			changed.Parameters[idx].String = &command
+		}
+	}
+	if admitted := EvaluateCandidateAdmission(aggregate, runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: changed}}}}); !admitted.Accepted() {
+		t.Fatalf("new validation structure rejected: %+v", admitted)
+	}
+}
+
 func TestAdmitCandidateProposalAtomicallyClosesReplayAttemptAndExhaustsSecondAttempt(t *testing.T) {
 	aggregate, candidate := aggregateWithActiveRejectedCandidate(t)
 	repository := &controllerRepository{aggregate: &aggregate}

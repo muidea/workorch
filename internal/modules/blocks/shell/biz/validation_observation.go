@@ -22,9 +22,54 @@ func attachShellValidationObservation(output *RuntimeCommandResult, command stri
 	if output.ZeroWork || strings.TrimSpace(output.EvidenceQuality) == string(common.EvidenceQualityInconclusive) {
 		return
 	}
+	if goTestObservationIsAllSkipped(observation) {
+		output.EvidenceQuality = string(common.EvidenceQualitySkipped)
+		if strings.TrimSpace(output.EvidenceReason) == "" {
+			output.EvidenceReason = "all observed validation checks were skipped"
+		}
+		output.EvidenceTags = appendUniqueShellEvidenceTag(output.EvidenceTags, "all_skipped")
+		return
+	}
 	if output.ExitCode == 0 {
 		output.EvidenceQuality = string(common.EvidenceQualityValid)
 	}
+}
+
+// goTestObservationIsAllSkipped is intentionally expressed only in terms of the
+// owner-reported observation. The Shell owner may parse a tool's output, but it
+// must not infer workspace/profile semantics from test names or let a successful
+// process exit turn an all-skipped execution into valid evidence.
+func goTestObservationIsAllSkipped(observation runtimecontract.RuntimeValidationObservation) bool {
+	observation = observation.Normalized()
+	if len(observation.ExecutedChecks) == 0 || len(observation.PassedChecks) != 0 || len(observation.FailedChecks) != 0 {
+		return false
+	}
+	if len(observation.SkippedChecks) != len(observation.ExecutedChecks) {
+		return false
+	}
+	executed := make(map[string]struct{}, len(observation.ExecutedChecks))
+	for _, name := range observation.ExecutedChecks {
+		executed[name] = struct{}{}
+	}
+	for _, name := range observation.SkippedChecks {
+		if _, found := executed[name]; !found {
+			return false
+		}
+	}
+	return true
+}
+
+func appendUniqueShellEvidenceTag(values []string, tag string) []string {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return values
+	}
+	for _, value := range values {
+		if strings.TrimSpace(value) == tag {
+			return values
+		}
+	}
+	return append(values, tag)
 }
 
 func goTestValidationObservation(stdout, stderr string) runtimecontract.RuntimeValidationObservation {

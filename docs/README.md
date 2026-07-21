@@ -2,7 +2,7 @@
 
 Status: active
 
-Last Updated: 2026-07-20
+Last Updated: 2026-07-21
 
 ## Purpose
 
@@ -31,6 +31,8 @@ Last Updated: 2026-07-20
   [runtime-stage-contract.md](00-core/runtime-stage-contract.md)
 - Runtime V2 candidate admission / attempt transaction 完成记录：
   [runtime-v2-candidate-admission-transaction-closure.md](90-archive/completed/runtime-v2-candidate-admission-transaction-closure.md)
+- Runtime V2 validation/effective-progress 当前收口：
+  [runtime-v2-validation-progress-closure-plan.md](70-roadmap/active/runtime-v2-validation-progress-closure-plan.md)
 - 当前仓库事实 / 未关项：
   [current-state.md](01-overview/current-state.md),
   [current-unclosed-matrix.md](01-overview/current-unclosed-matrix.md),
@@ -102,7 +104,7 @@ Last Updated: 2026-07-20
 - 权威层已按 V2 刷新：`00-core` 双层映射、`01-overview` 事实入口、`20-runtime-flow` / `30-module-architecture` 主链。
 - 2026-07-14：约 146 份 completed / V1-absorbed plan 已迁 `90-archive/completed/`。
 - **2026-07-16 文档清理**：`active/` 假活跃产品/审计/收口日记全部归档；dated live verification 迁 `records/`；`60-verification/artifacts/**` 出库。
-- **RPF-1～5 prerequisite freshness 已完成**：归档执行规格保留组件职责、typed EventHub 交接、逐组件直接回归、交接门与 fresh deployed evidence；active 仅保留 ARCH-1、OPS-1 与可选 OPT-1。过程日记只在 archive 检索。
+- **RPF-1～5 prerequisite freshness 已完成**：归档执行规格保留组件职责、typed EventHub 交接、逐组件直接回归、交接门与当时的 fresh deployed evidence；2026-07-21 新 deployed 反证已将 validation/effective-progress 作为 RUNTIME-VPC 重新打开。active 当前包含 RUNTIME-VPC、ARCH-1、OPS-1 与可选 OPT-1。
 - **已废止作为生产主链叙述**：StagePacket、NextAction、graph dispatch checkpoint、ExecutionContextPatch、自动 replan successor。
 - 根目录正式导航：本文。历史目录重组计划见 `90-archive/completed/docs-domain-module-flow-reorganization-plan.md`。
 

@@ -22,15 +22,16 @@ type RuntimeCandidateContext struct {
 	Failure            *FailureFact
 	// RequiredAction is the sole next-action authority for this candidate attempt.
 	// When RepairDirective is set it mirrors directive.RequiredAction (INV-05).
-	RequiredAction           RuntimeAction
-	RequiredEffectScopes     []RuntimeEffectScope
-	RequiredEvidenceKinds    []string
-	RepairDirective          *RuntimeRepairDirective
-	AdmissibleOperationKinds []string
-	RejectedOperationShapes  []RuntimeRejectedOperationShape
-	Capabilities             RuntimeCapabilities
-	Resources                RuntimeResourceFacts
-	Activation               RuntimeActivationContext
+	RequiredAction            RuntimeAction
+	RequiredEffectScopes      []RuntimeEffectScope
+	RequiredEvidenceKinds     []string
+	RepairDirective           *RuntimeRepairDirective
+	AdmissibleOperationKinds  []string
+	RejectedOperationShapes   []RuntimeRejectedOperationShape
+	NoProgressOperationShapes []RuntimeRejectedOperationShape
+	Capabilities              RuntimeCapabilities
+	Resources                 RuntimeResourceFacts
+	Activation                RuntimeActivationContext
 }
 
 func RuntimeCandidateContextFromFacts(facts RuntimeFacts) RuntimeCandidateContext {
@@ -53,6 +54,9 @@ func RuntimeCandidateContextFromFacts(facts RuntimeFacts) RuntimeCandidateContex
 		}
 		if len(directive.RejectedOperationShapes) > 0 {
 			ctx.RejectedOperationShapes = append([]RuntimeRejectedOperationShape(nil), directive.RejectedOperationShapes...)
+		}
+		if len(directive.NoProgressOperationShapes) > 0 {
+			ctx.NoProgressOperationShapes = append([]RuntimeRejectedOperationShape(nil), directive.NoProgressOperationShapes...)
 		}
 	}
 	return ctx.Normalized()
@@ -101,6 +105,7 @@ func (c RuntimeCandidateContext) Normalized() RuntimeCandidateContext {
 	}
 	c.AdmissibleOperationKinds = normalizeStrings(c.AdmissibleOperationKinds)
 	c.RejectedOperationShapes = NormalizeRuntimeRejectedOperationShapes(c.RejectedOperationShapes)
+	c.NoProgressOperationShapes = NormalizeRuntimeRejectedOperationShapes(c.NoProgressOperationShapes)
 	c.Capabilities = facts.Capabilities
 	c.Resources = facts.Resources
 	c.Activation = facts.Activation

@@ -330,13 +330,25 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 			}
 			aggregate.Facts.StateChange = aggregate.Facts.StateChange.ApplyAcceptedStateChangeEvidence(fact, currentCoverage)
 		}
-		// Accepted progress on the current focus invalidates prior non-satisfied assessments so
-		// the same-focus loop can re-enter produce_assessment after repair evidence.
+		// A newly admitted receipt may require a fresh assessment, but admission is
+		// not itself convergence progress. In particular, a validation receipt that
+		// later recreates the same gap must retain the same-focus repair and
+		// validation-only budgets. Only a durable, changed state effect resets those
+		// windows here; assessment satisfaction owns the other progress transition.
 		if runtimecontract.EvidenceAppliesToCurrentFocus(aggregate.Facts, fact) {
 			aggregate.Facts.Assessments = invalidateNonSatisfiedAssessmentsForFocus(aggregate.Facts.Assessments, aggregate.Facts.Focus.ID)
 			aggregate.Facts.Failure = nil
-			aggregate.Facts.Repair = aggregate.Facts.Repair.NoteProgress(fact.Revision)
-			aggregate.Facts.Repair.ActiveGap = nil
+			if runtimeEvidenceIsEffectiveProgress(fact, evidence) {
+				aggregate.Facts.Repair = aggregate.Facts.Repair.NoteProgress(fact.Revision)
+			} else if fact.Kind == runtimecontract.EvidenceKindValidation && aggregate.Facts.Repair.ActiveGap != nil {
+				aggregate.Facts.Repair = aggregate.Facts.Repair.RecordNoProgressOperationShape(runtimecontract.RuntimeRejectedOperationShape{
+					Operation: committedOperation, EvidenceID: fact.ID,
+					FailureClass:     runtimecontract.FailureClassCoverageAssessmentIncomplete,
+					FailureCode:      "accepted_validation_pending_assessment",
+					FailureSignature: "accepted-validation-pending-assessment",
+					FailureMessage:   "accepted validation has not yet resolved the active assessment gap",
+				})
+			}
 		}
 	case ExecutionEvidenceStatusRejected:
 		if evidence.Failure != nil {
@@ -442,6 +454,18 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 		return EvidenceCommitResult{}, err
 	}
 	return EvidenceCommitResult{Disposition: CommitDispositionCommitted, DispatchCompleted: dispatchCompleted, Aggregate: aggregate}, nil
+}
+
+// runtimeEvidenceIsEffectiveProgress is an SM-2 decision helper. It is kept in
+// the Orchestrator owner because the contract package must not decide when an
+// aggregate transition may reset repair state. A validation receipt is useful
+// evidence for assessment, but cannot by itself prove convergence progress.
+func runtimeEvidenceIsEffectiveProgress(fact runtimecontract.EvidenceFact, evidence ExecutionEvidence) bool {
+	if fact.Kind != runtimecontract.EvidenceKindStateChange || evidence.Receipt == nil {
+		return false
+	}
+	receipt := evidence.Receipt.Normalized()
+	return receipt.Changed && !receipt.NoOp && receipt.ObservedEffectScope == runtimecontract.RuntimeEffectWorkspaceDurable
 }
 
 func repairFailureSignatureCount(ledger runtimecontract.RuntimeRepairLedger, signature string) int {
