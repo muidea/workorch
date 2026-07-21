@@ -24,8 +24,9 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 2. activation 与 Runtime V2 使用完整 `ProviderModelTarget{ProviderID, ModelID}`。
 3. catalog 精确模型容量是能力权威；exact override / custom explicit 是仅有的替代来源。
 4. 能力不完整时 fail-fast，不使用 model pattern 或 conservative default。
-5. 已封存 `ProviderCeiling` 的 Run 不因 catalog 刷新漂移。
-6. ai-proxy client API key 是可选配置；catalog、chat、stream、embedding 仅在 key 非空时发送 Bearer header，空 key 不得编码成无效 `Authorization: Bearer `。
+5. `effectiveMaxOutputTokens` 直接采用 selected model 能力；`MaxInputTokens` 与 `MaxBytes` 由 context window、输出保留量、利用率和 token/byte 估算派生，不接受通用固定 output/request cap。
+6. 已封存 `ProviderCeiling` 的 Run 不因 catalog 刷新漂移。
+7. ai-proxy client API key 是可选配置；catalog、chat、stream、embedding 仅在 key 非空时发送 Bearer header，空 key 不得编码成无效 `Authorization: Bearer `。
 
 ## EventHub 合同
 

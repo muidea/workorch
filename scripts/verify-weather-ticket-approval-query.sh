@@ -744,8 +744,6 @@ original = {
     "budget": {
         "contextUtilizationRatio": float(budget.get("contextUtilizationRatio") or 0.75),
         "estimatedTokensPerByte": float(budget.get("estimatedTokensPerByte") or 0.25),
-        "defaultMaxOutputTokens": int(budget.get("defaultMaxOutputTokens") or 4096),
-        "maxRequestBytes": int(budget.get("maxRequestBytes") or 4194304),
     },
     "customProviders": custom_providers_payload(custom_providers, include_api_key=False, mock_base_url=mock_base_url),
 }

@@ -68,7 +68,7 @@ func resolveAIProxyTarget(cfg workorchconfig.LLMConfig, catalog *llmmodels.Provi
 				break
 			}
 		}
-		profile, err := deriveBudgetProfile(target, operation, llmcommon.ProviderSurfaceOpenAICompatibleHTTP, override.ContextWindowTokens, override.MaxOutputTokens, 0, cfg.Budget, llmmodels.CapabilitySourceAIProxyExactOverride, configRevision, overrideRevision(override))
+		profile, err := deriveBudgetProfile(target, operation, llmcommon.ProviderSurfaceOpenAICompatibleHTTP, override.ContextWindowTokens, override.MaxOutputTokens, cfg.Budget, llmmodels.CapabilitySourceAIProxyExactOverride, configRevision, overrideRevision(override))
 		return profile, err
 	}
 	if catalog == nil {
@@ -96,7 +96,7 @@ func resolveAIProxyTarget(cfg workorchconfig.LLMConfig, catalog *llmmodels.Provi
 				Target:  target,
 			}
 		}
-		return deriveBudgetProfile(target, operation, llmcommon.ProviderSurfaceOpenAICompatibleHTTP, model.ContextWindowTokens, model.MaxOutputTokens, 0, cfg.Budget, llmmodels.CapabilitySourceAIProxyCatalog, configRevision, model.CapabilityRevision)
+		return deriveBudgetProfile(target, operation, llmcommon.ProviderSurfaceOpenAICompatibleHTTP, model.ContextWindowTokens, model.MaxOutputTokens, cfg.Budget, llmmodels.CapabilitySourceAIProxyCatalog, configRevision, model.CapabilityRevision)
 	}
 	return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{
 		Code:    llmmodels.ProviderModelFailureModelNotFound,
@@ -142,7 +142,7 @@ func resolveCustomProviderTarget(cfg workorchconfig.LLMConfig, target runtimecon
 	if apiSurface == "" {
 		apiSurface = defaultProviderAPISurface(provider.Provider)
 	}
-	return deriveBudgetProfile(target, operation, apiSurface, model.ContextWindowTokens, model.MaxOutputTokens, model.MaxOutputTokens, cfg.Budget, llmmodels.CapabilitySourceCustomProviderExplicit, configRevision, "")
+	return deriveBudgetProfile(target, operation, apiSurface, model.ContextWindowTokens, model.MaxOutputTokens, cfg.Budget, llmmodels.CapabilitySourceCustomProviderExplicit, configRevision, "")
 }
 
 func deriveBudgetProfile(
@@ -151,7 +151,6 @@ func deriveBudgetProfile(
 	apiSurface string,
 	contextWindowTokens int,
 	providerMaxOutputTokens int,
-	modelConfiguredMaxOutput int,
 	budget workorchconfig.LLMContextBudgetPolicyConfig,
 	capabilitySource string,
 	configurationRevision string,
@@ -164,24 +163,17 @@ func deriveBudgetProfile(
 			Target:  target,
 		}
 	}
-	if budget.ContextUtilizationRatio <= 0 || budget.ContextUtilizationRatio > 1 || budget.EstimatedTokensPerByte <= 0 || budget.DefaultMaxOutputTokens < 0 || budget.MaxRequestBytes <= 0 {
+	if budget.ContextUtilizationRatio <= 0 || budget.ContextUtilizationRatio > 1 || budget.EstimatedTokensPerByte <= 0 {
 		return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{
 			Code:    llmmodels.ProviderModelFailureConfigurationInvalid,
 			Message: "budget policy is invalid",
 			Target:  target,
 		}
 	}
-	// The catalog declares the selected model's concrete single-response
-	// capability. A zero local budget means do not silently shrink that
-	// capability; a positive value is an explicit deployment safety cap.
-	requestedOutputTokens := providerMaxOutputTokens
-	if budget.DefaultMaxOutputTokens > 0 {
-		requestedOutputTokens = budget.DefaultMaxOutputTokens
-	}
-	if modelConfiguredMaxOutput > 0 {
-		requestedOutputTokens = modelConfiguredMaxOutput
-	}
-	effectiveMaxOutputTokens := minPositive(requestedOutputTokens, providerMaxOutputTokens, contextWindowTokens-1)
+	// The selected provider/model capability is the single source of truth for
+	// the response ceiling. Runtime continuation is reserved for payloads that
+	// actually reach this hard provider boundary.
+	effectiveMaxOutputTokens := minPositive(providerMaxOutputTokens, contextWindowTokens-1)
 	if effectiveMaxOutputTokens <= 0 {
 		return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{
 			Code:    llmmodels.ProviderModelFailureCapabilityIncomplete,
@@ -198,11 +190,10 @@ func deriveBudgetProfile(
 			Target:  target,
 		}
 	}
-	estimatedInputBytes := int(math.Floor(float64(maxInputTokens) / budget.EstimatedTokensPerByte))
-	maxBytes := estimatedInputBytes
-	if budget.MaxRequestBytes < maxBytes {
-		maxBytes = budget.MaxRequestBytes
-	}
+	// Providers describe model capacity in tokens, not serialized HTTP bytes.
+	// Derive the request-byte ceiling from the selected model's input budget so
+	// a process-wide fixed cap cannot silently shrink a large-context model.
+	maxBytes := int(math.Floor(float64(maxInputTokens) / budget.EstimatedTokensPerByte))
 	if maxBytes <= 0 {
 		return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{
 			Code:    llmmodels.ProviderModelFailureCapabilityIncomplete,

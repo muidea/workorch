@@ -67,8 +67,6 @@ export type AIProxyConfigurationView = {
 export type LLMContextBudgetPolicyView = {
   contextUtilizationRatio?: number;
   estimatedTokensPerByte?: number;
-  defaultMaxOutputTokens?: number;
-  maxRequestBytes?: number;
 };
 
 export type CustomProviderModelView = {
@@ -180,8 +178,6 @@ export type UpdateLLMConfigurationRequest = {
   budget?: {
     contextUtilizationRatio?: number;
     estimatedTokensPerByte?: number;
-    defaultMaxOutputTokens?: number;
-    maxRequestBytes?: number;
   };
   customProviders?: Record<string, {
     provider?: string;

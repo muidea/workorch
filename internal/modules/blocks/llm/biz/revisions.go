@@ -42,8 +42,6 @@ func TargetConfigurationRevision(cfg workorchconfig.LLMConfig, target runtimecon
 	writeLenPrefixed(h, target.ModelID)
 	writeLenPrefixed(h, fmt.Sprintf("%.8f", cfg.Budget.ContextUtilizationRatio))
 	writeLenPrefixed(h, fmt.Sprintf("%.8f", cfg.Budget.EstimatedTokensPerByte))
-	_ = binary.Write(h, binary.BigEndian, int64(cfg.Budget.DefaultMaxOutputTokens))
-	_ = binary.Write(h, binary.BigEndian, int64(cfg.Budget.MaxRequestBytes))
 
 	if target.ProviderID == runtimecontract.BuiltinAIProxyProviderID {
 		writeLenPrefixed(h, strings.TrimSpace(cfg.AIProxy.BaseURL))

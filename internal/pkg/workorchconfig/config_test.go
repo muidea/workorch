@@ -2,6 +2,7 @@ package workorchconfig
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,8 +70,6 @@ modelID = "text-embedding-3-large"
 [llm.budget]
 contextUtilizationRatio = 0.75
 estimatedTokensPerByte = 0.25
-defaultMaxOutputTokens = 0
-maxRequestBytes = 4194304
 
 [webSearch]
 defaultProvider = "search"
@@ -149,9 +148,7 @@ maxRepeatedSamePrompt = 1
 		t.Fatalf("default embedding = %+v, want text-embedding-3-large", cfg.LLM.DefaultEmbedding)
 	}
 	if cfg.LLM.Budget.ContextUtilizationRatio != 0.75 ||
-		cfg.LLM.Budget.EstimatedTokensPerByte != 0.25 ||
-		cfg.LLM.Budget.DefaultMaxOutputTokens != 0 ||
-		cfg.LLM.Budget.MaxRequestBytes != 4194304 {
+		cfg.LLM.Budget.EstimatedTokensPerByte != 0.25 {
 		t.Fatalf("budget = %+v, want configured budget policy", cfg.LLM.Budget)
 	}
 	if cfg.WebSearch.DefaultProvider != "search" ||
@@ -218,7 +215,6 @@ func TestSaveWritesApplicationConfigAndReloadsFrameworkConfig(t *testing.T) {
 	}
 	cfg.LLM.DefaultChat = ProviderModelTargetConfig{ProviderID: BuiltinAIProxyProviderID, ModelID: "gpt-4.1"}
 	cfg.LLM.DefaultEmbedding = &ProviderModelTargetConfig{ProviderID: BuiltinAIProxyProviderID, ModelID: "text-embedding-3-small"}
-	cfg.LLM.Budget.DefaultMaxOutputTokens = 8192
 	temperature := 0.0
 	cfg.LLM.CustomProviders = map[string]CustomLLMProviderConfig{
 		"direct-anthropic": {
@@ -392,6 +388,38 @@ model = "local-model"
 	}
 }
 
+func TestCurrentRejectsRemovedLLMBudgetCaps(t *testing.T) {
+	for name, removedField := range map[string]string{
+		"default output tokens": "defaultMaxOutputTokens = 4096",
+		"max request bytes":     "maxRequestBytes = 4194304",
+	} {
+		t.Run(name, func(t *testing.T) {
+			configDir := writeApplicationConfig(t, fmt.Sprintf(`
+endpointName = "workorch"
+
+[server]
+addr = "127.0.0.1:18080"
+
+[repository]
+backend = "file"
+dataDir = ".workorch-data"
+
+[llm.budget]
+contextUtilizationRatio = 0.75
+estimatedTokensPerByte = 0.25
+%s
+	`, removedField))
+			_ = Close()
+			t.Setenv(EnvConfigDir, configDir)
+			t.Cleanup(func() { _ = Close() })
+
+			if _, err := Current(); err == nil {
+				t.Fatal("Current error = nil, want removed budget cap rejection")
+			}
+		})
+	}
+}
+
 func TestValidateLLMConfigRejectsReservedCustomProviderID(t *testing.T) {
 	cfg := DefaultLLMConfig()
 	cfg.AIProxy.BaseURL = "http://127.0.0.1:8080"
@@ -523,8 +551,6 @@ modelID = "gpt-4o"
 [llm.budget]
 contextUtilizationRatio = 0.75
 estimatedTokensPerByte = 0.25
-defaultMaxOutputTokens = 4096
-maxRequestBytes = 4194304
 `
 }
 

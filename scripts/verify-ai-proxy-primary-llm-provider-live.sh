@@ -266,8 +266,6 @@ modelID = "live-embedding"
 [llm.budget]
 contextUtilizationRatio = 0.75
 estimatedTokensPerByte = 0.25
-defaultMaxOutputTokens = 4096
-maxRequestBytes = 4194304
 EOF
 
 UPSTREAM_ADDR="$UPSTREAM_ADDR" REQUEST_LOG="$ARTIFACT_DIR/upstream-requests.jsonl" \

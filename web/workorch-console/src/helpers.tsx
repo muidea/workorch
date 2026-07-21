@@ -2385,9 +2385,7 @@ export function llmConfigurationFormValues(configuration: ServiceConfiguration):
     ),
     budget: {
       contextUtilizationRatio: configuration.llm.budget?.contextUtilizationRatio,
-      estimatedTokensPerByte: configuration.llm.budget?.estimatedTokensPerByte,
-      defaultMaxOutputTokens: configuration.llm.budget?.defaultMaxOutputTokens,
-      maxRequestBytes: configuration.llm.budget?.maxRequestBytes
+      estimatedTokensPerByte: configuration.llm.budget?.estimatedTokensPerByte
     }
   };
 }

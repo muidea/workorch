@@ -510,8 +510,6 @@ original_llm = {
     "budget": {
         "contextUtilizationRatio": float((llm.get("budget") or {}).get("contextUtilizationRatio") or 0.75),
         "estimatedTokensPerByte": float((llm.get("budget") or {}).get("estimatedTokensPerByte") or 0.25),
-        "defaultMaxOutputTokens": int((llm.get("budget") or {}).get("defaultMaxOutputTokens") or 4096),
-        "maxRequestBytes": int((llm.get("budget") or {}).get("maxRequestBytes") or 4194304),
     },
     "customProviders": {},
 }

@@ -243,10 +243,6 @@ modelID = "gpt-4o"
 [llm.budget]
 contextUtilizationRatio = 0.75
 estimatedTokensPerByte = 0.25
-# 0 uses the exact maxOutputTokens advertised by the selected /v1/models entry.
-# Set a positive value only to apply a local output safety cap.
-defaultMaxOutputTokens = 0
-maxRequestBytes = 4194304
 
 [governance.autoTicket]
 enabled = true

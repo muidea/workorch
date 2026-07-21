@@ -313,8 +313,6 @@ modelID = "container-verify-model"
 [llm.budget]
 contextUtilizationRatio = 0.75
 estimatedTokensPerByte = 0.25
-defaultMaxOutputTokens = 4096
-maxRequestBytes = 4194304
 
 [llm.customProviders.verify]
 provider = "compatible"

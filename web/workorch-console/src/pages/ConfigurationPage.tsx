@@ -564,12 +564,6 @@ export function ConfigurationPage() {
                       <Form.Item name={['budget', 'contextUtilizationRatio']} label="上下文利用率">
                         <InputNumber min={0.05} max={1} step={0.05} style={{ width: '100%' }} />
                       </Form.Item>
-                      <Form.Item name={['budget', 'defaultMaxOutputTokens']} label="默认最大输出 Tokens">
-                        <InputNumber min={1} style={{ width: '100%' }} />
-                      </Form.Item>
-                      <Form.Item name={['budget', 'maxRequestBytes']} label="最大请求字节">
-                        <InputNumber min={1024} style={{ width: '100%' }} />
-                      </Form.Item>
                       <Form.Item name={['budget', 'estimatedTokensPerByte']} label="Token/Byte 估算">
                         <InputNumber min={0.01} step={0.01} style={{ width: '100%' }} />
                       </Form.Item>

@@ -708,8 +708,6 @@ func TestConfigurationEndpointReturnsRedactedAIProxyConfiguration(t *testing.T) 
 			Budget: appservice.LLMContextBudgetPolicyView{
 				ContextUtilizationRatio: 0.75,
 				EstimatedTokensPerByte:  0.25,
-				DefaultMaxOutputTokens:  4096,
-				MaxRequestBytes:         4194304,
 			},
 		},
 	}
@@ -1168,8 +1166,6 @@ modelID = "model-1"
 [llm.budget]
 contextUtilizationRatio = 0.75
 estimatedTokensPerByte = 0.25
-defaultMaxOutputTokens = 4096
-maxRequestBytes = 4194304
 
 [llm.customProviders.custom-test]
 provider = "compatible"
@@ -1232,8 +1228,6 @@ modelID = "model-1"
 [llm.budget]
 contextUtilizationRatio = 0.75
 estimatedTokensPerByte = 0.25
-defaultMaxOutputTokens = 4096
-maxRequestBytes = 4194304
 
 [llm.customProviders.custom-test]
 provider = "compatible"

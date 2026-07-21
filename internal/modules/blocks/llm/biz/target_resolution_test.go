@@ -20,16 +20,20 @@ func TestResolveProviderModelTargetUsesCatalogOutputCapabilityWithoutLocalCap(t 
 	}
 }
 
-func TestResolveProviderModelTargetHonorsExplicitLocalOutputCap(t *testing.T) {
-	cfg := testCatalogOutputCeilingConfig("capped-model")
-	cfg.Budget.DefaultMaxOutputTokens = 4096
-	target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "capped-model"}
-	profile, err := ResolveProviderModelTarget(cfg, testCatalogOutputCeiling(target), target, workorchconfig.LLMOperationChatCompletions)
+func TestResolveProviderModelTargetDerivesRequestBytesFromSelectedModel(t *testing.T) {
+	cfg := testCatalogOutputCeilingConfig("large-context-model")
+	target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "large-context-model"}
+	catalog := testCatalogOutputCeiling(target)
+	catalog.Models[0].ContextWindowTokens = 2_000_000
+
+	profile, err := ResolveProviderModelTarget(cfg, catalog, target, workorchconfig.LLMOperationChatCompletions)
 	if err != nil {
 		t.Fatalf("ResolveProviderModelTarget: %v", err)
 	}
-	if profile.EffectiveMaxOutputTokens != 4096 {
-		t.Fatalf("profile output ceiling = %d, want explicit cap", profile.EffectiveMaxOutputTokens)
+	const wantMaxInputTokens = 1_450_848
+	const wantMaxRequestBytes = 5_803_392
+	if profile.MaxInputTokens != wantMaxInputTokens || profile.MaxRequestBytes != wantMaxRequestBytes {
+		t.Fatalf("profile input ceiling = %+v, want tokens=%d bytes=%d derived from model capability", profile, wantMaxInputTokens, wantMaxRequestBytes)
 	}
 }
 

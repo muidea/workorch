@@ -30,8 +30,6 @@ modelID = "gpt-4o"
 [llm.budget]
 contextUtilizationRatio = 0.75
 estimatedTokensPerByte = 0.25
-defaultMaxOutputTokens = 4096
-maxRequestBytes = 4194304
 `
 }
 
@@ -127,9 +125,6 @@ maxRepeatedSamePrompt = 1
 	}
 	if cfg.LLM.DefaultChat.ProviderID != "ai-proxy" || cfg.LLM.DefaultChat.ModelID != "gpt-4o" {
 		t.Fatalf("defaultChat = %+v, want ai-proxy/gpt-4o", cfg.LLM.DefaultChat)
-	}
-	if cfg.LLM.Budget.DefaultMaxOutputTokens != 4096 || cfg.LLM.Budget.MaxRequestBytes != 4194304 {
-		t.Fatalf("budget = %+v, want configured budget", cfg.LLM.Budget)
 	}
 	if cfg.WebSearch.DefaultProviderID != "search" || len(cfg.WebSearch.Providers) != 1 {
 		t.Fatalf("web search configuration = %+v, want search provider", cfg.WebSearch)
@@ -289,8 +284,6 @@ modelID = "gpt-4o"
 [llm.budget]
 contextUtilizationRatio = 0.75
 estimatedTokensPerByte = 0.25
-defaultMaxOutputTokens = 4096
-maxRequestBytes = 4194304
 
 [webSearch]
 defaultProvider = "search"
@@ -370,8 +363,6 @@ modelID = "gpt-4o"
 [llm.budget]
 contextUtilizationRatio = 0.75
 estimatedTokensPerByte = 0.25
-defaultMaxOutputTokens = 4096
-maxRequestBytes = 4194304
 
 [webSearch]
 defaultProvider = "search"
@@ -453,8 +444,7 @@ modelID = "gpt-4o"
 [llm.budget]
 contextUtilizationRatio = 0.75
 estimatedTokensPerByte = 0.25
-defaultMaxOutputTokens = 4096
-maxRequestBytes = 4194304`), 0o600); err != nil {
+`), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	_ = workorchconfig.Close()
@@ -496,8 +486,6 @@ modelID = "gpt-4o"
 [llm.budget]
 contextUtilizationRatio = 0.75
 estimatedTokensPerByte = 0.25
-defaultMaxOutputTokens = 4096
-maxRequestBytes = 4194304
 
 [webSearch]
 defaultProvider = "search"

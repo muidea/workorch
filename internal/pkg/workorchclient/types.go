@@ -1321,8 +1321,6 @@ type AIProxyConfigurationView struct {
 type LLMContextBudgetPolicyView struct {
 	ContextUtilizationRatio float64 `json:"contextUtilizationRatio"`
 	EstimatedTokensPerByte  float64 `json:"estimatedTokensPerByte"`
-	DefaultMaxOutputTokens  int     `json:"defaultMaxOutputTokens"`
-	MaxRequestBytes         int     `json:"maxRequestBytes"`
 }
 
 type CustomProviderModelView struct {

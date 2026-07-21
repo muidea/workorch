@@ -90,8 +90,6 @@ func llmConfigurationView(cfg workorchconfig.LLMConfig, catalog ProviderCatalogS
 		Budget: LLMContextBudgetPolicyView{
 			ContextUtilizationRatio: cfg.Budget.ContextUtilizationRatio,
 			EstimatedTokensPerByte:  cfg.Budget.EstimatedTokensPerByte,
-			DefaultMaxOutputTokens:  cfg.Budget.DefaultMaxOutputTokens,
-			MaxRequestBytes:         cfg.Budget.MaxRequestBytes,
 		},
 		CustomProviders: customProviders,
 		Catalog:         catalog,

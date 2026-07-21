@@ -13,7 +13,7 @@ WorkOrch 以内置 `ai-proxy` 为唯一默认 LLM endpoint：
 1. canonical config 使用 `llm.aiProxy` + `llm.defaultChat` + `llm.budget` + 可选 `llm.customProviders`。
 2. `blocks/llm` 通过 `GET /v1/models` 获取精确模型容量，并维护进程内 TTL/LKG catalog cache。
 3. application activation 解析完整 `ProviderModelTarget`，写入 typed `RuntimeBootstrap.Activation.ProviderTarget`。
-4. Runtime V2 prerequisite 封存完整 `ProviderCeiling`（target + token/byte ceiling + capability/configuration revision）。
+4. Runtime V2 prerequisite 封存完整 `ProviderCeiling`（target + token/byte ceiling + capability/configuration revision）；输出上限直接采用 selected model 的 `maxOutputTokens`，输入 token/byte ceiling 由 selected model 的 `contextWindowTokens` 自动派生，不叠加进程级固定 output/request cap。
 5. candidate/completion/embedding 强制使用已封存 target；不存在 provider map fallback 或 provider context 传递。
 6. `llm.aiProxy.apiKey` 是可选客户端身份配置；`/v1/models`、chat、stream 与 embedding 必须使用同一 header 规则，仅在 key 非空时发送 Bearer credential。
 

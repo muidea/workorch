@@ -150,9 +150,12 @@ active-run release 与 eventstream projection 均已完成。
 2. `produce_state_change` 的两次 same-contract provider 请求均用尽 sealed
    `effectiveMaxOutputTokens=4096`，JSON 在边界处 EOF；Provider catalog 允许的输出上限为
    `65536`，且 stable prefix 未漂移。这不是 transport、model selection 或 Resume 缺陷，也
-   **不能**通过把静态默认值改为 8192 或其他固定值收口：任何固定值都可能不足。Catalog 值
-   必须继续作为 provider hard capability。`defaultMaxOutputTokens=0` 表示直接采用 selected
-   catalog 值；正数才是显式本地 safety cap。超过 provider hard limit 的合法候选必须进入
+   **不能**通过把静态默认值改为 8192 或其他固定值收口：任何固定值都可能不足。Selected
+   catalog/model 的 `maxOutputTokens` 是唯一 provider hard capability，不再叠加通用本地输出
+   safety cap。`MaxInputTokens` 由 `contextWindowTokens - effectiveMaxOutputTokens` 与上下文利用率
+   派生，sealed `MaxBytes` 再按 token/byte 估算自动换算；不再通过通用
+   `llm.budget.maxRequestBytes` 对不同模型施加同一个固定字节截断。超过 provider hard limit 的
+   合法候选必须进入
    Runtime V2 的 typed continuation/chunk protocol，而不是耗尽 same-contract candidate retry
    后 terminal。现有 artifact-continuation DTO、repository 与 read model 已存在；V2 主链
    已补入 bounded candidate-output continuation：初始 EOF fragment 与每个 suffix 均先由

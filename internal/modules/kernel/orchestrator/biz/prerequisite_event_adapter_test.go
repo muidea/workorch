@@ -69,7 +69,7 @@ func TestAcquireAndCommitManifestAndProviderCeilingPrerequisites(t *testing.T) {
 	}
 	defer file.Stop(ctx)
 	llm := llmmodule.New()
-	useTestLLMConfig(t, 4*1024*1024)
+	useTestLLMConfig(t, 128000, 8192)
 	if err := llm.Configure(llmmodule.Dependencies{EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestProviderCeilingPrerequisiteRejectsProviderBelowRequiredMinimum(t *testi
 	hub := magicevent.NewHub(16)
 	defer hub.Terminate(ctx)
 	llm := llmmodule.New()
-	useTestLLMConfig(t, 16*1024)
+	useTestLLMConfig(t, 8192, 4096)
 	if err := llm.Configure(llmmodule.Dependencies{EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -222,11 +222,8 @@ func TestAcquireAndCommitTargetSnapshotPrerequisiteAdvancesTypedFacts(t *testing
 	}
 }
 
-func useTestLLMConfig(t *testing.T, maxRequestBytes int) {
+func useTestLLMConfig(t *testing.T, contextWindowTokens int, maxOutputTokens int) {
 	t.Helper()
-	if maxRequestBytes <= 0 {
-		maxRequestBytes = 1024
-	}
 	configDir := t.TempDir()
 	content := fmt.Sprintf(`endpointName = "workorch"
 
@@ -253,8 +250,6 @@ modelID = "model-1"
 [llm.budget]
 contextUtilizationRatio = 0.75
 estimatedTokensPerByte = 0.25
-defaultMaxOutputTokens = 4096
-maxRequestBytes = %d
 
 [llm.customProviders.custom-test]
 provider = "compatible"
@@ -263,10 +258,10 @@ baseURL = "http://127.0.0.1:9"
 timeout = "30s"
 
 [llm.customProviders.custom-test.models.model-1]
-contextWindowTokens = 128000
-maxOutputTokens = 8192
+contextWindowTokens = %d
+maxOutputTokens = %d
 operations = ["chat_completions"]
-`, maxRequestBytes)
+`, contextWindowTokens, maxOutputTokens)
 	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
