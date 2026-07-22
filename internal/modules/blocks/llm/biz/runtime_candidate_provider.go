@@ -945,6 +945,7 @@ func runtimeV2CandidateContractCatalog() string {
 		"context.requiredAction is the sole next-action authority. When context.repairDirective is present, obey its requiredAction, requiredEffectScopes, requiredEvidenceKinds, allowedOperationKinds, targetRefs, and rejectedOperationShapes.",
 		"context.missingEvidenceKinds is completion-audit information only and must never override context.requiredAction or context.repairDirective.",
 		"Use operationContracts for allowed parameters of each kind. Dynamic fields are only valid where the contract permits them.",
+		"Operation parameters are a closed typed whitelist: omit every field that is not listed by the selected operationContract. Do not add narrative, summary, explanation, metadata, or convenience parameters unless that exact parameter is explicitly listed by the selected operationContract.",
 		"For an operation expected to produce a durable effect, targetRefs must name concrete declared targets that the operation itself will actually change. Do not label a read, check, preparation, or no-op action as state-changing, and do not cite unrelated targets as durable-effect witnesses.",
 		"When an operation has a canonical targetRef or path parameter, copy that exact value into its top-level targetRefs. targetRefs may declare a concrete new workspace-relative file before it exists; the owning capability validates creation at execution time.",
 		"When context.repairHints is present, follow those domain-neutral hints and do not repeat an active rejected operation shape.",
@@ -1047,11 +1048,14 @@ func runtimeV2CandidateRetryParameterHint(reason string) string {
 	if strings.Contains(lower, "targetrefs must contain targetref") || strings.Contains(lower, "targetrefs must contain path") || strings.Contains(lower, "targetrefs must contain target ") {
 		return " Declare exactly one non-empty canonical targetRef or path parameter, then copy that exact value into the operation's top-level targetRefs. A concrete new workspace-relative target is valid even when the file does not yet exist."
 	}
+	if strings.Contains(lower, "does not target the sealed focus, failure, or repair target set") {
+		return " The authority already has a sealed concrete target set. Return a durable operation that actually changes one of the target refs in context.focus, context.resources.failureTarget, or context.repairDirective, and copy that exact target into top-level targetRefs. A build, test, read, or command without that durable target effect cannot satisfy this state-change action."
+	}
 	if strings.Contains(lower, "owner-grounded workspace scope permits only a durable file operation") || strings.Contains(lower, "creation scope requires a durable file operation") {
 		return " The current target-selection scope permits only a durable File-owner operation. Use one of the File operation contracts, declare a concrete workspace-relative targetRefs value that the operation changes, and do not use Shell, Git, MCP, Web, or SSH until File owner evidence establishes a concrete target."
 	}
 	if strings.Contains(lower, "does not accept parameter") || strings.Contains(lower, "requires parameter") {
-		return " Rewrite illegal operation parameters to the allowed typed fields for the requested kind. Do not repeat rejected parameter names."
+		return " Remove every rejected parameter entirely and rebuild the operation from only the exact parameter names listed by its operationContract. Do not replace a rejected parameter with summary, narrative, explanation, metadata, or another invented field; operation-level commentary is never a legal substitute for a typed parameter."
 	}
 	if strings.Contains(lower, "conflict") || strings.Contains(lower, "not found") || strings.Contains(lower, "mismatch") {
 		return " Re-read current target content and realign operation inputs before retrying a conflicting state-changing operation."

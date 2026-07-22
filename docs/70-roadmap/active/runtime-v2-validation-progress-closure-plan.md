@@ -1249,6 +1249,21 @@ Shell/Git/MCP/Web/SSH，要求 operation 实际改变一个 concrete workspace-r
 scope 隐式扩权。此变更只缩小 SM-3 provider rendering 的提案面；不在 LLM 发现目标、不移动
 SM-2 action authority，也不替代 File feasibility probe 或 Orchestrator admission。
 
+#### 2026-07-22 follow-up — sealed-target retry and closed operation parameters
+
+新部署二进制创建的 `run-003` 证明 scope 收窄确实生效，但也暴露第二个 provider correction
+缺口：validation preflight 的 package target 不存在后，state-change attempt 0 返回没有命中 sealed
+target 的 `shell/command go build`；attempt 1 又在 `shell/command` parameters 中添加了不在 DTO
+白名单内的 `summary`。SM-3 对两者的拒绝均正确，最终形成
+`candidate_retry_exhausted`；这不是 TUI/Web、Run projection 或 recovery 的问题。
+
+LLM C0 现明确 operation parameters 是 closed typed whitelist，禁止叙述/summary/metadata 等自造
+参数；C3 retry 对“未命中 sealed focus/failure/repair target”明确要求 durable operation 实际改变该
+sealed target 并复制到 top-level `targetRefs`，对参数拒绝则要求移除全部被拒参数、仅按
+`operationContract` 重建，禁止替换成其它 commentary 字段。该项仍只影响 SM-3 provider rendering
+与同一 authority 的有限 candidate retry；DTO admission 继续裁决，不增加 retry 预算，也不让
+LLM/owner/projection 选择下一 action。
+
 #### Per-component closure boundary
 
 | 组件 | 可以单独回归的功能边界 | 不可承接的状态迁移 |

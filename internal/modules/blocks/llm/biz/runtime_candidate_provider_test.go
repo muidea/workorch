@@ -485,6 +485,33 @@ func TestRuntimeV2CandidateRetryExplainsFileOwnerScopeRestriction(t *testing.T) 
 	}
 }
 
+func TestRuntimeV2CandidateRetryExplainsSealedTargetAndClosedParameterContract(t *testing.T) {
+	targetRetry := runtimeV2CandidateRetry(1, &runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_target_outside_grounding",
+		Reason: "runtime state-changing candidate does not target the sealed focus, failure, or repair target set",
+	})
+	if targetRetry == nil {
+		t.Fatal("sealed-target retry projection is nil")
+	}
+	for _, want := range []string{"sealed concrete target set", "context.resources.failureTarget", "top-level targetRefs", "build, test, read"} {
+		if !strings.Contains(targetRetry.Instruction, want) {
+			t.Fatalf("sealed-target retry instruction lost %q: %s", want, targetRetry.Instruction)
+		}
+	}
+	parameterRetry := runtimeV2CandidateRetry(1, &runtimecontract.RuntimeCandidateFailure{
+		Class:  runtimecontract.RuntimeCandidateFailureClassContract,
+		Reason: `runtime candidate operation "op-1": kind "shell/command" does not accept parameter "summary"; allowed parameters: command, args`,
+	})
+	if parameterRetry == nil {
+		t.Fatal("parameter retry projection is nil")
+	}
+	for _, want := range []string{"Remove every rejected parameter", "exact parameter names", "summary, narrative, explanation, metadata", "never a legal substitute"} {
+		if !strings.Contains(parameterRetry.Instruction, want) {
+			t.Fatalf("parameter retry instruction lost %q: %s", want, parameterRetry.Instruction)
+		}
+	}
+}
+
 func TestRuntimeV2CandidateSchemaKeepsExplicitSequenceDuringFileScopeNarrowing(t *testing.T) {
 	selection := &runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: "target-selection-scope", OwnerModuleID: runtimecontract.RuntimeModuleFile,
@@ -507,6 +534,85 @@ func TestRuntimeV2CandidateSchemaKeepsExplicitSequenceDuringFileScopeNarrowing(t
 	schema := runtimeV2CandidateSchemaForDecisionWithTargetSelection(decision, selection)
 	if strings.Contains(schema, `"shell/command"`) || !strings.Contains(schema, `"patch/apply"`) || !strings.Contains(schema, `"git/write"`) {
 		t.Fatalf("scope sequence schema = %s", schema)
+	}
+}
+
+func TestRuntimeV2ProviderRequestNarrowsFileScopeAcrossSchemaContextAndRetry(t *testing.T) {
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "target-selection-scope", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable",
+		Disposition: runtimecontract.RuntimeTargetSelectionScope, CandidateCount: 2,
+		TargetRefs: []string{"main.go", "support.go"}, CandidateTargetRefs: []string{"main.go", "support.go"}, ObservedRevision: "workspace-v1",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	facts := runtimecontract.RuntimeFacts{
+		WorkspaceID: "ws-scope", RunID: "run-scope", DefinitionRevision: "definition-scope", EvidenceRevision: runtimecontract.InitialRuntimeEvidenceRevision,
+		Focus:    runtimecontract.CoverageFocus{ID: "focus-scope", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-scope"}, RequireTargetGrounding: true, TargetRole: "deliverable"},
+		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-scope", State: runtimecontract.RuntimeCoverageItemStateOpen}},
+		Capabilities: runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{
+			runtimecontract.StepKindShellCommand, runtimecontract.StepKindGitWrite, runtimecontract.RuntimeBlockKindPatchApply,
+		}},
+		Resources: runtimecontract.RuntimeResourceFacts{
+			TargetSelection: &selection,
+			ProviderCeiling: &runtimecontract.ProviderCeiling{
+				Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ContextWindowTokens: 128000,
+				ProviderMaxOutputTokens: 16384, EffectiveMaxOutputTokens: 4096, MaxInputTokens: 92928, MaxBytes: 96 * 1024,
+				CapabilityRevision: "capability-scope", ConfigurationRevision: "config-scope",
+			},
+		},
+		Activation: runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+	}
+	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
+		State: runtimecontract.ConvergenceStateNeedStateChange, Action: runtimecontract.RuntimeActionProduceStateChange, Focus: facts.Focus,
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			Kind:                 runtimecontract.RequiredOutputKindStateChange,
+			AcceptedKinds:        []string{runtimecontract.StepKindShellCommand, runtimecontract.StepKindGitWrite, runtimecontract.RuntimeBlockKindPatchApply},
+			AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+			CoverageWorkItemIDs:  facts.Focus.CoverageWorkItemIDs,
+		},
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := runtimecontract.RuntimeDefinitionContext{Revision: "definition-scope", GoalID: "goal-scope", GoalDefinition: "goal", DoDID: "dod-scope", DoDDefinition: "dod"}
+	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, facts.Activation.ExecutionContract)
+	request, err := runtimeV2ProviderRequest(llmmodels.RuntimeCandidateRequest{
+		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix, DefinitionContext: definition,
+		CandidateContext: runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{`"shell/command"`, `"git/write"`} {
+		if strings.Contains(request.Schema, forbidden) {
+			t.Fatalf("scope provider schema widened to %s: %s", forbidden, request.Schema)
+		}
+	}
+	if !strings.Contains(request.Schema, `"enum":["patch/apply"]`) {
+		t.Fatalf("scope provider schema did not retain durable File operation: %s", request.Schema)
+	}
+	dynamic := request.PromptContext.Sections[3].Content
+	for _, required := range []string{`"admissibleOperationKinds":["patch/apply"]`, `"operationContracts":[{"kind":"patch/apply"`, "bounded workspace feasibility scope"} {
+		if !strings.Contains(dynamic, required) {
+			t.Fatalf("scope provider C3 lost %q: %s", required, dynamic)
+		}
+	}
+	for _, forbidden := range []string{`"kind":"shell/command"`, `"kind":"git/write"`} {
+		if strings.Contains(dynamic, forbidden) {
+			t.Fatalf("scope provider C3 widened operation contracts to %s: %s", forbidden, dynamic)
+		}
+	}
+	retryRequest, err := runtimeV2ProviderRequest(llmmodels.RuntimeCandidateRequest{
+		Decision: decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1,
+		PreviousFailure:  &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_target_outside_grounding", Reason: "owner-grounded workspace scope permits only a durable File operation with a concrete target"},
+		StablePrefixHash: prefix, DefinitionContext: definition, CandidateContext: runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(retryRequest.PromptContext.Sections[3].Content, "do not use Shell, Git, MCP, Web, or SSH") {
+		t.Fatalf("scope provider retry lost owner-bound correction: %s", retryRequest.PromptContext.Sections[3].Content)
 	}
 }
 
