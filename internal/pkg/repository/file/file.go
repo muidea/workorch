@@ -3442,6 +3442,10 @@ func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 		target := item.DefaultLLMTarget.Clone()
 		cloned.DefaultLLMTarget = &target
 	}
+	if item.TargetDeclaration != nil {
+		declaration := item.TargetDeclaration.Clone()
+		cloned.TargetDeclaration = &declaration
+	}
 	if item.SoulBindings != nil {
 		cloned.SoulBindings = map[string]common.SoulID{}
 		for key, value := range item.SoulBindings {

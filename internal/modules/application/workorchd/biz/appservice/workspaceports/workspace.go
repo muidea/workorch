@@ -54,6 +54,7 @@ func UpdateWorkspaceRecord(ctx context.Context, hub magicevent.Hub, item *worksp
 		TemplateID:           item.TemplateID,
 		ProfileID:            item.ProfileID,
 		DefaultLLMTarget:     cloneProviderModelTarget(item.DefaultLLMTarget),
+		TargetDeclaration:    cloneTargetDeclaration(item.TargetDeclaration),
 		DefaultSoulID:        item.DefaultSoulID,
 		SoulBindings:         cloneSoulBindingMap(item.SoulBindings),
 		ContextHints:         item.ContextHints.Clone(),
@@ -62,6 +63,32 @@ func UpdateWorkspaceRecord(ctx context.Context, hub magicevent.Hub, item *worksp
 	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandUpdate, "workspace", string(item.ID), item.ID, item.ActiveRunID, "")
 	_, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandUpdate)
 	return err
+}
+
+func UpdateWorkspaceTargetDeclaration(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, declaration *runtimecontract.RuntimeTargetDeclaration) (*workspacemodel.Workspace, error) {
+	if hub == nil || workspaceID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	var cloned *runtimecontract.RuntimeTargetDeclaration
+	if declaration != nil {
+		value := declaration.Normalized()
+		if err := value.Validate(); err != nil {
+			return nil, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
+		}
+		cloned = &value
+	}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandUpdateTargetDeclaration, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.UpdateWorkspaceTargetDeclarationCommand{
+		WorkspaceID: workspaceID, Declaration: cloned,
+	})
+	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandUpdateTargetDeclaration, "workspace", string(workspaceID), workspaceID, "", "")
+	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandUpdateTargetDeclaration)
+	if err != nil {
+		return nil, err
+	}
+	if response.Workspace == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	return response.Workspace, nil
 }
 
 func UpdateWorkspaceLLMTarget(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*workspacemodel.Workspace, error) {
@@ -92,6 +119,14 @@ func UpdateWorkspaceLLMTarget(ctx context.Context, hub magicevent.Hub, workspace
 }
 
 func cloneProviderModelTarget(input *runtimecontract.ProviderModelTarget) *runtimecontract.ProviderModelTarget {
+	if input == nil {
+		return nil
+	}
+	value := input.Clone()
+	return &value
+}
+
+func cloneTargetDeclaration(input *runtimecontract.RuntimeTargetDeclaration) *runtimecontract.RuntimeTargetDeclaration {
 	if input == nil {
 		return nil
 	}

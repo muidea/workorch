@@ -73,7 +73,7 @@ func (m *Biz) resolveRuntimeV2Prerequisite(
 		result, err := AcquireTargetSnapshotPrerequisite(ctx, m.EventHub(), events.AcquireTargetSnapshotCommand{
 			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
 			PrerequisiteID: prerequisite.ID, WorkspaceDeliverableDirectory: deliverableDirectory,
-			TargetRef: prerequisite.SubjectRef, MaxBytes: maxBytes,
+			TargetRef: prerequisite.SubjectRef, MaxBytes: maxBytes, TargetDeclaration: aggregate.Facts.Activation.TargetDeclaration,
 		})
 		if err != nil {
 			return runtimev2.PrerequisiteResult{}, err
@@ -405,7 +405,7 @@ func (m *Biz) probeRuntimeV2CandidateFeasibility(ctx context.Context, aggregate 
 		response, probeErr := ProbeRuntimeOperationFeasibility(ctx, m.EventHub(), events.ProbeRuntimeOperationFeasibilityCommand{
 			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, Transaction: aggregate.Decision.AuthorityTransaction(),
 			WorkspaceDeliverableDirectory: workspaceDirectory, Operation: operation, Admissibility: inventory,
-			CapabilityStateBinding: inventory.AcquisitionBinding, Observation: &observation,
+			CapabilityStateBinding: inventory.AcquisitionBinding, Observation: &observation, TargetDeclaration: aggregate.Facts.Activation.TargetDeclaration,
 		})
 		if probeErr != nil {
 			return nil, nil, probeErr

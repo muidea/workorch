@@ -509,9 +509,14 @@ type TargetSnapshot struct {
 	Content      string
 	ContentHash  string
 	ContentState SnapshotContentState
-	Size         int64
-	LineCount    int
-	ObservedAt   string
+	// Revision is the owner-authored observation revision. Complete snapshots
+	// normally use their content hash; an explicitly declared missing target
+	// uses a non-content revision so it cannot be mistaken for a file hash.
+	Revision              string
+	WorkspaceTreeRevision string
+	Size                  int64
+	LineCount             int
+	ObservedAt            string
 }
 
 // RuntimeTargetSelection is a bounded, read-only owner observation for a
@@ -1486,6 +1491,8 @@ func normalizeTargetSnapshots(values []TargetSnapshot) []TargetSnapshot {
 	for _, value := range values {
 		value.TargetRef = strings.TrimSpace(value.TargetRef)
 		value.ContentHash = strings.TrimSpace(value.ContentHash)
+		value.Revision = strings.TrimSpace(value.Revision)
+		value.WorkspaceTreeRevision = strings.TrimSpace(value.WorkspaceTreeRevision)
 		value.ObservedAt = strings.TrimSpace(value.ObservedAt)
 		if value.TargetRef == "" {
 			continue

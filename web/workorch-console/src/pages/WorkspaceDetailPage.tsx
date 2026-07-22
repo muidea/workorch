@@ -1073,10 +1073,19 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
       message.error('当前没有 ready 的对话模型，请先完成模型配置');
       return;
     }
-    const { llmTargetKey: _llmTargetKey, ...activationRequest } = request;
+		const { llmTargetKey: _llmTargetKey, targetDeclaration: requestedTargetDeclaration, ...activationRequest } = request;
+		const targetRef = requestedTargetDeclaration?.targetRef?.trim();
+		const targetDeclaration = targetRef
+			? {
+				targetRef,
+				targetRole: requestedTargetDeclaration?.targetRole?.trim() || 'implementation',
+				mode: requestedTargetDeclaration?.mode || 'new_file'
+			}
+			: undefined;
     const requestWithCapabilityServers: WorkspaceExecutionActivationRequest = {
       ...activationRequest,
       llmTarget: normalizedLLMTarget,
+			targetDeclaration,
       mcpServerIds: Array.from(new Set([...(request.mcpServerIds ?? []), ...selectedCapabilityServerIds]))
     };
     const targetWorkspaceId = workspaceId;
@@ -1144,6 +1153,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
       mcpServerIds: [],
       capabilityIds: [],
       memoryIds: [],
+			targetDeclaration: snapshot?.workspace.targetDeclaration ?? { targetRef: '', targetRole: 'implementation', mode: 'new_file' },
       priority: 0
     });
     setActivationOpen(true);
@@ -2785,6 +2795,18 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           <Form.Item name="doDId" label="验收标准" rules={[{ required: true }]}>
             <Select options={readyDoDs.map((item) => ({ value: item.id, label: `${item.items.join(' / ')} (${item.id})` }))} />
           </Form.Item>
+			<Typography.Text type="secondary">交付目标（空工作区需要显式声明；不会从目标文本或目录猜测文件）</Typography.Text>
+			<Space.Compact block>
+				<Form.Item name={['targetDeclaration', 'targetRef']} noStyle>
+					<Input placeholder="工作区相对路径，例如 main.go" />
+				</Form.Item>
+				<Form.Item name={['targetDeclaration', 'mode']} noStyle>
+					<Select style={{ width: 130 }} options={[{ value: 'new_file', label: '新建文件' }, { value: 'existing_file', label: '已有文件' }]} />
+				</Form.Item>
+			</Space.Compact>
+			<Form.Item name={['targetDeclaration', 'targetRole']} label="目标角色" extra="必须与当前 profile 声明的目标角色匹配；默认 implementation。">
+				<Input placeholder="implementation" />
+			</Form.Item>
           <Form.Item label="LLM 模型选择模式">
             <Space>
               <Button

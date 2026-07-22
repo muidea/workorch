@@ -117,6 +117,7 @@ func BuildWorkspaceRuntimeActivation(ctx context.Context, request WorkspaceRunti
 			workspace.EvidencePolicies,
 			executionContract,
 			continuation,
+			workspace.TargetDeclaration,
 		),
 	}, nil
 }

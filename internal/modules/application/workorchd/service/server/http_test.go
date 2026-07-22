@@ -5288,6 +5288,22 @@ func TestWorkorchDActivationHTTPProjectsRequestID(t *testing.T) {
 		snapshot.RunCommand.DecisionID != "ticket-http-activation" {
 		t.Fatalf("projected run command = %+v, want HTTP request id, reason, source, definition revision, and decision id", snapshot.RunCommand)
 	}
+	var persistedWorkspace appservice.Workspace
+	waitForCondition(t, time.Second, func() bool {
+		item, err := state.readWorkspace(context.Background(), state.config.Backend, state.config.DataRoot, workspace.ID)
+		if err != nil {
+			return false
+		}
+		persistedWorkspace = item
+		return persistedWorkspace.DefaultLLMTarget != nil
+	})
+	runs, err := state.listRuns(context.Background(), state.config.Backend, state.config.DataRoot, workspace.ID)
+	if err != nil {
+		t.Fatalf("list runs after web activation: %v", err)
+	}
+	if len(runs) != 1 || runs[0].SealedLLMTarget == nil || !persistedWorkspace.DefaultLLMTarget.Same(*runs[0].SealedLLMTarget) {
+		t.Fatalf("web workspace/run model targets = %+v/%+v, want one matching first activation target", persistedWorkspace.DefaultLLMTarget, runs)
+	}
 }
 
 func TestWorkorchDActivationHTTPReturnsWhileSchedulerIsStillRunning(t *testing.T) {

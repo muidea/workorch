@@ -65,6 +65,7 @@ func (m *Biz) Start() error {
 		workspaceevents.TopicWorkspaceCommandList,
 		workspaceevents.TopicWorkspaceCommandUpdate,
 		workspaceevents.TopicWorkspaceCommandUpdateLLMTarget,
+		workspaceevents.TopicWorkspaceCommandUpdateTargetDeclaration,
 		workspaceevents.TopicWorkspaceCommandDelete,
 		workspaceevents.TopicWorkspaceCommandPurge,
 		workspaceevents.TopicWorkspaceCommandDefineGoal,
@@ -210,6 +211,29 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 				return workspaceevents.WorkspaceCommandResult{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
 			}
 			item.DefaultLLMTarget = &target
+		}
+		if err := m.workspaces.Update(ctx, item); err != nil {
+			return workspaceevents.WorkspaceCommandResult{}, err
+		}
+		m.publishWorkspaceUpdated(ctx, item)
+		return workspaceevents.WorkspaceCommandResult{Workspace: item}, nil
+	case workspaceevents.TopicWorkspaceCommandUpdateTargetDeclaration:
+		cmd, ok := ev.Data().(workspaceevents.UpdateWorkspaceTargetDeclarationCommand)
+		if !ok || cmd.WorkspaceID == "" || m.workspaces == nil {
+			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
+		}
+		item, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
+		if err != nil {
+			return workspaceevents.WorkspaceCommandResult{}, err
+		}
+		if cmd.Declaration == nil {
+			item.TargetDeclaration = nil
+		} else {
+			value := cmd.Declaration.Normalized()
+			if err := value.Validate(); err != nil {
+				return workspaceevents.WorkspaceCommandResult{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
+			}
+			item.TargetDeclaration = &value
 		}
 		if err := m.workspaces.Update(ctx, item); err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
@@ -520,6 +544,7 @@ func workspaceFromUpdateCommand(cmd workspaceevents.UpdateWorkspaceCommand) *wor
 		TemplateID:           cmd.TemplateID,
 		ProfileID:            cmd.ProfileID,
 		DefaultLLMTarget:     cloneProviderModelTarget(cmd.DefaultLLMTarget),
+		TargetDeclaration:    cloneTargetDeclaration(cmd.TargetDeclaration),
 		DefaultSoulID:        cmd.DefaultSoulID,
 		SoulBindings:         cloneSoulBindingMap(cmd.SoulBindings),
 		ContextHints:         cmd.ContextHints.Clone(),
@@ -528,6 +553,14 @@ func workspaceFromUpdateCommand(cmd workspaceevents.UpdateWorkspaceCommand) *wor
 }
 
 func cloneProviderModelTarget(input *runtimecontract.ProviderModelTarget) *runtimecontract.ProviderModelTarget {
+	if input == nil {
+		return nil
+	}
+	value := input.Clone()
+	return &value
+}
+
+func cloneTargetDeclaration(input *runtimecontract.RuntimeTargetDeclaration) *runtimecontract.RuntimeTargetDeclaration {
 	if input == nil {
 		return nil
 	}

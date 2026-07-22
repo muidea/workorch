@@ -17,6 +17,7 @@ type Workspace struct {
 	TemplateID           string
 	ProfileID            string
 	DefaultLLMTarget     *runtimecontract.ProviderModelTarget
+	TargetDeclaration    *runtimecontract.RuntimeTargetDeclaration
 	DefaultSoulID        common.SoulID
 	SoulBindings         map[string]common.SoulID
 	ContextHints         workorcheventpayload.Payload

@@ -23,6 +23,7 @@ func MapWorkspace(item *workspacemodel.Workspace) appmodelcore.Workspace {
 		TemplateID:           item.TemplateID,
 		ProfileID:            item.ProfileID,
 		DefaultLLMTarget:     cloneProviderModelTarget(item.DefaultLLMTarget),
+		TargetDeclaration:    cloneTargetDeclaration(item.TargetDeclaration),
 		DefaultSoulID:        string(item.DefaultSoulID),
 		SoulBindings:         appmodelcore.MapSoulBindingIDs(item.SoulBindings),
 		ContextHints:         cloneContextMap(item.ContextHints.Map()),
@@ -53,6 +54,7 @@ func WorkspaceModelFromView(item appmodelcore.Workspace) *workspacemodel.Workspa
 		TemplateID:           item.TemplateID,
 		ProfileID:            item.ProfileID,
 		DefaultLLMTarget:     cloneProviderModelTarget(item.DefaultLLMTarget),
+		TargetDeclaration:    cloneTargetDeclaration(item.TargetDeclaration),
 		DefaultSoulID:        common.SoulID(item.DefaultSoulID),
 		SoulBindings:         SoulBindingsFromView(item.SoulBindings),
 		ContextHints:         contextHints,
@@ -61,6 +63,14 @@ func WorkspaceModelFromView(item appmodelcore.Workspace) *workspacemodel.Workspa
 }
 
 func cloneProviderModelTarget(input *runtimecontract.ProviderModelTarget) *runtimecontract.ProviderModelTarget {
+	if input == nil {
+		return nil
+	}
+	value := input.Clone()
+	return &value
+}
+
+func cloneTargetDeclaration(input *runtimecontract.RuntimeTargetDeclaration) *runtimecontract.RuntimeTargetDeclaration {
 	if input == nil {
 		return nil
 	}

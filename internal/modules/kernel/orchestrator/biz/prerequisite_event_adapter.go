@@ -46,7 +46,7 @@ func AcquireTargetSnapshotPrerequisite(ctx context.Context, hub magicevent.Hub, 
 		return orchestratorevents.AcquireTargetSnapshotResult{}, err
 	}
 	response, ok := data.(orchestratorevents.AcquireTargetSnapshotResult)
-	if !ok || response.PrerequisiteID != command.PrerequisiteID || !response.Snapshot.Complete() {
+	if !ok || response.PrerequisiteID != command.PrerequisiteID || !runtimecontract.RuntimeTargetSnapshotSatisfiesDeclaration(response.Snapshot, command.TargetDeclaration) {
 		return orchestratorevents.AcquireTargetSnapshotResult{}, fmt.Errorf("target snapshot prerequisite %q returned an invalid result", command.PrerequisiteID)
 	}
 	if response.Snapshot.TargetRef != command.TargetRef {
@@ -168,15 +168,30 @@ func validateFileTargetSnapshotObservation(prerequisiteID string, snapshot runti
 	if err := value.Validate(); err != nil {
 		return fmt.Errorf("target snapshot returned invalid freshness observation: %w", err)
 	}
-	if value.PrerequisiteID != prerequisiteID || value.Kind != runtimecontract.PrerequisiteKindTargetSnapshot || value.OwnerModuleID != runtimecontract.RuntimeModuleFile || value.ContentHash != snapshot.ContentHash {
+	revision := snapshot.Revision
+	if revision == "" {
+		revision = snapshot.ContentHash
+	}
+	if value.PrerequisiteID != prerequisiteID || value.Kind != runtimecontract.PrerequisiteKindTargetSnapshot || value.OwnerModuleID != runtimecontract.RuntimeModuleFile || value.ContentHash != revision {
 		return fmt.Errorf("target snapshot freshness observation does not match snapshot")
 	}
-	if len(value.Dependencies) != 1 {
-		return fmt.Errorf("target snapshot freshness observation requires exactly one workspace-target dependency")
+	if len(value.Dependencies) < 1 || len(value.Dependencies) > 2 {
+		return fmt.Errorf("target snapshot freshness observation requires bounded dependencies")
 	}
 	dependency := value.Dependencies[0].Normalized()
-	if dependency.Domain != runtimecontract.RuntimeResourceWorkspaceTarget || dependency.OwnerModuleID != runtimecontract.RuntimeModuleFile || dependency.SubjectRef != snapshot.TargetRef || dependency.Revision != snapshot.ContentHash {
+	if dependency.Domain != runtimecontract.RuntimeResourceWorkspaceTarget || dependency.OwnerModuleID != runtimecontract.RuntimeModuleFile || dependency.SubjectRef != snapshot.TargetRef || dependency.Revision != revision {
 		return fmt.Errorf("target snapshot freshness observation does not match workspace-target revision")
+	}
+	if snapshot.ContentState == runtimecontract.SnapshotContentStateMissing {
+		if len(value.Dependencies) != 2 || snapshot.WorkspaceTreeRevision == "" {
+			return fmt.Errorf("missing target snapshot requires workspace-tree freshness")
+		}
+		tree := value.Dependencies[1].Normalized()
+		if tree.Domain != runtimecontract.RuntimeResourceWorkspaceTree || tree.OwnerModuleID != runtimecontract.RuntimeModuleFile || tree.SubjectRef != "workspace_deliverable" || tree.Revision != snapshot.WorkspaceTreeRevision {
+			return fmt.Errorf("missing target snapshot freshness observation does not match workspace-tree revision")
+		}
+	} else if len(value.Dependencies) != 1 {
+		return fmt.Errorf("complete target snapshot freshness observation requires exactly one workspace-target dependency")
 	}
 	return nil
 }

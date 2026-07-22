@@ -1600,6 +1600,13 @@ func TestActivateWorkspaceExecutionCreatesRunWithTypedRuntimeBootstrap(t *testin
 			t.Fatalf("repository create runtime bootstrap = %+v, want typed bootstrap", persisted.RuntimeBootstrap)
 		}
 	}
+	persistedWorkspace, err := exports.Repositories.Workspaces.Get(ctx, workspace.ID)
+	if err != nil {
+		t.Fatalf("read persisted workspace: %v", err)
+	}
+	if persistedWorkspace.DefaultLLMTarget == nil || !persistedWorkspace.DefaultLLMTarget.Same(createdRun.RuntimeBootstrap.Activation.ProviderTarget) {
+		t.Fatalf("workspace default target = %+v, want first sealed run target %+v", persistedWorkspace.DefaultLLMTarget, createdRun.RuntimeBootstrap.Activation.ProviderTarget)
+	}
 }
 
 func TestActivationResponseWorkspaceSnapshotReusesRunSnapshotWorkspace(t *testing.T) {
@@ -3181,6 +3188,13 @@ func TestActivateWorkspaceExecutionWithBackendReturnsActiveRun(t *testing.T) {
 	}
 	if len(item.Snapshot.Runs) != 1 || item.Snapshot.Workspace.ActiveRunID != activeRunID {
 		t.Fatalf("activation snapshot = %+v, want active run projection", item.Snapshot)
+	}
+	persistedWorkspace, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
+	if err != nil {
+		t.Fatalf("read persisted workspace: %v", err)
+	}
+	if persistedWorkspace.DefaultLLMTarget != nil {
+		t.Fatalf("resume materialized workspace model = %+v, want unchanged nil preference", persistedWorkspace.DefaultLLMTarget)
 	}
 }
 

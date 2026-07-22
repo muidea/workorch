@@ -67,6 +67,7 @@ func TestRuntimeV2ActivationContextUsesConcreteSelectionSnapshots(t *testing.T) 
 			},
 		},
 		runtimecontract.RuntimeContinuationContext{},
+		nil,
 	)
 	if err := activation.Validate(); err != nil {
 		t.Fatal(err)

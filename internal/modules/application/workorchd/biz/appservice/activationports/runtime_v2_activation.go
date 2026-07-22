@@ -27,6 +27,7 @@ func RuntimeV2ActivationContext(
 	evidencePolicies []workorcheventpayload.Payload,
 	executionContract map[string]any,
 	continuation runtimecontract.RuntimeContinuationContext,
+	targetDeclaration *runtimecontract.RuntimeTargetDeclaration,
 ) runtimecontract.RuntimeActivationContext {
 	ret := runtimecontract.RuntimeActivationContext{
 		ProviderTarget:    providerTarget.Normalized(),
@@ -39,6 +40,7 @@ func RuntimeV2ActivationContext(
 		EvidencePolicies:  runtimeV2EvidencePolicies(evidencePolicies),
 		ExecutionContract: runtimeV2ExecutionContract(executionContract),
 		Continuation:      continuation,
+		TargetDeclaration: cloneRuntimeTargetDeclaration(targetDeclaration),
 	}
 	stages := make([]string, 0, len(soulRouting.Bindings))
 	for stage := range soulRouting.Bindings {
@@ -56,6 +58,14 @@ func RuntimeV2ActivationContext(
 		})
 	}
 	return ret.Normalized()
+}
+
+func cloneRuntimeTargetDeclaration(input *runtimecontract.RuntimeTargetDeclaration) *runtimecontract.RuntimeTargetDeclaration {
+	if input == nil {
+		return nil
+	}
+	value := input.Clone()
+	return &value
 }
 
 func RuntimeV2DefinitionChangeImpact(input map[string]any) *runtimecontract.RuntimeDefinitionChangeImpact {

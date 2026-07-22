@@ -26,6 +26,7 @@ type UpdateWorkspaceCommand struct {
 	TemplateID           string
 	ProfileID            string
 	DefaultLLMTarget     *runtimecontract.ProviderModelTarget
+	TargetDeclaration    *runtimecontract.RuntimeTargetDeclaration
 	DefaultSoulID        common.SoulID
 	SoulBindings         map[string]common.SoulID
 	ContextHints         workorcheventpayload.Payload
@@ -34,6 +35,10 @@ type UpdateWorkspaceCommand struct {
 type UpdateWorkspaceLLMTargetCommand struct {
 	WorkspaceID common.WorkspaceID
 	Target      *runtimecontract.ProviderModelTarget
+}
+type UpdateWorkspaceTargetDeclarationCommand struct {
+	WorkspaceID common.WorkspaceID
+	Declaration *runtimecontract.RuntimeTargetDeclaration
 }
 type DeleteWorkspaceCommand = workspacecontracts.DeleteWorkspaceCommand
 type PurgeWorkspaceCommand = workspacecontracts.DeleteWorkspaceCommand
@@ -140,6 +145,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[ListWorkspacesCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceCommandList).MessageContract(),
 		eventcontract.CommandTopic[UpdateWorkspaceCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandUpdate).MessageContract(),
 		eventcontract.CommandTopic[UpdateWorkspaceLLMTargetCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandUpdateLLMTarget).MessageContract(),
+		eventcontract.CommandTopic[UpdateWorkspaceTargetDeclarationCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandUpdateTargetDeclaration).MessageContract(),
 		eventcontract.CommandTopic[DeleteWorkspaceCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandDelete).MessageContract(),
 		eventcontract.CommandTopic[PurgeWorkspaceCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandPurge).MessageContract(),
 		eventcontract.CommandTopic[DefineGoalCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandDefineGoal).MessageContract(),

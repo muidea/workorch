@@ -26,6 +26,7 @@ func Contracts() []eventcontract.Contract {
 		TopicWorkspaceCommandEnsure,
 		TopicWorkspaceCommandUpdate,
 		TopicWorkspaceCommandUpdateLLMTarget,
+		TopicWorkspaceCommandUpdateTargetDeclaration,
 		TopicWorkspaceCommandDelete,
 		TopicWorkspaceCommandPurge,
 		TopicWorkspaceCommandDefineGoal,

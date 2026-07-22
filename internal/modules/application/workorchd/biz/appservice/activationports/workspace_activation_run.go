@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -14,8 +15,14 @@ func createReplacementWorkspaceExecutionRun(ctx context.Context, request Activat
 	if workspace == nil || goal == nil || dod == nil || oldRunID == "" {
 		return "", common.ErrInvalidArgument
 	}
+	if err := materializeWorkspaceTargetDeclaration(ctx, request, workspace); err != nil {
+		return "", err
+	}
 	activationBuild, err := workspaceRuntimeActivation(ctx, request, workspace, goal, dod)
 	if err != nil {
+		return "", err
+	}
+	if err := materializeWorkspaceDefaultLLMTarget(ctx, request, workspace, activationBuild); err != nil {
 		return "", err
 	}
 	if err := SupersedeRun(ctx, request.Hub, workspace.ID, oldRunID); err != nil {
@@ -28,11 +35,38 @@ func createWorkspaceExecutionRun(ctx context.Context, request ActivateWorkspaceE
 	if workspace == nil || goal == nil || dod == nil {
 		return "", common.ErrInvalidArgument
 	}
+	if err := materializeWorkspaceTargetDeclaration(ctx, request, workspace); err != nil {
+		return "", err
+	}
 	activationBuild, err := workspaceRuntimeActivation(ctx, request, workspace, goal, dod)
 	if err != nil {
 		return "", err
 	}
+	if err := materializeWorkspaceDefaultLLMTarget(ctx, request, workspace, activationBuild); err != nil {
+		return "", err
+	}
 	return startWorkspaceExecutionRun(ctx, request, workspace, goal, dod, activationBuild)
+}
+
+// materializeWorkspaceDefaultLLMTarget turns the first successfully resolved
+// activation target into the Workspace owner's next-run preference. The Run
+// still seals its own target below; active Run Resume never reaches this path.
+func materializeWorkspaceDefaultLLMTarget(ctx context.Context, request ActivateWorkspaceExecutionViewRequest, workspace *workspacemodel.Workspace, activationBuild WorkspaceRuntimeActivationBuild) error {
+	if request.Hub == nil || workspace == nil {
+		return common.ErrInvalidArgument
+	}
+	if workspace.DefaultLLMTarget != nil {
+		return nil
+	}
+	target := activationBuild.RuntimeActivation.ProviderTarget.Clone()
+	if err := target.Validate(); err != nil {
+		return err
+	}
+	if _, err := workspaceports.UpdateWorkspaceLLMTarget(ctx, request.Hub, workspace.ID, &target); err != nil {
+		return err
+	}
+	workspace.DefaultLLMTarget = &target
+	return nil
 }
 
 func workspaceRuntimeActivation(ctx context.Context, request ActivateWorkspaceExecutionViewRequest, workspace *workspacemodel.Workspace, goal *workspacemodel.Goal, dod *workspacemodel.DoD) (WorkspaceRuntimeActivationBuild, error) {

@@ -646,6 +646,56 @@ state change 与 direct validation 在 governance capability 存在时仍只形�
 `partial`：多资源 semantic selector / structured owner failure target（R2）尚不存在，须在下一次 fresh
 deployed Run 中验证新的零调用 terminal 事实，不能 resolve `run-008` 的旧泛化 ticket 作为补偿。
 
+**R1 fresh deployed proof — 2026-07-22.** 清洁 `.workorch-data` 上创建的
+`ws-7f3b65cb1aec5427/run-001` 已复核该无目标分支：Run 的 persisted terminal 为
+`target_grounding_unresolved`；`CandidateAttempts`、`CompletedDispatches`、`OperationReceipts` 与
+`GovernanceRequests` 均为空，未生成 target snapshot 或 decision ticket。Result 为唯一 rejected
+closeout，Run 为 `failed`，Workspace 的 `ActiveRunID` 已释放；EventStream
+`sourceEventRevision=29` 与 `projectedSourceRevision=29` 相等，`/healthz` 与 `/readyz` 均为 200。
+此事实只关闭 H6 的“未 ground 时零调用、typed terminal 与投影”子项；不证明有 owner-grounded
+target 时的正向 candidate/assessment delta，也不将 R1/H6 从 `partial`/`pending` 改为 landed。
+
+**R1 activation target persistence closure — 2026-07-22.** 同一 fresh Run 还暴露 activation
+边界的独立偏差：Workspace `DefaultLLMTarget` 为 nil，但其 sealed Run target 为
+`ai-proxy/DeepSeek-V4-Flash`。根因是 application activation 按
+`explicit command -> workspace preference -> system default` 解析有效且 ready 的 target，
+却只将其封存到新 Run。现已在新 Run/replacement Run 的 application activation 边界，经
+Workspace owner 的 typed `UpdateWorkspaceLLMTarget` command 物化原本为空的 workspace
+preference，再创建/封存 Run；不会直接写 Workspace repository。已有 preference 不被覆盖，
+active Run Resume 也不经过该路径，仍严格使用原 sealed target。TUI 与 Web 共用此用例；
+`TestActivateWorkspaceExecutionCreatesRunWithTypedRuntimeBootstrap`、
+`TestActivateWorkspaceExecutionWithBackendReturnsActiveRun` 和
+`TestWorkorchDActivationHTTPProjectsRequestID` 分别覆盖首次物化、Resume 不变与 Web 异步
+activation 的 workspace/sealed-target 一致性。该修复使 H6 条目 1 的 activation 合同可由
+新部署验证，但不替代 grounded 正向链的 live gate。
+
+**R1 deployed materialization proof — 2026-07-22.** 新二进制在同一 clean-data workspace
+创建 `run-002` 后，持久化 Workspace default 与 sealed Run target 均为
+`ai-proxy/DeepSeek-V4-Flash`；Web/TUI 共享的 activation scheduler 未再留下 nil workspace
+preference。该 Run 仍以 `target_grounding_unresolved` 终止，且 candidate、dispatch、receipt 和
+governance request 均为零，原因是 deliverable 目录为空、profile 只声明
+`file/unique_workspace_entry`，File owner 如实返回 `absent`。这再次确认不能以 Goal、模型输出、
+文件名或“允许任意新文件”的 core fallback 绕过 8D-01/8D-02；要取得 grounded 正向 live 链，必须
+由 profile-bound selector 或实际 capability owner 提供可验证的 implementation target observation。
+
+**R1 explicit declared-new-target closure — 2026-07-22.** 为让空 Workspace 具备不猜测路径的
+0→1 正向链，activation 可接收并经 Workspace owner 持久化 `RuntimeTargetDeclaration`；新 Run 将其
+封存到 `RuntimeActivationContext`，只绑定 role 精确相等的 direct-evidence focus。缺失声明、role
+不匹配或 active Run 试图覆盖 sealed declaration 均在 Run 创建前返回 typed input error，不生成
+decision ticket。File owner 是唯一可将 `missing` snapshot 视为满足者：仅当 target、mode=`new_file`
+和 declaration revision 精确相符时，才返回 owner-authored missing revision 加 workspace-tree
+freshness dependency；`existing_file`、binary、truncated、redacted 和任意非匹配 target 仍拒绝。
+
+SM-2 将这种 missing fact 仅作为已声明创建前置条件保存；SM-3 仅接受
+`patch/apply:file_write`、唯一 declared target、无 `baseHash` 的 durable candidate；File owner 在
+feasibility 与执行前再次确认目标不存在。若文件已经被外部创建则拒绝覆盖；若内容与已封存写入
+后置条件一致，则只作为 lost-receipt replay 生成 receipt。目标缺失 observation 同时依赖 target 与
+workspace-tree，任一 owner receipt 的资源变化都会使旧 snapshot 失效。该路径不从 Goal、LLM、
+manifest 第一项、文件后缀或 Resume 推导 target；TUI/Web 必须在**新 activation**提供声明，Resume
+只重驱已封存的 Run。相关独立回归：`runtime_target_declaration_test.go`、
+`TestRuntimeAdapterDeclaredNewFileSnapshotAndExecutionGuard`、
+`TestEvaluateCandidateAdmissionRestrictsDeclaredNewFileToTargetBoundPatchWrite`。
+
 **R2 local no-fallback increment.** `TestShellOwnerDoesNotInferFailureTargetFromValidationCommand`
 现覆盖相同 execution key/fence 的重复 Shell validation delivery：owner 只返回已提交 receipt，
 不二次 commit，也不从 validation entry、diagnostic 或重放结果生成 failure target observation。
@@ -891,6 +941,18 @@ proof、receipt delta、recovery budget 与 evidence exactly-once，且 receipt 
 “receipt 已提交、上层响应丢失”的重启消费，复用既有 receipt 而不重新请求 candidate 或执行第二次
 durable write。`TestRuntimeAdapterPatchApplyReplayProofCoversAllDurableVariants` 则保证 preview proof
 和 File execution 对 byte-sensitive content、old/new text 与 unified diff 使用同一未截断 payload。
+
+**H5-C local verification audit — 2026-07-22.** 本轮重新执行
+`go test -race ./internal/modules/kernel/orchestrator/... -count=1` 与
+`make verify-runtime-v2-positive-convergence-file`，均通过。后者实际执行
+`TestRuntimeV2FileBackedGroundedTargetStateSequenceRestartsAtCommittedBoundaries`、
+`TestRuntimeV2FileBackedMCPOwnerFailureTargetReceiptRestartMatrix`、
+`TestRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure` 以及 Result →
+Workspace → Run 的 terminal delivery restart tests；因此 P1--P5 所列的单点 CAS 前、CAS 后响应丢失、
+controller 重建与 owner receipt exactly-once 均有当前本地回归证据。此结论**不**将 R3-3/H6 改为
+`landed`：R3-3 仍要求明确列出的 stale/duplicate/CAS-reload 与 terminal delivery 的复合断点矩阵，
+H6 仍必须由 clean-data 的真实 grounded deployed chain 证明；不得将本地 fixture 成功外推为 live
+正向收敛。
 
 **Batch-level independent regression.**
 
