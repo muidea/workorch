@@ -305,8 +305,7 @@ func patchSuccessResult(req patchExecutionRequest, before []byte, after []byte, 
 		beforeHash = sha256Hex(before)
 	}
 	afterHash := sha256Hex(after)
-	changedLines := addedLines + deletedLines
-	approvalRequired := editApprovalRequired(req.TargetRef, changedLines)
+	approvalRequired := editApprovalRequired(req.TargetRef)
 	riskLevel := "low"
 	var riskReasons []string
 	if approvalRequired {

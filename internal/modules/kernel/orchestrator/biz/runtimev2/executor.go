@@ -344,7 +344,6 @@ func runtimeOperationEffectMismatchFailure(decision runtimecontract.RuntimeDecis
 	return &runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassEffectMismatch, Code: "operation_effect_mismatch",
 		Signature: "effect-mismatch-" + operation.ID, Message: reason,
-		TargetRefs: append([]string(nil), operation.TargetRefs...),
 	}
 }
 

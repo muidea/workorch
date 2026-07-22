@@ -12,7 +12,7 @@
 - Runtime V2 state-change/validation operation 只返回 typed status、failure 与 evidence 摘要，不返回跨组件 map。
 - request 必须携带 workspace/run/step scope、step kind、operation、path/ref 和有界输入；result 返回状态、摘要、target refs、side-effect metadata 和 raw ref。
 - Orchestrator 负责 state-changing admission、approval、evidence quality、coverage binding 和 next action。
-- 对敏感 file/write、patch/apply，File owner 先返回 `governance_required` 且不执行副作用；resume 只在 exact `ExecutionKey + next Fence` 的 typed grant 经 Orchestrator preflight 验证后消费该 grant 并执行，普通布尔参数或调用方声明不能绕过 approval。
+- 对跨越信任边界的敏感 file/write、patch/apply（密钥、`.env`、`.git`、CI workflow），File owner 先返回 `governance_required` 且不执行副作用；普通 workspace-local 文件的变更规模不构成 approval。resume 只在 exact `ExecutionKey + next Fence` 的 typed grant 经 Orchestrator preflight 验证后消费该 grant 并执行，普通布尔参数或调用方声明不能绕过 approval。
 
 ## 相关约束
 

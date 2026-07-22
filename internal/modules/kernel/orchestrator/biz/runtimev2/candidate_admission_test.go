@@ -194,6 +194,7 @@ func TestEvaluateCandidateAdmissionAllowsOwnerGroundedWorkspaceScopeThroughFileA
 	aggregate := stateChangeAggregate(t)
 	aggregate.Facts.Focus.RequireTargetGrounding = true
 	aggregate.Facts.Focus.TargetRole = "deliverable"
+	aggregate.Facts.Focus.TargetRefs = nil
 	selection := runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: "target-selection-scope", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: "deliverable",
 		SelectorRef: "file/workspace_deliverable", Disposition: runtimecontract.RuntimeTargetSelectionScope,
@@ -215,6 +216,7 @@ func TestEvaluateCandidateAdmissionWorkspaceScopeDoesNotAuthorizeOtherDurableOwn
 	aggregate := stateChangeAggregate(t)
 	aggregate.Facts.Focus.RequireTargetGrounding = true
 	aggregate.Facts.Focus.TargetRole = "deliverable"
+	aggregate.Facts.Focus.TargetRefs = nil
 	selection := runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: "target-selection-scope", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: "deliverable",
 		SelectorRef: "file/workspace_deliverable", Disposition: runtimecontract.RuntimeTargetSelectionScope,
@@ -257,6 +259,40 @@ func TestEvaluateCandidateAdmissionCreationScopeRequiresConcreteDurableFileTarge
 	fileCandidate.StateChange.Operations[0].Operation.Parameters = patchApplyTestParameters(newTarget)
 	if result := rejectCandidateOutsideGroundedTargets(aggregate.Facts, aggregate.Decision, fileCandidate); !result.Accepted() {
 		t.Fatalf("concrete File creation candidate rejected before File owner feasibility: %+v", result)
+	}
+}
+
+func TestEvaluateCandidateAdmissionScopeCannotBypassOwnerFailureTarget(t *testing.T) {
+	aggregate := stateChangeAggregate(t)
+	aggregate.Facts.Focus.RequireTargetGrounding = true
+	aggregate.Facts.Focus.TargetRole = "implementation"
+	aggregate.Facts.Focus.TargetRefs = nil
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "target-selection", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		TargetRole: "implementation", SelectorRef: "file/workspace_deliverable",
+		Disposition:         runtimecontract.RuntimeTargetSelectionScope,
+		TargetRefs:          []string{"implementation.go", "support.go"},
+		CandidateTargetRefs: []string{"implementation.go", "support.go"}, CandidateCount: 2, ObservedRevision: "workspace-tree-v1",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	aggregate.Facts.Resources.TargetSelection = &selection
+	aggregate.Facts.Resources.FailureTarget = &runtimecontract.FailureTarget{
+		Signature: "owner-observed-failure", TargetRefs: []string{"implementation.go"},
+	}
+
+	candidate := stateChangeCandidate()
+	wrongTarget := "support.go"
+	candidate.StateChange.Operations[0].Operation.TargetRefs = []string{wrongTarget}
+	candidate.StateChange.Operations[0].Operation.Parameters = patchApplyTestParameters(wrongTarget)
+	result := EvaluateCandidateAdmission(aggregate, candidate)
+	if result.Disposition != CandidateAdmissionRejectedContract || result.Failure == nil || result.Failure.Code != candidateAdmissionCodeTargetOutsideGrounding {
+		t.Fatalf("workspace scope bypassed owner failure target: %+v", result)
+	}
+
+	candidate.StateChange.Operations[0].Operation.TargetRefs = []string{"implementation.go"}
+	candidate.StateChange.Operations[0].Operation.Parameters = patchApplyTestParameters("implementation.go")
+	if result := EvaluateCandidateAdmission(aggregate, candidate); !result.Accepted() {
+		t.Fatalf("candidate targeting owner failure target rejected: %+v", result)
 	}
 }
 

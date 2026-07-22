@@ -292,17 +292,10 @@ func (e eventRuntimeV2OperationExecutor) executePatchApply(ctx context.Context, 
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
 	ret := runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt)
-	// RVC-R11: owner blocked apply before side effects for approval.
-	if response.Failure != nil && strings.Contains(strings.ToLower(response.Failure.Code+" "+response.Failure.Message), "approval_required") {
-		subject := firstNonEmptyString(strings.Join(request.Operation.TargetRefs, ","), request.Operation.Kind)
-		ret.Governance = &runtimecontract.RuntimeGovernanceRequirement{
-			Kind: runtimecontract.GovernanceApproval, SubjectRef: subject,
-			Reason:          firstNonEmptyString(response.Failure.Message, "patch apply requires approval before side effects"),
-			RequestedAction: request.Operation.Kind, RiskLevel: "high",
-		}
-		ret.Failure = nil
-		ret.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
-	}
+	// Governance is owner-authored, persisted in the receipt, and copied by
+	// runtimeOperationExecutionResult above. Do not infer a governance state
+	// from failure text here: ordinary File failures may contain operational
+	// guidance but must remain repairable rather than opening a decision ticket.
 	return ret, nil
 }
 

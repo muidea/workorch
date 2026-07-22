@@ -111,7 +111,7 @@ func rejectCandidateOutsideGroundedTargets(facts workorchruntimecontract.Runtime
 		)
 	}
 	requiredTargets := GroundedRepairTargets(facts)
-	if hasOwnerGroundedTargetScope(facts) {
+	if ownerGroundedTargetScopeMaySelectNewFileTarget(facts) {
 		for _, operation := range candidateRuntimeOperations(candidate) {
 			descriptor, known := workorchruntimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
 			if known && descriptor.OwnerModuleID == workorchruntimecontract.RuntimeModuleFile &&
@@ -122,6 +122,11 @@ func rejectCandidateOutsideGroundedTargets(facts workorchruntimecontract.Runtime
 				return acceptedCandidateAdmission()
 			}
 		}
+		return rejectedCandidateAdmission(
+			candidateAdmissionCodeTargetOutsideGrounding,
+			candidateAdmissionSignatureTargetOutsideGrounding,
+			"owner-grounded workspace scope permits only a durable File operation with a concrete target",
+		)
 	}
 	if len(requiredTargets) == 0 {
 		// Bounded discovery without a selected target remains admissible only
@@ -142,6 +147,29 @@ func rejectCandidateOutsideGroundedTargets(facts workorchruntimecontract.Runtime
 		candidateAdmissionSignatureTargetOutsideGrounding,
 		"runtime state-changing candidate does not target the sealed focus, failure, or repair target set",
 	)
+}
+
+// ownerGroundedTargetScopeMaySelectNewFileTarget preserves the File owner's
+// bounded workspace-scope form for an otherwise untargeted focus. A scope is
+// not a blanket override: once the focus, an owner-observed failure, the
+// current failure, or a repair directive supplies a concrete target, that
+// higher-precedence target is the only admissible durable repair target.
+//
+// Keeping this distinction here is an SM-3 admission fence. File still owns
+// path feasibility; this code neither discovers a path nor interprets source
+// semantics.
+func ownerGroundedTargetScopeMaySelectNewFileTarget(facts workorchruntimecontract.RuntimeFacts) bool {
+	facts = facts.Normalized()
+	if !hasOwnerGroundedTargetScope(facts) || len(facts.Focus.TargetRefs) != 0 {
+		return false
+	}
+	if facts.Resources.FailureTarget != nil && len(facts.Resources.FailureTarget.TargetRefs) != 0 {
+		return false
+	}
+	if facts.Failure != nil && len(facts.Failure.TargetRefs) != 0 {
+		return false
+	}
+	return facts.RepairDirective == nil || len(facts.RepairDirective.TargetRefs) == 0
 }
 
 // GroundedRepairTargets returns the single persisted target-precedence set for

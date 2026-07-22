@@ -337,6 +337,24 @@ target 不同、非 required target durable change 不算 progress、required ta
 retarget、focus advance、stale/duplicate，以及 acquisition/commit/dispatch/evidence/progress 各
 crash boundary 的 restart 等价性。
 
+**2026-07-22 scope-precedence closure.** `ws-2c9bb7bc523a0b0a/run-006` 证明 File 的
+`workspace_deliverable` complete scope 曾在 SM-3 过早放行任意 File target；随后候选反复覆盖
+`manager.go`，绕过该 Run 已持久化的 `manager_test.go/main.go` owner failure target。scope 只能在
+Focus、FailureTarget、current Failure 与 RepairDirective 都没有具体 target 时允许候选提出新的
+workspace-relative File target；任何更高优先级 target 一旦存在，candidate durable target 必须与其
+相交。`TestEvaluateCandidateAdmissionScopeCannotBypassOwnerFailureTarget` 覆盖该 precedence；这不改变
+File owner 的路径 feasibility，不把路径或语言语义下沉到 core。影响 SM-3 admission，SM-2 target
+precedence、SM-1 lifecycle 与 SM-4 recovery 保持不变。
+
+**2026-07-22 effect-mismatch target-source closure.** `run-007` 进一步证明
+`operation_effect_mismatch` 是 Orchestrator 对 owner receipt 与 sealed expected effect 的合同
+比对，不是 owner 对修复目标的观察；此前该 core 生成 failure 错误复用了 operation input 的
+`TargetRefs`，将错误声明的 Shell side-effect target 锁定为 `FailureTarget`，使真实依赖修复被
+SM-3 admission 拒绝。该类 failure 现在只保留 failure/signature/diagnostic lineage；只有 concrete
+owner `RuntimeFailureTargetObservation` 才能形成 `FailureTarget`。`TestRuntimeControllerRoutesDurableNoOpReceiptToStructuredSameFocusRepair`
+覆盖此边界。之后必须用新 Run 重新取得 File scope 或 owner observation，不能 Resume 已 terminal 的
+`run-007`。影响 SM-2 failure fact/repair authority 与 SM-3 admission；SM-1/SM-4 不变。
+
 ### VPC-8E — Shell validation failure targeting
 
 **Owner:** `internal/modules/blocks/shell/biz`。
@@ -375,6 +393,35 @@ C3-C5、C0-C2 stable prefix 不漂移、schema retry authority 不变和越界 t
 | `kernel/eventstream`、Web/TUI | 展示 failure/repair target、no-progress、attempts | 重建 authority、触发 retarget/Resume |
 | `blocks/git` | 前序 focus 关闭后的 add/commit sequence 回归 | 绕过当前 focus或选择下一 focus |
 
+### VPC-8H — File governance classification
+
+**Owner:** `internal/modules/blocks/file/biz`；Orchestrator 只消费 owner-persisted typed receipt。
+
+普通 workspace-local 文件的变更行数不是跨信任边界，不得被折叠为
+`approval_required`。File owner 只对敏感路径（密钥、`.env`、`.git`、CI workflow 等）返回带
+`RuntimeGovernanceRequirement` 的 `governance_required` receipt；普通 patch 冲突、输入不合法或
+可恢复的执行失败保留为 owner failure，进入同一 focus 的 repair，而不是创建 decision ticket。
+
+Orchestrator executor 不得从 failure code/message 猜测治理：只有 receipt 中的 typed governance
+requirement 才能触发 SM-3 operation-governance suspension 和 SM-2 `request_governance`。这保证
+File 的普通错误文本、未来新增的限制说明或 provider 文本不会意外把 Run 变为人工等待。
+
+**2026-07-22 closure update.** live `ws-2c9bb7bc523a0b0a/run-006` 证明旧规则将 293 行文件被
+228 行内容整体替换（加删 521 行）误判为高风险 approval，尽管目标是普通
+`lsp-bridge/internal/lsp/manager.go`。现已移除变更规模到 approval 的映射；File 的 293→228
+workspace-local source patch 回归证明 preview/apply 都不需要 grant，`.env` 的 typed grant
+回归仍保持。executor 同时改为只信任 owner receipt 的 governance 字段，未携带该字段的
+`approval_required` 文本不再产生 decision。影响 SM-3 的 operation result classification 与
+SM-2 的后续 reducer 输入；SM-1 lifecycle、SM-4 delivery 和 `workorchruntimecontract` 均不变。
+
+同一旧 Run 在人工同意后又连续产生 9 个针对该 target 的不同 durable replacement，因每次
+workspace revision 均会使 manifest/admissibility/target-selection 失效，最终耗尽历史 aggregate
+已封存的 `MaxPrerequisiteResourceChangeRefreshes=8` 并以
+`prerequisite_refresh_exhausted` 终止。该结果证明旧 approval grant、receipt fence、stale refresh
+和 terminal 投影链路均按合同工作；它发生在本项修复部署前，不能被 Resume 或迁移为 VPC-8H 的
+live 通过证据。部署新二进制后必须新建 Run，验证普通 source patch 不创建 ticket，且以
+assessment/gap delta 而非 repeated replacement 判断后续正向收敛。
+
 ### VPC-8 implementation order
 
 1. `define runtime repair target grounding contracts`（VPC-8A/C）；
@@ -384,6 +431,7 @@ C3-C5、C0-C2 stable prefix 不漂移、schema retry authority 不变和越界 t
 5. `report shell validation failure targets`（VPC-8E）；
 6. `render sealed runtime repair authority`（VPC-8F）；
 7. `verify grounded runtime repair convergence`（VPC-8G/integration/live）。
+8. `classify sensitive File governance without volume-only tickets`（VPC-8H）。
 
 不能先在 LLM prompt 中增加“请修改生产代码”作为临时修复；在 typed contract、activation
 compiler 和 Orchestrator authority 未落地前，prompt-only 修改不构成收口。
@@ -1003,6 +1051,7 @@ H6 仍必须由 clean-data 的真实 grounded deployed chain 证明；不得将�
 | 8E-02 | landed MCP observation baseline / open Shell and owner binding | 各 failing capability adapter 必须报告其实际可观察的 related implementation target 或明确不可得；不得伪造。MCP 只解析失败 response 的顶层显式 `failureTargets`；Shell 不再从 sealed request 或 command target 复制该字段。 | diagnostic target、failure signature、owner revision、subject 与 bounded evidence refs 由 capability owner 返回。缺结构化观察时 `FailureTargets=nil`。 | SM-2 只将与 Focus target role 相容的 receipt target 转成 `FailureTarget`；validation entry 本身不自动升级为 implementation target。当前 Shell 的 operation/diagnostic target 仍只是 receipt lineage，不能代替 future structured capability observation。 | MCP explicit/no-target/success-response/duplicate，Shell no-fallback、多个 target、stale owner revision、receipt replay；仍需 Shell structured protocol、role/freshness binding、crash/restart matrix。core 内不得新增文件名、后缀、Go/LSP/MCP 语义。 |
 | 8F-01 | landed baseline | LLM block 只渲染 sealed authority；不拥有 Runtime facts。 | C3-C5 dynamic context 已含 Focus target contract、FailureTarget、TargetSnapshots、TargetSelection、RepairDirective、failure 和 rejected/no-progress shapes。对 File `create` selection，C3 还必须明确要求候选提出一个具体 workspace-relative File target：这只是未执行 operation proposal，不是 LLM 建立 target authority；File admissibility/feasibility 仍是唯一裁决者。 | SM-3 request 只能使用 Orchestrator 持久化的 authority snapshot；C0-C2 stable prefix 不包含这些易变事实。 | context round-trip、stable prefix 不漂移、selected/absent/ambiguous/create rendering、schema unknown field 拒绝。 |
 | 8F-02 | landed FailureTarget snapshot gate / open owner-observation binding | Orchestrator 在 provider 前执行 target/admissibility/snapshot gate；LLM 不得扩展 target。 | candidate 的 target/selector/effect scope 必须匹配 sealed `RequiredOutputContract`、fresh owner snapshot 和 admissibility inventory。 | Focus refs、selected target **及已持久化 `FailureTarget`** 均必须取得 File owner 的当前 snapshot；缺 snapshot 时只能 `AcquirePrerequisite`，不得产生 provider request。越界 candidate 在 admission/seal 前拒绝且不形成 dispatch。 | persisted failure target → File snapshot prerequisite 的 focused 回归已具备；仍需 actual owner observation 的 role/revision/freshness binding、zero provider call、target mismatch、selector mismatch、stale snapshot、candidate retry/restart；自由文本“建议修改某文件”永远不是 observation。 |
+| 8H-01 | landed local / pending deployed verification | File owner 是敏感路径治理唯一事实源；Orchestrator executor 只复制 receipt governance。 | `RuntimeOperationReceipt.Governance` 是唯一能够将 File operation 转为 approval suspension 的 typed input；failure code/message 只是 repair input，不能被 executor 重新解释。 | SM-3 仅在 owner persisted `governance_required` receipt 存在时建立 operation governance binding；普通 workspace-local source patch（无论行数）保持普通 durable state-change receipt。SM-2 仅对前者 reduce 到 `request_governance`。 | `TestRuntimeAdapterPatchApplyAllowsLargeWorkspaceLocalSourceChange` 覆盖 293→228 行 source replacement；`TestRuntimeAdapterPatchApplyConsumesValidatedApprovalGrant` 保持敏感 `.env` 的无副作用/typed grant 边界。仍需 clean-data deployed Run 证明不会再为普通 source patch 创建 ticket。 |
 | 8G-01 | partial local | Run/Result/File/Eventstream/Web/TUI 仅作 CAS owner、receipt owner 或 projection consumer；Orchestrator Biz 负责自身 drive lifecycle synchronization。 | 只消费 typed aggregate/event/read-model DTO；不添加 cross-owner repository/service access。 | SM-4 restart 复用已提交 target/failure/selection/directive，且 background drive、projection/recovery 与所有 in-flight typed owner handlers 均持有 lifecycle read lock；`Stop` 必须先等待这些分支退出才解除订阅并清 owner dependency。queued persistence、operation receipt query 和 governance aggregate load 均已有 lifecycle race 回归；projection 不重建 authority 或发送 Resume。 | state-sequence：selection → snapshot → candidate → receipt → assessment delta → focus advance；每个 prerequisite、receipt、evidence、progress、terminal crash boundary 和 duplicate/stale；fresh clean-data deployed Run。 |
 
 #### Mandatory transition rules for 8D-04 and 8D-05

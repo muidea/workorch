@@ -1099,6 +1099,42 @@ func TestRuntimeAdapterPatchApplyConsumesValidatedApprovalGrant(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterPatchApplyAllowsLargeWorkspaceLocalSourceChange(t *testing.T) {
+	workspace := t.TempDir()
+	target := filepath.Join(workspace, "internal", "lsp", "manager.go")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	before := strings.Repeat("// previous implementation\n", 293)
+	after := strings.Repeat("// replacement implementation\n", 228)
+	if err := os.WriteFile(target, []byte(before), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	request := PatchApplyRequest{
+		WorkspaceDirectory: workspace, PatchType: patchTypeFileWrite, TargetRef: "internal/lsp/manager.go",
+		Content: after, ContentPresent: true,
+	}
+	preview, err := NewRuntimeAdapter().PreviewPatch(request)
+	if err != nil {
+		t.Fatalf("preview large workspace-local source change: %v", err)
+	}
+	if preview.ApprovalRequired || preview.RiskLevel != "low" {
+		t.Fatalf("large workspace-local source preview unexpectedly requires approval: %+v", preview)
+	}
+	result, err := NewRuntimeAdapter().ApplyPatch(request)
+	if err != nil {
+		t.Fatalf("apply large workspace-local source change: %v", err)
+	}
+	if result.AfterHash == result.BeforeHash || result.FailureCode != "" {
+		t.Fatalf("large workspace-local source apply = %+v", result)
+	}
+	content, err := os.ReadFile(target)
+	if err != nil || string(content) != after {
+		t.Fatalf("large workspace-local source content=%q err=%v", string(content), err)
+	}
+}
+
 func TestRuntimeAdapterPatchApplyUnifiedDiffSuccess(t *testing.T) {
 	workspace := t.TempDir()
 	path := filepath.Join(workspace, "main.txt")

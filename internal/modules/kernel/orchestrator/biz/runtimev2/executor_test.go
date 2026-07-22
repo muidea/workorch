@@ -441,6 +441,9 @@ func TestRuntimeControllerRoutesDurableNoOpReceiptToStructuredSameFocusRepair(t 
 	if progressed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || progressed.Facts.Failure == nil || progressed.Facts.Failure.Class != runtimecontract.FailureClassEffectMismatch {
 		t.Fatalf("no-op did not route to same-focus effect repair: decision=%+v failure=%+v", progressed.Decision, progressed.Facts.Failure)
 	}
+	if len(progressed.Facts.Failure.TargetRefs) != 0 || progressed.Facts.Resources.FailureTarget != nil {
+		t.Fatalf("core effect mismatch promoted operation input into repair authority: failure=%+v failureTarget=%+v", progressed.Facts.Failure, progressed.Facts.Resources.FailureTarget)
+	}
 	if len(progressed.Facts.Evidence.Accepted) != 0 || len(progressed.Facts.Evidence.Rejected) != 1 || len(progressed.OperationReceipts) != 1 {
 		t.Fatalf("no-op incorrectly closed durable evidence: accepted=%+v rejected=%+v receipts=%+v", progressed.Facts.Evidence.Accepted, progressed.Facts.Evidence.Rejected, progressed.OperationReceipts)
 	}

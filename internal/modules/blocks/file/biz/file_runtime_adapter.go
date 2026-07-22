@@ -730,12 +730,18 @@ func containsRuntimeRedactionMarker(value string) bool {
 		strings.Contains(value, "[MASKED]")
 }
 
-func editApprovalRequired(path string, changedLines int) bool {
+// editApprovalRequired identifies paths whose mutation crosses a trust
+// boundary. Change volume is deliberately not a governance signal: a large,
+// workspace-local source edit remains an ordinary Runtime V2 state change and
+// must be allowed to converge without manufacturing a human decision ticket.
+//
+// Owners may still report ordinary patch conflicts or invalid inputs, which
+// stay in the typed execution-repair path. Only this explicit sensitive-path
+// classification may produce approval_required and a governance receipt.
+func editApprovalRequired(path string) bool {
 	clean := strings.ToLower(filepath.ToSlash(filepath.Clean(strings.TrimSpace(path))))
 	base := filepath.Base(clean)
 	switch {
-	case changedLines > 500:
-		return true
 	case clean == ".git" || strings.HasPrefix(clean, ".git/"):
 		return true
 	case clean == ".ssh" || strings.HasPrefix(clean, ".ssh/"):

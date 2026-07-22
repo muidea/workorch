@@ -59,7 +59,11 @@ run_pkg ./internal/modules/kernel/run \
 
 # Concrete File owner consumes only an already validated typed governance grant.
 run_pkg ./internal/modules/blocks/file/... \
-  -run 'TestRuntimeAdapterPatchApplyConsumesValidatedApprovalGrant|TestSupportedRuntimeOperationVariantsMatchDescriptor|TestRuntimeAdapterAcquireRuntimeTargetSelectionIsCardinalityBounded'
+  -run 'TestRuntimeAdapterPatchApply(ConsumesValidatedApprovalGrant|AllowsLargeWorkspaceLocalSourceChange)|TestSupportedRuntimeOperationVariantsMatchDescriptor|TestRuntimeAdapterAcquireRuntimeTargetSelectionIsCardinalityBounded'
+
+# Only an owner-persisted governance receipt may suspend an operation for approval.
+run_pkg ./internal/modules/kernel/orchestrator/biz \
+  -run 'TestRuntimeOperationExecutionResultUsesOnlyPersistedReceiptGovernance'
 
 run_pkg ./internal/modules/blocks/git/... \
   -run 'TestCapabilityStateReceiptStoreIsDurableAndIdempotent|TestSupportedRuntimeOperationVariantsMatchDescriptor|TestValidateGitCapabilityStatePredecessorReceiptsRequiresExactDurableBinding|TestGitOwnerCapabilityBoundAdmissibilityRejectsMismatchedProbeBindingAsStale'
