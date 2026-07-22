@@ -1095,6 +1095,13 @@ focus-001 missing validation
    File patch/write；Shell build/test/dependency/toolchain 命令只作为 validation，除非它确实
    修改所声明的 workspace target。
 
+后续部署的 `run-005` 已验证上项使候选从 `go mod vendor` 转为 `patch/apply` 创建缺失的
+`lsp-bridge/internal/lsp/manager.go`。该路径在创建前不存在是预期行为；实际 contract failure
+只是 candidate 同时遗漏了顶层 `targetRefs` 中的同一路径。收口规则补充为：任何 canonical
+`targetRef`/`path` 参数必须逐字复制到 operation `targetRefs`；新 workspace-relative target 可以
+在执行前不存在，最终仍由 File owner 的创建路径验证。这是 LLM C0/C3 DTO consistency，不允许
+由 Orchestrator 或 File owner 自动补写候选字段。
+
 该项影响 SM-3 的 candidate rendering/admission 协同，不改变 SM-2 action authority 或 SM-4
 re-drive。独立回归包括 LLM C0/C3 rendering、stable-prefix parity、software-dev defaults 以及
 Shell effect-mismatch receipt；部署验证必须从新的 activation 开始，既有 `run-001` 与 `run-002`

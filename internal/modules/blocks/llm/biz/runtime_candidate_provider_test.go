@@ -132,7 +132,7 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 		t.Fatalf("provider request lost dynamic context: %+v", request)
 	}
 	contractSection := request.PromptContext.Sections[0].Content
-	for _, value := range []string{`"operations"`, `"focusId"`, `"externalDependency"`, "candidate", "candidates", "executionGraph", "durable-effect witnesses"} {
+	for _, value := range []string{`"operations"`, `"focusId"`, `"externalDependency"`, "candidate", "candidates", "executionGraph", "durable-effect witnesses", "copy that exact value into its top-level targetRefs"} {
 		if !strings.Contains(contractSection, value) {
 			t.Fatalf("provider request stable contract lost %q: %s", value, contractSection)
 		}
@@ -255,6 +255,21 @@ func TestRuntimeV2CandidateRetryExplainsOperationShapeReplayWithoutChangingStabl
 		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_admission_invalid",
 	}); retry == nil || strings.Contains(retry.Instruction, "materially different operation shape") {
 		t.Fatalf("non-replay retry instruction = %+v, want no replay-specific correction", retry)
+	}
+}
+
+func TestRuntimeV2CandidateRetryExplainsCanonicalTargetRefConsistency(t *testing.T) {
+	retry := runtimeV2CandidateRetry(1, &runtimecontract.RuntimeCandidateFailure{
+		Class:  runtimecontract.RuntimeCandidateFailureClassContract,
+		Reason: `runtime candidate operation "op-write": kind "patch/apply" targetRefs must contain targetRef "new/manager.go"`,
+	})
+	if retry == nil {
+		t.Fatal("retry projection is nil")
+	}
+	for _, want := range []string{"exact canonical targetRef or path", "top-level targetRefs", "even when the file does not yet exist"} {
+		if !strings.Contains(retry.Instruction, want) {
+			t.Fatalf("retry instruction lost %q: %s", want, retry.Instruction)
+		}
 	}
 }
 

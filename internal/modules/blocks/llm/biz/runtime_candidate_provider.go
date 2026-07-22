@@ -847,6 +847,7 @@ func runtimeV2CandidateContractCatalog() string {
 		"context.missingEvidenceKinds is completion-audit information only and must never override context.requiredAction or context.repairDirective.",
 		"Use operationContracts for allowed parameters of each kind. Dynamic fields are only valid where the contract permits them.",
 		"For an operation expected to produce a durable effect, targetRefs must name concrete declared targets that the operation itself will actually change. Do not label a read, check, preparation, or no-op action as state-changing, and do not cite unrelated targets as durable-effect witnesses.",
+		"When an operation has a canonical targetRef or path parameter, copy that exact value into its top-level targetRefs. targetRefs may declare a concrete new workspace-relative file before it exists; the owning capability validates creation at execution time.",
 		"When context.repairHints is present, follow those domain-neutral hints and do not repeat an active rejected operation shape.",
 		"When context.rejectedOperationShapes is present, every listed operation hash and exact structural operation is forbidden until later accepted evidence supersedes it. Choose an admissible kind and change kind, targets, or execution-semantic parameters.",
 		"For a satisfied assessment, evidenceRefs is mandatory and every value must be copied exactly from context.allowedAcceptedEvidenceRefs. Satisfied item evidenceRefs must use the same allowed set.",
@@ -943,6 +944,9 @@ func runtimeV2CandidateRetryParameterHint(reason string) string {
 		return ""
 	}
 	lower := strings.ToLower(reason)
+	if strings.Contains(lower, "targetrefs must contain targetref") || strings.Contains(lower, "targetrefs must contain path") || strings.Contains(lower, "targetrefs must contain target ") {
+		return " Copy the exact canonical targetRef or path parameter value into the operation's top-level targetRefs. A concrete new workspace-relative target is valid even when the file does not yet exist."
+	}
 	if strings.Contains(lower, "does not accept parameter") || strings.Contains(lower, "requires parameter") {
 		return " Rewrite illegal operation parameters to the allowed typed fields for the requested kind. Do not repeat rejected parameter names."
 	}
