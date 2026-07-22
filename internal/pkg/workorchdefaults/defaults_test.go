@@ -531,6 +531,7 @@ func TestEnsureBuiltinDefaultsUpsertsEmbeddedSoulsAndTemplates(t *testing.T) {
 	if contextHints["stateChangePolicy"] != "must_produce_state_change" {
 		t.Fatalf("software-dev contextHints = %+v, want must_produce_state_change", template.ContextHints)
 	}
+	assertSoftwareDevWorkspaceDeliverableSelectors(t, contextHints)
 	assertSoftwareDevAcceptanceSlicePolicy(t, contextHints)
 	assertSoftwareDevAcceptanceDimensions(t, contextHints)
 	assertSoftwareDevCapabilityUsagePolicies(t, contextHints)
@@ -578,6 +579,43 @@ func TestEnsureBuiltinDefaultsUpsertsEmbeddedSoulsAndTemplates(t *testing.T) {
 	}
 	if statusCapability.Category != "code_semantics" || statusCapability.RiskLevel != "read_only" {
 		t.Fatalf("lsp status capability = %+v, want code semantics read-only", statusCapability)
+	}
+}
+
+// assertSoftwareDevWorkspaceDeliverableSelectors guards the startup-default
+// refresh path used by a new workspace.  The legacy unique-entry selector
+// turns an empty workspace into an unresolved terminal before a provider can
+// propose its first concrete File operation.
+func assertSoftwareDevWorkspaceDeliverableSelectors(t *testing.T, hints map[string]any) {
+	t.Helper()
+	contracts, ok := hints["profileContracts"].(map[string]any)
+	if !ok {
+		t.Fatalf("profileContracts = %T, want object", hints["profileContracts"])
+	}
+	profile, ok := contracts["software-dev"].(map[string]any)
+	if !ok {
+		t.Fatalf("software-dev profile = %T, want object", contracts["software-dev"])
+	}
+	requirements, ok := profile["evidenceRequirements"].([]any)
+	if !ok {
+		t.Fatalf("software-dev evidenceRequirements = %T, want list", profile["evidenceRequirements"])
+	}
+	for _, id := range []string{"source_change", "*"} {
+		found := false
+		for _, raw := range requirements {
+			item, ok := raw.(map[string]any)
+			requiresGrounding, grounded := item["requireTargetGrounding"].(bool)
+			if !ok || item["id"] != id || !grounded || !requiresGrounding {
+				continue
+			}
+			if item["targetSelectorRef"] != "file/workspace_deliverable" {
+				t.Fatalf("%s targetSelectorRef = %q, want file/workspace_deliverable", id, item["targetSelectorRef"])
+			}
+			found = true
+		}
+		if !found {
+			t.Fatalf("missing grounded %s evidence requirement", id)
+		}
 	}
 }
 
@@ -862,8 +900,8 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 			}
 			assertStringListContains(t, discovery, "workspace_manifest")
 			assertStringListContains(t, discovery, "project_files")
-			if selector, _ := item["targetSelectorRef"].(string); selector != "file/unique_workspace_entry" {
-				t.Fatalf("source_change targetSelectorRef = %q, want file/unique_workspace_entry", selector)
+			if selector, _ := item["targetSelectorRef"].(string); selector != "file/workspace_deliverable" {
+				t.Fatalf("source_change targetSelectorRef = %q, want file/workspace_deliverable", selector)
 			}
 			if direct, _ := item["requireDirectEvidence"].(bool); !direct {
 				t.Fatalf("source_change requireDirectEvidence = false, want true")
@@ -942,8 +980,8 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 				}
 				assertStringListContains(t, discovery, "workspace_manifest")
 				assertStringListContains(t, discovery, "project_files")
-				if selector, _ := item["targetSelectorRef"].(string); selector != "file/unique_workspace_entry" {
-					t.Fatalf("%s wildcard targetSelectorRef = %q, want file/unique_workspace_entry", scope, selector)
+				if selector, _ := item["targetSelectorRef"].(string); selector != "file/workspace_deliverable" {
+					t.Fatalf("%s wildcard targetSelectorRef = %q, want file/workspace_deliverable", scope, selector)
 				}
 				directValidationTargetContracts[scope] = true
 			}

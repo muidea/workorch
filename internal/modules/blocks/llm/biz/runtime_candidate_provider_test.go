@@ -78,6 +78,13 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 			},
 		},
 	}
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "target-selection-1", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable",
+		Disposition: runtimecontract.RuntimeTargetSelectionCreate, CandidateCount: 0, ObservedRevision: "workspace-empty-v1",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	facts.Resources.TargetSelection = &selection
 	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedStateChange, Action: runtimecontract.RuntimeActionProduceStateChange, Focus: facts.Focus,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
@@ -135,7 +142,7 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 		`"outputContract"`, `"requiredTopLevelExample":"{\"operations\":[...]}"`, `"$id":"workorch.runtime_candidate.state_change.v2"`, `"forbiddenTopLevelFields"`,
 		`"operationContracts":[{"kind":"file/edit"`, `"name":"path"`, `"name":"oldText"`, `"name":"newText"`,
 		`"forbiddenParameters":["filePath","fileContent","targetRef","targetRefs"]`,
-		`"RequirementID":"repo-init"`, `"capabilityStates"`, `"repo-state-hash"`,
+		`"RequirementID":"repo-init"`, `"capabilityStates"`, `"repo-state-hash"`, `"targetSelectionInstruction"`, "empty workspace creation scope", "concrete workspace-relative targetRefs entry",
 	} {
 		if !strings.Contains(dynamicSection, value) {
 			t.Fatalf("provider request dynamic output contract lost %q: %s", value, dynamicSection)
@@ -226,6 +233,29 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 	}
 }
 
+func TestRuntimeV2TargetSelectionInstructionIsLimitedToFileCreation(t *testing.T) {
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "target-selection-1", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable",
+		Disposition: runtimecontract.RuntimeTargetSelectionCreate, CandidateCount: 0, ObservedRevision: "workspace-empty-v1",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	got := runtimeV2TargetSelectionInstruction(&selection, runtimecontract.RuntimeActionProduceStateChange)
+	for _, required := range []string{"durable File-owner operation", "concrete workspace-relative targetRefs", "do not use this scope to authorize Git, Shell, MCP"} {
+		if !strings.Contains(got, required) {
+			t.Fatalf("creation instruction lost %q: %s", required, got)
+		}
+	}
+	if got := runtimeV2TargetSelectionInstruction(&selection, runtimecontract.RuntimeActionProduceValidation); got != "" {
+		t.Fatalf("validation must not receive creation instruction: %q", got)
+	}
+	selection.OwnerModuleID = runtimecontract.RuntimeModuleGit
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	if got := runtimeV2TargetSelectionInstruction(&selection, runtimecontract.RuntimeActionProduceStateChange); got != "" {
+		t.Fatalf("non-File selection must not receive creation instruction: %q", got)
+	}
+}
+
 func TestRuntimeV2CandidateContextProjectionPreservesRepairDirectiveAuthority(t *testing.T) {
 	directive := runtimecontract.RuntimeRepairDirective{
 		ID: "repair-1", FocusID: "focus-1", Trigger: runtimecontract.RuntimeRepairTriggerRejectedValidation,
@@ -271,8 +301,8 @@ func TestRuntimeV2CandidateContextProjectionPreservesTargetGroundingInVolatileAu
 			FailureTarget: &runtimecontract.FailureTarget{Signature: "validation-failure", TargetRefs: []string{"implementation.go"}, TargetObservation: &runtimecontract.RuntimeFailureTargetObservation{
 				OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "server-a", TargetRole: "implementation", ObservedRevision: "mcp-server-v1", TargetRefs: []string{"implementation.go"},
 			}},
-			TargetSnapshots: []runtimecontract.TargetSnapshot{{TargetRef: "implementation.go", ContentHash: "hash-1", ContentState: runtimecontract.SnapshotContentStateComplete}},
-			TargetSelection: &runtimecontract.RuntimeTargetSelection{PrerequisiteID: "selection-1", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: "implementation", Disposition: runtimecontract.RuntimeTargetSelectionSelected, TargetRefs: []string{"implementation.go"}, CandidateTargetRefs: []string{"implementation.go"}, CandidateCount: 1, ObservedRevision: "manifest-1"},
+			TargetSnapshots: []runtimecontract.TargetSnapshot{{TargetRef: "implementation.go", ContentHash: "hash-1", ContentState: runtimecontract.SnapshotContentStateComplete}, {TargetRef: "support.go", ContentHash: "hash-2", ContentState: runtimecontract.SnapshotContentStateComplete}},
+			TargetSelection: &runtimecontract.RuntimeTargetSelection{PrerequisiteID: "selection-1", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: "implementation", SelectorRef: "file/workspace_deliverable", Disposition: runtimecontract.RuntimeTargetSelectionScope, TargetRefs: []string{"implementation.go", "support.go"}, CandidateTargetRefs: []string{"implementation.go", "support.go"}, CandidateCount: 2, ObservedRevision: "manifest-1"},
 		},
 	}
 	context.Resources.TargetSelection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(*context.Resources.TargetSelection)
@@ -281,7 +311,7 @@ func TestRuntimeV2CandidateContextProjectionPreservesTargetGroundingInVolatileAu
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{`"TargetRole":"implementation"`, `"TargetRefs":["implementation.go"]`, `"TargetDiscoverySources":["workspace_manifest"]`, `"RequireTargetGrounding":true`, `"failureTarget"`, `"TargetObservation"`, `"OwnerModuleID":"blocks/mcp"`, `"ObservedRevision":"mcp-server-v1"`, `"targetSelection"`, `"selected"`} {
+	for _, required := range []string{`"TargetRole":"implementation"`, `"TargetRefs":["implementation.go"]`, `"TargetDiscoverySources":["workspace_manifest"]`, `"RequireTargetGrounding":true`, `"failureTarget"`, `"TargetObservation"`, `"OwnerModuleID":"blocks/mcp"`, `"ObservedRevision":"mcp-server-v1"`, `"targetSelection"`, `"scope"`, `"support.go"`} {
 		if !strings.Contains(string(encoded), required) {
 			t.Fatalf("volatile target-grounding context lost %s: %s", required, encoded)
 		}

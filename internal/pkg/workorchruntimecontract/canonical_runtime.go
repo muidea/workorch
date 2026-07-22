@@ -516,13 +516,23 @@ type TargetSnapshot struct {
 
 // RuntimeTargetSelection is a bounded, read-only owner observation for a
 // direct-evidence focus without explicit target refs. It never encodes an
-// operation, action, or progress decision: the owner reports whether its
-// declared inventory has a unique target, and SM-2 decides what to do when it
-// does not.
+// operation, action, progress decision, or a guessed path: the owner reports
+// a selected existing target, an empty-workspace creation scope, or an
+// unresolved inventory fact, and SM-2 decides what to do with that fact.
 type RuntimeTargetSelectionDisposition string
 
 const (
-	RuntimeTargetSelectionSelected  RuntimeTargetSelectionDisposition = "selected"
+	RuntimeTargetSelectionSelected RuntimeTargetSelectionDisposition = "selected"
+	// RuntimeTargetSelectionCreate authorizes a creation candidate within an
+	// owner-observed empty workspace. It deliberately carries no path: the
+	// candidate proposes a concrete workspace-relative target and the File
+	// owner validates it against its operation admissibility inventory.
+	RuntimeTargetSelectionCreate RuntimeTargetSelectionDisposition = "create"
+	// RuntimeTargetSelectionScope binds a bounded complete workspace target set
+	// selected by an owner-declared scope. It is not a filename heuristic: a
+	// candidate still proposes concrete operations and their owner validates
+	// every target against the sealed admissibility inventory.
+	RuntimeTargetSelectionScope     RuntimeTargetSelectionDisposition = "scope"
 	RuntimeTargetSelectionAbsent    RuntimeTargetSelectionDisposition = "absent"
 	RuntimeTargetSelectionAmbiguous RuntimeTargetSelectionDisposition = "ambiguous"
 )
@@ -568,6 +578,14 @@ func (s RuntimeTargetSelection) Validate() error {
 	case RuntimeTargetSelectionSelected:
 		if s.CandidateCount != 1 || len(s.TargetRefs) != 1 || len(s.CandidateTargetRefs) != 1 || s.TargetRefs[0] != s.CandidateTargetRefs[0] {
 			return fmt.Errorf("selected runtime target selection requires exactly one matching target")
+		}
+	case RuntimeTargetSelectionCreate:
+		if s.CandidateCount != 0 || len(s.TargetRefs) != 0 || len(s.CandidateTargetRefs) != 0 {
+			return fmt.Errorf("create runtime target selection requires an empty owner inventory")
+		}
+	case RuntimeTargetSelectionScope:
+		if s.CandidateCount < 2 || len(s.TargetRefs) != s.CandidateCount || len(s.CandidateTargetRefs) != s.CandidateCount || !sameStrings(s.TargetRefs, s.CandidateTargetRefs) {
+			return fmt.Errorf("scope runtime target selection requires a complete bounded target set")
 		}
 	case RuntimeTargetSelectionAbsent:
 		if s.CandidateCount != 0 || len(s.TargetRefs) != 0 || len(s.CandidateTargetRefs) != 0 {

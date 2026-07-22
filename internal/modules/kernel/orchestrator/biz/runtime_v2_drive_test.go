@@ -250,9 +250,9 @@ func TestDriveRuntimeV2FileBackedRunExecutesDurableFileOwnerAndRestarts(t *testi
 // immediately before and immediately after one Run-owner CAS. A fresh
 // Orchestrator Biz then has no choice but to load that file-backed aggregate
 // and continue through the regular typed EventHub owners. Target selection is
-// intentionally the File owner's neutral unique-inventory observation;
-// neither the fixture nor the Orchestrator synthesizes the selected target
-// from a path hint.
+// intentionally the File owner's bounded complete workspace scope; neither
+// the fixture nor the Orchestrator synthesizes an implementation path from a
+// path hint.
 func TestRuntimeV2FileBackedGroundedTargetStateSequenceRestartsAtCommittedBoundaries(t *testing.T) {
 	boundaries := []struct {
 		name  string
@@ -315,8 +315,12 @@ func TestRuntimeV2FileBackedGroundedTargetStateSequenceRestartsAtCommittedBounda
 				if err := os.WriteFile(filepath.Join(deliverable, "implementation.txt"), []byte("before\n"), 0o644); err != nil {
 					t.Fatal(err)
 				}
+				if err := os.WriteFile(filepath.Join(deliverable, "support.txt"), []byte("support\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
 
 				bootstrap := runtimeV2GroundedTargetSequenceBootstrap()
+				bootstrap.Focuses[0].TargetSelectorRef = "file/workspace_deliverable"
 				runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
 				workspaces := filerepository.NewWorkspaceRepository(filepath.Join(root, "workspaces.json"))
 				results := filerepository.NewResultRepository(filepath.Join(root, "results.json"))
@@ -425,8 +429,8 @@ func TestRuntimeV2FileBackedGroundedTargetStateSequenceRestartsAtCommittedBounda
 				}
 				state := persisted.RuntimeState
 				if state.Decision.Action != runtimecontract.RuntimeActionComplete || state.Decision.Terminal == nil ||
-					state.Facts.Resources.TargetSelection == nil || state.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionSelected ||
-					len(state.Facts.Resources.TargetSnapshots) != 1 || state.Facts.Resources.TargetSnapshots[0].TargetRef != "implementation.txt" ||
+					state.Facts.Resources.TargetSelection == nil || state.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionScope ||
+					len(state.Facts.Resources.TargetSnapshots) != 2 || state.Facts.Resources.TargetSnapshots[0].TargetRef != "implementation.txt" || state.Facts.Resources.TargetSnapshots[1].TargetRef != "support.txt" ||
 					len(state.OperationReceipts) != 2 || len(state.Facts.Evidence.Accepted) != 2 || len(state.Facts.Assessments) != 1 {
 					t.Fatalf("restart state sequence did not converge exactly once: %+v", state)
 				}
@@ -471,10 +475,338 @@ func TestRuntimeV2FileBackedAmbiguousTargetSelectionFailsWithoutProvider(t *test
 	})
 }
 
-// An empty deliverable directory is an owner-observed absent target, not a
-// request for TUI/Web target input. It resolves before LLM or governance.
+// The legacy unique-entry selector reports an empty directory as absent. The
+// production workspace-deliverable selector has a separate owner-grounded
+// creation path below; neither path requests TUI/Web target input.
 func TestRuntimeV2FileBackedAbsentTargetSelectionFailsWithoutProvider(t *testing.T) {
 	testRuntimeV2FileBackedUnresolvedTargetSelectionFailsWithoutProvider(t, runtimeV2GroundedTargetSequenceBootstrap(), runtimecontract.RuntimeTargetSelectionAbsent, nil)
+}
+
+func TestRuntimeV2FileBackedEmptyWorkspaceCreationSelectionContinuesThroughCandidate(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	root := t.TempDir()
+	deliverable, internalDir := filepath.Join(root, "workspace"), filepath.Join(root, "internal")
+	if err := os.MkdirAll(deliverable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(internalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bootstrap := runtimeV2GroundedTargetSequenceBootstrap()
+	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}
+	bootstrap.Focuses[0].TargetSelectorRef = "file/workspace_deliverable"
+	bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}
+	bootstrap.Requirements[0].RequiredCapabilities = []string{runtimecontract.StepKindFileWrite}
+	bootstrap.Requirements = append(bootstrap.Requirements, runtimecontract.RuntimeRequirement{
+		Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		RequiredCapabilities: []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}, Reason: "empty workspace File creation inventory",
+	})
+	runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
+	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID, DefinitionRevision: bootstrap.Definition.Revision, RuntimeBootstrap: &bootstrap, State: common.RunStateActive}); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+	startRuntimeV2ReceiptTestOwner(t, hub)
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+	fileOwner := filemodule.New()
+	if err := fileOwner.Configure(filemodule.Dependencies{EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
+	candidateCalls := 0
+	initialSelection := runtimecontract.RuntimeTargetSelectionDisposition("")
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		candidateCalls++
+		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		if candidateCalls == 1 && command.CandidateContext.Resources.TargetSelection != nil {
+			initialSelection = command.CandidateContext.Resources.TargetSelection.Disposition
+		}
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: runtimeV2EmptyWorkspaceCreationCandidate(command)}, nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	module := newRuntimeV2GroundedTargetSequenceModule(t, hub, runtimeV2StateRepository{hub: hub})
+	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
+	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, module.handleRuntimeV2Drive)
+	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
+
+	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
+	if err != nil || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 3 {
+		t.Fatalf("empty workspace creation completion=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
+	}
+	content, err := os.ReadFile(filepath.Join(deliverable, "implementation.txt"))
+	if err != nil || string(content) != "created\n" {
+		t.Fatalf("empty workspace creation file=%q err=%v", string(content), err)
+	}
+	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil || persisted.RuntimeState == nil || initialSelection != runtimecontract.RuntimeTargetSelectionCreate ||
+		persisted.RuntimeState.Facts.Resources.TargetSelection == nil || persisted.RuntimeState.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionSelected ||
+		len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 1 || len(persisted.RuntimeState.OperationReceipts) != 2 {
+		t.Fatalf("empty workspace creation authority=%+v err=%v", persisted, err)
+	}
+}
+
+func TestRuntimeV2FileBackedEmptyWorkspaceCreationReceiptCrashRestartDoesNotReplayCreate(t *testing.T) {
+	for _, after := range []bool{false, true} {
+		phase := "before_receipt_evidence_commit"
+		if after {
+			phase = "after_receipt_evidence_commit_response_loss"
+		}
+		t.Run(phase, func(t *testing.T) {
+			ctx := context.Background()
+			hub := magicevent.NewHub(32)
+			t.Cleanup(func() { hub.Terminate(ctx) })
+			root := t.TempDir()
+			deliverable, internalDir := filepath.Join(root, "workspace"), filepath.Join(root, "internal")
+			if err := os.MkdirAll(deliverable, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(internalDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			bootstrap := runtimeV2GroundedTargetSequenceBootstrap()
+			bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}
+			bootstrap.Focuses[0].TargetSelectorRef = "file/workspace_deliverable"
+			bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}
+			bootstrap.Requirements[0].RequiredCapabilities = []string{runtimecontract.StepKindFileWrite}
+			bootstrap.Requirements = append(bootstrap.Requirements, runtimecontract.RuntimeRequirement{
+				Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+				RequiredCapabilities: []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}, Reason: "empty workspace File creation inventory",
+			})
+			runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
+			workspaces := filerepository.NewWorkspaceRepository(filepath.Join(root, "workspaces.json"))
+			results := filerepository.NewResultRepository(filepath.Join(root, "results.json"))
+			if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID, DefinitionRevision: bootstrap.Definition.Revision, RuntimeBootstrap: &bootstrap, State: common.RunStateActive}); err != nil {
+				t.Fatal(err)
+			}
+			if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}); err != nil {
+				t.Fatal(err)
+			}
+			runOwner := runmodule.New()
+			if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+				t.Fatal(err)
+			}
+			if err := runOwner.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+			workspaceOwner := workspacemodule.New()
+			if err := workspaceOwner.Configure(workspacemodule.Dependencies{
+				Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
+				Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := workspaceOwner.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
+			resultOwner := resultmodule.New()
+			if err := resultOwner.Configure(resultmodule.Dependencies{Results: results, Artifacts: memory.NewArtifactRepository(), EventHub: hub}); err != nil {
+				t.Fatal(err)
+			}
+			if err := resultOwner.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = resultOwner.Stop(ctx) })
+			startRuntimeV2ReceiptTestOwner(t, hub)
+			fileOwner := filemodule.New()
+			if err := fileOwner.Configure(filemodule.Dependencies{EventHub: hub}); err != nil {
+				t.Fatal(err)
+			}
+			if err := fileOwner.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
+			candidateCalls := 0
+			llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+			llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+				candidateCalls++
+				command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+				result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: runtimeV2EmptyWorkspaceCreationCandidate(command)}, nil)
+			})
+			t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+
+			marker := "empty-workspace-create-receipt-" + phase
+			crashRepository := &runtimeV2SaveCrashRepository{
+				delegate: runtimeV2StateRepository{hub: hub}, after: after, marker: marker,
+				match: func(aggregate runtimev2.RuntimeAggregate) bool {
+					return len(aggregate.OperationReceipts) == 1 && len(aggregate.Facts.Evidence.Accepted) == 1
+				},
+			}
+			crashing := newRuntimeV2GroundedTargetSequenceModule(t, hub, crashRepository)
+			func() {
+				defer func() {
+					if recovered := recover(); recovered != marker {
+						t.Fatalf("unexpected empty-workspace receipt crash marker: %v", recovered)
+					}
+				}()
+				if err := crashing.scheduleRuntimeV2Drive(ctx, "ws-v2", "run-v2", marker); err != nil {
+					t.Fatalf("drive before empty-workspace receipt crash: %v", err)
+				}
+				t.Fatal("expected empty-workspace receipt crash")
+			}()
+			if !crashRepository.fired {
+				t.Fatal("empty-workspace receipt crash point was not reached")
+			}
+			created, err := os.ReadFile(filepath.Join(deliverable, "implementation.txt"))
+			if err != nil || string(created) != "created\n" {
+				t.Fatalf("empty-workspace first create content=%q err=%v", string(created), err)
+			}
+
+			restarted := newRuntimeV2GroundedTargetSequenceModule(t, hub, runtimeV2StateRepository{hub: hub})
+			if err := restarted.scheduleRuntimeV2Drive(ctx, "ws-v2", "run-v2", "restart:"+phase); err != nil {
+				t.Fatalf("restart after empty-workspace receipt crash: %v", err)
+			}
+			persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+			if err != nil || persisted.RuntimeState == nil || persisted.State != common.RunStateCompleted ||
+				persisted.RuntimeState.Decision.Action != runtimecontract.RuntimeActionComplete ||
+				persisted.RuntimeState.Facts.Resources.TargetSelection == nil || persisted.RuntimeState.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionSelected ||
+				len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 1 || len(persisted.RuntimeState.OperationReceipts) != 2 ||
+				len(persisted.RuntimeState.Facts.Evidence.Accepted) != 2 || candidateCalls != 3 {
+				t.Fatalf("empty-workspace receipt restart authority=%+v candidateCalls=%d err=%v", persisted, candidateCalls, err)
+			}
+		})
+	}
+}
+
+// TestRuntimeV2FileBackedBoundedWorkspaceScopeAllowsNewDeliverable verifies
+// the owner-chain counterpart to empty-workspace creation. A complete bounded
+// scope is authority for File to assess a concrete new workspace-relative
+// target, not an Orchestrator permission to synthesize one. The durable
+// receipt must then invalidate the old scope and require a fresh complete
+// scope/snapshot set before validation and assessment can converge.
+func TestRuntimeV2FileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	root := t.TempDir()
+	deliverable, internalDir := filepath.Join(root, "workspace"), filepath.Join(root, "internal")
+	if err := os.MkdirAll(deliverable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(internalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for target, content := range map[string]string{"implementation.txt": "before\n", "support.txt": "support\n"} {
+		if err := os.WriteFile(filepath.Join(deliverable, target), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bootstrap := runtimeV2GroundedTargetSequenceBootstrap()
+	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}
+	bootstrap.Focuses[0].TargetSelectorRef = "file/workspace_deliverable"
+	bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}
+	bootstrap.Requirements[0].RequiredCapabilities = []string{runtimecontract.StepKindFileWrite}
+	bootstrap.Requirements = append(bootstrap.Requirements, runtimecontract.RuntimeRequirement{
+		Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		RequiredCapabilities: []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}, Reason: "bounded workspace File creation inventory",
+	})
+	runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
+	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID, DefinitionRevision: bootstrap.Definition.Revision, RuntimeBootstrap: &bootstrap, State: common.RunStateActive}); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+	startRuntimeV2ReceiptTestOwner(t, hub)
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+	fileOwner := filemodule.New()
+	if err := fileOwner.Configure(filemodule.Dependencies{EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
+	candidateCalls := 0
+	initialSelection := runtimecontract.RuntimeTargetSelectionDisposition("")
+	initialSnapshots := 0
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		candidateCalls++
+		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		if candidateCalls == 1 && command.CandidateContext.Resources.TargetSelection != nil {
+			initialSelection = command.CandidateContext.Resources.TargetSelection.Disposition
+			initialSnapshots = len(command.CandidateContext.Resources.TargetSnapshots)
+		}
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
+			Transaction: command.Transaction,
+			Candidate:   runtimeV2WorkspaceCreationCandidate(command, "new-deliverable.txt", "created\n"),
+		}, nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	module := newRuntimeV2GroundedTargetSequenceModule(t, hub, runtimeV2StateRepository{hub: hub})
+	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
+	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, module.handleRuntimeV2Drive)
+	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
+
+	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
+	if err != nil || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 3 {
+		t.Fatalf("bounded scope new-deliverable completion=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
+	}
+	content, err := os.ReadFile(filepath.Join(deliverable, "new-deliverable.txt"))
+	if err != nil || string(content) != "created\n" {
+		t.Fatalf("bounded scope new-deliverable content=%q err=%v", string(content), err)
+	}
+	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil || persisted.RuntimeState == nil || initialSelection != runtimecontract.RuntimeTargetSelectionScope || initialSnapshots != 2 ||
+		persisted.RuntimeState.Facts.Resources.TargetSelection == nil || persisted.RuntimeState.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionScope ||
+		persisted.RuntimeState.Facts.Resources.TargetSelection.CandidateCount != 3 || len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 3 ||
+		len(persisted.RuntimeState.OperationReceipts) != 2 || len(persisted.RuntimeState.Facts.Evidence.Accepted) != 2 {
+		t.Fatalf("bounded scope new-deliverable authority=%+v err=%v", persisted, err)
+	}
+}
+
+func runtimeV2EmptyWorkspaceCreationCandidate(command orchestratorevents.RequestRuntimeCandidateCommand) runtimecontract.RuntimeCandidate {
+	return runtimeV2WorkspaceCreationCandidate(command, "implementation.txt", "created\n")
+}
+
+func runtimeV2WorkspaceCreationCandidate(command orchestratorevents.RequestRuntimeCandidateCommand, target, content string) runtimecontract.RuntimeCandidate {
+	switch command.Decision.Action {
+	case runtimecontract.RuntimeActionProduceStateChange:
+		return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+			ID: "create-deliverable", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
+			Parameters: []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "content", String: &content}},
+		}}}}}
+	case runtimecontract.RuntimeActionProduceValidation:
+		return runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
+			ID: "read-created-deliverable", Kind: runtimecontract.StepKindFileRead, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target}, Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &target}},
+		}}}}}
+	case runtimecontract.RuntimeActionProduceAssessment:
+		refs := make([]string, 0, len(command.CandidateContext.Evidence.Accepted))
+		for _, evidence := range command.CandidateContext.Evidence.Accepted {
+			refs = append(refs, string(evidence.ID))
+		}
+		return runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "created workspace deliverable validated", Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-v2", Satisfied: true, EvidenceRefs: refs}}, EvidenceRefs: refs}}
+	default:
+		return runtimecontract.RuntimeCandidate{}
+	}
 }
 
 func testRuntimeV2FileBackedUnresolvedTargetSelectionFailsWithoutProvider(t *testing.T, bootstrap runtimecontract.RuntimeBootstrap, disposition runtimecontract.RuntimeTargetSelectionDisposition, files map[string]string) {
@@ -2057,6 +2389,21 @@ func testRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(
 	if sealedDispatch.ID == "" || sealedDispatch.Candidate.StateChange == nil || len(sealedDispatch.Candidate.StateChange.Operations) != 1 {
 		t.Fatalf("recovered dispatch is unavailable for duplicate delivery: %+v", completed.CompletedDispatches)
 	}
+	// Recreate the File capability owner before asking it about the already
+	// committed receipt.  File owns execution only: the replay answer must come
+	// from Orchestrator's persisted receipt query, never from a process-local
+	// File adapter cache.
+	if err := fileOwner.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	restartedFileOwner := filemodule.New()
+	if err := restartedFileOwner.Configure(filemodule.Dependencies{EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := restartedFileOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = restartedFileOwner.Stop(ctx) })
 	duplicate, err := (eventRuntimeV2OperationExecutor{hub: hub}).ExecuteRuntimeOperation(ctx, runtimev2.RuntimeOperationExecutionRequest{
 		WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: sealedDispatch.ID, Transaction: sealedDispatch.Transaction,
 		Operation: sealedDispatch.Candidate.StateChange.Operations[0].Operation, Execution: claimed,
@@ -2100,6 +2447,113 @@ func testRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(
 	finalReceipt := terminalAggregate.RuntimeState.OperationReceipts[0]
 	if finalReceipt.ExecutionKey != receipt.ExecutionKey || finalReceipt.Fence != receipt.Fence || finalReceipt.BeforeHash != receipt.BeforeHash || finalReceipt.AfterHash != receipt.AfterHash {
 		t.Fatalf("terminal continuation replaced reconstructed receipt before=%+v after=%+v", receipt, finalReceipt)
+	}
+	// P3 may race with the eventual terminal delivery: a delayed duplicate
+	// receipt must remain an idempotent lookup, while a different receipt for
+	// the same sealed execution key/fence must be rejected.  In both cases the
+	// already committed SM-2 terminal authority is immutable; no new dispatch,
+	// evidence, candidate attempt, or provider request may appear.
+	duplicateTerminal, duplicateReceipt, err := restartedBiz.CommitRuntimeV2OperationReceipt(
+		ctx, "ws-v2", "run-v2", sealedDispatchID, finalReceipt.Fence, finalReceipt,
+	)
+	if err != nil || duplicateTerminal.StateRevision != terminalAggregate.RuntimeState.StateRevision ||
+		!runtimecontract.SameRuntimeOperationReceipt(duplicateReceipt, finalReceipt) {
+		t.Fatalf("duplicate receipt after terminal aggregate=%+v receipt=%+v err=%v", duplicateTerminal, duplicateReceipt, err)
+	}
+	tamperedReceipt := finalReceipt.Clone()
+	tamperedReceipt.Evidence.Summary = "tampered delayed receipt"
+	if _, _, err := restartedBiz.CommitRuntimeV2OperationReceipt(ctx, "ws-v2", "run-v2", sealedDispatchID, tamperedReceipt.Fence, tamperedReceipt); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("different delayed receipt after terminal err=%v, want conflict", err)
+	}
+	immutableTerminal, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil || immutableTerminal.RuntimeState == nil ||
+		immutableTerminal.RuntimeState.StateRevision != terminalAggregate.RuntimeState.StateRevision ||
+		immutableTerminal.RuntimeState.Decision.Action != runtimecontract.RuntimeActionComplete ||
+		len(immutableTerminal.RuntimeState.OperationReceipts) != 1 || len(immutableTerminal.RuntimeState.Facts.Evidence.Accepted) != 1 ||
+		providerCalls != 2 || stateChangeCalls != 1 {
+		t.Fatalf("late receipt changed terminal authority=%+v provider=%d stateChanges=%d err=%v", immutableTerminal, providerCalls, stateChangeCalls, err)
+	}
+
+	// Carry the recovered P3 receipt through a P5 owner acknowledgement loss.
+	// The workspace observer was only the File prerequisite adapter; terminal
+	// projection below deliberately uses the production Workspace owner.
+	workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
+	workspaces := filerepository.NewWorkspaceRepository(filepath.Join(root, "workspaces.json"))
+	if err := workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2",
+		DeliverableDirectory: deliverable, InternalDirectory: internalDir,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	workspaceOwner := workspacemodule.New()
+	if err := workspaceOwner.Configure(workspacemodule.Dependencies{
+		Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
+		Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := workspaceOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
+	deliveryModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(runs, workspaces, nil, nil), hub, nil)
+	results := filerepository.NewResultRepository(filepath.Join(root, "results.json"))
+	interruptedResults := &failAfterResultCreateRepository{ResultRepository: results}
+	firstResultOwner := resultmodule.New()
+	if err := firstResultOwner.Configure(resultmodule.Dependencies{
+		Results: interruptedResults, Artifacts: filerepository.NewArtifactRepository(filepath.Join(root, "artifacts.json")), EventHub: hub,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := firstResultOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := deliveryModule.deliverRuntimeV2Terminal(ctx, runtimeAggregateFromRecord(*terminalAggregate.RuntimeState)); err == nil {
+		t.Fatal("expected terminal Result acknowledgement loss after recovered receipt")
+	}
+	if !interruptedResults.fired {
+		t.Fatal("terminal Result acknowledgement loss was not reached")
+	}
+	if run, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2"); err != nil || run.State != common.RunStateActive {
+		t.Fatalf("P5 projected Run before Result acknowledgement restart: %+v err=%v", run, err)
+	}
+	if workspace, err := workspaces.Get(ctx, "ws-v2"); err != nil || workspace.ActiveRunID != "run-v2" {
+		t.Fatalf("P5 released Workspace before Result acknowledgement restart: %+v err=%v", workspace, err)
+	}
+	if err := firstResultOwner.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	restartedResultOwner := resultmodule.New()
+	if err := restartedResultOwner.Configure(resultmodule.Dependencies{
+		Results: results, Artifacts: filerepository.NewArtifactRepository(filepath.Join(root, "artifacts.json")), EventHub: hub,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := restartedResultOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = restartedResultOwner.Stop(ctx) })
+	persistedTerminal, err := restartedBiz.LoadRuntimeV2(ctx, "ws-v2", "run-v2")
+	if err != nil || persistedTerminal.StateRevision != terminalAggregate.RuntimeState.StateRevision || persistedTerminal.Decision.Action != runtimecontract.RuntimeActionComplete {
+		t.Fatalf("P3/P5 restart did not retain terminal authority=%+v err=%v", persistedTerminal, err)
+	}
+	if err := deliveryModule.deliverRuntimeV2Terminal(ctx, persistedTerminal); err != nil {
+		t.Fatalf("P3/P5 terminal replay: %v", err)
+	}
+	if items, err := results.ListByRun(ctx, "run-v2"); err != nil || len(items) != 1 || items[0].State != common.ResultStateAccepted {
+		t.Fatalf("P3/P5 Result replay=%+v err=%v", items, err)
+	}
+	if run, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2"); err != nil || run.State != common.RunStateCompleted {
+		t.Fatalf("P3/P5 Run replay=%+v err=%v", run, err)
+	}
+	if workspace, err := workspaces.Get(ctx, "ws-v2"); err != nil || workspace.ActiveRunID != "" {
+		t.Fatalf("P3/P5 Workspace replay=%+v err=%v", workspace, err)
+	}
+	finalAggregate, err := restartedBiz.LoadRuntimeV2(ctx, "ws-v2", "run-v2")
+	if err != nil || finalAggregate.StateRevision != terminalAggregate.RuntimeState.StateRevision ||
+		len(finalAggregate.OperationReceipts) != 1 || len(finalAggregate.Facts.Evidence.Accepted) != 1 ||
+		providerCalls != 2 || stateChangeCalls != 1 {
+		t.Fatalf("P3/P5 replay rewrote authority=%+v provider=%d stateChanges=%d err=%v", finalAggregate, providerCalls, stateChangeCalls, err)
 	}
 }
 

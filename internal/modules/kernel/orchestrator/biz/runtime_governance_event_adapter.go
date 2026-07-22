@@ -16,6 +16,16 @@ import (
 )
 
 func (m *Biz) handleRuntimeV2GovernanceTicketResolution(event magicevent.Event, result magicevent.Result) {
+	if m == nil {
+		setRuntimeV2GovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument)
+		return
+	}
+	m.lifecycleMu.RLock()
+	defer m.lifecycleMu.RUnlock()
+	m.handleRuntimeV2GovernanceTicketResolutionLocked(event, result)
+}
+
+func (m *Biz) handleRuntimeV2GovernanceTicketResolutionLocked(event magicevent.Event, result magicevent.Result) {
 	command, ok := event.Data().(orchestratorevents.CommitRuntimeGovernanceTicketResolutionCommand)
 	if !ok || m == nil || m.bizPtr == nil || command.ResolutionID == "" || command.TicketID == "" || command.WorkspaceID == "" || command.RunID == "" || strings.TrimSpace(command.Summary) == "" {
 		setRuntimeV2GovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument)
@@ -38,7 +48,7 @@ func (m *Biz) handleRuntimeV2GovernanceTicketResolution(event magicevent.Event, 
 		setRuntimeV2GovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, fmt.Errorf("%w: runtime governance ticket has no persisted binding", common.ErrConflict))
 		return
 	}
-	m.handleRuntimeV2GovernanceResolution(magicevent.NewEventWithContext(
+	m.handleRuntimeV2GovernanceResolutionLocked(magicevent.NewEventWithContext(
 		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution,
 		event.Source(), ModuleID, magicevent.NewHeader(), event.Context(),
 		orchestratorevents.CommitRuntimeGovernanceResolutionCommand{Resolution: runtimecontract.RuntimeGovernanceResolution{
@@ -87,6 +97,16 @@ func CommitRuntimeGovernanceResolution(ctx context.Context, hub magicevent.Hub, 
 }
 
 func (m *Biz) handleRuntimeV2GovernanceResolution(event magicevent.Event, result magicevent.Result) {
+	if m == nil {
+		setRuntimeV2GovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument)
+		return
+	}
+	m.lifecycleMu.RLock()
+	defer m.lifecycleMu.RUnlock()
+	m.handleRuntimeV2GovernanceResolutionLocked(event, result)
+}
+
+func (m *Biz) handleRuntimeV2GovernanceResolutionLocked(event magicevent.Event, result magicevent.Result) {
 	command, ok := event.Data().(orchestratorevents.CommitRuntimeGovernanceResolutionCommand)
 	if !ok || m == nil || m.bizPtr == nil {
 		setRuntimeV2GovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument)

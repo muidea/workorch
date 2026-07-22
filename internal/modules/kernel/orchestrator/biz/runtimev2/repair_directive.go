@@ -191,7 +191,7 @@ func repairDirectiveTargets(facts runtimecontract.RuntimeFacts, fallback []strin
 	if facts.Failure != nil && len(facts.Failure.TargetRefs) > 0 {
 		return append([]string(nil), facts.Failure.TargetRefs...)
 	}
-	if selection := facts.Resources.TargetSelection; selection != nil && selection.Disposition == runtimecontract.RuntimeTargetSelectionSelected && len(selection.TargetRefs) > 0 {
+	if selection := facts.Resources.TargetSelection; selection != nil && targetSelectionHasTargets(*selection) {
 		return append([]string(nil), selection.TargetRefs...)
 	}
 	return append([]string(nil), fallback...)
@@ -201,11 +201,13 @@ func acceptedStateChangeAfterRepairDirective(facts runtimecontract.RuntimeFacts,
 	if directive == nil {
 		return false
 	}
-	// Assessment-required focuses need a persisted post-change assessment before
-	// SM-2 can claim that the repair progressed or move on to validation.
-	if facts.Focus.RequireAssessment {
-		return false
-	}
+	// Assessment is the final evidence-quality gate, after every required
+	// evidence kind is present.  It must not keep a state-change repair
+	// directive active when that repair has already produced a later accepted
+	// durable effect and the focus still lacks validation: doing so would force
+	// another produce_state_change candidate instead of returning to the
+	// reducer's missing-validation branch.  Assessment-required focuses still
+	// cannot close coverage until the normal assessment decision is reached.
 	baseline := strings.TrimSpace(directive.SupersedesEvidenceRevision)
 	requiredTargets := directive.TargetRefs
 	for _, evidence := range facts.Evidence.Accepted {

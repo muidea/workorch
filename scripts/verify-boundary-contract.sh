@@ -135,6 +135,30 @@ EOF
   exit 1
 fi
 
+# Component pkg/ is a contract/value boundary.  It may define DTOs, event
+# contracts and pure normalization/validation helpers, but it must not become
+# a hidden lifecycle, EventHub, repository or transport owner.  Keep this
+# check independent of rg because the CI image intentionally only requires
+# portable POSIX tooling.
+matches="$(
+  find internal/modules -type f -path '*/pkg/*.go' ! -name '*_test.go' -print0 |
+    xargs -0 -r grep -n -E -- 'github\.com/muidea/magicCommon/(event|task)|"(os|os/exec|net/http|database/sql|io|io/fs|path/filepath)"|internal/pkg/repository|NewSimpleObserver|\.Subscribe\(|\.Unsubscribe\(|\.Send\(|\.Post\(' || true
+)"
+if [[ -n "$matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: component pkg/ may only contain DTOs, contracts
+and pure stateless helpers. It must not import EventHub/task, filesystem,
+process, network, database or repository infrastructure, or publish/subscribe
+events.
+
+$matches
+
+Move lifecycle, I/O and aggregate transition ownership into the component Biz
+or a focused owner-local adapter. Keep pkg/ values and pure helpers only.
+EOF
+  exit 1
+fi
+
 # These terms are allowed in e2e scripts, tests, and docs, where a concrete
 # acceptance dataset can describe a business scenario. They are forbidden in
 # reusable runtime layers because those layers must not synthesize business

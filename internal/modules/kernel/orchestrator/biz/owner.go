@@ -242,6 +242,18 @@ func (m *Biz) handleMagicCommand(ev magicevent.Event, result magicevent.Result) 
 }
 
 func (m *Biz) executeMagicCommand(ev magicevent.Event) (orchestratorevents.OrchestratorCommandResult, error) {
+	if m == nil {
+		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
+	}
+	// Command handlers can race with framework teardown after their EventHub
+	// subscription was already queued. Keep the owner dependencies live for the
+	// full typed command; this does not grant SM-1 authority to choose an action.
+	m.lifecycleMu.RLock()
+	defer m.lifecycleMu.RUnlock()
+	return m.executeMagicCommandLocked(ev)
+}
+
+func (m *Biz) executeMagicCommandLocked(ev magicevent.Event) (orchestratorevents.OrchestratorCommandResult, error) {
 	if m == nil || m.bizPtr == nil {
 		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 	}

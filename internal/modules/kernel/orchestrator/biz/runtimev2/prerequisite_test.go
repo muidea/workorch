@@ -192,6 +192,67 @@ func TestReduceRuntimeStateWithDirectiveDoesNotRequestStateChangeWithoutOwnerGro
 	}
 }
 
+func TestReduceRuntimeStateWithDirectiveAllowsOwnerGroundedEmptyWorkspaceCreation(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.RequireTargetGrounding = true
+	facts.Focus.TargetRole = "deliverable"
+	facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	facts.Focus.TargetSelectorRef = "file/workspace_deliverable"
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "target_selection:blocks/file:deliverable:file/workspace_deliverable:::0",
+		OwnerModuleID:  runtimecontract.RuntimeModuleFile, TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable",
+		Disposition: runtimecontract.RuntimeTargetSelectionCreate, CandidateCount: 0, ObservedRevision: "empty-workspace-v1",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	facts.Resources.TargetSelection = &selection
+	facts.Resources.Manifest = &runtimecontract.WorkspaceManifest{Revision: "empty-workspace-v1"}
+	inventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "operation_admissibility:blocks/file:::patch/apply::0", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}, SelectorRefs: []string{"workspace-relative-new-file-target"},
+		ObservedRevision: "empty-workspace-v1",
+	}
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
+	facts.Prerequisites = runtimecontract.PrerequisiteState{}
+
+	updated, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionProduceStateChange || decision.RequiredOutput.Kind != runtimecontract.RequiredOutputKindStateChange || len(decision.RequiredOutput.TargetRefs) != 0 || len(updated.Prerequisites.Pending) != 0 {
+		t.Fatalf("empty workspace creation decision=%+v prerequisites=%+v", decision, updated.Prerequisites)
+	}
+}
+
+func TestReduceRuntimeStateWithDirectiveSnapshotsBoundedOwnerWorkspaceScope(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.RequireTargetGrounding = true
+	facts.Focus.TargetRole = "deliverable"
+	facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	facts.Focus.TargetSelectorRef = "file/workspace_deliverable"
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "target_selection:blocks/file:deliverable:file/workspace_deliverable:::0", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable", Disposition: runtimecontract.RuntimeTargetSelectionScope,
+		TargetRefs: []string{"implementation.go", "support.go"}, CandidateTargetRefs: []string{"implementation.go", "support.go"}, CandidateCount: 2, ObservedRevision: "workspace-tree-v1",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	facts.Resources.TargetSelection = &selection
+	facts.Resources.Manifest = &runtimecontract.WorkspaceManifest{Revision: "workspace-tree-v1", TargetRefs: []string{"implementation.go", "support.go"}}
+	facts.Prerequisites = runtimecontract.PrerequisiteState{}
+
+	updated, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(updated.Prerequisites.Pending) != 2 ||
+		updated.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindTargetSnapshot || updated.Prerequisites.Pending[1].Kind != runtimecontract.PrerequisiteKindTargetSnapshot ||
+		updated.Prerequisites.Pending[0].SubjectRef != "implementation.go" || updated.Prerequisites.Pending[1].SubjectRef != "support.go" {
+		t.Fatalf("workspace scope prerequisites decision=%+v prerequisites=%+v", decision, updated.Prerequisites)
+	}
+}
+
 func TestReduceRuntimeStateWithDirectiveTerminatesUngroundedStateChangeWithoutGovernance(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.RequireTargetGrounding = true

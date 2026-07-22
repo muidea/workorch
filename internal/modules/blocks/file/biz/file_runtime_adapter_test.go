@@ -44,6 +44,18 @@ func TestRuntimeAdapterProbeRejectsDirectoryPatchTargetWithoutMutation(t *testin
 
 func TestRuntimeAdapterAcquireRuntimeTargetSelectionIsCardinalityBounded(t *testing.T) {
 	adapter := NewRuntimeAdapter()
+	t.Run("empty workspace grounds creation scope", func(t *testing.T) {
+		selection, err := adapter.AcquireRuntimeTargetSelection(t.TempDir(), "target-selection-create", "deliverable", runtimeFileTargetSelectorWorkspaceDeliverable, 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selection.Disposition != runtimecontract.RuntimeTargetSelectionCreate || selection.CandidateCount != 0 || len(selection.TargetRefs) != 0 || len(selection.CandidateTargetRefs) != 0 || selection.SnapshotID == "" {
+			t.Fatalf("empty workspace creation selection = %+v", selection)
+		}
+		if selection.SelectorRef != runtimeFileTargetSelectorWorkspaceDeliverable {
+			t.Fatalf("creation selection lost owner selector binding: %+v", selection)
+		}
+	})
 	t.Run("unique", func(t *testing.T) {
 		workspace := t.TempDir()
 		if err := os.WriteFile(filepath.Join(workspace, "deliverable.txt"), []byte("value\n"), 0o644); err != nil {
@@ -58,6 +70,28 @@ func TestRuntimeAdapterAcquireRuntimeTargetSelectionIsCardinalityBounded(t *test
 		}
 		if selection.SelectorRef != runtimeFileTargetSelectorUniqueWorkspaceEntry {
 			t.Fatalf("unique selection lost owner selector binding: %+v", selection)
+		}
+	})
+	t.Run("bounded workspace scope", func(t *testing.T) {
+		workspace := t.TempDir()
+		for _, name := range []string{"implementation.txt", "support.txt"} {
+			if err := os.WriteFile(filepath.Join(workspace, name), []byte(name), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		selection, err := adapter.AcquireRuntimeTargetSelection(workspace, "target-selection-scope", "deliverable", runtimeFileTargetSelectorWorkspaceDeliverable, 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selection.Disposition != runtimecontract.RuntimeTargetSelectionScope || selection.CandidateCount != 2 || len(selection.TargetRefs) != 2 || len(selection.CandidateTargetRefs) != 2 || selection.TargetRefs[0] != "implementation.txt" || selection.TargetRefs[1] != "support.txt" {
+			t.Fatalf("workspace scope selection = %+v", selection)
+		}
+		bounded, err := adapter.AcquireRuntimeTargetSelection(workspace, "target-selection-scope-bounded", "deliverable", runtimeFileTargetSelectorWorkspaceDeliverable, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bounded.Disposition != runtimecontract.RuntimeTargetSelectionAmbiguous || bounded.CandidateCount != 2 || len(bounded.TargetRefs) != 0 || len(bounded.CandidateTargetRefs) != 1 {
+			t.Fatalf("bounded workspace scope selection = %+v", bounded)
 		}
 	})
 	t.Run("ambiguous", func(t *testing.T) {

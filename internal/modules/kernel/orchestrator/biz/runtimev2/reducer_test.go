@@ -215,6 +215,58 @@ func TestReduceRuntimeStateMissingConcreteCapabilityUsesFormalDecision(t *testin
 	}
 }
 
+func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t *testing.T) {
+	newCreationFacts := func() runtimecontract.RuntimeFacts {
+		facts := validationFacts()
+		facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+		facts.Focus.TargetRole = "deliverable"
+		facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+		facts.Focus.TargetSelectorRef = "file/workspace_deliverable"
+		facts.Focus.RequireTargetGrounding = true
+		selection := runtimecontract.RuntimeTargetSelection{
+			PrerequisiteID: "selection-1", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			TargetRole: facts.Focus.TargetRole, SelectorRef: facts.Focus.TargetSelectorRef,
+			Disposition: runtimecontract.RuntimeTargetSelectionCreate, CandidateCount: 0, ObservedRevision: "workspace-empty-v1",
+		}
+		selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+		facts.Resources.TargetSelection = &selection
+		return facts
+	}
+
+	t.Run("fails before provider when only non-file durable capability is sealed", func(t *testing.T) {
+		facts := newCreationFacts()
+		facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindGitWrite}
+		facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindGitWrite}
+		decision, err := ReduceRuntimeState(facts, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "creation_scope_file_capability_unavailable" {
+			t.Fatalf("creation scope without File admission decision = %+v", decision)
+		}
+	})
+
+	t.Run("permits owner-declared new-file selector", func(t *testing.T) {
+		facts := newCreationFacts()
+		facts.Focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
+		facts.Capabilities.StateChangeKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
+		inventory := runtimecontract.RuntimeOperationAdmissibility{
+			PrerequisiteID: "admissibility-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			OperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}, SelectorRefs: []string{"owner-new-target-selector"},
+			ObservedRevision: "workspace-empty-v1",
+		}
+		inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+		facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
+		decision, err := ReduceRuntimeState(facts, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(decision.RequiredOutput.AcceptedKinds) != 1 || decision.RequiredOutput.AcceptedKinds[0] != runtimecontract.RuntimeBlockKindPatchApply {
+			t.Fatalf("creation scope File admission decision = %+v", decision)
+		}
+	})
+}
+
 func TestReduceRuntimeStateAttemptOnlyIncrementsForSameFactsRevision(t *testing.T) {
 	facts := validationFacts()
 	first, err := ReduceRuntimeState(facts, nil)

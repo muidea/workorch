@@ -63,8 +63,9 @@ func TestRepairDirectiveSurvivesPrerequisiteReacquisition(t *testing.T) {
 	}
 }
 
-func TestRepairDirectiveFlipsOnlyAfterAcceptedStateChange(t *testing.T) {
+func TestRepairDirectiveFlipsToValidationAfterAcceptedStateChangeEvenWhenAssessmentIsRequired(t *testing.T) {
 	facts := validationFacts()
+	facts.Focus.RequireAssessment = true
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
 	facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{
 		ID: "repair-cwi-1-produce_state_change-0", FocusID: facts.Focus.ID,
@@ -143,7 +144,7 @@ func TestRepairDirectiveDoesNotFlipForAcceptedStateChangeOutsideGroundedTarget(t
 	}
 }
 
-func TestRepairDirectiveDoesNotFlipBeforeRequiredAssessment(t *testing.T) {
+func TestRepairDirectiveStateChangeEvidenceCanAdvanceBeforeRequiredAssessment(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.RequireAssessment = true
 	facts.Focus.TargetRefs = []string{"implementation.go"}
@@ -162,8 +163,8 @@ func TestRepairDirectiveDoesNotFlipBeforeRequiredAssessment(t *testing.T) {
 	if updated.RepairDirective != nil {
 		t.Fatalf("assessment boundary should clear repair directive for fresh assessment: %+v", updated.RepairDirective)
 	}
-	if acceptedStateChangeAfterRepairDirective(facts, facts.RepairDirective) {
-		t.Fatal("assessment-required focus treated state change as completed repair before assessment")
+	if !acceptedStateChangeAfterRepairDirective(facts, facts.RepairDirective) {
+		t.Fatal("accepted repair state change must advance to missing validation before assessment")
 	}
 }
 

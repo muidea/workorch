@@ -245,6 +245,15 @@ func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecont
 		}
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "capability_unavailable", "state-change authority has no concrete runtime capability"), nil
 	}
+	// An empty-workspace create scope is owner-grounded permission to propose a
+	// new File target, not a general durable-operation grant.  Fail before the
+	// provider when the persisted File admissibility observation cannot accept a
+	// new target for any sealed durable File kind; otherwise retries would only
+	// cycle through candidates that the File owner must reject.
+	if hasOwnerGroundedCreationScope(facts) && !creationScopeHasAdmissibleFileOperation(facts, acceptedKinds) {
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail,
+			"creation_scope_file_capability_unavailable", "empty workspace creation scope has no admissible durable File operation"), nil
+	}
 	base.State = runtimecontract.ConvergenceStateNeedStateChange
 	base.Action = runtimecontract.RuntimeActionProduceStateChange
 	base.RequiredOutput = runtimecontract.RequiredOutputContract{
@@ -259,6 +268,36 @@ func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecont
 		RequiredOperationSequence: requiredCapabilityStateSequence(facts, acceptedKinds),
 	}
 	return base, nil
+}
+
+// creationScopeHasAdmissibleFileOperation checks only the committed owner
+// inventory. It does not know a selector name, choose a path, inspect a
+// workspace, or call a capability owner: a non-empty File SelectorRefs list
+// is the owner's opaque assertion that the listed kind may receive a new
+// concrete target. Keeping that interpretation in SM-2 prevents the LLM from
+// treating an empty workspace as authority for Git/Shell/MCP side effects.
+func creationScopeHasAdmissibleFileOperation(facts runtimecontract.RuntimeFacts, acceptedKinds []string) bool {
+	accepted := make(map[string]struct{}, len(acceptedKinds))
+	for _, kind := range acceptedKinds {
+		accepted[runtimecontract.CanonicalRuntimeBlockKind(kind)] = struct{}{}
+	}
+	for _, inventory := range facts.Resources.OperationAdmissibilities {
+		inventory = inventory.Normalized()
+		if inventory.OwnerModuleID != runtimecontract.RuntimeModuleFile || len(inventory.SelectorRefs) == 0 {
+			continue
+		}
+		for _, kind := range inventory.OperationKinds {
+			kind = runtimecontract.CanonicalRuntimeBlockKind(kind)
+			if _, permitted := accepted[kind]; !permitted {
+				continue
+			}
+			descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(kind)
+			if known && descriptor.OwnerModuleID == runtimecontract.RuntimeModuleFile && runtimecontract.RuntimeEffectIsDurable(descriptor.DefaultEffectScope) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // requiredCapabilityStateSequence only contributes a capability owner's
@@ -329,12 +368,32 @@ func validationDecision(base runtimecontract.RuntimeDecision, facts runtimecontr
 // always closes this path with a typed terminal. Capability owners and the
 // shared contract package only carry observations; SM-2 owns the terminal.
 func targetGroundingDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, allowAcceptedStateChangeLineage bool) (runtimecontract.RuntimeDecision, bool, error) {
-	if !facts.Focus.RequireTargetGrounding || len(GroundedRepairTargets(facts)) != 0 ||
+	if !facts.Focus.RequireTargetGrounding || len(GroundedRepairTargets(facts)) != 0 || hasOwnerGroundedCreationScope(facts) ||
 		(allowAcceptedStateChangeLineage && hasCurrentFocusTargetBoundStateChangeEvidence(facts)) {
 		return runtimecontract.RuntimeDecision{}, false, nil
 	}
 	const summary = "direct-evidence focus requires an owner-grounded target; workspace discovery alone did not select one"
 	return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "target_grounding_unresolved", summary), true, nil
+}
+
+// hasOwnerGroundedCreationScope is the empty-workspace counterpart to an
+// existing target snapshot. It is true only for the File owner's persisted
+// creation observation; the reducer never derives a file path from Goal, DoD,
+// manifest ordering, or provider text.
+func hasOwnerGroundedCreationScope(facts runtimecontract.RuntimeFacts) bool {
+	selection := facts.Resources.TargetSelection
+	return selection != nil && selection.Disposition == runtimecontract.RuntimeTargetSelectionCreate &&
+		selection.OwnerModuleID == runtimecontract.RuntimeModuleFile
+}
+
+func hasOwnerGroundedTargetScope(facts runtimecontract.RuntimeFacts) bool {
+	selection := facts.Resources.TargetSelection
+	return selection != nil && selection.Disposition == runtimecontract.RuntimeTargetSelectionScope &&
+		selection.OwnerModuleID == runtimecontract.RuntimeModuleFile && len(selection.TargetRefs) != 0
+}
+
+func targetSelectionHasTargets(selection runtimecontract.RuntimeTargetSelection) bool {
+	return (selection.Disposition == runtimecontract.RuntimeTargetSelectionSelected || selection.Disposition == runtimecontract.RuntimeTargetSelectionScope) && len(selection.TargetRefs) != 0
 }
 
 func hasCurrentFocusTargetBoundStateChangeEvidence(facts runtimecontract.RuntimeFacts) bool {

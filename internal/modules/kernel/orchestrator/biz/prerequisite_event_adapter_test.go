@@ -86,6 +86,19 @@ func TestAcquireRuntimeTargetSelectionPrerequisiteUsesTypedEventHubContract(t *t
 	if result.Selection.Disposition != runtimecontract.RuntimeTargetSelectionSelected || result.Selection.SelectorRef != "file/unique_workspace_entry" || len(result.Selection.TargetRefs) != 1 || result.Selection.TargetRefs[0] != "implementation.txt" || result.Observation == nil {
 		t.Fatalf("target selection result = %+v", result)
 	}
+	emptyWorkspace := t.TempDir()
+	creation, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, orchestratorevents.AcquireRuntimeTargetSelectionCommand{
+		WorkspaceID: "ws-selection", RunID: "run-selection", AuthoritySnapshotID: "authority-1",
+		PrerequisiteID: "target_selection:blocks/file:deliverable:file/workspace_deliverable:::0", WorkspaceDeliverableDirectory: emptyWorkspace,
+		TargetRole: "deliverable", TargetSelectorRef: "file/workspace_deliverable", MaxItems: 4,
+	})
+	if err != nil {
+		t.Fatalf("AcquireRuntimeTargetSelectionPrerequisite() empty workspace error = %v", err)
+	}
+	if creation.Selection.Disposition != runtimecontract.RuntimeTargetSelectionCreate || creation.Selection.CandidateCount != 0 || len(creation.Selection.TargetRefs) != 0 || creation.Observation == nil ||
+		len(creation.Observation.Dependencies) != 1 || creation.Observation.Dependencies[0].Domain != runtimecontract.RuntimeResourceWorkspaceTree || creation.Observation.Dependencies[0].Revision != creation.Selection.ObservedRevision {
+		t.Fatalf("empty workspace creation selection = %+v", creation)
+	}
 	_, err = AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, orchestratorevents.AcquireRuntimeTargetSelectionCommand{
 		WorkspaceID: "ws-selection", RunID: "run-selection", AuthoritySnapshotID: "authority-1",
 		PrerequisiteID: "target_selection:blocks/file:deliverable:profile/free_form_selector:::0", WorkspaceDeliverableDirectory: workspace,

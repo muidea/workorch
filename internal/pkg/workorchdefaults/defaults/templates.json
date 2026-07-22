@@ -866,7 +866,7 @@
                 "workspace_manifest",
                 "project_files"
               ],
-              "targetSelectorRef": "file/unique_workspace_entry",
+              "targetSelectorRef": "file/workspace_deliverable",
               "requireTargetGrounding": true,
               "requireDirectEvidence": true,
               "requireCoverageTargets": true,
@@ -919,7 +919,7 @@
                 "workspace_manifest",
                 "project_files"
               ],
-              "targetSelectorRef": "file/unique_workspace_entry",
+              "targetSelectorRef": "file/workspace_deliverable",
               "requireTargetGrounding": true,
               "requireDirectEvidence": true,
               "requireClaimEvidence": true,
@@ -946,7 +946,7 @@
                 "workspace_manifest",
                 "project_files"
               ],
-              "targetSelectorRef": "file/unique_workspace_entry",
+              "targetSelectorRef": "file/workspace_deliverable",
               "requireTargetGrounding": true,
               "requireDirectEvidence": true,
               "requireClaimEvidence": true,

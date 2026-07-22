@@ -17,10 +17,19 @@ func runtimeOperationMagicFailure(err error) *cd.Error {
 }
 
 func (m *Biz) handleRuntimeV2OperationReceipt(event magicevent.Event, result magicevent.Result) {
-	if m == nil || m.bizPtr == nil || result == nil {
+	if m == nil || result == nil {
 		if result != nil {
 			result.Set(nil, runtimeOperationMagicFailure(common.ErrInvalidArgument))
 		}
+		return
+	}
+	// Query/commit receipt events may have been dequeued before Stop removed its
+	// subscription. They share the same Runtime V2 owner dependencies as drive
+	// and therefore must finish or reject before Stop clears those pointers.
+	m.lifecycleMu.RLock()
+	defer m.lifecycleMu.RUnlock()
+	if m.bizPtr == nil {
+		result.Set(nil, runtimeOperationMagicFailure(common.ErrInvalidArgument))
 		return
 	}
 	switch event.ID() {

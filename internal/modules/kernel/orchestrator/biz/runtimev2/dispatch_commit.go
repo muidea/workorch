@@ -516,7 +516,7 @@ func validationFailureTargetsAreGrounded(facts runtimecontract.RuntimeFacts, fai
 	if facts.Resources.FailureTarget != nil {
 		grounded = append(grounded, facts.Resources.FailureTarget.TargetRefs...)
 	}
-	if selection := facts.Resources.TargetSelection; selection != nil && selection.Disposition == runtimecontract.RuntimeTargetSelectionSelected {
+	if selection := facts.Resources.TargetSelection; selection != nil && targetSelectionHasTargets(*selection) {
 		grounded = append(grounded, selection.TargetRefs...)
 	}
 	if facts.RepairDirective != nil {

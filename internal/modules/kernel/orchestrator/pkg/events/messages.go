@@ -47,7 +47,7 @@ type AcquireTargetSnapshotResult struct {
 // AcquireRuntimeTargetSelectionCommand asks the File owner for a bounded
 // target-selection observation. TargetRole is opaque to the owner; the owner
 // may only apply its declared neutral selection rule to the workspace
-// inventory and must return selected, absent, or ambiguous facts.
+// inventory and must return selected, create, scope, absent, or ambiguous facts.
 type AcquireRuntimeTargetSelectionCommand struct {
 	WorkspaceID                   common.WorkspaceID
 	RunID                         common.RunID

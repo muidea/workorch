@@ -70,7 +70,12 @@ type runtimeCandidateContextProjection struct {
 	NoProgressOperationShapes []runtimecontract.RuntimeRejectedOperationShape `json:"noProgressOperationShapes,omitempty"`
 	Capabilities              runtimecontract.RuntimeCapabilities             `json:"capabilities"`
 	Resources                 runtimeCandidateResourceProjection              `json:"resources"`
-	Activation                runtimeCandidateActivationProjection            `json:"activation"`
+	// TargetSelectionInstruction makes a sealed File-owner creation scope
+	// actionable for the provider.  It is volatile C3 guidance derived only
+	// from the persisted selection; it neither creates a target fact nor grants
+	// any operation that the owner has not already declared admissible.
+	TargetSelectionInstruction string                               `json:"targetSelectionInstruction,omitempty"`
+	Activation                 runtimeCandidateActivationProjection `json:"activation"`
 }
 
 type runtimeCandidateOutputContractProjection struct {
@@ -536,6 +541,7 @@ func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidat
 			CapabilityStates: context.Resources.CapabilityStates, OperationAdmissibilities: context.Resources.OperationAdmissibilities,
 			PrerequisiteObservations: context.Resources.PrerequisiteObservations,
 		},
+		TargetSelectionInstruction: runtimeV2TargetSelectionInstruction(context.Resources.TargetSelection, action),
 		Activation: runtimeCandidateActivationProjection{
 			DialogLanguage: activation.DialogLanguage, CurrentStage: stage, Soul: runtimeV2CandidateSoul(activation, stage),
 			Skills: activation.Skills, MCPServerIDs: activation.MCPServerIDs,
@@ -543,6 +549,22 @@ func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidat
 			Memories:        activation.Memories, EvidencePolicies: activation.EvidencePolicies, Continuation: activation.Continuation,
 		},
 	}
+}
+
+// runtimeV2TargetSelectionInstruction converts the persisted File-owner
+// selection disposition into provider-facing C3 guidance.  A create scope is
+// intentionally not a target selection: the candidate may propose a concrete
+// relative path from the Goal/DoD, but only a durable File-owner operation is
+// admissible and the File owner remains the final path authority.
+func runtimeV2TargetSelectionInstruction(selection *runtimecontract.RuntimeTargetSelection, action runtimecontract.RuntimeAction) string {
+	if selection == nil || action != runtimecontract.RuntimeActionProduceStateChange {
+		return ""
+	}
+	value := selection.Normalized()
+	if value.Disposition != runtimecontract.RuntimeTargetSelectionCreate || value.OwnerModuleID != runtimecontract.RuntimeModuleFile {
+		return ""
+	}
+	return "The File owner observed an empty workspace creation scope. Propose at least one durable File-owner operation with a concrete workspace-relative targetRefs entry and matching target parameter. Choose that proposed path from the Goal and DoD; do not leave it blank, and do not use this scope to authorize Git, Shell, MCP, or another owner. The File owner will validate the proposed path before execution."
 }
 
 func runtimeV2CandidateStage(action runtimecontract.RuntimeAction) string {

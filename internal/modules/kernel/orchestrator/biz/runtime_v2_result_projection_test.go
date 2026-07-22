@@ -404,6 +404,13 @@ func TestDeliverRuntimeV2TerminalRestartsAfterOwnerProjectionAcknowledgementLoss
 			if err := restartedOrchestrator.deliverRuntimeV2Terminal(ctx, restartedAggregate); err != nil {
 				t.Fatalf("restart terminal delivery: %v", err)
 			}
+			// The same restarted process may receive a duplicate delivery trigger
+			// after the first replay has completed.  It must reuse the persisted
+			// terminal authority and the already-created Result rather than
+			// allocating another projection or attempting a reducer transition.
+			if err := restartedOrchestrator.deliverRuntimeV2Terminal(ctx, restartedAggregate); err != nil {
+				t.Fatalf("duplicate restart terminal delivery: %v", err)
+			}
 			if run, err := baseRuns.Get(ctx, "run-v2"); err != nil || run.State != common.RunStateFailed {
 				t.Fatalf("restart Run=%+v err=%v", run, err)
 			}

@@ -653,6 +653,123 @@ func TestRuntimeV2StateRepositoryTargetSelectionCommitCrashRestartIsAtomic(t *te
 	}
 }
 
+// Creation scope is a distinct owner observation from an existing target.
+// Exercise its Run-owner CAS boundaries explicitly: a restart may observe
+// either the pending prerequisite or the fully committed scope, never a
+// partial scope that would authorize a candidate without File's fact.
+func TestRuntimeV2StateRepositoryCreationSelectionCommitCrashRestartIsAtomic(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	runs := filerepository.NewRunRepository(filepath.Join(t.TempDir(), "runs.json"))
+	if err := runs.Create(ctx, runtimeV2RunForTest(common.RunStateActive, runtimeV2Definition())); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+
+	facts := runtimeV2Aggregate(t, 1).Facts
+	facts.Focus.TargetRefs = nil
+	facts.Focus.TargetRole = "deliverable"
+	facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	facts.Focus.TargetSelectorRef = "file/workspace_deliverable"
+	facts.Focus.RequireTargetGrounding = true
+	repository := runtimeV2StateRepository{hub: hub}
+	controller, err := runtimev2.NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialized, err := controller.Initialize(ctx, facts, runtimeV2Definition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prerequisite runtimecontract.RuntimePrerequisite
+	for _, value := range initialized.Facts.Prerequisites.Pending {
+		if value.Kind == runtimecontract.PrerequisiteKindTargetSelection {
+			prerequisite = value
+			break
+		}
+	}
+	if prerequisite.ID == "" {
+		t.Fatalf("creation selection prerequisite missing: %+v", initialized.Facts.Prerequisites)
+	}
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: prerequisite.ID, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable",
+		Disposition: runtimecontract.RuntimeTargetSelectionCreate, CandidateCount: 0, ObservedRevision: "workspace-tree-empty-v1",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID, ContentHash: selection.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", Revision: selection.ObservedRevision,
+		}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	result := runtimev2.PrerequisiteResult{PrerequisiteID: prerequisite.ID, TargetSelection: &selection, Observation: &observation}
+
+	beforeCommit := &failOnceRuntimeStateRepository{RuntimeStateRepository: repository, err: errors.New("injected creation selection CAS failure")}
+	failedController, err := runtimev2.NewRuntimeController(beforeCommit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := failedController.CommitPrerequisite(ctx, "ws-v2", "run-v2", result); err == nil {
+		t.Fatal("creation selection persisted despite injected Run-owner CAS failure")
+	}
+	loadedBefore, err := controller.Load(ctx, "ws-v2", "run-v2")
+	if err != nil || loadedBefore.StateRevision != initialized.StateRevision || loadedBefore.Facts.Resources.TargetSelection != nil {
+		t.Fatalf("failed creation selection CAS partially persisted authority=%+v err=%v", loadedBefore, err)
+	}
+
+	responseLoss := &panicAfterRuntimeStateSaveRepository{
+		RuntimeStateRepository: repository, marker: "creation-selection-response-loss",
+		match: func(aggregate runtimev2.RuntimeAggregate) bool {
+			return aggregate.Facts.Resources.TargetSelection != nil && aggregate.Facts.Resources.TargetSelection.SnapshotID == selection.SnapshotID
+		},
+	}
+	responseLost, err := runtimev2.NewRuntimeController(responseLoss)
+	if err != nil {
+		t.Fatal(err)
+	}
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != "creation-selection-response-loss" {
+				t.Fatalf("unexpected creation selection response-loss marker: %v", recovered)
+			}
+		}()
+		_, _ = responseLost.CommitPrerequisite(ctx, "ws-v2", "run-v2", result)
+		t.Fatal("expected creation selection response loss after durable CAS")
+	}()
+	if !responseLoss.fired {
+		t.Fatal("creation selection response-loss CAS point was not reached")
+	}
+	restarted, err := runtimev2.NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loadedAfter, err := restarted.Load(ctx, "ws-v2", "run-v2")
+	if err != nil || loadedAfter.StateRevision <= initialized.StateRevision || loadedAfter.Facts.Resources.TargetSelection == nil ||
+		loadedAfter.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionCreate ||
+		loadedAfter.Facts.Resources.TargetSelection.SnapshotID != selection.SnapshotID {
+		t.Fatalf("restart did not reuse committed creation selection=%+v err=%v", loadedAfter, err)
+	}
+	if _, err := restarted.CommitPrerequisite(ctx, "ws-v2", "run-v2", result); err == nil {
+		t.Fatal("duplicate creation selection unexpectedly mutated committed aggregate")
+	}
+	final, err := controller.Load(ctx, "ws-v2", "run-v2")
+	if err != nil || final.StateRevision != loadedAfter.StateRevision || final.Facts.Resources.TargetSelection == nil ||
+		final.Facts.Resources.TargetSelection.SnapshotID != selection.SnapshotID {
+		t.Fatalf("duplicate creation selection changed persisted aggregate=%+v err=%v", final, err)
+	}
+}
+
 // A selected target is not usable until File has committed its current
 // snapshot. Verify the second half of that grounding gate has the same CAS
 // atomicity: a restart may see either the pending prerequisite or the complete

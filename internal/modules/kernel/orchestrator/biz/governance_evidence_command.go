@@ -18,6 +18,12 @@ import (
 )
 
 func (m *Biz) handleDecisionEvidenceCommand(ev magicevent.Event, result magicevent.Result) {
+	if m == nil {
+		setDecisionEvidenceResult(result, decisionevents.RecordDecisionEvidenceResult{}, common.ErrInvalidArgument)
+		return
+	}
+	m.lifecycleMu.RLock()
+	defer m.lifecycleMu.RUnlock()
 	command, ok := ev.Data().(decisionevents.RecordDecisionEvidenceCommand)
 	if !ok {
 		setDecisionEvidenceResult(result, decisionevents.RecordDecisionEvidenceResult{}, common.ErrInvalidArgument)
@@ -93,6 +99,12 @@ func setDecisionEvidenceResult(result magicevent.Result, response decisionevents
 }
 
 func (m *Biz) handleApprovalEvidenceCommand(ev magicevent.Event, result magicevent.Result) {
+	if m == nil {
+		setApprovalEvidenceResult(result, approvalevents.RecordApprovalEvidenceResult{}, common.ErrInvalidArgument)
+		return
+	}
+	m.lifecycleMu.RLock()
+	defer m.lifecycleMu.RUnlock()
 	command, ok := ev.Data().(approvalevents.RecordApprovalEvidenceCommand)
 	if !ok {
 		setApprovalEvidenceResult(result, approvalevents.RecordApprovalEvidenceResult{}, common.ErrInvalidArgument)

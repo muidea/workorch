@@ -24,12 +24,14 @@ const (
 	candidateAdmissionCodeReplaysNoProgressShape      = "candidate_replays_no_progress_shape"
 	candidateAdmissionCodeActionEvidenceMismatch      = "candidate_action_evidence_mismatch"
 	candidateAdmissionCodeTargetOutsideGrounding      = "candidate_target_outside_grounding"
+	candidateAdmissionCodeCreationScopeMissingTarget  = "candidate_creation_scope_missing_file_target"
 	candidateAdmissionSignatureInvalid                = "candidate-admission-invalid"
 	candidateAdmissionSignatureReplaysRejectedShape   = "candidate-replays-rejected-shape"
 	candidateAdmissionSignaturePartialReplay          = "candidate-partially-replays-rejected-shape"
 	candidateAdmissionSignatureNoProgressReplay       = "candidate-replays-no-progress-shape"
 	candidateAdmissionSignatureActionEvidenceMismatch = "candidate-action-evidence-mismatch"
 	candidateAdmissionSignatureTargetOutsideGrounding = "candidate-target-outside-grounding"
+	candidateAdmissionSignatureCreationScopeTarget    = "candidate-creation-scope-missing-file-target"
 )
 
 // CandidateAdmissionResult is a typed, expected candidate outcome. Error is
@@ -90,7 +92,37 @@ func rejectCandidateOutsideGroundedTargets(facts workorchruntimecontract.Runtime
 	if decision.Action != workorchruntimecontract.RuntimeActionProduceStateChange || !facts.Focus.RequireTargetGrounding {
 		return acceptedCandidateAdmission()
 	}
+	if hasOwnerGroundedCreationScope(facts) {
+		for _, operation := range candidateRuntimeOperations(candidate) {
+			descriptor, known := workorchruntimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+			if known && descriptor.OwnerModuleID == workorchruntimecontract.RuntimeModuleFile &&
+				workorchruntimecontract.RuntimeEffectIsDurable(workorchruntimecontract.ResolveExpectedEffectScope(operation, facts.Activation.MCPCapabilities)) &&
+				len(operation.TargetRefs) != 0 {
+				// create is a File-owner workspace scope, not a generic durable
+				// side-effect grant. The concrete relative target remains subject
+				// to the sealed File inventory and feasibility probe.
+				return acceptedCandidateAdmission()
+			}
+		}
+		return rejectedCandidateAdmission(
+			candidateAdmissionCodeCreationScopeMissingTarget,
+			candidateAdmissionSignatureCreationScopeTarget,
+			"empty workspace creation scope requires a durable File operation with a concrete workspace-relative target",
+		)
+	}
 	requiredTargets := GroundedRepairTargets(facts)
+	if hasOwnerGroundedTargetScope(facts) {
+		for _, operation := range candidateRuntimeOperations(candidate) {
+			descriptor, known := workorchruntimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+			if known && descriptor.OwnerModuleID == workorchruntimecontract.RuntimeModuleFile &&
+				workorchruntimecontract.RuntimeEffectIsDurable(workorchruntimecontract.ResolveExpectedEffectScope(operation, facts.Activation.MCPCapabilities)) && len(operation.TargetRefs) != 0 {
+				// A scope authorizes the File owner to adjudicate a concrete
+				// workspace-relative target. It does not authorize an operation
+				// without a target or bypass the later owner feasibility check.
+				return acceptedCandidateAdmission()
+			}
+		}
+	}
 	if len(requiredTargets) == 0 {
 		// Bounded discovery without a selected target remains admissible only
 		// through owner operation inventories. A profile adapter, not the core,
@@ -128,7 +160,7 @@ func GroundedRepairTargets(facts workorchruntimecontract.RuntimeFacts) []string 
 	if facts.Failure != nil && len(facts.Failure.TargetRefs) > 0 {
 		return append([]string(nil), facts.Failure.TargetRefs...)
 	}
-	if selection := facts.Resources.TargetSelection; selection != nil && selection.Disposition == workorchruntimecontract.RuntimeTargetSelectionSelected && len(selection.TargetRefs) > 0 {
+	if selection := facts.Resources.TargetSelection; selection != nil && targetSelectionHasTargets(*selection) {
 		return append([]string(nil), selection.TargetRefs...)
 	}
 	if facts.RepairDirective != nil && len(facts.RepairDirective.TargetRefs) > 0 {

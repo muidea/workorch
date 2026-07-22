@@ -190,6 +190,76 @@ func TestEvaluateCandidateAdmissionRejectsDurableChangeOutsideGroundedRepairTarg
 	}
 }
 
+func TestEvaluateCandidateAdmissionAllowsOwnerGroundedWorkspaceScopeThroughFileAdmissibility(t *testing.T) {
+	aggregate := stateChangeAggregate(t)
+	aggregate.Facts.Focus.RequireTargetGrounding = true
+	aggregate.Facts.Focus.TargetRole = "deliverable"
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "target-selection-scope", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: "deliverable",
+		SelectorRef: "file/workspace_deliverable", Disposition: runtimecontract.RuntimeTargetSelectionScope,
+		TargetRefs: []string{"implementation.go", "support.go"}, CandidateTargetRefs: []string{"implementation.go", "support.go"}, CandidateCount: 2, ObservedRevision: "workspace-tree-v1",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	aggregate.Facts.Resources.TargetSelection = &selection
+
+	candidate := stateChangeCandidate()
+	newTarget := "new-deliverable.go"
+	candidate.StateChange.Operations[0].Operation.TargetRefs = []string{newTarget}
+	candidate.StateChange.Operations[0].Operation.Parameters = patchApplyTestParameters(newTarget)
+	if admitted := EvaluateCandidateAdmission(aggregate, candidate); !admitted.Accepted() {
+		t.Fatalf("owner-grounded workspace scope candidate rejected before File admissibility: %+v", admitted)
+	}
+}
+
+func TestEvaluateCandidateAdmissionWorkspaceScopeDoesNotAuthorizeOtherDurableOwners(t *testing.T) {
+	aggregate := stateChangeAggregate(t)
+	aggregate.Facts.Focus.RequireTargetGrounding = true
+	aggregate.Facts.Focus.TargetRole = "deliverable"
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "target-selection-scope", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: "deliverable",
+		SelectorRef: "file/workspace_deliverable", Disposition: runtimecontract.RuntimeTargetSelectionScope,
+		TargetRefs: []string{"implementation.go", "support.go"}, CandidateTargetRefs: []string{"implementation.go", "support.go"}, CandidateCount: 2, ObservedRevision: "workspace-tree-v1",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	aggregate.Facts.Resources.TargetSelection = &selection
+
+	operation := runtimecontract.RuntimeOperation{ID: "initialize-repository", Kind: runtimecontract.StepKindGitWrite, TargetRefs: []string{"implementation.go"}}
+	if result := rejectCandidateOutsideGroundedTargets(aggregate.Facts, aggregate.Decision, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: operation}}}}); result.Disposition != CandidateAdmissionRejectedContract || result.Failure == nil || result.Failure.Code != candidateAdmissionCodeTargetOutsideGrounding {
+		t.Fatalf("non-File workspace-scope candidate admission = %+v", result)
+	}
+}
+
+func TestEvaluateCandidateAdmissionCreationScopeRequiresConcreteDurableFileTarget(t *testing.T) {
+	aggregate := stateChangeAggregate(t)
+	aggregate.Facts.Focus.RequireTargetGrounding = true
+	aggregate.Facts.Focus.TargetRole = "deliverable"
+	aggregate.Facts.Focus.TargetRefs = nil
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "target-selection-create", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: "deliverable",
+		SelectorRef: "file/workspace_deliverable", Disposition: runtimecontract.RuntimeTargetSelectionCreate, CandidateCount: 0,
+		ObservedRevision: "workspace-tree-empty",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	aggregate.Facts.Resources.TargetSelection = &selection
+
+	gitInit := "init"
+	nonFileCandidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+		ID: "initialize-repository", Kind: runtimecontract.StepKindGitWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		Parameters: []runtimecontract.OperationParameter{{Name: "operation", String: &gitInit}},
+	}}}}}
+	if result := rejectCandidateOutsideGroundedTargets(aggregate.Facts, aggregate.Decision, nonFileCandidate); result.Disposition != CandidateAdmissionRejectedContract || result.Failure == nil || result.Failure.Code != candidateAdmissionCodeCreationScopeMissingTarget {
+		t.Fatalf("non-File creation-scope candidate admission = %+v", result)
+	}
+
+	fileCandidate := stateChangeCandidate()
+	newTarget := "new-deliverable.txt"
+	fileCandidate.StateChange.Operations[0].Operation.TargetRefs = []string{newTarget}
+	fileCandidate.StateChange.Operations[0].Operation.Parameters = patchApplyTestParameters(newTarget)
+	if result := rejectCandidateOutsideGroundedTargets(aggregate.Facts, aggregate.Decision, fileCandidate); !result.Accepted() {
+		t.Fatalf("concrete File creation candidate rejected before File owner feasibility: %+v", result)
+	}
+}
+
 func TestAdmitCandidateProposalAtomicallyClosesReplayAttemptAndExhaustsSecondAttempt(t *testing.T) {
 	aggregate, candidate := aggregateWithActiveRejectedCandidate(t)
 	repository := &controllerRepository{aggregate: &aggregate}

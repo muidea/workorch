@@ -19,6 +19,7 @@ const (
 	defaultMaxEntries                             = 500
 	runtimeFileSelectorWorkspaceRelativeNewTarget = "workspace-relative-new-file-target"
 	runtimeFileTargetSelectorUniqueWorkspaceEntry = "file/unique_workspace_entry"
+	runtimeFileTargetSelectorWorkspaceDeliverable = "file/workspace_deliverable"
 )
 
 type RuntimeAdapter struct{}
@@ -94,12 +95,16 @@ func (a *RuntimeAdapter) AcquireWorkspaceManifest(workspaceDirectory string) (ru
 
 // AcquireRuntimeTargetSelection applies the File owner's neutral cardinality
 // rule to a bounded workspace inventory. It does not inspect source syntax,
-// file names, suffixes, or a profile's semantic TargetRole. The selector is
-// an explicit File-owner contract, not a hint: this adapter currently owns
-// only unique-workspace-entry selection, while zero or multiple files remain
-// explicit facts for SM-2 governance/terminal handling.
+// file names, suffixes, or a profile's semantic TargetRole. The
+// workspace-deliverable selector has both a creation form for an empty
+// inventory and a bounded complete-scope form for multiple entries. Neither
+// form guesses a path: the candidate must still name concrete files and File
+// operation admissibility validates every path.
 func (a *RuntimeAdapter) AcquireRuntimeTargetSelection(workspaceDirectory, prerequisiteID, targetRole, selectorRef string, maxItems int) (runtimemodel.RuntimeTargetSelection, error) {
-	if strings.TrimSpace(prerequisiteID) == "" || strings.TrimSpace(targetRole) == "" || strings.TrimSpace(selectorRef) != runtimeFileTargetSelectorUniqueWorkspaceEntry || maxItems < 1 || maxItems > runtimemodel.RuntimeCandidateContextItemsMaxCount {
+	selectorRef = strings.TrimSpace(selectorRef)
+	if strings.TrimSpace(prerequisiteID) == "" || strings.TrimSpace(targetRole) == "" ||
+		(selectorRef != runtimeFileTargetSelectorUniqueWorkspaceEntry && selectorRef != runtimeFileTargetSelectorWorkspaceDeliverable) ||
+		maxItems < 1 || maxItems > runtimemodel.RuntimeCandidateContextItemsMaxCount {
 		return runtimemodel.RuntimeTargetSelection{}, common.ErrInvalidArgument
 	}
 	manifest, err := a.AcquireWorkspaceManifest(workspaceDirectory)
@@ -113,12 +118,21 @@ func (a *RuntimeAdapter) AcquireRuntimeTargetSelection(workspaceDirectory, prere
 	}
 	switch selection.CandidateCount {
 	case 0:
-		selection.Disposition = runtimemodel.RuntimeTargetSelectionAbsent
+		if selectorRef == runtimeFileTargetSelectorWorkspaceDeliverable {
+			selection.Disposition = runtimemodel.RuntimeTargetSelectionCreate
+		} else {
+			selection.Disposition = runtimemodel.RuntimeTargetSelectionAbsent
+		}
 	case 1:
 		selection.Disposition = runtimemodel.RuntimeTargetSelectionSelected
 		selection.TargetRefs = append([]string(nil), candidates...)
 	default:
-		selection.Disposition = runtimemodel.RuntimeTargetSelectionAmbiguous
+		if selectorRef == runtimeFileTargetSelectorWorkspaceDeliverable && len(candidates) == selection.CandidateCount {
+			selection.Disposition = runtimemodel.RuntimeTargetSelectionScope
+			selection.TargetRefs = append([]string(nil), candidates...)
+		} else {
+			selection.Disposition = runtimemodel.RuntimeTargetSelectionAmbiguous
+		}
 	}
 	selection.SnapshotID = runtimemodel.StableRuntimeTargetSelectionSnapshotID(selection)
 	if err := selection.Validate(); err != nil {

@@ -10,12 +10,16 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
@@ -355,6 +359,167 @@ func TestStopWaitsForRuntimeV2DriveLifecycleReadLockBeforeClearingDependencies(t
 	if module.bizPtr != nil || module.evidenceRecords != nil {
 		t.Fatalf("Stop retained owner dependencies: biz=%+v evidence=%+v", module.bizPtr, module.evidenceRecords)
 	}
+}
+
+func TestStopWaitsForQueuedDecisionEvidenceHandlerBeforeClearingDependencies(t *testing.T) {
+	base := memoryrepo.NewEvidenceRecordRepository()
+	blocking := &blockingEvidenceRecordRepository{
+		EvidenceRecordRepository: base,
+		createEntered:            make(chan struct{}),
+		releaseCreate:            make(chan struct{}),
+	}
+	module := newTestBiz(nil, nil, nil)
+	module.evidenceRecords = blocking
+	event := magicevent.NewEventWithContext(
+		decisionevents.TopicDecisionCommandRecordEvidence,
+		"test",
+		ModuleID,
+		magicevent.NewHeader(),
+		context.Background(),
+		decisionevents.RecordDecisionEvidenceCommand{
+			EvidenceRecordID: "evidence-lifecycle", WorkspaceID: "ws-lifecycle", RunID: "run-lifecycle",
+			TicketID: "ticket-lifecycle", ResolutionID: "resolution-lifecycle", ResolutionType: "continue",
+			DecisionKind: "runtime_governance", Reason: "test lifecycle lock",
+		},
+	)
+	handled := make(chan struct{})
+	go func() {
+		module.handleDecisionEvidenceCommand(event, nil)
+		close(handled)
+	}()
+	<-blocking.createEntered
+
+	stopped := make(chan error, 1)
+	go func() { stopped <- module.Stop(context.Background()) }()
+	select {
+	case err := <-stopped:
+		t.Fatalf("Stop returned while queued evidence handler retained owner dependencies: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(blocking.releaseCreate)
+	<-handled
+	if err := <-stopped; err != nil {
+		t.Fatal(err)
+	}
+	if module.evidenceRecords != nil || module.bizPtr != nil {
+		t.Fatalf("Stop retained owner dependencies after queued handler: evidence=%+v biz=%+v", module.evidenceRecords, module.bizPtr)
+	}
+	items, err := base.ListByRun(common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-lifecycle"), "run-lifecycle")
+	if err != nil || len(items) != 1 || items[0].Kind != runtimecontract.EvidenceKindDecision {
+		t.Fatalf("queued evidence persistence=%+v err=%v", items, err)
+	}
+}
+
+func TestStopWaitsForQueuedRuntimeOperationReceiptHandlerBeforeClearingDependencies(t *testing.T) {
+	repository := &blockingRuntimeV2StateRepository{loadEntered: make(chan struct{}), releaseLoad: make(chan struct{})}
+	owner := &RuntimeOrchestrator{}
+	if err := owner.ConfigureRuntimeV2Repository(repository); err != nil {
+		t.Fatal(err)
+	}
+	module := newTestBiz(owner, nil, nil)
+	event := magicevent.NewEventWithContext(
+		orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt,
+		"test",
+		ModuleID,
+		magicevent.NewHeader(),
+		context.Background(),
+		orchestratorevents.QueryRuntimeOperationReceiptCommand{
+			WorkspaceID: "ws-lifecycle", RunID: "run-lifecycle", DispatchID: "dispatch-lifecycle",
+			OperationID: "operation-lifecycle", ExecutionKey: "execution-lifecycle", Fence: 1,
+		},
+	)
+	handled := make(chan struct{})
+	go func() {
+		module.handleRuntimeV2OperationReceipt(event, magicevent.NewResult(event.ID(), event.Source(), event.Destination()))
+		close(handled)
+	}()
+	<-repository.loadEntered
+
+	stopped := make(chan error, 1)
+	go func() { stopped <- module.Stop(context.Background()) }()
+	select {
+	case err := <-stopped:
+		t.Fatalf("Stop returned while queued operation-receipt handler retained owner dependencies: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(repository.releaseLoad)
+	<-handled
+	if err := <-stopped; err != nil {
+		t.Fatal(err)
+	}
+	if module.bizPtr != nil {
+		t.Fatalf("Stop retained Runtime V2 owner after queued receipt handler: %+v", module.bizPtr)
+	}
+}
+
+func TestStopWaitsForQueuedRuntimeGovernanceResolutionHandlerBeforeClearingDependencies(t *testing.T) {
+	repository := &blockingRuntimeV2StateRepository{loadEntered: make(chan struct{}), releaseLoad: make(chan struct{})}
+	owner := &RuntimeOrchestrator{}
+	if err := owner.ConfigureRuntimeV2Repository(repository); err != nil {
+		t.Fatal(err)
+	}
+	module := newTestBiz(owner, nil, nil)
+	event := magicevent.NewEventWithContext(
+		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution,
+		"test",
+		ModuleID,
+		magicevent.NewHeader(),
+		context.Background(),
+		orchestratorevents.CommitRuntimeGovernanceResolutionCommand{Resolution: runtimecontract.RuntimeGovernanceResolution{
+			ResolutionID: "resolution-lifecycle", TicketID: "ticket-lifecycle", WorkspaceID: "ws-lifecycle", RunID: "run-lifecycle",
+			AuthoritySnapshotID: "authority-lifecycle", DispatchID: "dispatch-lifecycle", DependencyKind: "decision", SubjectRef: "subject-lifecycle",
+			Outcome: runtimecontract.RuntimeGovernanceResolutionOutcomeContinue, Summary: "continue lifecycle test",
+		}},
+	)
+	handled := make(chan struct{})
+	go func() {
+		module.handleRuntimeV2GovernanceResolution(event, magicevent.NewResult(event.ID(), event.Source(), event.Destination()))
+		close(handled)
+	}()
+	<-repository.loadEntered
+
+	stopped := make(chan error, 1)
+	go func() { stopped <- module.Stop(context.Background()) }()
+	select {
+	case err := <-stopped:
+		t.Fatalf("Stop returned while queued governance handler retained owner dependencies: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(repository.releaseLoad)
+	<-handled
+	if err := <-stopped; err != nil {
+		t.Fatal(err)
+	}
+	if module.bizPtr != nil {
+		t.Fatalf("Stop retained Runtime V2 owner after queued governance handler: %+v", module.bizPtr)
+	}
+}
+
+type blockingEvidenceRecordRepository struct {
+	repository.EvidenceRecordRepository
+	createEntered chan struct{}
+	releaseCreate chan struct{}
+}
+
+func (r *blockingEvidenceRecordRepository) Create(ctx context.Context, item *runtimecontract.EvidenceRecord) error {
+	close(r.createEntered)
+	<-r.releaseCreate
+	return r.EvidenceRecordRepository.Create(ctx, item)
+}
+
+type blockingRuntimeV2StateRepository struct {
+	loadEntered chan struct{}
+	releaseLoad chan struct{}
+}
+
+func (r *blockingRuntimeV2StateRepository) Load(context.Context, common.WorkspaceID, common.RunID) (runtimev2.RuntimeAggregate, error) {
+	close(r.loadEntered)
+	<-r.releaseLoad
+	return runtimev2.RuntimeAggregate{}, common.ErrNotFound
+}
+
+func (*blockingRuntimeV2StateRepository) Save(context.Context, runtimev2.RuntimeAggregate, uint64) error {
+	return nil
 }
 
 func moduleContractDependencies() Dependencies {
