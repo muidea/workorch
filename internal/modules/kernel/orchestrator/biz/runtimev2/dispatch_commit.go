@@ -516,7 +516,12 @@ func validationFailureTargetsAreGrounded(facts runtimecontract.RuntimeFacts, fai
 	if facts.Resources.FailureTarget != nil {
 		grounded = append(grounded, facts.Resources.FailureTarget.TargetRefs...)
 	}
-	if selection := facts.Resources.TargetSelection; selection != nil && targetSelectionHasTargets(*selection) {
+	// A File owner scope is a bounded feasibility inventory, not a selected
+	// repair surface.  A validation command that happens to name a member of
+	// that inventory cannot turn it into FailureTarget authority.  Only a
+	// selected owner target was already concrete before this receipt.
+	if selection := facts.Resources.TargetSelection; selection != nil &&
+		selection.Disposition == runtimecontract.RuntimeTargetSelectionSelected && len(selection.TargetRefs) > 0 {
 		grounded = append(grounded, selection.TargetRefs...)
 	}
 	if facts.RepairDirective != nil {

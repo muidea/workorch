@@ -528,10 +528,11 @@ const (
 	// candidate proposes a concrete workspace-relative target and the File
 	// owner validates it against its operation admissibility inventory.
 	RuntimeTargetSelectionCreate RuntimeTargetSelectionDisposition = "create"
-	// RuntimeTargetSelectionScope binds a bounded complete workspace target set
-	// selected by an owner-declared scope. It is not a filename heuristic: a
-	// candidate still proposes concrete operations and their owner validates
-	// every target against the sealed admissibility inventory.
+	// RuntimeTargetSelectionScope binds a bounded complete File feasibility
+	// inventory selected by an owner-declared scope. It is not a concrete repair
+	// target or a filename heuristic: a candidate still proposes concrete
+	// operations and their owner validates every target against the sealed
+	// admissibility inventory.
 	RuntimeTargetSelectionScope     RuntimeTargetSelectionDisposition = "scope"
 	RuntimeTargetSelectionAbsent    RuntimeTargetSelectionDisposition = "absent"
 	RuntimeTargetSelectionAmbiguous RuntimeTargetSelectionDisposition = "ambiguous"

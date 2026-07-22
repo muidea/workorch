@@ -273,7 +273,7 @@ func TestRuntimeV2CandidateRetryExplainsCanonicalTargetRefConsistency(t *testing
 	}
 }
 
-func TestRuntimeV2TargetSelectionInstructionIsLimitedToFileCreation(t *testing.T) {
+func TestRuntimeV2TargetSelectionInstructionIsLimitedToFileScopes(t *testing.T) {
 	selection := runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: "target-selection-1", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable",
@@ -288,6 +288,17 @@ func TestRuntimeV2TargetSelectionInstructionIsLimitedToFileCreation(t *testing.T
 	}
 	if got := runtimeV2TargetSelectionInstruction(&selection, runtimecontract.RuntimeActionProduceValidation); got != "" {
 		t.Fatalf("validation must not receive creation instruction: %q", got)
+	}
+	selection.Disposition = runtimecontract.RuntimeTargetSelectionScope
+	selection.TargetRefs = []string{"implementation.go", "support.go"}
+	selection.CandidateTargetRefs = append([]string(nil), selection.TargetRefs...)
+	selection.CandidateCount = len(selection.TargetRefs)
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	got = runtimeV2TargetSelectionInstruction(&selection, runtimecontract.RuntimeActionProduceStateChange)
+	for _, required := range []string{"bounded workspace feasibility scope, not a selected repair target", "Focus, FailureTarget, current failure, or RepairDirective", "may be a new file", "Do not use this scope to authorize Git, Shell, MCP"} {
+		if !strings.Contains(got, required) {
+			t.Fatalf("scope instruction lost %q: %s", required, got)
+		}
 	}
 	selection.OwnerModuleID = runtimecontract.RuntimeModuleGit
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)

@@ -188,7 +188,7 @@ func GroundedRepairTargets(facts workorchruntimecontract.RuntimeFacts) []string 
 	if facts.Failure != nil && len(facts.Failure.TargetRefs) > 0 {
 		return append([]string(nil), facts.Failure.TargetRefs...)
 	}
-	if selection := facts.Resources.TargetSelection; selection != nil && targetSelectionHasTargets(*selection) {
+	if selection := facts.Resources.TargetSelection; selection != nil && targetSelectionHasConcreteTarget(*selection) {
 		return append([]string(nil), selection.TargetRefs...)
 	}
 	if facts.RepairDirective != nil && len(facts.RepairDirective.TargetRefs) > 0 {

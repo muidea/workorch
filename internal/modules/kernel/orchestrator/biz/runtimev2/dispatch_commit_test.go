@@ -151,6 +151,58 @@ func TestRejectedValidationEntryDoesNotBootstrapUngroundedFailureTarget(t *testi
 	}
 }
 
+func TestRejectedValidationScopeMemberDoesNotBecomeFailureTarget(t *testing.T) {
+	aggregate := validationAggregate(t)
+	aggregate.Facts.Focus.TargetRefs = nil
+	aggregate.Facts.Focus.TargetRole = "deliverable"
+	aggregate.Facts.Focus.RequireTargetGrounding = true
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "target-selection-scope", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable",
+		Disposition: runtimecontract.RuntimeTargetSelectionScope,
+		TargetRefs:  []string{"implementation.go", "support.go"}, CandidateTargetRefs: []string{"implementation.go", "support.go"},
+		CandidateCount: 2, ObservedRevision: "workspace-tree-v1",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	aggregate.Facts.Resources.TargetSelection = &selection
+	repository := &durableRuntimeStateRepository{aggregate: aggregate}
+	coordinator, _ := NewDispatchCoordinator(repository)
+	candidate := validationCandidate()
+	candidate.Validation.Operations[0].Operation.TargetRefs = []string{"implementation.go"}
+	sealed := sealCandidateForTest(t, repository, candidate)
+	evidence := ExecutionEvidence{
+		EventID: "event-validation-scope-member-failed", WorkspaceID: "ws-1", RunID: "run-1",
+		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
+		OperationID: "validate-1", Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusRejected,
+		Failure: &runtimecontract.FailureFact{Class: runtimecontract.FailureClassBuildFailure, Signature: "validation-scope-member-failed", Message: "check failed", TargetRefs: []string{"implementation.go"}},
+	}
+	attachRuntimeV2TestOwnerReceipt(t, &repository.aggregate, &evidence)
+	committed, err := coordinator.CommitEvidence(context.Background(), evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if committed.Aggregate.Facts.Failure == nil || len(committed.Aggregate.Facts.Failure.TargetRefs) != 0 || committed.Aggregate.Facts.Resources.FailureTarget != nil {
+		t.Fatalf("File scope member became failure-target authority: facts=%+v", committed.Aggregate.Facts)
+	}
+	if committed.Aggregate.Facts.RepairDirective != nil && len(committed.Aggregate.Facts.RepairDirective.TargetRefs) != 0 {
+		t.Fatalf("File scope member became a concrete repair directive target: %+v", committed.Aggregate.Facts.RepairDirective)
+	}
+	if committed.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(committed.Aggregate.Decision.RequiredOutput.TargetRefs) != 0 {
+		t.Fatalf("scope-backed validation failure did not return to an unbound File repair: decision=%+v", committed.Aggregate.Decision)
+	}
+	if committed.Aggregate.Facts.Resources.TargetSelection == nil || committed.Aggregate.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionScope {
+		t.Fatalf("scope feasibility inventory was not retained: %+v", committed.Aggregate.Facts.Resources.TargetSelection)
+	}
+	if len(committed.Aggregate.Facts.Prerequisites.Pending) != 0 || len(committed.Aggregate.Facts.Resources.TargetSnapshots) != 0 {
+		t.Fatalf("scope was promoted into concrete target snapshots: prerequisites=%+v snapshots=%+v", committed.Aggregate.Facts.Prerequisites.Pending, committed.Aggregate.Facts.Resources.TargetSnapshots)
+	}
+	next := stateChangeCandidate()
+	next.StateChange.Operations[0].Operation = patchApplyTestOperation("patch-next", "generated.go")
+	if admission := EvaluateCandidateAdmission(committed.Aggregate, next); !admission.Accepted() {
+		t.Fatalf("scope did not allow the next concrete File target proposal: %+v", admission)
+	}
+}
+
 func TestRejectedValidationOwnerObservationBindsCompatibleTarget(t *testing.T) {
 	aggregate := validationAggregate(t)
 	aggregate.Facts.Focus.TargetRefs = nil

@@ -225,7 +225,7 @@ func TestReduceRuntimeStateWithDirectiveAllowsOwnerGroundedEmptyWorkspaceCreatio
 	}
 }
 
-func TestReduceRuntimeStateWithDirectiveSnapshotsBoundedOwnerWorkspaceScope(t *testing.T) {
+func TestReduceRuntimeStateWithDirectiveAllowsBoundedOwnerWorkspaceScopeWithoutConcreteSnapshots(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.RequireTargetGrounding = true
 	facts.Focus.TargetRole = "deliverable"
@@ -246,10 +246,8 @@ func TestReduceRuntimeStateWithDirectiveSnapshotsBoundedOwnerWorkspaceScope(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(updated.Prerequisites.Pending) != 2 ||
-		updated.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindTargetSnapshot || updated.Prerequisites.Pending[1].Kind != runtimecontract.PrerequisiteKindTargetSnapshot ||
-		updated.Prerequisites.Pending[0].SubjectRef != "implementation.go" || updated.Prerequisites.Pending[1].SubjectRef != "support.go" {
-		t.Fatalf("workspace scope prerequisites decision=%+v prerequisites=%+v", decision, updated.Prerequisites)
+	if decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(decision.RequiredOutput.TargetRefs) != 0 || len(updated.Prerequisites.Pending) != 0 {
+		t.Fatalf("workspace scope decision=%+v prerequisites=%+v", decision, updated.Prerequisites)
 	}
 }
 

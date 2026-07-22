@@ -144,6 +144,41 @@ func TestRepairDirectiveDoesNotFlipForAcceptedStateChangeOutsideGroundedTarget(t
 	}
 }
 
+func TestBuildRepairDirectiveDoesNotPromoteOwnerScopeToConcreteRepairTarget(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.TargetRefs = nil
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "target-selection-scope", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		TargetRole: "implementation", SelectorRef: "file/workspace_deliverable",
+		Disposition: runtimecontract.RuntimeTargetSelectionScope,
+		TargetRefs:  []string{"implementation.go", "support.go"}, CandidateTargetRefs: []string{"implementation.go", "support.go"},
+		CandidateCount: 2, ObservedRevision: "workspace-tree-v1",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	facts.Resources.TargetSelection = &selection
+	facts.Failure = &runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassEffectMismatch, Code: "operation_effect_mismatch",
+		Signature: "effect-mismatch", Message: "durable effect not observed",
+	}
+
+	decision := runtimecontract.RuntimeDecision{
+		State: runtimecontract.ConvergenceStateNeedStateChange, Action: runtimecontract.RuntimeActionProduceStateChange,
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			Kind: runtimecontract.RequiredOutputKindStateChange, AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+			RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			CoverageWorkItemIDs:   facts.Focus.CoverageWorkItemIDs, TargetRefs: selection.TargetRefs,
+		},
+	}
+	directive := buildRepairDirective(facts, decision)
+	if len(directive.TargetRefs) != 0 {
+		t.Fatalf("owner scope became a concrete repair target: %+v", directive)
+	}
+	if directive.CurrentFailure == nil || directive.CurrentFailure.Signature != "effect-mismatch" {
+		t.Fatalf("effect mismatch lineage was not retained: %+v", directive)
+	}
+}
+
 func TestRepairDirectiveStateChangeEvidenceCanAdvanceBeforeRequiredAssessment(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.RequireAssessment = true

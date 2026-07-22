@@ -178,9 +178,12 @@ func buildRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimeco
 }
 
 // repairDirectiveTargets is an SM-2 ownership rule: an explicit Focus target
-// is immutable authority; otherwise a persisted owner failure target grounds
-// the next repair. The runtime core does not infer source/test roles from path
-// names or provider text.
+// is immutable authority; otherwise a persisted owner failure target or a
+// uniquely selected owner target grounds the next repair. A File owner scope
+// is deliberately excluded: it is a bounded feasibility inventory, not a
+// concrete repair target, and must remain available for the next candidate to
+// propose one concrete File target. The runtime core does not infer
+// source/test roles from path names or provider text.
 func repairDirectiveTargets(facts runtimecontract.RuntimeFacts, fallback []string) []string {
 	if len(facts.Focus.TargetRefs) > 0 {
 		return append([]string(nil), facts.Focus.TargetRefs...)
@@ -191,8 +194,15 @@ func repairDirectiveTargets(facts runtimecontract.RuntimeFacts, fallback []strin
 	if facts.Failure != nil && len(facts.Failure.TargetRefs) > 0 {
 		return append([]string(nil), facts.Failure.TargetRefs...)
 	}
-	if selection := facts.Resources.TargetSelection; selection != nil && targetSelectionHasTargets(*selection) {
+	if selection := facts.Resources.TargetSelection; selection != nil && selection.Disposition == runtimecontract.RuntimeTargetSelectionSelected && len(selection.TargetRefs) > 0 {
 		return append([]string(nil), selection.TargetRefs...)
+	}
+	if hasOwnerGroundedTargetScope(facts) {
+		// The state-change decision retains the bounded scope only in Resources
+		// for candidate context. It must not turn into directive authority through
+		// this fallback; SM-3 still asks File to adjudicate the candidate's next
+		// concrete target.
+		return nil
 	}
 	return append([]string(nil), fallback...)
 }

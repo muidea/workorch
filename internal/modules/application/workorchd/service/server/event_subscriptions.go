@@ -115,8 +115,10 @@ func (s *serverState) RecordEventRecordAppended(_ context.Context, data eventstr
 }
 
 // RecordRunStateChanged accepts only the concrete Run owner notification for
-// metrics. It deliberately does not derive state from an Eventstream payload:
-// Eventstream is audit/display infrastructure and may replay independently.
+// process-local metrics, terminal-snapshot cache invalidation, and status-wait
+// wakeups. It deliberately does not derive those facts from an Eventstream
+// payload: Eventstream is audit/display infrastructure and may replay
+// independently.
 func (s *serverState) RecordRunStateChanged(_ context.Context, data runevents.RunStateChangedData) {
 	if s == nil {
 		return

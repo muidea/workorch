@@ -368,7 +368,7 @@ func validationDecision(base runtimecontract.RuntimeDecision, facts runtimecontr
 // always closes this path with a typed terminal. Capability owners and the
 // shared contract package only carry observations; SM-2 owns the terminal.
 func targetGroundingDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, allowAcceptedStateChangeLineage bool) (runtimecontract.RuntimeDecision, bool, error) {
-	if !facts.Focus.RequireTargetGrounding || len(GroundedRepairTargets(facts)) != 0 || hasOwnerGroundedCreationScope(facts) ||
+	if !facts.Focus.RequireTargetGrounding || len(GroundedRepairTargets(facts)) != 0 || hasOwnerGroundedCreationScope(facts) || hasOwnerGroundedTargetScope(facts) ||
 		(allowAcceptedStateChangeLineage && hasCurrentFocusTargetBoundStateChangeEvidence(facts)) {
 		return runtimecontract.RuntimeDecision{}, false, nil
 	}
@@ -392,8 +392,12 @@ func hasOwnerGroundedTargetScope(facts runtimecontract.RuntimeFacts) bool {
 		selection.OwnerModuleID == runtimecontract.RuntimeModuleFile && len(selection.TargetRefs) != 0
 }
 
-func targetSelectionHasTargets(selection runtimecontract.RuntimeTargetSelection) bool {
-	return (selection.Disposition == runtimecontract.RuntimeTargetSelectionSelected || selection.Disposition == runtimecontract.RuntimeTargetSelectionScope) && len(selection.TargetRefs) != 0
+// targetSelectionHasConcreteTarget is intentionally narrower than an owner
+// scope. A selected value is an owner-grounded concrete repair surface; a
+// scope is only a bounded File feasibility inventory and must not enter facts
+// that are interpreted as a repair target.
+func targetSelectionHasConcreteTarget(selection runtimecontract.RuntimeTargetSelection) bool {
+	return selection.Disposition == runtimecontract.RuntimeTargetSelectionSelected && len(selection.TargetRefs) != 0
 }
 
 func hasCurrentFocusTargetBoundStateChangeEvidence(facts runtimecontract.RuntimeFacts) bool {

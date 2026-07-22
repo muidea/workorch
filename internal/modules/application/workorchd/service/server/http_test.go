@@ -3891,7 +3891,7 @@ func TestRunStatusEndpointCanWaitForTargetState(t *testing.T) {
 	}
 }
 
-func TestRunStatusEndpointInvalidatesCachedTerminalSnapshotOnOwnerRunStateEvent(t *testing.T) {
+func TestRunStatusEndpointInvalidatesCachedTerminalSnapshotOnTypedOwnerRunStateNotification(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	var statusReads atomic.Int32
 	state.readRunStatus = func(_ context.Context, _, _, runID string) (appservice.RunStatus, error) {
@@ -3926,15 +3926,11 @@ func TestRunStatusEndpointInvalidatesCachedTerminalSnapshotOnOwnerRunStateEvent(
 		t.Fatalf("cached status = %+v reads=%d, want cached completed state before owner event", cachedBody.Status, statusReads.Load())
 	}
 
-	if err := publishServerTestEventRecord(context.Background(), testStateCommandHub(state), streamEvent{
-		Topic:       runevents.TopicRunStateChanged,
+	state.RecordRunStateChanged(context.Background(), runevents.RunStateChangedData{
 		WorkspaceID: "ws-status-owner-event",
 		RunID:       "run-status-owner-event",
-		SubjectID:   "run-status-owner-event",
-		Payload:     events.RunPayloadData{State: common.RunStateActive}.EventPayload().Map(),
-	}); err != nil {
-		t.Fatalf("publish run state changed: %v", err)
-	}
+		State:       common.RunStateActive,
+	})
 
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -3950,6 +3946,52 @@ func TestRunStatusEndpointInvalidatesCachedTerminalSnapshotOnOwnerRunStateEvent(
 	}
 	if statusReads.Load() == 0 {
 		t.Fatal("status endpoint reused stale cached snapshot after owner run state event")
+	}
+}
+
+func TestRunStatusEndpointDoesNotInvalidateCachedTerminalSnapshotOnEventstreamRecord(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
+	var statusReads atomic.Int32
+	state.readRunStatus = func(_ context.Context, _, _, runID string) (appservice.RunStatus, error) {
+		statusReads.Add(1)
+		return appservice.RunStatus{
+			ID:          runID,
+			WorkspaceID: "ws-status-eventstream-record",
+			State:       string(common.RunStateActive),
+		}, nil
+	}
+	state.cacheRunSnapshot(appservice.RunSnapshot{
+		Workspace: appservice.Workspace{ID: "ws-status-eventstream-record", State: string(common.WorkspaceStateActive)},
+		Run: appservice.Run{
+			ID:          "run-status-eventstream-record",
+			WorkspaceID: "ws-status-eventstream-record",
+			State:       string(common.RunStateCompleted),
+		},
+	})
+	handler := newMuxWithState(state)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/ws-status-eventstream-record/runs/run-status-eventstream-record/status", nil)
+
+	if err := publishServerTestEventRecord(context.Background(), testStateCommandHub(state), streamEvent{
+		Topic:       runevents.TopicRunStateChanged,
+		WorkspaceID: "ws-status-eventstream-record",
+		RunID:       "run-status-eventstream-record",
+		SubjectID:   "run-status-eventstream-record",
+		Payload:     events.RunPayloadData{State: common.RunStateActive}.EventPayload().Map(),
+	}); err != nil {
+		t.Fatalf("publish eventstream run record: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status after eventstream record = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var body runStatusResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal run status: %v", err)
+	}
+	if body.Status.State != string(common.RunStateCompleted) || statusReads.Load() != 0 {
+		t.Fatalf("eventstream record invalidated terminal cache: status=%+v reads=%d", body.Status, statusReads.Load())
 	}
 }
 

@@ -70,10 +70,10 @@ type runtimeCandidateContextProjection struct {
 	NoProgressOperationShapes []runtimecontract.RuntimeRejectedOperationShape `json:"noProgressOperationShapes,omitempty"`
 	Capabilities              runtimecontract.RuntimeCapabilities             `json:"capabilities"`
 	Resources                 runtimeCandidateResourceProjection              `json:"resources"`
-	// TargetSelectionInstruction makes a sealed File-owner creation scope
-	// actionable for the provider.  It is volatile C3 guidance derived only
-	// from the persisted selection; it neither creates a target fact nor grants
-	// any operation that the owner has not already declared admissible.
+	// TargetSelectionInstruction renders a sealed File-owner creation or bounded
+	// feasibility scope as volatile C3 guidance. It neither creates a concrete
+	// target fact nor grants any operation that the owner has not already
+	// declared admissible.
 	TargetSelectionInstruction string                               `json:"targetSelectionInstruction,omitempty"`
 	Activation                 runtimeCandidateActivationProjection `json:"activation"`
 }
@@ -552,19 +552,27 @@ func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidat
 }
 
 // runtimeV2TargetSelectionInstruction converts the persisted File-owner
-// selection disposition into provider-facing C3 guidance.  A create scope is
-// intentionally not a target selection: the candidate may propose a concrete
-// relative path from the Goal/DoD, but only a durable File-owner operation is
-// admissible and the File owner remains the final path authority.
+// selection disposition into provider-facing C3 guidance. A create or complete
+// scope is intentionally not a concrete repair target: a candidate may propose
+// one concrete relative path only when the sealed authority contains no
+// higher-precedence concrete target. Only a durable File-owner operation is
+// admissible in that case, and the File owner remains the final path authority.
 func runtimeV2TargetSelectionInstruction(selection *runtimecontract.RuntimeTargetSelection, action runtimecontract.RuntimeAction) string {
 	if selection == nil || action != runtimecontract.RuntimeActionProduceStateChange {
 		return ""
 	}
 	value := selection.Normalized()
-	if value.Disposition != runtimecontract.RuntimeTargetSelectionCreate || value.OwnerModuleID != runtimecontract.RuntimeModuleFile {
+	if value.OwnerModuleID != runtimecontract.RuntimeModuleFile {
 		return ""
 	}
-	return "The File owner observed an empty workspace creation scope. Propose at least one durable File-owner operation with a concrete workspace-relative targetRefs entry and matching target parameter. Choose that proposed path from the Goal and DoD; do not leave it blank, and do not use this scope to authorize Git, Shell, MCP, or another owner. The File owner will validate the proposed path before execution."
+	switch value.Disposition {
+	case runtimecontract.RuntimeTargetSelectionCreate:
+		return "The File owner observed an empty workspace creation scope. Propose at least one durable File-owner operation with a concrete workspace-relative targetRefs entry and matching target parameter. Choose that proposed path from the Goal and DoD; do not leave it blank, and do not use this scope to authorize Git, Shell, MCP, or another owner. The File owner will validate the proposed path before execution."
+	case runtimecontract.RuntimeTargetSelectionScope:
+		return "The File owner provided a bounded workspace feasibility scope, not a selected repair target. Follow any concrete target already sealed in the Focus, FailureTarget, current failure, or RepairDirective. Only when none is present, propose at least one durable File-owner operation with a concrete workspace-relative targetRefs entry and matching target parameter; that target may be a new file and remains subject to File-owner feasibility. Do not use this scope to authorize Git, Shell, MCP, or another owner."
+	default:
+		return ""
+	}
 }
 
 func runtimeV2CandidateStage(action runtimecontract.RuntimeAction) string {

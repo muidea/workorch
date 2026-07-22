@@ -86,7 +86,7 @@ func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []Ru
 					goto selectionRequirementDone
 				}
 			}
-		} else if targetSelectionHasTargets(*selection) {
+		} else if targetSelectionHasConcreteTarget(*selection) {
 			for _, target := range selection.TargetRefs {
 				requirements = append(requirements, RuntimeRequirement{
 					Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile,

@@ -265,12 +265,6 @@ func TestRuntimeV2FileBackedGroundedTargetStateSequenceRestartsAtCommittedBounda
 			},
 		},
 		{
-			name: "target_snapshot",
-			match: func(aggregate runtimev2.RuntimeAggregate) bool {
-				return len(aggregate.Facts.Resources.TargetSnapshots) == 1
-			},
-		},
-		{
 			name: "candidate_proposal",
 			match: func(aggregate runtimev2.RuntimeAggregate) bool {
 				for _, attempt := range aggregate.CandidateAttempts {
@@ -430,7 +424,7 @@ func TestRuntimeV2FileBackedGroundedTargetStateSequenceRestartsAtCommittedBounda
 				state := persisted.RuntimeState
 				if state.Decision.Action != runtimecontract.RuntimeActionComplete || state.Decision.Terminal == nil ||
 					state.Facts.Resources.TargetSelection == nil || state.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionScope ||
-					len(state.Facts.Resources.TargetSnapshots) != 2 || state.Facts.Resources.TargetSnapshots[0].TargetRef != "implementation.txt" || state.Facts.Resources.TargetSnapshots[1].TargetRef != "support.txt" ||
+					len(state.Facts.Resources.TargetSnapshots) != 0 ||
 					len(state.OperationReceipts) != 2 || len(state.Facts.Evidence.Accepted) != 2 || len(state.Facts.Assessments) != 1 {
 					t.Fatalf("restart state sequence did not converge exactly once: %+v", state)
 				}
@@ -691,7 +685,8 @@ func TestRuntimeV2FileBackedEmptyWorkspaceCreationReceiptCrashRestartDoesNotRepl
 // scope is authority for File to assess a concrete new workspace-relative
 // target, not an Orchestrator permission to synthesize one. The durable
 // receipt must then invalidate the old scope and require a fresh complete
-// scope/snapshot set before validation and assessment can converge.
+// scope before validation and assessment can converge. Scope contents remain
+// File feasibility inventory; they must never be read as concrete snapshots.
 func TestRuntimeV2FileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
@@ -745,6 +740,7 @@ func TestRuntimeV2FileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing
 	}
 	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
 	candidateCalls := 0
+	stateChangeCalls := 0
 	initialSelection := runtimecontract.RuntimeTargetSelectionDisposition("")
 	initialSnapshots := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
@@ -754,6 +750,20 @@ func TestRuntimeV2FileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing
 		if candidateCalls == 1 && command.CandidateContext.Resources.TargetSelection != nil {
 			initialSelection = command.CandidateContext.Resources.TargetSelection.Disposition
 			initialSnapshots = len(command.CandidateContext.Resources.TargetSnapshots)
+		}
+		if command.Decision.Action == runtimecontract.RuntimeActionProduceStateChange {
+			stateChangeCalls++
+			if stateChangeCalls == 1 {
+				// A valid File write to unchanged content produces an owner no-op
+				// receipt.  Scope must remain feasibility inventory through this
+				// repair, not become the concrete directive target that blocks the
+				// next File proposal below.
+				result.Set(orchestratorevents.RequestRuntimeCandidateResult{
+					Transaction: command.Transaction,
+					Candidate:   runtimeV2WorkspaceCreationCandidate(command, "implementation.txt", "before\n"),
+				}, nil)
+				return
+			}
 		}
 		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
 			Transaction: command.Transaction,
@@ -767,18 +777,19 @@ func TestRuntimeV2FileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 
 	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 3 {
-		t.Fatalf("bounded scope new-deliverable completion=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
+	if err != nil || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 4 || stateChangeCalls != 2 {
+		t.Fatalf("bounded scope new-deliverable completion=%+v candidateCalls=%d stateChangeCalls=%d err=%v", completed, candidateCalls, stateChangeCalls, err)
 	}
 	content, err := os.ReadFile(filepath.Join(deliverable, "new-deliverable.txt"))
 	if err != nil || string(content) != "created\n" {
 		t.Fatalf("bounded scope new-deliverable content=%q err=%v", string(content), err)
 	}
 	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
-	if err != nil || persisted.RuntimeState == nil || initialSelection != runtimecontract.RuntimeTargetSelectionScope || initialSnapshots != 2 ||
+	if err != nil || persisted.RuntimeState == nil || initialSelection != runtimecontract.RuntimeTargetSelectionScope || initialSnapshots != 0 ||
 		persisted.RuntimeState.Facts.Resources.TargetSelection == nil || persisted.RuntimeState.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionScope ||
-		persisted.RuntimeState.Facts.Resources.TargetSelection.CandidateCount != 3 || len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 3 ||
-		len(persisted.RuntimeState.OperationReceipts) != 2 || len(persisted.RuntimeState.Facts.Evidence.Accepted) != 2 {
+		persisted.RuntimeState.Facts.Resources.TargetSelection.CandidateCount != 3 || len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 0 ||
+		len(persisted.RuntimeState.OperationReceipts) != 3 || len(persisted.RuntimeState.Facts.Evidence.Accepted) != 2 || len(persisted.RuntimeState.Facts.Evidence.Rejected) != 1 ||
+		persisted.RuntimeState.Facts.Resources.FailureTarget != nil || (persisted.RuntimeState.Facts.RepairDirective != nil && len(persisted.RuntimeState.Facts.RepairDirective.TargetRefs) != 0) {
 		t.Fatalf("bounded scope new-deliverable authority=%+v err=%v", persisted, err)
 	}
 }
