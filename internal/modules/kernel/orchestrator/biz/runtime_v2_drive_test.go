@@ -464,14 +464,20 @@ func TestRuntimeV2FileBackedGroundedTargetStateSequenceRestartsAtCommittedBounda
 // or validation entry to choose an implementation target.
 func TestRuntimeV2FileBackedAmbiguousTargetSelectionFailsWithoutProvider(t *testing.T) {
 	t.Run("state_change", func(t *testing.T) {
-		testRuntimeV2FileBackedAmbiguousTargetSelectionFailsWithoutProvider(t, runtimeV2GroundedTargetSequenceBootstrap())
+		testRuntimeV2FileBackedUnresolvedTargetSelectionFailsWithoutProvider(t, runtimeV2GroundedTargetSequenceBootstrap(), runtimecontract.RuntimeTargetSelectionAmbiguous, map[string]string{"validation-entry.go": "package fixture\n", "implementation.go": "package fixture\n"})
 	})
 	t.Run("direct_validation", func(t *testing.T) {
-		testRuntimeV2FileBackedAmbiguousTargetSelectionFailsWithoutProvider(t, runtimeV2GroundedTargetValidationBootstrap())
+		testRuntimeV2FileBackedUnresolvedTargetSelectionFailsWithoutProvider(t, runtimeV2GroundedTargetValidationBootstrap(), runtimecontract.RuntimeTargetSelectionAmbiguous, map[string]string{"validation-entry.go": "package fixture\n", "implementation.go": "package fixture\n"})
 	})
 }
 
-func testRuntimeV2FileBackedAmbiguousTargetSelectionFailsWithoutProvider(t *testing.T, bootstrap runtimecontract.RuntimeBootstrap) {
+// An empty deliverable directory is an owner-observed absent target, not a
+// request for TUI/Web target input. It resolves before LLM or governance.
+func TestRuntimeV2FileBackedAbsentTargetSelectionFailsWithoutProvider(t *testing.T) {
+	testRuntimeV2FileBackedUnresolvedTargetSelectionFailsWithoutProvider(t, runtimeV2GroundedTargetSequenceBootstrap(), runtimecontract.RuntimeTargetSelectionAbsent, nil)
+}
+
+func testRuntimeV2FileBackedUnresolvedTargetSelectionFailsWithoutProvider(t *testing.T, bootstrap runtimecontract.RuntimeBootstrap, disposition runtimecontract.RuntimeTargetSelectionDisposition, files map[string]string) {
 	t.Helper()
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
@@ -484,7 +490,7 @@ func testRuntimeV2FileBackedAmbiguousTargetSelectionFailsWithoutProvider(t *test
 	if err := os.MkdirAll(internalDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for name, content := range map[string]string{"validation-entry.go": "package fixture\n", "implementation.go": "package fixture\n"} {
+	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(deliverable, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -524,7 +530,7 @@ func testRuntimeV2FileBackedAmbiguousTargetSelectionFailsWithoutProvider(t *test
 		providerCalls++
 		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
 		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Failure: &runtimecontract.RuntimeCandidateFailure{
-			Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: "provider must not be called for ambiguous target selection",
+			Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: "provider must not be called for unresolved target selection",
 		}}, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
@@ -544,20 +550,20 @@ func testRuntimeV2FileBackedAmbiguousTargetSelectionFailsWithoutProvider(t *test
 
 	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
 	if err != nil || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.Action != runtimecontract.RuntimeActionFail || completed.Terminal == nil || completed.Terminal.Code != "target_grounding_unresolved" {
-		t.Fatalf("ambiguous owner target result=%+v err=%v", completed, err)
+		t.Fatalf("unresolved owner target result=%+v err=%v", completed, err)
 	}
 	if providerCalls != 0 {
-		t.Fatalf("ambiguous target selection called provider %d times", providerCalls)
+		t.Fatalf("unresolved target selection called provider %d times", providerCalls)
 	}
 	if governanceRequests != 0 {
-		t.Fatalf("ambiguous target selection opened %d governance requests", governanceRequests)
+		t.Fatalf("unresolved target selection opened %d governance requests", governanceRequests)
 	}
 	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil || persisted.RuntimeState == nil || persisted.RuntimeState.ActiveDispatch != nil || persisted.RuntimeState.Decision.Action != runtimecontract.RuntimeActionFail || persisted.RuntimeState.Decision.Terminal == nil ||
-		persisted.RuntimeState.Facts.Resources.TargetSelection == nil || persisted.RuntimeState.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionAmbiguous ||
-		persisted.RuntimeState.Facts.Resources.TargetSelection.CandidateCount != 2 || len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 0 ||
+		persisted.RuntimeState.Facts.Resources.TargetSelection == nil || persisted.RuntimeState.Facts.Resources.TargetSelection.Disposition != disposition ||
+		persisted.RuntimeState.Facts.Resources.TargetSelection.CandidateCount != len(files) || len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 0 ||
 		len(persisted.RuntimeState.OperationReceipts) != 0 || len(persisted.RuntimeState.Facts.Evidence.Accepted) != 0 {
-		t.Fatalf("ambiguous target selection persisted wrong authority state=%+v err=%v", persisted, err)
+		t.Fatalf("unresolved target selection persisted wrong authority state=%+v err=%v", persisted, err)
 	}
 }
 

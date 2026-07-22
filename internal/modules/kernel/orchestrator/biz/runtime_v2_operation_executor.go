@@ -264,7 +264,6 @@ func (e eventRuntimeV2OperationExecutor) executeFileWrite(ctx context.Context, r
 		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
-		TargetDeclaration: request.TargetDeclaration,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorExecuteFileWriteOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
 	response, err := fileWriteOperationResponse(result)
@@ -286,7 +285,6 @@ func (e eventRuntimeV2OperationExecutor) executePatchApply(ctx context.Context, 
 		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
-		TargetDeclaration: request.TargetDeclaration, TargetSnapshotRevision: runtimeDeclaredTargetSnapshotRevision(request, data.TargetRef),
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorExecutePatchApplyOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
 	response, err := patchApplyOperationResponse(result)
@@ -306,22 +304,6 @@ func (e eventRuntimeV2OperationExecutor) executePatchApply(ctx context.Context, 
 		ret.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
 	}
 	return ret, nil
-}
-
-func runtimeDeclaredTargetSnapshotRevision(request runtimev2.RuntimeOperationExecutionRequest, targetRef string) string {
-	if request.TargetDeclaration == nil {
-		return ""
-	}
-	declaration := request.TargetDeclaration.Normalized()
-	if declaration.Validate() != nil || declaration.Mode != runtimecontract.RuntimeTargetDeclarationNewFile || declaration.TargetRef != strings.TrimSpace(targetRef) {
-		return ""
-	}
-	for _, snapshot := range request.TargetSnapshots {
-		if snapshot.TargetRef == declaration.TargetRef && runtimecontract.RuntimeTargetSnapshotSatisfiesDeclaration(snapshot, &declaration) {
-			return snapshot.Revision
-		}
-	}
-	return ""
 }
 
 func (e eventRuntimeV2OperationExecutor) executePatchPreview(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtimev2.RuntimeOperationExecutionResult, error) {

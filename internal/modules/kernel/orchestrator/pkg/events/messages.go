@@ -36,7 +36,6 @@ type AcquireTargetSnapshotCommand struct {
 	WorkspaceDeliverableDirectory string
 	TargetRef                     string
 	MaxBytes                      int
-	TargetDeclaration             *runtimecontract.RuntimeTargetDeclaration
 }
 
 type AcquireTargetSnapshotResult struct {
@@ -153,9 +152,6 @@ type ProbeRuntimeOperationFeasibilityCommand struct {
 	// supplied by Orchestrator so an owner can return an exact typed stale
 	// detail without reconstructing authority from local process state.
 	Observation *runtimecontract.RuntimePrerequisiteObservation
-	// TargetDeclaration is activation-sealed input. File owner consumes it
-	// only to enforce the exact declared-new-file precondition.
-	TargetDeclaration *runtimecontract.RuntimeTargetDeclaration
 }
 
 type ProbeRuntimeOperationFeasibilityResult struct {
@@ -522,7 +518,6 @@ type ExecuteFileWriteOperationCommand struct {
 	WorkspaceDeliverableDirectory string
 	WorkspaceInternalDirectory    string
 	Data                          FileWriteOperationData
-	TargetDeclaration             *runtimecontract.RuntimeTargetDeclaration
 }
 
 type ExecutePatchApplyOperationCommand struct {
@@ -539,8 +534,6 @@ type ExecutePatchApplyOperationCommand struct {
 	WorkspaceDeliverableDirectory string
 	WorkspaceInternalDirectory    string
 	Data                          PatchApplyOperationData
-	TargetDeclaration             *runtimecontract.RuntimeTargetDeclaration
-	TargetSnapshotRevision        string
 }
 
 type ExecutePatchPreviewOperationCommand struct {

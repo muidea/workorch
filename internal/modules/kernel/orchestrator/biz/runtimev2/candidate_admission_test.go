@@ -190,30 +190,6 @@ func TestEvaluateCandidateAdmissionRejectsDurableChangeOutsideGroundedRepairTarg
 	}
 }
 
-func TestEvaluateCandidateAdmissionRestrictsDeclaredNewFileToTargetBoundPatchWrite(t *testing.T) {
-	aggregate := stateChangeAggregate(t)
-	declaration := runtimecontract.RuntimeTargetDeclaration{TargetRef: "main.go", TargetRole: "implementation", Mode: runtimecontract.RuntimeTargetDeclarationNewFile}.Normalized()
-	aggregate.Facts.Activation.TargetDeclaration = &declaration
-	aggregate.Facts.Focus.RequireTargetGrounding = true
-	aggregate.Facts.Focus.TargetRole = "implementation"
-	aggregate.Facts.Focus.TargetRefs = []string{"main.go"}
-
-	wrong := stateChangeCandidate()
-	patchType, oldText, newText := "text_replace", "old", "new"
-	target := "main.go"
-	wrong.StateChange.Operations[0].Operation.Parameters = []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}}
-	if result := EvaluateCandidateAdmission(aggregate, wrong); result.Failure == nil || result.Failure.Code != candidateAdmissionCodeDeclaredNewFile {
-		t.Fatalf("generic file write admission = %+v failure=%+v", result, result.Failure)
-	}
-
-	correct := stateChangeCandidate()
-	correct.StateChange.Operations[0].Operation.TargetRefs = []string{"main.go"}
-	correct.StateChange.Operations[0].Operation.Parameters = patchApplyTestParameters("main.go")
-	if result := EvaluateCandidateAdmission(aggregate, correct); !result.Accepted() {
-		t.Fatalf("target-bound patch write rejected: %+v", result)
-	}
-}
-
 func TestAdmitCandidateProposalAtomicallyClosesReplayAttemptAndExhaustsSecondAttempt(t *testing.T) {
 	aggregate, candidate := aggregateWithActiveRejectedCandidate(t)
 	repository := &controllerRepository{aggregate: &aggregate}

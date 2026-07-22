@@ -82,44 +82,6 @@ func TestRuntimeAdapterAcquireRuntimeTargetSelectionIsCardinalityBounded(t *test
 	})
 }
 
-func TestRuntimeAdapterDeclaredNewFileSnapshotAndExecutionGuard(t *testing.T) {
-	ctx := context.Background()
-	workspace := t.TempDir()
-	adapter := NewRuntimeAdapter()
-	declaration := runtimecontract.RuntimeTargetDeclaration{TargetRef: "main.go", TargetRole: "deliverable", Mode: runtimecontract.RuntimeTargetDeclarationNewFile}.Normalized()
-	snapshot, err := adapter.AcquireDeclaredTargetSnapshot(ctx, workspace, "main.go", 1024, &declaration)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !runtimecontract.RuntimeTargetSnapshotSatisfiesDeclaration(snapshot, &declaration) || snapshot.Revision == "" || snapshot.WorkspaceTreeRevision == "" {
-		t.Fatalf("declared new snapshot = %+v", snapshot)
-	}
-	patchType, content := patchTypeFileWrite, "package main\n"
-	operation := runtimecontract.RuntimeOperation{
-		ID: "create", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{"main.go"},
-		Parameters: []runtimecontract.OperationParameter{{Name: "targetRef", String: stringPointer("main.go")}, {Name: "patchType", String: &patchType}, {Name: "content", String: &content}},
-	}
-	if failure := adapter.ProbeDeclaredNewFileOperation(workspace, &declaration, operation); failure != nil {
-		t.Fatalf("declared new file feasibility = %+v", failure)
-	}
-	if replay, err := adapter.VerifyDeclaredNewFileWrite(ctx, workspace, &declaration, "main.go", patchType, "", snapshot.Revision, content); err != nil || replay != nil {
-		t.Fatalf("new file execution precondition replay=%+v err=%v", replay, err)
-	}
-	if err := os.WriteFile(filepath.Join(workspace, "main.go"), []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	complete, err := adapter.AcquireDeclaredTargetSnapshot(ctx, workspace, "main.go", 1024, &declaration)
-	if err != nil || !complete.Complete() {
-		t.Fatalf("post-create complete snapshot = %+v err=%v", complete, err)
-	}
-	if replay, err := adapter.VerifyDeclaredNewFileWrite(ctx, workspace, &declaration, "main.go", patchType, "", snapshot.Revision, content); err != nil || replay == nil || replay.AfterHash == "" {
-		t.Fatalf("lost-receipt replay replay=%+v err=%v", replay, err)
-	}
-	if failure := adapter.ProbeDeclaredNewFileOperation(workspace, &declaration, operation); failure == nil || failure.Code != "declared_new_file_already_exists" {
-		t.Fatalf("existing declared-new target feasibility = %+v", failure)
-	}
-}
-
 func TestFileMutationReceiptObservationReportsAfterRevisionForAllStateChangingHandlers(t *testing.T) {
 	workspace := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workspace, "target.txt"), []byte("after\n"), 0o644); err != nil {

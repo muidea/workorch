@@ -20,8 +20,6 @@ type RuntimeOperationExecutionRequest struct {
 	GovernanceGrant                    *runtimecontract.RuntimeOperationGovernanceGrant
 	EvidenceKind                       string
 	TargetRole                         string
-	TargetDeclaration                  *runtimecontract.RuntimeTargetDeclaration
-	TargetSnapshots                    []runtimecontract.TargetSnapshot
 	EvidencePolicies                   []runtimecontract.RuntimeEvidencePolicy
 	CapabilityStates                   []runtimecontract.RuntimeCapabilityStateSnapshot
 	CompletedRequiredOperationReceipts []runtimecontract.RuntimeRequiredOperationReceiptBinding
@@ -192,8 +190,6 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 			GovernanceGrant:                    governanceGrant,
 			EvidenceKind:                       evidenceKindForDecision(aggregate.Decision),
 			TargetRole:                         aggregate.Facts.Focus.TargetRole,
-			TargetDeclaration:                  aggregate.Facts.Activation.TargetDeclaration,
-			TargetSnapshots:                    append([]runtimecontract.TargetSnapshot(nil), aggregate.Facts.Resources.TargetSnapshots...),
 			EvidencePolicies:                   aggregate.Facts.Activation.EvidencePolicies,
 			CapabilityStates:                   append([]runtimecontract.RuntimeCapabilityStateSnapshot(nil), aggregate.Facts.Resources.CapabilityStates...),
 			CompletedRequiredOperationReceipts: completedRequiredOperationReceiptBindings(*aggregate.ActiveDispatch, aggregate.OperationReceipts, completed),

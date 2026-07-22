@@ -14,7 +14,6 @@ import (
 // ProviderTarget 是 identity 快照，不进入 C0/C1/C2 stable prefix。
 type RuntimeActivationContext struct {
 	ProviderTarget    ProviderModelTarget
-	TargetDeclaration *RuntimeTargetDeclaration
 	DialogLanguage    string
 	DefaultSoul       *RuntimeSoulContext
 	StageSoulBindings []RuntimeStageSoulBinding
@@ -107,14 +106,6 @@ type RuntimeMemoryContext struct {
 
 func (c RuntimeActivationContext) Normalized() RuntimeActivationContext {
 	c.ProviderTarget = c.ProviderTarget.Normalized()
-	if c.TargetDeclaration != nil {
-		value := c.TargetDeclaration.Normalized()
-		if value.TargetRef == "" {
-			c.TargetDeclaration = nil
-		} else {
-			c.TargetDeclaration = &value
-		}
-	}
 	c.DialogLanguage = strings.TrimSpace(c.DialogLanguage)
 	if c.DefaultSoul != nil {
 		value := c.DefaultSoul.Normalized()
@@ -139,11 +130,6 @@ func (c RuntimeActivationContext) Validate() error {
 	c = c.Normalized()
 	if err := c.ProviderTarget.Validate(); err != nil {
 		return fmt.Errorf("runtime activation provider target: %w", err)
-	}
-	if c.TargetDeclaration != nil {
-		if err := c.TargetDeclaration.Validate(); err != nil {
-			return fmt.Errorf("runtime activation target declaration: %w", err)
-		}
 	}
 	for _, binding := range c.StageSoulBindings {
 		if binding.Stage == "" || binding.Soul.ID == "" {
@@ -184,7 +170,7 @@ func (c RuntimeActivationContext) Clone() RuntimeActivationContext {
 func SameRuntimeActivationContext(left RuntimeActivationContext, right RuntimeActivationContext) bool {
 	left = left.Normalized()
 	right = right.Normalized()
-	if !left.ProviderTarget.Same(right.ProviderTarget) || !SameRuntimeTargetDeclaration(left.TargetDeclaration, right.TargetDeclaration) || left.DialogLanguage != right.DialogLanguage || !sameRuntimeSoulPointers(left.DefaultSoul, right.DefaultSoul) ||
+	if !left.ProviderTarget.Same(right.ProviderTarget) || left.DialogLanguage != right.DialogLanguage || !sameRuntimeSoulPointers(left.DefaultSoul, right.DefaultSoul) ||
 		len(left.StageSoulBindings) != len(right.StageSoulBindings) || len(left.Skills) != len(right.Skills) ||
 		len(left.MCPServerIDs) != len(right.MCPServerIDs) || len(left.MCPCapabilities) != len(right.MCPCapabilities) || len(left.Memories) != len(right.Memories) ||
 		!SameRuntimeEvidencePolicies(left.EvidencePolicies, right.EvidencePolicies) {

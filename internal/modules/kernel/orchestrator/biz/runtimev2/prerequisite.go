@@ -167,9 +167,7 @@ func applyPrerequisiteResult(facts *runtimecontract.RuntimeFacts, prerequisite r
 		facts.Resources.Manifest = result.Manifest
 	case runtimecontract.PrerequisiteKindTargetSnapshot:
 		if result.TargetSnapshot == nil || result.TargetSnapshot.TargetRef != prerequisite.SubjectRef || !result.TargetSnapshot.Complete() {
-			if result.TargetSnapshot == nil || result.TargetSnapshot.TargetRef != prerequisite.SubjectRef || !runtimecontract.RuntimeTargetSnapshotSatisfiesDeclaration(*result.TargetSnapshot, facts.Activation.TargetDeclaration) {
-				return fmt.Errorf("target snapshot prerequisite returned no complete or declared-new-file snapshot for %q", prerequisite.SubjectRef)
-			}
+			return fmt.Errorf("target snapshot prerequisite returned no complete snapshot for %q", prerequisite.SubjectRef)
 		}
 		facts.Resources.TargetSnapshots = append(facts.Resources.TargetSnapshots, *result.TargetSnapshot)
 	case runtimecontract.PrerequisiteKindTargetSelection:
@@ -281,7 +279,7 @@ func runtimeRequirementSatisfied(facts runtimecontract.RuntimeFacts, requirement
 		return facts.Resources.Manifest != nil && facts.Resources.Manifest.Revision != ""
 	case runtimecontract.PrerequisiteKindTargetSnapshot:
 		for _, snapshot := range facts.Resources.TargetSnapshots {
-			if snapshot.TargetRef == requirement.SubjectRef && runtimecontract.RuntimeTargetSnapshotSatisfiesDeclaration(snapshot, facts.Activation.TargetDeclaration) {
+			if snapshot.TargetRef == requirement.SubjectRef && snapshot.Complete() {
 				return true
 			}
 		}

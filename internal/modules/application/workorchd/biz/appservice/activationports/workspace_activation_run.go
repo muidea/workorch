@@ -15,9 +15,6 @@ func createReplacementWorkspaceExecutionRun(ctx context.Context, request Activat
 	if workspace == nil || goal == nil || dod == nil || oldRunID == "" {
 		return "", common.ErrInvalidArgument
 	}
-	if err := materializeWorkspaceTargetDeclaration(ctx, request, workspace); err != nil {
-		return "", err
-	}
 	activationBuild, err := workspaceRuntimeActivation(ctx, request, workspace, goal, dod)
 	if err != nil {
 		return "", err
@@ -34,9 +31,6 @@ func createReplacementWorkspaceExecutionRun(ctx context.Context, request Activat
 func createWorkspaceExecutionRun(ctx context.Context, request ActivateWorkspaceExecutionViewRequest, workspace *workspacemodel.Workspace, goal *workspacemodel.Goal, dod *workspacemodel.DoD) (common.RunID, error) {
 	if workspace == nil || goal == nil || dod == nil {
 		return "", common.ErrInvalidArgument
-	}
-	if err := materializeWorkspaceTargetDeclaration(ctx, request, workspace); err != nil {
-		return "", err
 	}
 	activationBuild, err := workspaceRuntimeActivation(ctx, request, workspace, goal, dod)
 	if err != nil {

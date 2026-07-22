@@ -31,10 +31,11 @@ func RuntimeV2Bootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defi
 	if err != nil {
 		return nil, err
 	}
-	focuses, err := bindRuntimeTargetDeclarationToFocuses(compiled.Focuses, activation.TargetDeclaration)
-	if err != nil {
-		return nil, err
-	}
+	// Goal/DoD compilation declares the required role and bounded discovery
+	// source. Runtime then asks the owning File block to select from the actual
+	// workspace manifest before any candidate request; activation never asks a
+	// user to provide a file path.
+	focuses := compiled.Focuses
 	capabilityContract := []string{
 		runtimecontract.StepKindFileEdit,
 		runtimecontract.StepKindFileRead,
@@ -118,38 +119,6 @@ func RuntimeV2Bootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defi
 		return nil, err
 	}
 	return &bootstrap, nil
-}
-
-// bindRuntimeTargetDeclarationToFocuses seals a Workspace-owner supplied
-// target into matching direct-evidence focuses. The activation boundary only
-// compiles this explicit fact; it never derives paths from the goal, files, or
-// a provider response.
-func bindRuntimeTargetDeclarationToFocuses(focuses []runtimecontract.CoverageFocus, declaration *runtimecontract.RuntimeTargetDeclaration) ([]runtimecontract.CoverageFocus, error) {
-	if declaration != nil {
-		value := declaration.Normalized()
-		if err := value.Validate(); err != nil {
-			return nil, fmt.Errorf("runtime target declaration: %w", err)
-		}
-		declaration = &value
-	}
-	ret := make([]runtimecontract.CoverageFocus, len(focuses))
-	for idx, focus := range focuses {
-		focus = focus.Normalized()
-		if focus.RequireTargetGrounding && len(focus.TargetRefs) == 0 {
-			if declaration == nil {
-				return nil, fmt.Errorf("%w: direct-evidence focus %q (%s) requires an explicit workspace target declaration", ErrTargetDeclarationRequired, focus.ID, focus.TargetRole)
-			}
-			if declaration.TargetRole != focus.TargetRole {
-				return nil, fmt.Errorf("%w: target declaration role %q does not match focus %q role %q", ErrTargetDeclarationRequired, declaration.TargetRole, focus.ID, focus.TargetRole)
-			}
-			focus.TargetRefs = []string{declaration.TargetRef}
-		}
-		if err := runtimecontract.ValidateRuntimeTargetGrounding(focus.RequireTargetGrounding, focus.TargetRole, focus.TargetRefs, focus.TargetDiscoverySources, focus.TargetSelectorRef); err != nil {
-			return nil, err
-		}
-		ret[idx] = focus.Normalized()
-	}
-	return ret, nil
 }
 
 func runtimeV2OperationAdmissibilityRequirements(kinds []string) ([]runtimecontract.RuntimeRequirement, error) {

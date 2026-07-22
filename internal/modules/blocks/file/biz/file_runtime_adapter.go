@@ -28,50 +28,16 @@ func NewRuntimeAdapter() *RuntimeAdapter {
 }
 
 func (a *RuntimeAdapter) AcquireTargetSnapshot(ctx context.Context, workspaceDirectory, targetRef string, maxBytes int) (runtimemodel.TargetSnapshot, error) {
-	snapshot, err := a.acquireTargetSnapshot(ctx, workspaceDirectory, targetRef, maxBytes)
-	if err != nil {
-		return runtimemodel.TargetSnapshot{}, err
-	}
-	if !snapshot.Complete() {
-		return snapshot, fmt.Errorf("%w: target snapshot %q is not complete (%s)", common.ErrInvalidArgument, snapshot.TargetRef, snapshot.ContentState)
-	}
-	return snapshot, nil
-}
-
-// AcquireDeclaredTargetSnapshot is the only File-owner path that can report a
-// missing target as a satisfied observation. The declaration is activation
-// input, not a selector: it must name this exact target and explicitly state
-// that the target is new.
-func (a *RuntimeAdapter) AcquireDeclaredTargetSnapshot(ctx context.Context, workspaceDirectory, targetRef string, maxBytes int, declaration *runtimemodel.RuntimeTargetDeclaration) (runtimemodel.TargetSnapshot, error) {
-	snapshot, err := a.acquireTargetSnapshot(ctx, workspaceDirectory, targetRef, maxBytes)
-	if err != nil {
-		return runtimemodel.TargetSnapshot{}, err
-	}
-	if snapshot.Complete() {
-		// A prior declared create invalidates its missing observation and then
-		// requires this ordinary complete snapshot for validation/assessment.
-		// File mutation remains fenced separately at feasibility/execution, so
-		// accepting this read fact cannot authorize an overwrite.
-		return snapshot, nil
-	}
-	if !runtimemodel.RuntimeTargetSnapshotSatisfiesDeclaration(snapshot, declaration) {
-		return runtimemodel.TargetSnapshot{}, fmt.Errorf("%w: target snapshot %q is not complete (%s)", common.ErrInvalidArgument, snapshot.TargetRef, snapshot.ContentState)
-	}
-	return snapshot, nil
-}
-
-func (a *RuntimeAdapter) acquireTargetSnapshot(ctx context.Context, workspaceDirectory, targetRef string, maxBytes int) (runtimemodel.TargetSnapshot, error) {
 	result, err := a.ReadFile(ctx, FileReadRequest{
 		WorkspaceDirectory: workspaceDirectory,
 		Path:               targetRef,
 		MaxBytes:           int64(maxBytes),
-		Optional:           true,
 	})
 	if err != nil {
 		return runtimemodel.TargetSnapshot{}, err
 	}
 	snapshot := runtimemodel.TargetSnapshot{
-		TargetRef:   firstNonEmpty(result.TargetRef, result.Path),
+		TargetRef:   result.TargetRef,
 		Content:     result.Content,
 		ContentHash: result.ContentHash,
 		Size:        result.Size,
@@ -80,12 +46,6 @@ func (a *RuntimeAdapter) acquireTargetSnapshot(ctx context.Context, workspaceDir
 	switch {
 	case !result.Exists:
 		snapshot.ContentState = runtimemodel.SnapshotContentStateMissing
-		manifest, manifestErr := a.AcquireWorkspaceManifest(workspaceDirectory)
-		if manifestErr != nil {
-			return runtimemodel.TargetSnapshot{}, manifestErr
-		}
-		snapshot.WorkspaceTreeRevision = manifest.Revision
-		snapshot.Revision = missingTargetSnapshotRevision(snapshot.TargetRef, manifest.Revision)
 	case result.Binary:
 		snapshot.ContentState = runtimemodel.SnapshotContentStateBinary
 	case result.Redacted:
@@ -94,15 +54,11 @@ func (a *RuntimeAdapter) acquireTargetSnapshot(ctx context.Context, workspaceDir
 		snapshot.ContentState = runtimemodel.SnapshotContentStateTruncated
 	case result.ContentComplete:
 		snapshot.ContentState = runtimemodel.SnapshotContentStateComplete
-		snapshot.Revision = snapshot.ContentHash
+	}
+	if !snapshot.Complete() {
+		return snapshot, fmt.Errorf("%w: target snapshot %q is not complete (%s)", common.ErrInvalidArgument, snapshot.TargetRef, snapshot.ContentState)
 	}
 	return snapshot, nil
-}
-
-func missingTargetSnapshotRevision(targetRef, workspaceTreeRevision string) string {
-	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "missing-target-v1:%s:%s", strings.TrimSpace(targetRef), strings.TrimSpace(workspaceTreeRevision))
-	return "missing-target-" + hex.EncodeToString(h.Sum(nil))
 }
 
 func (a *RuntimeAdapter) AcquireWorkspaceManifest(workspaceDirectory string) (runtimemodel.WorkspaceManifest, error) {
@@ -274,75 +230,6 @@ func (a *RuntimeAdapter) ProbeRuntimeOperationFeasibilityWithReplayProof(workspa
 		return fileOperationInfeasible(operation, "operation_replay_proof_invalid", err.Error(), operation.TargetRefs), nil, nil
 	}
 	return nil, nil, &proof
-}
-
-// ProbeDeclaredNewFileOperation is the File-owner pre-seal guard for a
-// declaration that was sealed at activation. It deliberately accepts no
-// generic file-write form, base hash, or already-existing file.
-func (a *RuntimeAdapter) ProbeDeclaredNewFileOperation(workspaceDirectory string, declaration *runtimemodel.RuntimeTargetDeclaration, operation runtimemodel.RuntimeOperation) *runtimemodel.FailureFact {
-	if declaration == nil {
-		return nil
-	}
-	value := declaration.Normalized()
-	if err := value.Validate(); err != nil {
-		return fileOperationInfeasible(operation, "target_declaration_invalid", err.Error(), nil)
-	}
-	if value.Mode != runtimemodel.RuntimeTargetDeclarationNewFile {
-		return nil
-	}
-	operation = operation.Normalized()
-	targetRef := fileOperationTargetRef(operation)
-	if targetRef != value.TargetRef || operation.Kind != runtimemodel.RuntimeBlockKindPatchApply || runtimeOperationParameterString(operation, "patchType") != patchTypeFileWrite || runtimeOperationParameterString(operation, "baseHash") != "" {
-		return fileOperationInfeasible(operation, "declared_new_file_operation_required", "declared new target requires patch/apply file_write without baseHash on the exact declared target", []string{value.TargetRef})
-	}
-	_, target, rel, err := guardedWorkspacePath(workspaceDirectory, targetRef, false)
-	if err != nil {
-		return fileOperationInfeasible(operation, "operation_target_invalid", err.Error(), []string{targetRef})
-	}
-	if _, err := os.Stat(target); err == nil {
-		return fileOperationInfeasible(operation, "declared_new_file_already_exists", "declared new target now exists and must not be overwritten", []string{filepath.ToSlash(rel)})
-	} else if !os.IsNotExist(err) {
-		return fileOperationInfeasible(operation, "operation_target_unreadable", err.Error(), []string{filepath.ToSlash(rel)})
-	}
-	return nil
-}
-
-// VerifyDeclaredNewFileWrite performs the final owner-side create
-// precondition immediately before mutation. A matching existing content is an
-// idempotent lost-receipt replay; differing existing content is never
-// overwritten.
-func (a *RuntimeAdapter) VerifyDeclaredNewFileWrite(ctx context.Context, workspaceDirectory string, declaration *runtimemodel.RuntimeTargetDeclaration, targetRef, patchType, baseHash, snapshotRevision, content string) (*RuntimeFileOperationResult, error) {
-	if declaration == nil {
-		return nil, nil
-	}
-	value := declaration.Normalized()
-	if err := value.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: runtime target declaration: %v", common.ErrInvalidArgument, err)
-	}
-	if value.Mode != runtimemodel.RuntimeTargetDeclarationNewFile {
-		return nil, nil
-	}
-	if targetRef != value.TargetRef || patchType != patchTypeFileWrite || strings.TrimSpace(baseHash) != "" || strings.TrimSpace(snapshotRevision) == "" {
-		return nil, fmt.Errorf("%w: declared new target requires patch/apply file_write without baseHash and its sealed missing snapshot revision", common.ErrInvalidArgument)
-	}
-	snapshot, err := a.acquireTargetSnapshot(ctx, workspaceDirectory, targetRef, defaultMaxReadBytes)
-	if err != nil {
-		return nil, err
-	}
-	if snapshot.ContentState == runtimemodel.SnapshotContentStateMissing {
-		if snapshot.Revision != snapshotRevision {
-			return nil, fmt.Errorf("%w: declared new target snapshot is stale", common.ErrConflict)
-		}
-		return nil, nil
-	}
-	if snapshot.Complete() && snapshot.Content == content {
-		return &RuntimeFileOperationResult{
-			Stage: "patch_apply", Summary: "declared new file write replay confirmed",
-			BeforeHash: snapshotRevision, AfterHash: snapshot.ContentHash, ContentHash: snapshot.ContentHash,
-			TargetRefs: []string{targetRef}, EvidenceRefs: []string{"workorch://workspace/" + targetRef},
-		}, nil
-	}
-	return nil, fmt.Errorf("%w: declared new target %q already exists and does not match the sealed postcondition", common.ErrConflict, targetRef)
 }
 
 // ProbeRuntimeOperationFeasibilityWithObservation is the owner read-only

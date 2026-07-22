@@ -301,18 +301,8 @@ export type Workspace = {
   activeRunId?: string;
   // Mutable workspace preference. It applies only to the next activation.
   defaultLLMTarget?: ProviderModelTarget;
-	// Declarative input for the next Runtime V2 activation. It never changes
-	// an already sealed Run.
-	targetDeclaration?: RuntimeTargetDeclaration;
   defaultSoulId?: string;
   soulBindings?: Record<string, string>;
-};
-
-export type RuntimeTargetDeclaration = {
-  targetRef: string;
-  targetRole: string;
-  mode: 'existing_file' | 'new_file';
-  revision?: string;
 };
 
 export type ProjectionStatus = {
@@ -532,7 +522,6 @@ export type WorkspaceExecutionActivationRequest = {
   goalId?: string;
   doDId?: string;
   llmTarget?: ProviderModelTarget;
-  targetDeclaration?: RuntimeTargetDeclaration;
   soulId?: string;
   soulBindings?: Record<string, string>;
   skillIds?: string[];

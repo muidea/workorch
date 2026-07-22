@@ -1526,10 +1526,6 @@ func cloneWorkspace(item appmodelcore.Workspace) appmodelcore.Workspace {
 		target := item.DefaultLLMTarget.Clone()
 		item.DefaultLLMTarget = &target
 	}
-	if item.TargetDeclaration != nil {
-		declaration := item.TargetDeclaration.Clone()
-		item.TargetDeclaration = &declaration
-	}
 	item.SoulBindings = cloneStringStringMap(item.SoulBindings)
 	item.ContextHints = cloneStringAnyMap(item.ContextHints)
 	item.EvidencePolicies = cloneMapSlice(item.EvidencePolicies)

@@ -678,23 +678,16 @@ governance request 均为零，原因是 deliverable 目录为空、profile 只�
 文件名或“允许任意新文件”的 core fallback 绕过 8D-01/8D-02；要取得 grounded 正向 live 链，必须
 由 profile-bound selector 或实际 capability owner 提供可验证的 implementation target observation。
 
-**R1 explicit declared-new-target closure — 2026-07-22.** 为让空 Workspace 具备不猜测路径的
-0→1 正向链，activation 可接收并经 Workspace owner 持久化 `RuntimeTargetDeclaration`；新 Run 将其
-封存到 `RuntimeActivationContext`，只绑定 role 精确相等的 direct-evidence focus。缺失声明、role
-不匹配或 active Run 试图覆盖 sealed declaration 均在 Run 创建前返回 typed input error，不生成
-decision ticket。File owner 是唯一可将 `missing` snapshot 视为满足者：仅当 target、mode=`new_file`
-和 declaration revision 精确相符时，才返回 owner-authored missing revision 加 workspace-tree
-freshness dependency；`existing_file`、binary、truncated、redacted 和任意非匹配 target 仍拒绝。
-
-SM-2 将这种 missing fact 仅作为已声明创建前置条件保存；SM-3 仅接受
-`patch/apply:file_write`、唯一 declared target、无 `baseHash` 的 durable candidate；File owner 在
-feasibility 与执行前再次确认目标不存在。若文件已经被外部创建则拒绝覆盖；若内容与已封存写入
-后置条件一致，则只作为 lost-receipt replay 生成 receipt。目标缺失 observation 同时依赖 target 与
-workspace-tree，任一 owner receipt 的资源变化都会使旧 snapshot 失效。该路径不从 Goal、LLM、
-manifest 第一项、文件后缀或 Resume 推导 target；TUI/Web 必须在**新 activation**提供声明，Resume
-只重驱已封存的 Run。相关独立回归：`runtime_target_declaration_test.go`、
-`TestRuntimeAdapterDeclaredNewFileSnapshotAndExecutionGuard`、
-`TestEvaluateCandidateAdmissionRestrictsDeclaredNewFileToTargetBoundPatchWrite`。
+**R1 automatic workspace-target derivation — 2026-07-22.** 启动 execution 不要求用户填写
+交付文件路径。activation 先依据 Goal/DoD 编译 target role、coverage scope 与 profile 声明的 bounded
+selector；SM-2 随后向 File owner 查询实际 workspace manifest，并由 owner 返回 selected、absent 或
+ambiguous 的 typed observation。只有 selected target 才进入 snapshot、candidate 与 dispatch。核心
+不从 Goal 文本、DoD 文本、文件后缀或 manifest 第一项猜测路径；多文件的语义选择必须由 profile
+声明一个对应 owner selector，而不是退回到 Web/TUI 的手工输入。空目录或无法唯一选择时，Run 以
+typed no-target outcome 收口，不生成 decision ticket，也不会伪造新文件目标。
+回归覆盖 `TestRuntimeV2BootstrapDefersTargetSelectionToFileOwner`、
+`TestRuntimeV2FileBackedAbsentTargetSelectionFailsWithoutProvider` 与
+`TestRuntimeV2FileBackedAmbiguousTargetSelectionFailsWithoutProvider`。
 
 **R2 local no-fallback increment.** `TestShellOwnerDoesNotInferFailureTargetFromValidationCommand`
 现覆盖相同 execution key/fence 的重复 Shell validation delivery：owner 只返回已提交 receipt，

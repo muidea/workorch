@@ -251,17 +251,6 @@ func (m *Biz) handleFileWriteOperation(event magicevent.Event, result magicevent
 		setPrerequisiteError(result, err)
 		return
 	}
-	if command.TargetDeclaration != nil {
-		declaration := command.TargetDeclaration.Normalized()
-		if err := declaration.Validate(); err != nil {
-			setPrerequisiteError(result, fmt.Errorf("%w: runtime target declaration: %v", common.ErrInvalidArgument, err))
-			return
-		}
-		if declaration.Mode == runtimecontract.RuntimeTargetDeclarationNewFile {
-			setPrerequisiteError(result, fmt.Errorf("%w: declared new target only permits patch/apply file_write", common.ErrInvalidArgument))
-			return
-		}
-	}
 	beforeWorkspaceRevision := m.workspaceTreeRevision(command.WorkspaceDeliverableDirectory)
 	operationResult, executeErr := m.runtimeAdapter.ApplyPatch(PatchApplyRequest{
 		WorkspaceDirectory: command.WorkspaceDeliverableDirectory,
@@ -314,28 +303,21 @@ func (m *Biz) handlePatchApplyOperation(event magicevent.Event, result magiceven
 		return
 	}
 	beforeWorkspaceRevision := m.workspaceTreeRevision(command.WorkspaceDeliverableDirectory)
-	operationResult, executeErr := m.runtimeAdapter.VerifyDeclaredNewFileWrite(event.Context(), command.WorkspaceDeliverableDirectory, command.TargetDeclaration, command.Data.TargetRef, command.Data.PatchType, command.Data.BaseHash, command.TargetSnapshotRevision, command.Data.Content)
-	if executeErr == nil && operationResult == nil {
-		applied, applyErr := m.runtimeAdapter.ApplyPatch(PatchApplyRequest{
-			WorkspaceDirectory: command.WorkspaceDeliverableDirectory,
-			TargetRef:          command.Data.TargetRef, PatchType: command.Data.PatchType,
-			Content: command.Data.Content, ContentPresent: command.Data.ContentPresent,
-			Diff: command.Data.Diff, OldText: command.Data.OldText, NewText: command.Data.NewText, NewTextPresent: command.Data.NewTextPresent,
-			BaseHash: command.Data.BaseHash, Occurrence: command.Data.Occurrence,
-			CoverageTargets: command.Data.CoverageTargets, Summary: command.Data.Summary,
-			ApprovalGranted: command.Execution.GovernanceGrant != nil,
-			ReplayProof:     command.Execution.ReplayProof,
-		})
-		operationResult, executeErr = &applied, applyErr
-	}
-	if operationResult == nil {
-		operationResult = &RuntimeFileOperationResult{TargetRefs: []string{command.Data.TargetRef}}
-	}
+	operationResult, executeErr := m.runtimeAdapter.ApplyPatch(PatchApplyRequest{
+		WorkspaceDirectory: command.WorkspaceDeliverableDirectory,
+		TargetRef:          command.Data.TargetRef, PatchType: command.Data.PatchType,
+		Content: command.Data.Content, ContentPresent: command.Data.ContentPresent,
+		Diff: command.Data.Diff, OldText: command.Data.OldText, NewText: command.Data.NewText, NewTextPresent: command.Data.NewTextPresent,
+		BaseHash: command.Data.BaseHash, Occurrence: command.Data.Occurrence,
+		CoverageTargets: command.Data.CoverageTargets, Summary: command.Data.Summary,
+		ApprovalGranted: command.Execution.GovernanceGrant != nil,
+		ReplayProof:     command.Execution.ReplayProof,
+	})
 	response := orchestratorevents.ExecutePatchApplyOperationResult{
 		EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID,
 		EvidenceKind: command.EvidenceKind, Status: runtimeOperationStatus(executeErr),
 		SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID),
-		Evidence:  fileOperationEvidence(*operationResult),
+		Evidence:  fileOperationEvidence(operationResult),
 	}
 	if executeErr != nil {
 		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.RuntimeBlockKindPatchApply, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
@@ -344,7 +326,7 @@ func (m *Biz) handlePatchApplyOperation(event magicevent.Event, result magiceven
 	if response.Failure != nil && response.Failure.Code == "approval_required" {
 		governance = &runtimecontract.RuntimeGovernanceRequirement{Kind: runtimecontract.GovernanceApproval, SubjectRef: command.Data.TargetRef, Reason: response.Failure.Message, RequestedAction: runtimecontract.RuntimeBlockKindPatchApply, RiskLevel: "high"}
 	}
-	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, governance, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, response.Status, *operationResult, beforeWorkspaceRevision))
+	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, governance, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, response.Status, operationResult, beforeWorkspaceRevision))
 	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
 	if err != nil {
 		setPrerequisiteError(result, err)
@@ -479,9 +461,6 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		return
 	}
 	failure, stale, replayProof := m.runtimeAdapter.ProbeRuntimeOperationFeasibilityWithReplayProof(command.WorkspaceDeliverableDirectory, command.Admissibility, operation, command.Observation)
-	if failure == nil && stale == nil {
-		failure = m.runtimeAdapter.ProbeDeclaredNewFileOperation(command.WorkspaceDeliverableDirectory, command.TargetDeclaration, operation)
-	}
 	result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{
 		OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID,
 		CapabilityStateBinding: command.Admissibility.AcquisitionBinding,
@@ -509,7 +488,7 @@ func (m *Biz) handleAcquireTargetSnapshot(event magicevent.Event, result magicev
 		setPrerequisiteError(result, common.ErrInvalidArgument)
 		return
 	}
-	snapshot, err := m.runtimeAdapter.AcquireDeclaredTargetSnapshot(event.Context(), command.WorkspaceDeliverableDirectory, command.TargetRef, command.MaxBytes, command.TargetDeclaration)
+	snapshot, err := m.runtimeAdapter.AcquireTargetSnapshot(event.Context(), command.WorkspaceDeliverableDirectory, command.TargetRef, command.MaxBytes)
 	if setPrerequisiteError(result, err) {
 		return
 	}
@@ -632,17 +611,9 @@ func fileManifestObservation(prerequisiteID string, manifest runtimecontract.Wor
 }
 
 func fileTargetSnapshotObservation(prerequisiteID string, snapshot runtimecontract.TargetSnapshot) runtimecontract.RuntimePrerequisiteObservation {
-	revision := strings.TrimSpace(snapshot.Revision)
-	if revision == "" {
-		revision = strings.TrimSpace(snapshot.ContentHash)
-	}
-	dependencies := []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: ModuleID, SubjectRef: snapshot.TargetRef, Revision: revision}}
-	if snapshot.ContentState == runtimecontract.SnapshotContentStateMissing && strings.TrimSpace(snapshot.WorkspaceTreeRevision) != "" {
-		dependencies = append(dependencies, runtimecontract.RuntimeFreshnessDependency{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: ModuleID, SubjectRef: "workspace_deliverable", Revision: snapshot.WorkspaceTreeRevision})
-	}
 	observation := runtimecontract.RuntimePrerequisiteObservation{
-		PrerequisiteID: prerequisiteID, Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: ModuleID, ContentHash: revision,
-		Dependencies: dependencies,
+		PrerequisiteID: prerequisiteID, Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: ModuleID, ContentHash: snapshot.ContentHash,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: ModuleID, SubjectRef: snapshot.TargetRef, Revision: snapshot.ContentHash}},
 	}
 	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
 	return observation

@@ -55,9 +55,6 @@ func ActivateWorkspaceExecutionView(ctx context.Context, request ActivateWorkspa
 			return readmodelcore.WorkspaceExecutionActivation{}, err
 		}
 		if !activationcore.IsTerminalRunState(run.State) {
-			if err := rejectActiveRunTargetDeclarationOverride(workspace, cmd.TargetDeclaration); err != nil {
-				return readmodelcore.WorkspaceExecutionActivation{}, err
-			}
 			goal, dod, replaceErr := SelectWorkspaceExecutionDefinitions(ctx, request.Hub, workspaceID, common.GoalID(cmd.GoalID), common.DoDID(cmd.DoDID))
 			if replaceErr != nil {
 				if strings.TrimSpace(cmd.GoalID) != "" || strings.TrimSpace(cmd.DoDID) != "" {

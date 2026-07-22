@@ -63,6 +63,34 @@ func TestCompileRuntimeV2CoverageFocusesAppliesDodItemWildcard(t *testing.T) {
 	}
 }
 
+func TestRuntimeV2BootstrapDefersTargetSelectionToFileOwner(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{
+			AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
+			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+				ID: "profile", EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
+					ID: "*", Scope: "dodItem", TargetRole: "deliverable_implementation",
+					TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
+					TargetSelectorRef:      "file/unique_workspace_entry", RequireTargetGrounding: true,
+					AcceptedStepKinds: []string{"patch/apply"},
+				}},
+			}},
+		},
+	}
+	bootstrap, err := RuntimeV2Bootstrap(
+		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "根据当前交付物完成能力"},
+		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"已有交付物通过验收"}},
+		"definition-1", nil, activation,
+	)
+	if err != nil {
+		t.Fatalf("bootstrap failed before File owner target selection: %v", err)
+	}
+	if len(bootstrap.Focuses) != 1 || len(bootstrap.Focuses[0].TargetRefs) != 0 || bootstrap.Focuses[0].TargetSelectorRef != "file/unique_workspace_entry" {
+		t.Fatalf("bootstrap target contract = %+v", bootstrap.Focuses)
+	}
+}
+
 func TestResolveCoverageEvidencePolicyCompilesGroundedDirectEvidenceScopes(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},

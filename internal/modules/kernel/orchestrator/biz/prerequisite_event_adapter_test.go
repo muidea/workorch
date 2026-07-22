@@ -56,42 +56,6 @@ func TestAcquireTargetSnapshotPrerequisiteUsesTypedEventHubContract(t *testing.T
 	}
 }
 
-func TestAcquireTargetSnapshotPrerequisiteAcceptsOnlyDeclaredNewFileMissingTarget(t *testing.T) {
-	ctx := context.Background()
-	hub := magicevent.NewHub(16)
-	defer hub.Terminate(ctx)
-	background := magictask.NewBackgroundRoutine(2)
-	defer background.Shutdown(ctx)
-	file := filemodule.New()
-	if err := file.Configure(filemodule.Dependencies{EventHub: hub}); err != nil {
-		t.Fatal(err)
-	}
-	if err := file.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer file.Stop(ctx)
-
-	workspace := t.TempDir()
-	declaration := runtimecontract.RuntimeTargetDeclaration{TargetRef: "main.go", TargetRole: "deliverable", Mode: runtimecontract.RuntimeTargetDeclarationNewFile}.Normalized()
-	result, err := AcquireTargetSnapshotPrerequisite(ctx, hub, orchestratorevents.AcquireTargetSnapshotCommand{
-		WorkspaceID: "ws-new", RunID: "run-new", AuthoritySnapshotID: "authority-new", PrerequisiteID: "target_snapshot:main.go::0",
-		WorkspaceDeliverableDirectory: workspace, TargetRef: "main.go", TargetDeclaration: &declaration,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !runtimecontract.RuntimeTargetSnapshotSatisfiesDeclaration(result.Snapshot, &declaration) || result.Observation == nil || len(result.Observation.Dependencies) != 2 {
-		t.Fatalf("declared-new target snapshot result = %+v", result)
-	}
-	withoutDeclaration, err := AcquireTargetSnapshotPrerequisite(ctx, hub, orchestratorevents.AcquireTargetSnapshotCommand{
-		WorkspaceID: "ws-new", RunID: "run-new", AuthoritySnapshotID: "authority-new", PrerequisiteID: "target_snapshot:main.go::1",
-		WorkspaceDeliverableDirectory: workspace, TargetRef: "main.go",
-	})
-	if err == nil || withoutDeclaration.Snapshot.TargetRef != "" {
-		t.Fatalf("undeclared missing target accepted: result=%+v err=%v", withoutDeclaration, err)
-	}
-}
-
 func TestAcquireRuntimeTargetSelectionPrerequisiteUsesTypedEventHubContract(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)

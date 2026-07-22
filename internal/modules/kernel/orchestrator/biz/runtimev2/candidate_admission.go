@@ -24,14 +24,12 @@ const (
 	candidateAdmissionCodeReplaysNoProgressShape      = "candidate_replays_no_progress_shape"
 	candidateAdmissionCodeActionEvidenceMismatch      = "candidate_action_evidence_mismatch"
 	candidateAdmissionCodeTargetOutsideGrounding      = "candidate_target_outside_grounding"
-	candidateAdmissionCodeDeclaredNewFile             = "candidate_declared_new_file_contract"
 	candidateAdmissionSignatureInvalid                = "candidate-admission-invalid"
 	candidateAdmissionSignatureReplaysRejectedShape   = "candidate-replays-rejected-shape"
 	candidateAdmissionSignaturePartialReplay          = "candidate-partially-replays-rejected-shape"
 	candidateAdmissionSignatureNoProgressReplay       = "candidate-replays-no-progress-shape"
 	candidateAdmissionSignatureActionEvidenceMismatch = "candidate-action-evidence-mismatch"
 	candidateAdmissionSignatureTargetOutsideGrounding = "candidate-target-outside-grounding"
-	candidateAdmissionSignatureDeclaredNewFile        = "candidate-declared-new-file-contract"
 )
 
 // CandidateAdmissionResult is a typed, expected candidate outcome. Error is
@@ -79,51 +77,7 @@ func EvaluateCandidateAdmission(aggregate RuntimeAggregate, candidate workorchru
 	if result := rejectCandidateOutsideGroundedTargets(aggregate.Facts, aggregate.Decision, candidate); !result.Accepted() {
 		return result
 	}
-	if result := rejectCandidateDeclaredNewFileShape(aggregate.Facts, aggregate.Decision, candidate); !result.Accepted() {
-		return result
-	}
 	return acceptedCandidateAdmission()
-}
-
-// rejectCandidateDeclaredNewFileShape preserves the activation-sealed create
-// precondition. It is deliberately structural: no file path semantics are
-// inferred here, and File owner still verifies absence immediately before
-// execution.
-func rejectCandidateDeclaredNewFileShape(facts workorchruntimecontract.RuntimeFacts, decision workorchruntimecontract.RuntimeDecision, candidate workorchruntimecontract.RuntimeCandidate) CandidateAdmissionResult {
-	facts = facts.Normalized()
-	declaration := facts.Activation.TargetDeclaration
-	if decision.Action != workorchruntimecontract.RuntimeActionProduceStateChange || declaration == nil {
-		return acceptedCandidateAdmission()
-	}
-	value := declaration.Normalized()
-	if value.Validate() != nil || value.Mode != workorchruntimecontract.RuntimeTargetDeclarationNewFile {
-		return acceptedCandidateAdmission()
-	}
-	operations := candidateRuntimeOperations(candidate)
-	for _, operation := range operations {
-		if !workorchruntimecontract.RuntimeEffectIsDurable(workorchruntimecontract.ResolveExpectedEffectScope(operation, facts.Activation.MCPCapabilities)) {
-			continue
-		}
-		operation = operation.Normalized()
-		if operation.Kind != workorchruntimecontract.RuntimeBlockKindPatchApply || len(operation.TargetRefs) != 1 || operation.TargetRefs[0] != value.TargetRef ||
-			candidateOperationStringParameter(operation, "targetRef") != value.TargetRef || candidateOperationStringParameter(operation, "patchType") != "file_write" || candidateOperationStringParameter(operation, "baseHash") != "" {
-			return rejectedCandidateAdmission(
-				candidateAdmissionCodeDeclaredNewFile,
-				candidateAdmissionSignatureDeclaredNewFile,
-				"activation-sealed new target requires exactly patch/apply:file_write on the declared target without baseHash",
-			)
-		}
-	}
-	return acceptedCandidateAdmission()
-}
-
-func candidateOperationStringParameter(operation workorchruntimecontract.RuntimeOperation, name string) string {
-	for _, parameter := range operation.Normalized().Parameters {
-		if parameter.Name == name && parameter.String != nil {
-			return strings.TrimSpace(*parameter.String)
-		}
-	}
-	return ""
 }
 
 // rejectCandidateOutsideGroundedTargets is the SM-3 fence for a focus whose
