@@ -110,7 +110,6 @@ func operationShapeNonSemanticParameterNames() map[string]struct{} {
 		"validationScratchAutoCleanup": {},
 		"targetRef":                    {},
 		"targetRefs":                   {},
-		"relatedFailureTargets":        {},
 		"coverageTargets":              {},
 		"verificationScope":            {},
 		// path is folded into operationShapeTargets with targetRef.

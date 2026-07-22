@@ -32,6 +32,11 @@ type compiledEvidencePolicy struct {
 	AcceptedOperationVariants         []runtimecontract.RuntimeOperationVariantRef
 	RejectedStepKinds                 []string
 	EvidenceRole                      string
+	TargetRole                        string
+	TargetRefs                        []string
+	TargetDiscoverySources            []string
+	TargetSelectorRef                 string
+	RequireTargetGrounding            bool
 	RequireDirectEvidence             bool
 	RequireClaimEvidence              bool
 	RequireExecutableBehaviorEvidence bool
@@ -213,8 +218,9 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 			// Focus-level accepted/rejected kinds: first item's non-empty values; rejected/required kinds union.
 			var acceptedKinds, rejectedKinds []string
 			var acceptedVariants []runtimecontract.RuntimeOperationVariantRef
-			var evidenceRole string
-			requireDirect, requireClaim, requireExec, requireTargets, requireAssessment := false, false, false, false, false
+			var evidenceRole, targetRole, targetSelectorRef string
+			var targetRefs, targetDiscoverySources []string
+			requireDirect, requireClaim, requireExec, requireTargets, requireTargetGrounding, requireAssessment := false, false, false, false, false, false
 			texts := make([]string, 0, len(chunk))
 			for _, item := range chunk {
 				ids = append(ids, item.itemID)
@@ -229,10 +235,30 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 				if evidenceRole == "" && item.policy.EvidenceRole != "" {
 					evidenceRole = item.policy.EvidenceRole
 				}
+				// A Focus has exactly one target role/selector binding. Silently
+				// keeping the first profile value would make the remaining
+				// declarative policy disappear and could let SM-2 acquire a target
+				// for the wrong semantic role. Split such work in the profile's
+				// acceptance-slice policy or make the binding explicitly equal.
+				if item.policy.TargetRole != "" {
+					if targetRole != "" && targetRole != item.policy.TargetRole {
+						return compiledCoverage{}, fmt.Errorf("acceptance slice %s combines incompatible target roles %q and %q", sliceID, targetRole, item.policy.TargetRole)
+					}
+					targetRole = item.policy.TargetRole
+				}
+				if item.policy.TargetSelectorRef != "" {
+					if targetSelectorRef != "" && targetSelectorRef != item.policy.TargetSelectorRef {
+						return compiledCoverage{}, fmt.Errorf("acceptance slice %s combines incompatible target selector refs %q and %q", sliceID, targetSelectorRef, item.policy.TargetSelectorRef)
+					}
+					targetSelectorRef = item.policy.TargetSelectorRef
+				}
+				targetRefs = stableStringUnion(targetRefs, item.policy.TargetRefs)
+				targetDiscoverySources = stableStringUnion(targetDiscoverySources, item.policy.TargetDiscoverySources)
 				requireDirect = requireDirect || item.policy.RequireDirectEvidence
 				requireClaim = requireClaim || item.policy.RequireClaimEvidence
 				requireExec = requireExec || item.policy.RequireExecutableBehaviorEvidence
 				requireTargets = requireTargets || item.policy.RequireCoverageTargets
+				requireTargetGrounding = requireTargetGrounding || item.policy.RequireTargetGrounding
 				requireAssessment = requireAssessment || item.policy.RequireAssessment
 				texts = append(texts, item.unit.text)
 				coverageItems = append(coverageItems, runtimecontract.RuntimeCoverageItem{
@@ -255,11 +281,16 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 				CoverageWorkItemIDs:   ids,
 				RequiredEvidenceKinds: requiredKinds,
 				EvidenceRole:          evidenceRole,
-				AcceptedStepKinds:     acceptedKinds, AcceptedOperationVariants: acceptedVariants, RejectedStepKinds: rejectedKinds,
+				TargetRole:            targetRole, TargetRefs: targetRefs, TargetDiscoverySources: targetDiscoverySources, TargetSelectorRef: targetSelectorRef,
+				RequireTargetGrounding: requireTargetGrounding,
+				AcceptedStepKinds:      acceptedKinds, AcceptedOperationVariants: acceptedVariants, RejectedStepKinds: rejectedKinds,
 				RequireDirectEvidence: requireDirect, RequireClaimEvidence: requireClaim,
 				RequireExecutableBehaviorEvidence: requireExec, RequireCoverageTargets: requireTargets,
 				RequireAssessment: requireAssessment,
 			}.Normalized()
+			if err := runtimecontract.ValidateRuntimeTargetGrounding(focus.RequireTargetGrounding, focus.TargetRole, focus.TargetRefs, focus.TargetDiscoverySources, focus.TargetSelectorRef); err != nil {
+				return compiledCoverage{}, fmt.Errorf("compiled focus %s: %w", focus.ID, err)
+			}
 			focuses = append(focuses, focus)
 			slices = append(slices, runtimecontract.RuntimeAcceptanceSlice{
 				ID: sliceID, Title: bucket.group.Title, Scope: bucket.group.Scope, Priority: bucket.group.Priority,
@@ -498,6 +529,15 @@ func mergeCompiledEvidencePolicy(base compiledEvidencePolicy, requirements []run
 		if base.EvidenceRole == "" && strings.TrimSpace(requirement.EvidenceRole) != "" {
 			base.EvidenceRole = strings.TrimSpace(requirement.EvidenceRole)
 		}
+		if base.TargetRole == "" && strings.TrimSpace(requirement.TargetRole) != "" {
+			base.TargetRole = strings.TrimSpace(requirement.TargetRole)
+		}
+		if base.TargetSelectorRef == "" && strings.TrimSpace(requirement.TargetSelectorRef) != "" {
+			base.TargetSelectorRef = strings.TrimSpace(requirement.TargetSelectorRef)
+		}
+		base.TargetRefs = stableStringUnion(base.TargetRefs, requirement.TargetRefs)
+		base.TargetDiscoverySources = stableStringUnion(base.TargetDiscoverySources, requirement.TargetDiscoverySources)
+		base.RequireTargetGrounding = base.RequireTargetGrounding || requirement.RequireTargetGrounding
 		if len(base.AcceptedStepKinds) == 0 && len(requirement.AcceptedStepKinds) > 0 {
 			base.AcceptedStepKinds = append([]string(nil), requirement.AcceptedStepKinds...)
 		}
@@ -523,6 +563,11 @@ func applyCompiledEvidencePolicy(focus runtimecontract.CoverageFocus, policy com
 	if policy.EvidenceRole != "" {
 		focus.EvidenceRole = policy.EvidenceRole
 	}
+	focus.TargetRole = policy.TargetRole
+	focus.TargetSelectorRef = policy.TargetSelectorRef
+	focus.TargetRefs = append([]string(nil), policy.TargetRefs...)
+	focus.TargetDiscoverySources = append([]string(nil), policy.TargetDiscoverySources...)
+	focus.RequireTargetGrounding = policy.RequireTargetGrounding
 	focus.RequireDirectEvidence = policy.RequireDirectEvidence
 	focus.RequireClaimEvidence = policy.RequireClaimEvidence
 	focus.RequireExecutableBehaviorEvidence = policy.RequireExecutableBehaviorEvidence

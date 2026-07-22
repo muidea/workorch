@@ -178,6 +178,10 @@ func (d RuntimeRepairDirective) Normalized() RuntimeRepairDirective {
 		failure.Signature = strings.TrimSpace(failure.Signature)
 		failure.Message = strings.TrimSpace(failure.Message)
 		failure.TargetRefs = normalizeStrings(failure.TargetRefs)
+		if failure.TargetObservation != nil {
+			observation := failure.TargetObservation.Normalized()
+			failure.TargetObservation = &observation
+		}
 		d.CurrentFailure = &failure
 	}
 	d.RequiredAction = RuntimeAction(strings.TrimSpace(string(d.RequiredAction)))
@@ -216,6 +220,9 @@ func (d RuntimeRepairDirective) Validate() error {
 		if d.CurrentFailure.Class == "" || d.CurrentFailure.Message == "" {
 			return fmt.Errorf("repair directive current failure requires class and message")
 		}
+		if err := ValidateRuntimeFailureTargetObservationBinding(*d.CurrentFailure); err != nil {
+			return fmt.Errorf("repair directive current failure target observation: %w", err)
+		}
 	}
 	return nil
 }
@@ -224,6 +231,11 @@ func (d RuntimeRepairDirective) Clone() RuntimeRepairDirective {
 	ret := d.Normalized()
 	if d.CurrentFailure != nil {
 		failure := *ret.CurrentFailure
+		if failure.TargetObservation != nil {
+			observation := failure.TargetObservation.Normalized()
+			observation.TargetRefs = append([]string(nil), observation.TargetRefs...)
+			failure.TargetObservation = &observation
+		}
 		ret.CurrentFailure = &failure
 	}
 	if len(ret.RejectedOperationShapes) > 0 {
@@ -265,7 +277,8 @@ func SameRuntimeRepairDirective(left *RuntimeRepairDirective, right *RuntimeRepa
 	if l.CurrentFailure != nil {
 		if l.CurrentFailure.Class != r.CurrentFailure.Class || l.CurrentFailure.Code != r.CurrentFailure.Code ||
 			l.CurrentFailure.Signature != r.CurrentFailure.Signature || l.CurrentFailure.Message != r.CurrentFailure.Message ||
-			!sameStrings(l.CurrentFailure.TargetRefs, r.CurrentFailure.TargetRefs) {
+			!sameStrings(l.CurrentFailure.TargetRefs, r.CurrentFailure.TargetRefs) ||
+			!sameRuntimeFailureTargetObservation(l.CurrentFailure.TargetObservation, r.CurrentFailure.TargetObservation) {
 			return false
 		}
 	}
@@ -286,4 +299,18 @@ func SameRuntimeRepairDirective(left *RuntimeRepairDirective, right *RuntimeRepa
 		}
 	}
 	return true
+}
+
+func sameRuntimeFailureTargetObservation(left *RuntimeFailureTargetObservation, right *RuntimeFailureTargetObservation) bool {
+	if left == nil && right == nil {
+		return true
+	}
+	if left == nil || right == nil {
+		return false
+	}
+	l := left.Normalized()
+	r := right.Normalized()
+	return l.OwnerModuleID == r.OwnerModuleID && l.SubjectRef == r.SubjectRef &&
+		l.TargetRole == r.TargetRole && l.ObservedRevision == r.ObservedRevision &&
+		sameStrings(l.TargetRefs, r.TargetRefs)
 }

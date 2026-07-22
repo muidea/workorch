@@ -75,6 +75,61 @@ func (g RuntimeAssessmentGap) Validate() error {
 	return nil
 }
 
+// RuntimeAssessmentGapStrictlyNarrows is a pure comparison of two persisted
+// assessment gaps. It deliberately compares only the neutral, set-like gap
+// dimensions whose reduction is observable in RuntimeFacts; reason text,
+// evidence refs and failure wording are lineage, not convergence progress.
+//
+// The Orchestrator remains the sole owner that decides whether this comparison
+// authorizes a repair-ledger transition.
+func RuntimeAssessmentGapStrictlyNarrows(previous, current RuntimeAssessmentGap) bool {
+	previous = previous.Normalized()
+	current = current.Normalized()
+	coverageNarrowed, coverageExpanded := normalizedCoverageSubsetDelta(previous.CoverageWorkItemIDs, current.CoverageWorkItemIDs)
+	evidenceNarrowed, evidenceExpanded := normalizedStringSubsetDelta(previous.MissingEvidenceKinds, current.MissingEvidenceKinds)
+	return !coverageExpanded && !evidenceExpanded && (coverageNarrowed || evidenceNarrowed)
+}
+
+func normalizedCoverageSubsetDelta(previous, current []common.CoverageWorkItemID) (narrowed, expanded bool) {
+	prior := make(map[common.CoverageWorkItemID]struct{}, len(previous))
+	for _, id := range previous {
+		prior[id] = struct{}{}
+	}
+	next := make(map[common.CoverageWorkItemID]struct{}, len(current))
+	for _, id := range current {
+		next[id] = struct{}{}
+		if _, found := prior[id]; !found {
+			expanded = true
+		}
+	}
+	for id := range prior {
+		if _, found := next[id]; !found {
+			narrowed = true
+		}
+	}
+	return narrowed, expanded
+}
+
+func normalizedStringSubsetDelta(previous, current []string) (narrowed, expanded bool) {
+	prior := make(map[string]struct{}, len(previous))
+	for _, value := range previous {
+		prior[value] = struct{}{}
+	}
+	next := make(map[string]struct{}, len(current))
+	for _, value := range current {
+		next[value] = struct{}{}
+		if _, found := prior[value]; !found {
+			expanded = true
+		}
+	}
+	for value := range prior {
+		if _, found := next[value]; !found {
+			narrowed = true
+		}
+	}
+	return narrowed, expanded
+}
+
 func (i RuntimeAssessmentItemFact) Normalized() RuntimeAssessmentItemFact {
 	i.CoverageWorkItemID = common.CoverageWorkItemID(strings.TrimSpace(string(i.CoverageWorkItemID)))
 	i.Reason = strings.TrimSpace(i.Reason)

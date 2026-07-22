@@ -304,6 +304,59 @@ func TestScheduleRuntimeV2DriveReleasesKeyWhenSchedulingFails(t *testing.T) {
 	}
 }
 
+func TestScheduledRuntimeV2DriveReleasesSingleflightKeyWhenOwnerStopsBeforeTaskStarts(t *testing.T) {
+	background := &recordingBackgroundRoutine{}
+	module := newTestBiz(&RuntimeOrchestrator{}, nil, background)
+	const driveKey = "ws-drive-stopped\x00run-drive-stopped"
+	if err := module.scheduleRuntimeV2Drive(context.Background(), "ws-drive-stopped", "run-drive-stopped", "late-start"); err != nil {
+		t.Fatal(err)
+	}
+	if background.lastAsyncFunction == nil {
+		t.Fatal("expected queued Runtime V2 drive")
+	}
+	// Model the lifecycle state observed by a queued task after Stop has
+	// acquired its write lock and cleared the owner authority.
+	module.lifecycleMu.Lock()
+	module.bizPtr = nil
+	module.lifecycleMu.Unlock()
+	background.lastAsyncFunction()
+
+	module.driveMu.Lock()
+	_, queued := module.drivingRuns[driveKey]
+	module.driveMu.Unlock()
+	if queued {
+		t.Fatal("late-start drive retained its singleflight key after owner shutdown")
+	}
+}
+
+func TestStopWaitsForRuntimeV2DriveLifecycleReadLockBeforeClearingDependencies(t *testing.T) {
+	module := newTestBiz(&RuntimeOrchestrator{}, nil, nil)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	go func() {
+		module.lifecycleMu.RLock()
+		close(entered)
+		<-release
+		module.lifecycleMu.RUnlock()
+	}()
+	<-entered
+
+	stopped := make(chan error, 1)
+	go func() { stopped <- module.Stop(context.Background()) }()
+	select {
+	case err := <-stopped:
+		t.Fatalf("Stop returned before active Runtime V2 drive left lifecycle read lock: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(release)
+	if err := <-stopped; err != nil {
+		t.Fatal(err)
+	}
+	if module.bizPtr != nil || module.evidenceRecords != nil {
+		t.Fatalf("Stop retained owner dependencies: biz=%+v evidence=%+v", module.bizPtr, module.evidenceRecords)
+	}
+}
+
 func moduleContractDependencies() Dependencies {
 	rawHub := magicevent.NewHub(32)
 	return Dependencies{

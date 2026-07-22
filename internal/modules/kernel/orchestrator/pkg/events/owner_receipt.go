@@ -11,6 +11,11 @@ func (e RuntimeOperationExecutionEnvelope) Validate() error {
 	if strings.TrimSpace(e.ExecutionKey) == "" || e.Fence == 0 || !runtimecontract.ValidRuntimeEffectScope(e.ExpectedEffectScope) {
 		return fmt.Errorf("runtime operation execution envelope requires key, fence and expected effect")
 	}
+	if e.ReplayProof != nil {
+		if err := e.ReplayProof.Validate(); err != nil {
+			return fmt.Errorf("runtime operation execution replay proof: %w", err)
+		}
+	}
 	if e.GovernanceGrant != nil {
 		grant := e.GovernanceGrant.Normalized()
 		if err := grant.Validate(); err != nil {

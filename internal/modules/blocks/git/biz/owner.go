@@ -103,10 +103,19 @@ func (m *Biz) handleGitCapabilityState(event magicevent.Event, result magicevent
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
+	workspaceTreeRevision, err := m.acquireFileWorkspaceTreeRevision(event.Context(), command)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
 	if snapshot, found, err := m.capabilityReceipts.Load(command.WorkspaceID, command.AcquisitionKey); err != nil {
 		setCapabilityError(result, err)
 		return
 	} else if found {
+		if snapshot.WorkspaceTreeRevision != workspaceTreeRevision {
+			setCapabilityError(result, fmt.Errorf("%w: git capability acquisition %q has a different File workspace-tree revision", common.ErrConflict, command.AcquisitionKey))
+			return
+		}
 		observation := gitCapabilityStateObservation(command.PrerequisiteID, snapshot)
 		result.Set(orchestratorevents.AcquireGitCapabilityStateResult{PrerequisiteID: command.PrerequisiteID, Snapshot: snapshot, Observation: &observation}, nil)
 		return
@@ -121,6 +130,7 @@ func (m *Biz) handleGitCapabilityState(event magicevent.Event, result magicevent
 	// snapshot.  Downstream components compare this opaque binding but never
 	// derive repository semantics from it.
 	snapshot.AcquisitionBinding = command.AcquisitionKey
+	snapshot.WorkspaceTreeRevision = workspaceTreeRevision
 	snapshot.QueryReceiptRef = "capability-state-receipt/" + command.AcquisitionKey
 	snapshot.SnapshotID = runtimecontract.StableRuntimeCapabilityStateSnapshotID(snapshot)
 	snapshot, err = m.capabilityReceipts.StoreIfAbsent(command.WorkspaceID, snapshot)
@@ -130,6 +140,48 @@ func (m *Biz) handleGitCapabilityState(event magicevent.Event, result magicevent
 	}
 	observation := gitCapabilityStateObservation(command.PrerequisiteID, snapshot)
 	result.Set(orchestratorevents.AcquireGitCapabilityStateResult{PrerequisiteID: command.PrerequisiteID, Snapshot: snapshot, Observation: &observation}, nil)
+}
+
+// acquireFileWorkspaceTreeRevision keeps Git's repository-state observation
+// bound to the File owner's exact workspace-tree revision. Git does not hash
+// or infer that File-owned value itself; the nested typed EventHub query is a
+// read-only owner observation and never changes Runtime authority.
+func (m *Biz) acquireFileWorkspaceTreeRevision(ctx context.Context, command orchestratorevents.AcquireGitCapabilityStateCommand) (string, error) {
+	if m == nil || m.EventHub() == nil {
+		return "", common.ErrInvalidArgument
+	}
+	result := m.EventHub().Send(magicevent.NewEventWithContext(
+		orchestratorevents.TopicOrchestratorAcquireWorkspaceManifest,
+		ModuleID,
+		orchestratorevents.PrerequisiteCommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		orchestratorevents.AcquireWorkspaceManifestCommand{
+			WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID,
+			PrerequisiteID: "git-workspace-tree/" + command.AcquisitionKey, WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
+		},
+	))
+	if result == nil {
+		return "", common.ErrInvalidArgument
+	}
+	if eventErr := result.Error(); eventErr != nil {
+		if eventErr.Cause != nil {
+			return "", eventErr.Cause
+		}
+		return "", eventErr
+	}
+	data, err := result.Get()
+	if err != nil {
+		if err.Cause != nil {
+			return "", err.Cause
+		}
+		return "", err
+	}
+	response, ok := data.(orchestratorevents.AcquireWorkspaceManifestResult)
+	if !ok || response.Manifest.Revision == "" {
+		return "", fmt.Errorf("%w: File owner returned an invalid workspace-tree observation", common.ErrConflict)
+	}
+	return response.Manifest.Revision, nil
 }
 
 func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result magicevent.Result) {
@@ -186,7 +238,7 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		setCapabilityError(result, err)
 		return
 	}
-	observation := gitAdmissibilityObservation(command.PrerequisiteID, inventory)
+	observation := gitAdmissibilityObservation(command.PrerequisiteID, inventory, snapshot.WorkspaceTreeRevision)
 	result.Set(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{PrerequisiteID: command.PrerequisiteID, Admissibility: inventory, Observation: &observation}, nil)
 }
 
@@ -226,19 +278,19 @@ func gitCapabilityStateObservation(prerequisiteID string, snapshot runtimecontra
 			// CapabilityState reads git status or the root directory to derive the
 			// required sequence. A File effect can therefore invalidate this
 			// observation before Git executes its next sealed operation.
-			{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: snapshot.ObservedRevision},
+			{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: snapshot.WorkspaceTreeRevision},
 		},
 	}
 	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
 	return observation
 }
 
-func gitAdmissibilityObservation(prerequisiteID string, inventory runtimecontract.RuntimeOperationAdmissibility) runtimecontract.RuntimePrerequisiteObservation {
+func gitAdmissibilityObservation(prerequisiteID string, inventory runtimecontract.RuntimeOperationAdmissibility, workspaceTreeRevision string) runtimecontract.RuntimePrerequisiteObservation {
 	observation := runtimecontract.RuntimePrerequisiteObservation{
 		PrerequisiteID: prerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: ModuleID, ContentHash: inventory.SnapshotID,
 		Dependencies: []runtimecontract.RuntimeFreshnessDependency{
 			{Domain: runtimecontract.RuntimeResourceRepositoryState, OwnerModuleID: ModuleID, SubjectRef: "workspace_deliverable", Revision: inventory.ObservedRevision},
-			{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: inventory.ObservedRevision},
+			{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: strings.TrimSpace(workspaceTreeRevision)},
 		},
 	}
 	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)

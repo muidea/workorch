@@ -833,6 +833,10 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 	}
 	sourceChangeEvidenceFound := false
 	versionControlEvidenceFound := false
+	directValidationTargetContracts := map[string]bool{
+		"dodItem":      false,
+		"goalCoverage": false,
+	}
 	for _, raw := range requirements {
 		item, ok := raw.(map[string]any)
 		if !ok {
@@ -845,6 +849,21 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 			}
 			if role, _ := item["evidenceRole"].(string); role != "primary_state_change" {
 				t.Fatalf("source_change evidenceRole = %q, want primary_state_change", role)
+			}
+			if role, _ := item["targetRole"].(string); role != "deliverable_implementation" {
+				t.Fatalf("source_change targetRole = %q, want deliverable_implementation", role)
+			}
+			if required, _ := item["requireTargetGrounding"].(bool); !required {
+				t.Fatalf("source_change requireTargetGrounding = false, want true")
+			}
+			discovery, ok := item["targetDiscoverySources"].([]any)
+			if !ok {
+				t.Fatalf("source_change targetDiscoverySources = %+v, want list", item["targetDiscoverySources"])
+			}
+			assertStringListContains(t, discovery, "workspace_manifest")
+			assertStringListContains(t, discovery, "project_files")
+			if selector, _ := item["targetSelectorRef"].(string); selector != "file/unique_workspace_entry" {
+				t.Fatalf("source_change targetSelectorRef = %q, want file/unique_workspace_entry", selector)
 			}
 			if direct, _ := item["requireDirectEvidence"].(bool); !direct {
 				t.Fatalf("source_change requireDirectEvidence = false, want true")
@@ -908,6 +927,28 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 			versionControlEvidenceFound = true
 			continue
 		}
+		if id == "*" {
+			scope, _ := item["scope"].(string)
+			if _, expected := directValidationTargetContracts[scope]; expected {
+				if role, _ := item["targetRole"].(string); role != "deliverable_implementation" {
+					t.Fatalf("%s wildcard targetRole = %q, want deliverable_implementation", scope, role)
+				}
+				if required, _ := item["requireTargetGrounding"].(bool); !required {
+					t.Fatalf("%s wildcard requireTargetGrounding = false, want true", scope)
+				}
+				discovery, ok := item["targetDiscoverySources"].([]any)
+				if !ok {
+					t.Fatalf("%s wildcard targetDiscoverySources = %+v, want list", scope, item["targetDiscoverySources"])
+				}
+				assertStringListContains(t, discovery, "workspace_manifest")
+				assertStringListContains(t, discovery, "project_files")
+				if selector, _ := item["targetSelectorRef"].(string); selector != "file/unique_workspace_entry" {
+					t.Fatalf("%s wildcard targetSelectorRef = %q, want file/unique_workspace_entry", scope, selector)
+				}
+				directValidationTargetContracts[scope] = true
+			}
+			continue
+		}
 		if _, ok := requiredEvidence[id]; !ok {
 			continue
 		}
@@ -952,6 +993,11 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 	}
 	if !sourceChangeEvidenceFound {
 		t.Fatalf("software-dev evidenceRequirements missing source_change in %+v", requirements)
+	}
+	for scope, found := range directValidationTargetContracts {
+		if !found {
+			t.Fatalf("software-dev evidenceRequirements missing grounded wildcard for %s in %+v", scope, requirements)
+		}
 	}
 }
 

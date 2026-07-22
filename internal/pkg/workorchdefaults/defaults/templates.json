@@ -861,6 +861,13 @@
               "id": "source_change",
               "scope": "deliverable",
               "evidenceRole": "primary_state_change",
+              "targetRole": "deliverable_implementation",
+              "targetDiscoverySources": [
+                "workspace_manifest",
+                "project_files"
+              ],
+              "targetSelectorRef": "file/unique_workspace_entry",
+              "requireTargetGrounding": true,
               "requireDirectEvidence": true,
               "requireCoverageTargets": true,
               "acceptedStepKinds": [
@@ -907,6 +914,13 @@
             {
               "id": "*",
               "scope": "dodItem",
+              "targetRole": "deliverable_implementation",
+              "targetDiscoverySources": [
+                "workspace_manifest",
+                "project_files"
+              ],
+              "targetSelectorRef": "file/unique_workspace_entry",
+              "requireTargetGrounding": true,
               "requireDirectEvidence": true,
               "requireClaimEvidence": true,
               "requireExecutableBehaviorEvidence": true,
@@ -927,6 +941,13 @@
             {
               "id": "*",
               "scope": "goalCoverage",
+              "targetRole": "deliverable_implementation",
+              "targetDiscoverySources": [
+                "workspace_manifest",
+                "project_files"
+              ],
+              "targetSelectorRef": "file/unique_workspace_entry",
+              "requireTargetGrounding": true,
               "requireDirectEvidence": true,
               "requireClaimEvidence": true,
               "requireExecutableBehaviorEvidence": true,

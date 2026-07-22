@@ -31,6 +31,10 @@ import (
 type RuntimeAdapter struct {
 	service serverGetter
 	client  *http.Client
+	// idleSessionTimeout belongs to this adapter instance. It must not be a
+	// package-global test knob because delayed eviction callbacks can outlive a
+	// test and race with another adapter's configuration.
+	idleSessionTimeout time.Duration
 
 	sessionMu sync.Mutex
 	sessions  map[string]*stdioSession
@@ -50,9 +54,13 @@ const (
 	mcpClientVersion   = "mvp"
 
 	sessionPolicyLongLived = "long_lived"
-)
 
-var longLivedStdioSessionIdleTimeout = 5 * time.Minute
+	defaultLongLivedStdioSessionIdleTimeout = 5 * time.Minute
+
+	// maxMCPObservedFailureTargets bounds a capability owner's structured
+	// failure observation before it crosses the typed runtime receipt boundary.
+	maxMCPObservedFailureTargets = 16
+)
 
 type operationSpec struct {
 	Operation  string
@@ -65,6 +73,7 @@ type operationSpec struct {
 	Summary    string
 	Stream     bool
 	TargetRefs []string
+	TargetRole string
 }
 
 type jsonRPCResponse struct {
@@ -126,10 +135,14 @@ func NewRuntimeAdapter(service serverGetter) *RuntimeAdapter {
 }
 
 func NewRuntimeAdapterWithHTTPClient(service serverGetter, client *http.Client) *RuntimeAdapter {
+	return newRuntimeAdapterWithIdleSessionTimeout(service, client, defaultLongLivedStdioSessionIdleTimeout)
+}
+
+func newRuntimeAdapterWithIdleSessionTimeout(service serverGetter, client *http.Client, idleSessionTimeout time.Duration) *RuntimeAdapter {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	return &RuntimeAdapter{service: service, client: client, sessions: map[string]*stdioSession{}}
+	return &RuntimeAdapter{service: service, client: client, idleSessionTimeout: idleSessionTimeout, sessions: map[string]*stdioSession{}}
 }
 
 func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeOperationRequest) (RuntimeOperationResult, error) {
@@ -335,6 +348,7 @@ func (a *RuntimeAdapter) executeHTTPOperation(ctx context.Context, request Runti
 		output.Stage = failedStage(spec)
 		output.FailureMessage = err.Error()
 		output.Diagnostics = capabilityFailureDiagnostics(spec)
+		a.bindMCPFailureObservationRevision(ctx, &output)
 		return finalizeMCPResult(output, err)
 	}
 	if err := toolResultError(spec, responsePayload); err != nil {
@@ -342,6 +356,7 @@ func (a *RuntimeAdapter) executeHTTPOperation(ctx context.Context, request Runti
 		output.Stage = failedStage(spec)
 		output.FailureMessage = err.Error()
 		output.Diagnostics = capabilityFailureDiagnostics(spec)
+		a.bindMCPFailureObservationRevision(ctx, &output)
 		return finalizeMCPResult(output, err)
 	}
 	return finalizeMCPResult(output, nil)
@@ -381,6 +396,7 @@ func (a *RuntimeAdapter) executeStdioOperation(ctx context.Context, request Runt
 		output.Stage = failedStage(spec)
 		output.FailureMessage = err.Error()
 		output.Diagnostics = capabilityFailureDiagnostics(spec)
+		a.bindMCPFailureObservationRevision(ctx, &output)
 		return finalizeMCPResult(output, err)
 	}
 	return finalizeMCPResult(output, nil)
@@ -417,6 +433,7 @@ func (a *RuntimeAdapter) executeLongLivedStdioOperation(ctx context.Context, req
 		output.Stage = failedStage(spec)
 		output.FailureMessage = err.Error()
 		output.Diagnostics = capabilityFailureDiagnostics(spec)
+		a.bindMCPFailureObservationRevision(ctx, &output)
 		return finalizeMCPResult(output, err)
 	}
 	return finalizeMCPResult(output, nil)
@@ -458,10 +475,10 @@ func (a *RuntimeAdapter) evictStdioSession(serverID string, target *stdioSession
 }
 
 func (a *RuntimeAdapter) scheduleStdioSessionIdleEviction(serverID string, session *stdioSession) {
-	if a == nil || session == nil || longLivedStdioSessionIdleTimeout <= 0 {
+	if a == nil || session == nil || a.idleSessionTimeout <= 0 {
 		return
 	}
-	time.AfterFunc(longLivedStdioSessionIdleTimeout, func() {
+	time.AfterFunc(a.idleSessionTimeout, func() {
 		a.evictIdleStdioSession(serverID, session)
 	})
 }
@@ -470,7 +487,7 @@ func (a *RuntimeAdapter) evictIdleStdioSession(serverID string, session *stdioSe
 	if a == nil || session == nil {
 		return
 	}
-	ttl := longLivedStdioSessionIdleTimeout
+	ttl := a.idleSessionTimeout
 	if ttl <= 0 {
 		return
 	}
@@ -674,7 +691,7 @@ func parseOperationSpec(request RuntimeOperationRequest) (operationSpec, error) 
 		Arguments:  append([]orchestratorevents.MCPArgument(nil), request.Data.Arguments...),
 		Summary:    strings.TrimSpace(request.Data.Summary),
 		Stream:     request.Data.Stream,
-		TargetRefs: append([]string(nil), request.TargetRefs...),
+		TargetRefs: append([]string(nil), request.TargetRefs...), TargetRole: strings.TrimSpace(request.TargetRole),
 	}
 	if spec.Operation == "" {
 		spec.Operation = blockcommon.StepKindToolCall
@@ -766,6 +783,26 @@ func successOutput(spec operationSpec, server *mcpmodel.Server, duration time.Du
 	return output
 }
 
+// bindMCPFailureObservationRevision ties a structured failure target to the
+// same owner-catalog revision used by MCP admissibility. If that catalog is no
+// longer readable, the result intentionally carries no target observation:
+// an unbound target cannot become repair authority.
+func (a *RuntimeAdapter) bindMCPFailureObservationRevision(ctx context.Context, output *RuntimeOperationResult) {
+	if a == nil || output == nil {
+		return
+	}
+	if len(output.Diagnostics.FailureTargets) == 0 {
+		output.Diagnostics.FailureTargets = observedMCPFailureTargets(output.Response)
+	}
+	if len(output.Diagnostics.FailureTargets) == 0 {
+		return
+	}
+	_, revision, err := a.OperationAdmissibility(ctx)
+	if err == nil {
+		output.OwnerRevision = revision
+	}
+}
+
 func baseOutput(spec operationSpec) RuntimeOperationResult {
 	return RuntimeOperationResult{
 		Operation: spec.Operation, ServerID: spec.ServerID, Tool: spec.Tool, URI: spec.URI,
@@ -775,14 +812,13 @@ func baseOutput(spec operationSpec) RuntimeOperationResult {
 
 func capabilityFailureDiagnostics(spec operationSpec) MCPCapabilityFailureDiagnostics {
 	diagnostics := MCPCapabilityFailureDiagnostics{
-		Operation: spec.Operation, ServerID: spec.ServerID, Tool: spec.Tool, URI: spec.URI, Prompt: spec.Prompt,
+		Operation: spec.Operation, ServerID: spec.ServerID, Tool: spec.Tool, URI: spec.URI, Prompt: spec.Prompt, TargetRole: spec.TargetRole,
 	}
 	if spec.URI != "" {
 		diagnostics.TargetRef = spec.URI
 	}
 	if target := firstCapabilityInputTarget(spec); target != "" {
 		diagnostics.TargetRef = target
-		diagnostics.FailureTargets = []string{target}
 	}
 	return diagnostics
 }
@@ -930,15 +966,50 @@ func finalizeMCPResult(output RuntimeOperationResult, executeErr error) (Runtime
 	}
 	if executeErr != nil {
 		output.FailureCode = firstMCPNonEmpty(output.Stage, "mcp_operation_failed")
-	}
-	if target := strings.TrimSpace(output.Diagnostics.TargetRef); target != "" {
-		output.TargetRefs = []string{target}
+		// A request target is diagnostic context, not an observed failing
+		// implementation target. Only an explicit structured target returned by
+		// the failing MCP capability may cross this owner boundary as a failure
+		// target.
+		output.Diagnostics.FailureTargets = observedMCPFailureTargets(output.Response)
 	}
 	if strings.TrimSpace(output.Summary) == "" {
 		output.Summary = firstMCPNonEmpty(output.Status, fmt.Sprintf("mcp operation %s", output.Operation))
 	}
 	output.Evidence = runtimecontract.RuntimeOperationEvidence{Summary: output.Summary}
 	return output, executeErr
+}
+
+func observedMCPFailureTargets(payload MCPResponsePayload) []string {
+	if len(payload.JSON) == 0 {
+		return nil
+	}
+	var observation struct {
+		FailureTargets []string `json:"failureTargets"`
+	}
+	if err := json.Unmarshal(payload.JSON, &observation); err != nil {
+		return nil
+	}
+	return normalizeMCPTargetRefs(observation.FailureTargets)
+}
+
+func normalizeMCPTargetRefs(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	targets := make([]string, 0, min(len(values), maxMCPObservedFailureTargets))
+	for _, value := range values {
+		value = normalizedCapabilityInputTarget(value)
+		if value == "" {
+			continue
+		}
+		if _, found := seen[value]; found {
+			continue
+		}
+		seen[value] = struct{}{}
+		targets = append(targets, value)
+		if len(targets) == maxMCPObservedFailureTargets {
+			break
+		}
+	}
+	return targets
 }
 
 func firstMCPNonEmpty(values ...string) string {

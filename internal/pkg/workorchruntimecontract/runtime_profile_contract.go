@@ -27,9 +27,16 @@ type RuntimeDeliverableExpectation struct {
 }
 
 type RuntimeProfileEvidenceRequirement struct {
-	ID                                string
-	Scope                             string
-	EvidenceRole                      string
+	ID           string
+	Scope        string
+	EvidenceRole string
+	// TargetRole identifies the declared target role of direct evidence. It is
+	// a profile-owned semantic label; Runtime V2 only transports and compares it.
+	TargetRole                        string
+	TargetRefs                        []string
+	TargetDiscoverySources            []string
+	TargetSelectorRef                 string
+	RequireTargetGrounding            bool
 	RequiredEvidenceKinds             []string
 	RequireDirectEvidence             bool
 	RequireClaimEvidence              bool
@@ -89,6 +96,9 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 		for _, item := range profile.EvidenceRequirements {
 			if item.ID == "" || item.Scope == "" {
 				return fmt.Errorf("runtime profile evidence requirement requires id and scope")
+			}
+			if err := ValidateRuntimeTargetGrounding(item.RequireTargetGrounding, item.TargetRole, item.TargetRefs, item.TargetDiscoverySources, item.TargetSelectorRef); err != nil {
+				return fmt.Errorf("runtime profile evidence requirement %q: %w", item.ID, err)
 			}
 			for _, state := range item.CapabilityStateRequirements {
 				if !runtimeProfileCapabilityStateOwnerMatchesAcceptedStepKind(state.OwnerModuleID, item.AcceptedStepKinds) {
@@ -164,6 +174,10 @@ func normalizeRuntimeProfileEvidenceRequirements(values []RuntimeProfileEvidence
 		value.ID = strings.TrimSpace(value.ID)
 		value.Scope = strings.TrimSpace(value.Scope)
 		value.EvidenceRole = strings.TrimSpace(value.EvidenceRole)
+		value.TargetRole = strings.TrimSpace(value.TargetRole)
+		value.TargetRefs = normalizeStrings(value.TargetRefs)
+		value.TargetDiscoverySources = normalizeStrings(value.TargetDiscoverySources)
+		value.TargetSelectorRef = strings.TrimSpace(value.TargetSelectorRef)
 		value.RequiredEvidenceKinds = normalizeStrings(value.RequiredEvidenceKinds)
 		value.AcceptedStepKinds = normalizeStrings(value.AcceptedStepKinds)
 		value.AcceptedOperationVariants = NormalizeRuntimeOperationVariantRefs(value.AcceptedOperationVariants)
@@ -222,7 +236,9 @@ func sameRuntimeProfileContract(left RuntimeProfileContract, right RuntimeProfil
 	}
 	for idx := range left.EvidenceRequirements {
 		l, r := left.EvidenceRequirements[idx], right.EvidenceRequirements[idx]
-		if l.ID != r.ID || l.Scope != r.Scope || l.EvidenceRole != r.EvidenceRole || !sameStrings(l.RequiredEvidenceKinds, r.RequiredEvidenceKinds) || l.RequireDirectEvidence != r.RequireDirectEvidence ||
+		if l.ID != r.ID || l.Scope != r.Scope || l.EvidenceRole != r.EvidenceRole || l.TargetRole != r.TargetRole || l.TargetSelectorRef != r.TargetSelectorRef ||
+			!sameStrings(l.TargetRefs, r.TargetRefs) || !sameStrings(l.TargetDiscoverySources, r.TargetDiscoverySources) || l.RequireTargetGrounding != r.RequireTargetGrounding ||
+			!sameStrings(l.RequiredEvidenceKinds, r.RequiredEvidenceKinds) || l.RequireDirectEvidence != r.RequireDirectEvidence ||
 			l.RequireClaimEvidence != r.RequireClaimEvidence || l.RequireExecutableBehaviorEvidence != r.RequireExecutableBehaviorEvidence ||
 			l.RequireCoverageTargets != r.RequireCoverageTargets || l.Description != r.Description ||
 			!sameStrings(l.AcceptedStepKinds, r.AcceptedStepKinds) || !SameRuntimeOperationVariantRefs(l.AcceptedOperationVariants, r.AcceptedOperationVariants) || !sameStrings(l.RejectedStepKinds, r.RejectedStepKinds) {

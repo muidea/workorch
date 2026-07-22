@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -235,6 +236,15 @@ func (c *RuntimeController) CommitPrerequisite(ctx context.Context, workspaceID 
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action does not accept prerequisite results", common.ErrConflict)
 	}
 	expectedRevision := aggregate.StateRevision
+	// A prerequisite ID is stable across re-acquisition. It is therefore not
+	// sufficient to match only the pending ID here: a response started before a
+	// durable resource change can otherwise satisfy the newly-pending instance
+	// after that change invalidated the original observation. The persisted
+	// invalidation records are the authoritative freshness fence; never accept
+	// a result whose owner observation still reports the superseded revision.
+	if err := validatePrerequisiteResultFreshness(result, aggregate.PrerequisiteInvalidations); err != nil {
+		return RuntimeAggregate{}, err
+	}
 	facts, err := CommitPrerequisiteResult(aggregate.Facts, result)
 	if err != nil {
 		return RuntimeAggregate{}, err
@@ -428,7 +438,7 @@ func (c *RuntimeController) RecordCandidateFeasibility(ctx context.Context, work
 		if strings.TrimSpace(persisted.OperationID) != strings.TrimSpace(record.OperationID) {
 			continue
 		}
-		if persisted.AdmissibilitySnapshotID != record.AdmissibilitySnapshotID || persisted.AcquisitionBinding != record.AcquisitionBinding || persisted.Feasible != record.Feasible || !reflect.DeepEqual(persisted.Failure, record.Failure) || !reflect.DeepEqual(persisted.Stale, record.Stale) {
+		if persisted.AdmissibilitySnapshotID != record.AdmissibilitySnapshotID || persisted.AcquisitionBinding != record.AcquisitionBinding || persisted.Feasible != record.Feasible || !reflect.DeepEqual(persisted.ReplayProof, record.ReplayProof) || !reflect.DeepEqual(persisted.Failure, record.Failure) || !reflect.DeepEqual(persisted.Stale, record.Stale) {
 			return RuntimeAggregate{}, fmt.Errorf("%w: candidate feasibility result for operation %q changed", common.ErrConflict, record.OperationID)
 		}
 		return aggregate, nil
@@ -443,6 +453,10 @@ func (c *RuntimeController) RecordCandidateFeasibility(ctx context.Context, work
 	if record.Stale != nil {
 		stale := *record.Stale
 		copyRecord.Stale = &stale
+	}
+	if record.ReplayProof != nil {
+		proof := record.ReplayProof.Clone()
+		copyRecord.ReplayProof = &proof
 	}
 	aggregate.CandidateAttempts[idx].Feasibilities = append(aggregate.CandidateAttempts[idx].Feasibilities, copyRecord)
 	aggregate.StateRevision++
@@ -525,7 +539,7 @@ func (c *RuntimeController) AdmitAndSealCandidateAttempt(ctx context.Context, wo
 	if err := validateCandidateAdmissionFeasibility(aggregate.Facts, candidate, record); err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
-	dispatch, err := SealDispatchWithActivation(aggregate.Decision, candidate, aggregate.Facts.Activation)
+	dispatch, err := SealDispatchWithActivationAndFeasibilities(aggregate.Decision, candidate, aggregate.Facts.Activation, record.Feasibilities)
 	if err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
@@ -576,6 +590,12 @@ func validateCandidateAdmissionFeasibility(facts runtimecontract.RuntimeFacts, c
 		if !feasibility.Feasible {
 			return fmt.Errorf("candidate operation %q has persisted infeasible result", operation.ID)
 		}
+		if feasibility.ReplayProof != nil {
+			proof := feasibility.ReplayProof.Normalized()
+			if err := proof.Validate(); err != nil || proof.OwnerModuleID != descriptor.OwnerModuleID || proof.OperationID != operation.ID || proof.AdmissibilitySnapshotID != inventory.SnapshotID || proof.AcquisitionBinding != inventory.AcquisitionBinding || !sameStringSet(proof.TargetRefs, operation.TargetRefs) {
+				return fmt.Errorf("candidate operation %q has invalid persisted replay proof", operation.ID)
+			}
+		}
 	}
 	return nil
 }
@@ -612,6 +632,36 @@ func candidateAttemptFeasibilityForOperation(values []runtimecontract.RuntimeCan
 		}
 	}
 	return runtimecontract.RuntimeCandidateFeasibilityRecord{}, false
+}
+
+func sameStringSet(left, right []string) bool {
+	left = normalizeStringSet(left)
+	right = normalizeStringSet(right)
+	if len(left) != len(right) {
+		return false
+	}
+	for idx := range left {
+		if left[idx] != right[idx] {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeStringSet(values []string) []string {
+	set := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			set[value] = struct{}{}
+		}
+	}
+	ret := make([]string, 0, len(set))
+	for value := range set {
+		ret = append(ret, value)
+	}
+	sort.Strings(ret)
+	return ret
 }
 
 func (c *RuntimeController) FailCandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, failure runtimecontract.RuntimeCandidateFailure) (RuntimeAggregate, error) {
@@ -867,6 +917,7 @@ func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID co
 	}
 	aggregate.Facts.Assessments = append(aggregate.Facts.Assessments, fact)
 	if assessment.Disposition == runtimecontract.AssessmentDispositionRepairableGap {
+		priorGap := aggregate.Facts.Repair.ActiveGap
 		signature := runtimecontract.StableAssessmentFailureSignature(aggregate.Facts.Focus.ID, assessment.Disposition, assessment.Gap)
 		cycleID := runtimecontract.StableRepairCycleID(string(aggregate.Facts.RunID), aggregate.Facts.Focus.ID, signature, fact.ID)
 		ledger, _, cycleErr := aggregate.Facts.Repair.BeginRepairCycle(aggregate.Facts.Focus.ID, aggregate.Facts.Focus.SliceID, cycleID, signature, aggregate.Facts.ConvergencePolicy)
@@ -876,6 +927,21 @@ func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID co
 		if assessment.Gap != nil {
 			gap := assessment.Gap.Normalized()
 			ledger.ActiveGap = &gap
+			// A repairable assessment only resets the same-focus progress windows
+			// when its persisted neutral gap set strictly narrows. The comparison
+			// itself is a pure contract helper; SM-2 alone decides to apply it.
+			// Repeated or expanded gaps retain their signatures/shapes and must not
+			// create a fresh retry window merely because an assessment was accepted.
+			if priorGap != nil && runtimecontract.RuntimeAssessmentGapStrictlyNarrows(*priorGap, gap) {
+				ledger = ledger.NoteGapProgress(gap, aggregate.Facts.EvidenceRevision)
+			} else {
+				// An accepted operation is not harmless merely because its receipt
+				// succeeded. Once assessment reports the same (or a wider) persisted
+				// gap, retain every concrete current-focus operation shape that led
+				// here. Candidate admission consumes this ledger on restart as well,
+				// so changing prose cannot replay an accepted no-progress repair.
+				ledger = recordAcceptedNoProgressShapes(aggregate, ledger, signature, assessment.Gap)
+			}
 		}
 		if assessment.Gap != nil {
 			hasStateChangeGap := false
@@ -915,6 +981,32 @@ func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID co
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
+}
+
+func recordAcceptedNoProgressShapes(aggregate RuntimeAggregate, ledger runtimecontract.RuntimeRepairLedger, signature string, gap *runtimecontract.RuntimeAssessmentGap) runtimecontract.RuntimeRepairLedger {
+	for _, evidence := range aggregate.Facts.Evidence.Accepted {
+		if !runtimecontract.EvidenceAppliesToCurrentFocus(aggregate.Facts, evidence) {
+			continue
+		}
+		switch evidence.Kind {
+		case runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation:
+		default:
+			continue
+		}
+		operation, found := runtimeOperationForEvidence(aggregate, evidence)
+		if !found {
+			continue
+		}
+		ledger = ledger.RecordNoProgressOperationShape(runtimecontract.RuntimeRejectedOperationShape{
+			Operation:        operation,
+			EvidenceID:       evidence.ID,
+			FailureClass:     runtimecontract.FailureClassCoverageAssessmentIncomplete,
+			FailureCode:      "accepted_operation_same_gap",
+			FailureSignature: signature,
+			FailureMessage:   "accepted operation did not reduce the persisted assessment gap",
+		})
+	}
+	return ledger
 }
 
 func runtimeAssessmentCoverageIDs(ids []common.CoverageWorkItemID, fallback []common.CoverageWorkItemID) []common.CoverageWorkItemID {

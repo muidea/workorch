@@ -63,6 +63,20 @@ func TestValidateRuntimeOperationContractFileWriteRequiresTargetAndContent(t *te
 	}
 }
 
+func TestValidateRuntimeOperationContractRejectsCandidateClaimedShellFailureTargets(t *testing.T) {
+	command := "go"
+	err := ValidateRuntimeOperationContract(RuntimeOperation{
+		ID: "validate-1", Kind: StepKindShellCommand,
+		Parameters: []OperationParameter{
+			{Name: "command", String: &command},
+			{Name: "relatedFailureTargets", StringList: []string{"implementation.go"}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), `does not accept parameter "relatedFailureTargets"`) {
+		t.Fatalf("candidate-claimed shell failure targets error = %v", err)
+	}
+}
+
 func TestRuntimeOperationRequiresCurrentTargetSnapshot(t *testing.T) {
 	tests := []struct {
 		name      string

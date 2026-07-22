@@ -16,6 +16,7 @@ type RuntimeOperationRequest struct {
 	WorkspaceDeliverableDirectory string
 	WorkspaceInternalDirectory    string
 	TargetRefs                    []string
+	TargetRole                    string
 	Data                          orchestratorevents.MCPOperationData
 	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
 }
@@ -36,6 +37,7 @@ type RuntimeOperationResult struct {
 	Stderr         string
 	FailureCode    string
 	FailureMessage string
+	OwnerRevision  string
 	TargetRefs     []string
 	Response       MCPResponsePayload
 	StreamEvents   []MCPStreamEvent
@@ -62,4 +64,5 @@ type MCPCapabilityFailureDiagnostics struct {
 	Prompt         string
 	TargetRef      string
 	FailureTargets []string
+	TargetRole     string
 }

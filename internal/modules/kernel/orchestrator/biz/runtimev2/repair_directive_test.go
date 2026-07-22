@@ -105,6 +105,68 @@ func TestRepairDirectiveFlipsOnlyAfterAcceptedStateChange(t *testing.T) {
 	}
 }
 
+func TestRepairDirectiveDoesNotFlipForAcceptedStateChangeOutsideGroundedTarget(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
+	facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{
+		ID: "repair-cwi-1-produce_state_change-0", FocusID: facts.Focus.ID,
+		Trigger:               runtimecontract.RuntimeRepairTriggerRejectedValidation,
+		RequiredAction:        runtimecontract.RuntimeActionProduceStateChange,
+		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+		TargetRefs: []string{"implementation.go"}, SupersedesEvidenceRevision: "evidence-v2-00000000000000000002",
+	}
+	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
+		ID: "accepted-validation-entry-edit", Kind: runtimecontract.EvidenceKindStateChange,
+		Revision: "evidence-v2-00000000000000000003", TargetRefs: []string{"entry_test.go"}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+	}}
+	facts.EvidenceRevision = "evidence-v2-00000000000000000003"
+	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionProduceStateChange || facts.RepairDirective == nil || facts.RepairDirective.RequiredAction != runtimecontract.RuntimeActionProduceStateChange {
+		t.Fatalf("outside-target state change advanced repair: decision=%+v directive=%+v", decision, facts.RepairDirective)
+	}
+
+	facts.Evidence.Accepted = append(facts.Evidence.Accepted, runtimecontract.EvidenceFact{
+		ID: "accepted-implementation-edit", Kind: runtimecontract.EvidenceKindStateChange,
+		Revision: "evidence-v2-00000000000000000004", TargetRefs: []string{"implementation.go"}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+	})
+	facts.EvidenceRevision = "evidence-v2-00000000000000000004"
+	facts, decision, err = ReduceRuntimeStateWithDirective(facts, &decision.AuthoritySnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionProduceValidation || facts.RepairDirective == nil || facts.RepairDirective.RequiredAction != runtimecontract.RuntimeActionProduceValidation {
+		t.Fatalf("grounded state change did not advance repair: decision=%+v directive=%+v", decision, facts.RepairDirective)
+	}
+}
+
+func TestRepairDirectiveDoesNotFlipBeforeRequiredAssessment(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.RequireAssessment = true
+	facts.Focus.TargetRefs = []string{"implementation.go"}
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+	facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{
+		ID: "repair-focus-1-produce_state_change-0", FocusID: facts.Focus.ID,
+		Trigger: runtimecontract.RuntimeRepairTriggerAssessmentGap, RequiredAction: runtimecontract.RuntimeActionProduceStateChange,
+		RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		TargetRefs: []string{"implementation.go"}, SupersedesEvidenceRevision: facts.EvidenceRevision,
+	}
+	facts.Evidence.Accepted = append(facts.Evidence.Accepted, runtimecontract.EvidenceFact{
+		ID: "changed-target", Kind: runtimecontract.EvidenceKindStateChange, Revision: "evidence-v2-00000000000000000001", TargetRefs: []string{"implementation.go"},
+		CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+	})
+	updated := syncRepairDirective(facts, runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceAssessment, Focus: facts.Focus})
+	if updated.RepairDirective != nil {
+		t.Fatalf("assessment boundary should clear repair directive for fresh assessment: %+v", updated.RepairDirective)
+	}
+	if acceptedStateChangeAfterRepairDirective(facts, facts.RepairDirective) {
+		t.Fatal("assessment-required focus treated state change as completed repair before assessment")
+	}
+}
+
 func TestNormalStateChangeDoesNotCreateRepairDirective(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}

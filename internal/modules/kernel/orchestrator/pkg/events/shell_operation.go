@@ -42,8 +42,6 @@ func ShellOperationDataFromRuntimeOperation(operation runtimecontract.RuntimeOpe
 			ret.TargetRef = strings.TrimSpace(*parameter.String)
 		case "targetRefs":
 			ret.TargetRefs = append([]string(nil), parameter.StringList...)
-		case "relatedFailureTargets":
-			ret.RelatedFailureTargets = append([]string(nil), parameter.StringList...)
 		case "verificationScope":
 			ret.VerificationScope = *parameter.String
 		case "boundedReason":

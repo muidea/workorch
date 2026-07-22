@@ -130,7 +130,20 @@ func ProbeRuntimeOperationFeasibility(ctx context.Context, hub magicevent.Hub, c
 		if response.Failure != nil || response.Stale != nil {
 			return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("feasible runtime operation probe returned failure facts")
 		}
+		if response.ReplayProof != nil {
+			proof := response.ReplayProof.Normalized()
+			if err := proof.Validate(); err != nil {
+				return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, err
+			}
+			if proof.OperationID != operation.ID || proof.AdmissibilitySnapshotID != inventory.SnapshotID || proof.AcquisitionBinding != inventory.AcquisitionBinding || proof.OwnerModuleID != descriptor.OwnerModuleID {
+				return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("runtime operation feasibility probe returned mismatched replay proof")
+			}
+			response.ReplayProof = &proof
+		}
 		return response, nil
+	}
+	if response.ReplayProof != nil {
+		return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("infeasible runtime operation probe cannot return replay proof")
 	}
 	if response.Stale != nil {
 		if response.Failure != nil {

@@ -62,8 +62,12 @@ type RuntimeCandidateFeasibilityRecord struct {
 	AdmissibilitySnapshotID string
 	AcquisitionBinding      string
 	Feasible                bool
-	Failure                 *FailureFact
-	Stale                   *RuntimePrerequisiteStale
+	// ReplayProof is optional owner preflight output. When present it is sealed
+	// into the execution record for same-key/fence receipt recovery; it is never
+	// execution evidence and cannot authorize a dispatch by itself.
+	ReplayProof *RuntimeOperationReplayProof
+	Failure     *FailureFact
+	Stale       *RuntimePrerequisiteStale
 }
 
 type RuntimeCandidateAttemptRecord struct {
@@ -403,7 +407,19 @@ func ValidateRuntimeCandidateFeasibilityRecords(values []RuntimeCandidateFeasibi
 			if value.Failure != nil || value.Stale != nil {
 				return fmt.Errorf("feasible runtime candidate operation %q cannot carry failure", operationID)
 			}
+			if value.ReplayProof != nil {
+				proof := value.ReplayProof.Normalized()
+				if err := proof.Validate(); err != nil {
+					return fmt.Errorf("feasible runtime candidate operation %q replay proof: %w", operationID, err)
+				}
+				if proof.OperationID != operationID || proof.AdmissibilitySnapshotID != strings.TrimSpace(value.AdmissibilitySnapshotID) || proof.AcquisitionBinding != strings.TrimSpace(value.AcquisitionBinding) {
+					return fmt.Errorf("feasible runtime candidate operation %q replay proof identity mismatch", operationID)
+				}
+			}
 			continue
+		}
+		if value.ReplayProof != nil {
+			return fmt.Errorf("infeasible runtime candidate operation %q cannot carry replay proof", operationID)
 		}
 		if value.Stale != nil {
 			if value.Failure != nil {
@@ -555,11 +571,20 @@ func cloneRuntimeCandidateFeasibilities(values []RuntimeCandidateFeasibilityReco
 		if value.Failure != nil {
 			failure := *value.Failure
 			failure.TargetRefs = append([]string(nil), value.Failure.TargetRefs...)
+			if value.Failure.TargetObservation != nil {
+				observation := value.Failure.TargetObservation.Normalized()
+				observation.TargetRefs = append([]string(nil), observation.TargetRefs...)
+				failure.TargetObservation = &observation
+			}
 			ret[idx].Failure = &failure
 		}
 		if value.Stale != nil {
 			stale := *value.Stale
 			ret[idx].Stale = &stale
+		}
+		if value.ReplayProof != nil {
+			proof := value.ReplayProof.Clone()
+			ret[idx].ReplayProof = &proof
 		}
 	}
 	return ret
@@ -622,6 +647,17 @@ func (d RuntimeDispatchRecord) ValidateWithActivation(decision RuntimeDecision, 
 		if _, ok := available[exec.OperationID]; !ok {
 			return fmt.Errorf("runtime dispatch operation execution %q is not present in candidate", exec.OperationID)
 		}
+		if exec.ReplayProof != nil {
+			operation, found := runtimeCandidateOperationForID(d.Candidate, exec.OperationID)
+			if !found {
+				return fmt.Errorf("runtime dispatch replay proof operation %q is not present in candidate", exec.OperationID)
+			}
+			descriptor, known := RuntimeOperationDescriptorForKind(operation.Kind)
+			proof := exec.ReplayProof.Normalized()
+			if !known || proof.OwnerModuleID != descriptor.OwnerModuleID || !sameRuntimeStringSet(proof.TargetRefs, operation.TargetRefs) {
+				return fmt.Errorf("runtime dispatch replay proof does not match sealed operation %q", exec.OperationID)
+			}
+		}
 	}
 	return nil
 }
@@ -633,7 +669,9 @@ func (d RuntimeDispatchRecord) Clone() RuntimeDispatchRecord {
 	ret.OperationExecutions = NormalizeRuntimeOperationExecutionRecords(d.OperationExecutions)
 	if len(ret.OperationExecutions) > 0 {
 		execs := make([]RuntimeOperationExecutionRecord, len(ret.OperationExecutions))
-		copy(execs, ret.OperationExecutions)
+		for idx := range ret.OperationExecutions {
+			execs[idx] = ret.OperationExecutions[idx].Clone()
+		}
 		ret.OperationExecutions = execs
 	}
 	return ret
@@ -701,4 +739,39 @@ func runtimeCandidateOperationIDs(candidate RuntimeCandidate) map[string]struct{
 		}
 	}
 	return ret
+}
+
+func runtimeCandidateOperationForID(candidate RuntimeCandidate, wanted string) (RuntimeOperation, bool) {
+	wanted = strings.TrimSpace(wanted)
+	if candidate.StateChange != nil {
+		for _, item := range candidate.StateChange.Operations {
+			operation := item.Operation.Normalized()
+			if operation.ID == wanted {
+				return operation, true
+			}
+		}
+	}
+	if candidate.Validation != nil {
+		for _, item := range candidate.Validation.Operations {
+			operation := item.Operation.Normalized()
+			if operation.ID == wanted {
+				return operation, true
+			}
+		}
+	}
+	return RuntimeOperation{}, false
+}
+
+func sameRuntimeStringSet(left, right []string) bool {
+	left = normalizeStrings(left)
+	right = normalizeStrings(right)
+	if len(left) != len(right) {
+		return false
+	}
+	for idx := range left {
+		if left[idx] != right[idx] {
+			return false
+		}
+	}
+	return true
 }

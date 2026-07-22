@@ -174,7 +174,7 @@ func (e eventRuntimeV2OperationExecutor) executeMCP(ctx context.Context, request
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID, OperationKind: request.Operation.Kind,
 		CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
-		TargetRefs:          append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
+		TargetRefs:          append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind, TargetRole: request.TargetRole,
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
 	}
@@ -343,6 +343,10 @@ func runtimeOperationExecutionEnvelope(execution runtimecontract.RuntimeOperatio
 	execution = execution.Normalized()
 	ret := orchestratorevents.RuntimeOperationExecutionEnvelope{
 		ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, ExpectedEffectScope: execution.ExpectedEffectScope,
+	}
+	if execution.ReplayProof != nil {
+		proof := execution.ReplayProof.Clone()
+		ret.ReplayProof = &proof
 	}
 	if grant != nil {
 		value := grant.Normalized()

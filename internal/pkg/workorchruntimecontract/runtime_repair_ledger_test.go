@@ -76,3 +76,20 @@ func TestRuntimeRepairLedgerProgressResetsWindowsButPreservesFocusTotal(t *testi
 		t.Fatalf("focus advance reset = %+v", advanced)
 	}
 }
+
+func TestRuntimeRepairLedgerNoteGapProgressRetainsRemainingGap(t *testing.T) {
+	ledger := RuntimeRepairLedger{
+		FocusID: "focus-1", SliceID: "slice-1", RepairAttempts: 4,
+		ValidationOnlyRetries: 1, NoProgressCount: 2,
+		SignatureCounts:           []RuntimeFailureSignatureCount{{Signature: "same-gap", Count: 3}},
+		NoProgressOperationShapes: []RuntimeRejectedOperationShape{{Operation: RuntimeOperation{Kind: StepKindShellCommand}}},
+		LastCycleID:               "cycle-4", ActiveGap: &RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1", "cwi-2"}, Reason: "prior gap"},
+	}
+	remaining := RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-2"}, Reason: "remaining gap"}
+	progressed := ledger.NoteGapProgress(remaining, "evidence-5")
+	if progressed.RepairAttempts != 4 || progressed.ValidationOnlyRetries != 0 || progressed.NoProgressCount != 0 ||
+		len(progressed.SignatureCounts) != 0 || len(progressed.NoProgressOperationShapes) != 0 || progressed.LastCycleID != "" || progressed.ActiveGap == nil ||
+		len(progressed.ActiveGap.CoverageWorkItemIDs) != 1 || progressed.ActiveGap.CoverageWorkItemIDs[0] != "cwi-2" || progressed.LastProgressRevision != "evidence-5" {
+		t.Fatalf("partial gap progress = %+v", progressed)
+	}
+}

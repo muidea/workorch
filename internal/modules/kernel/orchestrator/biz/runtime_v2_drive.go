@@ -78,7 +78,7 @@ func DriveRuntimeV2(ctx context.Context, hub magicevent.Hub, command orchestrato
 
 func (m *Biz) handleRuntimeV2Drive(event magicevent.Event, result magicevent.Result) {
 	command, ok := event.Data().(orchestratorevents.DriveRuntimeV2Command)
-	if !ok || m == nil || m.bizPtr == nil || m.EventHub() == nil {
+	if !ok || m == nil {
 		setRuntimeV2DriveResult(result, orchestratorevents.DriveRuntimeV2Result{}, common.ErrInvalidArgument)
 		return
 	}
@@ -87,6 +87,18 @@ func (m *Biz) handleRuntimeV2Drive(event magicevent.Event, result magicevent.Res
 }
 
 func (m *Biz) driveRuntimeV2(ctx context.Context, command orchestratorevents.DriveRuntimeV2Command) (orchestratorevents.DriveRuntimeV2Result, error) {
+	if m == nil || command.WorkspaceID == "" || command.RunID == "" {
+		return orchestratorevents.DriveRuntimeV2Result{}, common.ErrInvalidArgument
+	}
+	m.lifecycleMu.RLock()
+	defer m.lifecycleMu.RUnlock()
+	return m.driveRuntimeV2Locked(ctx, command)
+}
+
+// driveRuntimeV2Locked is called either by the synchronous EventHub handler
+// through driveRuntimeV2 or by the background drive while lifecycleMu is held.
+// Keeping this split avoids recursive RLock acquisition when Stop is pending.
+func (m *Biz) driveRuntimeV2Locked(ctx context.Context, command orchestratorevents.DriveRuntimeV2Command) (orchestratorevents.DriveRuntimeV2Result, error) {
 	if m == nil || m.bizPtr == nil || m.EventHub() == nil || command.WorkspaceID == "" || command.RunID == "" {
 		return orchestratorevents.DriveRuntimeV2Result{}, common.ErrInvalidArgument
 	}
@@ -156,8 +168,10 @@ func (m *Biz) driveRuntimeV2Decision(ctx context.Context, aggregate runtimev2.Ru
 	return m.executeRuntimeV2ActiveDispatch(ctx, aggregate)
 }
 
-func (m *Biz) driveAndProjectRuntimeV2(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) error {
-	result, err := m.driveRuntimeV2(ctx, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: workspaceID, RunID: runID})
+// driveAndProjectRuntimeV2Locked is only called from the background drive
+// while lifecycleMu is held across recovery accounting and terminal delivery.
+func (m *Biz) driveAndProjectRuntimeV2Locked(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) error {
+	result, err := m.driveRuntimeV2Locked(ctx, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: workspaceID, RunID: runID})
 	if err != nil {
 		return err
 	}

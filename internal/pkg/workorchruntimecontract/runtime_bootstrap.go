@@ -86,6 +86,9 @@ func (b RuntimeBootstrap) Validate() error {
 		if focus.ID == "" || len(focus.CoverageWorkItemIDs) == 0 || (len(focus.RequiredEvidenceKinds) == 0 && !focus.RequireAssessment) {
 			return fmt.Errorf("runtime bootstrap focus requires identity, coverage and evidence or assessment")
 		}
+		if err := ValidateRuntimeTargetGrounding(focus.RequireTargetGrounding, focus.TargetRole, focus.TargetRefs, focus.TargetDiscoverySources, focus.TargetSelectorRef); err != nil {
+			return fmt.Errorf("runtime bootstrap focus %s: %w", focus.ID, err)
+		}
 		if _, ok := seen[focus.ID]; ok {
 			return fmt.Errorf("runtime bootstrap focus %s is duplicated", focus.ID)
 		}
@@ -200,10 +203,10 @@ func sameCoverageFocus(left CoverageFocus, right CoverageFocus) bool {
 	right = right.Normalized()
 	return left.ID == right.ID && left.SliceID == right.SliceID && sameCoverageWorkItemIDs(left.CoverageWorkItemIDs, right.CoverageWorkItemIDs) &&
 		left.AssessmentScope == right.AssessmentScope && left.AssessmentID == right.AssessmentID && left.AssessmentText == right.AssessmentText &&
-		left.EvidenceRole == right.EvidenceRole && left.RequireAssessment == right.RequireAssessment &&
+		left.EvidenceRole == right.EvidenceRole && left.TargetRole == right.TargetRole && left.TargetSelectorRef == right.TargetSelectorRef && left.RequireTargetGrounding == right.RequireTargetGrounding && left.RequireAssessment == right.RequireAssessment &&
 		left.RequireDirectEvidence == right.RequireDirectEvidence && left.RequireClaimEvidence == right.RequireClaimEvidence &&
 		left.RequireExecutableBehaviorEvidence == right.RequireExecutableBehaviorEvidence && left.RequireCoverageTargets == right.RequireCoverageTargets &&
-		sameStrings(left.RequiredEvidenceKinds, right.RequiredEvidenceKinds) && sameStrings(left.TargetRefs, right.TargetRefs) &&
+		sameStrings(left.RequiredEvidenceKinds, right.RequiredEvidenceKinds) && sameStrings(left.TargetRefs, right.TargetRefs) && sameStrings(left.TargetDiscoverySources, right.TargetDiscoverySources) &&
 		sameStrings(left.AcceptedStepKinds, right.AcceptedStepKinds) && SameRuntimeOperationVariantRefs(left.AcceptedOperationVariants, right.AcceptedOperationVariants) &&
 		sameStrings(left.RejectedStepKinds, right.RejectedStepKinds)
 }
@@ -216,7 +219,7 @@ func sameRuntimeRequirement(left RuntimeRequirement, right RuntimeRequirement) b
 	}
 	left = leftValues[0]
 	right = rightValues[0]
-	return left.Kind == right.Kind && left.OwnerModuleID == right.OwnerModuleID && left.SubjectRef == right.SubjectRef &&
+	return left.Kind == right.Kind && left.OwnerModuleID == right.OwnerModuleID && left.SubjectRef == right.SubjectRef && left.TargetSelectorRef == right.TargetSelectorRef &&
 		left.CapabilityClass == right.CapabilityClass && left.MinimumBytes == right.MinimumBytes && left.Reason == right.Reason &&
 		sameStrings(left.RequiredCapabilities, right.RequiredCapabilities)
 }
@@ -252,10 +255,11 @@ func normalizeRuntimeRequirements(values []RuntimeRequirement) []RuntimeRequirem
 		value.Kind = PrerequisiteKind(strings.TrimSpace(string(value.Kind)))
 		value.OwnerModuleID = strings.TrimSpace(value.OwnerModuleID)
 		value.SubjectRef = strings.TrimSpace(value.SubjectRef)
+		value.TargetSelectorRef = strings.TrimSpace(value.TargetSelectorRef)
 		value.CapabilityClass = RuntimeCapabilityClass(strings.TrimSpace(string(value.CapabilityClass)))
 		value.RequiredCapabilities = normalizeStrings(value.RequiredCapabilities)
 		value.Reason = strings.TrimSpace(value.Reason)
-		key := strings.Join([]string{string(value.Kind), value.OwnerModuleID, value.SubjectRef, string(value.CapabilityClass), strings.Join(value.RequiredCapabilities, ","), fmt.Sprintf("%d", value.MinimumBytes)}, "|")
+		key := strings.Join([]string{string(value.Kind), value.OwnerModuleID, value.SubjectRef, value.TargetSelectorRef, string(value.CapabilityClass), strings.Join(value.RequiredCapabilities, ","), fmt.Sprintf("%d", value.MinimumBytes)}, "|")
 		if value.Kind == "" || key == "" {
 			continue
 		}

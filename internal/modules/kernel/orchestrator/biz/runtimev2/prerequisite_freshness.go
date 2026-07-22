@@ -36,7 +36,7 @@ func (c *RuntimeController) InvalidateCandidateAttemptForPrerequisiteStale(ctx c
 		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d is not pending", common.ErrConflict, attempt)
 	}
 	expectedRevision := aggregate.StateRevision
-	facts, affectedPrerequisites, affectedObservations, err := invalidatePrerequisiteObservationsForStale(aggregate.Facts, stale)
+	facts, affectedPrerequisites, affectedObservations, invalidatedDependencies, err := invalidatePrerequisiteObservationsForStale(aggregate.Facts, stale)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -52,7 +52,8 @@ func (c *RuntimeController) InvalidateCandidateAttemptForPrerequisiteStale(ctx c
 	staleCopy := stale
 	aggregate.CandidateAttempts[idx].Stale = &staleCopy
 	aggregate.PrerequisiteInvalidations = append(aggregate.PrerequisiteInvalidations, runtimecontract.RuntimePrerequisiteInvalidationRecord{
-		Signature: signature, PrerequisiteIDs: affectedPrerequisites, ObservationIDs: affectedObservations, Stale: &staleCopy,
+		Signature: signature, PrerequisiteIDs: affectedPrerequisites, ObservationIDs: affectedObservations,
+		InvalidatedDependencies: invalidatedDependencies, Stale: &staleCopy,
 	})
 	if !consumed {
 		facts.Failure = &runtimecontract.FailureFact{
@@ -106,7 +107,7 @@ func (c *RuntimeController) InvalidateActiveDispatchForPrerequisiteStale(ctx con
 		return RuntimeAggregate{}, fmt.Errorf("%w: stale receipt is not owner-persisted", common.ErrConflict)
 	}
 	expectedRevision := aggregate.StateRevision
-	facts, prerequisiteIDs, observationIDs, err := invalidatePrerequisiteObservationsForStale(aggregate.Facts, stale)
+	facts, prerequisiteIDs, observationIDs, invalidatedDependencies, err := invalidatePrerequisiteObservationsForStale(aggregate.Facts, stale)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -117,7 +118,8 @@ func (c *RuntimeController) InvalidateActiveDispatchForPrerequisiteStale(ctx con
 	facts.Recovery = ledger
 	aggregate.PrerequisiteInvalidations = append(aggregate.PrerequisiteInvalidations, runtimecontract.RuntimePrerequisiteInvalidationRecord{
 		Signature: signature, PrerequisiteIDs: prerequisiteIDs, ObservationIDs: observationIDs,
-		DispatchID: dispatchID, OperationID: receipt.OperationID, Stale: &stale,
+		InvalidatedDependencies: invalidatedDependencies,
+		DispatchID:              dispatchID, OperationID: receipt.OperationID, Stale: &stale,
 	})
 	dispatch := *aggregate.ActiveDispatch
 	dispatch.State = DispatchStateInvalidated
@@ -161,7 +163,7 @@ func applyReceiptResourceChangeInvalidation(aggregate *RuntimeAggregate, dispatc
 	if prerequisiteInvalidationExists(*aggregate, signature) {
 		return false, nil
 	}
-	facts, prerequisiteIDs, observationIDs, err := invalidatePrerequisiteObservationsForChanges(aggregate.Facts, receipt.ResourceChanges)
+	facts, prerequisiteIDs, observationIDs, invalidatedDependencies, err := invalidatePrerequisiteObservationsForChanges(aggregate.Facts, receipt.ResourceChanges)
 	if err != nil {
 		return false, err
 	}
@@ -179,7 +181,8 @@ func applyReceiptResourceChangeInvalidation(aggregate *RuntimeAggregate, dispatc
 	aggregate.Facts = facts
 	aggregate.PrerequisiteInvalidations = append(aggregate.PrerequisiteInvalidations, runtimecontract.RuntimePrerequisiteInvalidationRecord{
 		Signature: signature, PrerequisiteIDs: prerequisiteIDs, ObservationIDs: observationIDs,
-		DispatchID: strings.TrimSpace(dispatchID), OperationID: strings.TrimSpace(operationID), ReceiptHash: receiptHash,
+		InvalidatedDependencies: invalidatedDependencies,
+		DispatchID:              strings.TrimSpace(dispatchID), OperationID: strings.TrimSpace(operationID), ReceiptHash: receiptHash,
 		ResourceChanges: receipt.ResourceChanges,
 	})
 	if !consumed {
@@ -201,12 +204,71 @@ func prerequisiteInvalidationExists(aggregate RuntimeAggregate, signature string
 	return false
 }
 
-func invalidatePrerequisiteObservationsForStale(facts runtimecontract.RuntimeFacts, stale runtimecontract.RuntimePrerequisiteStale) (runtimecontract.RuntimeFacts, []string, []string, error) {
+// validatePrerequisiteResultFreshness prevents an owner response produced for
+// a previous instance of a stable prerequisite ID from satisfying the current
+// re-acquisition. Prerequisites intentionally retain their semantic ID after
+// invalidation so reducer ordering and owner contracts stay stable; the
+// persisted owner observation is consequently the generation fence.
+//
+// This is an Orchestrator admission rule, not a DTO transition: capability
+// owners continue to report only their current observation, while SM-2 decides
+// whether that observation may re-enter the aggregate.
+func validatePrerequisiteResultFreshness(result PrerequisiteResult, invalidations []runtimecontract.RuntimePrerequisiteInvalidationRecord) error {
+	prerequisiteID := strings.TrimSpace(result.PrerequisiteID)
+	if prerequisiteID == "" {
+		return common.ErrInvalidArgument
+	}
+	for _, invalidation := range invalidations {
+		invalidation = invalidation.Normalized()
+		if !containsFreshnessString(invalidation.PrerequisiteIDs, prerequisiteID) {
+			continue
+		}
+		if result.Observation == nil {
+			return fmt.Errorf("%w: prerequisite %q was invalidated and requires a fresh owner observation", common.ErrConflict, prerequisiteID)
+		}
+		observation := result.Observation.Normalized()
+		for _, dependency := range observation.Dependencies {
+			for _, invalidatedDependency := range invalidation.InvalidatedDependencies {
+				invalidatedDependency = invalidatedDependency.Normalized()
+				if dependency.Domain == invalidatedDependency.Domain && dependency.OwnerModuleID == invalidatedDependency.OwnerModuleID &&
+					dependency.SubjectRef == invalidatedDependency.SubjectRef && dependency.Revision == invalidatedDependency.Revision {
+					return fmt.Errorf("%w: prerequisite %q result retains an invalidated owner freshness dependency", common.ErrConflict, prerequisiteID)
+				}
+			}
+			if invalidation.Stale != nil {
+				stale := invalidation.Stale.Normalized()
+				if dependency.Domain == stale.Domain && dependency.OwnerModuleID == stale.OwnerModuleID &&
+					dependency.SubjectRef == stale.SubjectRef && dependency.Revision == stale.ExpectedRevision {
+					return fmt.Errorf("%w: prerequisite %q result retains superseded %s revision", common.ErrConflict, prerequisiteID, stale.Domain)
+				}
+			}
+			for _, change := range invalidation.ResourceChanges {
+				if runtimecontract.RuntimeFreshnessDependencyIntersectsChange(dependency, change) &&
+					dependency.Revision == change.BeforeRevision {
+					return fmt.Errorf("%w: prerequisite %q result retains resource revision superseded by durable receipt", common.ErrConflict, prerequisiteID)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func containsFreshnessString(values []string, value string) bool {
+	value = strings.TrimSpace(value)
+	for _, candidate := range values {
+		if strings.TrimSpace(candidate) == value {
+			return true
+		}
+	}
+	return false
+}
+
+func invalidatePrerequisiteObservationsForStale(facts runtimecontract.RuntimeFacts, stale runtimecontract.RuntimePrerequisiteStale) (runtimecontract.RuntimeFacts, []string, []string, []runtimecontract.RuntimeFreshnessDependency, error) {
 	facts = facts.Normalized()
 	stale = stale.Normalized()
 	observation, found := runtimecontract.RuntimePrerequisiteObservationForID(facts.Resources.PrerequisiteObservations, stale.PrerequisiteID)
 	if !found || observation.ObservationID != stale.ObservationID {
-		return runtimecontract.RuntimeFacts{}, nil, nil, fmt.Errorf("%w: stale prerequisite observation is not current", common.ErrConflict)
+		return runtimecontract.RuntimeFacts{}, nil, nil, nil, fmt.Errorf("%w: stale prerequisite observation is not current", common.ErrConflict)
 	}
 	matchedDependency := false
 	for _, dependency := range observation.Dependencies {
@@ -216,12 +278,16 @@ func invalidatePrerequisiteObservationsForStale(facts runtimecontract.RuntimeFac
 		}
 	}
 	if !matchedDependency {
-		return runtimecontract.RuntimeFacts{}, nil, nil, fmt.Errorf("%w: stale prerequisite dependency is not current", common.ErrConflict)
+		return runtimecontract.RuntimeFacts{}, nil, nil, nil, fmt.Errorf("%w: stale prerequisite dependency is not current", common.ErrConflict)
 	}
-	return invalidatePrerequisiteObservations(facts, []runtimecontract.RuntimePrerequisiteObservation{observation})
+	updated, prerequisiteIDs, observationIDs, dependencies, err := invalidatePrerequisiteObservations(facts, []runtimecontract.RuntimePrerequisiteObservation{observation})
+	if err != nil {
+		return runtimecontract.RuntimeFacts{}, nil, nil, nil, err
+	}
+	return updated, prerequisiteIDs, observationIDs, freshnessDependenciesMatchingStale(dependencies, stale), nil
 }
 
-func invalidatePrerequisiteObservationsForChanges(facts runtimecontract.RuntimeFacts, changes []runtimecontract.RuntimeResourceChange) (runtimecontract.RuntimeFacts, []string, []string, error) {
+func invalidatePrerequisiteObservationsForChanges(facts runtimecontract.RuntimeFacts, changes []runtimecontract.RuntimeResourceChange) (runtimecontract.RuntimeFacts, []string, []string, []runtimecontract.RuntimeFreshnessDependency, error) {
 	facts = facts.Normalized()
 	changes = runtimecontract.NormalizeRuntimeResourceChanges(changes)
 	affected := make([]runtimecontract.RuntimePrerequisiteObservation, 0)
@@ -237,12 +303,43 @@ func invalidatePrerequisiteObservationsForChanges(facts runtimecontract.RuntimeF
 	nextObservation:
 	}
 	if len(affected) == 0 {
-		return facts, nil, nil, nil
+		return facts, nil, nil, nil, nil
 	}
-	return invalidatePrerequisiteObservations(facts, affected)
+	updated, prerequisiteIDs, observationIDs, dependencies, err := invalidatePrerequisiteObservations(facts, affected)
+	if err != nil {
+		return runtimecontract.RuntimeFacts{}, nil, nil, nil, err
+	}
+	return updated, prerequisiteIDs, observationIDs, freshnessDependenciesIntersectingChanges(dependencies, changes), nil
 }
 
-func invalidatePrerequisiteObservations(facts runtimecontract.RuntimeFacts, observations []runtimecontract.RuntimePrerequisiteObservation) (runtimecontract.RuntimeFacts, []string, []string, error) {
+func freshnessDependenciesMatchingStale(values []runtimecontract.RuntimeFreshnessDependency, stale runtimecontract.RuntimePrerequisiteStale) []runtimecontract.RuntimeFreshnessDependency {
+	stale = stale.Normalized()
+	ret := make([]runtimecontract.RuntimeFreshnessDependency, 0, 1)
+	for _, dependency := range values {
+		dependency = dependency.Normalized()
+		if dependency.Domain == stale.Domain && dependency.OwnerModuleID == stale.OwnerModuleID &&
+			dependency.SubjectRef == stale.SubjectRef && dependency.Revision == stale.ExpectedRevision {
+			ret = append(ret, dependency)
+		}
+	}
+	return runtimecontract.NormalizeRuntimeFreshnessDependencies(ret)
+}
+
+func freshnessDependenciesIntersectingChanges(values []runtimecontract.RuntimeFreshnessDependency, changes []runtimecontract.RuntimeResourceChange) []runtimecontract.RuntimeFreshnessDependency {
+	changes = runtimecontract.NormalizeRuntimeResourceChanges(changes)
+	ret := make([]runtimecontract.RuntimeFreshnessDependency, 0, len(values))
+	for _, dependency := range values {
+		for _, change := range changes {
+			if runtimecontract.RuntimeFreshnessDependencyIntersectsChange(dependency, change) {
+				ret = append(ret, dependency)
+				break
+			}
+		}
+	}
+	return runtimecontract.NormalizeRuntimeFreshnessDependencies(ret)
+}
+
+func invalidatePrerequisiteObservations(facts runtimecontract.RuntimeFacts, observations []runtimecontract.RuntimePrerequisiteObservation) (runtimecontract.RuntimeFacts, []string, []string, []runtimecontract.RuntimeFreshnessDependency, error) {
 	facts = facts.Normalized()
 	byID := map[string]runtimecontract.RuntimePrerequisiteObservation{}
 	for _, observation := range observations {
@@ -250,7 +347,7 @@ func invalidatePrerequisiteObservations(facts runtimecontract.RuntimeFacts, obse
 		byID[observation.PrerequisiteID] = observation
 	}
 	if len(byID) == 0 {
-		return facts, nil, nil, nil
+		return facts, nil, nil, nil, nil
 	}
 	satisfied := make(map[string]runtimecontract.RuntimePrerequisite, len(facts.Prerequisites.Satisfied))
 	for _, prerequisite := range facts.Prerequisites.Satisfied {
@@ -258,17 +355,24 @@ func invalidatePrerequisiteObservations(facts runtimecontract.RuntimeFacts, obse
 	}
 	prerequisiteIDs := make([]string, 0, len(byID))
 	observationIDs := make([]string, 0, len(byID))
+	invalidatedDependencies := make([]runtimecontract.RuntimeFreshnessDependency, 0)
 	for prerequisiteID, observation := range byID {
 		prerequisite, found := satisfied[prerequisiteID]
 		if !found || prerequisite.Kind != observation.Kind || prerequisite.OwnerModuleID != observation.OwnerModuleID {
-			return runtimecontract.RuntimeFacts{}, nil, nil, fmt.Errorf("%w: observation %q has no current satisfied prerequisite", common.ErrConflict, prerequisiteID)
+			return runtimecontract.RuntimeFacts{}, nil, nil, nil, fmt.Errorf("%w: observation %q has no current satisfied prerequisite", common.ErrConflict, prerequisiteID)
 		}
 		if err := removePrerequisiteResourceFact(&facts, prerequisite); err != nil {
-			return runtimecontract.RuntimeFacts{}, nil, nil, err
+			return runtimecontract.RuntimeFacts{}, nil, nil, nil, err
 		}
 		prerequisiteIDs = append(prerequisiteIDs, prerequisiteID)
 		observationIDs = append(observationIDs, observation.ObservationID)
+		invalidatedDependencies = append(invalidatedDependencies, observation.Dependencies...)
 	}
+	// A failure target observed by a capability is only authoritative while the
+	// owner catalog revision that produced it remains fresh. The invalidated
+	// prerequisite already carries that owner-neutral dependency; do not retain
+	// its target as a second, stale source of repair authority.
+	invalidateFailureTargetObservations(&facts, byID)
 	keptSatisfied := make([]runtimecontract.RuntimePrerequisite, 0, len(facts.Prerequisites.Satisfied))
 	for _, prerequisite := range facts.Prerequisites.Satisfied {
 		if _, invalidated := byID[prerequisite.ID]; !invalidated {
@@ -287,7 +391,59 @@ func invalidatePrerequisiteObservations(facts runtimecontract.RuntimeFacts, obse
 	}
 	facts.Resources.PrerequisiteObservations = keptObservations
 	facts.Feasibility = nil
-	return facts.Normalized(), normalizedFreshnessStrings(prerequisiteIDs), normalizedFreshnessStrings(observationIDs), nil
+	return facts.Normalized(), normalizedFreshnessStrings(prerequisiteIDs), normalizedFreshnessStrings(observationIDs), runtimecontract.NormalizeRuntimeFreshnessDependencies(invalidatedDependencies), nil
+}
+
+func invalidateFailureTargetObservations(facts *runtimecontract.RuntimeFacts, invalidated map[string]runtimecontract.RuntimePrerequisiteObservation) {
+	if facts == nil || facts.Resources.FailureTarget == nil || facts.Resources.FailureTarget.TargetObservation == nil {
+		return
+	}
+	targetObservation := facts.Resources.FailureTarget.TargetObservation.Normalized()
+	if !failureTargetObservationDependsOnInvalidatedOwnerRevision(targetObservation, invalidated) {
+		return
+	}
+	facts.Resources.FailureTarget = nil
+	if facts.Failure != nil && sameFailureTargetObservationBinding(facts.Failure.TargetObservation, &targetObservation) {
+		facts.Failure.TargetRefs = nil
+		facts.Failure.TargetObservation = nil
+	}
+	// The directive is a sealed SM-2 decision derived from the same stale
+	// failure fact. ReduceRuntimeStateWithDirective will rebuild it from the
+	// remaining fresh facts after re-acquisition; retaining it would make its
+	// target refs an unauthorized fallback.
+	if facts.RepairDirective != nil && facts.RepairDirective.CurrentFailure != nil &&
+		sameFailureTargetObservationBinding(facts.RepairDirective.CurrentFailure.TargetObservation, &targetObservation) {
+		facts.RepairDirective = nil
+	}
+}
+
+func failureTargetObservationDependsOnInvalidatedOwnerRevision(target runtimecontract.RuntimeFailureTargetObservation, invalidated map[string]runtimecontract.RuntimePrerequisiteObservation) bool {
+	target = target.Normalized()
+	for _, observation := range invalidated {
+		for _, dependency := range observation.Normalized().Dependencies {
+			if dependency.OwnerModuleID == target.OwnerModuleID && dependency.Revision == target.ObservedRevision {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func sameFailureTargetObservationBinding(left *runtimecontract.RuntimeFailureTargetObservation, right *runtimecontract.RuntimeFailureTargetObservation) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	l := left.Normalized()
+	r := right.Normalized()
+	if l.OwnerModuleID != r.OwnerModuleID || l.SubjectRef != r.SubjectRef || l.TargetRole != r.TargetRole || l.ObservedRevision != r.ObservedRevision || len(l.TargetRefs) != len(r.TargetRefs) {
+		return false
+	}
+	for idx := range l.TargetRefs {
+		if l.TargetRefs[idx] != r.TargetRefs[idx] {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizedFreshnessStrings(values []string) []string {
@@ -313,6 +469,8 @@ func removePrerequisiteResourceFact(facts *runtimecontract.RuntimeFacts, prerequ
 			}
 		}
 		facts.Resources.TargetSnapshots = kept
+	case runtimecontract.PrerequisiteKindTargetSelection:
+		facts.Resources.TargetSelection = nil
 	case runtimecontract.PrerequisiteKindCapabilityState:
 		kept := make([]runtimecontract.RuntimeCapabilityStateSnapshot, 0, len(facts.Resources.CapabilityStates))
 		for _, snapshot := range facts.Resources.CapabilityStates {

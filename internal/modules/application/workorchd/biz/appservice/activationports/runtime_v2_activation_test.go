@@ -48,6 +48,7 @@ func TestRuntimeV2ActivationContextUsesConcreteSelectionSnapshots(t *testing.T) 
 					"deliverableExpectations": []any{map[string]any{"id": "version_control_snapshot", "required": true, "evidenceRole": "supplemental_evidence"}},
 					"evidenceRequirements": []any{map[string]any{
 						"id": "version_control_snapshot", "scope": "deliverable", "evidenceRole": "supplemental_evidence",
+						"targetRole": "repository", "targetRefs": []any{".git"}, "targetDiscoverySources": []any{"workspace_manifest"}, "targetSelectorRef": "file/unique_workspace_entry", "requireTargetGrounding": true,
 						"requireDirectEvidence": true, "requireClaimEvidence": true, "requireExecutableBehaviorEvidence": true, "requireCoverageTargets": true,
 						"acceptedStepKinds": []any{"git/write"}, "acceptedOperationVariants": []any{map[string]any{"kind": "git/write", "variantId": "commit"}}, "rejectedStepKinds": []any{"shell/read"},
 					}},
@@ -87,7 +88,9 @@ func TestRuntimeV2ActivationContextUsesConcreteSelectionSnapshots(t *testing.T) 
 	profile := activation.ExecutionContract.ProfileContracts[0]
 	if profile.ID != "software-dev" || len(profile.AcceptanceDimensions) != 1 || profile.AcceptanceDimensions[0].ID != "runtime_entrypoint" || !profile.AcceptanceDimensions[0].Required ||
 		len(profile.DeliverableExpectations) != 1 || profile.DeliverableExpectations[0].ID != "version_control_snapshot" || profile.DeliverableExpectations[0].EvidenceRole != "supplemental_evidence" ||
-		len(profile.EvidenceRequirements) != 1 || profile.EvidenceRequirements[0].Scope != "deliverable" || !profile.EvidenceRequirements[0].RequireDirectEvidence ||
+		len(profile.EvidenceRequirements) != 1 || profile.EvidenceRequirements[0].Scope != "deliverable" || profile.EvidenceRequirements[0].TargetRole != "repository" ||
+		len(profile.EvidenceRequirements[0].TargetRefs) != 1 || profile.EvidenceRequirements[0].TargetRefs[0] != ".git" ||
+		len(profile.EvidenceRequirements[0].TargetDiscoverySources) != 1 || profile.EvidenceRequirements[0].TargetDiscoverySources[0] != "workspace_manifest" || profile.EvidenceRequirements[0].TargetSelectorRef != "file/unique_workspace_entry" || !profile.EvidenceRequirements[0].RequireTargetGrounding || !profile.EvidenceRequirements[0].RequireDirectEvidence ||
 		!profile.EvidenceRequirements[0].RequireClaimEvidence || !profile.EvidenceRequirements[0].RequireExecutableBehaviorEvidence || !profile.EvidenceRequirements[0].RequireCoverageTargets ||
 		len(profile.EvidenceRequirements[0].AcceptedStepKinds) != 1 || profile.EvidenceRequirements[0].AcceptedStepKinds[0] != "git/write" ||
 		len(profile.EvidenceRequirements[0].AcceptedOperationVariants) != 1 || profile.EvidenceRequirements[0].AcceptedOperationVariants[0] != (runtimecontract.RuntimeOperationVariantRef{Kind: "git/write", VariantID: "commit"}) ||

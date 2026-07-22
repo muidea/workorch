@@ -293,12 +293,13 @@ func StableRuntimePrerequisiteStaleSignature(value RuntimePrerequisiteStale) str
 // resource-change/stale processing. It is intentionally diagnostic and does
 // not create evidence or a repair directive.
 type RuntimePrerequisiteInvalidationRecord struct {
-	Signature       string
-	PrerequisiteIDs []string
-	ObservationIDs  []string
-	DispatchID      string
-	OperationID     string
-	ReceiptHash     string
+	Signature               string
+	PrerequisiteIDs         []string
+	ObservationIDs          []string
+	InvalidatedDependencies []RuntimeFreshnessDependency
+	DispatchID              string
+	OperationID             string
+	ReceiptHash             string
 	// ResourceChanges preserve the owner-observed source of a receipt-driven
 	// invalidation for audit/read projections. They do not participate in the
 	// reducer beyond the receipt's already-completed exact intersection.
@@ -312,6 +313,7 @@ func (r RuntimePrerequisiteInvalidationRecord) Normalized() RuntimePrerequisiteI
 	r.Signature = strings.TrimSpace(r.Signature)
 	r.PrerequisiteIDs = normalizeStrings(r.PrerequisiteIDs)
 	r.ObservationIDs = normalizeStrings(r.ObservationIDs)
+	r.InvalidatedDependencies = NormalizeRuntimeFreshnessDependencies(r.InvalidatedDependencies)
 	r.DispatchID = strings.TrimSpace(r.DispatchID)
 	r.OperationID = strings.TrimSpace(r.OperationID)
 	r.ReceiptHash = strings.TrimSpace(r.ReceiptHash)
@@ -333,6 +335,11 @@ func (r RuntimePrerequisiteInvalidationRecord) Validate() error {
 			return fmt.Errorf("runtime stale invalidation cannot include resource changes")
 		}
 		return r.Stale.Validate()
+	}
+	for _, dependency := range r.InvalidatedDependencies {
+		if err := dependency.Validate(); err != nil {
+			return err
+		}
 	}
 	if r.ReceiptHash == "" {
 		return fmt.Errorf("runtime resource-change invalidation requires receipt hash")

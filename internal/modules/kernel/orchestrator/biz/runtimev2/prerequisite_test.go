@@ -91,6 +91,215 @@ func TestCommitPrerequisiteResultRejectsDuplicateAndUnsafeSnapshot(t *testing.T)
 	}
 }
 
+func TestReduceRuntimeStateWithDirectiveAcquiresDeclaredFocusTargetBeforeCandidate(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.RequireTargetGrounding = true
+	facts.Focus.TargetRole = "implementation"
+	facts.Focus.TargetRefs = []string{"implementation.go"}
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+	facts.Prerequisites = runtimecontract.PrerequisiteState{}
+	updated, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(updated.Prerequisites.Pending) != 1 {
+		t.Fatalf("target-grounding decision=%+v prerequisites=%+v, want acquisition", decision, updated.Prerequisites)
+	}
+	prerequisite := updated.Prerequisites.Pending[0]
+	if prerequisite.Kind != runtimecontract.PrerequisiteKindTargetSnapshot || prerequisite.OwnerModuleID != runtimecontract.RuntimeModuleFile || prerequisite.SubjectRef != "implementation.go" {
+		t.Fatalf("target-grounding prerequisite = %+v", prerequisite)
+	}
+}
+
+func TestReduceRuntimeStateWithDirectiveAcquiresSnapshotForPersistedFailureTargetBeforeCandidate(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.RequireTargetGrounding = true
+	facts.Focus.TargetRole = "implementation"
+	facts.Focus.TargetRefs = nil
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+	facts.Resources.FailureTarget = &runtimecontract.FailureTarget{Signature: "failed-validation", TargetRefs: []string{"implementation.go"}}
+	facts.Prerequisites = runtimecontract.PrerequisiteState{}
+
+	updated, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(updated.Prerequisites.Pending) != 1 {
+		t.Fatalf("failure-target grounding decision=%+v prerequisites=%+v, want snapshot acquisition", decision, updated.Prerequisites)
+	}
+	prerequisite := updated.Prerequisites.Pending[0]
+	if prerequisite.Kind != runtimecontract.PrerequisiteKindTargetSnapshot || prerequisite.OwnerModuleID != runtimecontract.RuntimeModuleFile || prerequisite.SubjectRef != "implementation.go" {
+		t.Fatalf("failure-target snapshot prerequisite = %+v", prerequisite)
+	}
+}
+
+func TestReduceRuntimeStateWithDirectiveAcquiresDiscoveryManifestBeforeCandidate(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.RequireTargetGrounding = true
+	facts.Focus.TargetRole = "implementation"
+	facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	facts.Focus.TargetSelectorRef = "file/unique_workspace_entry"
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+	facts.Prerequisites = runtimecontract.PrerequisiteState{}
+	updated, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(updated.Prerequisites.Pending) != 2 || updated.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindManifest || updated.Prerequisites.Pending[1].Kind != runtimecontract.PrerequisiteKindTargetSelection {
+		t.Fatalf("discovery-grounding decision=%+v prerequisites=%+v, want manifest and owner selection acquisition", decision, updated.Prerequisites)
+	}
+}
+
+func TestReduceRuntimeStateWithDirectiveDoesNotRequestStateChangeWithoutOwnerGroundedTarget(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.RequireTargetGrounding = true
+	facts.Focus.TargetRole = "implementation"
+	facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	facts.Focus.TargetSelectorRef = "file/unique_workspace_entry"
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+	facts.Prerequisites = runtimecontract.PrerequisiteState{}
+
+	grounding, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(grounding.Prerequisites.Pending) != 2 {
+		t.Fatalf("initial grounding = decision=%+v prerequisites=%+v, want manifest and owner selection acquisition", decision, grounding.Prerequisites)
+	}
+	for _, prerequisite := range append([]runtimecontract.RuntimePrerequisite(nil), grounding.Prerequisites.Pending...) {
+		result := PrerequisiteResult{PrerequisiteID: prerequisite.ID}
+		switch prerequisite.Kind {
+		case runtimecontract.PrerequisiteKindManifest:
+			result.Manifest = &runtimecontract.WorkspaceManifest{Revision: "manifest-1", TargetRefs: []string{"validation-entry.go", "implementation.go"}}
+		case runtimecontract.PrerequisiteKindTargetSelection:
+			selection := testRuntimeTargetSelection(prerequisite.ID, "implementation", runtimecontract.RuntimeTargetSelectionAmbiguous, []string{"validation-entry.go", "implementation.go"})
+			result.TargetSelection = &selection
+		}
+		grounding, err = CommitPrerequisiteResult(grounding, result)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	grounding, decision, err = ReduceRuntimeStateWithDirective(grounding, &decision.AuthoritySnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action == runtimecontract.RuntimeActionProduceStateChange || decision.Action == runtimecontract.RuntimeActionProduceValidation {
+		t.Fatalf("ungrounded discovery requested provider candidate: %+v", decision)
+	}
+	if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "target_grounding_unresolved" {
+		t.Fatalf("ungrounded discovery decision = %+v, want target-grounding terminal", decision)
+	}
+}
+
+func TestReduceRuntimeStateWithDirectiveTerminatesUngroundedStateChangeWithoutGovernance(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.RequireTargetGrounding = true
+	facts.Focus.TargetRole = "implementation"
+	facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	facts.Focus.TargetSelectorRef = "file/unique_workspace_entry"
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+	facts.Capabilities.GovernanceKinds = []string{"governance/decision"}
+	facts.Resources.Manifest = &runtimecontract.WorkspaceManifest{Revision: "manifest-1", TargetRefs: []string{"validation-entry.go", "implementation.go"}}
+	selection := testRuntimeTargetSelection("target_selection:blocks/file:implementation::::0", "implementation", runtimecontract.RuntimeTargetSelectionAmbiguous, []string{"validation-entry.go", "implementation.go"})
+	facts.Resources.TargetSelection = &selection
+	facts.Prerequisites = runtimecontract.PrerequisiteState{}
+
+	_, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "target_grounding_unresolved" {
+		t.Fatalf("ungrounded discovery decision = %+v, want target-grounding terminal", decision)
+	}
+}
+
+func TestReduceRuntimeStateWithDirectiveTerminatesUngroundedDirectValidationWithoutGovernance(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.RequireTargetGrounding = true
+	facts.Focus.TargetRole = "implementation"
+	facts.Focus.TargetRefs = nil
+	facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	facts.Focus.TargetSelectorRef = "file/unique_workspace_entry"
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	facts.Capabilities.GovernanceKinds = []string{"governance/decision"}
+	facts.Resources.Manifest = &runtimecontract.WorkspaceManifest{Revision: "manifest-1", TargetRefs: []string{"validation-entry.go", "implementation.go"}}
+	selection := testRuntimeTargetSelection("target_selection:blocks/file:implementation:file/unique_workspace_entry:::0", "implementation", runtimecontract.RuntimeTargetSelectionAmbiguous, []string{"validation-entry.go", "implementation.go"})
+	facts.Resources.TargetSelection = &selection
+	facts.Prerequisites = runtimecontract.PrerequisiteState{}
+
+	_, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "target_grounding_unresolved" {
+		t.Fatalf("ungrounded direct-validation decision = %+v, want target-grounding terminal", decision)
+	}
+}
+
+func TestReduceRuntimeStateWithDirectiveRequiresSnapshotForOwnerSelectedTarget(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.RequireTargetGrounding = true
+	facts.Focus.TargetRole = "deliverable"
+	facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	facts.Focus.TargetSelectorRef = "file/unique_workspace_entry"
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+	facts.Prerequisites = runtimecontract.PrerequisiteState{}
+
+	grounding, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, prerequisite := range append([]runtimecontract.RuntimePrerequisite(nil), grounding.Prerequisites.Pending...) {
+		result := PrerequisiteResult{PrerequisiteID: prerequisite.ID}
+		switch prerequisite.Kind {
+		case runtimecontract.PrerequisiteKindManifest:
+			result.Manifest = &runtimecontract.WorkspaceManifest{Revision: "manifest-1", TargetRefs: []string{"implementation.go"}}
+		case runtimecontract.PrerequisiteKindTargetSelection:
+			selection := testRuntimeTargetSelection(prerequisite.ID, "deliverable", runtimecontract.RuntimeTargetSelectionSelected, []string{"implementation.go"})
+			result.TargetSelection = &selection
+		}
+		grounding, err = CommitPrerequisiteResult(grounding, result)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	grounding, decision, err = ReduceRuntimeStateWithDirective(grounding, &decision.AuthoritySnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(grounding.Prerequisites.Pending) != 1 || grounding.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindTargetSnapshot || grounding.Prerequisites.Pending[0].SubjectRef != "implementation.go" {
+		t.Fatalf("selected target did not require snapshot: decision=%+v prerequisites=%+v", decision, grounding.Prerequisites)
+	}
+	snapshotPrerequisite := grounding.Prerequisites.Pending[0]
+	grounding, err = CommitPrerequisiteResult(grounding, PrerequisiteResult{
+		PrerequisiteID: snapshotPrerequisite.ID,
+		TargetSnapshot: &runtimecontract.TargetSnapshot{TargetRef: "implementation.go", Content: "package implementation", ContentHash: "hash-implementation", ContentState: runtimecontract.SnapshotContentStateComplete},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, decision, err = ReduceRuntimeStateWithDirective(grounding, &decision.AuthoritySnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(decision.RequiredOutput.TargetRefs) != 1 || decision.RequiredOutput.TargetRefs[0] != "implementation.go" {
+		t.Fatalf("owner-selected target state-change decision = %+v", decision)
+	}
+}
+
+func testRuntimeTargetSelection(prerequisiteID, targetRole string, disposition runtimecontract.RuntimeTargetSelectionDisposition, candidates []string) runtimecontract.RuntimeTargetSelection {
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: prerequisiteID, OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: targetRole, SelectorRef: "file/unique_workspace_entry",
+		Disposition: disposition, CandidateTargetRefs: append([]string(nil), candidates...), CandidateCount: len(candidates), ObservedRevision: "manifest-1",
+	}
+	if disposition == runtimecontract.RuntimeTargetSelectionSelected {
+		selection.TargetRefs = append([]string(nil), candidates...)
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	return selection
+}
+
 func TestPreflightRuntimeFactsChecksAllRuntimeManagedPrerequisites(t *testing.T) {
 	facts := validationFacts()
 	requirements := []RuntimeRequirement{

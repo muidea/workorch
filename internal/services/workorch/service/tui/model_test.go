@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -224,6 +225,70 @@ func TestModelExitCommandQuits(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatal("expected quit command")
+	}
+}
+
+func TestModelExitCommandDefersProjectionUnsubscribe(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	unsubscribed := make(chan struct{}, 1)
+	m.subscription = &projectionSubscription{
+		unsubscribe: func() { unsubscribed <- struct{}{} },
+		done:        make(chan struct{}),
+	}
+	m.input = "/exit"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if asModel(next).mode != modeQuit || cmd == nil {
+		t.Fatal("exit should immediately return the quit command")
+	}
+	select {
+	case <-unsubscribed:
+		t.Fatal("exit must not synchronously unsubscribe from the EventHub")
+	default:
+	}
+	if !m.CloseProjectionSubscription(time.Second) {
+		t.Fatal("deferred projection cleanup did not complete")
+	}
+	select {
+	case <-unsubscribed:
+	default:
+		t.Fatal("deferred projection cleanup did not unsubscribe")
+	}
+}
+
+func TestModelExitCommandWorksDuringModelSelection(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.modelSelectMode = true
+	for _, char := range "/exit" {
+		next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{char}})
+		m = asModel(next)
+		if cmd != nil {
+			t.Fatal("quit should wait for enter")
+		}
+	}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if asModel(next).mode != modeQuit || cmd == nil {
+		t.Fatal("/exit should quit even while model selection is active")
+	}
+}
+
+func TestCloseProjectionSubscriptionHasBoundedWait(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	release := make(chan struct{})
+	m.subscription = &projectionSubscription{
+		unsubscribe: func() { <-release },
+		done:        make(chan struct{}),
+	}
+	started := time.Now()
+	if m.CloseProjectionSubscription(20 * time.Millisecond) {
+		t.Fatal("blocked unsubscribe should exceed cleanup wait budget")
+	}
+	if elapsed := time.Since(started); elapsed > 200*time.Millisecond {
+		t.Fatalf("cleanup wait was not bounded: %s", elapsed)
+	}
+	close(release)
+	if !m.CloseProjectionSubscription(time.Second) {
+		t.Fatal("cleanup should finish after unsubscribe is released")
 	}
 }
 
@@ -3496,7 +3561,7 @@ func TestModelSubscriptionQueuesHandledEvents(t *testing.T) {
 
 func TestModelAllowsBackendWithoutEvents(t *testing.T) {
 	m := NewAppModel(&noEventsBE{fakeBE: newFake(t)}, "ws-a", "")
-	if m.unsubscribe == nil {
+	if m.subscription == nil || m.subscription.unsubscribe == nil {
 		t.Fatal("expected noop unsubscribe when backend has no projection client")
 	}
 	if m.eventSubscriptionActive {

@@ -100,8 +100,8 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		WorkspaceInternalDirectory:    command.WorkspaceInternalDirectory,
 		Command:                       command.Data.Command, Args: command.Data.Args, TimeoutMillis: command.Data.TimeoutMillis,
 		StateChanging: command.Data.StateChanging, TargetRef: command.Data.TargetRef, TargetRefs: command.Data.TargetRefs,
-		RelatedFailureTargets: command.Data.RelatedFailureTargets, VerificationScope: command.Data.VerificationScope,
-		BoundedReason: command.Data.BoundedReason, ValidationScratchDirectory: command.Data.ValidationScratchDirectory,
+		VerificationScope: command.Data.VerificationScope,
+		BoundedReason:     command.Data.BoundedReason, ValidationScratchDirectory: command.Data.ValidationScratchDirectory,
 		ValidationScratchAutoCleanup:    command.Data.ValidationScratchAutoCleanup,
 		ValidationScratchAutoCleanupSet: command.Data.ValidationScratchAutoCleanupSet,
 		ValidationEvidence:              command.Data.ValidationEvidence, ManagedValidation: command.Data.ManagedValidation,
@@ -131,7 +131,11 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 	}
 	if executeErr != nil {
 		response.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
-		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindShellCommand, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
+		// Shell currently has no structured protocol that can bind a related
+		// failure target to an owner, subject, role and revision. The command
+		// target remains execution lineage only; it must not become repair
+		// authority through a local heuristic.
+		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindShellCommand, operationResult.FailureCode, operationResult.FailureMessage, nil)
 	}
 	observation := shellMutationReceiptObservation(command.Data.StateChanging, response.Status, operationResult)
 	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, nil, observation)

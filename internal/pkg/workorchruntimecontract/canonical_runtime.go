@@ -49,15 +49,22 @@ const (
 )
 
 type CoverageFocus struct {
-	ID                                string
-	SliceID                           string
-	AssessmentScope                   string
-	AssessmentID                      string
-	AssessmentText                    string
-	CoverageWorkItemIDs               []common.CoverageWorkItemID
-	RequiredEvidenceKinds             []string
-	TargetRefs                        []string
-	EvidenceRole                      string
+	ID                     string
+	SliceID                string
+	AssessmentScope        string
+	AssessmentID           string
+	AssessmentText         string
+	CoverageWorkItemIDs    []common.CoverageWorkItemID
+	RequiredEvidenceKinds  []string
+	TargetRefs             []string
+	EvidenceRole           string
+	TargetRole             string
+	TargetDiscoverySources []string
+	// TargetSelectorRef is an opaque, profile-declared selector identity. The
+	// owning capability validates and applies it; Runtime V2 only seals and
+	// compares the binding.
+	TargetSelectorRef                 string
+	RequireTargetGrounding            bool
 	AcceptedStepKinds                 []string
 	AcceptedOperationVariants         []RuntimeOperationVariantRef
 	RejectedStepKinds                 []string
@@ -106,6 +113,10 @@ type EvidenceFact struct {
 	ContentHash         string
 	ExitCode            *int64
 	EvidenceRefs        []string
+	// TargetRefs are the sealed operation targets that produced this fact. They
+	// preserve owner-validated target lineage for SM-2 comparisons; the contract
+	// package does not use them to choose a transition.
+	TargetRefs          []string
 	CoverageWorkItemIDs []common.CoverageWorkItemID
 	Quality             common.EvidenceQuality
 	ZeroWork            bool
@@ -178,11 +189,59 @@ const (
 )
 
 type FailureFact struct {
-	Class      FailureClass
-	Code       string
-	Signature  string
-	Message    string
-	TargetRefs []string
+	Class             FailureClass
+	Code              string
+	Signature         string
+	Message           string
+	TargetRefs        []string
+	TargetObservation *RuntimeFailureTargetObservation
+}
+
+// RuntimeFailureTargetObservation is a bounded, owner-authored observation of
+// the repair target behind an execution failure. It is data only: the
+// Orchestrator decides whether it is compatible with the current Focus and
+// may become persisted repair authority.
+type RuntimeFailureTargetObservation struct {
+	OwnerModuleID    string
+	SubjectRef       string
+	TargetRole       string
+	ObservedRevision string
+	TargetRefs       []string
+}
+
+func (o RuntimeFailureTargetObservation) Normalized() RuntimeFailureTargetObservation {
+	o.OwnerModuleID = strings.TrimSpace(o.OwnerModuleID)
+	o.SubjectRef = strings.TrimSpace(o.SubjectRef)
+	o.TargetRole = strings.TrimSpace(o.TargetRole)
+	o.ObservedRevision = strings.TrimSpace(o.ObservedRevision)
+	o.TargetRefs = normalizeStrings(o.TargetRefs)
+	return o
+}
+
+func (o RuntimeFailureTargetObservation) Validate() error {
+	o = o.Normalized()
+	if o.OwnerModuleID == "" || o.SubjectRef == "" || o.TargetRole == "" || o.ObservedRevision == "" || len(o.TargetRefs) == 0 {
+		return fmt.Errorf("runtime failure target observation requires owner, subject, role, revision and targets")
+	}
+	return nil
+}
+
+// ValidateRuntimeFailureTargetObservationBinding checks only the data binding
+// between a failure and its optional owner observation. It is intentionally a
+// pure contract helper: it does not decide whether that observation is
+// compatible with a Focus or may advance a Runtime aggregate.
+func ValidateRuntimeFailureTargetObservationBinding(failure FailureFact) error {
+	if failure.TargetObservation == nil {
+		return nil
+	}
+	observation := failure.TargetObservation.Normalized()
+	if err := observation.Validate(); err != nil {
+		return err
+	}
+	if !sameStrings(failure.TargetRefs, observation.TargetRefs) {
+		return fmt.Errorf("runtime failure target observation targets must match failure targets")
+	}
+	return nil
 }
 
 type PrerequisiteState struct {
@@ -195,6 +254,7 @@ type PrerequisiteKind string
 const (
 	PrerequisiteKindManifest          PrerequisiteKind = "manifest"
 	PrerequisiteKindTargetSnapshot    PrerequisiteKind = "target_snapshot"
+	PrerequisiteKindTargetSelection   PrerequisiteKind = "target_selection"
 	PrerequisiteKindFailureTarget     PrerequisiteKind = "failure_target"
 	PrerequisiteKindCapability        PrerequisiteKind = "capability"
 	PrerequisiteKindCapabilityState   PrerequisiteKind = "capability_state"
@@ -211,6 +271,7 @@ type RuntimePrerequisite struct {
 	Kind                 PrerequisiteKind
 	OwnerModuleID        string
 	SubjectRef           string
+	TargetSelectorRef    string
 	CapabilityClass      RuntimeCapabilityClass
 	RequiredCapabilities []string
 	CapabilityStateKind  string
@@ -222,6 +283,7 @@ type RuntimeRequirement struct {
 	Kind                 PrerequisiteKind
 	OwnerModuleID        string
 	SubjectRef           string
+	TargetSelectorRef    string
 	CapabilityClass      RuntimeCapabilityClass
 	RequiredCapabilities []string
 	CapabilityStateKind  string
@@ -291,6 +353,7 @@ const (
 type RuntimeResourceFacts struct {
 	Manifest                 *WorkspaceManifest
 	TargetSnapshots          []TargetSnapshot
+	TargetSelection          *RuntimeTargetSelection
 	FailureTarget            *FailureTarget
 	ValidationScratch        *ValidationScratch
 	ProviderCeiling          *ProviderCeiling
@@ -389,11 +452,16 @@ type RuntimeCapabilityStateSnapshot struct {
 	// AcquisitionBinding is the opaque binding emitted by the owner for this
 	// persisted acquisition. It may equal AcquisitionKey, but consumers must
 	// compare it only as an opaque value.
-	AcquisitionBinding        string
-	OwnerModuleID             string
-	CapabilityStateKind       string
-	SubjectRef                string
-	ObservedRevision          string
+	AcquisitionBinding  string
+	OwnerModuleID       string
+	CapabilityStateKind string
+	SubjectRef          string
+	ObservedRevision    string
+	// WorkspaceTreeRevision is the File-owner revision observed alongside a
+	// capability state that reads workspace contents. It is distinct from the
+	// capability owner's repository revision and keeps cross-owner freshness
+	// dependencies exact after a durable File effect.
+	WorkspaceTreeRevision     string
 	ContentHash               string
 	Disposition               RuntimeCapabilityStateDisposition
 	RequiredOperationSequence []RuntimeRequiredOperationVariant
@@ -446,13 +514,101 @@ type TargetSnapshot struct {
 	ObservedAt   string
 }
 
+// RuntimeTargetSelection is a bounded, read-only owner observation for a
+// direct-evidence focus without explicit target refs. It never encodes an
+// operation, action, or progress decision: the owner reports whether its
+// declared inventory has a unique target, and SM-2 decides what to do when it
+// does not.
+type RuntimeTargetSelectionDisposition string
+
+const (
+	RuntimeTargetSelectionSelected  RuntimeTargetSelectionDisposition = "selected"
+	RuntimeTargetSelectionAbsent    RuntimeTargetSelectionDisposition = "absent"
+	RuntimeTargetSelectionAmbiguous RuntimeTargetSelectionDisposition = "ambiguous"
+)
+
+type RuntimeTargetSelection struct {
+	PrerequisiteID      string
+	SnapshotID          string
+	OwnerModuleID       string
+	TargetRole          string
+	SelectorRef         string
+	Disposition         RuntimeTargetSelectionDisposition
+	TargetRefs          []string
+	CandidateTargetRefs []string
+	// CandidateCount is observed before the bounded candidate projection. It
+	// prevents a max-items=1 context from turning a multi-target workspace into
+	// a false unique selection.
+	CandidateCount   int
+	ObservedRevision string
+}
+
+func (s RuntimeTargetSelection) Normalized() RuntimeTargetSelection {
+	s.PrerequisiteID = strings.TrimSpace(s.PrerequisiteID)
+	s.SnapshotID = strings.TrimSpace(s.SnapshotID)
+	s.OwnerModuleID = strings.TrimSpace(s.OwnerModuleID)
+	s.TargetRole = strings.TrimSpace(s.TargetRole)
+	s.SelectorRef = strings.TrimSpace(s.SelectorRef)
+	s.Disposition = RuntimeTargetSelectionDisposition(strings.TrimSpace(string(s.Disposition)))
+	s.TargetRefs = normalizeStrings(s.TargetRefs)
+	s.CandidateTargetRefs = normalizeStrings(s.CandidateTargetRefs)
+	if s.CandidateCount < 0 {
+		s.CandidateCount = 0
+	}
+	s.ObservedRevision = strings.TrimSpace(s.ObservedRevision)
+	return s
+}
+
+func (s RuntimeTargetSelection) Validate() error {
+	s = s.Normalized()
+	if s.PrerequisiteID == "" || s.SnapshotID == "" || s.OwnerModuleID == "" || s.TargetRole == "" || s.SelectorRef == "" || s.ObservedRevision == "" {
+		return fmt.Errorf("runtime target selection requires identity, owner, role, selector and revision")
+	}
+	switch s.Disposition {
+	case RuntimeTargetSelectionSelected:
+		if s.CandidateCount != 1 || len(s.TargetRefs) != 1 || len(s.CandidateTargetRefs) != 1 || s.TargetRefs[0] != s.CandidateTargetRefs[0] {
+			return fmt.Errorf("selected runtime target selection requires exactly one matching target")
+		}
+	case RuntimeTargetSelectionAbsent:
+		if s.CandidateCount != 0 || len(s.TargetRefs) != 0 || len(s.CandidateTargetRefs) != 0 {
+			return fmt.Errorf("absent runtime target selection cannot contain targets")
+		}
+	case RuntimeTargetSelectionAmbiguous:
+		if s.CandidateCount < 2 || len(s.TargetRefs) != 0 || len(s.CandidateTargetRefs) == 0 || len(s.CandidateTargetRefs) > s.CandidateCount {
+			return fmt.Errorf("ambiguous runtime target selection requires bounded candidate targets and no selected target")
+		}
+	default:
+		return fmt.Errorf("runtime target selection has invalid disposition %q", s.Disposition)
+	}
+	if expected := StableRuntimeTargetSelectionSnapshotID(s); s.SnapshotID != expected {
+		return fmt.Errorf("runtime target selection snapshot identity mismatch")
+	}
+	return nil
+}
+
+func StableRuntimeTargetSelectionSnapshotID(value RuntimeTargetSelection) string {
+	value = value.Normalized()
+	h := sha256.New()
+	writeHashString(h, value.PrerequisiteID)
+	writeHashString(h, value.OwnerModuleID)
+	writeHashString(h, value.TargetRole)
+	writeHashString(h, value.SelectorRef)
+	writeHashString(h, string(value.Disposition))
+	writeHashStrings(h, value.TargetRefs)
+	writeHashStrings(h, value.CandidateTargetRefs)
+	writeHashString(h, fmt.Sprintf("%d", value.CandidateCount))
+	writeHashString(h, value.ObservedRevision)
+	return "target-selection-" + hex.EncodeToString(h.Sum(nil))[:20]
+}
+
 func (s TargetSnapshot) Complete() bool {
 	return s.ContentState == SnapshotContentStateComplete && s.ContentHash != ""
 }
 
 type FailureTarget struct {
-	Signature  string
-	TargetRefs []string
+	Signature         string
+	TargetRefs        []string
+	TargetObservation *RuntimeFailureTargetObservation
 }
 
 type ValidationScratch struct {
@@ -614,6 +770,10 @@ func (f RuntimeFacts) Normalized() RuntimeFacts {
 		failure.Signature = strings.TrimSpace(failure.Signature)
 		failure.Message = strings.TrimSpace(failure.Message)
 		failure.TargetRefs = normalizeStrings(failure.TargetRefs)
+		if failure.TargetObservation != nil {
+			observation := failure.TargetObservation.Normalized()
+			failure.TargetObservation = &observation
+		}
 		f.Failure = &failure
 	}
 	if f.RepairDirective != nil {
@@ -642,6 +802,22 @@ func (f RuntimeFacts) Validate() error {
 	}
 	if err := f.Recovery.Validate(f.RecoveryPolicy); err != nil {
 		return fmt.Errorf("runtime facts recovery ledger: %w", err)
+	}
+	if f.Resources.TargetSelection != nil {
+		if err := f.Resources.TargetSelection.Validate(); err != nil {
+			return fmt.Errorf("runtime facts target selection: %w", err)
+		}
+	}
+	if f.Failure != nil {
+		if err := ValidateRuntimeFailureTargetObservationBinding(*f.Failure); err != nil {
+			return fmt.Errorf("runtime facts failure target observation: %w", err)
+		}
+	}
+	if f.Resources.FailureTarget != nil && f.Resources.FailureTarget.TargetObservation != nil {
+		bound := FailureFact{TargetRefs: f.Resources.FailureTarget.TargetRefs, TargetObservation: f.Resources.FailureTarget.TargetObservation}
+		if err := ValidateRuntimeFailureTargetObservationBinding(bound); err != nil {
+			return fmt.Errorf("runtime facts failure target resource observation: %w", err)
+		}
 	}
 	for _, snapshot := range f.Resources.CapabilityStates {
 		if snapshot.RequirementID == "" || snapshot.SnapshotID == "" || snapshot.AcquisitionKey == "" || snapshot.QueryReceiptRef == "" || snapshot.OwnerModuleID == "" || snapshot.CapabilityStateKind == "" || snapshot.SubjectRef == "" || snapshot.ObservedRevision == "" || snapshot.ContentHash == "" {
@@ -750,10 +926,47 @@ func (f CoverageFocus) Normalized() CoverageFocus {
 	f.RequiredEvidenceKinds = normalizeStrings(f.RequiredEvidenceKinds)
 	f.TargetRefs = normalizeStrings(f.TargetRefs)
 	f.EvidenceRole = strings.TrimSpace(f.EvidenceRole)
+	f.TargetRole = strings.TrimSpace(f.TargetRole)
+	f.TargetDiscoverySources = normalizeStrings(f.TargetDiscoverySources)
+	f.TargetSelectorRef = strings.TrimSpace(f.TargetSelectorRef)
 	f.AcceptedStepKinds = normalizeStrings(f.AcceptedStepKinds)
 	f.AcceptedOperationVariants = NormalizeRuntimeOperationVariantRefs(f.AcceptedOperationVariants)
 	f.RejectedStepKinds = normalizeStrings(f.RejectedStepKinds)
 	return f
+}
+
+// ValidateRuntimeTargetGrounding validates a declarative target contract. It
+// deliberately does not inspect a workspace or resolve a target: those are
+// owner observations and SM-2 decisions, respectively.
+func ValidateRuntimeTargetGrounding(required bool, role string, targetRefs, discoverySources []string, selectorRef string) error {
+	if !required {
+		return nil
+	}
+	if strings.TrimSpace(role) == "" {
+		return fmt.Errorf("target grounding requires a target role")
+	}
+	targetRefs = normalizeStrings(targetRefs)
+	discoverySources = normalizeStrings(discoverySources)
+	selectorRef = strings.TrimSpace(selectorRef)
+	if len(targetRefs) == 0 && len(discoverySources) == 0 {
+		return fmt.Errorf("target grounding requires target refs or bounded discovery sources")
+	}
+	if len(targetRefs) == 0 && selectorRef == "" {
+		return fmt.Errorf("target grounding without explicit target refs requires an owner target selector")
+	}
+	for _, source := range discoverySources {
+		switch source {
+		case RuntimeValidationDiscoverySourceWorkspaceManifest,
+			RuntimeValidationDiscoverySourceProjectFiles,
+			RuntimeValidationDiscoverySourceDeclaredCommands,
+			RuntimeValidationDiscoverySourceAvailableCapabilities:
+			// Canonical source vocabulary only. A caller cannot make an
+			// unbounded or fictional discovery source look grounded.
+		default:
+			return fmt.Errorf("target grounding declares unknown discovery source %q", source)
+		}
+	}
+	return nil
 }
 
 func (r RuntimeResourceFacts) Normalized() RuntimeResourceFacts {
@@ -764,10 +977,18 @@ func (r RuntimeResourceFacts) Normalized() RuntimeResourceFacts {
 		r.Manifest = &manifest
 	}
 	r.TargetSnapshots = normalizeTargetSnapshots(r.TargetSnapshots)
+	if r.TargetSelection != nil {
+		selection := r.TargetSelection.Normalized()
+		r.TargetSelection = &selection
+	}
 	if r.FailureTarget != nil {
 		target := *r.FailureTarget
 		target.Signature = strings.TrimSpace(target.Signature)
 		target.TargetRefs = normalizeStrings(target.TargetRefs)
+		if target.TargetObservation != nil {
+			observation := target.TargetObservation.Normalized()
+			target.TargetObservation = &observation
+		}
 		r.FailureTarget = &target
 	}
 	if r.ValidationScratch != nil {
@@ -817,6 +1038,7 @@ func NormalizeRuntimeCapabilityStateSnapshots(values []RuntimeCapabilityStateSna
 		value.CapabilityStateKind = strings.TrimSpace(value.CapabilityStateKind)
 		value.SubjectRef = strings.TrimSpace(value.SubjectRef)
 		value.ObservedRevision = strings.TrimSpace(value.ObservedRevision)
+		value.WorkspaceTreeRevision = strings.TrimSpace(value.WorkspaceTreeRevision)
 		value.ContentHash = strings.TrimSpace(value.ContentHash)
 		value.ObservedAt = strings.TrimSpace(value.ObservedAt)
 		value.QueryReceiptRef = strings.TrimSpace(value.QueryReceiptRef)
@@ -851,6 +1073,7 @@ func StableRuntimeCapabilityStateHash(values []RuntimeCapabilityStateSnapshot) s
 		writeHashString(h, value.CapabilityStateKind)
 		writeHashString(h, value.SubjectRef)
 		writeHashString(h, value.ObservedRevision)
+		writeHashString(h, value.WorkspaceTreeRevision)
 		writeHashString(h, value.ContentHash)
 		writeHashString(h, string(value.Disposition))
 		writeHashString(h, value.QueryReceiptRef)
@@ -873,6 +1096,7 @@ func StableRuntimeCapabilityStateSnapshotID(value RuntimeCapabilityStateSnapshot
 	writeHashString(h, value.CapabilityStateKind)
 	writeHashString(h, value.SubjectRef)
 	writeHashString(h, value.ObservedRevision)
+	writeHashString(h, value.WorkspaceTreeRevision)
 	writeHashString(h, value.ContentHash)
 	return "capability-state-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
@@ -1237,6 +1461,7 @@ func normalizeRuntimePrerequisites(values []RuntimePrerequisite) []RuntimePrereq
 		value.Kind = PrerequisiteKind(strings.TrimSpace(string(value.Kind)))
 		value.OwnerModuleID = strings.TrimSpace(value.OwnerModuleID)
 		value.SubjectRef = strings.TrimSpace(value.SubjectRef)
+		value.TargetSelectorRef = strings.TrimSpace(value.TargetSelectorRef)
 		value.CapabilityClass = RuntimeCapabilityClass(strings.TrimSpace(string(value.CapabilityClass)))
 		value.RequiredCapabilities = normalizeStrings(value.RequiredCapabilities)
 		value.Reason = strings.TrimSpace(value.Reason)
@@ -1300,6 +1525,7 @@ func normalizeEvidenceFacts(values []EvidenceFact) []EvidenceFact {
 		value.Summary = strings.TrimSpace(value.Summary)
 		value.ContentHash = strings.TrimSpace(value.ContentHash)
 		value.EvidenceRefs = normalizeStrings(value.EvidenceRefs)
+		value.TargetRefs = normalizeStrings(value.TargetRefs)
 		value.CoverageWorkItemIDs = normalizeCoverageWorkItemIDs(value.CoverageWorkItemIDs)
 		value.Quality = common.EvidenceQuality(strings.TrimSpace(string(value.Quality)))
 		value.EvidenceReason = strings.TrimSpace(value.EvidenceReason)

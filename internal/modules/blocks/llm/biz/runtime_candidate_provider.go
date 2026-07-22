@@ -26,6 +26,7 @@ type runtimeCandidateDefinitionProjection struct {
 type runtimeCandidateResourceProjection struct {
 	Manifest                 *runtimecontract.WorkspaceManifest               `json:"manifest,omitempty"`
 	TargetSnapshots          []runtimecontract.TargetSnapshot                 `json:"targetSnapshots,omitempty"`
+	TargetSelection          *runtimecontract.RuntimeTargetSelection          `json:"targetSelection,omitempty"`
 	FailureTarget            *runtimecontract.FailureTarget                   `json:"failureTarget,omitempty"`
 	ValidationScratch        *runtimecontract.ValidationScratch               `json:"validationScratch,omitempty"`
 	CapabilityStates         []runtimecontract.RuntimeCapabilityStateSnapshot `json:"capabilityStates,omitempty"`
@@ -530,7 +531,8 @@ func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidat
 		Capabilities:              context.Capabilities,
 		Resources: runtimeCandidateResourceProjection{
 			Manifest: context.Resources.Manifest, TargetSnapshots: context.Resources.TargetSnapshots,
-			FailureTarget: context.Resources.FailureTarget, ValidationScratch: context.Resources.ValidationScratch,
+			TargetSelection: context.Resources.TargetSelection,
+			FailureTarget:   context.Resources.FailureTarget, ValidationScratch: context.Resources.ValidationScratch,
 			CapabilityStates: context.Resources.CapabilityStates, OperationAdmissibilities: context.Resources.OperationAdmissibilities,
 			PrerequisiteObservations: context.Resources.PrerequisiteObservations,
 		},

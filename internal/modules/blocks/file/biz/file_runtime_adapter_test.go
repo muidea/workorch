@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	cd "github.com/muidea/magicCommon/def"
+	magicevent "github.com/muidea/magicCommon/event"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -39,6 +42,46 @@ func TestRuntimeAdapterProbeRejectsDirectoryPatchTargetWithoutMutation(t *testin
 	}
 }
 
+func TestRuntimeAdapterAcquireRuntimeTargetSelectionIsCardinalityBounded(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	t.Run("unique", func(t *testing.T) {
+		workspace := t.TempDir()
+		if err := os.WriteFile(filepath.Join(workspace, "deliverable.txt"), []byte("value\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		selection, err := adapter.AcquireRuntimeTargetSelection(workspace, "target-selection-1", "deliverable", runtimeFileTargetSelectorUniqueWorkspaceEntry, 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selection.Disposition != runtimecontract.RuntimeTargetSelectionSelected || len(selection.TargetRefs) != 1 || selection.TargetRefs[0] != "deliverable.txt" || selection.SnapshotID == "" {
+			t.Fatalf("unique selection = %+v", selection)
+		}
+		if selection.SelectorRef != runtimeFileTargetSelectorUniqueWorkspaceEntry {
+			t.Fatalf("unique selection lost owner selector binding: %+v", selection)
+		}
+	})
+	t.Run("ambiguous", func(t *testing.T) {
+		workspace := t.TempDir()
+		for _, name := range []string{"validation-entry.txt", "implementation.txt"} {
+			if err := os.WriteFile(filepath.Join(workspace, name), []byte(name), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		selection, err := adapter.AcquireRuntimeTargetSelection(workspace, "target-selection-2", "deliverable", runtimeFileTargetSelectorUniqueWorkspaceEntry, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selection.Disposition != runtimecontract.RuntimeTargetSelectionAmbiguous || len(selection.TargetRefs) != 0 || len(selection.CandidateTargetRefs) != 1 || selection.CandidateCount != 2 {
+			t.Fatalf("ambiguous selection = %+v", selection)
+		}
+	})
+	t.Run("unknown selector rejected", func(t *testing.T) {
+		if _, err := adapter.AcquireRuntimeTargetSelection(t.TempDir(), "target-selection-3", "deliverable", "profile/free_form_selector", 4); !errors.Is(err, common.ErrInvalidArgument) {
+			t.Fatalf("unknown File selector error = %v, want invalid argument", err)
+		}
+	})
+}
+
 func TestFileMutationReceiptObservationReportsAfterRevisionForAllStateChangingHandlers(t *testing.T) {
 	workspace := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workspace, "target.txt"), []byte("after\n"), 0o644); err != nil {
@@ -51,7 +94,7 @@ func TestFileMutationReceiptObservationReportsAfterRevisionForAllStateChangingHa
 		t.Run(variant, func(t *testing.T) {
 			observation := fileMutationReceiptObservation(workspace, []string{"target.txt"}, runtimecontract.RuntimeOperationExecutionStatusAccepted, RuntimeFileOperationResult{
 				BeforeHash: "before-" + variant, AfterHash: "after-" + variant,
-			})
+			}, "workspace-tree-before-"+variant)
 			if observation.ObservedEffectScope != runtimecontract.RuntimeEffectWorkspaceDurable || !observation.Changed || observation.NoOp {
 				t.Fatalf("%s receipt observation state = %+v", variant, observation)
 			}
@@ -68,7 +111,7 @@ func TestFileMutationReceiptObservationReportsAfterRevisionForAllStateChangingHa
 			if target == nil || target.OwnerModuleID != ModuleID || target.BeforeRevision != "before-"+variant || target.AfterRevision != "after-"+variant {
 				t.Fatalf("%s target resource change = %+v", variant, observation.ResourceChanges)
 			}
-			if tree == nil || tree.OwnerModuleID != ModuleID || tree.AfterRevision == "" {
+			if tree == nil || tree.OwnerModuleID != ModuleID || tree.BeforeRevision != "workspace-tree-before-"+variant || tree.AfterRevision == "" {
 				t.Fatalf("%s workspace tree resource change = %+v", variant, observation.ResourceChanges)
 			}
 		})
@@ -182,7 +225,7 @@ func TestRuntimeAdapterProbeReportsTypedStaleAfterExternalWorkspaceMutation(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation := fileAdmissibilityObservation("admissibility-file", inventory, []string{"main.go"})
+	observation := fileAdmissibilityObservation("admissibility-file", inventory, []string{"main.go"}, nil)
 	if err := os.WriteFile(target, []byte("package main\n// externally changed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -659,6 +702,217 @@ func TestRuntimeAdapterPatchApplyFileWriteWritesOnce(t *testing.T) {
 	}
 	if string(content) != "hello\n" {
 		t.Fatalf("applied content = %q", string(content))
+	}
+}
+
+func TestRuntimeAdapterPatchApplyFileWriteConfirmsSealedReplayAfterReceiptLoss(t *testing.T) {
+	workspace := t.TempDir()
+	target := filepath.Join(workspace, "README.md")
+	before := []byte("before\n")
+	if err := os.WriteFile(target, before, 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	baseHash := sha256Hex(before)
+	request := PatchApplyRequest{
+		WorkspaceDirectory: workspace, PatchType: patchTypeFileWrite, TargetRef: "README.md",
+		Content: "after\n", ContentPresent: true, BaseHash: baseHash,
+	}
+	first, err := NewRuntimeAdapter().ApplyPatch(request)
+	if err != nil || first.BeforeHash != baseHash || first.AfterHash == "" || first.BeforeHash == first.AfterHash {
+		t.Fatalf("initial sealed write = %+v err=%v", first, err)
+	}
+	// Model a process loss after the durable write and before its owner receipt
+	// reached the Orchestrator. The retry sees the sealed postcondition, does
+	// not need the original in-memory result, and preserves the same logical
+	// resource delta for the persisted execution key/fence.
+	replayed, err := NewRuntimeAdapter().ApplyPatch(request)
+	if err != nil || replayed.Summary != "patch file_write replay confirmed" || replayed.BeforeHash != baseHash || replayed.AfterHash != first.AfterHash || replayed.ContentHash != first.ContentHash {
+		t.Fatalf("lost-receipt replay = %+v err=%v", replayed, err)
+	}
+	observation := fileMutationReceiptObservation(workspace, replayed.TargetRefs, runtimecontract.RuntimeOperationExecutionStatusAccepted, replayed)
+	if !observation.Changed || observation.NoOp || observation.BeforeHash != baseHash || observation.AfterHash != first.AfterHash {
+		t.Fatalf("replayed receipt observation lost durable delta: %+v", observation)
+	}
+	content, err := os.ReadFile(target)
+	if err != nil || string(content) != "after\n" {
+		t.Fatalf("replay changed sealed postcondition: content=%q err=%v", content, err)
+	}
+}
+
+func TestRuntimeAdapterPatchApplyReplayProofCoversAllDurableVariants(t *testing.T) {
+	tests := []struct {
+		name       string
+		parameters func() []runtimecontract.OperationParameter
+	}{
+		{
+			name: "file_write",
+			parameters: func() []runtimecontract.OperationParameter {
+				patchType, content, target := patchTypeFileWrite, "after\n", "README.md"
+				return []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "content", String: &content}}
+			},
+		},
+		{
+			name: "text_replace",
+			parameters: func() []runtimecontract.OperationParameter {
+				patchType, oldText, newText, target := patchTypeTextReplace, "before", "after", "README.md"
+				return []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}}
+			},
+		},
+		{
+			name: "unified_diff",
+			parameters: func() []runtimecontract.OperationParameter {
+				patchType, target := patchTypeUnifiedDiff, "README.md"
+				diff := "--- a/README.md\n+++ b/README.md\n@@ -1,1 +1,1 @@\n-before\n+after\n"
+				return []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "diff", String: &diff}}
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			if err := os.WriteFile(filepath.Join(workspace, "README.md"), []byte("before\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			adapter := NewRuntimeAdapter()
+			inventory, err := adapter.AcquireRuntimeOperationAdmissibility(workspace, "admissibility-file", []string{runtimecontract.RuntimeBlockKindPatchApply}, []string{"README.md"}, 4)
+			if err != nil {
+				t.Fatal(err)
+			}
+			operation := runtimecontract.RuntimeOperation{ID: "patch-1", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{"README.md"}, Parameters: test.parameters()}
+			failure, stale, proof := adapter.ProbeRuntimeOperationFeasibilityWithReplayProof(workspace, inventory, operation, nil)
+			if failure != nil || stale != nil || proof == nil || proof.OwnerModuleID != ModuleID || proof.OperationID != operation.ID || proof.BeforeHash == proof.AfterHash || proof.AdmissibilitySnapshotID != inventory.SnapshotID {
+				t.Fatalf("owner replay proof = %+v failure=%+v stale=%+v", proof, failure, stale)
+			}
+			request, ok := patchApplyRequestFromRuntimeOperation(workspace, operation)
+			if !ok {
+				t.Fatal("patch request conversion failed")
+			}
+			request.ReplayProof = proof
+			first, err := adapter.ApplyPatch(request)
+			if err != nil || first.BeforeHash != proof.BeforeHash || first.AfterHash != proof.AfterHash {
+				t.Fatalf("initial proof-bound apply = %+v err=%v", first, err)
+			}
+			replayed, err := adapter.ApplyPatch(request)
+			if err != nil || replayed.Summary != "patch replay proof confirmed" || replayed.BeforeHash != proof.BeforeHash || replayed.AfterHash != proof.AfterHash {
+				t.Fatalf("proof replay = %+v err=%v", replayed, err)
+			}
+			content, err := os.ReadFile(filepath.Join(workspace, "README.md"))
+			if err != nil || sha256Hex(content) != proof.AfterHash {
+				t.Fatalf("replay changed target content=%q hash=%q err=%v", content, sha256Hex(content), err)
+			}
+			// A receipt-loss replay may confirm only the postcondition sealed by
+			// the original owner feasibility probe. If another writer changes the
+			// target before recovery, the File owner must not apply the old patch
+			// again or treat the external content as the original operation's
+			// durable effect.
+			if err := os.WriteFile(filepath.Join(workspace, "README.md"), []byte("external-change\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := adapter.ApplyPatch(request); !errors.Is(err, common.ErrConflict) {
+				t.Fatalf("stale replay proof error = %v, want conflict", err)
+			}
+			content, err = os.ReadFile(filepath.Join(workspace, "README.md"))
+			if err != nil || string(content) != "external-change\n" {
+				t.Fatalf("stale replay rewrote external content=%q err=%v", content, err)
+			}
+		})
+	}
+}
+
+func TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	owner, err := New(hub, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+
+	workspace := t.TempDir()
+	before := []byte("before\n")
+	if err := os.WriteFile(filepath.Join(workspace, "README.md"), before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	baseHash := sha256Hex(before)
+	proof := runtimecontract.RuntimeOperationReplayProof{
+		OwnerModuleID: ModuleID, OperationID: "write-1", TargetRefs: []string{"README.md"},
+		BeforeHash: baseHash, AfterHash: sha256Hex([]byte("after\n")), AdmissibilitySnapshotID: "admissibility-1",
+	}
+	commitCalls := 0
+	receiptObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
+	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(orchestratorevents.QueryRuntimeOperationReceiptResult{Found: false}, nil)
+	})
+	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
+		commitCalls++
+		if commitCalls == 1 {
+			result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: "injected receipt CAS loss", Cause: errors.New("injected receipt CAS loss")})
+			return
+		}
+		command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)
+		result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: command.Receipt}, nil)
+	})
+	t.Cleanup(func() {
+		receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
+		receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
+	})
+
+	command := orchestratorevents.ExecutePatchApplyOperationCommand{
+		Execution:   orchestratorevents.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/write-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, ReplayProof: &proof},
+		WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1",
+		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
+		OperationID: "write-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"README.md"},
+		EvidenceKind: runtimecontract.EvidenceKindStateChange, WorkspaceDeliverableDirectory: workspace,
+		Data: orchestratorevents.PatchApplyOperationData{TargetRef: "README.md", PatchType: patchTypeFileWrite, Content: "after\n", ContentPresent: true, BaseHash: baseHash},
+	}
+	send := func() magicevent.Result {
+		return hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorExecutePatchApplyOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, command))
+	}
+	if _, err := send().Get(); err == nil {
+		t.Fatal("first owner execution unexpectedly succeeded despite receipt commit loss")
+	}
+	content, err := os.ReadFile(filepath.Join(workspace, "README.md"))
+	if err != nil || string(content) != "after\n" {
+		t.Fatalf("first execution did not apply sealed write: content=%q err=%v", content, err)
+	}
+	data, resultErr := send().Get()
+	if resultErr != nil {
+		t.Fatalf("replay after receipt loss: %v", resultErr)
+	}
+	response, ok := data.(orchestratorevents.ExecutePatchApplyOperationResult)
+	if !ok || response.Receipt.ExecutionKey != command.Execution.ExecutionKey || !response.Receipt.Changed || response.Receipt.BeforeHash != baseHash || response.Receipt.AfterHash == baseHash || commitCalls != 2 {
+		t.Fatalf("owner replay did not commit the sealed logical delta once: response=%+v calls=%d", response, commitCalls)
+	}
+	content, err = os.ReadFile(filepath.Join(workspace, "README.md"))
+	if err != nil || string(content) != "after\n" {
+		t.Fatalf("replay rewrote sealed postcondition: content=%q err=%v", content, err)
+	}
+}
+
+func TestRuntimeAdapterProbeRejectsUnverifiedFileWriteReplayBaseHash(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "README.md"), []byte("current\n"), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	adapter := NewRuntimeAdapter()
+	inventory, err := adapter.AcquireRuntimeOperationAdmissibility(workspace, "admissibility-file", []string{runtimecontract.RuntimeBlockKindPatchApply}, []string{"README.md"}, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patchType, content, staleHash := patchTypeFileWrite, "after\n", "unverified-prior-revision"
+	failure := adapter.ProbeRuntimeOperationFeasibility(workspace, inventory, runtimecontract.RuntimeOperation{
+		ID: "sealed-file-write", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{"README.md"},
+		Parameters: []runtimecontract.OperationParameter{
+			{Name: "targetRef", String: stringPointer("README.md")}, {Name: "patchType", String: &patchType},
+			{Name: "content", String: &content}, {Name: "baseHash", String: &staleHash},
+		},
+	})
+	if failure == nil || failure.Code != "operation_base_hash_mismatch" {
+		t.Fatalf("unverified replay precondition = %+v", failure)
 	}
 }
 

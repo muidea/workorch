@@ -3,6 +3,7 @@ package runtimev2
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -70,6 +71,65 @@ func TestRuntimeControllerInitializeRunsPreflightReduceAndPersistOnce(t *testing
 	}
 	if restarted.Decision.AuthoritySnapshot.ID != initialized.Decision.AuthoritySnapshot.ID || restarted.Decision.AuthoritySnapshot.Attempt != 0 {
 		t.Fatalf("restart changed authority: before=%+v after=%+v", initialized.Decision.AuthoritySnapshot, restarted.Decision.AuthoritySnapshot)
+	}
+}
+
+func TestRuntimeControllerRestartReusesCommittedOwnerTargetSelection(t *testing.T) {
+	ctx := context.Background()
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := controllerFacts()
+	facts.Focus.TargetRefs = nil
+	facts.Focus.TargetRole = "deliverable"
+	facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	facts.Focus.TargetSelectorRef = "file/unique_workspace_entry"
+	facts.Focus.RequireTargetGrounding = true
+
+	initialized, err := controller.Initialize(ctx, facts, controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prerequisite runtimecontract.RuntimePrerequisite
+	for _, value := range initialized.Facts.Prerequisites.Pending {
+		if value.Kind == runtimecontract.PrerequisiteKindTargetSelection {
+			prerequisite = value
+			break
+		}
+	}
+	if prerequisite.ID == "" {
+		t.Fatalf("initial target-selection prerequisite missing: %+v", initialized.Facts.Prerequisites)
+	}
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: prerequisite.ID, OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: "deliverable", SelectorRef: "file/unique_workspace_entry",
+		Disposition: runtimecontract.RuntimeTargetSelectionSelected, TargetRefs: []string{"implementation.go"}, CandidateTargetRefs: []string{"implementation.go"}, CandidateCount: 1,
+		ObservedRevision: "tree-v1",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID, ContentHash: selection.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: "tree-v1"}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	committed, err := controller.CommitPrerequisite(ctx, facts.WorkspaceID, facts.RunID, PrerequisiteResult{PrerequisiteID: prerequisite.ID, TargetSelection: &selection, Observation: &observation})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if committed.Facts.Resources.TargetSelection == nil || committed.Facts.Resources.TargetSelection.SnapshotID != selection.SnapshotID {
+		t.Fatalf("committed target selection = %+v", committed.Facts.Resources.TargetSelection)
+	}
+	saves := repository.saves
+	restarted, err := controller.Initialize(ctx, facts, controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repository.saves != saves || restarted.StateRevision != committed.StateRevision || restarted.Facts.Resources.TargetSelection == nil || restarted.Facts.Resources.TargetSelection.SnapshotID != selection.SnapshotID {
+		t.Fatalf("restart did not reuse committed selection: restarted=%+v saves=%d", restarted, repository.saves)
+	}
+	if _, err := controller.CommitPrerequisite(ctx, facts.WorkspaceID, facts.RunID, PrerequisiteResult{PrerequisiteID: prerequisite.ID, TargetSelection: &selection, Observation: &observation}); err == nil || repository.saves != saves {
+		t.Fatalf("duplicate target selection changed persisted state: saves=%d err=%v", repository.saves, err)
 	}
 }
 
@@ -385,6 +445,88 @@ func TestRuntimeControllerCommitsTypedAssessmentBeforeCompletion(t *testing.T) {
 	}
 	if completed.Decision.Action != runtimecontract.RuntimeActionComplete || len(completed.Facts.Assessments) != 1 || completed.Facts.Assessments[0].Disposition != runtimecontract.AssessmentDispositionSatisfied {
 		t.Fatalf("completed assessment aggregate = %+v", completed)
+	}
+}
+
+func TestRuntimeControllerAssessmentGapDeltaResetsWindowButRetainsRemainingGap(t *testing.T) {
+	ctx := context.Background()
+	repository := &controllerRepository{}
+	controller, _ := NewRuntimeController(repository)
+	facts := controllerFacts()
+	facts.Focus.RequireAssessment = true
+	facts.Focus.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-a", "cwi-b"}
+	facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{
+		{ID: "cwi-a", State: runtimecontract.RuntimeCoverageItemStateOpen},
+		{ID: "cwi-b", State: runtimecontract.RuntimeCoverageItemStateOpen},
+	}
+	if _, err := controller.Initialize(ctx, facts, controllerDefinition(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "state-change-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
+		StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+			ID: "write-both", Kind: "file/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-a", "cwi-b"},
+			TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("state"),
+		}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := ExecutionEvidence{
+		EventID: "event-state", WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: sealed.ActiveDispatch.ID,
+		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "write-both",
+		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
+	}
+	attachRuntimeV2TestOwnerReceipt(t, repository.aggregate, &evidence)
+	committed, err := controller.CommitEvidence(ctx, evidence)
+	if err != nil || committed.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
+		t.Fatalf("state evidence did not reach assessment: aggregate=%+v err=%v", committed.Aggregate, err)
+	}
+	// Model a persisted prior repairable gap. The assessment below closes cwi-a
+	// with current-run evidence and leaves cwi-b open, so it must reset only the
+	// no-progress window, not erase the remaining repair target.
+	repository.aggregate.Facts.Repair = runtimecontract.RuntimeRepairLedger{
+		FocusID: repository.aggregate.Facts.Focus.ID, SliceID: repository.aggregate.Facts.Focus.SliceID,
+		RepairAttempts: 2, ValidationOnlyRetries: 1, NoProgressCount: 2, LastCycleID: "prior-cycle",
+		SignatureCounts:           []runtimecontract.RuntimeFailureSignatureCount{{Signature: "prior-gap", Count: 2}},
+		NoProgressOperationShapes: []runtimecontract.RuntimeRejectedOperationShape{{Operation: runtimecontract.RuntimeOperation{Kind: runtimecontract.StepKindFileWrite}}},
+		ActiveGap:                 &runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-a", "cwi-b"}, MissingEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, Reason: "both remain open"},
+	}
+	if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "assessment-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
+		Assessment: &runtimecontract.AssessmentCandidate{
+			FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-a", "cwi-b"},
+			Disposition: runtimecontract.AssessmentDispositionRepairableGap, Summary: "one remaining item",
+			Items: []runtimecontract.RuntimeAssessmentItemFact{
+				{CoverageWorkItemID: "cwi-a", Satisfied: true, EvidenceRefs: []string{"event-state"}},
+				{CoverageWorkItemID: "cwi-b", Satisfied: false, Reason: "still open"},
+			},
+			Gap: &runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-b"}, Reason: "one remaining item"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	progressed, err := controller.CommitAssessment(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger := progressed.Facts.Repair
+	if ledger.RepairAttempts != 3 || ledger.ValidationOnlyRetries != 0 || ledger.NoProgressCount != 0 || len(ledger.SignatureCounts) != 0 ||
+		len(ledger.NoProgressOperationShapes) != 0 || ledger.LastCycleID != "" || ledger.ActiveGap == nil ||
+		len(ledger.ActiveGap.CoverageWorkItemIDs) != 1 || ledger.ActiveGap.CoverageWorkItemIDs[0] != "cwi-b" || ledger.LastProgressRevision == "" {
+		t.Fatalf("partial assessment delta did not preserve the remaining gap while resetting the window: %+v", ledger)
+	}
+	restarted, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := restarted.Load(ctx, "ws-v2", "run-v2")
+	if err != nil || reloaded.StateRevision != progressed.StateRevision || !reflect.DeepEqual(reloaded.Facts.Repair, ledger) {
+		t.Fatalf("restart did not preserve partial assessment progress transition: aggregate=%+v err=%v", reloaded, err)
 	}
 }
 

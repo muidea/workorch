@@ -124,6 +124,10 @@ type PatchApplyRequest struct {
 	// ApprovalGranted is set only after the File owner has validated the persisted
 	// Runtime V2 governance grant for this exact ExecutionKey + resume Fence.
 	ApprovalGranted bool
+	// ReplayProof is an optional sealed File-owner proof supplied only through
+	// the execution envelope. It permits postcondition confirmation after a
+	// lost receipt CAS; it never changes normal patch semantics.
+	ReplayProof *runtimecontract.RuntimeOperationReplayProof
 }
 
 type RuntimeFileOperationResult struct {
@@ -444,6 +448,38 @@ func (a *RuntimeAdapter) ApplyPatch(request PatchApplyRequest) (RuntimeFileOpera
 	if request.PatchType == patchTypeTextReplace && (!request.NewTextPresent || request.OldText == "" || request.OldText == request.NewText) {
 		return runtimeFileFailure("patch_invalid_input", common.ErrInvalidArgument, request.TargetRef), common.ErrInvalidArgument
 	}
+	if request.ReplayProof != nil {
+		proof := request.ReplayProof.Normalized()
+		if err := proof.Validate(); err != nil {
+			return runtimeFileFailure("patch_replay_proof_invalid", err, request.TargetRef), err
+		}
+		if replay, confirmed, err := confirmPatchReplayProof(request, proof); confirmed || err != nil {
+			return replay, err
+		}
+		preview, previewErr := a.PreviewPatch(request)
+		if previewErr != nil {
+			// This is a recovery-time postcondition check, not a fresh candidate
+			// validation failure. A changed target can make a previously valid
+			// patch syntactically inapplicable (for example, a unified-diff hunk
+			// no longer matches). Preserve the replay boundary for every variant:
+			// the owner must refuse to write and report a conflict rather than
+			// leaking a variant-specific invalid-input classification.
+			err := fmt.Errorf("%w: patch replay proof cannot confirm sealed postcondition: %v", common.ErrConflict, previewErr)
+			return runtimeFileFailure("patch_replay_proof_mismatch", err, request.TargetRef), err
+		}
+		if preview.TargetRef != request.TargetRef || preview.BeforeHash != proof.BeforeHash || preview.AfterHash != proof.AfterHash {
+			err := fmt.Errorf("%w: patch replay proof does not match current sealed operation (target %q/%q, before %q/%q, after %q/%q)", common.ErrConflict, preview.TargetRef, request.TargetRef, preview.BeforeHash, proof.BeforeHash, preview.AfterHash, proof.AfterHash)
+			return runtimeFileFailure("patch_replay_proof_mismatch", err, request.TargetRef), err
+		}
+	}
+	// A sealed file_write carrying the owner-verified input revision can be
+	// replayed after its durable write succeeded but the Orchestrator receipt
+	// CAS did not. The persisted execution key/fence still makes the receipt
+	// unique; this check merely proves that the sealed postcondition already
+	// holds and therefore must not write the workspace a second time.
+	if replay, confirmed, err := confirmFileWritePatchReplay(request); confirmed || err != nil {
+		return replay, err
+	}
 	// RVC-R11 INV-06: preview first; if approval is required, do not apply side effects.
 	previewRequest := patchRequest
 	previewRequest.Operation = "preview"
@@ -457,6 +493,75 @@ func (a *RuntimeAdapter) ApplyPatch(request PatchApplyRequest) (RuntimeFileOpera
 	}
 	result, err := a.executePatchRequest(request.WorkspaceDirectory, patchRequest, true)
 	return runtimeFileOperationResultFromExecution(result, request.TargetRef, err), err
+}
+
+// confirmPatchReplayProof verifies only the owner-observed postcondition that
+// was sealed before the original claim. It works for all patch/apply variants:
+// no operation text is reinterpreted and no write is attempted when the target
+// already has the exact expected output revision.
+func confirmPatchReplayProof(request PatchApplyRequest, proof runtimecontract.RuntimeOperationReplayProof) (RuntimeFileOperationResult, bool, error) {
+	proof = proof.Normalized()
+	_, target, rel, err := guardedWorkspacePath(request.WorkspaceDirectory, request.TargetRef, false)
+	if err != nil {
+		return RuntimeFileOperationResult{}, false, err
+	}
+	ref := filepath.ToSlash(rel)
+	found := false
+	for _, targetRef := range proof.TargetRefs {
+		if targetRef == ref {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return RuntimeFileOperationResult{}, false, fmt.Errorf("%w: patch replay proof target mismatch", common.ErrConflict)
+	}
+	content, exists, readErr := readPatchTarget(target)
+	if readErr != nil || !exists || looksBinary(content) {
+		return RuntimeFileOperationResult{}, false, readErr
+	}
+	actualHash := sha256Hex(content)
+	if actualHash != proof.AfterHash {
+		return RuntimeFileOperationResult{}, false, nil
+	}
+	return RuntimeFileOperationResult{
+		Stage: "patch_apply", Summary: "patch replay proof confirmed",
+		BeforeHash: proof.BeforeHash, AfterHash: proof.AfterHash, ContentHash: proof.AfterHash,
+		TargetRefs: []string{ref}, EvidenceRefs: []string{"workorch://workspace/" + ref},
+	}, true, nil
+}
+
+// confirmFileWritePatchReplay recognizes only a fully sealed file_write
+// postcondition. It intentionally does not infer replay success for text
+// replacement or unified diff: their postconditions require their own
+// owner-verified effect proof. A caller supplied baseHash is accepted here
+// only after feasibility preflight has checked it against the owner snapshot.
+func confirmFileWritePatchReplay(request PatchApplyRequest) (RuntimeFileOperationResult, bool, error) {
+	if request.PatchType != patchTypeFileWrite || !request.ContentPresent || strings.TrimSpace(request.BaseHash) == "" {
+		return RuntimeFileOperationResult{}, false, nil
+	}
+	_, target, rel, err := guardedWorkspacePath(request.WorkspaceDirectory, request.TargetRef, false)
+	if err != nil {
+		return RuntimeFileOperationResult{}, false, err
+	}
+	content, exists, err := readPatchTarget(target)
+	if err != nil || !exists || looksBinary(content) {
+		return RuntimeFileOperationResult{}, false, err
+	}
+	actualHash := sha256Hex(content)
+	baseHash := strings.TrimSpace(request.BaseHash)
+	if strings.EqualFold(actualHash, baseHash) || string(content) != request.Content {
+		return RuntimeFileOperationResult{}, false, nil
+	}
+	ref := filepath.ToSlash(rel)
+	return RuntimeFileOperationResult{
+		Stage: "patch_apply", Summary: "patch file_write replay confirmed",
+		// BeforeHash is the owner-verified sealed input revision, not a fresh
+		// observation of the already-written target. It lets the receipt retain
+		// the original durable resource delta after a lost CAS response.
+		BeforeHash: baseHash, AfterHash: actualHash, ContentHash: actualHash,
+		TargetRefs: []string{ref}, EvidenceRefs: []string{"workorch://workspace/" + ref},
+	}, true, nil
 }
 
 func runtimeFileOperationResultFromExecution(result patchExecutionResult, fallbackTarget string, executeErr error) RuntimeFileOperationResult {

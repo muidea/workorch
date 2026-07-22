@@ -259,6 +259,43 @@ func TestRuntimeV2CandidateContextProjectionPreservesRepairDirectiveAuthority(t 
 	}
 }
 
+func TestRuntimeV2CandidateContextProjectionPreservesTargetGroundingInVolatileAuthority(t *testing.T) {
+	context := runtimecontract.RuntimeCandidateContext{
+		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
+		Focus: runtimecontract.CoverageFocus{
+			ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			TargetRole: "implementation", TargetRefs: []string{"implementation.go"}, TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, RequireTargetGrounding: true,
+		},
+		RequiredAction: runtimecontract.RuntimeActionProduceStateChange,
+		Resources: runtimecontract.RuntimeResourceFacts{
+			FailureTarget: &runtimecontract.FailureTarget{Signature: "validation-failure", TargetRefs: []string{"implementation.go"}, TargetObservation: &runtimecontract.RuntimeFailureTargetObservation{
+				OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "server-a", TargetRole: "implementation", ObservedRevision: "mcp-server-v1", TargetRefs: []string{"implementation.go"},
+			}},
+			TargetSnapshots: []runtimecontract.TargetSnapshot{{TargetRef: "implementation.go", ContentHash: "hash-1", ContentState: runtimecontract.SnapshotContentStateComplete}},
+			TargetSelection: &runtimecontract.RuntimeTargetSelection{PrerequisiteID: "selection-1", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: "implementation", Disposition: runtimecontract.RuntimeTargetSelectionSelected, TargetRefs: []string{"implementation.go"}, CandidateTargetRefs: []string{"implementation.go"}, CandidateCount: 1, ObservedRevision: "manifest-1"},
+		},
+	}
+	context.Resources.TargetSelection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(*context.Resources.TargetSelection)
+	projection := runtimeV2CandidateContextProjection(context, runtimecontract.RuntimeActionProduceStateChange)
+	encoded, err := json.Marshal(projection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{`"TargetRole":"implementation"`, `"TargetRefs":["implementation.go"]`, `"TargetDiscoverySources":["workspace_manifest"]`, `"RequireTargetGrounding":true`, `"failureTarget"`, `"TargetObservation"`, `"OwnerModuleID":"blocks/mcp"`, `"ObservedRevision":"mcp-server-v1"`, `"targetSelection"`, `"selected"`} {
+		if !strings.Contains(string(encoded), required) {
+			t.Fatalf("volatile target-grounding context lost %s: %s", required, encoded)
+		}
+	}
+	definition := runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod"}
+	base := runtimecontract.RuntimeExecutionContract{ProfileContracts: []runtimecontract.RuntimeProfileContract{{ID: "profile"}}}
+	before := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, base)
+	context.Focus.TargetRefs = []string{"different.go"}
+	after := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, base)
+	if before != after {
+		t.Fatalf("focus target grounding drifted stable C0-C2 prefix: %s != %s", before, after)
+	}
+}
+
 func TestRuntimeV2CandidateSchemasAreActionSpecific(t *testing.T) {
 	stateChange := runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceStateChange)
 	validation := runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceValidation)

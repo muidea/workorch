@@ -49,6 +49,12 @@ func AcquireTargetSnapshotPrerequisite(ctx context.Context, hub magicevent.Hub, 
 	if !ok || response.PrerequisiteID != command.PrerequisiteID || !response.Snapshot.Complete() {
 		return orchestratorevents.AcquireTargetSnapshotResult{}, fmt.Errorf("target snapshot prerequisite %q returned an invalid result", command.PrerequisiteID)
 	}
+	if response.Snapshot.TargetRef != command.TargetRef {
+		return orchestratorevents.AcquireTargetSnapshotResult{}, fmt.Errorf("target snapshot prerequisite %q returned a mismatched target", command.PrerequisiteID)
+	}
+	if err := validateFileTargetSnapshotObservation(command.PrerequisiteID, response.Snapshot, response.Observation); err != nil {
+		return orchestratorevents.AcquireTargetSnapshotResult{}, fmt.Errorf("target snapshot prerequisite %q: %w", command.PrerequisiteID, err)
+	}
 	return response, nil
 }
 
@@ -62,6 +68,64 @@ func AcquireAndCommitTargetSnapshotPrerequisite(ctx context.Context, hub magicev
 		TargetSnapshot: &response.Snapshot,
 		Observation:    response.Observation,
 	})
+}
+
+func AcquireRuntimeTargetSelectionPrerequisite(ctx context.Context, hub magicevent.Hub, command orchestratorevents.AcquireRuntimeTargetSelectionCommand) (orchestratorevents.AcquireRuntimeTargetSelectionResult, error) {
+	if hub == nil || command.WorkspaceID == "" || command.RunID == "" || command.AuthoritySnapshotID == "" || command.PrerequisiteID == "" || command.TargetRole == "" || command.TargetSelectorRef == "" || command.MaxItems < 1 {
+		return orchestratorevents.AcquireRuntimeTargetSelectionResult{}, common.ErrInvalidArgument
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorAcquireRuntimeTargetSelection, ModuleID, orchestratorevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, command))
+	if result == nil {
+		return orchestratorevents.AcquireRuntimeTargetSelectionResult{}, common.ErrInvalidArgument
+	}
+	if err := prerequisiteResultError(result); err != nil {
+		return orchestratorevents.AcquireRuntimeTargetSelectionResult{}, err
+	}
+	data, magicErr := result.Get()
+	if magicErr != nil {
+		return orchestratorevents.AcquireRuntimeTargetSelectionResult{}, prerequisiteMagicError(magicErr)
+	}
+	response, ok := data.(orchestratorevents.AcquireRuntimeTargetSelectionResult)
+	if !ok || response.PrerequisiteID != command.PrerequisiteID || response.Selection.PrerequisiteID != command.PrerequisiteID || response.Selection.OwnerModuleID != runtimecontract.RuntimeModuleFile || response.Selection.TargetRole != command.TargetRole || response.Selection.SelectorRef != command.TargetSelectorRef {
+		return orchestratorevents.AcquireRuntimeTargetSelectionResult{}, fmt.Errorf("target selection prerequisite %q returned an invalid result", command.PrerequisiteID)
+	}
+	if err := response.Selection.Validate(); err != nil {
+		return orchestratorevents.AcquireRuntimeTargetSelectionResult{}, fmt.Errorf("target selection prerequisite %q: %w", command.PrerequisiteID, err)
+	}
+	// A target selection is a mutable File-owner observation, not a durable
+	// target authority by itself. Require the owner-authored workspace-tree
+	// dependency here so the controller can later invalidate this exact
+	// selection after a workspace change. The adapter verifies the concrete
+	// EventHub result; it does not select a target or inspect workspace paths.
+	if err := validateRuntimeTargetSelectionObservation(command.PrerequisiteID, response.Selection, response.Observation); err != nil {
+		return orchestratorevents.AcquireRuntimeTargetSelectionResult{}, fmt.Errorf("target selection prerequisite %q: %w", command.PrerequisiteID, err)
+	}
+	return response, nil
+}
+
+func validateRuntimeTargetSelectionObservation(prerequisiteID string, selection runtimecontract.RuntimeTargetSelection, observation *runtimecontract.RuntimePrerequisiteObservation) error {
+	selection = selection.Normalized()
+	if observation == nil {
+		return fmt.Errorf("target selection returned no freshness observation")
+	}
+	value := observation.Normalized()
+	if err := value.Validate(); err != nil {
+		return fmt.Errorf("target selection returned invalid freshness observation: %w", err)
+	}
+	if value.PrerequisiteID != prerequisiteID || value.Kind != runtimecontract.PrerequisiteKindTargetSelection || value.OwnerModuleID != runtimecontract.RuntimeModuleFile || value.ContentHash != selection.SnapshotID {
+		return fmt.Errorf("target selection freshness observation does not match selection")
+	}
+	if len(value.Dependencies) != 1 {
+		return fmt.Errorf("target selection freshness observation requires exactly one workspace-tree dependency")
+	}
+	dependency := value.Dependencies[0].Normalized()
+	if dependency.Domain != runtimecontract.RuntimeResourceWorkspaceTree || dependency.OwnerModuleID != runtimecontract.RuntimeModuleFile || dependency.SubjectRef != "workspace_deliverable" || dependency.Revision != selection.ObservedRevision {
+		return fmt.Errorf("target selection freshness observation does not match workspace-tree revision")
+	}
+	return nil
 }
 
 func AcquireAndCommitWorkspaceManifestPrerequisite(ctx context.Context, hub magicevent.Hub, facts runtimecontract.RuntimeFacts, command orchestratorevents.AcquireWorkspaceManifestCommand) (runtimecontract.RuntimeFacts, error) {
@@ -86,11 +150,56 @@ func AcquireAndCommitWorkspaceManifestPrerequisite(ctx context.Context, hub magi
 	if !ok || response.PrerequisiteID != command.PrerequisiteID || response.Manifest.Revision == "" {
 		return runtimecontract.RuntimeFacts{}, fmt.Errorf("workspace manifest prerequisite %q returned an invalid result", command.PrerequisiteID)
 	}
+	if err := validateFileWorkspaceManifestObservation(command.PrerequisiteID, response.Manifest, response.Observation); err != nil {
+		return runtimecontract.RuntimeFacts{}, fmt.Errorf("workspace manifest prerequisite %q: %w", command.PrerequisiteID, err)
+	}
 	return runtimev2.CommitPrerequisiteResult(facts, runtimev2.PrerequisiteResult{
 		PrerequisiteID: response.PrerequisiteID,
 		Manifest:       &response.Manifest,
 		Observation:    response.Observation,
 	})
+}
+
+func validateFileTargetSnapshotObservation(prerequisiteID string, snapshot runtimecontract.TargetSnapshot, observation *runtimecontract.RuntimePrerequisiteObservation) error {
+	if observation == nil {
+		return fmt.Errorf("target snapshot returned no freshness observation")
+	}
+	value := observation.Normalized()
+	if err := value.Validate(); err != nil {
+		return fmt.Errorf("target snapshot returned invalid freshness observation: %w", err)
+	}
+	if value.PrerequisiteID != prerequisiteID || value.Kind != runtimecontract.PrerequisiteKindTargetSnapshot || value.OwnerModuleID != runtimecontract.RuntimeModuleFile || value.ContentHash != snapshot.ContentHash {
+		return fmt.Errorf("target snapshot freshness observation does not match snapshot")
+	}
+	if len(value.Dependencies) != 1 {
+		return fmt.Errorf("target snapshot freshness observation requires exactly one workspace-target dependency")
+	}
+	dependency := value.Dependencies[0].Normalized()
+	if dependency.Domain != runtimecontract.RuntimeResourceWorkspaceTarget || dependency.OwnerModuleID != runtimecontract.RuntimeModuleFile || dependency.SubjectRef != snapshot.TargetRef || dependency.Revision != snapshot.ContentHash {
+		return fmt.Errorf("target snapshot freshness observation does not match workspace-target revision")
+	}
+	return nil
+}
+
+func validateFileWorkspaceManifestObservation(prerequisiteID string, manifest runtimecontract.WorkspaceManifest, observation *runtimecontract.RuntimePrerequisiteObservation) error {
+	if observation == nil {
+		return fmt.Errorf("workspace manifest returned no freshness observation")
+	}
+	value := observation.Normalized()
+	if err := value.Validate(); err != nil {
+		return fmt.Errorf("workspace manifest returned invalid freshness observation: %w", err)
+	}
+	if value.PrerequisiteID != prerequisiteID || value.Kind != runtimecontract.PrerequisiteKindManifest || value.OwnerModuleID != runtimecontract.RuntimeModuleFile || value.ContentHash != manifest.Revision {
+		return fmt.Errorf("workspace manifest freshness observation does not match manifest")
+	}
+	if len(value.Dependencies) != 1 {
+		return fmt.Errorf("workspace manifest freshness observation requires exactly one workspace-tree dependency")
+	}
+	dependency := value.Dependencies[0].Normalized()
+	if dependency.Domain != runtimecontract.RuntimeResourceWorkspaceTree || dependency.OwnerModuleID != runtimecontract.RuntimeModuleFile || dependency.SubjectRef != "workspace_deliverable" || dependency.Revision != manifest.Revision {
+		return fmt.Errorf("workspace manifest freshness observation does not match workspace-tree revision")
+	}
+	return nil
 }
 
 func AcquireAndCommitProviderCeilingPrerequisite(ctx context.Context, hub magicevent.Hub, facts runtimecontract.RuntimeFacts, command orchestratorevents.AcquireProviderCeilingCommand) (runtimecontract.RuntimeFacts, error) {

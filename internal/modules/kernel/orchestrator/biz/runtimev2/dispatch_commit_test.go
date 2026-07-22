@@ -112,6 +112,200 @@ func TestRejectedValidationEvidenceAtomicallyReturnsToStateChange(t *testing.T) 
 	if result.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || result.Aggregate.Decision.RequiredOutput.Kind != runtimecontract.RequiredOutputKindStateChange {
 		t.Fatalf("validation failure decision = %+v, want atomic state change", result.Aggregate.Decision)
 	}
+	if result.Aggregate.Facts.Resources.FailureTarget == nil || result.Aggregate.Facts.Resources.FailureTarget.Signature != "build-failed" ||
+		len(result.Aggregate.Facts.Resources.FailureTarget.TargetRefs) != 1 || result.Aggregate.Facts.Resources.FailureTarget.TargetRefs[0] != "main.go" {
+		t.Fatalf("validation failure target was not persisted from owner receipt: %+v", result.Aggregate.Facts.Resources.FailureTarget)
+	}
+	if result.Aggregate.Facts.RepairDirective == nil || len(result.Aggregate.Facts.RepairDirective.TargetRefs) != 1 || result.Aggregate.Facts.RepairDirective.TargetRefs[0] != "main.go" {
+		t.Fatalf("repair directive is not grounded to owner failure target: %+v", result.Aggregate.Facts.RepairDirective)
+	}
+}
+
+func TestRejectedValidationEntryDoesNotBootstrapUngroundedFailureTarget(t *testing.T) {
+	aggregate := validationAggregate(t)
+	aggregate.Facts.Focus.TargetRefs = nil
+	aggregate.Facts.Focus.TargetRole = "deliverable"
+	aggregate.Facts.Focus.RequireTargetGrounding = true
+	aggregate.Facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	repository := &durableRuntimeStateRepository{aggregate: aggregate}
+	coordinator, _ := NewDispatchCoordinator(repository)
+	candidate := validationCandidate()
+	candidate.Validation.Operations[0].Operation.TargetRefs = []string{"validation-entry.go"}
+	sealed := sealCandidateForTest(t, repository, candidate)
+	evidence := ExecutionEvidence{
+		EventID: "event-validation-entry-failed", WorkspaceID: "ws-1", RunID: "run-1",
+		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
+		OperationID: "validate-1", Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusRejected,
+		Failure: &runtimecontract.FailureFact{Class: runtimecontract.FailureClassBuildFailure, Signature: "validation-entry-failed", Message: "check failed", TargetRefs: []string{"validation-entry.go"}},
+	}
+	attachRuntimeV2TestOwnerReceipt(t, &repository.aggregate, &evidence)
+	committed, err := coordinator.CommitEvidence(context.Background(), evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if committed.Aggregate.Facts.Failure == nil || len(committed.Aggregate.Facts.Failure.TargetRefs) != 0 || committed.Aggregate.Facts.Resources.FailureTarget != nil {
+		t.Fatalf("validation entry was promoted into failure-target authority: facts=%+v", committed.Aggregate.Facts)
+	}
+	if committed.Aggregate.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite {
+		t.Fatalf("ungrounded validation failure requested a candidate: decision=%+v", committed.Aggregate.Decision)
+	}
+}
+
+func TestRejectedValidationOwnerObservationBindsCompatibleTarget(t *testing.T) {
+	aggregate := validationAggregate(t)
+	aggregate.Facts.Focus.TargetRefs = nil
+	aggregate.Facts.Focus.TargetRole = "implementation"
+	aggregate.Facts.Focus.RequireTargetGrounding = true
+	aggregate.Facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	addCurrentMCPFailureObservationFreshness(t, &aggregate, "mcp-server-v1")
+	repository := &durableRuntimeStateRepository{aggregate: aggregate}
+	coordinator, _ := NewDispatchCoordinator(repository)
+	candidate := validationCandidate()
+	candidate.Validation.Operations[0].Operation.TargetRefs = []string{"validation-entry.go"}
+	sealed := sealCandidateForTest(t, repository, candidate)
+	evidence := ExecutionEvidence{
+		EventID: "event-observed-target-failed", WorkspaceID: "ws-1", RunID: "run-1",
+		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
+		OperationID: "validate-1", Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusRejected,
+		Failure: &runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassBuildFailure, Signature: "mcp-observed-failure", Message: "capability observed failure",
+			TargetRefs: []string{"implementation.go"},
+			TargetObservation: &runtimecontract.RuntimeFailureTargetObservation{
+				OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "server-a", TargetRole: "implementation",
+				ObservedRevision: "mcp-server-v1", TargetRefs: []string{"implementation.go"},
+			},
+		},
+	}
+	attachRuntimeV2TestOwnerReceipt(t, &repository.aggregate, &evidence)
+	committed, err := coordinator.CommitEvidence(context.Background(), evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failureTarget := committed.Aggregate.Facts.Resources.FailureTarget
+	if committed.Aggregate.Facts.Failure == nil || failureTarget == nil || failureTarget.TargetObservation == nil ||
+		len(failureTarget.TargetRefs) != 1 || failureTarget.TargetRefs[0] != "implementation.go" ||
+		failureTarget.TargetObservation.SubjectRef != "server-a" || failureTarget.TargetObservation.ObservedRevision != "mcp-server-v1" {
+		t.Fatalf("owner observation was not persisted as repair authority: facts=%+v", committed.Aggregate.Facts)
+	}
+	if committed.Aggregate.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite {
+		t.Fatalf("owner observation bypassed snapshot prerequisite: decision=%+v", committed.Aggregate.Decision)
+	}
+	var snapshotPrerequisite runtimecontract.RuntimePrerequisite
+	for _, prerequisite := range committed.Aggregate.Facts.Prerequisites.Pending {
+		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSnapshot && prerequisite.OwnerModuleID == runtimecontract.RuntimeModuleFile && prerequisite.SubjectRef == "implementation.go" {
+			snapshotPrerequisite = prerequisite
+			break
+		}
+	}
+	if snapshotPrerequisite.ID == "" {
+		t.Fatalf("owner observation did not request a current file snapshot: %+v", committed.Aggregate.Facts.Prerequisites.Pending)
+	}
+	revision := committed.Aggregate.StateRevision
+	duplicate, err := coordinator.CommitEvidence(context.Background(), evidence)
+	if err != nil || duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.StateRevision != revision ||
+		duplicate.Aggregate.Facts.EvidenceRevision != committed.Aggregate.Facts.EvidenceRevision ||
+		len(duplicate.Aggregate.Facts.Evidence.Rejected) != len(committed.Aggregate.Facts.Evidence.Rejected) {
+		t.Fatalf("duplicate observed failure changed authority: result=%+v err=%v", duplicate, err)
+	}
+	// A restarted controller must reuse the committed owner observation and
+	// sealed dispatch lineage. Completing the fresh snapshot is a new SM-2
+	// prerequisite transition, never a replay of the rejected MCP operation.
+	restarted, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterSnapshot, err := restarted.CommitPrerequisite(context.Background(), "ws-1", "run-1", PrerequisiteResult{
+		PrerequisiteID: snapshotPrerequisite.ID,
+		TargetSnapshot: &runtimecontract.TargetSnapshot{TargetRef: "implementation.go", ContentHash: "implementation-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
+	})
+	if err != nil || afterSnapshot.ActiveDispatch != nil || len(afterSnapshot.CompletedDispatches) != 1 ||
+		afterSnapshot.CompletedDispatches[0].ID != sealed.ActiveDispatch.ID || afterSnapshot.Facts.Resources.FailureTarget == nil ||
+		len(afterSnapshot.Facts.Resources.TargetSnapshots) != 1 || afterSnapshot.Facts.Resources.TargetSnapshots[0].TargetRef != "implementation.go" {
+		t.Fatalf("restart prerequisite continuation replayed or lost owner binding: aggregate=%+v err=%v", afterSnapshot, err)
+	}
+}
+
+func addCurrentMCPFailureObservationFreshness(t *testing.T, aggregate *RuntimeAggregate, revision string) {
+	t.Helper()
+	if aggregate == nil {
+		t.Fatal("runtime aggregate is required")
+	}
+	inventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "operation_admissibility:mcp", OwnerModuleID: runtimecontract.RuntimeModuleMCP,
+		OperationKinds: []string{runtimecontract.StepKindMCPToolCall}, SelectorRefs: []string{"server-a"}, ObservedRevision: revision,
+	}
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	prerequisite := runtimecontract.RuntimePrerequisite{
+		ID: inventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID: runtimecontract.RuntimeModuleMCP, RequiredCapabilities: []string{runtimecontract.StepKindMCPToolCall},
+	}
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID, ContentHash: inventory.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "mcp_server_catalog", Revision: revision,
+		}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	aggregate.Facts.Resources.OperationAdmissibilities = append(aggregate.Facts.Resources.OperationAdmissibilities, inventory)
+	aggregate.Facts.Resources.PrerequisiteObservations = append(aggregate.Facts.Resources.PrerequisiteObservations, observation)
+	aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, prerequisite)
+}
+
+func TestValidationFailureTargetObservationRequiresCurrentOwnerFreshness(t *testing.T) {
+	facts := runtimecontract.RuntimeFacts{Focus: runtimecontract.CoverageFocus{TargetRole: "implementation", RequireTargetGrounding: true}}
+	failure := runtimecontract.FailureFact{
+		TargetRefs: []string{"implementation.go"},
+		TargetObservation: &runtimecontract.RuntimeFailureTargetObservation{
+			OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "server-a", TargetRole: "implementation", ObservedRevision: "mcp-server-v1", TargetRefs: []string{"implementation.go"},
+		},
+	}
+	if validationFailureTargetsAreGrounded(facts, failure) {
+		t.Fatal("failure target observation without a current owner freshness dependency was grounded")
+	}
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{{
+		OwnerModuleID: runtimecontract.RuntimeModuleMCP,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "mcp_server_catalog", Revision: "mcp-server-v1",
+		}},
+	}}
+	if !validationFailureTargetsAreGrounded(facts, failure) {
+		t.Fatal("failure target observation with current owner freshness dependency was not grounded")
+	}
+}
+
+func TestRejectedValidationOwnerObservationRejectsMismatchedRole(t *testing.T) {
+	aggregate := validationAggregate(t)
+	aggregate.Facts.Focus.TargetRefs = nil
+	aggregate.Facts.Focus.TargetRole = "implementation"
+	aggregate.Facts.Focus.RequireTargetGrounding = true
+	aggregate.Facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	repository := &durableRuntimeStateRepository{aggregate: aggregate}
+	coordinator, _ := NewDispatchCoordinator(repository)
+	candidate := validationCandidate()
+	candidate.Validation.Operations[0].Operation.TargetRefs = []string{"validation-entry.go"}
+	sealed := sealCandidateForTest(t, repository, candidate)
+	evidence := ExecutionEvidence{
+		EventID: "event-observed-target-role-mismatch", WorkspaceID: "ws-1", RunID: "run-1",
+		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
+		OperationID: "validate-1", Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusRejected,
+		Failure: &runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassBuildFailure, Signature: "mcp-observed-role-mismatch", Message: "capability observed failure",
+			TargetRefs: []string{"implementation.go"},
+			TargetObservation: &runtimecontract.RuntimeFailureTargetObservation{
+				OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "server-a", TargetRole: "validation-entry",
+				ObservedRevision: "mcp-server-v1", TargetRefs: []string{"implementation.go"},
+			},
+		},
+	}
+	attachRuntimeV2TestOwnerReceipt(t, &repository.aggregate, &evidence)
+	committed, err := coordinator.CommitEvidence(context.Background(), evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if committed.Aggregate.Facts.Failure == nil || len(committed.Aggregate.Facts.Failure.TargetRefs) != 0 ||
+		committed.Aggregate.Facts.Resources.FailureTarget != nil || committed.Aggregate.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite {
+		t.Fatalf("mismatched owner role became repair authority: facts=%+v decision=%+v", committed.Aggregate.Facts, committed.Aggregate.Decision)
+	}
 }
 
 func TestRejectedTextReplaceConsumesRepairBudgetAndRequiresFreshTargetSnapshot(t *testing.T) {

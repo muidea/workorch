@@ -140,6 +140,56 @@ func TestEvaluateCandidateAdmissionRejectsAcceptedNoProgressShape(t *testing.T) 
 	}
 }
 
+func TestRepairableAssessmentSameGapRecordsAcceptedOperationShapeForAdmission(t *testing.T) {
+	aggregate := stateChangeAggregate(t)
+	candidate := stateChangeCandidate()
+	operation := candidate.StateChange.Operations[0].Operation
+	aggregate.CompletedDispatches = []SealedDispatch{{
+		ID: "dispatch-accepted-state", Candidate: candidate,
+	}}
+	aggregate.Facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
+		ID: "accepted-state", Kind: runtimecontract.EvidenceKindStateChange,
+		DispatchID: "dispatch-accepted-state", OperationID: operation.ID,
+		CoverageWorkItemIDs: aggregate.Facts.Focus.CoverageWorkItemIDs,
+	}}
+	ledger := runtimecontract.RuntimeRepairLedger{
+		FocusID: aggregate.Facts.Focus.ID,
+		ActiveGap: &runtimecontract.RuntimeAssessmentGap{
+			CoverageWorkItemIDs: aggregate.Facts.Focus.CoverageWorkItemIDs,
+			Reason:              "same assessment gap",
+		},
+	}
+	ledger = recordAcceptedNoProgressShapes(aggregate, ledger, "same-gap", ledger.ActiveGap)
+	if len(ledger.NoProgressOperationShapes) != 1 || ledger.NoProgressOperationShapes[0].FailureCode != "accepted_operation_same_gap" {
+		t.Fatalf("same-gap assessment did not retain accepted state shape: %+v", ledger)
+	}
+	aggregate.Facts.Repair = ledger
+	if result := EvaluateCandidateAdmission(aggregate, candidate); result.Disposition != CandidateAdmissionRejectedContract || result.Failure == nil || result.Failure.Code != candidateAdmissionCodeReplaysNoProgressShape {
+		t.Fatalf("same-gap accepted state replay admission = %+v", result)
+	}
+}
+
+func TestEvaluateCandidateAdmissionRejectsDurableChangeOutsideGroundedRepairTarget(t *testing.T) {
+	aggregate := stateChangeAggregate(t)
+	aggregate.Facts.Focus.RequireTargetGrounding = true
+	aggregate.Facts.Focus.TargetRole = "implementation"
+	aggregate.Facts.Focus.TargetRefs = nil
+	aggregate.Facts.Resources.FailureTarget = &runtimecontract.FailureTarget{Signature: "validation-failure", TargetRefs: []string{"implementation.go"}}
+
+	wrong := stateChangeCandidate()
+	result := EvaluateCandidateAdmission(aggregate, wrong)
+	if result.Disposition != CandidateAdmissionRejectedContract || result.Failure == nil || result.Failure.Code != candidateAdmissionCodeTargetOutsideGrounding {
+		t.Fatalf("outside-target candidate admission = %+v", result)
+	}
+
+	correct := stateChangeCandidate()
+	correct.StateChange.Operations[0].Operation.TargetRefs = []string{"implementation.go"}
+	correct.StateChange.Operations[0].Operation.Parameters = patchApplyTestParameters("implementation.go")
+	if admitted := EvaluateCandidateAdmission(aggregate, correct); !admitted.Accepted() {
+		t.Fatalf("grounded candidate rejected: %+v", admitted)
+	}
+}
+
 func TestAdmitCandidateProposalAtomicallyClosesReplayAttemptAndExhaustsSecondAttempt(t *testing.T) {
 	aggregate, candidate := aggregateWithActiveRejectedCandidate(t)
 	repository := &controllerRepository{aggregate: &aggregate}

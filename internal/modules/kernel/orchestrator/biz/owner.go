@@ -43,9 +43,13 @@ type Biz struct {
 	bizPtr          *RuntimeOrchestrator
 	evidenceRecords repository.EvidenceRecordRepository
 	rawTopics       []string
-	driveMu         sync.Mutex
-	drivingRuns     map[string]struct{}
-	started         bool
+	// lifecycleMu protects Runtime V2 owner dependencies while a background
+	// drive is using them. Stop takes the write lock before clearing pointers;
+	// every drive holds the read lock through authority and projection work.
+	lifecycleMu sync.RWMutex
+	driveMu     sync.Mutex
+	drivingRuns map[string]struct{}
+	started     bool
 }
 
 func New() *Biz { return &Biz{} }
@@ -211,6 +215,14 @@ func queryRuntimeV2RecoveryInventory(ctx context.Context, hub magicevent.Hub) ([
 
 func (m *Biz) Stop(ctx context.Context) error {
 	_ = ctx
+	if m == nil {
+		return nil
+	}
+	// A drive can still be executing after its EventHub subscription has been
+	// removed. Wait for it before dropping the owner dependencies it uses; this
+	// is lifecycle synchronization only, not a second recovery state machine.
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
 	for idx := len(m.rawTopics) - 1; idx >= 0; idx-- {
 		m.UnsubscribeFunc(m.rawTopics[idx])
 	}
@@ -346,7 +358,7 @@ func (m *Biz) resumeRunMagicCommand(ctx context.Context, cmd orchestratorevents.
 }
 
 func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source string) error {
-	if m == nil || m.bizPtr == nil || workspaceID == "" || runID == "" {
+	if m == nil || workspaceID == "" || runID == "" {
 		return common.ErrInvalidArgument
 	}
 	driveKey := string(workspaceID) + "\x00" + string(runID)
@@ -355,13 +367,25 @@ func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.Wor
 	}
 	drive := func(driveCtx context.Context) {
 		retryDelivery := false
+		// The singleflight key belongs to the scheduled drive, including the
+		// no-op path where Stop wins before this background task begins. It
+		// must therefore be released before the lifecycle readiness check.
 		defer func() {
 			m.endRuntimeV2Drive(driveKey)
 			if retryDelivery {
 				m.scheduleRuntimeV2RecoveryRetry(driveCtx, workspaceID, runID)
 			}
 		}()
-		if err := m.driveAndProjectRuntimeV2(driveCtx, workspaceID, runID); err != nil && !errors.Is(err, context.Canceled) {
+		// Keep the Runtime V2 authority and its EventHub-backed dependencies
+		// alive until this entire drive/projection/recovery branch returns.
+		// A task that starts after Stop observes nil and exits without effects.
+		m.lifecycleMu.RLock()
+		if m.bizPtr == nil || m.EventHub() == nil {
+			m.lifecycleMu.RUnlock()
+			return
+		}
+		defer m.lifecycleMu.RUnlock()
+		if err := m.driveAndProjectRuntimeV2Locked(driveCtx, workspaceID, runID); err != nil && !errors.Is(err, context.Canceled) {
 			var projectionErr *runtimeV2ProjectionError
 			if errors.As(err, &projectionErr) {
 				slog.Warn("workorch Runtime V2 projection failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", err)

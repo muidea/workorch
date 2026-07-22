@@ -32,6 +32,13 @@ func ReduceRuntimeState(facts runtimecontract.RuntimeFacts, previous *runtimecon
 // ReduceRuntimeStateWithDirective reduces facts and returns the decision plus facts
 // with RepairDirective synchronized to the sealed decision (INV-05).
 func ReduceRuntimeStateWithDirective(facts runtimecontract.RuntimeFacts, previous *runtimecontract.AuthoritySnapshot) (runtimecontract.RuntimeFacts, runtimecontract.RuntimeDecision, error) {
+	facts = facts.Normalized()
+	// Target grounding is an SM-2 prerequisite, not a candidate-generation
+	// hint. Restrict this to the boundary between acquisition batches so an
+	// existing persisted owner acquisition can never be erased.
+	if len(facts.Prerequisites.Pending) == 0 {
+		facts = PreflightRuntimeFacts(facts, runtimeTargetGroundingRequirements(facts))
+	}
 	decision, err := ReduceRuntimeState(facts, previous)
 	if err != nil {
 		return facts, runtimecontract.RuntimeDecision{}, err
@@ -228,6 +235,9 @@ func assessmentDecision(base runtimecontract.RuntimeDecision, facts runtimecontr
 }
 
 func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision, error) {
+	if decision, blocked, err := targetGroundingDecision(base, facts, false); err != nil || blocked {
+		return decision, err
+	}
 	acceptedKinds := focusAcceptedKinds(facts.Capabilities.StateChangeKinds, facts.Focus)
 	if len(acceptedKinds) == 0 {
 		if len(facts.Capabilities.GovernanceKinds) > 0 {
@@ -245,7 +255,7 @@ func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecont
 		RequiredEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
 		RequiredEvidenceKinds:     []string{runtimecontract.EvidenceKindStateChange},
 		CoverageWorkItemIDs:       facts.Focus.CoverageWorkItemIDs,
-		TargetRefs:                facts.Focus.TargetRefs,
+		TargetRefs:                GroundedRepairTargets(facts),
 		RequiredOperationSequence: requiredCapabilityStateSequence(facts, acceptedKinds),
 	}
 	return base, nil
@@ -280,6 +290,9 @@ func requiredCapabilityStateSequence(facts runtimecontract.RuntimeFacts, accepte
 }
 
 func validationDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision, error) {
+	if decision, blocked, err := targetGroundingDecision(base, facts, true); err != nil || blocked {
+		return decision, err
+	}
 	acceptedKinds := focusAcceptedKinds(facts.Capabilities.ValidationKinds, facts.Focus)
 	if len(acceptedKinds) == 0 {
 		if len(facts.Capabilities.GovernanceKinds) > 0 {
@@ -300,6 +313,37 @@ func validationDecision(base runtimecontract.RuntimeDecision, facts runtimecontr
 		TargetRefs:                facts.Focus.TargetRefs,
 	}
 	return base, nil
+}
+
+// targetGroundingDecision is the common SM-2 pre-provider fence for executable
+// direct-evidence actions. A bounded manifest or selection acquisition
+// establishes what the owner observed, but an absent or ambiguous observation
+// does not authorize a first validation or a durable candidate. A validation
+// following a current-focus accepted target-bound state change may reuse that
+// already sealed evidence lineage; it cannot authorize another state change.
+//
+// An owner-complete target observation is a deterministic feasibility result,
+// not an external dependency. In particular, opening a decision ticket cannot
+// make an absent or ambiguous target admissible: a generic "continue" would
+// only re-enter this same gate and create a ticket loop. The reducer therefore
+// always closes this path with a typed terminal. Capability owners and the
+// shared contract package only carry observations; SM-2 owns the terminal.
+func targetGroundingDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, allowAcceptedStateChangeLineage bool) (runtimecontract.RuntimeDecision, bool, error) {
+	if !facts.Focus.RequireTargetGrounding || len(GroundedRepairTargets(facts)) != 0 ||
+		(allowAcceptedStateChangeLineage && hasCurrentFocusTargetBoundStateChangeEvidence(facts)) {
+		return runtimecontract.RuntimeDecision{}, false, nil
+	}
+	const summary = "direct-evidence focus requires an owner-grounded target; workspace discovery alone did not select one"
+	return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "target_grounding_unresolved", summary), true, nil
+}
+
+func hasCurrentFocusTargetBoundStateChangeEvidence(facts runtimecontract.RuntimeFacts) bool {
+	for _, evidence := range facts.Evidence.Accepted {
+		if evidence.Kind == runtimecontract.EvidenceKindStateChange && len(evidence.TargetRefs) != 0 && runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) {
+			return true
+		}
+	}
+	return false
 }
 
 func focusAcceptedKinds(capabilityKinds []string, focus runtimecontract.CoverageFocus) []string {

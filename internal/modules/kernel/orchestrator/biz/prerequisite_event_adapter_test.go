@@ -56,6 +56,158 @@ func TestAcquireTargetSnapshotPrerequisiteUsesTypedEventHubContract(t *testing.T
 	}
 }
 
+func TestAcquireRuntimeTargetSelectionPrerequisiteUsesTypedEventHubContract(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	defer hub.Terminate(ctx)
+	background := magictask.NewBackgroundRoutine(2)
+	defer background.Shutdown(ctx)
+	file := filemodule.New()
+	if err := file.Configure(filemodule.Dependencies{EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer file.Stop(ctx)
+
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "implementation.txt"), []byte("deliverable\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, orchestratorevents.AcquireRuntimeTargetSelectionCommand{
+		WorkspaceID: "ws-selection", RunID: "run-selection", AuthoritySnapshotID: "authority-1",
+		PrerequisiteID: "target_selection:blocks/file:deliverable:file/unique_workspace_entry:::0", WorkspaceDeliverableDirectory: workspace,
+		TargetRole: "deliverable", TargetSelectorRef: "file/unique_workspace_entry", MaxItems: 4,
+	})
+	if err != nil {
+		t.Fatalf("AcquireRuntimeTargetSelectionPrerequisite() error = %v", err)
+	}
+	if result.Selection.Disposition != runtimecontract.RuntimeTargetSelectionSelected || result.Selection.SelectorRef != "file/unique_workspace_entry" || len(result.Selection.TargetRefs) != 1 || result.Selection.TargetRefs[0] != "implementation.txt" || result.Observation == nil {
+		t.Fatalf("target selection result = %+v", result)
+	}
+	_, err = AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, orchestratorevents.AcquireRuntimeTargetSelectionCommand{
+		WorkspaceID: "ws-selection", RunID: "run-selection", AuthoritySnapshotID: "authority-1",
+		PrerequisiteID: "target_selection:blocks/file:deliverable:profile/free_form_selector:::0", WorkspaceDeliverableDirectory: workspace,
+		TargetRole: "deliverable", TargetSelectorRef: "profile/free_form_selector", MaxItems: 4,
+	})
+	if err == nil {
+		t.Fatal("undeclared File owner selector was accepted")
+	}
+}
+
+func TestAcquireRuntimeTargetSelectionPrerequisiteRejectsUnboundSelectionObservation(t *testing.T) {
+	ctx := context.Background()
+	command := orchestratorevents.AcquireRuntimeTargetSelectionCommand{
+		WorkspaceID: "ws-selection", RunID: "run-selection", AuthoritySnapshotID: "authority-1",
+		PrerequisiteID: "target_selection:blocks/file:implementation:file/unique_workspace_entry:::0", WorkspaceDeliverableDirectory: t.TempDir(),
+		TargetRole: "implementation", TargetSelectorRef: "file/unique_workspace_entry", MaxItems: 4,
+	}
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: command.PrerequisiteID, OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: command.TargetRole,
+		SelectorRef: command.TargetSelectorRef, Disposition: runtimecontract.RuntimeTargetSelectionSelected,
+		TargetRefs: []string{"implementation.txt"}, CandidateTargetRefs: []string{"implementation.txt"}, CandidateCount: 1, ObservedRevision: "tree-v1",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	validObservation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: command.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindTargetSelection, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		ContentHash: selection.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: selection.ObservedRevision,
+		}},
+	}
+	validObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(validObservation)
+
+	for _, testCase := range []struct {
+		name        string
+		selection   runtimecontract.RuntimeTargetSelection
+		observation *runtimecontract.RuntimePrerequisiteObservation
+	}{
+		{name: "missing observation", selection: selection},
+		{name: "role mismatch", selection: func() runtimecontract.RuntimeTargetSelection {
+			value := selection
+			value.TargetRole = "validation_entry"
+			value.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(value)
+			return value
+		}(), observation: &validObservation},
+		{name: "tree revision mismatch", selection: selection, observation: func() *runtimecontract.RuntimePrerequisiteObservation {
+			value := validObservation
+			value.Dependencies[0].Revision = "tree-v0"
+			value.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(value)
+			return &value
+		}()},
+		{name: "selection hash mismatch", selection: selection, observation: func() *runtimecontract.RuntimePrerequisiteObservation {
+			value := validObservation
+			value.ContentHash = "target-selection-other"
+			value.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(value)
+			return &value
+		}()},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			hub := magicevent.NewHub(4)
+			t.Cleanup(func() { hub.Terminate(ctx) })
+			observer := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
+			observer.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeTargetSelection, func(_ magicevent.Event, result magicevent.Result) {
+				result.Set(orchestratorevents.AcquireRuntimeTargetSelectionResult{
+					PrerequisiteID: command.PrerequisiteID, Selection: testCase.selection, Observation: testCase.observation,
+				}, nil)
+			})
+			t.Cleanup(func() { observer.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeTargetSelection) })
+			if _, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, command); err == nil {
+				t.Fatalf("target selection accepted %s", testCase.name)
+			}
+		})
+	}
+}
+
+func TestFilePrerequisiteObservationBindingsRejectMissingOrStaleFacts(t *testing.T) {
+	snapshot := runtimecontract.TargetSnapshot{
+		TargetRef: "implementation.txt", Content: "implementation\n", ContentHash: "content-v1", ContentState: runtimecontract.SnapshotContentStateComplete,
+	}
+	snapshotObservation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: "target_snapshot:implementation.txt::0", Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		ContentHash: snapshot.ContentHash,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: snapshot.TargetRef, Revision: snapshot.ContentHash,
+		}},
+	}
+	snapshotObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(snapshotObservation)
+	manifest := runtimecontract.WorkspaceManifest{Revision: "tree-v1", TargetRefs: []string{snapshot.TargetRef}}
+	manifestObservation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: "manifest:blocks/file:::::0", Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		ContentHash: manifest.Revision,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: manifest.Revision,
+		}},
+	}
+	manifestObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(manifestObservation)
+
+	if err := validateFileTargetSnapshotObservation(snapshotObservation.PrerequisiteID, snapshot, &snapshotObservation); err != nil {
+		t.Fatalf("valid target snapshot observation rejected: %v", err)
+	}
+	if err := validateFileWorkspaceManifestObservation(manifestObservation.PrerequisiteID, manifest, &manifestObservation); err != nil {
+		t.Fatalf("valid manifest observation rejected: %v", err)
+	}
+	if err := validateFileTargetSnapshotObservation(snapshotObservation.PrerequisiteID, snapshot, nil); err == nil {
+		t.Fatal("target snapshot accepted a missing freshness observation")
+	}
+	staleSnapshotObservation := snapshotObservation
+	staleSnapshotObservation.Dependencies[0].Revision = "content-v0"
+	staleSnapshotObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(staleSnapshotObservation)
+	if err := validateFileTargetSnapshotObservation(snapshotObservation.PrerequisiteID, snapshot, &staleSnapshotObservation); err == nil {
+		t.Fatal("target snapshot accepted a stale target revision")
+	}
+	if err := validateFileWorkspaceManifestObservation(manifestObservation.PrerequisiteID, manifest, nil); err == nil {
+		t.Fatal("workspace manifest accepted a missing freshness observation")
+	}
+	staleManifestObservation := manifestObservation
+	staleManifestObservation.Dependencies[0].Revision = "tree-v0"
+	staleManifestObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(staleManifestObservation)
+	if err := validateFileWorkspaceManifestObservation(manifestObservation.PrerequisiteID, manifest, &staleManifestObservation); err == nil {
+		t.Fatal("workspace manifest accepted a stale tree revision")
+	}
+}
+
 func TestAcquireAndCommitManifestAndProviderCeilingPrerequisites(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)

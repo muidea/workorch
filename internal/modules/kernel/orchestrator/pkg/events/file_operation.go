@@ -211,6 +211,19 @@ func RuntimeOperationFailure(transaction runtimecontract.AuthorityTransaction, o
 	}
 }
 
+func RuntimeOperationFailureWithTargetObservation(transaction runtimecontract.AuthorityTransaction, operationKind string, failureCode string, failureMessage string, targetRefs []string, observation *runtimecontract.RuntimeFailureTargetObservation) *runtimecontract.FailureFact {
+	failure := RuntimeOperationFailure(transaction, operationKind, failureCode, failureMessage, targetRefs)
+	if observation == nil {
+		return failure
+	}
+	value := observation.Normalized()
+	if err := value.Validate(); err != nil || !sameRuntimeOperationTargets(failure.TargetRefs, value.TargetRefs) {
+		return failure
+	}
+	failure.TargetObservation = &value
+	return failure
+}
+
 func StableRuntimeOperationFailureSignature(transaction runtimecontract.AuthorityTransaction, operationKind string, failureCode string, targetRefs []string) string {
 	targetRefs = normalizedRuntimeOperationTargets(targetRefs)
 	h := sha256.New()
@@ -252,4 +265,18 @@ func normalizedRuntimeOperationTargets(values []string) []string {
 	}
 	sort.Strings(ret)
 	return ret
+}
+
+func sameRuntimeOperationTargets(left, right []string) bool {
+	left = normalizedRuntimeOperationTargets(left)
+	right = normalizedRuntimeOperationTargets(right)
+	if len(left) != len(right) {
+		return false
+	}
+	for idx := range left {
+		if left[idx] != right[idx] {
+			return false
+		}
+	}
+	return true
 }

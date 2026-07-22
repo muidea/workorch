@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -333,11 +334,18 @@ func TestRuntimeAdapter_ExecuteOperationReturnsOutputForNonZeroExit(t *testing.T
 func TestRuntimeAdapter_ExecuteOperationAddsValidationFailureDiagnostic(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "feature_test.go"), []byte("package fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "feature.go"), []byte("package fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: deliverableDirectory,
 		Command:                       "sh",
 		Args:                          []string{"-c", "echo assertion failed >&2; exit 3"},
+		TargetRefs:                    []string{"feature_test.go"},
 		ValidationEvidence:            runtimemodel.RuntimeValidationEvidence{Mode: "runtime_behavior", ObservationType: "test_result", TargetRefs: []string{"feature-contract"}},
 	})
 	if err == nil {
@@ -351,8 +359,8 @@ func TestRuntimeAdapter_ExecuteOperationAddsValidationFailureDiagnostic(t *testi
 		diagnostic.RecommendedEvidenceTargetType != runtimemodel.ValidationEvidenceTargetBehaviorEvidence {
 		t.Fatalf("validationFailureDiagnostic = %+v, want test failure behavior diagnostic", diagnostic)
 	}
-	if len(diagnostic.TargetRefs) != 1 || diagnostic.TargetRefs[0] != "feature-contract" {
-		t.Fatalf("targetRefs = %#v, want feature-contract", diagnostic.TargetRefs)
+	if got, want := diagnostic.TargetRefs, []string{"feature_test.go", "feature-contract"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("targetRefs = %#v, want %#v", got, want)
 	}
 	if result.RuntimeDiagnostics.ValidationFailureDiagnostic == nil {
 		t.Fatalf("runtimeDiagnostics = %+v, want nested validation diagnostic", result.RuntimeDiagnostics)

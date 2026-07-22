@@ -20,6 +20,10 @@ func TestCompileRuntimeV2CoverageFocusesAppliesDodItemWildcard(t *testing.T) {
 				ID: "software-dev",
 				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
 					ID: "*", Scope: "dodItem",
+					TargetRole: "deliverable_implementation", TargetDiscoverySources: []string{
+						runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest,
+						runtimecontract.RuntimeValidationDiscoverySourceProjectFiles,
+					}, TargetSelectorRef: "file/unique_workspace_entry", RequireTargetGrounding: true,
 					RequireDirectEvidence: true, RequireClaimEvidence: true, RequireExecutableBehaviorEvidence: true,
 					AcceptedStepKinds: []string{"shell/command", "patch/apply", "mcp/tool_call"},
 					RejectedStepKinds: []string{"file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"},
@@ -52,6 +56,45 @@ func TestCompileRuntimeV2CoverageFocusesAppliesDodItemWildcard(t *testing.T) {
 		if len(focus.RequiredEvidenceKinds) != 1 || focus.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindValidation {
 			t.Fatalf("required evidence kinds = %v, want validation only", focus.RequiredEvidenceKinds)
 		}
+		if focus.TargetRole != "deliverable_implementation" || focus.TargetSelectorRef != "file/unique_workspace_entry" || !focus.RequireTargetGrounding ||
+			len(focus.TargetRefs) != 0 || len(focus.TargetDiscoverySources) != 2 {
+			t.Fatalf("dod focus target contract not compiled: %+v", focus)
+		}
+	}
+}
+
+func TestResolveCoverageEvidencePolicyCompilesGroundedDirectEvidenceScopes(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{
+			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+				ID: "software-dev",
+				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
+					{
+						ID: "*", Scope: "dodItem", TargetRole: "deliverable_implementation",
+						TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest, runtimecontract.RuntimeValidationDiscoverySourceProjectFiles},
+						TargetSelectorRef:      "file/unique_workspace_entry", RequireTargetGrounding: true,
+					},
+					{
+						ID: "*", Scope: "goalCoverage", TargetRole: "deliverable_implementation",
+						TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest, runtimecontract.RuntimeValidationDiscoverySourceProjectFiles},
+						TargetSelectorRef:      "file/unique_workspace_entry", RequireTargetGrounding: true,
+					},
+				},
+			}},
+		},
+	}
+	for _, scope := range []string{"dodItem", "goalCoverage"} {
+		t.Run(scope, func(t *testing.T) {
+			policy, err := resolveCoverageEvidencePolicy(scope, "any-item", activation, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if policy.TargetRole != "deliverable_implementation" || policy.TargetSelectorRef != "file/unique_workspace_entry" || !policy.RequireTargetGrounding ||
+				len(policy.TargetRefs) != 0 || len(policy.TargetDiscoverySources) != 2 {
+				t.Fatalf("%s target policy = %+v", scope, policy)
+			}
+		})
 	}
 }
 
@@ -255,6 +298,7 @@ func TestCompileRuntimeV2CoverageFocusesKeepsDeliverableStateChange(t *testing.T
 				},
 				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
 					ID: "source_change", Scope: "deliverable", EvidenceRole: "primary_state_change",
+					TargetRole: "implementation", TargetRefs: []string{"cmd/main.go"}, TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, RequireTargetGrounding: true,
 					AcceptedStepKinds: []string{"patch/apply"},
 				}},
 			}},
@@ -283,8 +327,124 @@ func TestCompileRuntimeV2CoverageFocusesKeepsDeliverableStateChange(t *testing.T
 			found = true
 		}
 	}
-	if !found || deliverable.EvidenceRole != "primary_state_change" {
+	if !found || deliverable.EvidenceRole != "primary_state_change" || deliverable.TargetRole != "implementation" || !deliverable.RequireTargetGrounding ||
+		len(deliverable.TargetRefs) != 1 || deliverable.TargetRefs[0] != "cmd/main.go" || len(deliverable.TargetDiscoverySources) != 1 {
 		t.Fatalf("deliverable focus must keep explicit state_change: %+v", deliverable)
+	}
+}
+
+func TestCompileRuntimeV2CoverageFocusesRejectsUngroundedRequiredTarget(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+			ID: "profile", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "source", Required: true, EvidenceRole: "primary_state_change"}},
+			EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
+				ID: "source", Scope: "deliverable", RequireTargetGrounding: true, TargetRole: "implementation", AcceptedStepKinds: []string{"patch/apply"},
+			}},
+		}}},
+	}
+	_, err := compileRuntimeV2CoverageFocuses(
+		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
+		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"behavior"}}, activation,
+	)
+	if err == nil || !strings.Contains(err.Error(), "target grounding requires target refs or bounded discovery sources") {
+		t.Fatalf("ungrounded required target was accepted: %v", err)
+	}
+}
+
+func TestCompileRuntimeV2CoverageFocusesRejectsConflictingTargetBindingsWithinSlice(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		firstRole      string
+		secondRole     string
+		firstSelector  string
+		secondSelector string
+		want           string
+	}{
+		{
+			name: "target_role", firstRole: "implementation", secondRole: "generated_artifact",
+			firstSelector: "file/unique_workspace_entry", secondSelector: "file/unique_workspace_entry",
+			want: "incompatible target roles",
+		},
+		{
+			name: "target_selector", firstRole: "implementation", secondRole: "implementation",
+			firstSelector: "file/unique_workspace_entry", secondSelector: "profile/semantic_owner_selector",
+			want: "incompatible target selector refs",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			activation := runtimecontract.RuntimeActivationContext{
+				ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+				ExecutionContract: runtimecontract.RuntimeExecutionContract{
+					AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
+						SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaV2,
+						MaxWorkItems:  2, MaxFocuses: 4, MaxCandidateContextItems: 4,
+						Groups: []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{{
+							ID: "combined", Title: "combined", Scope: "deliverable", Priority: 1, MaxWorkItems: 2,
+							Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true},
+						}},
+					},
+					ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+						ID: "profile",
+						DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{
+							{ID: "first", Required: true, EvidenceRole: "primary_state_change"},
+							{ID: "second", Required: true, EvidenceRole: "primary_state_change"},
+						},
+						EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
+							{ID: "first", Scope: "deliverable", EvidenceRole: "primary_state_change", TargetRole: tc.firstRole, TargetSelectorRef: tc.firstSelector, TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, RequireTargetGrounding: true, AcceptedStepKinds: []string{"patch/apply"}},
+							{ID: "second", Scope: "deliverable", EvidenceRole: "primary_state_change", TargetRole: tc.secondRole, TargetSelectorRef: tc.secondSelector, TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, RequireTargetGrounding: true, AcceptedStepKinds: []string{"patch/apply"}},
+						},
+					}},
+				},
+			}
+			_, err := compileRuntimeV2Coverage(
+				&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
+				&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1"},
+				activation,
+			)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("compile conflicting %s binding error = %v, want %q", tc.name, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestCompileRuntimeV2CoverageFocusesPreservesSharedTargetBindingWithinSlice(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{
+			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
+				SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaV2,
+				MaxWorkItems:  2, MaxFocuses: 4, MaxCandidateContextItems: 4,
+				Groups: []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{{
+					ID: "combined", Title: "combined", Scope: "deliverable", Priority: 1, MaxWorkItems: 2,
+					Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true},
+				}},
+			},
+			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+				ID: "profile",
+				DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{
+					{ID: "first", Required: true, EvidenceRole: "primary_state_change"},
+					{ID: "second", Required: true, EvidenceRole: "primary_state_change"},
+				},
+				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
+					{ID: "first", Scope: "deliverable", EvidenceRole: "primary_state_change", TargetRole: "implementation", TargetSelectorRef: "file/unique_workspace_entry", TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, RequireTargetGrounding: true, AcceptedStepKinds: []string{"patch/apply"}},
+					{ID: "second", Scope: "deliverable", EvidenceRole: "primary_state_change", TargetRole: "implementation", TargetSelectorRef: "file/unique_workspace_entry", TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, RequireTargetGrounding: true, AcceptedStepKinds: []string{"patch/apply"}},
+				},
+			}},
+		},
+	}
+	compiled, err := compileRuntimeV2Coverage(
+		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
+		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1"},
+		activation,
+	)
+	if err != nil || len(compiled.Focuses) != 1 {
+		t.Fatalf("compile shared binding = %+v err=%v", compiled, err)
+	}
+	focus := compiled.Focuses[0]
+	if focus.TargetRole != "implementation" || focus.TargetSelectorRef != "file/unique_workspace_entry" || !focus.RequireTargetGrounding || len(focus.TargetDiscoverySources) != 1 {
+		t.Fatalf("shared target binding was not preserved: %+v", focus)
 	}
 }
 

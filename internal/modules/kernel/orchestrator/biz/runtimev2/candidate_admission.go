@@ -23,11 +23,13 @@ const (
 	candidateAdmissionCodePartiallyReplaysRejected    = "candidate_partially_replays_rejected_shape"
 	candidateAdmissionCodeReplaysNoProgressShape      = "candidate_replays_no_progress_shape"
 	candidateAdmissionCodeActionEvidenceMismatch      = "candidate_action_evidence_mismatch"
+	candidateAdmissionCodeTargetOutsideGrounding      = "candidate_target_outside_grounding"
 	candidateAdmissionSignatureInvalid                = "candidate-admission-invalid"
 	candidateAdmissionSignatureReplaysRejectedShape   = "candidate-replays-rejected-shape"
 	candidateAdmissionSignaturePartialReplay          = "candidate-partially-replays-rejected-shape"
 	candidateAdmissionSignatureNoProgressReplay       = "candidate-replays-no-progress-shape"
 	candidateAdmissionSignatureActionEvidenceMismatch = "candidate-action-evidence-mismatch"
+	candidateAdmissionSignatureTargetOutsideGrounding = "candidate-target-outside-grounding"
 )
 
 // CandidateAdmissionResult is a typed, expected candidate outcome. Error is
@@ -72,7 +74,67 @@ func EvaluateCandidateAdmission(aggregate RuntimeAggregate, candidate workorchru
 	if result := rejectCandidateMissingValidationGap(aggregate.Facts, aggregate.Decision, candidate); !result.Accepted() {
 		return result
 	}
+	if result := rejectCandidateOutsideGroundedTargets(aggregate.Facts, aggregate.Decision, candidate); !result.Accepted() {
+		return result
+	}
 	return acceptedCandidateAdmission()
+}
+
+// rejectCandidateOutsideGroundedTargets is the SM-3 fence for a focus whose
+// profile requires target grounding. The reducer owns which targets are
+// authoritative; admission only verifies that a state-changing proposal does
+// not bypass that sealed set. It deliberately does not classify file names or
+// infer target roles from a provider explanation.
+func rejectCandidateOutsideGroundedTargets(facts workorchruntimecontract.RuntimeFacts, decision workorchruntimecontract.RuntimeDecision, candidate workorchruntimecontract.RuntimeCandidate) CandidateAdmissionResult {
+	facts = facts.Normalized()
+	if decision.Action != workorchruntimecontract.RuntimeActionProduceStateChange || !facts.Focus.RequireTargetGrounding {
+		return acceptedCandidateAdmission()
+	}
+	requiredTargets := GroundedRepairTargets(facts)
+	if len(requiredTargets) == 0 {
+		// Bounded discovery without a selected target remains admissible only
+		// through owner operation inventories. A profile adapter, not the core,
+		// supplies any domain-specific target selection.
+		return acceptedCandidateAdmission()
+	}
+	for _, operation := range candidateRuntimeOperations(candidate) {
+		if !workorchruntimecontract.RuntimeEffectIsDurable(workorchruntimecontract.ResolveExpectedEffectScope(operation, facts.Activation.MCPCapabilities)) {
+			continue
+		}
+		if runtimeTargetRefsIntersect(requiredTargets, operation.TargetRefs) {
+			return acceptedCandidateAdmission()
+		}
+	}
+	return rejectedCandidateAdmission(
+		candidateAdmissionCodeTargetOutsideGrounding,
+		candidateAdmissionSignatureTargetOutsideGrounding,
+		"runtime state-changing candidate does not target the sealed focus, failure, or repair target set",
+	)
+}
+
+// GroundedRepairTargets returns the single persisted target-precedence set for
+// the current focus. It is an SM-2 fact projection, not target discovery: all
+// members must already originate in the sealed focus, owner observation,
+// failure fact, target selection, or repair directive. SM-3 admission and
+// prerequisite re-acquisition must consume this same set so a resource-change
+// refresh cannot silently fall back to an empty Focus.TargetRefs.
+func GroundedRepairTargets(facts workorchruntimecontract.RuntimeFacts) []string {
+	if len(facts.Focus.TargetRefs) > 0 {
+		return append([]string(nil), facts.Focus.TargetRefs...)
+	}
+	if facts.Resources.FailureTarget != nil && len(facts.Resources.FailureTarget.TargetRefs) > 0 {
+		return append([]string(nil), facts.Resources.FailureTarget.TargetRefs...)
+	}
+	if facts.Failure != nil && len(facts.Failure.TargetRefs) > 0 {
+		return append([]string(nil), facts.Failure.TargetRefs...)
+	}
+	if selection := facts.Resources.TargetSelection; selection != nil && selection.Disposition == workorchruntimecontract.RuntimeTargetSelectionSelected && len(selection.TargetRefs) > 0 {
+		return append([]string(nil), selection.TargetRefs...)
+	}
+	if facts.RepairDirective != nil && len(facts.RepairDirective.TargetRefs) > 0 {
+		return append([]string(nil), facts.RepairDirective.TargetRefs...)
+	}
+	return nil
 }
 
 func rejectCandidateNoProgressReplay(aggregate RuntimeAggregate, candidate workorchruntimecontract.RuntimeCandidate) CandidateAdmissionResult {

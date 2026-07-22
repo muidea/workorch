@@ -14,6 +14,7 @@ type PrerequisiteResult struct {
 	PrerequisiteID         string
 	Manifest               *runtimecontract.WorkspaceManifest
 	TargetSnapshot         *runtimecontract.TargetSnapshot
+	TargetSelection        *runtimecontract.RuntimeTargetSelection
 	FailureTarget          *runtimecontract.FailureTarget
 	Capabilities           *runtimecontract.RuntimeCapabilities
 	ValidationScratch      *runtimecontract.ValidationScratch
@@ -35,6 +36,7 @@ func PreflightRuntimeFacts(facts runtimecontract.RuntimeFacts, requirements []Ru
 			Kind:                 requirement.Kind,
 			OwnerModuleID:        requirement.OwnerModuleID,
 			SubjectRef:           requirement.SubjectRef,
+			TargetSelectorRef:    requirement.TargetSelectorRef,
 			CapabilityClass:      requirement.CapabilityClass,
 			RequiredCapabilities: requirement.RequiredCapabilities,
 			CapabilityStateKind:  requirement.CapabilityStateKind,
@@ -44,6 +46,74 @@ func PreflightRuntimeFacts(facts runtimecontract.RuntimeFacts, requirements []Ru
 	}
 	facts.Prerequisites.Pending = pending
 	return facts.Normalized()
+}
+
+// runtimeTargetGroundingRequirements translates a sealed focus declaration
+// into owner acquisitions. It never chooses a target from workspace content:
+// explicit refs require File snapshots, while discovery source IDs only assert
+// the owner facts that the profile declared as a bounded basis.
+func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []RuntimeRequirement {
+	facts = facts.Normalized()
+	focus := facts.Focus
+	if !focus.RequireTargetGrounding {
+		return nil
+	}
+	requirements := make([]RuntimeRequirement, 0, len(focus.TargetRefs)+len(focus.TargetDiscoverySources)+1)
+	groundedTargets := append([]string(nil), focus.TargetRefs...)
+	if len(groundedTargets) == 0 && facts.Resources.FailureTarget != nil {
+		groundedTargets = append(groundedTargets, facts.Resources.FailureTarget.TargetRefs...)
+	}
+	for _, target := range groundedTargets {
+		requirements = append(requirements, RuntimeRequirement{
+			Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: target, Reason: "grounded repair target requires owner snapshot",
+		})
+	}
+	// A failure target is already an owner-selected repair surface. Otherwise a
+	// File owner may only make the neutral cardinality observation below; it
+	// must not infer an implementation role from paths, suffixes, or content.
+	if len(groundedTargets) == 0 {
+		selection := facts.Resources.TargetSelection
+		if selection == nil {
+			for _, source := range focus.TargetDiscoverySources {
+				switch source {
+				case runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest, runtimecontract.RuntimeValidationDiscoverySourceProjectFiles:
+					requirements = append(requirements, RuntimeRequirement{
+						Kind: runtimecontract.PrerequisiteKindTargetSelection, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+						SubjectRef: focus.TargetRole, TargetSelectorRef: focus.TargetSelectorRef, Reason: "focus target grounding requires owner target selection",
+					})
+					// One File-owner observation covers both file-backed source IDs.
+					goto selectionRequirementDone
+				}
+			}
+		} else if selection.Disposition == runtimecontract.RuntimeTargetSelectionSelected {
+			for _, target := range selection.TargetRefs {
+				requirements = append(requirements, RuntimeRequirement{
+					Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+					SubjectRef: target, Reason: "selected focus target requires owner snapshot",
+				})
+			}
+		}
+	}
+selectionRequirementDone:
+	for _, source := range focus.TargetDiscoverySources {
+		switch source {
+		case runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest, runtimecontract.RuntimeValidationDiscoverySourceProjectFiles:
+			requirements = append(requirements, RuntimeRequirement{
+				Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+				Reason: "focus target grounding requires workspace owner discovery",
+			})
+		case runtimecontract.RuntimeValidationDiscoverySourceDeclaredCommands:
+			requirements = append(requirements, RuntimeRequirement{
+				Kind: runtimecontract.PrerequisiteKindValidationScratch, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
+				Reason: "focus target grounding requires declared command discovery",
+			})
+		case runtimecontract.RuntimeValidationDiscoverySourceAvailableCapabilities:
+			// Capability and admissibility requirements are activation-sealed for
+			// every executable operation. The core must not invent an owner here.
+		}
+	}
+	return normalizeRuntimeRequirements(requirements)
 }
 
 func CommitPrerequisiteResult(facts runtimecontract.RuntimeFacts, result PrerequisiteResult) (runtimecontract.RuntimeFacts, error) {
@@ -100,6 +170,18 @@ func applyPrerequisiteResult(facts *runtimecontract.RuntimeFacts, prerequisite r
 			return fmt.Errorf("target snapshot prerequisite returned no complete snapshot for %q", prerequisite.SubjectRef)
 		}
 		facts.Resources.TargetSnapshots = append(facts.Resources.TargetSnapshots, *result.TargetSnapshot)
+	case runtimecontract.PrerequisiteKindTargetSelection:
+		if result.TargetSelection == nil {
+			return fmt.Errorf("target selection prerequisite returned no selection")
+		}
+		selection := result.TargetSelection.Normalized()
+		if selection.PrerequisiteID != prerequisite.ID || selection.OwnerModuleID != prerequisite.OwnerModuleID || selection.TargetRole != prerequisite.SubjectRef || selection.SelectorRef != prerequisite.TargetSelectorRef {
+			return fmt.Errorf("target selection prerequisite returned a mismatched selection")
+		}
+		if err := selection.Validate(); err != nil {
+			return fmt.Errorf("target selection prerequisite returned invalid selection: %w", err)
+		}
+		facts.Resources.TargetSelection = &selection
 	case runtimecontract.PrerequisiteKindFailureTarget:
 		if result.FailureTarget == nil || len(result.FailureTarget.TargetRefs) == 0 {
 			return fmt.Errorf("failure target prerequisite returned no targets")
@@ -202,6 +284,8 @@ func runtimeRequirementSatisfied(facts runtimecontract.RuntimeFacts, requirement
 			}
 		}
 		return false
+	case runtimecontract.PrerequisiteKindTargetSelection:
+		return facts.Resources.TargetSelection != nil && facts.Resources.TargetSelection.PrerequisiteID == runtimePrerequisiteID(requirement)
 	case runtimecontract.PrerequisiteKindFailureTarget:
 		return facts.Resources.FailureTarget != nil && len(facts.Resources.FailureTarget.TargetRefs) > 0
 	case runtimecontract.PrerequisiteKindCapability:
@@ -279,6 +363,7 @@ func normalizeRuntimeRequirements(values []RuntimeRequirement) []RuntimeRequirem
 	byID := make(map[string]RuntimeRequirement, len(values))
 	for _, value := range values {
 		value.SubjectRef = strings.TrimSpace(value.SubjectRef)
+		value.TargetSelectorRef = strings.TrimSpace(value.TargetSelectorRef)
 		value.OwnerModuleID = strings.TrimSpace(value.OwnerModuleID)
 		value.CapabilityClass = runtimecontract.RuntimeCapabilityClass(strings.TrimSpace(string(value.CapabilityClass)))
 		value.RequiredCapabilities = normalizeRequirementStrings(value.RequiredCapabilities)
@@ -302,7 +387,7 @@ func normalizeRuntimeRequirements(values []RuntimeRequirement) []RuntimeRequirem
 }
 
 func runtimePrerequisiteID(requirement RuntimeRequirement) string {
-	parts := []string{string(requirement.Kind), requirement.OwnerModuleID, requirement.SubjectRef, string(requirement.CapabilityClass), strings.Join(requirement.RequiredCapabilities, ","), requirement.CapabilityStateKind, fmt.Sprintf("%d", requirement.MinimumBytes)}
+	parts := []string{string(requirement.Kind), requirement.OwnerModuleID, requirement.SubjectRef, requirement.TargetSelectorRef, string(requirement.CapabilityClass), strings.Join(requirement.RequiredCapabilities, ","), requirement.CapabilityStateKind, fmt.Sprintf("%d", requirement.MinimumBytes)}
 	return strings.Join(parts, ":")
 }
 

@@ -39,11 +39,59 @@ type RuntimeOperationExecutionRecord struct {
 	OperationID         string
 	ExecutionKey        string
 	ExpectedEffectScope RuntimeEffectScope
-	State               RuntimeOperationExecutionState
-	Fence               uint64
-	OwnerReceiptRef     string
-	OwnerReceiptHash    string
-	ClaimedAt           string
+	// ReplayProof is an owner-authored, read-only preflight proof sealed before
+	// the operation is claimed. It is optional: only a claimed durable operation
+	// carrying a valid proof may be recovered after an owner side effect could
+	// have completed while its receipt CAS was lost.
+	ReplayProof      *RuntimeOperationReplayProof
+	State            RuntimeOperationExecutionState
+	Fence            uint64
+	OwnerReceiptRef  string
+	OwnerReceiptHash string
+	ClaimedAt        string
+}
+
+// RuntimeOperationReplayProof binds an owner-observed precondition and
+// postcondition to one sealed operation. It is a DTO-only contract: owners
+// create it during a side-effect-free feasibility probe, the orchestrator
+// persists it, and the owner verifies it again during same-key/fence recovery.
+// It must not select actions or itself constitute execution evidence.
+type RuntimeOperationReplayProof struct {
+	OwnerModuleID           string
+	OperationID             string
+	TargetRefs              []string
+	BeforeHash              string
+	AfterHash               string
+	AdmissibilitySnapshotID string
+	AcquisitionBinding      string
+}
+
+func (p RuntimeOperationReplayProof) Normalized() RuntimeOperationReplayProof {
+	p.OwnerModuleID = strings.TrimSpace(p.OwnerModuleID)
+	p.OperationID = strings.TrimSpace(p.OperationID)
+	p.TargetRefs = normalizeStrings(p.TargetRefs)
+	p.BeforeHash = strings.TrimSpace(p.BeforeHash)
+	p.AfterHash = strings.TrimSpace(p.AfterHash)
+	p.AdmissibilitySnapshotID = strings.TrimSpace(p.AdmissibilitySnapshotID)
+	p.AcquisitionBinding = strings.TrimSpace(p.AcquisitionBinding)
+	return p
+}
+
+func (p RuntimeOperationReplayProof) Validate() error {
+	p = p.Normalized()
+	if p.OwnerModuleID == "" || p.OperationID == "" || len(p.TargetRefs) == 0 || p.AfterHash == "" || p.AdmissibilitySnapshotID == "" {
+		return fmt.Errorf("runtime operation replay proof requires owner, operation, targets, output and admissibility identity")
+	}
+	if p.BeforeHash == p.AfterHash {
+		return fmt.Errorf("runtime operation replay proof requires a changed postcondition")
+	}
+	return nil
+}
+
+func (p RuntimeOperationReplayProof) Clone() RuntimeOperationReplayProof {
+	p = p.Normalized()
+	p.TargetRefs = append([]string(nil), p.TargetRefs...)
+	return p
 }
 
 // RuntimeOperationReceipt is the owner-persisted receipt for one ExecutionKey.
@@ -181,6 +229,10 @@ func (r RuntimeOperationExecutionRecord) Normalized() RuntimeOperationExecutionR
 	r.OperationID = strings.TrimSpace(r.OperationID)
 	r.ExecutionKey = strings.TrimSpace(r.ExecutionKey)
 	r.ExpectedEffectScope = NormalizeRuntimeEffectScope(r.ExpectedEffectScope)
+	if r.ReplayProof != nil {
+		proof := r.ReplayProof.Normalized()
+		r.ReplayProof = &proof
+	}
 	r.State = r.State.Normalized()
 	r.OwnerReceiptRef = strings.TrimSpace(r.OwnerReceiptRef)
 	r.OwnerReceiptHash = strings.TrimSpace(r.OwnerReceiptHash)
@@ -198,6 +250,14 @@ func (r RuntimeOperationExecutionRecord) Validate() error {
 	}
 	if !ValidRuntimeEffectScope(r.ExpectedEffectScope) {
 		return fmt.Errorf("operation execution record has invalid expected effect scope %q", r.ExpectedEffectScope)
+	}
+	if r.ReplayProof != nil {
+		if err := r.ReplayProof.Validate(); err != nil {
+			return fmt.Errorf("operation execution replay proof: %w", err)
+		}
+		if r.ReplayProof.OperationID != r.OperationID {
+			return fmt.Errorf("operation execution replay proof operation mismatch")
+		}
 	}
 	switch r.State {
 	case OperationExecutionSealed:
@@ -221,7 +281,12 @@ func (r RuntimeOperationExecutionRecord) Validate() error {
 }
 
 func (r RuntimeOperationExecutionRecord) Clone() RuntimeOperationExecutionRecord {
-	return r.Normalized()
+	r = r.Normalized()
+	if r.ReplayProof != nil {
+		proof := r.ReplayProof.Clone()
+		r.ReplayProof = &proof
+	}
+	return r
 }
 
 func NormalizeRuntimeOperationExecutionRecords(values []RuntimeOperationExecutionRecord) []RuntimeOperationExecutionRecord {
@@ -311,6 +376,10 @@ func (r RuntimeOperationReceipt) Normalized() RuntimeOperationReceipt {
 		failure.Signature = strings.TrimSpace(failure.Signature)
 		failure.Message = strings.TrimSpace(failure.Message)
 		failure.TargetRefs = normalizeStrings(failure.TargetRefs)
+		if failure.TargetObservation != nil {
+			observation := failure.TargetObservation.Normalized()
+			failure.TargetObservation = &observation
+		}
 		r.Failure = &failure
 	}
 	if r.Governance != nil {
@@ -377,6 +446,9 @@ func (r RuntimeOperationReceipt) Validate() error {
 		if r.Failure == nil || r.Failure.Class == "" || strings.TrimSpace(r.Failure.Message) == "" {
 			return fmt.Errorf("rejected operation receipt requires typed failure")
 		}
+		if err := ValidateRuntimeFailureTargetObservationBinding(*r.Failure); err != nil {
+			return fmt.Errorf("rejected operation receipt failure target observation: %w", err)
+		}
 	case RuntimeOperationOutcomeUnknown:
 		// unknown is intentionally sparse; recovery path decides governance vs fail.
 	}
@@ -422,6 +494,11 @@ func (r RuntimeOperationReceipt) Clone() RuntimeOperationReceipt {
 	ret := r.Normalized()
 	if r.Failure != nil {
 		failure := *ret.Failure
+		if failure.TargetObservation != nil {
+			observation := failure.TargetObservation.Normalized()
+			observation.TargetRefs = append([]string(nil), observation.TargetRefs...)
+			failure.TargetObservation = &observation
+		}
 		ret.Failure = &failure
 	}
 	if r.Governance != nil {
@@ -545,6 +622,16 @@ func StableRuntimeOperationReceiptHash(receipt RuntimeOperationReceipt) string {
 		writeHashString(h, receipt.Failure.Signature)
 		writeHashString(h, receipt.Failure.Message)
 		writeHashStrings(h, receipt.Failure.TargetRefs)
+		if receipt.Failure.TargetObservation == nil {
+			writeHashString(h, "failure-target-observation:nil")
+		} else {
+			observation := receipt.Failure.TargetObservation.Normalized()
+			writeHashString(h, observation.OwnerModuleID)
+			writeHashString(h, observation.SubjectRef)
+			writeHashString(h, observation.TargetRole)
+			writeHashString(h, observation.ObservedRevision)
+			writeHashStrings(h, observation.TargetRefs)
+		}
 	}
 	if receipt.Governance == nil {
 		writeHashString(h, "governance:nil")

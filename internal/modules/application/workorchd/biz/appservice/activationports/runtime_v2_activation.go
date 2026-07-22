@@ -159,6 +159,8 @@ func runtimeV2ExecutionContract(input map[string]any) runtimecontract.RuntimeExe
 			}
 			contract.EvidenceRequirements = append(contract.EvidenceRequirements, runtimecontract.RuntimeProfileEvidenceRequirement{
 				ID: runtimeV2String(item["id"]), Scope: runtimeV2String(item["scope"]), EvidenceRole: runtimeV2String(item["evidenceRole"]),
+				TargetRole: runtimeV2String(item["targetRole"]), TargetRefs: runtimeV2Strings(item["targetRefs"]),
+				TargetDiscoverySources: runtimeV2Strings(item["targetDiscoverySources"]), TargetSelectorRef: runtimeV2String(item["targetSelectorRef"]), RequireTargetGrounding: runtimeV2Bool(item["requireTargetGrounding"]),
 				RequiredEvidenceKinds: runtimeV2Strings(item["requiredEvidenceKinds"]),
 				RequireDirectEvidence: runtimeV2Bool(item["requireDirectEvidence"]), RequireClaimEvidence: runtimeV2Bool(item["requireClaimEvidence"]),
 				RequireExecutableBehaviorEvidence: runtimeV2Bool(item["requireExecutableBehaviorEvidence"]), RequireCoverageTargets: runtimeV2Bool(item["requireCoverageTargets"]),

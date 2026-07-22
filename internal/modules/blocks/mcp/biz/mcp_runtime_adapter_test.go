@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -224,7 +225,7 @@ func TestRuntimeAdapterFailsHTTPToolResultError(t *testing.T) {
 	}
 }
 
-func TestRuntimeAdapterFailureDiagnosticsIncludeToolInputTarget(t *testing.T) {
+func TestRuntimeAdapterFailureDiagnosticsKeepToolInputAsContextOnly(t *testing.T) {
 	ctx := context.Background()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -255,8 +256,85 @@ func TestRuntimeAdapterFailureDiagnosticsIncludeToolInputTarget(t *testing.T) {
 	if diagnostics.TargetRef != "src/symbol.go" {
 		t.Fatalf("runtimeDiagnostics = %+v, want tool input target", diagnostics)
 	}
-	if len(diagnostics.FailureTargets) != 1 || diagnostics.FailureTargets[0] != "src/symbol.go" {
-		t.Fatalf("failureTargets = %#v, want tool input target", diagnostics.FailureTargets)
+	if len(diagnostics.FailureTargets) != 0 {
+		t.Fatalf("failureTargets = %#v, want no unobserved target", diagnostics.FailureTargets)
+	}
+}
+
+func TestRuntimeAdapterFailureDiagnosticsUseExplicitResponseFailureTargets(t *testing.T) {
+	ctx := context.Background()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content":        []map[string]any{{"type": "text", "text": "implementation failure"}},
+			"failureTargets": []string{" ./implementation.go ", "implementation.go", ""},
+			"isError":        true,
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewRuntimeAdapter(newMCPService(t, mcpmodel.Server{
+		ID:            common.MCPServerID("mcp-http-observed-target"),
+		Name:          "http observed target",
+		Transport:     "http",
+		Endpoint:      server.URL,
+		Enabled:       true,
+		AllowedTools:  []string{"lookup.references"},
+		TimeoutMillis: 1000,
+	}))
+	result, err := adapter.ExecuteOperation(ctx, RuntimeOperationRequest{
+		Kind:       "mcp/tool_call",
+		TargetRefs: []string{"validation-entry.go"}, TargetRole: "implementation",
+		Data: orchestratorevents.MCPOperationData{
+			ServerID: "mcp-http-observed-target", Tool: "lookup.references",
+			Input: []orchestratorevents.MCPArgument{mcpStringArgument("path", "validation-entry.go")},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "implementation failure") {
+		t.Fatalf("ExecuteOperation err = %v, want MCP tool result error", err)
+	}
+	if result.Diagnostics.TargetRef != "validation-entry.go" {
+		t.Fatalf("diagnostic target = %q, want operation context", result.Diagnostics.TargetRef)
+	}
+	if got, want := result.Diagnostics.FailureTargets, []string{"implementation.go"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("observed failure targets = %#v, want %#v", got, want)
+	}
+	if got, want := result.TargetRefs, []string{"validation-entry.go"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("operation target refs = %#v, want %#v", got, want)
+	}
+	if result.Diagnostics.TargetRole != "implementation" || result.OwnerRevision == "" {
+		t.Fatalf("owner observation binding = %+v ownerRevision=%q", result.Diagnostics, result.OwnerRevision)
+	}
+	_, admissibilityRevision, admissibilityErr := adapter.OperationAdmissibility(ctx)
+	if admissibilityErr != nil || result.OwnerRevision != admissibilityRevision {
+		t.Fatalf("owner revision = %q, admissibility revision = %q, err=%v", result.OwnerRevision, admissibilityRevision, admissibilityErr)
+	}
+}
+
+func TestRuntimeAdapterSuccessDoesNotObserveFailureTargets(t *testing.T) {
+	ctx := context.Background()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"failureTargets": []string{"implementation.go"}, "isError": false})
+	}))
+	defer server.Close()
+
+	adapter := NewRuntimeAdapter(newMCPService(t, mcpmodel.Server{
+		ID:            common.MCPServerID("mcp-http-success-target"),
+		Name:          "http success target",
+		Transport:     "http",
+		Endpoint:      server.URL,
+		Enabled:       true,
+		AllowedTools:  []string{"lookup.references"},
+		TimeoutMillis: 1000,
+	}))
+	result, err := adapter.ExecuteOperation(ctx, RuntimeOperationRequest{
+		Kind: "mcp/tool_call",
+		Data: orchestratorevents.MCPOperationData{ServerID: "mcp-http-success-target", Tool: "lookup.references"},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteOperation: %v", err)
+	}
+	if len(result.Diagnostics.FailureTargets) != 0 {
+		t.Fatalf("failure targets = %#v, want none for successful result", result.Diagnostics.FailureTargets)
 	}
 }
 
@@ -708,10 +786,6 @@ func TestRuntimeAdapterReusesLongLivedStdioSession(t *testing.T) {
 }
 
 func TestRuntimeAdapterEvictsIdleLongLivedStdioSession(t *testing.T) {
-	oldIdleTimeout := longLivedStdioSessionIdleTimeout
-	longLivedStdioSessionIdleTimeout = 20 * time.Millisecond
-	defer func() { longLivedStdioSessionIdleTimeout = oldIdleTimeout }()
-
 	ctx := context.Background()
 	initFile := filepath.Join(t.TempDir(), "mcp-init-count.txt")
 	service := newMCPService(t, mcpmodel.Server{
@@ -724,7 +798,7 @@ func TestRuntimeAdapterEvictsIdleLongLivedStdioSession(t *testing.T) {
 		SessionPolicy: "long_lived",
 		TimeoutMillis: 1000,
 	})
-	adapter := NewRuntimeAdapter(service)
+	adapter := newRuntimeAdapterWithIdleSessionTimeout(service, http.DefaultClient, 20*time.Millisecond)
 	defer adapter.Close()
 
 	for idx := 0; idx < 2; idx++ {

@@ -78,7 +78,23 @@ func (m *AppModel) cancelModelSelection() {
 	m.modelSelectWorkspaceID = ""
 }
 
-func (m *AppModel) handleModelSelectionKey(key string) (tea.Model, tea.Cmd) {
+func (m *AppModel) handleModelSelectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+	if msg.Type == tea.KeyRunes {
+		// A modal must not swallow the sole explicit quit command.  Keep this
+		// deliberately narrow: regular input remains unavailable while choosing
+		// a model, but /exit is accepted incrementally and handled on Enter.
+		candidate := m.input + string(msg.Runes)
+		if strings.HasPrefix("/exit", candidate) {
+			m.insertInput(string(msg.Runes))
+			return m, nil
+		}
+	}
+	if key == KeyEnter && strings.TrimSpace(m.input) == "/exit" {
+		m.addInputHistory(m.input)
+		m.mode = modeQuit
+		return m, tea.Quit
+	}
 	switch key {
 	case "esc":
 		m.cancelModelSelection()

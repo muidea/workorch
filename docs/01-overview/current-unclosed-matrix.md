@@ -31,7 +31,7 @@ Last Updated: 2026-07-21
 
 | ID | 项 | 说明 | 当前方案 |
 | --- | --- | --- | --- |
-| RUNTIME-VPC | validation evidence / effective progress / escalation | 2026-07-21 fresh deployed `run-003` 反证：all-skipped validation 被 Shell 标 valid，Orchestrator 将任意 current-focus accepted evidence 视为 progress 并清空 validation-only ledger，导致相同 gap 重复至 `no_progress_exhausted`；同时 discovery 缺少 owner grounding，异步 terminal metrics 未计数 | [详细收口方案](../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md) |
+| RUNTIME-VPC | validation evidence / effective progress / grounded repair target | `run-003` 暴露的 all-skipped/effective-progress/escalation 已完成代码收口；最新 `run-006` 继续反证 repair grounding：`Focus.TargetRefs=nil`，target snapshot 只覆盖验证入口，production adapter 未进入 repair set，最终 `repairAttempts=10/10`、`no_progress_exhausted`。剩余按 VPC-8 收口 profile、activation compiler、Orchestrator、Shell、LLM typed interaction | [详细收口方案](../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md) |
 
 ### B. 运行单元架构 / 生命周期
 
@@ -68,7 +68,7 @@ Last Updated: 2026-07-21
 ## Judgment
 
 - **代码主链**：Runtime V2 only；V1 authority 不再是问题来源。
-- **正向收敛基础**：RVC-R5～R26、RPA-1 首次 inventory/selector/feasibility、RPF-1～5 prerequisite freshness 与 RCA transaction 结论仍作为已完成基线；但它们没有关闭 2026-07-21 暴露的 validation evidence → effective progress → same-gap escalation 缺口，现由 RUNTIME-VPC 重新打开。
+- **正向收敛基础**：RVC-R5～R26、RPA-1 inventory/selector/feasibility、RPF-1～5 freshness、RCA transaction 及 VPC-1～VPC-7 仍作为已完成基线；最新 `run-006` 表明它们尚未关闭 profile/focus → failure target → repair candidate → effective progress 的 owner-grounded 收敛链，现由 RUNTIME-VPC/VPC-8 继续收口。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；不得再从已归档 plan 推导实现约束。
 - **Active roadmap**：RUNTIME-VPC、ARCH-1、OPS-1（+ 可选 OPT-1）；RCA-1、RPF 和 RPA-1 的历史 completion record 均归 archive，但不得覆盖新的 deployed 反证。
 - **清理原则**：失效主链叙述、重复 audit、过程日记、live 产物一律归档或出库，不在 active 保留“假活跃”项。

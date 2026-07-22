@@ -19,6 +19,7 @@ type RuntimeOperationExecutionRequest struct {
 	Execution                          runtimecontract.RuntimeOperationExecutionRecord
 	GovernanceGrant                    *runtimecontract.RuntimeOperationGovernanceGrant
 	EvidenceKind                       string
+	TargetRole                         string
 	EvidencePolicies                   []runtimecontract.RuntimeEvidencePolicy
 	CapabilityStates                   []runtimecontract.RuntimeCapabilityStateSnapshot
 	CompletedRequiredOperationReceipts []runtimecontract.RuntimeRequiredOperationReceiptBinding
@@ -107,9 +108,10 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 				return RuntimeAggregate{}, fmt.Errorf("operation %q dependency %q is not committed", operation.ID, dependency)
 			}
 		}
-		// RVC-R10: claim fence before owner side effect. Recovery never replays a
-		// claimed/owner_committed operation; it either commits the persisted owner
-		// receipt or moves to outcome_unknown.
+		// RVC-R10: claim fence before owner side effect. A claimed operation only
+		// re-enters an owner when it is already safe-to-replay or carries an
+		// owner-authored proof sealed before the claim; otherwise it becomes
+		// outcome_unknown rather than guessing whether a durable effect happened.
 		execution, hasExec := operationExecutionRecord(aggregate.ActiveDispatch.OperationExecutions, operation.ID)
 		if !hasExec {
 			_, _ = c.markOperationExecutionOutcomeUnknown(ctx, workspaceID, runID, operation.ID)
@@ -146,7 +148,8 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 			governanceGrant = governanceGrantForExecution(aggregate, execution)
 			if governanceGrant == nil {
 				idempotency := runtimecontract.ResolveOperationIdempotencyClass(operation, aggregate.Facts.Activation.MCPCapabilities)
-				if idempotency != runtimecontract.RuntimeOperationIdempotencySafeToReplay && idempotency != runtimecontract.RuntimeOperationIdempotencyOwnerManaged {
+				hasReplayProof := execution.ReplayProof != nil
+				if idempotency != runtimecontract.RuntimeOperationIdempotencySafeToReplay && idempotency != runtimecontract.RuntimeOperationIdempotencyOwnerManaged && !hasReplayProof {
 					_, _ = c.markOperationExecutionOutcomeUnknown(ctx, workspaceID, runID, operation.ID)
 					return RuntimeAggregate{}, fmt.Errorf("operation %q claimed without receipt; outcome_unknown", operation.ID)
 				}
@@ -186,6 +189,7 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 			Transaction: dispatch.Transaction, Operation: operation, Execution: execution,
 			GovernanceGrant:                    governanceGrant,
 			EvidenceKind:                       evidenceKindForDecision(aggregate.Decision),
+			TargetRole:                         aggregate.Facts.Focus.TargetRole,
 			EvidencePolicies:                   aggregate.Facts.Activation.EvidencePolicies,
 			CapabilityStates:                   append([]runtimecontract.RuntimeCapabilityStateSnapshot(nil), aggregate.Facts.Resources.CapabilityStates...),
 			CompletedRequiredOperationReceipts: completedRequiredOperationReceiptBindings(*aggregate.ActiveDispatch, aggregate.OperationReceipts, completed),
@@ -199,6 +203,12 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 				return RuntimeAggregate{}, recoverErr
 			} else if found {
 				return recovered, nil
+			}
+			if execution.ReplayProof != nil {
+				// Reload only persisted aggregate facts; the claimed-operation branch
+				// consumes the single bounded recovery allowance before it re-enters
+				// the owner with the original key/fence.
+				return c.ExecuteActiveDispatch(ctx, workspaceID, runID, executor)
 			}
 			// No terminal receipt exists. The side effect may still have completed, so
 			// fence the execution as outcome_unknown instead of blind replaying it.

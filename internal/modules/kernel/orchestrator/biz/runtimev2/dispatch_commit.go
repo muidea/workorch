@@ -137,6 +137,14 @@ func SealDispatch(decision runtimecontract.RuntimeDecision, candidate runtimecon
 // SealDispatchWithActivation seals a candidate using owner-sealed activation capability
 // metadata for side-effect gating (MCP RiskLevel, etc.).
 func SealDispatchWithActivation(decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate, activation runtimecontract.RuntimeActivationContext) (SealedDispatch, error) {
+	return SealDispatchWithActivationAndFeasibilities(decision, candidate, activation, nil)
+}
+
+// SealDispatchWithActivationAndFeasibilities seals the optional, owner-authored
+// replay proof from a persisted read-only feasibility ledger into its matching
+// execution record. The proof is not inferred from operation kind or provider
+// text: absent feasibility proof means absent recovery authority.
+func SealDispatchWithActivationAndFeasibilities(decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate, activation runtimecontract.RuntimeActivationContext, feasibilities []runtimecontract.RuntimeCandidateFeasibilityRecord) (SealedDispatch, error) {
 	if err := decision.Validate(); err != nil {
 		return SealedDispatch{}, err
 	}
@@ -153,6 +161,7 @@ func SealDispatchWithActivation(decision runtimecontract.RuntimeDecision, candid
 		dispatchID,
 		candidate,
 		activation,
+		feasibilities,
 	)
 	return SealedDispatch{
 		ID:                  dispatchID,
@@ -172,6 +181,7 @@ func sealOperationExecutionRecords(
 	dispatchID string,
 	candidate runtimecontract.RuntimeCandidate,
 	activation runtimecontract.RuntimeActivationContext,
+	feasibilities []runtimecontract.RuntimeCandidateFeasibilityRecord,
 ) []runtimecontract.RuntimeOperationExecutionRecord {
 	ops := candidateRuntimeOperations(candidate)
 	if len(ops) == 0 {
@@ -181,12 +191,21 @@ func sealOperationExecutionRecords(
 	for _, operation := range ops {
 		operation = operation.Normalized()
 		scope := runtimecontract.ResolveExpectedEffectScope(operation, activation.MCPCapabilities)
-		ret = append(ret, runtimecontract.RuntimeOperationExecutionRecord{
+		execution := runtimecontract.RuntimeOperationExecutionRecord{
 			OperationID:         operation.ID,
 			ExecutionKey:        runtimecontract.StableRuntimeOperationExecutionKey(workspaceID, runID, dispatchID, operation.ID),
 			ExpectedEffectScope: scope,
 			State:               runtimecontract.OperationExecutionSealed,
-		})
+		}
+		for _, feasibility := range feasibilities {
+			if feasibility.OperationID != operation.ID || !feasibility.Feasible || feasibility.ReplayProof == nil {
+				continue
+			}
+			proof := feasibility.ReplayProof.Clone()
+			execution.ReplayProof = &proof
+			break
+		}
+		ret = append(ret, execution)
 	}
 	return runtimecontract.NormalizeRuntimeOperationExecutionRecords(ret)
 }
@@ -305,6 +324,7 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 		DispatchID: evidence.DispatchID, OperationID: evidence.OperationID, Revision: nextEvidenceRevision(aggregate.EvidenceSequence + 1),
 		Summary: evidence.Evidence.Summary, ContentHash: evidence.Evidence.ContentHash,
 		ExitCode: evidence.Evidence.ExitCode, EvidenceRefs: append([]string(nil), evidence.Evidence.EvidenceRefs...),
+		TargetRefs:          append([]string(nil), committedOperation.TargetRefs...),
 		CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), committedOperation.CoverageWorkItemIDs...),
 		Quality:             evidence.Evidence.Quality, ZeroWork: evidence.Evidence.ZeroWork,
 		EvidenceReason: evidence.Evidence.EvidenceReason, EvidenceTags: append([]string(nil), evidence.Evidence.EvidenceTags...),
@@ -337,8 +357,11 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 		// windows here; assessment satisfaction owns the other progress transition.
 		if runtimecontract.EvidenceAppliesToCurrentFocus(aggregate.Facts, fact) {
 			aggregate.Facts.Assessments = invalidateNonSatisfiedAssessmentsForFocus(aggregate.Facts.Assessments, aggregate.Facts.Focus.ID)
-			aggregate.Facts.Failure = nil
-			if runtimeEvidenceIsEffectiveProgress(fact, evidence) {
+			// Progress must be evaluated against the failure/repair target that was
+			// authoritative before this accepted receipt clears the transient failure.
+			// Otherwise a repair can change an unrelated validation entry and reset
+			// the same-focus budget without shrinking the persisted gap.
+			if runtimeEvidenceIsEffectiveProgress(aggregate.Facts, fact, evidence) {
 				aggregate.Facts.Repair = aggregate.Facts.Repair.NoteProgress(fact.Revision)
 			} else if fact.Kind == runtimecontract.EvidenceKindValidation && aggregate.Facts.Repair.ActiveGap != nil {
 				aggregate.Facts.Repair = aggregate.Facts.Repair.RecordNoProgressOperationShape(runtimecontract.RuntimeRejectedOperationShape{
@@ -349,6 +372,7 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 					FailureMessage:   "accepted validation has not yet resolved the active assessment gap",
 				})
 			}
+			aggregate.Facts.Failure = nil
 		}
 	case ExecutionEvidenceStatusRejected:
 		if evidence.Failure != nil {
@@ -357,7 +381,30 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 			fact.FailureSignature = evidence.Failure.Signature
 			fact.FailureMessage = evidence.Failure.Message
 			failure := *evidence.Failure
+			// A validation operation's own target is an execution entry, not proof
+			// that the target is the object requiring repair. Do not bootstrap
+			// FailureTarget authority from that declaration: only a target already
+			// grounded by the Focus, a prior owner fact, selected owner target, or
+			// sealed directive may be retained. State-changing owner failures remain
+			// concrete effect failures and preserve their operation target lineage.
+			if fact.Kind == runtimecontract.EvidenceKindValidation && !validationFailureTargetsAreGrounded(aggregate.Facts, failure) {
+				failure.TargetRefs = nil
+				failure.TargetObservation = nil
+			}
 			aggregate.Facts.Failure = &failure
+			// A receipt is the only owner-authored source for an execution failure.
+			// Persist its bounded target set as repair context before the next SM-2
+			// reduction so candidate rendering never has to infer targets from text.
+			if len(failure.TargetRefs) > 0 {
+				aggregate.Facts.Resources.FailureTarget = &runtimecontract.FailureTarget{
+					Signature:  failure.Signature,
+					TargetRefs: append([]string(nil), failure.TargetRefs...),
+				}
+				if failure.TargetObservation != nil {
+					observation := failure.TargetObservation.Normalized()
+					aggregate.Facts.Resources.FailureTarget.TargetObservation = &observation
+				}
+			}
 			gap := runtimecontract.RuntimeAssessmentGap{
 				CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), fact.CoverageWorkItemIDs...),
 				TargetRefs:          append([]string(nil), failure.TargetRefs...), Reason: failure.Message,
@@ -456,16 +503,135 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 	return EvidenceCommitResult{Disposition: CommitDispositionCommitted, DispatchCompleted: dispatchCompleted, Aggregate: aggregate}, nil
 }
 
+// validationFailureTargetsAreGrounded verifies that a validation receipt does
+// not promote its command entry to a repair target. It is an SM-2 ownership
+// fence and intentionally uses only facts that existed before this receipt;
+// it never uses the receipt's own target list as evidence of authority.
+func validationFailureTargetsAreGrounded(facts runtimecontract.RuntimeFacts, failure runtimecontract.FailureFact) bool {
+	targets := failure.TargetRefs
+	if len(targets) == 0 {
+		return false
+	}
+	grounded := append([]string(nil), facts.Focus.TargetRefs...)
+	if facts.Resources.FailureTarget != nil {
+		grounded = append(grounded, facts.Resources.FailureTarget.TargetRefs...)
+	}
+	if selection := facts.Resources.TargetSelection; selection != nil && selection.Disposition == runtimecontract.RuntimeTargetSelectionSelected {
+		grounded = append(grounded, selection.TargetRefs...)
+	}
+	if facts.RepairDirective != nil {
+		grounded = append(grounded, facts.RepairDirective.TargetRefs...)
+	}
+	if runtimeTargetRefsIntersect(grounded, targets) {
+		return true
+	}
+	// A current validation receipt may introduce a new target only when the
+	// capability owner explicitly observed it and the observation is bound to
+	// this Focus's declared role. This is deliberately stricter than a command
+	// target or a diagnostic string: no owner/revision/role binding means the
+	// receipt remains ordinary failure lineage and cannot create repair authority.
+	observation := failure.TargetObservation
+	if observation == nil {
+		return false
+	}
+	value := observation.Normalized()
+	if err := value.Validate(); err != nil || value.OwnerModuleID != runtimecontract.RuntimeModuleMCP ||
+		value.TargetRole != facts.Focus.TargetRole || !sameRuntimeTargetRefs(value.TargetRefs, targets) ||
+		!failureTargetObservationHasCurrentFreshness(facts, value) {
+		return false
+	}
+	return facts.Focus.RequireTargetGrounding
+}
+
+func failureTargetObservationHasCurrentFreshness(facts runtimecontract.RuntimeFacts, target runtimecontract.RuntimeFailureTargetObservation) bool {
+	target = target.Normalized()
+	for _, observation := range facts.Resources.PrerequisiteObservations {
+		for _, dependency := range observation.Normalized().Dependencies {
+			if dependency.Domain == runtimecontract.RuntimeResourceOwnerCatalog && dependency.OwnerModuleID == target.OwnerModuleID && dependency.Revision == target.ObservedRevision {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func sameRuntimeTargetRefs(left, right []string) bool {
+	left = normalizeRuntimeTargetRefs(left)
+	right = normalizeRuntimeTargetRefs(right)
+	if len(left) != len(right) {
+		return false
+	}
+	for idx := range left {
+		if left[idx] != right[idx] {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeRuntimeTargetRefs(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	ret := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		seen[value] = struct{}{}
+	}
+	for value := range seen {
+		ret = append(ret, value)
+	}
+	sort.Strings(ret)
+	return ret
+}
+
 // runtimeEvidenceIsEffectiveProgress is an SM-2 decision helper. It is kept in
 // the Orchestrator owner because the contract package must not decide when an
 // aggregate transition may reset repair state. A validation receipt is useful
 // evidence for assessment, but cannot by itself prove convergence progress.
-func runtimeEvidenceIsEffectiveProgress(fact runtimecontract.EvidenceFact, evidence ExecutionEvidence) bool {
+func runtimeEvidenceIsEffectiveProgress(facts runtimecontract.RuntimeFacts, fact runtimecontract.EvidenceFact, evidence ExecutionEvidence) bool {
 	if fact.Kind != runtimecontract.EvidenceKindStateChange || evidence.Receipt == nil {
 		return false
 	}
 	receipt := evidence.Receipt.Normalized()
-	return receipt.Changed && !receipt.NoOp && receipt.ObservedEffectScope == runtimecontract.RuntimeEffectWorkspaceDurable
+	if !receipt.Changed || receipt.NoOp || receipt.ObservedEffectScope != runtimecontract.RuntimeEffectWorkspaceDurable {
+		return false
+	}
+	// A focus that explicitly requires assessment has not demonstrated a gap
+	// delta merely by changing the correct target. The durable receipt invalidates
+	// the old assessment; only the subsequent accepted assessment may reset the
+	// repair ledger or close coverage. This avoids state-change -> same-gap ->
+	// reset loops while preserving non-assessed neutral workflows.
+	if facts.Focus.RequireAssessment {
+		return false
+	}
+	// Use the exact same sealed target precedence as candidate admission and
+	// RepairDirective construction. A selected owner target is therefore not
+	// merely prompt context: an unrelated durable change cannot reset the
+	// current repair window.
+	requiredTargets := GroundedRepairTargets(facts)
+	if len(requiredTargets) == 0 {
+		return true
+	}
+	return runtimeTargetRefsIntersect(requiredTargets, receipt.TargetRefs)
+}
+
+func runtimeTargetRefsIntersect(left, right []string) bool {
+	seen := make(map[string]struct{}, len(left))
+	for _, value := range left {
+		if value = strings.TrimSpace(value); value != "" {
+			seen[value] = struct{}{}
+		}
+	}
+	for _, value := range right {
+		if value = strings.TrimSpace(value); value != "" {
+			if _, ok := seen[value]; ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func repairFailureSignatureCount(ledger runtimecontract.RuntimeRepairLedger, signature string) int {

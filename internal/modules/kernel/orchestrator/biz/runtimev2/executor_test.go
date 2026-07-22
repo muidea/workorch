@@ -49,6 +49,37 @@ type acceptingOperationExecutor struct {
 	called int
 }
 
+// replayProofRecoveryExecutor models an owner whose durable side effect
+// completed but whose receipt CAS failed. The second invocation is only valid
+// when the controller preserves the original execution key/fence and the
+// sealed owner proof.
+type replayProofRecoveryExecutor struct {
+	owner    *RuntimeController
+	requests []RuntimeOperationExecutionRequest
+}
+
+func (e *replayProofRecoveryExecutor) ExecuteRuntimeOperation(ctx context.Context, request RuntimeOperationExecutionRequest) (RuntimeOperationExecutionResult, error) {
+	e.requests = append(e.requests, request)
+	if len(e.requests) == 1 {
+		return RuntimeOperationExecutionResult{}, errors.New("durable side effect completed before receipt CAS loss")
+	}
+	receipt := runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID,
+		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: request.Execution.ExpectedEffectScope,
+		Changed: true, BeforeHash: "before", AfterHash: "after",
+		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "owner replay proof confirmed"},
+	}
+	_, committed, err := e.owner.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+	if err != nil {
+		return RuntimeOperationExecutionResult{}, err
+	}
+	return RuntimeOperationExecutionResult{
+		EventID: "event-" + request.Operation.ID, OperationID: request.Operation.ID, EvidenceKind: request.EvidenceKind,
+		Status: ExecutionEvidenceStatusAccepted, SourceRef: "runtime://" + request.Operation.ID,
+		Evidence: committed.Evidence, Receipt: committed,
+	}, nil
+}
+
 type qualityOperationExecutor struct {
 	owner    *RuntimeController
 	evidence runtimecontract.RuntimeOperationEvidence
@@ -336,6 +367,58 @@ func TestRuntimeControllerReplaysClaimedSafeOperationWithinRecoveryBudget(t *tes
 	if executor.called != 1 || completed.ActiveDispatch != nil || completed.Decision.Action != runtimecontract.RuntimeActionComplete ||
 		completed.Facts.Recovery.OperationRecoveryAttempts != 1 || len(completed.OperationReceipts) != 1 || len(completed.Facts.Evidence.Accepted) != 1 {
 		t.Fatalf("safe claimed recovery sealed=%+v completed=%+v calls=%d", sealed, completed, executor.called)
+	}
+}
+
+func TestRuntimeControllerRecoversClaimedAtMostOnceOperationOnlyWithSealedReplayProof(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, _ := NewRuntimeController(repository)
+	facts := controllerFacts()
+	facts.Capabilities = runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}}
+	definition := controllerDefinition()
+	definition.CapabilityContract = []string{runtimecontract.RuntimeBlockKindPatchApply}
+	_, err := controller.Initialize(context.Background(), facts, definition, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patchType, target, content := "file_write", "target.txt", "after\n"
+	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+		ID: "patch-1", Kind: runtimecontract.RuntimeBlockKindPatchApply, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
+		Parameters: []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "content", String: &content}},
+	}}}}}
+	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.AdmitCandidateProposal(context.Background(), "ws-v2", "run-v2", 0, candidate); err != nil {
+		t.Fatal(err)
+	}
+	proof := runtimecontract.RuntimeOperationReplayProof{
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationID: "patch-1", TargetRefs: []string{target},
+		BeforeHash: "before", AfterHash: "after", AdmissibilitySnapshotID: "admissibility-1",
+	}
+	if _, err := controller.RecordCandidateFeasibility(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+		OperationID: "patch-1", AdmissibilitySnapshotID: "admissibility-1", Feasible: true, ReplayProof: &proof,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := controller.AdmitAndSealCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, candidate)
+	if err != nil || sealed.Aggregate.ActiveDispatch == nil {
+		t.Fatalf("seal replay-proof candidate aggregate=%+v err=%v", sealed.Aggregate, err)
+	}
+	execution, ok := operationExecutionRecord(sealed.Aggregate.ActiveDispatch.OperationExecutions, "patch-1")
+	if !ok || execution.ReplayProof == nil || execution.ReplayProof.AfterHash != "after" {
+		t.Fatalf("sealed execution omitted replay proof: %+v", execution)
+	}
+	executor := &replayProofRecoveryExecutor{owner: controller}
+	completed, err := controller.ExecuteActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(executor.requests) != 2 || executor.requests[0].Execution.ExecutionKey != executor.requests[1].Execution.ExecutionKey || executor.requests[0].Execution.Fence != executor.requests[1].Execution.Fence || executor.requests[1].Execution.ReplayProof == nil {
+		t.Fatalf("recovery did not reuse sealed execution identity/proof: %+v", executor.requests)
+	}
+	if completed.ActiveDispatch != nil || completed.Decision.Action != runtimecontract.RuntimeActionComplete || completed.Facts.Recovery.OperationRecoveryAttempts != 1 || len(completed.OperationReceipts) != 1 || len(completed.Facts.Evidence.Accepted) != 1 {
+		t.Fatalf("replay-proof recovery did not converge exactly once: %+v", completed)
 	}
 }
 

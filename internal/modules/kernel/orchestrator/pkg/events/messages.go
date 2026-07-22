@@ -44,6 +44,27 @@ type AcquireTargetSnapshotResult struct {
 	Observation    *runtimecontract.RuntimePrerequisiteObservation
 }
 
+// AcquireRuntimeTargetSelectionCommand asks the File owner for a bounded
+// target-selection observation. TargetRole is opaque to the owner; the owner
+// may only apply its declared neutral selection rule to the workspace
+// inventory and must return selected, absent, or ambiguous facts.
+type AcquireRuntimeTargetSelectionCommand struct {
+	WorkspaceID                   common.WorkspaceID
+	RunID                         common.RunID
+	AuthoritySnapshotID           string
+	PrerequisiteID                string
+	WorkspaceDeliverableDirectory string
+	TargetRole                    string
+	TargetSelectorRef             string
+	MaxItems                      int
+}
+
+type AcquireRuntimeTargetSelectionResult struct {
+	PrerequisiteID string
+	Selection      runtimecontract.RuntimeTargetSelection
+	Observation    *runtimecontract.RuntimePrerequisiteObservation
+}
+
 type AcquireWorkspaceManifestCommand struct {
 	WorkspaceID                   common.WorkspaceID
 	RunID                         common.RunID
@@ -138,6 +159,7 @@ type ProbeRuntimeOperationFeasibilityResult struct {
 	AdmissibilitySnapshotID string
 	CapabilityStateBinding  string
 	Feasible                bool
+	ReplayProof             *runtimecontract.RuntimeOperationReplayProof
 	Failure                 *runtimecontract.FailureFact
 	Stale                   *runtimecontract.RuntimePrerequisiteStale
 }
@@ -226,6 +248,7 @@ type RuntimeOperationExecutionEnvelope struct {
 	ExecutionKey        string
 	Fence               uint64
 	ExpectedEffectScope runtimecontract.RuntimeEffectScope
+	ReplayProof         *runtimecontract.RuntimeOperationReplayProof
 	GovernanceGrant     *runtimecontract.RuntimeOperationGovernanceGrant
 }
 
@@ -368,7 +391,6 @@ type ShellOperationData struct {
 	StateChanging                   bool
 	TargetRef                       string
 	TargetRefs                      []string
-	RelatedFailureTargets           []string
 	VerificationScope               string
 	BoundedReason                   string
 	ValidationScratchDirectory      string
@@ -577,6 +599,7 @@ type ExecuteMCPOperationCommand struct {
 	CoverageWorkItemIDs           []common.CoverageWorkItemID
 	TargetRefs                    []string
 	EvidenceKind                  string
+	TargetRole                    string
 	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
 	WorkspaceDeliverableDirectory string
 	WorkspaceInternalDirectory    string
@@ -909,6 +932,8 @@ type MCPFailureDiagnosticsData struct {
 	Prompt         string
 	TargetRef      string
 	FailureTargets []string
+	TargetRole     string
+	OwnerRevision  string
 }
 
 type ExecuteSSHOperationResult struct {
@@ -1120,6 +1145,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[ListCoverageWorkItemsByRunCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorCommandListCoverageWorkItemsByRun).MessageContract(),
 		eventcontract.CommandTopic[ListArtifactContinuationsByRunCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorCommandListArtifactContinuationsByRun).MessageContract(),
 		eventcontract.CommandTopic[AcquireTargetSnapshotCommand, AcquireTargetSnapshotResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireTargetSnapshot).MessageContract(),
+		eventcontract.CommandTopic[AcquireRuntimeTargetSelectionCommand, AcquireRuntimeTargetSelectionResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireRuntimeTargetSelection).MessageContract(),
 		eventcontract.CommandTopic[AcquireWorkspaceManifestCommand, AcquireWorkspaceManifestResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireWorkspaceManifest).MessageContract(),
 		eventcontract.CommandTopic[AcquireProviderCeilingCommand, AcquireProviderCeilingResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireProviderCeiling).MessageContract(),
 		eventcontract.CommandTopic[AcquireRuntimeCapabilitiesCommand, AcquireRuntimeCapabilitiesResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireRuntimeCapabilities).MessageContract(),

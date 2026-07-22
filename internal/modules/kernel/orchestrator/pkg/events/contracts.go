@@ -11,6 +11,7 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorCommandListCoverageWorkItemsByRun,
 		TopicOrchestratorCommandListArtifactContinuationsByRun,
 		TopicOrchestratorAcquireTargetSnapshot,
+		TopicOrchestratorAcquireRuntimeTargetSelection,
 		TopicOrchestratorAcquireWorkspaceManifest,
 		TopicOrchestratorAcquireProviderCeiling,
 		TopicOrchestratorAcquireRuntimeCapabilities,

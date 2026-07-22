@@ -21,6 +21,7 @@ import (
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	shellmodule "github.com/muidea/workorch/internal/modules/blocks/shell"
 	shellbiz "github.com/muidea/workorch/internal/modules/blocks/shell/biz"
+	workspacemodule "github.com/muidea/workorch/internal/modules/blocks/workspace"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
@@ -35,6 +36,14 @@ import (
 )
 
 type panicAfterOwnerReceiptExecutor struct {
+	delegate eventRuntimeV2OperationExecutor
+}
+
+// panicAfterOwnerReceiptCommitErrorExecutor models process loss after a
+// capability owner applied its durable effect but before the owner receipt CAS
+// was committed. The nested EventHub error is intentionally not converted into
+// an outcome_unknown transition: the restart must use only the sealed proof.
+type panicAfterOwnerReceiptCommitErrorExecutor struct {
 	delegate eventRuntimeV2OperationExecutor
 }
 
@@ -129,6 +138,14 @@ func (e panicAfterOwnerReceiptExecutor) ExecuteRuntimeOperation(ctx context.Cont
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
 	panic("runtime-v2-test-crash-after-owner-receipt")
+}
+
+func (e panicAfterOwnerReceiptCommitErrorExecutor) ExecuteRuntimeOperation(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest) (runtimev2.RuntimeOperationExecutionResult, error) {
+	result, err := e.delegate.ExecuteRuntimeOperation(ctx, request)
+	if err != nil {
+		panic("runtime-v2-test-crash-after-owner-receipt-commit-error")
+	}
+	return result, nil
 }
 
 func TestDriveRuntimeV2FileBackedRunExecutesDurableFileOwnerAndRestarts(t *testing.T) {
@@ -229,6 +246,393 @@ func TestDriveRuntimeV2FileBackedRunExecutesDurableFileOwnerAndRestarts(t *testi
 	}
 }
 
+// R3-3 / H5-C: each subtest interrupts the same owner-grounded sequence both
+// immediately before and immediately after one Run-owner CAS. A fresh
+// Orchestrator Biz then has no choice but to load that file-backed aggregate
+// and continue through the regular typed EventHub owners. Target selection is
+// intentionally the File owner's neutral unique-inventory observation;
+// neither the fixture nor the Orchestrator synthesizes the selected target
+// from a path hint.
+func TestRuntimeV2FileBackedGroundedTargetStateSequenceRestartsAtCommittedBoundaries(t *testing.T) {
+	boundaries := []struct {
+		name  string
+		match func(runtimev2.RuntimeAggregate) bool
+	}{
+		{
+			name: "target_selection",
+			match: func(aggregate runtimev2.RuntimeAggregate) bool {
+				return aggregate.Facts.Resources.TargetSelection != nil
+			},
+		},
+		{
+			name: "target_snapshot",
+			match: func(aggregate runtimev2.RuntimeAggregate) bool {
+				return len(aggregate.Facts.Resources.TargetSnapshots) == 1
+			},
+		},
+		{
+			name: "candidate_proposal",
+			match: func(aggregate runtimev2.RuntimeAggregate) bool {
+				for _, attempt := range aggregate.CandidateAttempts {
+					if attempt.Proposal != nil && aggregate.ActiveDispatch == nil {
+						return true
+					}
+				}
+				return false
+			},
+		},
+		{
+			name: "receipt_and_evidence",
+			match: func(aggregate runtimev2.RuntimeAggregate) bool {
+				return len(aggregate.OperationReceipts) == 1 && len(aggregate.Facts.Evidence.Accepted) == 1
+			},
+		},
+		{
+			name: "assessment_terminal",
+			match: func(aggregate runtimev2.RuntimeAggregate) bool {
+				return aggregate.Decision.Action == runtimecontract.RuntimeActionComplete && aggregate.Decision.Terminal != nil
+			},
+		},
+	}
+	for _, tc := range boundaries {
+		for _, after := range []bool{false, true} {
+			phase := "before_commit"
+			if after {
+				phase = "after_commit_response_loss"
+			}
+			t.Run(tc.name+"_"+phase, func(t *testing.T) {
+				ctx := context.Background()
+				hub := magicevent.NewHub(32)
+				t.Cleanup(func() { hub.Terminate(ctx) })
+				root := t.TempDir()
+				deliverable, internalDir := filepath.Join(root, "workspace"), filepath.Join(root, "internal")
+				if err := os.MkdirAll(deliverable, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.MkdirAll(internalDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(deliverable, "implementation.txt"), []byte("before\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+
+				bootstrap := runtimeV2GroundedTargetSequenceBootstrap()
+				runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
+				workspaces := filerepository.NewWorkspaceRepository(filepath.Join(root, "workspaces.json"))
+				results := filerepository.NewResultRepository(filepath.Join(root, "results.json"))
+				if err := runs.Create(ctx, &runmodel.Run{
+					ID: "run-v2", WorkspaceID: "ws-v2", GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID,
+					DefinitionRevision: bootstrap.Definition.Revision, RuntimeBootstrap: &bootstrap, State: common.RunStateActive,
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}); err != nil {
+					t.Fatal(err)
+				}
+				runOwner := runmodule.New()
+				if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+					t.Fatal(err)
+				}
+				if err := runOwner.Start(); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+				workspaceOwner := workspacemodule.New()
+				if err := workspaceOwner.Configure(workspacemodule.Dependencies{
+					Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
+					Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub,
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if err := workspaceOwner.Start(); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
+				resultOwner := resultmodule.New()
+				if err := resultOwner.Configure(resultmodule.Dependencies{Results: results, Artifacts: memory.NewArtifactRepository(), EventHub: hub}); err != nil {
+					t.Fatal(err)
+				}
+				if err := resultOwner.Start(); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = resultOwner.Stop(ctx) })
+				fileOwner := filemodule.New()
+				if err := fileOwner.Configure(filemodule.Dependencies{EventHub: hub}); err != nil {
+					t.Fatal(err)
+				}
+				if err := fileOwner.Start(); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
+				startRuntimeV2ReceiptTestOwner(t, hub)
+
+				providerCalls := 0
+				llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+				llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+					providerCalls++
+					command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+					candidate, err := runtimeV2GroundedTargetSequenceCandidate(command)
+					if err != nil {
+						t.Errorf("grounded sequence candidate: %v", err)
+						result.Set(orchestratorevents.RequestRuntimeCandidateResult{
+							Transaction: command.Transaction,
+							Failure:     &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: err.Error()},
+						}, nil)
+						return
+					}
+					result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: candidate}, nil)
+				})
+				t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+
+				crashMarker := "grounded-sequence-" + tc.name + "-" + phase
+				crashRepository := &runtimeV2SaveCrashRepository{
+					delegate: runtimeV2StateRepository{hub: hub}, match: tc.match, after: after, marker: crashMarker,
+				}
+				crashingModule := newRuntimeV2GroundedTargetSequenceModule(t, hub, crashRepository)
+				func() {
+					defer func() {
+						if recovered := recover(); recovered != crashMarker {
+							t.Fatalf("unexpected crash marker: %v", recovered)
+						}
+					}()
+					if err := crashingModule.scheduleRuntimeV2Drive(ctx, "ws-v2", "run-v2", crashMarker); err != nil {
+						t.Fatalf("drive before crash: %v", err)
+					}
+					t.Fatalf("expected crash %s %s CAS", phase, tc.name)
+				}()
+				if !crashRepository.fired {
+					t.Fatalf("crash boundary %s was not reached", tc.name)
+				}
+				crashed, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+				if err != nil || crashed.RuntimeState == nil {
+					t.Fatalf("crashed aggregate missing from Run owner: run=%+v err=%v", crashed, err)
+				}
+				crashedAggregate := runtimeAggregateFromRecord(*crashed.RuntimeState)
+				if after && !tc.match(crashedAggregate) {
+					t.Fatalf("committed %s boundary is absent after response loss: %+v", tc.name, crashedAggregate)
+				}
+				if !after && tc.match(crashedAggregate) {
+					t.Fatalf("uncommitted %s boundary leaked into restarted aggregate: %+v", tc.name, crashedAggregate)
+				}
+
+				restarted := newRuntimeV2GroundedTargetSequenceModule(t, hub, runtimeV2StateRepository{hub: hub})
+				if err := restarted.scheduleRuntimeV2Drive(ctx, "ws-v2", "run-v2", "restart:"+tc.name+":"+phase); err != nil {
+					t.Fatalf("restart drive: %v", err)
+				}
+				persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+				if err != nil || persisted.RuntimeState == nil || persisted.State != common.RunStateCompleted {
+					t.Fatalf("restart terminal run=%+v state=%+v err=%v", persisted, persisted.RuntimeState, err)
+				}
+				state := persisted.RuntimeState
+				if state.Decision.Action != runtimecontract.RuntimeActionComplete || state.Decision.Terminal == nil ||
+					state.Facts.Resources.TargetSelection == nil || state.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionSelected ||
+					len(state.Facts.Resources.TargetSnapshots) != 1 || state.Facts.Resources.TargetSnapshots[0].TargetRef != "implementation.txt" ||
+					len(state.OperationReceipts) != 2 || len(state.Facts.Evidence.Accepted) != 2 || len(state.Facts.Assessments) != 1 {
+					t.Fatalf("restart state sequence did not converge exactly once: %+v", state)
+				}
+				wantProviderCalls := 3
+				// A proposal CAS-before crash is the one permitted retry point: no
+				// proposal exists in the restarted aggregate, so SM-3 has to request
+				// the state-change candidate again. Every other interrupted boundary
+				// has a committed selection/proposal/dispatch or receipt to consume.
+				if tc.name == "candidate_proposal" && !after {
+					wantProviderCalls = 4
+				}
+				if providerCalls != wantProviderCalls {
+					t.Fatalf("provider calls=%d, want %d", providerCalls, wantProviderCalls)
+				}
+				if content, err := os.ReadFile(filepath.Join(deliverable, "implementation.txt")); err != nil || string(content) != "after\n" {
+					t.Fatalf("target durable effect=%q err=%v", content, err)
+				}
+				items, err := results.ListByRun(ctx, "run-v2")
+				if err != nil || len(items) != 1 || items[0].State != common.ResultStateAccepted {
+					t.Fatalf("terminal projection Result=%+v err=%v", items, err)
+				}
+				workspace, err := workspaces.Get(ctx, "ws-v2")
+				if err != nil || workspace.ActiveRunID != "" {
+					t.Fatalf("terminal projection Workspace=%+v err=%v", workspace, err)
+				}
+			})
+		}
+	}
+}
+
+// TestRuntimeV2FileBackedAmbiguousTargetSelectionFailsWithoutProvider keeps
+// target grounding on the production typed-owner path. A profile may declare
+// File's neutral unique-entry selector, but a multi-file workspace is an
+// explicit ambiguous observation, not permission for the Orchestrator, LLM,
+// or validation entry to choose an implementation target.
+func TestRuntimeV2FileBackedAmbiguousTargetSelectionFailsWithoutProvider(t *testing.T) {
+	t.Run("state_change", func(t *testing.T) {
+		testRuntimeV2FileBackedAmbiguousTargetSelectionFailsWithoutProvider(t, runtimeV2GroundedTargetSequenceBootstrap())
+	})
+	t.Run("direct_validation", func(t *testing.T) {
+		testRuntimeV2FileBackedAmbiguousTargetSelectionFailsWithoutProvider(t, runtimeV2GroundedTargetValidationBootstrap())
+	})
+}
+
+func testRuntimeV2FileBackedAmbiguousTargetSelectionFailsWithoutProvider(t *testing.T, bootstrap runtimecontract.RuntimeBootstrap) {
+	t.Helper()
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	root := t.TempDir()
+	deliverable, internalDir := filepath.Join(root, "workspace"), filepath.Join(root, "internal")
+	if err := os.MkdirAll(deliverable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(internalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{"validation-entry.go": "package fixture\n", "implementation.go": "package fixture\n"} {
+		if err := os.WriteFile(filepath.Join(deliverable, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
+	if err := runs.Create(ctx, &runmodel.Run{
+		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID,
+		DefinitionRevision: bootstrap.Definition.Revision, RuntimeBootstrap: &bootstrap, State: common.RunStateActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+	fileOwner := filemodule.New()
+	if err := fileOwner.Configure(filemodule.Dependencies{EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
+
+	providerCalls := 0
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		providerCalls++
+		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Failure: &runtimecontract.RuntimeCandidateFailure{
+			Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: "provider must not be called for ambiguous target selection",
+		}}, nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	governanceRequests := 0
+	governanceObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleDecision, hub)
+	governanceObserver.Subscribe(orchestratorevents.TopicOrchestratorOpenRuntimeGovernanceRequest, func(_ magicevent.Event, result magicevent.Result) {
+		governanceRequests++
+		result.Set(nil, nil)
+	})
+	t.Cleanup(func() {
+		governanceObserver.Unsubscribe(orchestratorevents.TopicOrchestratorOpenRuntimeGovernanceRequest)
+	})
+	module := newRuntimeV2GroundedTargetSequenceModule(t, hub, runtimeV2StateRepository{hub: hub})
+	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
+	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, module.handleRuntimeV2Drive)
+	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
+
+	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
+	if err != nil || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.Action != runtimecontract.RuntimeActionFail || completed.Terminal == nil || completed.Terminal.Code != "target_grounding_unresolved" {
+		t.Fatalf("ambiguous owner target result=%+v err=%v", completed, err)
+	}
+	if providerCalls != 0 {
+		t.Fatalf("ambiguous target selection called provider %d times", providerCalls)
+	}
+	if governanceRequests != 0 {
+		t.Fatalf("ambiguous target selection opened %d governance requests", governanceRequests)
+	}
+	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil || persisted.RuntimeState == nil || persisted.RuntimeState.ActiveDispatch != nil || persisted.RuntimeState.Decision.Action != runtimecontract.RuntimeActionFail || persisted.RuntimeState.Decision.Terminal == nil ||
+		persisted.RuntimeState.Facts.Resources.TargetSelection == nil || persisted.RuntimeState.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionAmbiguous ||
+		persisted.RuntimeState.Facts.Resources.TargetSelection.CandidateCount != 2 || len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 0 ||
+		len(persisted.RuntimeState.OperationReceipts) != 0 || len(persisted.RuntimeState.Facts.Evidence.Accepted) != 0 {
+		t.Fatalf("ambiguous target selection persisted wrong authority state=%+v err=%v", persisted, err)
+	}
+}
+
+func runtimeV2GroundedTargetSequenceBootstrap() runtimecontract.RuntimeBootstrap {
+	bootstrap := runtimeV2Bootstrap()
+	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileEdit, runtimecontract.StepKindFileRead}
+	bootstrap.Focuses = []runtimecontract.CoverageFocus{{
+		ID: "focus-v2", SliceID: "slice-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},
+		TargetRole:            "deliverable", TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
+		TargetSelectorRef: "file/unique_workspace_entry", RequireTargetGrounding: true, RequireAssessment: true,
+		AcceptedStepKinds: []string{runtimecontract.StepKindFileEdit, runtimecontract.StepKindFileRead},
+	}}
+	bootstrap.Slices[0].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
+	bootstrap.Requirements = []runtimecontract.RuntimeRequirement{
+		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.StepKindFileEdit}},
+		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.StepKindFileRead}},
+	}
+	return bootstrap
+}
+
+func runtimeV2GroundedTargetValidationBootstrap() runtimecontract.RuntimeBootstrap {
+	bootstrap := runtimeV2GroundedTargetSequenceBootstrap()
+	bootstrap.Focuses[0].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	bootstrap.Focuses[0].RequireDirectEvidence = true
+	bootstrap.Slices[0].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	return bootstrap
+}
+
+func runtimeV2GroundedTargetSequenceCandidate(command orchestratorevents.RequestRuntimeCandidateCommand) (runtimecontract.RuntimeCandidate, error) {
+	target := "implementation.txt"
+	switch command.Decision.Action {
+	case runtimecontract.RuntimeActionProduceStateChange:
+		oldText, newText := "before\n", "after\n"
+		return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+			ID: "grounded-edit", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
+			Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &target}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}},
+		}}}}}, nil
+	case runtimecontract.RuntimeActionProduceValidation:
+		return runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
+			ID: "grounded-read", Kind: runtimecontract.StepKindFileRead, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
+			Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &target}},
+		}}}}}, nil
+	case runtimecontract.RuntimeActionProduceAssessment:
+		refs := make([]string, 0, len(command.CandidateContext.Evidence.Accepted))
+		for _, evidence := range command.CandidateContext.Evidence.Accepted {
+			refs = append(refs, string(evidence.ID))
+		}
+		return runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
+			FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Disposition: runtimecontract.AssessmentDispositionSatisfied,
+			Summary: "grounded target evidence satisfied",
+			Items:   []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-v2", Satisfied: true, EvidenceRefs: refs}}, EvidenceRefs: refs,
+		}}, nil
+	default:
+		return runtimecontract.RuntimeCandidate{}, fmt.Errorf("unexpected grounded sequence action %q", command.Decision.Action)
+	}
+}
+
+func newRuntimeV2GroundedTargetSequenceModule(t *testing.T, hub magicevent.Hub, repository runtimev2.RuntimeStateRepository) *Biz {
+	t.Helper()
+	module := New()
+	if err := module.Configure(Dependencies{
+		ToolCalls: memory.NewToolCallRepository(), Patches: memory.NewPatchRepository(),
+		ValidationResults: memory.NewValidationResultRepository(), EvidenceRecords: memory.NewEvidenceRecordRepository(),
+		CoverageWorkItems: memory.NewCoverageWorkItemRepository(), ArtifactContinuations: memory.NewArtifactContinuationRepository(),
+		CommandHub: hub,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.bizPtr.ConfigureRuntimeV2Repository(repository); err != nil {
+		t.Fatal(err)
+	}
+	return module
+}
+
 func TestRuntimeV2FileBackedGitCapabilityStateSequenceMatrix(t *testing.T) {
 	testCases := []struct {
 		name               string
@@ -317,6 +721,7 @@ func TestRuntimeV2FileBackedGitCapabilityStateSequenceMatrix(t *testing.T) {
 				result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 			})
 			t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+			startRuntimeV2FileManifestOwner(t, ctx, hub)
 
 			receipts, err := gitbiz.NewCapabilityStateReceiptStore(filepath.Join(root, "git-owner-data"))
 			if err != nil {
@@ -408,6 +813,7 @@ func TestRuntimeV2FileBackedGitRestartAfterInitEvidenceCommitContinuesSequence(t
 		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+	startRuntimeV2FileManifestOwner(t, ctx, hub)
 	receipts, err := gitbiz.NewCapabilityStateReceiptStore(filepath.Join(root, "git-owner-data"))
 	if err != nil {
 		t.Fatal(err)
@@ -544,6 +950,7 @@ func TestRuntimeV2FileBackedGitQueryReceiptCrashBeforePrerequisiteCommitReusesSn
 		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+	startRuntimeV2FileManifestOwner(t, ctx, hub)
 	storeRoot := filepath.Join(root, "git-owner-data")
 	store, err := gitbiz.NewCapabilityStateReceiptStore(storeRoot)
 	if err != nil {
@@ -695,6 +1102,7 @@ func TestRuntimeV2FileBackedGitSnapshotCommitCrashBeforeCandidateReusesCommitted
 		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+	startRuntimeV2FileManifestOwner(t, ctx, hub)
 	storeRoot := filepath.Join(root, "git-owner-data")
 	store, err := gitbiz.NewCapabilityStateReceiptStore(storeRoot)
 	if err != nil {
@@ -1093,6 +1501,7 @@ func TestRuntimeV2FileBackedGitStaleRefreshCrashRestartDoesNotReplayOldDispatch(
 		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+	startRuntimeV2FileManifestOwner(t, ctx, hub)
 	storeRoot := filepath.Join(root, "git-owner-data")
 	store, err := gitbiz.NewCapabilityStateReceiptStore(storeRoot)
 	if err != nil {
@@ -1323,7 +1732,7 @@ func TestRuntimeV2FileBackedPatchVariantMatrix(t *testing.T) {
 		want      string
 	}{
 		{
-			name: "file_write", target: "written.txt", variant: "file_write", want: "written\n",
+			name: "file_write", target: "written.txt", initial: "old\n", variant: "file_write", want: "written\n",
 			candidate: func() runtimecontract.RuntimeCandidate {
 				patchType, content, target := "file_write", "written\n", "written.txt"
 				return runtimeV2PatchCandidate("patch-file-write", target, []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "content", String: &content}})
@@ -1364,7 +1773,7 @@ func TestRuntimeV2FileBackedPatchVariantMatrix(t *testing.T) {
 				}
 			}
 
-			bootstrap := runtimeV2PatchVariantBootstrap(testCase.variant)
+			bootstrap := runtimeV2PatchVariantBootstrap(testCase.variant, testCase.target)
 			runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
 			if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2", DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, State: common.RunStateActive}); err != nil {
 				t.Fatal(err)
@@ -1413,17 +1822,288 @@ func TestRuntimeV2FileBackedPatchVariantMatrix(t *testing.T) {
 	}
 }
 
-func runtimeV2PatchVariantBootstrap(variant string) runtimecontract.RuntimeBootstrap {
+func runtimeV2PatchVariantBootstrap(variant, target string) runtimecontract.RuntimeBootstrap {
 	bootstrap := runtimeV2Bootstrap()
 	bootstrap.Definition.CapabilityContract = []string{runtimecontract.RuntimeBlockKindPatchApply}
 	bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
 	bootstrap.Focuses[0].AcceptedOperationVariants = []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: variant}}
-	bootstrap.Requirements = []runtimecontract.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindPatchApply}, Reason: "patch capability required"}}
+	bootstrap.Focuses[0].TargetRefs = []string{target}
+	bootstrap.Requirements = []runtimecontract.RuntimeRequirement{
+		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindPatchApply}, Reason: "patch capability required"},
+		{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindPatchApply}, Reason: "patch owner inventory required"},
+	}
 	return bootstrap
 }
 
 func runtimeV2PatchCandidate(id, target string, parameters []runtimecontract.OperationParameter) runtimecontract.RuntimeCandidate {
 	return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{ID: id, Kind: runtimecontract.RuntimeBlockKindPatchApply, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target}, Parameters: parameters}}}}}
+}
+
+func TestRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t *testing.T) {
+	testCases := []struct {
+		name        string
+		target      string
+		initial     string
+		variant     string
+		operationID string
+		want        string
+		candidate   func(string) runtimecontract.RuntimeCandidate
+	}{
+		{
+			name: "file_write", target: "written.txt", initial: "old\n", variant: "file_write", operationID: "patch-file-write", want: "written\n",
+			candidate: func(target string) runtimecontract.RuntimeCandidate {
+				patchType, content := "file_write", "written\n"
+				return runtimeV2PatchCandidate("patch-file-write", target, []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "content", String: &content}})
+			},
+		},
+		{
+			name: "text_replace", target: "written.txt", initial: "old\n", variant: "text_replace", operationID: "patch-text-replace", want: "written\n",
+			candidate: func(target string) runtimecontract.RuntimeCandidate {
+				patchType, oldText, newText := "text_replace", "old\n", "written\n"
+				return runtimeV2PatchCandidate("patch-text-replace", target, []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}})
+			},
+		},
+		{
+			name: "unified_diff", target: "written.txt", initial: "old\n", variant: "unified_diff", operationID: "patch-unified-diff", want: "written\n",
+			candidate: func(target string) runtimecontract.RuntimeCandidate {
+				patchType := "unified_diff"
+				diff := "--- a/written.txt\n+++ b/written.txt\n@@ -1,1 +1,1 @@\n-old\n+written\n"
+				return runtimeV2PatchCandidate("patch-unified-diff", target, []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "diff", String: &diff}})
+			},
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			testRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t, testCase.target, testCase.initial, testCase.variant, testCase.operationID, testCase.want, testCase.candidate)
+		})
+	}
+}
+
+func testRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t *testing.T, target, initial, variant, operationID, want string, candidateForTarget func(string) runtimecontract.RuntimeCandidate) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	root := t.TempDir()
+	deliverable, internalDir := filepath.Join(root, "workspace"), filepath.Join(root, "internal")
+	if err := os.MkdirAll(deliverable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(internalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bootstrap := runtimeV2PatchVariantBootstrap(variant, target)
+	// Make the continuation cross the P4 assessment boundary as well as the
+	// P3 owner-receipt boundary. Other patch-variant tests intentionally keep
+	// their bootstrap validation-free, so scope this requirement to this
+	// receipt-loss recovery sequence.
+	bootstrap.Focuses[0].RequireAssessment = true
+	runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
+	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2", DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, State: common.RunStateActive}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(deliverable, target), []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+	fileOwner := filemodule.New()
+	if err := fileOwner.Configure(filemodule.Dependencies{EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
+	baseRepository := runtimeV2StateRepository{hub: hub}
+	failingRepository := &failWhenRuntimeStateRepository{
+		RuntimeStateRepository: baseRepository, err: errors.New("injected owner receipt CAS failure"),
+		match: func(aggregate runtimev2.RuntimeAggregate) bool {
+			if aggregate.ActiveDispatch == nil || len(aggregate.OperationReceipts) != 1 || aggregate.EvidenceSequence != 0 {
+				return false
+			}
+			execution, found := runtimeV2DriveOperationExecutionRecord(aggregate.ActiveDispatch.OperationExecutions, operationID)
+			return found && execution.State == runtimecontract.OperationExecutionOwnerCommitted
+		},
+	}
+	crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	if err := crashingBiz.ConfigureRuntimeV2Repository(failingRepository); err != nil {
+		t.Fatal(err)
+	}
+	crashingModule := newTestBiz(crashingBiz, hub, nil)
+	receiptObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
+	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, crashingModule.handleRuntimeV2OperationReceipt)
+	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, crashingModule.handleRuntimeV2OperationReceipt)
+
+	run, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err := crashingBiz.InitializeRuntimeV2FromRun(ctx, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err = crashingModule.prepareRuntimeV2Prerequisites(ctx, aggregate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := candidateForTarget(target)
+	providerCalls := 0
+	stateChangeCalls := 0
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		providerCalls++
+		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		if command.Decision.Action == runtimecontract.RuntimeActionProduceAssessment {
+			evidenceRefs := make([]string, 0, len(command.CandidateContext.Evidence.Accepted))
+			for _, evidence := range command.CandidateContext.Evidence.Accepted {
+				evidenceRefs = append(evidenceRefs, string(evidence.ID))
+			}
+			result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
+				FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Disposition: runtimecontract.AssessmentDispositionSatisfied,
+				Summary: "replay-proof durable patch assessed", Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-v2", Satisfied: true, EvidenceRefs: evidenceRefs}}, EvidenceRefs: evidenceRefs,
+			}}}, nil)
+			return
+		}
+		if command.Decision.Action == runtimecontract.RuntimeActionProduceStateChange {
+			stateChangeCalls++
+		}
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: candidate}, nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
+	aggregate, err = crashingModule.requestAndSealRuntimeV2CandidateWithRetry(ctx, aggregate, prefix)
+	if err != nil || aggregate.ActiveDispatch == nil {
+		t.Fatalf("seal replay-proof dispatch aggregate=%+v err=%v", aggregate, err)
+	}
+	sealedDispatchID := aggregate.ActiveDispatch.ID
+	sealedExecution, found := runtimeV2DriveOperationExecutionRecord(aggregate.ActiveDispatch.OperationExecutions, operationID)
+	if !found || sealedExecution.ReplayProof == nil {
+		t.Fatalf("patch dispatch has no sealed replay proof: %+v", sealedExecution)
+	}
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != "runtime-v2-test-crash-after-owner-receipt-commit-error" {
+				t.Fatalf("unexpected crash marker: %v", recovered)
+			}
+		}()
+		_, _ = crashingBiz.ExecuteRuntimeV2Dispatch(ctx, "ws-v2", "run-v2", panicAfterOwnerReceiptCommitErrorExecutor{delegate: eventRuntimeV2OperationExecutor{hub: hub}})
+		t.Fatal("expected injected receipt-CAS crash")
+	}()
+	if !failingRepository.failed {
+		t.Fatal("owner receipt CAS failure point was not reached")
+	}
+	if content, err := os.ReadFile(filepath.Join(deliverable, target)); err != nil || string(content) != want {
+		t.Fatalf("durable side effect before restart content=%q err=%v", content, err)
+	}
+	crashed, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil || crashed.RuntimeState == nil || crashed.RuntimeState.ActiveDispatch == nil || len(crashed.RuntimeState.OperationReceipts) != 0 || crashed.RuntimeState.EvidenceSequence != 0 {
+		t.Fatalf("receipt-CAS crash persisted state=%+v err=%v", crashed, err)
+	}
+	claimed, found := runtimeV2DriveOperationExecutionRecord(crashed.RuntimeState.ActiveDispatch.OperationExecutions, operationID)
+	if !found || claimed.State != runtimecontract.OperationExecutionClaimed || claimed.Fence == 0 || claimed.ExecutionKey != sealedExecution.ExecutionKey || claimed.ReplayProof == nil {
+		t.Fatalf("receipt-CAS crash lost claimed proof execution=%+v", claimed)
+	}
+
+	receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
+	receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
+	restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	if err := restartedBiz.ConfigureRuntimeV2Repository(baseRepository); err != nil {
+		t.Fatal(err)
+	}
+	restartedModule := newTestBiz(restartedBiz, hub, nil)
+	restartedReceiptObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
+	restartedReceiptObserver.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, restartedModule.handleRuntimeV2OperationReceipt)
+	restartedReceiptObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, restartedModule.handleRuntimeV2OperationReceipt)
+	t.Cleanup(func() {
+		restartedReceiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
+		restartedReceiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
+	})
+	completed, err := restartedBiz.ExecuteRuntimeV2Dispatch(ctx, "ws-v2", "run-v2", eventRuntimeV2OperationExecutor{hub: hub})
+	if err != nil || completed.ActiveDispatch != nil || completed.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || completed.Facts.Recovery.OperationRecoveryAttempts != 1 || len(completed.OperationReceipts) != 1 || len(completed.Facts.Evidence.Accepted) != 1 {
+		t.Fatalf("restart did not recover proof-bound receipt exactly once aggregate=%+v err=%v", completed, err)
+	}
+	receipt := completed.OperationReceipts[0]
+	if receipt.ExecutionKey != claimed.ExecutionKey || receipt.Fence != claimed.Fence || receipt.BeforeHash != claimed.ReplayProof.BeforeHash || receipt.AfterHash != claimed.ReplayProof.AfterHash {
+		t.Fatalf("restart did not retain sealed execution/receipt delta receipt=%+v claimed=%+v", receipt, claimed)
+	}
+	// A duplicate owner delivery after process reconstruction must resolve the
+	// same persisted key/fence receipt. It must neither reapply the durable
+	// patch nor mutate the Run aggregate after the first recovered evidence
+	// commit.
+	var sealedDispatch runtimev2.SealedDispatch
+	for _, value := range completed.CompletedDispatches {
+		if value.ID == sealedDispatchID {
+			sealedDispatch = value
+			break
+		}
+	}
+	if sealedDispatch.ID == "" || sealedDispatch.Candidate.StateChange == nil || len(sealedDispatch.Candidate.StateChange.Operations) != 1 {
+		t.Fatalf("recovered dispatch is unavailable for duplicate delivery: %+v", completed.CompletedDispatches)
+	}
+	duplicate, err := (eventRuntimeV2OperationExecutor{hub: hub}).ExecuteRuntimeOperation(ctx, runtimev2.RuntimeOperationExecutionRequest{
+		WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: sealedDispatch.ID, Transaction: sealedDispatch.Transaction,
+		Operation: sealedDispatch.Candidate.StateChange.Operations[0].Operation, Execution: claimed,
+		EvidenceKind: runtimecontract.EvidenceKindStateChange, TargetRole: completed.Facts.Focus.TargetRole,
+	})
+	if err != nil || duplicate.Receipt.ExecutionKey != receipt.ExecutionKey || duplicate.Receipt.Fence != receipt.Fence ||
+		duplicate.Receipt.BeforeHash != receipt.BeforeHash || duplicate.Receipt.AfterHash != receipt.AfterHash {
+		t.Fatalf("duplicate owner delivery did not reuse persisted receipt result=%+v err=%v", duplicate, err)
+	}
+	if content, readErr := os.ReadFile(filepath.Join(deliverable, target)); readErr != nil || string(content) != want {
+		t.Fatalf("duplicate owner delivery rewrote durable target content=%q err=%v", content, readErr)
+	}
+	loaded, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil || loaded.RuntimeState == nil || loaded.RuntimeState.StateRevision != completed.StateRevision ||
+		len(loaded.RuntimeState.OperationReceipts) != 1 || len(loaded.RuntimeState.Facts.Evidence.Accepted) != 1 {
+		t.Fatalf("duplicate owner delivery changed persisted aggregate=%+v err=%v", loaded, err)
+	}
+
+	// Continue through the normal drive after the reconstructed receipt. This
+	// ties P3's owner-receipt loss to P4's evidence/assessment transition: the
+	// restart may only consume the original key/fence receipt and must not ask
+	// the provider for a second state-changing candidate before terminal
+	// authority is committed.
+	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
+	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, restartedModule.handleRuntimeV2Drive)
+	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
+	terminal, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
+	if err != nil || terminal.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || terminal.Action != runtimecontract.RuntimeActionComplete || terminal.Terminal == nil {
+		t.Fatalf("receipt-loss continuation did not commit terminal authority result=%+v err=%v", terminal, err)
+	}
+	if providerCalls != 2 || stateChangeCalls != 1 {
+		t.Fatalf("receipt-loss continuation provider calls=%d state-change calls=%d, want one initial patch and one assessment", providerCalls, stateChangeCalls)
+	}
+	terminalAggregate, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil || terminalAggregate.RuntimeState == nil || terminalAggregate.RuntimeState.ActiveDispatch != nil ||
+		terminalAggregate.RuntimeState.Decision.Action != runtimecontract.RuntimeActionComplete || terminalAggregate.RuntimeState.Decision.Terminal == nil ||
+		len(terminalAggregate.RuntimeState.OperationReceipts) != 1 || len(terminalAggregate.RuntimeState.Facts.Evidence.Accepted) != 1 ||
+		len(terminalAggregate.RuntimeState.Facts.Assessments) != 1 {
+		t.Fatalf("receipt-loss continuation changed P3/P4 identities or missed assessment terminal aggregate=%+v err=%v", terminalAggregate, err)
+	}
+	finalReceipt := terminalAggregate.RuntimeState.OperationReceipts[0]
+	if finalReceipt.ExecutionKey != receipt.ExecutionKey || finalReceipt.Fence != receipt.Fence || finalReceipt.BeforeHash != receipt.BeforeHash || finalReceipt.AfterHash != receipt.AfterHash {
+		t.Fatalf("terminal continuation replaced reconstructed receipt before=%+v after=%+v", receipt, finalReceipt)
+	}
+}
+
+func runtimeV2DriveOperationExecutionRecord(values []runtimecontract.RuntimeOperationExecutionRecord, operationID string) (runtimecontract.RuntimeOperationExecutionRecord, bool) {
+	for _, value := range values {
+		if value.OperationID == operationID {
+			return value, true
+		}
+	}
+	return runtimecontract.RuntimeOperationExecutionRecord{}, false
 }
 
 func TestRuntimeV2FileBackedPatchVariantRestartAfterOwnerReceipt(t *testing.T) {
@@ -1436,7 +2116,7 @@ func TestRuntimeV2FileBackedPatchVariantRestartAfterOwnerReceipt(t *testing.T) {
 		want      string
 	}{
 		{
-			name: "file_write", target: "written.txt", variant: "file_write", want: "written\n",
+			name: "file_write", target: "written.txt", initial: "old\n", variant: "file_write", want: "written\n",
 			candidate: func() runtimecontract.RuntimeCandidate {
 				patchType, content, target := "file_write", "written\n", "written.txt"
 				return runtimeV2PatchCandidate("patch-file-write", target, []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "content", String: &content}})
@@ -1476,7 +2156,7 @@ func TestRuntimeV2FileBackedPatchVariantRestartAfterOwnerReceipt(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			bootstrap := runtimeV2PatchVariantBootstrap(testCase.variant)
+			bootstrap := runtimeV2PatchVariantBootstrap(testCase.variant, testCase.target)
 			runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
 			if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2", DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, State: common.RunStateActive}); err != nil {
 				t.Fatal(err)
@@ -1541,7 +2221,12 @@ func TestRuntimeV2FileBackedPatchVariantRestartAfterOwnerReceipt(t *testing.T) {
 			}()
 			content, err := os.ReadFile(filepath.Join(deliverable, testCase.target))
 			if err != nil || string(content) != testCase.want {
-				t.Fatalf("side effect before patch restart content=%q err=%v want=%q", content, err, testCase.want)
+				state, _ := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+				var failure *runtimecontract.FailureFact
+				if state.RuntimeState != nil && len(state.RuntimeState.OperationReceipts) > 0 {
+					failure = state.RuntimeState.OperationReceipts[0].Failure
+				}
+				t.Fatalf("side effect before patch restart content=%q err=%v want=%q failure=%+v", content, err, testCase.want, failure)
 			}
 			crashed, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 			if err != nil || crashed.RuntimeState == nil || crashed.RuntimeState.ActiveDispatch == nil || len(crashed.RuntimeState.OperationReceipts) != 1 || crashed.RuntimeState.EvidenceSequence != 0 {
@@ -2722,6 +3407,18 @@ func TestRequestAndSealRuntimeV2CandidateReacquiresProviderCeilingAfterTypedStal
 		invalidated.Facts.Repair.RepairAttempts != 0 || invalidated.Facts.Recovery.ProviderTransportAttempts != 0 {
 		t.Fatalf("provider configuration stale did not return to clean prerequisite acquisition: %+v", invalidated)
 	}
+}
+
+func startRuntimeV2FileManifestOwner(t *testing.T, ctx context.Context, hub magicevent.Hub) {
+	t.Helper()
+	fileOwner := filemodule.New()
+	if err := fileOwner.Configure(filemodule.Dependencies{EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
 }
 
 func newRuntimeV2DriveTestModule(t *testing.T, hub magicevent.Hub) *Biz {

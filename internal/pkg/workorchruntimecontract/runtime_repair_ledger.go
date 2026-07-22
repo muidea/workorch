@@ -191,6 +191,19 @@ func (l RuntimeRepairLedger) NoteProgress(revision string) RuntimeRepairLedger {
 	return l
 }
 
+// NoteGapProgress resets only the same-focus no-progress windows after the
+// caller has established a strictly narrower persisted assessment gap. Unlike
+// NoteProgress it retains the remaining gap so the next reducer transition
+// cannot treat a partial assessment as focus completion. It is a pure value
+// transformation; the Orchestrator decides when an assessment proves this
+// delta.
+func (l RuntimeRepairLedger) NoteGapProgress(gap RuntimeAssessmentGap, revision string) RuntimeRepairLedger {
+	l = l.NoteProgress(revision)
+	gap = gap.Normalized()
+	l.ActiveGap = &gap
+	return l
+}
+
 // RecordNoProgressOperationShape is a pure ledger update. It deliberately does
 // not decide whether a receipt made progress; that decision remains in the
 // Orchestrator state machine.

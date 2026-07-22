@@ -109,9 +109,13 @@ func repairDirectiveEvidenceSatisfied(facts runtimecontract.RuntimeFacts, direct
 	}
 	accepted := map[string]struct{}{}
 	for _, evidence := range facts.Evidence.Accepted {
-		if runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) {
-			accepted[strings.TrimSpace(evidence.Kind)] = struct{}{}
+		if !runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) {
+			continue
 		}
+		if evidence.Kind == runtimecontract.EvidenceKindStateChange && len(directive.TargetRefs) > 0 && !runtimeTargetRefsIntersect(directive.TargetRefs, evidence.TargetRefs) {
+			continue
+		}
+		accepted[strings.TrimSpace(evidence.Kind)] = struct{}{}
 	}
 	for _, kind := range required {
 		if _, ok := accepted[strings.TrimSpace(kind)]; !ok {
@@ -155,7 +159,7 @@ func buildRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimeco
 		RequiredEvidenceKinds: required.RequiredEvidenceKinds,
 		AllowedOperationKinds: required.AcceptedKinds,
 		CoverageWorkItemIDs:   required.CoverageWorkItemIDs,
-		TargetRefs:            required.TargetRefs,
+		TargetRefs:            repairDirectiveTargets(facts, required.TargetRefs),
 		RepairAttempt:         attempt,
 	}
 	if facts.Failure != nil {
@@ -173,14 +177,43 @@ func buildRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimeco
 	return directive.Normalized()
 }
 
+// repairDirectiveTargets is an SM-2 ownership rule: an explicit Focus target
+// is immutable authority; otherwise a persisted owner failure target grounds
+// the next repair. The runtime core does not infer source/test roles from path
+// names or provider text.
+func repairDirectiveTargets(facts runtimecontract.RuntimeFacts, fallback []string) []string {
+	if len(facts.Focus.TargetRefs) > 0 {
+		return append([]string(nil), facts.Focus.TargetRefs...)
+	}
+	if facts.Resources.FailureTarget != nil && len(facts.Resources.FailureTarget.TargetRefs) > 0 {
+		return append([]string(nil), facts.Resources.FailureTarget.TargetRefs...)
+	}
+	if facts.Failure != nil && len(facts.Failure.TargetRefs) > 0 {
+		return append([]string(nil), facts.Failure.TargetRefs...)
+	}
+	if selection := facts.Resources.TargetSelection; selection != nil && selection.Disposition == runtimecontract.RuntimeTargetSelectionSelected && len(selection.TargetRefs) > 0 {
+		return append([]string(nil), selection.TargetRefs...)
+	}
+	return append([]string(nil), fallback...)
+}
+
 func acceptedStateChangeAfterRepairDirective(facts runtimecontract.RuntimeFacts, directive *runtimecontract.RuntimeRepairDirective) bool {
 	if directive == nil {
 		return false
 	}
+	// Assessment-required focuses need a persisted post-change assessment before
+	// SM-2 can claim that the repair progressed or move on to validation.
+	if facts.Focus.RequireAssessment {
+		return false
+	}
 	baseline := strings.TrimSpace(directive.SupersedesEvidenceRevision)
+	requiredTargets := directive.TargetRefs
 	for _, evidence := range facts.Evidence.Accepted {
 		if runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) && evidence.Kind == runtimecontract.EvidenceKindStateChange &&
 			(baseline == "" || runtimecontract.EvidenceRevisionAfter(evidence.Revision, baseline)) {
+			if len(requiredTargets) > 0 && !runtimeTargetRefsIntersect(requiredTargets, evidence.TargetRefs) {
+				continue
+			}
 			return true
 		}
 	}

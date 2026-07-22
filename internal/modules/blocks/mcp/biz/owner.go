@@ -28,6 +28,10 @@ type Biz struct {
 type Dependencies struct {
 	EventHub          magicevent.Hub
 	BackgroundRoutine task.BackgroundRoutine
+	// RuntimeAdapter is an explicit owner-local dependency for focused
+	// runtimes and tests. Production leaves it nil so the typed MCP registry
+	// remains the sole adapter construction source.
+	RuntimeAdapter *RuntimeAdapter
 }
 
 func New(eventHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine) (*Biz, error) {
@@ -41,7 +45,14 @@ func New(eventHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine) (*Bi
 }
 
 func NewWithDependencies(deps Dependencies) (*Biz, error) {
-	return New(deps.EventHub, deps.BackgroundRoutine)
+	owner, err := New(deps.EventHub, deps.BackgroundRoutine)
+	if err != nil {
+		return nil, err
+	}
+	if deps.RuntimeAdapter != nil {
+		owner.runtimeAdapter = deps.RuntimeAdapter
+	}
+	return owner, nil
 }
 
 func (m *Biz) Start() error {
@@ -91,7 +102,8 @@ func (m *Biz) handleMCPOperation(event magicevent.Event, result magicevent.Resul
 		WorkspaceID: command.WorkspaceID, RunID: command.RunID, StepID: common.StepID(command.DispatchID + "/" + command.OperationID),
 		Kind: command.OperationKind, WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
 		WorkspaceInternalDirectory: command.WorkspaceInternalDirectory, TargetRefs: command.TargetRefs,
-		Data: command.Data, EvidencePolicies: command.EvidencePolicies,
+		TargetRole: command.TargetRole,
+		Data:       command.Data, EvidencePolicies: command.EvidencePolicies,
 	})
 	response := orchestratorevents.ExecuteMCPOperationResult{
 		EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID,
@@ -106,13 +118,13 @@ func (m *Biz) handleMCPOperation(event magicevent.Event, result magicevent.Resul
 			Diagnostics: orchestratorevents.MCPFailureDiagnosticsData{
 				Operation: operationResult.Diagnostics.Operation, ServerID: operationResult.Diagnostics.ServerID, Tool: operationResult.Diagnostics.Tool,
 				URI: operationResult.Diagnostics.URI, Prompt: operationResult.Diagnostics.Prompt, TargetRef: operationResult.Diagnostics.TargetRef,
-				FailureTargets: append([]string(nil), operationResult.Diagnostics.FailureTargets...),
+				FailureTargets: append([]string(nil), operationResult.Diagnostics.FailureTargets...), TargetRole: operationResult.Diagnostics.TargetRole, OwnerRevision: operationResult.OwnerRevision,
 			},
 		},
 	}
 	if executeErr != nil {
 		response.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
-		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, command.OperationKind, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
+		response.Failure = orchestratorevents.RuntimeOperationFailureWithTargetObservation(command.Transaction, command.OperationKind, operationResult.FailureCode, operationResult.FailureMessage, mcpFailureTargets(operationResult), mcpFailureTargetObservation(operationResult))
 	}
 	observation := orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectUnknown}
 	if response.Status == runtimecontract.RuntimeOperationExecutionStatusAccepted {
@@ -127,6 +139,25 @@ func (m *Biz) handleMCPOperation(event magicevent.Event, result magicevent.Resul
 	}
 	response.Receipt = committed
 	result.Set(response, nil)
+}
+
+// mcpFailureTargets preserves only the bounded failure surface actually
+// observed by the MCP owner. An operation target identifies what was queried;
+// without an explicit owner observation there is no related failure target.
+func mcpFailureTargets(result RuntimeOperationResult) []string {
+	return normalizeMCPTargetRefs(result.Diagnostics.FailureTargets)
+}
+
+func mcpFailureTargetObservation(result RuntimeOperationResult) *runtimecontract.RuntimeFailureTargetObservation {
+	targets := mcpFailureTargets(result)
+	observation := runtimecontract.RuntimeFailureTargetObservation{
+		OwnerModuleID: ModuleID, SubjectRef: result.ServerID, TargetRole: result.Diagnostics.TargetRole,
+		ObservedRevision: result.OwnerRevision, TargetRefs: targets,
+	}.Normalized()
+	if err := observation.Validate(); err != nil {
+		return nil
+	}
+	return &observation
 }
 
 func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {

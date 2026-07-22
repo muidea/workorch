@@ -24,10 +24,17 @@ func attachRuntimeV2TestOwnerReceipt(t *testing.T, aggregate *RuntimeAggregate, 
 	if execution.Fence == 0 {
 		execution.Fence = 1
 	}
+	var targetRefs []string
+	for _, operation := range candidateRuntimeOperations(aggregate.ActiveDispatch.Candidate) {
+		if operation.ID == evidence.OperationID {
+			targetRefs = append([]string(nil), operation.TargetRefs...)
+			break
+		}
+	}
 	receipt := runtimecontract.RuntimeOperationReceipt{
 		ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, OperationID: execution.OperationID,
 		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: execution.ExpectedEffectScope,
-		Changed: runtimecontract.RuntimeEffectIsDurable(execution.ExpectedEffectScope), Evidence: evidence.Evidence,
+		Changed: runtimecontract.RuntimeEffectIsDurable(execution.ExpectedEffectScope), TargetRefs: targetRefs, Evidence: evidence.Evidence,
 	}
 	if evidence.Status == ExecutionEvidenceStatusRejected {
 		receipt.Outcome = runtimecontract.RuntimeOperationOutcomeRejected

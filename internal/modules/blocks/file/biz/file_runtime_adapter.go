@@ -18,6 +18,7 @@ const (
 	defaultMaxReadBytes                           = 64 * 1024
 	defaultMaxEntries                             = 500
 	runtimeFileSelectorWorkspaceRelativeNewTarget = "workspace-relative-new-file-target"
+	runtimeFileTargetSelectorUniqueWorkspaceEntry = "file/unique_workspace_entry"
 )
 
 type RuntimeAdapter struct{}
@@ -89,6 +90,41 @@ func (a *RuntimeAdapter) AcquireWorkspaceManifest(workspaceDirectory string) (ru
 		Revision:   hex.EncodeToString(h.Sum(nil)),
 		TargetRefs: targetRefs,
 	}, nil
+}
+
+// AcquireRuntimeTargetSelection applies the File owner's neutral cardinality
+// rule to a bounded workspace inventory. It does not inspect source syntax,
+// file names, suffixes, or a profile's semantic TargetRole. The selector is
+// an explicit File-owner contract, not a hint: this adapter currently owns
+// only unique-workspace-entry selection, while zero or multiple files remain
+// explicit facts for SM-2 governance/terminal handling.
+func (a *RuntimeAdapter) AcquireRuntimeTargetSelection(workspaceDirectory, prerequisiteID, targetRole, selectorRef string, maxItems int) (runtimemodel.RuntimeTargetSelection, error) {
+	if strings.TrimSpace(prerequisiteID) == "" || strings.TrimSpace(targetRole) == "" || strings.TrimSpace(selectorRef) != runtimeFileTargetSelectorUniqueWorkspaceEntry || maxItems < 1 || maxItems > runtimemodel.RuntimeCandidateContextItemsMaxCount {
+		return runtimemodel.RuntimeTargetSelection{}, common.ErrInvalidArgument
+	}
+	manifest, err := a.AcquireWorkspaceManifest(workspaceDirectory)
+	if err != nil {
+		return runtimemodel.RuntimeTargetSelection{}, err
+	}
+	candidates := boundedAdmissibilityTargetRefs(nil, manifest.TargetRefs, maxItems)
+	selection := runtimemodel.RuntimeTargetSelection{
+		PrerequisiteID: prerequisiteID, OwnerModuleID: runtimemodel.RuntimeModuleFile, TargetRole: targetRole, SelectorRef: selectorRef,
+		CandidateTargetRefs: candidates, CandidateCount: len(manifest.TargetRefs), ObservedRevision: manifest.Revision,
+	}
+	switch selection.CandidateCount {
+	case 0:
+		selection.Disposition = runtimemodel.RuntimeTargetSelectionAbsent
+	case 1:
+		selection.Disposition = runtimemodel.RuntimeTargetSelectionSelected
+		selection.TargetRefs = append([]string(nil), candidates...)
+	default:
+		selection.Disposition = runtimemodel.RuntimeTargetSelectionAmbiguous
+	}
+	selection.SnapshotID = runtimemodel.StableRuntimeTargetSelectionSnapshotID(selection)
+	if err := selection.Validate(); err != nil {
+		return runtimemodel.RuntimeTargetSelection{}, err
+	}
+	return selection, nil
 }
 
 // AcquireRuntimeOperationAdmissibility returns the bounded File-owner view used
@@ -163,6 +199,39 @@ func (a *RuntimeAdapter) ProbeRuntimeOperationFeasibility(workspaceDirectory str
 	return failure
 }
 
+// ProbeRuntimeOperationFeasibilityWithReplayProof returns the ordinary
+// side-effect-free feasibility result plus an optional owner-authored effect
+// proof. Only patch/apply has a File-owned durable postcondition that can be
+// proven by previewing the exact sealed operation; all other kinds deliberately
+// return a nil proof and retain their normal recovery policy.
+func (a *RuntimeAdapter) ProbeRuntimeOperationFeasibilityWithReplayProof(workspaceDirectory string, inventory runtimemodel.RuntimeOperationAdmissibility, operation runtimemodel.RuntimeOperation, observation *runtimemodel.RuntimePrerequisiteObservation) (*runtimemodel.FailureFact, *runtimemodel.RuntimePrerequisiteStale, *runtimemodel.RuntimeOperationReplayProof) {
+	failure, stale := a.ProbeRuntimeOperationFeasibilityWithObservation(workspaceDirectory, inventory, operation, observation)
+	if failure != nil || stale != nil || operation.Normalized().Kind != runtimemodel.RuntimeBlockKindPatchApply {
+		return failure, stale, nil
+	}
+	request, ok := patchApplyRequestFromRuntimeOperation(workspaceDirectory, operation)
+	if !ok {
+		return fileOperationInfeasible(operation, "operation_replay_proof_invalid", "runtime patch operation cannot form an owner replay proof", operation.TargetRefs), nil, nil
+	}
+	preview, err := a.PreviewPatch(request)
+	if err != nil || preview.BeforeHash == preview.AfterHash || strings.TrimSpace(preview.AfterHash) == "" {
+		message := "runtime patch operation cannot prove a durable postcondition"
+		if err != nil {
+			message = err.Error()
+		}
+		return fileOperationInfeasible(operation, "operation_replay_proof_unavailable", message, operation.TargetRefs), nil, nil
+	}
+	proof := runtimemodel.RuntimeOperationReplayProof{
+		OwnerModuleID: ModuleID, OperationID: operation.Normalized().ID,
+		TargetRefs: []string{strings.TrimSpace(preview.TargetRef)}, BeforeHash: preview.BeforeHash, AfterHash: preview.AfterHash,
+		AdmissibilitySnapshotID: inventory.Normalized().SnapshotID, AcquisitionBinding: inventory.Normalized().AcquisitionBinding,
+	}.Normalized()
+	if err := proof.Validate(); err != nil {
+		return fileOperationInfeasible(operation, "operation_replay_proof_invalid", err.Error(), operation.TargetRefs), nil, nil
+	}
+	return nil, nil, &proof
+}
+
 // ProbeRuntimeOperationFeasibilityWithObservation is the owner read-only
 // admission gate. A changed inventory revision is a freshness transition, not
 // a candidate-contract failure, when Orchestrator supplied the persisted
@@ -207,6 +276,9 @@ func (a *RuntimeAdapter) ProbeRuntimeOperationFeasibilityWithObservation(workspa
 		if requiresRegular && !info.Mode().IsRegular() {
 			return fileOperationInfeasible(operation, "operation_target_not_regular", "runtime file operation target is not a regular file", []string{filepath.ToSlash(rel)}), nil
 		}
+		if failure := verifyFileWriteReplayPrecondition(target, operation, filepath.ToSlash(rel)); failure != nil {
+			return failure, nil
+		}
 		if failure := a.probePatchFeasibility(workspaceDirectory, operation, filepath.ToSlash(rel)); failure != nil {
 			return failure, nil
 		}
@@ -225,6 +297,31 @@ func (a *RuntimeAdapter) ProbeRuntimeOperationFeasibilityWithObservation(workspa
 		return failure, nil
 	}
 	return nil, nil
+}
+
+// verifyFileWriteReplayPrecondition binds an optional file_write baseHash to
+// the owner-observed preflight revision. ApplyPatch can later use that sealed
+// revision to prove a lost-receipt replay reached the same postcondition; a
+// provider cannot invent an arbitrary prior hash and obtain such a receipt.
+func verifyFileWriteReplayPrecondition(target string, operation runtimemodel.RuntimeOperation, targetRef string) *runtimemodel.FailureFact {
+	if operation.Kind != runtimemodel.RuntimeBlockKindPatchApply && operation.Kind != runtimemodel.RuntimeBlockKindPatchPreview {
+		return nil
+	}
+	if runtimeOperationParameterString(operation, "patchType") != patchTypeFileWrite {
+		return nil
+	}
+	baseHash := runtimeOperationParameterString(operation, "baseHash")
+	if baseHash == "" {
+		return nil
+	}
+	content, err := os.ReadFile(target)
+	if err != nil {
+		return fileOperationInfeasible(operation, "operation_base_hash_unavailable", err.Error(), []string{targetRef})
+	}
+	if !strings.EqualFold(sha256Hex(content), baseHash) {
+		return fileOperationInfeasible(operation, "operation_base_hash_mismatch", "runtime file operation baseHash does not match the owner-observed target revision", []string{targetRef})
+	}
+	return nil
 }
 
 // probePatchFeasibility uses the same patch parser and in-memory apply path as
@@ -260,10 +357,64 @@ func (a *RuntimeAdapter) probePatchFeasibility(workspaceDirectory string, operat
 func runtimeOperationParameterString(operation runtimemodel.RuntimeOperation, name string) string {
 	for _, parameter := range operation.Parameters {
 		if parameter.Name == name && parameter.String != nil {
-			return strings.TrimSpace(*parameter.String)
+			// Operation parameter values may be executable payloads. In
+			// particular, patch content, old/new text and unified diffs are
+			// byte-sensitive: trimming here would make feasibility preview (and
+			// its sealed replay proof) describe a different effect from the
+			// operation eventually executed by the typed File handler. Callers
+			// that consume identifiers or enums normalize those fields at their
+			// own contract boundary.
+			return *parameter.String
 		}
 	}
 	return ""
+}
+
+func runtimeOperationParameterInteger(operation runtimemodel.RuntimeOperation, name string) int64 {
+	for _, parameter := range operation.Parameters {
+		if parameter.Name == name && parameter.Integer != nil {
+			return *parameter.Integer
+		}
+	}
+	return 0
+}
+
+func runtimeOperationHasStringParameter(operation runtimemodel.RuntimeOperation, name string) bool {
+	for _, parameter := range operation.Parameters {
+		if parameter.Name == name && parameter.String != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func patchApplyRequestFromRuntimeOperation(workspaceDirectory string, operation runtimemodel.RuntimeOperation) (PatchApplyRequest, bool) {
+	operation = operation.Normalized()
+	if operation.Kind != runtimemodel.RuntimeBlockKindPatchApply {
+		return PatchApplyRequest{}, false
+	}
+	targetRef := fileOperationTargetRef(operation)
+	patchType := runtimeOperationParameterString(operation, "patchType")
+	if targetRef == "" || patchType == "" {
+		return PatchApplyRequest{}, false
+	}
+	return PatchApplyRequest{
+		WorkspaceDirectory: workspaceDirectory, TargetRef: targetRef, PatchType: patchType,
+		Content: runtimeOperationParameterString(operation, "content"), ContentPresent: runtimeOperationHasStringParameter(operation, "content"),
+		Diff: runtimeOperationParameterString(operation, "diff"), OldText: runtimeOperationParameterString(operation, "oldText"),
+		NewText: runtimeOperationParameterString(operation, "newText"), NewTextPresent: runtimeOperationHasStringParameter(operation, "newText"),
+		BaseHash: runtimeOperationParameterString(operation, "baseHash"), Occurrence: runtimeOperationParameterInteger(operation, "occurrence"),
+		CoverageTargets: append([]string(nil), runtimeOperationParameterStrings(operation, "coverageTargets")...), Summary: runtimeOperationParameterString(operation, "summary"),
+	}, true
+}
+
+func runtimeOperationParameterStrings(operation runtimemodel.RuntimeOperation, name string) []string {
+	for _, parameter := range operation.Parameters {
+		if parameter.Name == name {
+			return append([]string(nil), parameter.StringList...)
+		}
+	}
+	return nil
 }
 
 func fileInventoryContainsTarget(inventory runtimemodel.RuntimeOperationAdmissibility, targetRef string) bool {

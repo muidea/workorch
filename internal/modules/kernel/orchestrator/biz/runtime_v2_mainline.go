@@ -79,6 +79,17 @@ func (m *Biz) resolveRuntimeV2Prerequisite(
 			return runtimev2.PrerequisiteResult{}, err
 		}
 		return runtimev2.PrerequisiteResult{PrerequisiteID: prerequisite.ID, TargetSnapshot: &result.Snapshot, Observation: result.Observation}, nil
+	case runtimecontract.PrerequisiteKindTargetSelection:
+		result, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, m.EventHub(), events.AcquireRuntimeTargetSelectionCommand{
+			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
+			PrerequisiteID: prerequisite.ID, WorkspaceDeliverableDirectory: deliverableDirectory, TargetRole: prerequisite.SubjectRef, TargetSelectorRef: prerequisite.TargetSelectorRef,
+			MaxItems: aggregate.Facts.ConvergencePolicy.MaxCandidateContextItems,
+		})
+		if err != nil {
+			return runtimev2.PrerequisiteResult{}, err
+		}
+		selection := result.Selection
+		return runtimev2.PrerequisiteResult{PrerequisiteID: prerequisite.ID, TargetSelection: &selection, Observation: result.Observation}, nil
 	case runtimecontract.PrerequisiteKindFailureTarget:
 		facts, err := ResolveFailureTargetPrerequisite(aggregate.Facts, prerequisite.ID)
 		if err != nil {
@@ -131,7 +142,7 @@ func (m *Biz) resolveRuntimeV2Prerequisite(
 			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
 			PrerequisiteID: prerequisite.ID, OwnerModuleID: prerequisite.OwnerModuleID,
 			WorkspaceDeliverableDirectory: deliverableDirectory, RequiredKinds: append([]string(nil), prerequisite.RequiredCapabilities...),
-			RequiredTargetRefs: append([]string(nil), aggregate.Decision.Focus.TargetRefs...), CapabilityStateBinding: binding,
+			RequiredTargetRefs: runtimev2.GroundedRepairTargets(aggregate.Facts), CapabilityStateBinding: binding,
 			MaxItems: aggregate.Facts.ConvergencePolicy.MaxCandidateContextItems,
 		})
 		if err != nil {
@@ -401,7 +412,7 @@ func (m *Biz) probeRuntimeV2CandidateFeasibility(ctx context.Context, aggregate 
 		}
 		recorded, recordErr := m.bizPtr.RecordRuntimeV2CandidateFeasibility(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, runtimecontract.RuntimeCandidateFeasibilityRecord{
 			OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding,
-			Feasible: response.Feasible, Failure: response.Failure, Stale: response.Stale,
+			Feasible: response.Feasible, ReplayProof: response.ReplayProof, Failure: response.Failure, Stale: response.Stale,
 		})
 		if recordErr != nil {
 			return nil, nil, recordErr

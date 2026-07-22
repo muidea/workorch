@@ -7,6 +7,35 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
+func TestRuntimeAssessmentGapStrictlyNarrowsOnlyForNonExpandingNeutralSets(t *testing.T) {
+	previous := RuntimeAssessmentGap{
+		CoverageWorkItemIDs:  []common.CoverageWorkItemID{"coverage-a", "coverage-b"},
+		MissingEvidenceKinds: []string{EvidenceKindStateChange, EvidenceKindValidation},
+		TargetRefs:           []string{"implementation.go"},
+		Reason:               "prior wording",
+	}
+	if !RuntimeAssessmentGapStrictlyNarrows(previous, RuntimeAssessmentGap{
+		CoverageWorkItemIDs:  []common.CoverageWorkItemID{"coverage-b"},
+		MissingEvidenceKinds: []string{EvidenceKindValidation},
+		Reason:               "different wording",
+	}) {
+		t.Fatal("reduced coverage and missing-evidence sets did not count as gap progress")
+	}
+	if RuntimeAssessmentGapStrictlyNarrows(previous, RuntimeAssessmentGap{
+		CoverageWorkItemIDs:  []common.CoverageWorkItemID{"coverage-a", "coverage-b"},
+		MissingEvidenceKinds: []string{EvidenceKindStateChange, EvidenceKindValidation},
+		Reason:               "only wording changed",
+	}) {
+		t.Fatal("reason-only change counted as gap progress")
+	}
+	if RuntimeAssessmentGapStrictlyNarrows(previous, RuntimeAssessmentGap{
+		CoverageWorkItemIDs:  []common.CoverageWorkItemID{"coverage-b", "coverage-c"},
+		MissingEvidenceKinds: []string{EvidenceKindValidation},
+	}) {
+		t.Fatal("gap with a new coverage item counted as progress")
+	}
+}
+
 func TestValidateAssessmentDispositionRequiresExplicitAuthorityAndValidatesPartial(t *testing.T) {
 	if _, err := ValidateAssessmentDisposition("", nil, nil); err == nil {
 		t.Fatal("missing assessment disposition was accepted")

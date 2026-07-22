@@ -26,12 +26,13 @@ func init() {
 
 func runTUI(initialGoal string) error {
 	recordActiveWorkspace(defaultWorkspaceID)
-	m := tui.NewAppModelWithOptions(mustBackend(), defaultWorkspaceID, initialGoal, tui.Options{
-		OnActiveWorkspaceChanged: recordActiveWorkspace,
-	})
 	if info, err := os.Stdin.Stat(); err == nil && (info.Mode()&os.ModeCharDevice == 0 || os.Getenv("TERM") == "dumb") {
 		return fmt.Errorf("TUI requires an interactive terminal; use --server to run the backend service without TUI")
 	}
+	m := tui.NewAppModelWithOptions(mustBackend(), defaultWorkspaceID, initialGoal, tui.Options{
+		OnActiveWorkspaceChanged: recordActiveWorkspace,
+	})
+	defer m.CloseProjectionSubscription(tui.ProjectionSubscriptionCleanupTimeout())
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithInput(os.Stdin), tea.WithOutput(os.Stderr))
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("tui error: %w", err)

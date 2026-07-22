@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -131,7 +133,7 @@ type AppModel struct {
 	subscriptionStatusCh    chan backend.SubscriptionStatusInfo
 	eventSubscriptionActive bool
 	subscriptionStatus      backend.SubscriptionStatusInfo
-	unsubscribe             func()
+	subscription            *projectionSubscription
 	initialGoal             string
 	options                 Options
 
@@ -140,6 +142,18 @@ type AppModel struct {
 
 	lastError error
 }
+
+// projectionSubscription owns the local projection observer shared by the
+// value copies Bubble Tea makes of AppModel.  Its cleanup must never run on
+// the Bubble Tea update loop: EventHub observer removal can wait for a busy
+// shared hub worker queue.
+type projectionSubscription struct {
+	once        sync.Once
+	unsubscribe func()
+	done        chan struct{}
+}
+
+const projectionSubscriptionCleanupTimeout = 100 * time.Millisecond
 
 func NewAppModel(be backend.Backend, defaultWorkspaceID string, initialGoal string) AppModel {
 	return NewAppModelWithOptions(be, defaultWorkspaceID, initialGoal, Options{})
@@ -187,16 +201,58 @@ func NewAppModelWithOptions(be backend.Backend, defaultWorkspaceID string, initi
 		subscriptionStatusCh:    statusCh,
 		eventSubscriptionActive: eventSubscriptionActive,
 		subscriptionStatus:      subscriptionStatus,
-		unsubscribe:             unsubscribe,
-		initialGoal:             strings.TrimSpace(initialGoal),
-		currentTask:             strings.TrimSpace(initialGoal),
-		transcript:              initialTranscript(initialGoal),
-		options:                 options,
-		progress:                progressIdle,
-		workspaceRuntimeStates:  map[string]*workspaceRuntimeState{},
-		historyCursor:           -1,
-		mainViewport:            newMainViewport(),
+		subscription: &projectionSubscription{
+			unsubscribe: unsubscribe,
+			done:        make(chan struct{}),
+		},
+		initialGoal:            strings.TrimSpace(initialGoal),
+		currentTask:            strings.TrimSpace(initialGoal),
+		transcript:             initialTranscript(initialGoal),
+		options:                options,
+		progress:               progressIdle,
+		workspaceRuntimeStates: map[string]*workspaceRuntimeState{},
+		historyCursor:          -1,
+		mainViewport:           newMainViewport(),
 	}
+}
+
+// CloseProjectionSubscription releases the local EventHub observer after the
+// TUI has stopped.  It has a bounded wait so a congested EventHub cannot hold
+// process exit hostage.  A later framework teardown owns the remaining hub
+// cleanup if the observer removal is still in flight.
+func (m *AppModel) CloseProjectionSubscription(timeout time.Duration) bool {
+	if m == nil || m.subscription == nil {
+		return true
+	}
+	subscription := m.subscription
+	subscription.once.Do(func() {
+		go func() {
+			defer close(subscription.done)
+			if subscription.unsubscribe != nil {
+				subscription.unsubscribe()
+			}
+		}()
+	})
+	if timeout <= 0 {
+		select {
+		case <-subscription.done:
+			return true
+		default:
+			return false
+		}
+	}
+	select {
+	case <-subscription.done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+// ProjectionSubscriptionCleanupTimeout is the lifecycle wait budget used by
+// the interactive TUI after Bubble Tea has already restored the terminal.
+func ProjectionSubscriptionCleanupTimeout() time.Duration {
+	return projectionSubscriptionCleanupTimeout
 }
 
 func enqueueProjectionChanged(ch chan backend.WorkspaceProjectionChangedInfo, info backend.WorkspaceProjectionChangedInfo) {
@@ -647,7 +703,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	if m.modelSelectMode {
-		return m.handleModelSelectionKey(key)
+		return m.handleModelSelectionKey(msg)
 	}
 	if m.helpOpen {
 		switch key {
@@ -861,7 +917,6 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 	case "exit":
 		m.addInputHistory(text)
 		m.mode = modeQuit
-		m.unsubscribe()
 		return m, tea.Quit, true
 	case "help", "h", "?":
 		m.addInputHistory(text)

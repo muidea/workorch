@@ -152,7 +152,7 @@ func TestGitReceiptResourceChangesUseOwnerObservedRepositoryRevision(t *testing.
 func TestGitObservationsIncludeFileOwnedWorkspaceTreeDependency(t *testing.T) {
 	snapshot := runtimecontract.RuntimeCapabilityStateSnapshot{
 		RequirementID: "git-state", OwnerModuleID: ModuleID, CapabilityStateKind: "repository_state",
-		SubjectRef: "workspace_deliverable", ObservedRevision: "repo-v1", ContentHash: "content-v1",
+		SubjectRef: "workspace_deliverable", ObservedRevision: "repo-v1", WorkspaceTreeRevision: "tree-v1", ContentHash: "content-v1",
 	}
 	stateObservation := gitCapabilityStateObservation("git-state", snapshot)
 	inventory := runtimecontract.RuntimeOperationAdmissibility{
@@ -160,7 +160,7 @@ func TestGitObservationsIncludeFileOwnedWorkspaceTreeDependency(t *testing.T) {
 		OperationKinds: []string{runtimecontract.StepKindGitWrite}, ObservedRevision: "repo-v1",
 	}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
-	admissibilityObservation := gitAdmissibilityObservation("git-admissibility", inventory)
+	admissibilityObservation := gitAdmissibilityObservation("git-admissibility", inventory, snapshot.WorkspaceTreeRevision)
 	change := runtimecontract.RuntimeResourceChange{
 		Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		SubjectRef: "workspace_deliverable", BeforeRevision: "tree-v1", AfterRevision: "tree-v2",
@@ -187,6 +187,15 @@ func TestGitOwnerCapabilityBoundAdmissibilityRejectsMismatchedProbeBindingAsStal
 	if err != nil {
 		t.Fatal(err)
 	}
+	fileObserver := magicevent.NewSimpleObserver(orchestratorevents.PrerequisiteCommandDestination, hub)
+	fileObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireWorkspaceManifest, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.AcquireWorkspaceManifestCommand)
+		result.Set(orchestratorevents.AcquireWorkspaceManifestResult{
+			PrerequisiteID: command.PrerequisiteID,
+			Manifest:       runtimecontract.WorkspaceManifest{Revision: "file-tree-v1", TargetRefs: []string{"main.go"}},
+		}, nil)
+	})
+	t.Cleanup(func() { fileObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireWorkspaceManifest) })
 	workspace := newTestRepo(t)
 	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter(true), capabilityReceipts: store}
 	if err := owner.Start(); err != nil {
@@ -208,7 +217,7 @@ func TestGitOwnerCapabilityBoundAdmissibilityRejectsMismatchedProbeBindingAsStal
 		t.Fatal(err)
 	}
 	capability, ok := capabilityData.(orchestratorevents.AcquireGitCapabilityStateResult)
-	if !ok || capability.Snapshot.AcquisitionBinding != capabilityCommand.AcquisitionKey {
+	if !ok || capability.Snapshot.AcquisitionBinding != capabilityCommand.AcquisitionKey || capability.Snapshot.WorkspaceTreeRevision != "file-tree-v1" {
 		t.Fatalf("capability acquisition = %#v", capabilityData)
 	}
 
@@ -231,7 +240,7 @@ func TestGitOwnerCapabilityBoundAdmissibilityRejectsMismatchedProbeBindingAsStal
 	}
 
 	operationName := "status"
-	observation := gitAdmissibilityObservation(admissibilityCommand.PrerequisiteID, admissibility.Admissibility)
+	observation := gitAdmissibilityObservation(admissibilityCommand.PrerequisiteID, admissibility.Admissibility, capability.Snapshot.WorkspaceTreeRevision)
 	probe := orchestratorevents.ProbeRuntimeOperationFeasibilityCommand{
 		WorkspaceID: "ws-binding", RunID: "run-binding", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-binding"},
 		WorkspaceDeliverableDirectory: workspace, Admissibility: admissibility.Admissibility, Observation: &observation,
