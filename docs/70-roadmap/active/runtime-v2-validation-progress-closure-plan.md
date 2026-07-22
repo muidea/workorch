@@ -116,7 +116,7 @@ deployed gate 尚待用新二进制和清洁数据执行；不得以本地测试
 | VPC-2 | Orchestrator 仅在当前 focus 的 durable `Changed=true` state change 时调用 `NoteProgress`；accepted validation 只使 assessment 失效，不清 repair window。 | SM-2, SM-3 | `go test ./internal/modules/kernel/orchestrator/biz/runtimev2 -run 'TestAccepted.*ProgressWindow\|TestAcceptedValidation.*RepairLedger' -count=1` |
 | VPC-3 | persisted repair ledger 保存 canonical accepted-no-progress operation shapes；同 focus 的重放在 candidate admission 前被拒绝，新的 durable progress 才清空。 | SM-2, SM-3 | `go test ./internal/modules/kernel/orchestrator/biz/runtimev2 -run 'TestEvaluateCandidateAdmission' -count=1` |
 | VPC-4 | validation policy 的 source union 为纯 contract helper；capability owner 的 typed inventory 附带 catalog observation；Orchestrator 以 manifest、workspace-tree、admissibility 和 capability observations 作 deterministic gate，缺失时不请求 provider。已有 cap reducer 分支继续负责 retry=2 后 state change/governance/terminal。 | SM-2, SM-3, SM-4 freshness reuse | `go test ./internal/modules/kernel/orchestrator/biz -run TestRuntimeV2ValidationDiscovery -count=1` |
-| VPC-5 | Run state notification 携带单调 repair snapshot；workorchd 通过 EventStream notification 按 `workspace/run/state/runtimeRevision` 去重终态、按 run 最大 repair snapshot 累积 delta。activation 返回不再计 terminal outcome。 | SM-4 only | `go test ./internal/modules/application/workorchd/service/server -run TestServerMetricsObserveRunStateIsExactlyOnceAndMonotonic -count=1` |
+| VPC-5 | Run state notification 携带单调 repair snapshot；workorchd Biz 直接订阅 Run owner 的 typed `RunStateChangedData`，按 `workspace/run/state/runtimeRevision` 去重终态、按 run 最大 repair snapshot 累积 delta。EventStream 仅保留 audit/SSE/projection，不能成为 metrics 事实源。activation 返回不再计 terminal outcome。 | SM-4 only | `go test ./internal/modules/application/workorchd/service/server -run 'TestServer(MetricsObserveRunStateIsExactlyOnceAndMonotonic|RunMetricsConsumeTypedRunNotificationNotEventstreamPayload)' -count=1` |
 
 Capability discovery 的“candidate claim”只接受 typed operation/feasibility 的可执行断言：候选
 没有可被文本伪造的 `tool missing` authority 字段。operation 必须先匹配 fresh owner
@@ -1398,6 +1398,14 @@ state-sequence matrix。
 主要修改 `workorchd/service/server` metrics observer/tests；必要时补 `kernel/run/pkg/events`
 typed DTO。测试覆盖 active response=0、async failed=1、duplicate仍为1、四类 terminal 映射、
 repair 0→1→3 delta、terminal 后不回退，以及 lifecycle/teardown 不泄漏订阅。
+
+**2026-07-22 closure update.** `workorchd` Biz 已直接订阅 Run owner 的 concrete
+`RunStateChangedData`，再将其交给 server 的 process-local metrics observer。EventStream 的
+`EventRecordAppendedData` 仍只驱动 audit/SSE/read projection，不再读取通用 payload map 计 terminal
+或 repair metrics；因此投影 rebuild、SSE reconnect 或 audit replay 不会成为指标事实源。该变更只影响
+SM-4 observability，不写 owner、不触发 Resume、不改变 Run lifecycle 或任何 Runtime V2 authority。
+`TestServerRunMetricsConsumeTypedRunNotificationNotEventstreamPayload` 断言 EventStream failed payload
+不计数、同一 Run 的 typed failed notification 才产生一次 terminal 与 repair delta。
 
 ### VPC-6 — Cross-component and deployed acceptance
 

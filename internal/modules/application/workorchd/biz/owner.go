@@ -17,6 +17,7 @@ import (
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 )
@@ -65,6 +66,7 @@ func (b *Biz) Setup(ctx context.Context, commandHub magicevent.Hub, backgroundRo
 	})
 	b.SubscribeFunc(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, b.handleWorkspaceRunRequested)
 	b.SubscribeMatchedFunc(ModuleID+"/workspace-projection", workorchdevents.NotificationDestination, workorchdevents.TopicWorkspaceProjectionChanged, b.handleWorkspaceProjectionChanged)
+	b.SubscribeMatchedFunc(ModuleID+"/run-metrics", runevents.NotificationDestination, runevents.TopicRunStateChanged, b.handleRunStateChanged)
 	b.SubscribeMatchedFunc(ModuleID+"/eventstream", eventstreamevents.NotificationDestination, eventstreamevents.TopicEventStreamRecordAppended, b.handleEventRecordAppended)
 	return nil
 }
@@ -102,6 +104,7 @@ func (b *Biz) Stop(ctx context.Context) {
 	}
 	b.UnsubscribeFunc(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested)
 	b.UnsubscribeMatchedFunc(ModuleID+"/workspace-projection", workorchdevents.TopicWorkspaceProjectionChanged)
+	b.UnsubscribeMatchedFunc(ModuleID+"/run-metrics", runevents.TopicRunStateChanged)
 	b.UnsubscribeMatchedFunc(ModuleID+"/eventstream", eventstreamevents.TopicEventStreamRecordAppended)
 	if b.service != nil {
 		b.service.Shutdown(ctx)
@@ -117,6 +120,19 @@ func (b *Biz) handleWorkspaceProjectionChanged(event magicevent.Event, result ma
 	data, ok := event.Data().(workorchdevents.WorkspaceProjectionChangedData)
 	if ok && b != nil && b.service != nil {
 		b.service.RecordWorkspaceProjectionChanged(event.Context(), data)
+	}
+	if result != nil {
+		result.Set(nil, nil)
+	}
+}
+
+// handleRunStateChanged consumes the Run owner's concrete state notification
+// for process-local observability. Eventstream remains an audit/SSE source and
+// must not become the metric fact source.
+func (b *Biz) handleRunStateChanged(event magicevent.Event, result magicevent.Result) {
+	data, ok := event.Data().(runevents.RunStateChangedData)
+	if ok && b != nil && b.service != nil {
+		b.service.RecordRunStateChanged(event.Context(), data)
 	}
 	if result != nil {
 		result.Set(nil, nil)

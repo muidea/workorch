@@ -112,28 +112,27 @@ func (s *serverState) RecordEventRecordAppended(_ context.Context, data eventstr
 	if envelope, valid := eventRecordStreamEvent(data); valid {
 		s.recordStreamEvent(envelope)
 	}
-	if data.Topic != runevents.TopicRunStateChanged {
+}
+
+// RecordRunStateChanged accepts only the concrete Run owner notification for
+// metrics. It deliberately does not derive state from an Eventstream payload:
+// Eventstream is audit/display infrastructure and may replay independently.
+func (s *serverState) RecordRunStateChanged(_ context.Context, data runevents.RunStateChangedData) {
+	if s == nil {
 		return
 	}
-	runID := strings.TrimSpace(string(data.RunID))
-	if runID == "" {
-		runID = strings.TrimSpace(data.SubjectID)
-	}
-	if runID == "" {
-		s.notifyRunStatusChanged()
-		return
-	}
-	payload := data.Payload.Map()
-	workspaceID := strings.TrimSpace(string(data.WorkspaceID))
-	state := schedulerStringValue(payload, events.PayloadKeyState)
 	s.metrics.observeRunState(
-		workspaceID,
-		runID,
-		state,
-		uint64(schedulerInt(payload, events.PayloadKeyRuntimeStateRevision)),
-		schedulerInt(payload, events.PayloadKeyRuntimeRepairAttempts),
+		string(data.WorkspaceID),
+		string(data.RunID),
+		string(data.State),
+		data.RuntimeStateRevision,
+		data.RepairAttempts,
 	)
-	s.notifyRunStatusChangedForRun(appservice.Run{ID: runID, WorkspaceID: workspaceID, State: state})
+	s.notifyRunStatusChangedForRun(appservice.Run{
+		ID:          string(data.RunID),
+		WorkspaceID: string(data.WorkspaceID),
+		State:       string(data.State),
+	})
 }
 
 func eventRecordStreamEvent(data eventstreamevents.EventRecordData) (streamEvent, bool) {

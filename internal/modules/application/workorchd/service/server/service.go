@@ -14,6 +14,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 )
 
 type Service struct {
@@ -90,6 +91,15 @@ func (s *Service) HandleWorkspaceRunRequest(ctx context.Context, command workorc
 func (s *Service) RecordWorkspaceProjectionChanged(ctx context.Context, data workorchdevents.WorkspaceProjectionChangedData) {
 	if s != nil && s.http != nil && s.http.state != nil {
 		s.http.state.RecordWorkspaceProjectionChanged(ctx, data)
+	}
+}
+
+// RecordRunStateChanged accepts the Run owner's typed notification for
+// process-local metrics and status wakeups. It does not write owner state or
+// derive Runtime V2 authority.
+func (s *Service) RecordRunStateChanged(ctx context.Context, data runevents.RunStateChangedData) {
+	if s != nil && s.http != nil && s.http.state != nil {
+		s.http.state.RecordRunStateChanged(ctx, data)
 	}
 }
 

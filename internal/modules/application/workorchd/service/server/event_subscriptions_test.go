@@ -14,6 +14,7 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -110,6 +111,37 @@ func TestServerMetricsObserveRunStateIsExactlyOnceAndMonotonic(t *testing.T) {
 	metrics.observeRunState("ws-metrics", "run-completed", string(common.RunStateCompleted), 6, 0)
 	if metrics.runCanceled.Load() != 1 || metrics.runRejected.Load() != 1 || metrics.runSucceeded.Load() != 1 {
 		t.Fatalf("terminal mappings = canceled:%d rejected:%d succeeded:%d", metrics.runCanceled.Load(), metrics.runRejected.Load(), metrics.runSucceeded.Load())
+	}
+}
+
+func TestServerRunMetricsConsumeTypedRunNotificationNotEventstreamPayload(t *testing.T) {
+	state := &serverState{metrics: &serverMetrics{}}
+	state.RecordEventRecordAppended(context.Background(), eventstreamevents.EventRecordData{
+		Topic:       runevents.TopicRunStateChanged,
+		WorkspaceID: "ws-metrics",
+		RunID:       "run-metrics",
+		Payload: mustServerEventPayload(t, map[string]any{
+			events.PayloadKeyState:                 string(common.RunStateFailed),
+			events.PayloadKeyRuntimeStateRevision:  9,
+			events.PayloadKeyRuntimeRepairAttempts: 3,
+		}),
+	})
+	if got := state.metrics.runFailed.Load(); got != 0 {
+		t.Fatalf("eventstream payload changed terminal metric to %d, want 0", got)
+	}
+	if got := state.metrics.convergenceRepairAttempts.Load(); got != 0 {
+		t.Fatalf("eventstream payload changed repair metric to %d, want 0", got)
+	}
+
+	state.RecordRunStateChanged(context.Background(), runevents.RunStateChangedData{
+		WorkspaceID: "ws-metrics", RunID: "run-metrics", State: common.RunStateFailed,
+		RuntimeStateRevision: 9, RepairAttempts: 3,
+	})
+	if got := state.metrics.runFailed.Load(); got != 1 {
+		t.Fatalf("typed run notification terminal metric = %d, want 1", got)
+	}
+	if got := state.metrics.convergenceRepairAttempts.Load(); got != 3 {
+		t.Fatalf("typed run notification repair metric = %d, want 3", got)
 	}
 }
 
