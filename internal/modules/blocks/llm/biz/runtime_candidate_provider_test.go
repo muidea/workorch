@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -266,7 +267,7 @@ func TestRuntimeV2CandidateRetryExplainsCanonicalTargetRefConsistency(t *testing
 	if retry == nil {
 		t.Fatal("retry projection is nil")
 	}
-	for _, want := range []string{"exact canonical targetRef or path", "top-level targetRefs", "even when the file does not yet exist"} {
+	for _, want := range []string{"non-empty canonical targetRef or path", "top-level targetRefs", "even when the file does not yet exist"} {
 		if !strings.Contains(retry.Instruction, want) {
 			t.Fatalf("retry instruction lost %q: %s", want, retry.Instruction)
 		}
@@ -405,13 +406,107 @@ func TestRuntimeV2CandidateSchemaDerivesPatchTargetRequirementsFromOperationCont
 			AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
 		},
 	})
-	for _, value := range []string{`"const":"patch/apply"`, `"const":"patchType"`, `"const":"targetRef"`, `"const":"path"`, `"targetRefs"`, `"minItems":1`} {
+	for _, value := range []string{`"const":"patch/apply"`, `"const":"patchType"`, `"const":"targetRef"`, `"const":"path"`, `"targetRefs"`, `"minItems":1`, `"minLength":1`} {
 		if !strings.Contains(schema, value) {
 			t.Fatalf("descriptor-driven patch schema lost %q: %s", value, schema)
 		}
 	}
 	if strings.Contains(runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceStateChange), `"const":"patch/apply"`) {
 		t.Fatal("volatile operation constraints leaked into the stable generic contract schema")
+	}
+}
+
+func TestRuntimeV2CandidateSchemaRequiresNonEmptyCanonicalPatchTarget(t *testing.T) {
+	condition := runtimeV2NonEmptyParameterContainsSchema("targetRef", runtimecontract.RuntimeOperationParameterTypeString)
+	contains, ok := condition["contains"].(map[string]any)
+	if !ok {
+		t.Fatalf("condition = %#v, want contains object", condition)
+	}
+	properties, ok := contains["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("contains = %#v, want properties", contains)
+	}
+	target, ok := properties["string"].(map[string]any)
+	if !ok || target["minLength"] != 1 {
+		t.Fatalf("targetRef schema = %#v, want non-empty string", target)
+	}
+	required, ok := contains["required"].([]string)
+	if !ok || len(required) != 2 || required[0] != "name" || required[1] != "string" {
+		t.Fatalf("targetRef required = %#v, want name and string", contains["required"])
+	}
+}
+
+func TestRuntimeV2CandidateSchemaNarrowsFileOwnerScopeToDurableFileKinds(t *testing.T) {
+	selection := &runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "target-selection-scope", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable",
+		Disposition: runtimecontract.RuntimeTargetSelectionScope, ObservedRevision: "workspace-v1",
+	}
+	decision := runtimecontract.RuntimeDecision{
+		Action: runtimecontract.RuntimeActionProduceStateChange,
+		RequiredOutput: runtimecontract.RequiredOutputContract{AcceptedKinds: []string{
+			runtimecontract.StepKindShellCommand,
+			runtimecontract.RuntimeBlockKindPatchApply,
+			runtimecontract.StepKindGitWrite,
+		}},
+	}
+	schema := runtimeV2CandidateSchemaForDecisionWithTargetSelection(decision, selection)
+	if !strings.Contains(schema, `"enum":["patch/apply"]`) {
+		t.Fatalf("scope schema = %s, want only durable File kind", schema)
+	}
+	for _, forbidden := range []string{`"shell/command"`, `"git/write"`} {
+		if strings.Contains(schema, forbidden) {
+			t.Fatalf("scope schema admitted non-File kind %s: %s", forbidden, schema)
+		}
+	}
+	output := runtimeV2CandidateOutputContract(decision, selection)
+	if len(output.OperationContracts) != 1 || output.OperationContracts[0].Kind != runtimecontract.RuntimeBlockKindPatchApply {
+		t.Fatalf("scope operation contracts = %#v, want patch/apply only", output.OperationContracts)
+	}
+	kinds := runtimeV2CandidateAllowedOperationKinds(decision.Action, decision.RequiredOutput.AcceptedKinds, nil, selection)
+	if len(kinds) != 1 || kinds[0] != runtimecontract.RuntimeBlockKindPatchApply {
+		t.Fatalf("scope admissible kinds = %v, want patch/apply only", kinds)
+	}
+}
+
+func TestRuntimeV2CandidateRetryExplainsFileOwnerScopeRestriction(t *testing.T) {
+	retry := runtimeV2CandidateRetry(1, &runtimecontract.RuntimeCandidateFailure{
+		Class:  runtimecontract.RuntimeCandidateFailureClassContract,
+		Code:   "candidate_target_outside_grounding",
+		Reason: "owner-grounded workspace scope permits only a durable File operation with a concrete target",
+	})
+	if retry == nil {
+		t.Fatal("retry projection is nil")
+	}
+	for _, want := range []string{"target-selection scope", "durable File-owner operation", "do not use Shell, Git, MCP, Web, or SSH"} {
+		if !strings.Contains(retry.Instruction, want) {
+			t.Fatalf("scope retry instruction lost %q: %s", want, retry.Instruction)
+		}
+	}
+}
+
+func TestRuntimeV2CandidateSchemaKeepsExplicitSequenceDuringFileScopeNarrowing(t *testing.T) {
+	selection := &runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "target-selection-scope", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable",
+		Disposition: runtimecontract.RuntimeTargetSelectionScope, ObservedRevision: "workspace-v1",
+	}
+	decision := runtimecontract.RuntimeDecision{
+		Action: runtimecontract.RuntimeActionProduceStateChange,
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			AcceptedKinds: []string{runtimecontract.StepKindShellCommand, runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.StepKindGitWrite},
+			RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{{
+				RequirementID: "initialize-repository", Kind: runtimecontract.StepKindGitWrite, VariantID: "init",
+			}},
+		},
+	}
+	kinds := runtimeV2CandidateAllowedOperationKinds(decision.Action, decision.RequiredOutput.AcceptedKinds, decision.RequiredOutput.RequiredOperationSequence, selection)
+	if got, want := kinds, []string{runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.StepKindGitWrite}; !slices.Equal(got, want) {
+		t.Fatalf("scope kinds = %v, want %v", got, want)
+	}
+	schema := runtimeV2CandidateSchemaForDecisionWithTargetSelection(decision, selection)
+	if strings.Contains(schema, `"shell/command"`) || !strings.Contains(schema, `"patch/apply"`) || !strings.Contains(schema, `"git/write"`) {
+		t.Fatalf("scope sequence schema = %s", schema)
 	}
 }
 

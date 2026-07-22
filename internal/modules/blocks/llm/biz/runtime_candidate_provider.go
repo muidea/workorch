@@ -458,7 +458,7 @@ func runtimeV2ProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmod
 		request.Decision,
 		request.Transaction,
 		request.CandidateAttempt,
-		runtimeV2CandidateOutputContract(request.Decision),
+		runtimeV2CandidateOutputContract(request.Decision, candidateContext.Resources.TargetSelection),
 		runtimeV2CandidateRetry(request.CandidateAttempt, request.PreviousFailure),
 		runtimeV2CandidateContextProjection(candidateContext, request.Decision.Action),
 		request.OutputContinuation,
@@ -469,7 +469,7 @@ func runtimeV2ProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmod
 	providerRequest := llmmodels.ProviderRequest{
 		WorkspaceID: string(candidateContext.WorkspaceID), RunID: string(candidateContext.RunID),
 		StepID: request.Transaction.AuthoritySnapshotID, Kind: "runtime_v2_candidate",
-		Schema: runtimeV2CandidateSchemaForDecision(request.Decision),
+		Schema: runtimeV2CandidateSchemaForDecisionWithTargetSelection(request.Decision, candidateContext.Resources.TargetSelection),
 		PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.runtime_candidate_prompt.v2", Sections: []llmmodels.PromptSection{
 			{ID: "C0.runtime-candidate-contract", Name: "Runtime candidate contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, Content: runtimeV2CandidateContractCatalog()},
 			{ID: "C1.goal-dod", Name: "Goal and DoD", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 1, DefinitionRevision: definitionContext.Revision, Content: string(definitionJSON)},
@@ -531,7 +531,8 @@ func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidat
 		MissingEvidenceKinds: runtimecontract.MissingRequiredEvidenceKinds(facts),
 		AllowedEvidenceRefs:  runtimecontract.AcceptedEvidenceRefsForFocus(facts), Evidence: context.Evidence,
 		Assessments: context.Assessments, Failure: context.Failure, RepairHints: runtimecontract.DeriveRuntimeRepairHints(facts),
-		AdmissibleOperationKinds: context.AdmissibleOperationKinds, RejectedOperationShapes: context.RejectedOperationShapes,
+		AdmissibleOperationKinds:  runtimeV2CandidateAllowedOperationKinds(action, context.AdmissibleOperationKinds, nil, context.Resources.TargetSelection),
+		RejectedOperationShapes:   context.RejectedOperationShapes,
 		NoProgressOperationShapes: context.NoProgressOperationShapes,
 		Capabilities:              context.Capabilities,
 		Resources: runtimeCandidateResourceProjection{
@@ -622,6 +623,16 @@ func runtimeV2CandidateSchema(action runtimecontract.RuntimeAction) string {
 // output schema from the sealed operation contracts. The stable C0-C2 prompt
 // prefix remains unchanged; admissible operation kinds belong to C3 authority.
 func runtimeV2CandidateSchemaForDecision(decision runtimecontract.RuntimeDecision) string {
+	return runtimeV2CandidateSchemaForDecisionWithTargetSelection(decision, nil)
+}
+
+// runtimeV2CandidateSchemaForDecisionWithTargetSelection narrows the volatile
+// provider schema when the persisted File-owner selection is a creation/scope
+// observation. That observation is not a generic durable-side-effect grant:
+// until a concrete File target has been proposed and owner-validated, only a
+// durable File operation is a legal candidate shape. This is request rendering
+// only; Runtime V2 admission remains the final SM-3 authority.
+func runtimeV2CandidateSchemaForDecisionWithTargetSelection(decision runtimecontract.RuntimeDecision, selection *runtimecontract.RuntimeTargetSelection) string {
 	base := runtimeV2CandidateSchema(decision.Action)
 	if decision.Action != runtimecontract.RuntimeActionProduceStateChange && decision.Action != runtimecontract.RuntimeActionProduceValidation {
 		return base
@@ -642,11 +653,15 @@ func runtimeV2CandidateSchemaForDecision(decision runtimecontract.RuntimeDecisio
 	if !ok {
 		return base
 	}
+	allowedKinds := runtimeV2CandidateAllowedOperationKinds(decision.Action, decision.RequiredOutput.AcceptedKinds, decision.RequiredOutput.RequiredOperationSequence, selection)
 	conditions := runtimeV2OperationSchemaConditions(
-		decision.RequiredOutput.AcceptedKinds,
+		allowedKinds,
 		decision.RequiredOutput.AcceptedOperationVariants,
 		decision.RequiredOutput.RequiredOperationSequence,
 	)
+	if itemProperties, ok := items["properties"].(map[string]any); ok {
+		itemProperties["kind"] = map[string]any{"type": "string", "enum": allowedKinds}
+	}
 	if len(conditions) > 0 {
 		items["allOf"] = conditions
 	}
@@ -667,6 +682,50 @@ func runtimeV2CandidateSchemaForDecision(decision runtimecontract.RuntimeDecisio
 		return base
 	}
 	return string(encoded)
+}
+
+// runtimeV2CandidateAllowedOperationKinds projects a persisted File-owner
+// creation/scope fact into the C3 provider contract. It does not discover a
+// target, choose an action, or modify the sealed decision. The File owner and
+// Orchestrator admission still validate the concrete target and operation.
+func runtimeV2CandidateAllowedOperationKinds(action runtimecontract.RuntimeAction, kinds []string, requiredSequence []runtimecontract.RuntimeRequiredOperationVariant, selection *runtimecontract.RuntimeTargetSelection) []string {
+	if action != runtimecontract.RuntimeActionProduceStateChange || selection == nil {
+		return append([]string(nil), kinds...)
+	}
+	value := selection.Normalized()
+	if value.OwnerModuleID != runtimecontract.RuntimeModuleFile ||
+		(value.Disposition != runtimecontract.RuntimeTargetSelectionCreate && value.Disposition != runtimecontract.RuntimeTargetSelectionScope) {
+		return append([]string(nil), kinds...)
+	}
+	seen := make(map[string]struct{}, len(kinds))
+	ret := make([]string, 0, len(kinds))
+	for _, raw := range kinds {
+		descriptor, ok := runtimecontract.RuntimeOperationDescriptorForKind(raw)
+		if !ok || descriptor.OwnerModuleID != runtimecontract.RuntimeModuleFile || !runtimecontract.RuntimeEffectIsDurable(descriptor.DefaultEffectScope) {
+			continue
+		}
+		if _, duplicate := seen[descriptor.Kind]; duplicate {
+			continue
+		}
+		seen[descriptor.Kind] = struct{}{}
+		ret = append(ret, descriptor.Kind)
+	}
+	// A required sequence is an explicit sealed authority of its own. Keep its
+	// kinds so that File-scope narrowing cannot make a valid multi-owner
+	// sequence schema self-contradictory; the scope still does not authorize any
+	// arbitrary operation outside that sequence.
+	for _, requirement := range requiredSequence {
+		descriptor, ok := runtimecontract.RuntimeOperationDescriptorForKind(requirement.Kind)
+		if !ok {
+			continue
+		}
+		if _, duplicate := seen[descriptor.Kind]; duplicate {
+			continue
+		}
+		seen[descriptor.Kind] = struct{}{}
+		ret = append(ret, descriptor.Kind)
+	}
+	return ret
 }
 
 func runtimeV2OperationSchemaConditions(
@@ -704,9 +763,11 @@ func runtimeV2OperationSchemaConditions(
 		}
 		seen[contract.Kind] = struct{}{}
 		parameterNames := make([]string, 0, len(contract.Parameters))
+		parameterTypes := make(map[string]runtimecontract.RuntimeOperationParameterType, len(contract.Parameters))
 		parameterRequirements := make([]any, 0, len(contract.Parameters)+1)
 		for _, parameter := range contract.Parameters {
 			parameterNames = append(parameterNames, parameter.Name)
+			parameterTypes[parameter.Name] = parameter.Type
 			if parameter.Required {
 				parameterRequirements = append(parameterRequirements, runtimeV2ParameterContainsSchema(parameter.Name))
 			}
@@ -714,7 +775,11 @@ func runtimeV2OperationSchemaConditions(
 		if len(contract.RequireOneOfParameters) > 0 {
 			oneOf := make([]any, 0, len(contract.RequireOneOfParameters))
 			for _, name := range contract.RequireOneOfParameters {
-				oneOf = append(oneOf, runtimeV2ParameterContainsSchema(name))
+				// A one-of target must have a value. Presence-only validation
+				// admitted targetRef="", which then failed only after generation.
+				// This is provider-facing schema rendering; DTO admission remains
+				// the authoritative Runtime V2 contract gate.
+				oneOf = append(oneOf, runtimeV2NonEmptyParameterContainsSchema(name, parameterTypes[name]))
 			}
 			parameterRequirements = append(parameterRequirements, map[string]any{"anyOf": oneOf})
 		}
@@ -761,6 +826,32 @@ func runtimeV2ParameterContainsSchema(name string) map[string]any {
 	return map[string]any{
 		"contains": map[string]any{"type": "object", "properties": map[string]any{"name": map[string]any{"const": name}}, "required": []string{"name"}},
 	}
+}
+
+// runtimeV2NonEmptyParameterContainsSchema keeps a descriptor's one-of
+// parameter requirement aligned with the operation DTO: a selected canonical
+// target cannot be an empty string. It only renders a provider schema and
+// never discovers targets or changes Runtime V2 state.
+func runtimeV2NonEmptyParameterContainsSchema(name string, parameterType runtimecontract.RuntimeOperationParameterType) map[string]any {
+	properties := map[string]any{"name": map[string]any{"const": name}}
+	required := []string{"name"}
+	switch parameterType {
+	case runtimecontract.RuntimeOperationParameterTypeString:
+		properties["string"] = map[string]any{"type": "string", "minLength": 1}
+		required = append(required, "string")
+	case runtimecontract.RuntimeOperationParameterTypeStringList:
+		properties["stringList"] = map[string]any{"type": "array", "minItems": 1}
+		required = append(required, "stringList")
+	case runtimecontract.RuntimeOperationParameterTypeInteger:
+		properties["integer"] = map[string]any{"type": "integer"}
+		required = append(required, "integer")
+	case runtimecontract.RuntimeOperationParameterTypeBoolean:
+		properties["boolean"] = map[string]any{"type": "boolean"}
+		required = append(required, "boolean")
+	default:
+		return runtimeV2ParameterContainsSchema(name)
+	}
+	return map[string]any{"contains": map[string]any{"type": "object", "properties": properties, "required": required}}
 }
 
 func runtimeV2OperationVariantParameterSchema(kind string, variant runtimecontract.RuntimeOperationVariantContract) map[string]any {
@@ -862,13 +953,14 @@ func runtimeV2CandidateContractCatalog() string {
 	}, "\n")
 }
 
-func runtimeV2CandidateOutputContract(decision runtimecontract.RuntimeDecision) runtimeCandidateOutputContractProjection {
+func runtimeV2CandidateOutputContract(decision runtimecontract.RuntimeDecision, selection *runtimecontract.RuntimeTargetSelection) runtimeCandidateOutputContractProjection {
+	allowedKinds := runtimeV2CandidateAllowedOperationKinds(decision.Action, decision.RequiredOutput.AcceptedKinds, decision.RequiredOutput.RequiredOperationSequence, selection)
 	return runtimeCandidateOutputContractProjection{
 		Action:                  decision.Action,
-		Schema:                  json.RawMessage(runtimeV2CandidateSchemaForDecision(decision)),
+		Schema:                  json.RawMessage(runtimeV2CandidateSchemaForDecisionWithTargetSelection(decision, selection)),
 		RequiredTopLevelExample: runtimeV2CandidateTopLevelExample(decision.Action),
 		ForbiddenTopLevelFields: []string{"candidate", "candidates", "executionGraph", "convergenceState", "focus", "authority", "transaction", "outputMode", "result", "runtimeState"},
-		OperationContracts:      runtimeV2CandidateOperationContracts(decision.RequiredOutput.AcceptedKinds),
+		OperationContracts:      runtimeV2CandidateOperationContracts(allowedKinds),
 	}
 }
 
@@ -953,7 +1045,10 @@ func runtimeV2CandidateRetryParameterHint(reason string) string {
 	}
 	lower := strings.ToLower(reason)
 	if strings.Contains(lower, "targetrefs must contain targetref") || strings.Contains(lower, "targetrefs must contain path") || strings.Contains(lower, "targetrefs must contain target ") {
-		return " Copy the exact canonical targetRef or path parameter value into the operation's top-level targetRefs. A concrete new workspace-relative target is valid even when the file does not yet exist."
+		return " Declare exactly one non-empty canonical targetRef or path parameter, then copy that exact value into the operation's top-level targetRefs. A concrete new workspace-relative target is valid even when the file does not yet exist."
+	}
+	if strings.Contains(lower, "owner-grounded workspace scope permits only a durable file operation") || strings.Contains(lower, "creation scope requires a durable file operation") {
+		return " The current target-selection scope permits only a durable File-owner operation. Use one of the File operation contracts, declare a concrete workspace-relative targetRefs value that the operation changes, and do not use Shell, Git, MCP, Web, or SSH until File owner evidence establishes a concrete target."
 	}
 	if strings.Contains(lower, "does not accept parameter") || strings.Contains(lower, "requires parameter") {
 		return " Rewrite illegal operation parameters to the allowed typed fields for the requested kind. Do not repeat rejected parameter names."

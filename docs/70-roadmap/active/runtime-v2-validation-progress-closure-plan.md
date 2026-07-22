@@ -1205,6 +1205,50 @@ re-drive。独立回归包括 LLM C0/C3 rendering、stable-prefix parity、softw
 Shell effect-mismatch receipt；部署验证必须从新的 activation 开始，既有 `run-001` 与 `run-002`
 均为 terminal，不能 Resume。
 
+#### 2026-07-22 deployed counterexample — empty canonical target and malformed JSON
+
+清洁数据的新 workspace `ws-74e57b0067a0343f/run-001` 已证明启动、File owner selection、
+provider ceiling、Run/Result/Workspace terminal delivery 与 EventStream projection 都按既定合同
+工作：sealed target 为 `ai-proxy/deepseek-v4-flash`，`contextWindowTokens=1000000`，
+`effectiveMaxOutputTokens=65536`，实际两次请求仅输出 `3425` 与 `6368` tokens，均未到达
+输出上限，且 workspace 的 active run 最终已释放。
+
+该 Run 在 `focus-002` 的 state-change repair 先收到一个 JSON-object 候选：它的顶层
+`targetRefs` 含 `lsp-mcp-server/main.go`，但 `patch/apply` 的 canonical `targetRef/path` 为空。
+DTO admission 正确拒绝该候选；同一 authority 的 attempt 1 随后返回
+`invalid character '}' after array element`，因此严格 decoder 正确将其归为非截断的 schema
+failure，并在 sealed candidate retry 用尽后形成 `candidate_retry_exhausted` terminal。
+
+此反例不允许把任意 JSON syntax error 当作 output continuation，也不允许 File/Orchestrator
+自动从顶层 `targetRefs` 补写 canonical target；前者只适用于 provider token-limit EOF，后者会
+改变 LLM 提案内容。收口增量是 LLM adapter 的 sealed operation schema：
+`RequireOneOfParameters` 对 string target 现要求 non-empty value，而不只是字段存在；retry
+instruction 同步要求返回 non-empty `targetRef` 或 `path` 并逐字复制到 `targetRefs`。它只影响
+SM-3 provider request rendering，DTO/SM-3 admission 仍是最终裁决，SM-1、SM-2 与 SM-4 不变。
+
+该 Run 不能作为 H6 正向收敛完成证据，但可作为 H6 的负向事实：无 Resume、EventStream 或
+process-local recovery 参与 terminal；provider audit、persisted candidate attempts 与 Result/Run
+projection 对同一失败原因一致。后续 fresh Run 仍需验证完整 target-bound repair → validation →
+assessment delta 正向链。
+
+#### 2026-07-22 follow-up — File scope must constrain the provider operation surface
+
+使用已部署 LLM schema 收口后的 fresh `run-002` 证明上项不能只依赖自然语言 instruction：File
+owner 返回 `target_selection=scope`，其含义是“尚无 concrete target，允许 LLM 提出一个由 File
+owner 验证的 workspace-relative 文件目标”，而不是向所有 durable capability 授权。该 Run 的两次
+候选都返回 `shell/command go test`，分别携带目录或没有 `targetRefs`；SM-3 admission 正确以
+`candidate_target_outside_grounding` 拒绝，两次尝试用尽后终态为
+`candidate_retry_exhausted`。Run/Result/Workspace 投影一致，TUI workspace 的 `active` 只是
+workspace 生命周期显示，不能被解释为该 terminal Run 仍在执行。
+
+收口因此把同一个 persisted File `create`/`scope` fact 同时投影到 LLM 的 C3
+`admissibleOperationKinds`、动态 JSON schema 和 `operationContracts`：在没有更高优先级 concrete
+target 的 state-change authority 中，仅保留 durable File-owner kinds；重试 instruction 明确拒绝
+Shell/Git/MCP/Web/SSH，要求 operation 实际改变一个 concrete workspace-relative `targetRefs`。
+若 sealed required operation sequence 已显式需要其它 owner，必须由其 own contract 表达，不能由
+scope 隐式扩权。此变更只缩小 SM-3 provider rendering 的提案面；不在 LLM 发现目标、不移动
+SM-2 action authority，也不替代 File feasibility probe 或 Orchestrator admission。
+
 #### Per-component closure boundary
 
 | 组件 | 可以单独回归的功能边界 | 不可承接的状态迁移 |
