@@ -998,6 +998,7 @@ H6 仍必须由 clean-data 的真实 grounded deployed chain 证明；不得将�
 | 8D-03 | landed baseline | Orchestrator `runtimev2` 是唯一 repair target precedence owner。 | `groundedRepairTargets(facts)` 的稳定优先级为 Focus refs、persisted FailureTarget、当前 failure refs、selected TargetSelection、RepairDirective refs。 | SM-2 的 required output、candidate admission、RepairDirective 和 LLM authority 都使用同一集合；候选 durable operation 不命中该集合不得 seal。 | 每个来源单独、来源冲突、selected target outside operation、stale target、duplicate candidate；不得存在第二份 fallback 逻辑。 |
 | 8D-04 | landed baseline | Orchestrator 负责 effective-progress 判定；`workorchruntimecontract` 仅提供纯 delta/hash/clone helper。 | owner receipt、admitted evidence、coverage、assessment gap、focus、target set 和 repair ledger 都是输入；输出只能是 aggregate 的 CAS transition。 | SM-2：`RequireAssessment=true` 时，durable state change 只能使旧 assessment 失效，不能立即 `NoteProgress` 或清 repair window；后续 assessment 仅在 coverage/missing-evidence 的 neutral set **严格缩小**时调用纯 `NoteGapProgress`，保留剩余 `ActiveGap` 与同 focus 总预算；satisfied assessment 才可清 gap。无 assessment 要求时，只有 `Changed=true` 且命中 grounded target 的 durable change 才可能构成 progress。 | required target changed but assessment pending、same gap、partial gap delta、satisfied gap、non-target change、no-op、weak validation、restart 都有 focused 回归；duplicate/stale 与同签名 retarget 继续由 8D-05 收口。 |
 | 8D-05 | landed baseline / open retarget | Orchestrator 负责 no-progress family、same-signature retarget 和预算；candidate/LLM/owner 都不得维护该状态。 | canonical operation shape 绑定 focus、coverage、kind/variant、normalized targets、effect scope、quality 与 resulting gap；reason/description 不得成为 identity。 | SM-2/SM-3：repairable assessment 重现或扩大 persisted gap 时，将 current-focus accepted state-change/validation operation 写入 `NoProgressOperationShapes`；candidate admission 拒绝 exact replay。真实 gap/coverage/focus/grounded-target delta 才能开启新 cycle。总 `RepairAttempts` 只在 focus advance 时重置。 | exact replay、文案变化、assessment same-gap shape persistence 已有 focused 回归；仍需完成 profile/capability owner 的 same-signature **retarget** observation、完整 crash boundary 与 fresh deployed sequence。达到上限后只可 state change、governance 或 typed terminal。 |
+| 8D-06 | landed local / pending deployed verification | Orchestrator `runtimev2` 的 reducer/repair-directive 是唯一 owner；`pkg` 只保存 directive DTO 和纯 normalize/hash。 | 当前 Focus、已接受 evidence、directive 的 `SupersedesEvidenceRevision` 与 sealed `RequiredOutputContract` 是输入；输出为同一 CAS 内从 state-change repair 续接到 missing-validation 的新 decision/directive。 | SM-2：validation candidate 因 owner feasibility 在 provider 后但 dispatch 前不可行，且 policy 需要先补 durable state change 时，已接受、命中 directive target 且晚于 superseding revision 的 state change 必须消耗该 directive。即使 `RequireAssessment=true`，只要 validation evidence 仍缺失，下一 action 必须回到 `produce_validation`；assessment 仍仅在全部 required evidence 齐备后选择。不得因 `RequireAssessment` 固化 `produce_state_change` directive、耗尽 SM-3 candidate retry，或把状态迁移下沉到 `pkg`。 | `TestRepairDirectiveFlipsToValidationAfterAcceptedStateChangeEvenWhenAssessmentIsRequired` 覆盖 live 反例的状态序列；`TestRepairDirectiveStateChangeEvidenceCanAdvanceBeforeRequiredAssessment` 证明 assessment gate 只约束 coverage/closeout、不阻断 missing-validation 续接；`go test ./internal/modules/kernel/orchestrator/... -count=1` 与 file-backed positive verifier 已通过。仍需新的 deployed Run 验证。 |
 | 8E-01 | landed baseline | Shell 和 MCP block 仅形成 owner receipt。 | MCP 以 `RuntimeFailureTargetObservation` 传输失败 response 中的 actual failure targets；Shell 在没有结构化 source 时只传 operation `TargetRefs` lineage，failure target/observation 为 nil。两者均绝不回退 operation target。 | SM-3 仅把 receipt 作为 evidence-admission input；owner 不关闭 coverage、不修改 repair ledger、不选择 retarget/action。 | MCP target 与 operation target 相同/不同、多个/无可解析 target；Shell zero-work/all-skipped/non-zero/duplicate 与 validation entry 不升级为 failure target。 |
 | 8E-02 | landed MCP observation baseline / open Shell and owner binding | 各 failing capability adapter 必须报告其实际可观察的 related implementation target 或明确不可得；不得伪造。MCP 只解析失败 response 的顶层显式 `failureTargets`；Shell 不再从 sealed request 或 command target 复制该字段。 | diagnostic target、failure signature、owner revision、subject 与 bounded evidence refs 由 capability owner 返回。缺结构化观察时 `FailureTargets=nil`。 | SM-2 只将与 Focus target role 相容的 receipt target 转成 `FailureTarget`；validation entry 本身不自动升级为 implementation target。当前 Shell 的 operation/diagnostic target 仍只是 receipt lineage，不能代替 future structured capability observation。 | MCP explicit/no-target/success-response/duplicate，Shell no-fallback、多个 target、stale owner revision、receipt replay；仍需 Shell structured protocol、role/freshness binding、crash/restart matrix。core 内不得新增文件名、后缀、Go/LSP/MCP 语义。 |
 | 8F-01 | landed baseline | LLM block 只渲染 sealed authority；不拥有 Runtime facts。 | C3-C5 dynamic context 已含 Focus target contract、FailureTarget、TargetSnapshots、TargetSelection、RepairDirective、failure 和 rejected/no-progress shapes。对 File `create` selection，C3 还必须明确要求候选提出一个具体 workspace-relative File target：这只是未执行 operation proposal，不是 LLM 建立 target authority；File admissibility/feasibility 仍是唯一裁决者。 | SM-3 request 只能使用 Orchestrator 持久化的 authority snapshot；C0-C2 stable prefix 不包含这些易变事实。 | context round-trip、stable prefix 不漂移、selected/absent/ambiguous/create rendering、schema unknown field 拒绝。 |
@@ -1028,6 +1029,76 @@ accepted owner receipt
    diagnostic lineage，不能改变 evidence、repair、progress、metrics 或 candidate budget。
 5. `pkg` 的 `NoteProgress` / hash / normalize helper 必须继续是输入到输出的纯值函数；
    “何时调用”只在 Orchestrator Biz 的 reducer/commit 主链决定。
+
+#### 2026-07-22 deployed counterexample — repair directive must not mask missing validation
+
+最新服务的清洁 workspace `ws-2c9bb7bc523a0b0a/run-001` 已排除空工作区无 target、模型预算、
+provider transport、投影滞后与 terminal delivery 问题：File owner 已从空目录走完 `create`，随后
+以 `scope` 观察到 `lsp-bridge/main.go` 与
+`lsp-bridge/internal/lsp/manager_test.go`；Run/Result 均已持久化为 `failed`，且
+`sourceEventRevision == projectedSourceRevision == 112`。
+
+反例状态序列为：
+
+```text
+focus-002 only requires validation and RequireAssessment=true
+  -> validation candidate proposes build + test
+  -> owner feasibility rejects test because no executable test target exists
+  -> policy selects one state-change repair and File accepts manager_test.go
+  -> persisted RepairDirective remains produce_state_change
+  -> RequireAssessment previously prevents directive consumption
+  -> reducer asks produce_state_change although only validation is missing
+  -> provider returns read-only/session operations; durable-effect contract rejects attempt 0/1
+  -> candidate_retry_exhausted terminal
+```
+
+这是 SM-2 repair continuation 与 SM-3 candidate contract 的组合缺陷，不能通过放宽
+`produce_state_change` durable-effect gate、增加 candidate retry、提交 governance ticket、TUI/Web
+补偿 Resume 或把 workspace lifecycle `active` 误当作 Run 可恢复来修复。
+
+收口规则（提交 `aff9e271`）是：state-change repair 的 accepted evidence 一旦满足 directive
+的 revision/target binding，就只表示“该 repair evidence 已补足”；如果 Focus 仍缺 validation，
+reducer 必须进入 `produce_validation`。`RequireAssessment` 继续阻止 evidence 直接关闭 coverage、
+清 effective-progress ledger 或 terminal，但不允许阻止 missing evidence 的正常补齐。旧 terminal
+Run 不迁移、不 Resume；部署后必须创建新的 activation/run 复核这一序列。
+
+#### 2026-07-22 deployed counterexample — durable Shell declaration and rejected-shape retry
+
+同一清洁 workspace 的新 activation `run-002` 已证明上一项 reducer 修复生效：validation 失败后
+先进入 state-change repair，而非因 `RequireAssessment` 卡在旧 directive。但该 Run 随后以
+`candidate_retry_exhausted` 终止，原因不是 Resume、TUI、投影或 owner 执行异常，而是候选合同
+缺少对可观察持久变更的约束：
+
+```text
+focus-001 missing validation
+  -> produce_validation: bounded build command exits non-zero
+  -> produce_state_change: shell/command, stateChanging=true, command is dependency preparation
+  -> candidate declares existing source/test files as targetRefs
+  -> Shell owner observes neither declared target changed
+  -> receipt is correctly rejected as effect_mismatch / no durable effect
+  -> next provider attempt changes only operation ID/text and replays the same structural shape
+  -> SM-3 rejected-shape gate correctly rejects it
+  -> candidate_retry_exhausted terminal
+```
+
+收口职责如下：
+
+1. `blocks/shell/biz` 保持执行后的真实 target revision 比对；不得把未改变的命令伪造为
+   `workspace_durable`，也不得猜测命令本应修改哪个文件。
+2. `kernel/orchestrator/biz/runtimev2` 保持 persisted rejected/no-progress shape admission；不得以
+   增加 attempt、放宽 anti-replay 或由 reducer 推测 Shell 命令语义来绕过。
+3. `blocks/llm/biz` 的 C0 合同必须要求 durable operation 只声明该 operation 实际会改变的
+   concrete targets；同一 authority 的 retry 在 failure code 为 operation-shape replay 时，C3
+   必须明确要求查看 persisted shapes 并改变 kind、targets 或 execution-semantic parameters。
+   C0-C2 仍稳定，shapes 和 failure 仍只在 C3-C5。
+4. software-dev soul/profile 必须把项目骨架、模块描述、配置或实现缺失的修复表达为具体
+   File patch/write；Shell build/test/dependency/toolchain 命令只作为 validation，除非它确实
+   修改所声明的 workspace target。
+
+该项影响 SM-3 的 candidate rendering/admission 协同，不改变 SM-2 action authority 或 SM-4
+re-drive。独立回归包括 LLM C0/C3 rendering、stable-prefix parity、software-dev defaults 以及
+Shell effect-mismatch receipt；部署验证必须从新的 activation 开始，既有 `run-001` 与 `run-002`
+均为 terminal，不能 Resume。
 
 #### Per-component closure boundary
 

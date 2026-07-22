@@ -322,6 +322,8 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertStringSliceContains(t, execution.AllowedToolKinds, "git/read")
 	assertStringSliceContains(t, execution.AllowedToolKinds, "git/write")
 	assertSoulContains(t, execution.SoulMD, "git/write init")
+	assertSoulContains(t, execution.SoulMD, "targetRefs 只能列出该命令实际会修改")
+	assertSoulContains(t, execution.SoulMD, "先用 file_write/unified_diff 在具体路径落盘")
 	assertSoulContains(t, execution.SoulMD, "最小代码或配置变更")
 	assertSoulContains(t, execution.SoulMD, "workspace 为空且 Goal/DoD 未要求既有源码")
 	assertSoulContains(t, execution.SoulMD, "每轮修改后先执行最小相关验证")
@@ -857,6 +859,7 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 	}
 	assertStringListContains(t, guidance, "When repairActionPackage.requiredOutput accepts patch/apply, return at least one patch/apply node that performs a concrete source, configuration, test, documentation, or workspace state change directly tied to the current failure.")
 	assertStringListContains(t, guidance, "When repairActionPackage.requiredOutput.mustDeclareCoverageTargets is true, every patch/apply or equivalent state-changing evidence node must include coverageTargets copied from the active coverageTargetSet item it intends to close.")
+	assertStringListContains(t, guidance, "A state-changing shell/command must declare only workspace-relative targets that the command itself will actually modify. Build, test, listing, dependency, and toolchain probes are validation, not durable state changes; when project skeleton, module description, configuration, or implementation files are absent, create or patch those concrete paths before shell verification.")
 	assertStringListContains(t, guidance, "When targetSnapshots, failureTargetRepairContext, or repairTargetSet already identify existing implementation or entrypoint files for an unresolved Goal/DoD/source_change gap, patch those targets first; do not spend the primary state-changing turn on placeholder tests, go.sum, coverage_map, report-only files, or other supplemental evidence resources unless the current diagnostics explicitly target them.")
 	assertStringListContains(t, guidance, "When repairActionPackage.shapeContractEvidenceRequired is present, the next graph must first acquire bounded evidence for the actual API, dependency, schema, constructor, method, field, or capability contract shape via file/read, shell/command, mcp/tool_call, or git/read; do not guess SDK or dependency shapes from diagnostics alone.")
 	assertStringListContains(t, guidance, "If version_control_snapshot was rejected because it cited shell/command, file/read, file/list, LSP, or other non git/write commit evidence, the next repair must converge on git/read status/diff followed by git/write add and git/write commit, or return a zeroWork/skipped assessment when no commit-worthy change exists.")

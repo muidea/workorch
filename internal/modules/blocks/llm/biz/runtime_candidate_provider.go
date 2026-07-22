@@ -846,6 +846,7 @@ func runtimeV2CandidateContractCatalog() string {
 		"context.requiredAction is the sole next-action authority. When context.repairDirective is present, obey its requiredAction, requiredEffectScopes, requiredEvidenceKinds, allowedOperationKinds, targetRefs, and rejectedOperationShapes.",
 		"context.missingEvidenceKinds is completion-audit information only and must never override context.requiredAction or context.repairDirective.",
 		"Use operationContracts for allowed parameters of each kind. Dynamic fields are only valid where the contract permits them.",
+		"For an operation expected to produce a durable effect, targetRefs must name concrete declared targets that the operation itself will actually change. Do not label a read, check, preparation, or no-op action as state-changing, and do not cite unrelated targets as durable-effect witnesses.",
 		"When context.repairHints is present, follow those domain-neutral hints and do not repeat an active rejected operation shape.",
 		"When context.rejectedOperationShapes is present, every listed operation hash and exact structural operation is forbidden until later accepted evidence supersedes it. Choose an admissible kind and change kind, targets, or execution-semantic parameters.",
 		"For a satisfied assessment, evidenceRefs is mandatory and every value must be copied exactly from context.allowedAcceptedEvidenceRefs. Satisfied item evidenceRefs must use the same allowed set.",
@@ -920,8 +921,20 @@ func runtimeV2CandidateRetry(attempt int, failure *runtimecontract.RuntimeCandid
 	if previous.Class == runtimecontract.RuntimeCandidateFailureClassInfeasible {
 		instruction += " The previous operation was owner-infeasible before dispatch seal. Choose only targets, selectors, and parameters in the current operationAdmissibilities inventory; do not repeat its failure signature."
 	}
+	if runtimeV2CandidateFailureIsOperationShapeReplay(previous.Code) {
+		instruction += " The previous candidate replayed a rejected or no-progress operation shape. Inspect context.rejectedOperationShapes and context.noProgressOperationShapes, then choose a materially different operation shape that changes its declared durable targets. Changing only an operation ID, narrative, dependency list, or cosmetic parameter is not sufficient."
+	}
 	instruction += runtimeV2CandidateRetryParameterHint(previous.Reason)
 	return &runtimeCandidateRetryProjection{PreviousFailure: previous, Instruction: instruction}
+}
+
+func runtimeV2CandidateFailureIsOperationShapeReplay(code string) bool {
+	switch strings.TrimSpace(code) {
+	case "candidate_replays_rejected_shape", "candidate_partially_replays_rejected_shape", "candidate_replays_no_progress_shape":
+		return true
+	default:
+		return false
+	}
 }
 
 func runtimeV2CandidateRetryParameterHint(reason string) string {

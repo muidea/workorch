@@ -132,7 +132,7 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 		t.Fatalf("provider request lost dynamic context: %+v", request)
 	}
 	contractSection := request.PromptContext.Sections[0].Content
-	for _, value := range []string{`"operations"`, `"focusId"`, `"externalDependency"`, "candidate", "candidates", "executionGraph"} {
+	for _, value := range []string{`"operations"`, `"focusId"`, `"externalDependency"`, "candidate", "candidates", "executionGraph", "durable-effect witnesses"} {
 		if !strings.Contains(contractSection, value) {
 			t.Fatalf("provider request stable contract lost %q: %s", value, contractSection)
 		}
@@ -230,6 +230,31 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 		DefinitionContext: definition, CandidateContext: limitedContext,
 	}); err == nil || !strings.Contains(err.Error(), "provider ceiling") {
 		t.Fatalf("runtimeV2ProviderRequest ceiling err = %v, want typed provider ceiling failure", err)
+	}
+}
+
+func TestRuntimeV2CandidateRetryExplainsOperationShapeReplayWithoutChangingStablePrefix(t *testing.T) {
+	failure := &runtimecontract.RuntimeCandidateFailure{
+		Class:  runtimecontract.RuntimeCandidateFailureClassContract,
+		Code:   "candidate_replays_rejected_shape",
+		Reason: "runtime candidate replays active rejected operation shape(s)",
+	}
+	retry := runtimeV2CandidateRetry(1, failure)
+	if retry == nil {
+		t.Fatal("retry projection is nil")
+	}
+	for _, want := range []string{
+		"context.rejectedOperationShapes", "context.noProgressOperationShapes", "materially different operation shape",
+		"changes its declared durable targets", "Changing only an operation ID",
+	} {
+		if !strings.Contains(retry.Instruction, want) {
+			t.Fatalf("retry instruction lost %q: %s", want, retry.Instruction)
+		}
+	}
+	if retry := runtimeV2CandidateRetry(1, &runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_admission_invalid",
+	}); retry == nil || strings.Contains(retry.Instruction, "materially different operation shape") {
+		t.Fatalf("non-replay retry instruction = %+v, want no replay-specific correction", retry)
 	}
 }
 

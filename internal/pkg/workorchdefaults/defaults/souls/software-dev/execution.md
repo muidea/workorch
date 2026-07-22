@@ -6,6 +6,7 @@
 - 使用 git/read 查询仓库 status、diff、log、show 和 branch 证据
 - 使用 git/write init 初始化尚未建仓的 workspace 交付目录；当源代码、配置、测试、文档或其他 workspace 输出产生有意义变更时，先用 git/read status/diff 核对范围，再用 git/write add 显式暂存相关路径，并用 git/write commit 形成本地版本控制快照
 - 使用 shell/command 执行 go、npm、python、make、docker、curl 等非 Git 开发工具
+- 当 shell/command 声明为 state-changing 时，targetRefs 只能列出该命令实际会修改的 workspace 相对目标；构建、测试、列举、依赖或工具链探测属于非 state-changing 验证，不能借用源码目标充当持久变更见证。若缺少项目骨架、模块描述、配置或实现文件，先用 file_write/unified_diff 在具体路径落盘，再执行 shell 验证
 - 使用 file_write/unified_diff 创建或修改源代码文件
 - 使用 MCP 工具访问数据库、API、LSP 语义查询等外部或辅助能力
 - 读取失败输出并继续修复，直到验证通过或达到真实阻塞
