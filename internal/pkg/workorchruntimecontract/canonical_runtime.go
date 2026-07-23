@@ -189,12 +189,45 @@ const (
 )
 
 type FailureFact struct {
-	Class             FailureClass
-	Code              string
-	Signature         string
-	Message           string
-	TargetRefs        []string
-	TargetObservation *RuntimeFailureTargetObservation
+	Class                FailureClass
+	Code                 string
+	Signature            string
+	Message              string
+	TargetRefs           []string
+	TargetObservation    *RuntimeFailureTargetObservation
+	ValidationDiagnostic *ValidationFailureDiagnostic
+}
+
+func (f FailureFact) Normalized() FailureFact {
+	f.Class = FailureClass(strings.TrimSpace(string(f.Class)))
+	f.Code = strings.TrimSpace(f.Code)
+	f.Signature = strings.TrimSpace(f.Signature)
+	f.Message = strings.TrimSpace(f.Message)
+	f.TargetRefs = normalizeStrings(f.TargetRefs)
+	if f.TargetObservation != nil {
+		observation := f.TargetObservation.Normalized()
+		f.TargetObservation = &observation
+	}
+	if f.ValidationDiagnostic != nil {
+		diagnostic := f.ValidationDiagnostic.Normalized()
+		f.ValidationDiagnostic = &diagnostic
+	}
+	return f
+}
+
+func (f FailureFact) Clone() FailureFact {
+	f = f.Normalized()
+	f.TargetRefs = append([]string(nil), f.TargetRefs...)
+	if f.TargetObservation != nil {
+		observation := f.TargetObservation.Normalized()
+		observation.TargetRefs = append([]string(nil), observation.TargetRefs...)
+		f.TargetObservation = &observation
+	}
+	if f.ValidationDiagnostic != nil {
+		diagnostic := f.ValidationDiagnostic.Clone()
+		f.ValidationDiagnostic = &diagnostic
+	}
+	return f
 }
 
 // RuntimeFailureTargetObservation is a bounded, owner-authored observation of
@@ -783,16 +816,7 @@ func (f RuntimeFacts) Normalized() RuntimeFacts {
 		f.Feasibility = &value
 	}
 	if f.Failure != nil {
-		failure := *f.Failure
-		failure.Class = FailureClass(strings.TrimSpace(string(failure.Class)))
-		failure.Code = strings.TrimSpace(failure.Code)
-		failure.Signature = strings.TrimSpace(failure.Signature)
-		failure.Message = strings.TrimSpace(failure.Message)
-		failure.TargetRefs = normalizeStrings(failure.TargetRefs)
-		if failure.TargetObservation != nil {
-			observation := failure.TargetObservation.Normalized()
-			failure.TargetObservation = &observation
-		}
+		failure := f.Failure.Normalized()
 		f.Failure = &failure
 	}
 	if f.RepairDirective != nil {

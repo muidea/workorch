@@ -456,6 +456,13 @@ func runtimeCandidateFailureFromFeasibility(record runtimecontract.RuntimeCandid
 		Class: runtimecontract.RuntimeCandidateFailureClassInfeasible,
 		Code:  failure.Code, Signature: failure.Signature, Reason: failure.Message,
 		TargetRefs: append([]string(nil), failure.TargetRefs...),
+		ValidationDiagnostic: func() *runtimecontract.ValidationFailureDiagnostic {
+			if failure.ValidationDiagnostic == nil {
+				return nil
+			}
+			diagnostic := failure.ValidationDiagnostic.Clone()
+			return &diagnostic
+		}(),
 	}
 }
 

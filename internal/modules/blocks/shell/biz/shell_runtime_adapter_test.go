@@ -55,6 +55,10 @@ func TestRuntimeAdapterProbeRejectsMissingGoTestTargetWithoutStartingProcess(t *
 	if failure == nil || failure.Code != "validation_target_missing" {
 		t.Fatalf("missing go test target feasibility failure = %+v", failure)
 	}
+	if failure.ValidationDiagnostic == nil || failure.ValidationDiagnostic.Class != runtimemodel.ValidationDiagnosticCommandInvalid ||
+		failure.ValidationDiagnostic.RecommendedEvidenceTargetType != runtimemodel.ValidationEvidenceTargetCommandContract {
+		t.Fatalf("missing go test target diagnostic = %+v", failure.ValidationDiagnostic)
+	}
 	content, err := os.ReadFile(filepath.Join(workspace, "marker"))
 	if err != nil || string(content) != "unchanged\n" {
 		t.Fatalf("probe changed workspace content=%q err=%v", content, err)

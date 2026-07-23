@@ -316,7 +316,14 @@ func TestRuntimeV2CandidateContextProjectionPreservesRepairDirectiveAuthority(t 
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite},
 		CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
-		CurrentFailure: &runtimecontract.FailureFact{Class: runtimecontract.FailureClassExecutionRejected, Message: "validation failed"},
+		CurrentFailure: &runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassExecutionRejected, Message: "validation failed",
+			ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{
+				SchemaVersion: runtimecontract.ValidationFailureDiagnosticSchemaVersion,
+				Class:         runtimecontract.ValidationDiagnosticBuildFailed, RecommendedEvidenceTargetType: runtimecontract.ValidationEvidenceTargetFailureSurface,
+				TargetRefs: []string{"main.go"}, StderrPreview: "compile failed",
+			},
+		},
 	}
 	context := runtimecontract.RuntimeCandidateContext{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: runtimecontract.InitialRuntimeEvidenceRevision,
@@ -338,6 +345,15 @@ func TestRuntimeV2CandidateContextProjectionPreservesRepairDirectiveAuthority(t 
 	hints := projection.RepairHints
 	if len(hints) == 0 || hints[0].Code != "obey_repair_directive" {
 		t.Fatalf("projection repair hints = %+v", hints)
+	}
+	encoded, err := json.Marshal(projection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"ValidationDiagnostic", runtimecontract.ValidationDiagnosticBuildFailed, "compile failed", "main.go"} {
+		if !strings.Contains(string(encoded), want) {
+			t.Fatalf("C3 projection lost validation diagnostic %q: %s", want, encoded)
+		}
 	}
 }
 

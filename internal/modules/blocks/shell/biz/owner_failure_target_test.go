@@ -72,9 +72,15 @@ func TestShellOwnerDoesNotInferFailureTargetFromValidationCommand(t *testing.T) 
 		len(response.Failure.TargetRefs) != 0 || response.Failure.TargetObservation != nil {
 		t.Fatalf("shell owner failure = %+v", response)
 	}
+	if response.Failure.ValidationDiagnostic == nil || response.Failure.ValidationDiagnostic.Class != runtimecontract.ValidationDiagnosticBuildFailed {
+		t.Fatalf("shell owner failure lost validation diagnostic: %+v", response.Failure)
+	}
 	if !reflect.DeepEqual(response.Receipt.TargetRefs, []string{"validation-entry.go"}) || response.Receipt.Failure == nil ||
 		len(response.Receipt.Failure.TargetRefs) != 0 || response.Receipt.Failure.TargetObservation != nil {
 		t.Fatalf("shell owner receipt = %+v", response.Receipt)
+	}
+	if response.Receipt.Failure.ValidationDiagnostic == nil || response.Receipt.Failure.ValidationDiagnostic.Class != runtimecontract.ValidationDiagnosticBuildFailed {
+		t.Fatalf("shell owner receipt lost validation diagnostic: %+v", response.Receipt.Failure)
 	}
 	if receipt, found := receipts[command.Execution.ExecutionKey]; !found || !reflect.DeepEqual(receipt, response.Receipt) {
 		t.Fatalf("committed receipt = %+v, response receipt = %+v", receipt, response.Receipt)
@@ -96,5 +102,8 @@ func TestShellOwnerDoesNotInferFailureTargetFromValidationCommand(t *testing.T) 
 		len(duplicate.Failure.TargetRefs) != 0 || duplicate.Failure.TargetObservation != nil ||
 		duplicate.Receipt.Failure == nil || len(duplicate.Receipt.Failure.TargetRefs) != 0 || duplicate.Receipt.Failure.TargetObservation != nil {
 		t.Fatalf("duplicate shell validation delivery = %+v commits=%d", duplicate, commits)
+	}
+	if duplicate.Failure.ValidationDiagnostic == nil || duplicate.Failure.ValidationDiagnostic.Class != runtimecontract.ValidationDiagnosticBuildFailed {
+		t.Fatalf("duplicate shell validation lost persisted diagnostic: %+v", duplicate.Failure)
 	}
 }

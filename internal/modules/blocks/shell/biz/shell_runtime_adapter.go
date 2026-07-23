@@ -276,11 +276,38 @@ func shellOperationInfeasible(operation runtimemodel.RuntimeOperation, code stri
 	if err != nil {
 		message = err.Error()
 	}
-	return &runtimemodel.FailureFact{
+	failure := &runtimemodel.FailureFact{
 		Class: runtimemodel.FailureClassCandidateContractFailure,
 		Code:  code, Signature: "operation-admissibility/" + operation.Kind + "/" + code,
 		Message: message, TargetRefs: append([]string(nil), operation.TargetRefs...),
 	}
+	class := ""
+	targetType := ""
+	switch strings.TrimSpace(code) {
+	case "shell_executable_unavailable", "shell_working_directory_unavailable":
+		class = runtimemodel.ValidationDiagnosticEnvironmentMissing
+		targetType = runtimemodel.ValidationEvidenceTargetEnvironment
+	case "shell_command_invalid", "shell_command_policy_rejected", "shell_validation_contract_rejected", "shell_command_timeout_policy_rejected", "validation_target_missing":
+		class = runtimemodel.ValidationDiagnosticCommandInvalid
+		targetType = runtimemodel.ValidationEvidenceTargetCommandContract
+	}
+	if class != "" {
+		commandKind := ""
+		for _, parameter := range operation.Parameters {
+			if parameter.Name == "command" && parameter.String != nil {
+				commandKind = filepath.Base(strings.TrimSpace(*parameter.String))
+				break
+			}
+		}
+		failure.ValidationDiagnostic = &runtimemodel.ValidationFailureDiagnostic{
+			SchemaVersion: runtimemodel.ValidationFailureDiagnosticSchemaVersion,
+			Class:         class, Reason: message, RecommendedEvidenceTargetType: targetType,
+			Stage: "shell_validation_preflight_failed", Operation: operation.Kind, CommandKind: commandKind,
+			CommandPolicyViolation: class == runtimemodel.ValidationDiagnosticCommandInvalid,
+			TargetRefs:             append([]string(nil), operation.TargetRefs...),
+		}
+	}
+	return failure
 }
 
 func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCommandRequest) (RuntimeCommandResult, error) {
@@ -801,7 +828,8 @@ func allowedShellValidationDiagnosticClass(value string) string {
 		runtimemodel.ValidationDiagnosticTestFailed,
 		runtimemodel.ValidationDiagnosticTimeout,
 		runtimemodel.ValidationDiagnosticOutputInconclusive,
-		runtimemodel.ValidationDiagnosticEvidenceBindingMissing:
+		runtimemodel.ValidationDiagnosticEvidenceBindingMissing,
+		runtimemodel.ValidationDiagnosticImplementationGap:
 		return strings.TrimSpace(value)
 	default:
 		return ""
@@ -1182,6 +1210,16 @@ func validateGoTestPackageTargets(deliverableDirectory string, args []string) er
 			continue
 		}
 		rel := strings.TrimPrefix(arg, "./")
+		// Go's recursive package pattern addresses the directory before the
+		// trailing /..., not a literal child named "...". Preflight only proves
+		// that workspace-relative roots exist; the Go toolchain remains the
+		// authority for package discovery below that root.
+		if wildcard := strings.Index(rel, "..."); wildcard >= 0 {
+			rel = strings.TrimSuffix(rel[:wildcard], "/")
+			if rel == "" {
+				continue
+			}
+		}
 		path := filepath.Join(deliverableDirectory, filepath.FromSlash(rel))
 		info, err := os.Stat(path)
 		if err != nil || !info.IsDir() {

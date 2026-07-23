@@ -370,16 +370,7 @@ func (r RuntimeOperationReceipt) Normalized() RuntimeOperationReceipt {
 	}
 	r.ResourceChanges = NormalizeRuntimeResourceChanges(r.ResourceChanges)
 	if r.Failure != nil {
-		failure := *r.Failure
-		failure.Class = FailureClass(strings.TrimSpace(string(failure.Class)))
-		failure.Code = strings.TrimSpace(failure.Code)
-		failure.Signature = strings.TrimSpace(failure.Signature)
-		failure.Message = strings.TrimSpace(failure.Message)
-		failure.TargetRefs = normalizeStrings(failure.TargetRefs)
-		if failure.TargetObservation != nil {
-			observation := failure.TargetObservation.Normalized()
-			failure.TargetObservation = &observation
-		}
+		failure := r.Failure.Normalized()
 		r.Failure = &failure
 	}
 	if r.Governance != nil {
@@ -493,12 +484,7 @@ func (r RuntimeOperationReceipt) Validate() error {
 func (r RuntimeOperationReceipt) Clone() RuntimeOperationReceipt {
 	ret := r.Normalized()
 	if r.Failure != nil {
-		failure := *ret.Failure
-		if failure.TargetObservation != nil {
-			observation := failure.TargetObservation.Normalized()
-			observation.TargetRefs = append([]string(nil), observation.TargetRefs...)
-			failure.TargetObservation = &observation
-		}
+		failure := ret.Failure.Clone()
 		ret.Failure = &failure
 	}
 	if r.Governance != nil {
@@ -631,6 +617,27 @@ func StableRuntimeOperationReceiptHash(receipt RuntimeOperationReceipt) string {
 			writeHashString(h, observation.TargetRole)
 			writeHashString(h, observation.ObservedRevision)
 			writeHashStrings(h, observation.TargetRefs)
+		}
+		if receipt.Failure.ValidationDiagnostic == nil {
+			writeHashString(h, "validation-diagnostic:nil")
+		} else {
+			diagnostic := receipt.Failure.ValidationDiagnostic.Normalized()
+			writeHashString(h, diagnostic.SchemaVersion)
+			writeHashString(h, diagnostic.Class)
+			writeHashString(h, diagnostic.Reason)
+			writeHashString(h, diagnostic.RecommendedEvidenceTargetType)
+			writeHashString(h, diagnostic.Stage)
+			writeHashString(h, diagnostic.Operation)
+			writeHashString(h, diagnostic.CommandKind)
+			writeHashString(h, fmt.Sprintf("%d", diagnostic.ExitCode))
+			writeHashString(h, fmt.Sprintf("%t", diagnostic.TimedOut))
+			writeHashString(h, fmt.Sprintf("%t", diagnostic.CommandPolicyViolation))
+			writeHashString(h, diagnostic.UnavailableCommand)
+			writeHashStrings(h, diagnostic.TargetRefs)
+			writeHashString(h, diagnostic.ObservationType)
+			writeHashString(h, diagnostic.EvidenceMode)
+			writeHashString(h, diagnostic.StdoutPreview)
+			writeHashString(h, diagnostic.StderrPreview)
 		}
 	}
 	if receipt.Governance == nil {

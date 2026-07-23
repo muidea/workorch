@@ -156,7 +156,7 @@ func reduceDeterminedFailure(base runtimecontract.RuntimeDecision, facts runtime
 		return runtimecontract.RuntimeDecision{}, false, nil
 	}
 	failure := facts.Failure
-	if failure.Class == runtimecontract.FailureClassExecutionFailure &&
+	if runtimecontract.FailureClassDisposition(failure.Class) == runtimecontract.RuntimeFailureDispositionSameFocusRepair &&
 		(facts.Repair.Exhausted || facts.Repair.RepairAttempts >= facts.ConvergencePolicy.MaxRepairAttemptsPerFocus) {
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "no_progress_exhausted", failure.Message), true, nil
 	}
@@ -478,7 +478,11 @@ func missingEvidenceKinds(facts runtimecontract.RuntimeFacts) []string {
 // anti-replay and only waste candidate budget. Re-validation is allowed only after accepted
 // state-change progress supersedes the failed validation lineage.
 func needsStateChangeAfterRejectedValidation(facts runtimecontract.RuntimeFacts) bool {
-	if !runtimecontract.RuntimeValidationFailureRequiresStateChange(facts.Activation.ExecutionContract.ValidationPolicies, runtimecontract.EvidenceKindValidation) {
+	diagnosticClass := ""
+	if facts.Failure != nil && facts.Failure.ValidationDiagnostic != nil {
+		diagnosticClass = facts.Failure.ValidationDiagnostic.Class
+	}
+	if !runtimecontract.RuntimeValidationFailureRequiresStateChange(facts.Activation.ExecutionContract.ValidationPolicies, runtimecontract.EvidenceKindValidation, diagnosticClass) {
 		return false
 	}
 	validationRevision, ok := latestRejectedValidationRevision(facts)

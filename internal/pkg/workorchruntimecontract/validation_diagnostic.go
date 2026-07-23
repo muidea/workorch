@@ -1,5 +1,7 @@
 package workorchruntimecontract
 
+import "strings"
+
 const (
 	ValidationFailureDiagnosticSchemaVersion = "workorch.validationFailureDiagnostic.v1"
 
@@ -52,4 +54,45 @@ type ValidationFailureDiagnostic struct {
 	EvidenceMode                  string   `json:"evidenceMode,omitempty"`
 	StdoutPreview                 string   `json:"stdoutPreview,omitempty"`
 	StderrPreview                 string   `json:"stderrPreview,omitempty"`
+}
+
+func (d ValidationFailureDiagnostic) Normalized() ValidationFailureDiagnostic {
+	d.SchemaVersion = strings.TrimSpace(d.SchemaVersion)
+	d.Class = strings.TrimSpace(d.Class)
+	d.Reason = strings.TrimSpace(d.Reason)
+	d.RecommendedEvidenceTargetType = strings.TrimSpace(d.RecommendedEvidenceTargetType)
+	d.Stage = strings.TrimSpace(d.Stage)
+	d.Operation = CanonicalRuntimeBlockKind(d.Operation)
+	d.CommandKind = strings.TrimSpace(d.CommandKind)
+	d.UnavailableCommand = strings.TrimSpace(d.UnavailableCommand)
+	d.TargetRefs = normalizeStrings(d.TargetRefs)
+	d.ObservationType = strings.TrimSpace(d.ObservationType)
+	d.EvidenceMode = strings.TrimSpace(d.EvidenceMode)
+	d.StdoutPreview = strings.TrimSpace(d.StdoutPreview)
+	d.StderrPreview = strings.TrimSpace(d.StderrPreview)
+	return d
+}
+
+func (d ValidationFailureDiagnostic) Clone() ValidationFailureDiagnostic {
+	d = d.Normalized()
+	d.TargetRefs = append([]string(nil), d.TargetRefs...)
+	return d
+}
+
+func sameValidationFailureDiagnostic(left, right *ValidationFailureDiagnostic) bool {
+	if left == nil && right == nil {
+		return true
+	}
+	if left == nil || right == nil {
+		return false
+	}
+	l := left.Normalized()
+	r := right.Normalized()
+	return l.SchemaVersion == r.SchemaVersion && l.Class == r.Class && l.Reason == r.Reason &&
+		l.RecommendedEvidenceTargetType == r.RecommendedEvidenceTargetType && l.Stage == r.Stage &&
+		l.Operation == r.Operation && l.CommandKind == r.CommandKind && l.ExitCode == r.ExitCode &&
+		l.TimedOut == r.TimedOut && l.CommandPolicyViolation == r.CommandPolicyViolation &&
+		l.UnavailableCommand == r.UnavailableCommand && sameStrings(l.TargetRefs, r.TargetRefs) &&
+		l.ObservationType == r.ObservationType && l.EvidenceMode == r.EvidenceMode &&
+		l.StdoutPreview == r.StdoutPreview && l.StderrPreview == r.StderrPreview
 }

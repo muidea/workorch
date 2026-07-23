@@ -949,8 +949,54 @@ func TestFailInfeasibleValidationCandidateRoutesToSealedStateChangeRepair(t *tes
 	if repaired.Facts.Failure == nil || repaired.Facts.Failure.Class != runtimecontract.FailureClassCandidateInfeasible || repaired.Facts.Failure.Code != "owner_target_missing" {
 		t.Fatalf("repair failure fact = %+v", repaired.Facts.Failure)
 	}
+	if repaired.Facts.Repair.RepairAttempts != 1 || repaired.Facts.Repair.ActiveGap == nil || repaired.Facts.Repair.LastCycleID == "" {
+		t.Fatalf("candidate infeasible did not start repair cycle: %+v", repaired.Facts.Repair)
+	}
+	if got := repaired.Facts.Repair.ActiveGap.MissingEvidenceKinds; len(got) != 1 || got[0] != runtimecontract.EvidenceKindValidation {
+		t.Fatalf("candidate infeasible gap evidence = %v", got)
+	}
+	if repaired.Facts.Repair.ActiveGap.FailureSignature != "owner/target/missing" || len(repaired.Facts.Repair.SignatureCounts) != 1 || repaired.Facts.Repair.SignatureCounts[0].Count != 1 {
+		t.Fatalf("candidate infeasible gap signature ledger = %+v", repaired.Facts.Repair)
+	}
 	if len(repaired.CandidateAttempts) != 1 || repaired.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed {
 		t.Fatalf("original validation attempt was not retained as a failed admission record: %+v", repaired.CandidateAttempts)
+	}
+}
+
+func TestFailInfeasibleValidationCandidateExhaustsSameFocusRepairBudget(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := controllerFacts()
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	facts.Capabilities = runtimecontract.RuntimeCapabilities{
+		StateChangeKinds: []string{runtimecontract.StepKindFileWrite},
+		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}
+	facts.ConvergencePolicy = runtimecontract.RuntimeConvergencePolicy{
+		MaxRepairAttemptsPerFocus: 1, MaxValidationOnlyRetriesPerFocus: 1,
+		MaxAcceptanceSliceWorkItems: 1, MaxFocuses: 1, MaxCandidateContextItems: 1,
+	}
+	facts.Activation.ExecutionContract.ValidationPolicies = []runtimecontract.RuntimeValidationPolicy{{
+		ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+		ValidationFailureImpliesStateChange: true,
+	}}
+	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.BeginCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	terminal, err := controller.FailCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassInfeasible, Code: "owner_target_missing", Signature: "owner/target/missing", Reason: "validation target is unavailable",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if terminal.Facts.Repair.RepairAttempts != 1 || terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "no_progress_exhausted" {
+		t.Fatalf("candidate infeasible repair budget did not terminal atomically: %+v", terminal)
 	}
 }
 
@@ -988,6 +1034,48 @@ func TestFailInfeasibleValidationCandidateKeepsValidationWhenPolicyAllowsAlterna
 	}
 	if continued.Decision.Action != runtimecontract.RuntimeActionProduceValidation || continued.Facts.Failure != nil {
 		t.Fatalf("alternative-validation policy changed authority unexpectedly: %+v", continued)
+	}
+}
+
+func TestFailInfeasibleValidationCommandDiagnosticKeepsSameContractRetry(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := controllerFacts()
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	facts.Capabilities = runtimecontract.RuntimeCapabilities{
+		StateChangeKinds: []string{runtimecontract.StepKindFileWrite},
+		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}
+	facts.Activation.ExecutionContract.ValidationPolicies = []runtimecontract.RuntimeValidationPolicy{{
+		ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+		ValidationFailureImpliesStateChange: true,
+		ImplementationGapDiagnosticClasses:  []string{runtimecontract.ValidationDiagnosticBuildFailed},
+	}}
+	initialized, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.BeginCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	continued, err := controller.FailCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassInfeasible, Code: "validation_target_missing", Signature: "validation-target-missing", Reason: "package target is unavailable",
+		ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{
+			SchemaVersion: runtimecontract.ValidationFailureDiagnosticSchemaVersion,
+			Class:         runtimecontract.ValidationDiagnosticCommandInvalid, RecommendedEvidenceTargetType: runtimecontract.ValidationEvidenceTargetCommandContract,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if continued.Decision.AuthoritySnapshot.ID != initialized.Decision.AuthoritySnapshot.ID || continued.Decision.Action != runtimecontract.RuntimeActionProduceValidation || continued.Facts.Failure != nil || continued.Facts.Repair.RepairAttempts != 0 {
+		t.Fatalf("command diagnostic changed SM-2 repair authority: %+v", continued)
+	}
+	if len(continued.CandidateAttempts) != 1 || continued.CandidateAttempts[0].Failure == nil || continued.CandidateAttempts[0].Failure.ValidationDiagnostic == nil {
+		t.Fatalf("command diagnostic was not retained for same-contract retry: %+v", continued.CandidateAttempts)
 	}
 }
 

@@ -136,6 +136,10 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		// target remains execution lineage only; it must not become repair
 		// authority through a local heuristic.
 		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindShellCommand, operationResult.FailureCode, operationResult.FailureMessage, nil)
+		if operationResult.ValidationFailureDiagnostic != nil {
+			diagnostic := operationResult.ValidationFailureDiagnostic.Clone()
+			response.Failure.ValidationDiagnostic = &diagnostic
+		}
 	}
 	observation := shellMutationReceiptObservation(command.Data.StateChanging, response.Status, operationResult)
 	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, nil, observation)

@@ -441,6 +441,51 @@ func TestReduceRuntimeStateHonorsTypedValidationFailureRoute(t *testing.T) {
 	}
 }
 
+func TestReduceRuntimeStateRoutesValidationBySealedDiagnosticClass(t *testing.T) {
+	base := validationFacts()
+	base.Activation.ExecutionContract.ValidationPolicies = []runtimecontract.RuntimeValidationPolicy{{
+		ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+		ValidationFailureImpliesStateChange: true,
+		ImplementationGapDiagnosticClasses:  []string{runtimecontract.ValidationDiagnosticBuildFailed},
+	}}
+	base.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
+	base.Capabilities.StateChangeKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
+	base.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+	base.Evidence.Accepted = []runtimecontract.EvidenceFact{{
+		ID: "accepted-state", Kind: runtimecontract.EvidenceKindStateChange, Revision: "evidence-v2-00000000000000000001", CoverageWorkItemIDs: base.Focus.CoverageWorkItemIDs,
+	}}
+	base.Evidence.Rejected = []runtimecontract.EvidenceFact{{
+		ID: "rejected-validation", Kind: runtimecontract.EvidenceKindValidation, Revision: "evidence-v2-00000000000000000002",
+		FailureClass: runtimecontract.FailureClassExecutionFailure, FailureMessage: "validation failed", CoverageWorkItemIDs: base.Focus.CoverageWorkItemIDs,
+	}}
+
+	commandFailure := base
+	commandFailure.Failure = &runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassExecutionFailure, Message: "validation target is invalid",
+		ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{Class: runtimecontract.ValidationDiagnosticCommandInvalid},
+	}
+	decision, err := ReduceRuntimeState(commandFailure, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionProduceValidation {
+		t.Fatalf("command diagnostic decision = %+v, want validation correction", decision)
+	}
+
+	implementationFailure := base
+	implementationFailure.Failure = &runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassExecutionFailure, Message: "build failed",
+		ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{Class: runtimecontract.ValidationDiagnosticBuildFailed},
+	}
+	decision, err = ReduceRuntimeState(implementationFailure, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+		t.Fatalf("implementation diagnostic decision = %+v, want state-change repair", decision)
+	}
+}
+
 func TestReduceRuntimeStateAllowsValidationAfterAcceptedRepair(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
 		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},

@@ -145,11 +145,12 @@ const (
 )
 
 type RuntimeCandidateFailure struct {
-	Class      RuntimeCandidateFailureClass
-	Code       string
-	Signature  string
-	Reason     string
-	TargetRefs []string
+	Class                RuntimeCandidateFailureClass
+	Code                 string
+	Signature            string
+	Reason               string
+	TargetRefs           []string
+	ValidationDiagnostic *ValidationFailureDiagnostic
 }
 
 func StableRuntimeCandidateHash(candidate RuntimeCandidate) string {

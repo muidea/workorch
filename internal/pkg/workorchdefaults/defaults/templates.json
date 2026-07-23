@@ -544,7 +544,9 @@
           ],
           "validationFailureImpliesStateChange": true,
           "implementationGapDiagnosticClasses": [
-            "implementation_gap_detected"
+            "implementation_gap_detected",
+            "validation_build_failed",
+            "validation_test_failed"
           ],
           "maxValidationOnlyRetriesPerFocus": 2,
           "preferMinimalPatchBeforeRepeatedValidation": true,

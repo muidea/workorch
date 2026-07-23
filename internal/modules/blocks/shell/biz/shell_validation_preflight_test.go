@@ -34,6 +34,27 @@ func TestValidateGoTestValidationPreflightWithTests(t *testing.T) {
 	}
 }
 
+func TestValidateGoTestPackageTargetsAcceptsExistingNestedRecursivePattern(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "lsp-mcp-server"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateGoTestPackageTargets(dir, []string{"test", "./lsp-mcp-server/..."}); err != nil {
+		t.Fatalf("existing nested recursive package pattern rejected: %v", err)
+	}
+	if err := validateGoTestPackageTargets(dir, []string{"test", "./lsp-mcp-server/.../adapter"}); err != nil {
+		t.Fatalf("existing nested wildcard package pattern rejected: %v", err)
+	}
+}
+
+func TestValidateGoTestPackageTargetsRejectsMissingNestedRecursivePattern(t *testing.T) {
+	dir := t.TempDir()
+	err := validateGoTestPackageTargets(dir, []string{"test", "./missing/..."})
+	if err == nil || !strings.Contains(err.Error(), `package target "./missing/..." does not exist`) {
+		t.Fatalf("expected missing nested recursive package pattern, got %v", err)
+	}
+}
+
 func TestExecuteOperationValidationPreflightRejectsMissingDeclaredTarget(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "main_test.go"), []byte("package main\nimport \"testing\"\nfunc TestHealthz(t *testing.T) {}\n"), 0o644); err != nil {

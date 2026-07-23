@@ -539,6 +539,11 @@ func (r RuntimeStateRecord) Clone() RuntimeStateRecord {
 		ret.CandidateAttempts[idx].Feasibilities = cloneRuntimeCandidateFeasibilities(attempt.Feasibilities)
 		if attempt.Failure != nil {
 			failure := *attempt.Failure
+			failure.TargetRefs = append([]string(nil), attempt.Failure.TargetRefs...)
+			if attempt.Failure.ValidationDiagnostic != nil {
+				diagnostic := attempt.Failure.ValidationDiagnostic.Clone()
+				failure.ValidationDiagnostic = &diagnostic
+			}
 			ret.CandidateAttempts[idx].Failure = &failure
 		}
 		if attempt.Stale != nil {
@@ -569,13 +574,7 @@ func cloneRuntimeCandidateFeasibilities(values []RuntimeCandidateFeasibilityReco
 	for idx, value := range values {
 		ret[idx] = value
 		if value.Failure != nil {
-			failure := *value.Failure
-			failure.TargetRefs = append([]string(nil), value.Failure.TargetRefs...)
-			if value.Failure.TargetObservation != nil {
-				observation := value.Failure.TargetObservation.Normalized()
-				observation.TargetRefs = append([]string(nil), observation.TargetRefs...)
-				failure.TargetObservation = &observation
-			}
+			failure := value.Failure.Clone()
 			ret[idx].Failure = &failure
 		}
 		if value.Stale != nil {

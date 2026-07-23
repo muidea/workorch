@@ -97,10 +97,17 @@ func ValidateRuntimeValidationPolicies(values []RuntimeValidationPolicy) error {
 	return nil
 }
 
-func RuntimeValidationFailureRequiresStateChange(values []RuntimeValidationPolicy, evidenceKind string) bool {
+func RuntimeValidationFailureRequiresStateChange(values []RuntimeValidationPolicy, evidenceKind string, diagnosticClasses ...string) bool {
 	evidenceKind = strings.TrimSpace(evidenceKind)
+	diagnosticClass := ""
+	if len(diagnosticClasses) > 0 {
+		diagnosticClass = strings.TrimSpace(diagnosticClasses[0])
+	}
 	for _, value := range NormalizeRuntimeValidationPolicies(values) {
 		if containsStringValue(value.AppliesToEvidenceKinds, evidenceKind) {
+			if diagnosticClass != "" && len(value.ImplementationGapDiagnosticClasses) > 0 {
+				return value.ValidationFailureImpliesStateChange && containsStringValue(value.ImplementationGapDiagnosticClasses, diagnosticClass)
+			}
 			return value.ValidationFailureImpliesStateChange
 		}
 	}

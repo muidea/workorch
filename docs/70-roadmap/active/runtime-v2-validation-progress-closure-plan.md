@@ -1534,6 +1534,63 @@ validation policy references neutral discovery source IDs
 commit 前后 crash、dependency stale/reacquire、duplicate observation，以及 cap=2 的完整
 state-sequence matrix。
 
+#### 2026-07-22 live validation closure update: owner feasibility and diagnostic routing
+
+Fresh live Run `ws-74e57b0067a0343f/run-004` exposed two additional contract breaks that
+must be closed before VPC-4 can be marked complete:
+
+1. Shell preflight treated Go recursive package pattern `./lsp-mcp-server/...` as a literal
+   filesystem path ending in `...`. The real base directory existed and direct `go test`
+   produced actionable compiler diagnostics, but SM-3 received a false
+   `validation_target_missing` infeasibility instead.
+2. validation candidate infeasibility closed the candidate attempt and set `Facts.Failure`,
+   but did not start `Facts.Repair`. Repeated validation → patch cycles therefore consumed
+   candidate contracts while `RepairAttempts=0`, `ActiveGap=nil` and no same-focus progress
+   signature was persisted.
+3. Shell already emitted typed `ValidationFailureDiagnostic` in its EventHub result, but the
+   owner receipt and runtime failure authority dropped it. Consequently the profile field
+   `ImplementationGapDiagnosticClasses` could not affect SM-2 routing and the LLM C3 context
+   received only unstructured failure text.
+
+The current code slice closes those breaks as follows:
+
+```text
+Shell owner preflight
+  ./path/... -> stat ./path -> let Go discover/compile packages
+
+owner diagnostic
+  -> owner receipt FailureFact.ValidationDiagnostic
+  -> Run aggregate Failure / RepairDirective
+  -> LLM volatile C3 projection
+
+candidate infeasible under sealed validation policy
+  command/environment diagnostic -> same sealed validation candidate retry
+  declared implementation-gap diagnostic -> atomic Failure + ActiveGap + BeginRepairCycle
+  repeated signature/new authority cycle -> monotonic no-progress/repair budget
+  exhausted same-focus budget -> no_progress_exhausted
+```
+
+Component responsibilities remain explicit:
+
+- `blocks/shell/biz` owns command/package executability observation and typed diagnostics; it
+  does not choose the next Runtime action or mutate coverage/repair state.
+- `workorchruntimecontract` contains only diagnostic/failure DTO normalization, clone, hash,
+  equality and declarative validation-policy lookup. It does not perform state migration.
+- `kernel/orchestrator/biz/runtimev2` is the sole SM-2/SM-3 authority that starts repair
+  cycles, increments budgets and chooses validation versus state-change versus terminal.
+- `blocks/llm/biz` only projects the persisted diagnostic into C3; C0-C2 and
+  `stablePrefixHash` remain unchanged.
+- software-dev defaults declaratively classify `validation_build_failed` and
+  `validation_test_failed` as implementation-gap routes; core contains no Go/LSP/test
+  framework routing rule.
+
+Focused regressions cover existing/missing nested recursive Go patterns, side-effect-free
+probe diagnostics, owner receipt duplicate replay, diagnostic-sensitive policy routing,
+candidate-infeasible repair accounting/budget exhaustion, and C3 diagnostic preservation.
+The changes affect SM-2 and SM-3; SM-1 lifecycle and SM-4 projection/recovery authority do
+not change. Fresh deployed validation is still required. Focus granularity and typed
+coverage-dependency reopening remain open work and must not be hidden by this slice.
+
 ### VPC-5 — Async terminal and repair metrics exactly-once
 
 **Affected machines:** SM-4 observability only.

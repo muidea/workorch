@@ -697,15 +697,55 @@ func closeCandidateAttempt(aggregate *RuntimeAggregate, idx, attempt int, failur
 	if aggregate == nil || idx < 0 || idx >= len(aggregate.CandidateAttempts) || failure.Class == "" || strings.TrimSpace(failure.Reason) == "" {
 		return common.ErrInvalidArgument
 	}
+	diagnosticClass := ""
+	if failure.ValidationDiagnostic != nil {
+		diagnostic := failure.ValidationDiagnostic.Clone()
+		failure.ValidationDiagnostic = &diagnostic
+		diagnosticClass = diagnostic.Class
+	}
+	needsInfeasibleRepair := failure.Class == runtimecontract.RuntimeCandidateFailureClassInfeasible &&
+		aggregate.Decision.Action == runtimecontract.RuntimeActionProduceValidation &&
+		runtimecontract.RuntimeValidationFailureRequiresStateChange(aggregate.Facts.Activation.ExecutionContract.ValidationPolicies, runtimecontract.EvidenceKindValidation, diagnosticClass)
+	if needsInfeasibleRepair {
+		gap := runtimecontract.RuntimeAssessmentGap{
+			CoverageWorkItemIDs:  append([]common.CoverageWorkItemID(nil), aggregate.Facts.Focus.CoverageWorkItemIDs...),
+			MissingEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+			TargetRefs:           append([]string(nil), failure.TargetRefs...),
+			Reason:               failure.Reason,
+			FailureClass:         runtimecontract.FailureClassCandidateInfeasible,
+			FailureCode:          failure.Code,
+			FailureSignature:     failure.Signature,
+		}
+		if len(gap.TargetRefs) == 0 {
+			gap.TargetRefs = append([]string(nil), aggregate.Facts.Focus.TargetRefs...)
+		}
+		gap = gap.Normalized()
+		if strings.TrimSpace(failure.Signature) == "" {
+			failure.Signature = runtimecontract.StableAssessmentFailureSignature(aggregate.Facts.Focus.ID, runtimecontract.AssessmentDispositionRepairableGap, &gap)
+			gap.FailureSignature = failure.Signature
+		}
+		previousCount := repairFailureSignatureCount(aggregate.Facts.Repair, failure.Signature)
+		record := aggregate.CandidateAttempts[idx]
+		sourceFactID := fmt.Sprintf("candidate/%s/%d", strings.TrimSpace(record.AuthorityContractID), attempt)
+		cycleID := runtimecontract.StableRepairCycleID(string(aggregate.Facts.RunID), aggregate.Facts.Focus.ID, failure.Signature, sourceFactID)
+		ledger, _, err := aggregate.Facts.Repair.BeginRepairCycle(aggregate.Facts.Focus.ID, aggregate.Facts.Focus.SliceID, cycleID, failure.Signature, aggregate.Facts.ConvergencePolicy)
+		if err != nil {
+			return err
+		}
+		ledger.ActiveGap = &gap
+		if previousCount > 0 {
+			ledger = ledger.NoteNoProgress()
+		}
+		aggregate.Facts.Repair = ledger
+	}
 	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateFailed
 	failureCopy := failure
 	aggregate.CandidateAttempts[idx].Failure = &failureCopy
 	needsReduce := false
-	if failure.Class == runtimecontract.RuntimeCandidateFailureClassInfeasible && aggregate.Decision.Action == runtimecontract.RuntimeActionProduceValidation &&
-		runtimecontract.RuntimeValidationFailureRequiresStateChange(aggregate.Facts.Activation.ExecutionContract.ValidationPolicies, runtimecontract.EvidenceKindValidation) {
+	if needsInfeasibleRepair {
 		aggregate.Facts.Failure = &runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassCandidateInfeasible, Code: failure.Code, Signature: failure.Signature,
-			Message: failure.Reason, TargetRefs: append([]string(nil), failure.TargetRefs...),
+			Message: failure.Reason, TargetRefs: append([]string(nil), failure.TargetRefs...), ValidationDiagnostic: failure.ValidationDiagnostic,
 		}
 		needsReduce = true
 	} else if failure.Class == runtimecontract.RuntimeCandidateFailureClassInternal {

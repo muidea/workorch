@@ -37,3 +37,20 @@ func TestRequiredRuntimeValidationDiscoverySourcesArePureAndScoped(t *testing.T)
 		t.Fatalf("validation discovery sources = %v, want %v", got, want)
 	}
 }
+
+func TestRuntimeValidationFailureRouteHonorsImplementationDiagnosticClasses(t *testing.T) {
+	policies := []RuntimeValidationPolicy{{
+		ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{EvidenceKindValidation},
+		ValidationFailureImpliesStateChange: true,
+		ImplementationGapDiagnosticClasses:  []string{ValidationDiagnosticBuildFailed, ValidationDiagnosticTestFailed},
+	}}
+	if !RuntimeValidationFailureRequiresStateChange(policies, EvidenceKindValidation, ValidationDiagnosticBuildFailed) {
+		t.Fatal("declared build failure did not route to state-change repair")
+	}
+	if RuntimeValidationFailureRequiresStateChange(policies, EvidenceKindValidation, ValidationDiagnosticCommandInvalid) {
+		t.Fatal("command-contract failure incorrectly routed to implementation repair")
+	}
+	if !RuntimeValidationFailureRequiresStateChange(policies, EvidenceKindValidation) {
+		t.Fatal("missing diagnostic must retain the sealed conservative route")
+	}
+}

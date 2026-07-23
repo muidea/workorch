@@ -172,16 +172,7 @@ func (d RuntimeRepairDirective) Normalized() RuntimeRepairDirective {
 	d.FocusID = strings.TrimSpace(d.FocusID)
 	d.Trigger = d.Trigger.Normalized()
 	if d.CurrentFailure != nil {
-		failure := *d.CurrentFailure
-		failure.Class = FailureClass(strings.TrimSpace(string(failure.Class)))
-		failure.Code = strings.TrimSpace(failure.Code)
-		failure.Signature = strings.TrimSpace(failure.Signature)
-		failure.Message = strings.TrimSpace(failure.Message)
-		failure.TargetRefs = normalizeStrings(failure.TargetRefs)
-		if failure.TargetObservation != nil {
-			observation := failure.TargetObservation.Normalized()
-			failure.TargetObservation = &observation
-		}
+		failure := d.CurrentFailure.Normalized()
 		d.CurrentFailure = &failure
 	}
 	d.RequiredAction = RuntimeAction(strings.TrimSpace(string(d.RequiredAction)))
@@ -230,12 +221,7 @@ func (d RuntimeRepairDirective) Validate() error {
 func (d RuntimeRepairDirective) Clone() RuntimeRepairDirective {
 	ret := d.Normalized()
 	if d.CurrentFailure != nil {
-		failure := *ret.CurrentFailure
-		if failure.TargetObservation != nil {
-			observation := failure.TargetObservation.Normalized()
-			observation.TargetRefs = append([]string(nil), observation.TargetRefs...)
-			failure.TargetObservation = &observation
-		}
+		failure := ret.CurrentFailure.Clone()
 		ret.CurrentFailure = &failure
 	}
 	if len(ret.RejectedOperationShapes) > 0 {
@@ -278,7 +264,8 @@ func SameRuntimeRepairDirective(left *RuntimeRepairDirective, right *RuntimeRepa
 		if l.CurrentFailure.Class != r.CurrentFailure.Class || l.CurrentFailure.Code != r.CurrentFailure.Code ||
 			l.CurrentFailure.Signature != r.CurrentFailure.Signature || l.CurrentFailure.Message != r.CurrentFailure.Message ||
 			!sameStrings(l.CurrentFailure.TargetRefs, r.CurrentFailure.TargetRefs) ||
-			!sameRuntimeFailureTargetObservation(l.CurrentFailure.TargetObservation, r.CurrentFailure.TargetObservation) {
+			!sameRuntimeFailureTargetObservation(l.CurrentFailure.TargetObservation, r.CurrentFailure.TargetObservation) ||
+			!sameValidationFailureDiagnostic(l.CurrentFailure.ValidationDiagnostic, r.CurrentFailure.ValidationDiagnostic) {
 			return false
 		}
 	}
