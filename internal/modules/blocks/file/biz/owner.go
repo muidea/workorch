@@ -461,10 +461,11 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		return
 	}
 	failure, stale, replayProof := m.runtimeAdapter.ProbeRuntimeOperationFeasibilityWithReplayProof(command.WorkspaceDeliverableDirectory, command.Admissibility, operation, command.Observation)
+	prerequisiteRequest := fileOperationSnapshotPrerequisiteRequest(operation, failure, command.CurrentTargetSnapshot)
 	result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{
 		OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID,
 		CapabilityStateBinding: command.Admissibility.AcquisitionBinding,
-		Feasible:               failure == nil && stale == nil, ReplayProof: replayProof, Failure: failure, Stale: stale,
+		Feasible:               failure == nil && stale == nil, ReplayProof: replayProof, Failure: failure, Stale: stale, PrerequisiteRequest: prerequisiteRequest,
 	}, nil)
 }
 

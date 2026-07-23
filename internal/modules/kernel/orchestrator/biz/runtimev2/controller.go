@@ -438,7 +438,7 @@ func (c *RuntimeController) RecordCandidateFeasibility(ctx context.Context, work
 		if strings.TrimSpace(persisted.OperationID) != strings.TrimSpace(record.OperationID) {
 			continue
 		}
-		if persisted.AdmissibilitySnapshotID != record.AdmissibilitySnapshotID || persisted.AcquisitionBinding != record.AcquisitionBinding || persisted.Feasible != record.Feasible || !reflect.DeepEqual(persisted.ReplayProof, record.ReplayProof) || !reflect.DeepEqual(persisted.Failure, record.Failure) || !reflect.DeepEqual(persisted.Stale, record.Stale) {
+		if persisted.AdmissibilitySnapshotID != record.AdmissibilitySnapshotID || persisted.AcquisitionBinding != record.AcquisitionBinding || persisted.Feasible != record.Feasible || !reflect.DeepEqual(persisted.ReplayProof, record.ReplayProof) || !reflect.DeepEqual(persisted.Failure, record.Failure) || !reflect.DeepEqual(persisted.Stale, record.Stale) || !reflect.DeepEqual(persisted.PrerequisiteRequest, record.PrerequisiteRequest) {
 			return RuntimeAggregate{}, fmt.Errorf("%w: candidate feasibility result for operation %q changed", common.ErrConflict, record.OperationID)
 		}
 		return aggregate, nil
@@ -457,6 +457,10 @@ func (c *RuntimeController) RecordCandidateFeasibility(ctx context.Context, work
 	if record.ReplayProof != nil {
 		proof := record.ReplayProof.Clone()
 		copyRecord.ReplayProof = &proof
+	}
+	if record.PrerequisiteRequest != nil {
+		request := record.PrerequisiteRequest.Normalized()
+		copyRecord.PrerequisiteRequest = &request
 	}
 	aggregate.CandidateAttempts[idx].Feasibilities = append(aggregate.CandidateAttempts[idx].Feasibilities, copyRecord)
 	aggregate.StateRevision++

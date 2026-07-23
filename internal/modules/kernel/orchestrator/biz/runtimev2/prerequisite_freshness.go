@@ -77,6 +77,145 @@ func (c *RuntimeController) InvalidateCandidateAttemptForPrerequisiteStale(ctx c
 	return aggregate, nil
 }
 
+// InvalidateCandidateAttemptForFeasibilityPrerequisite abandons an unsealed
+// candidate when its owning capability proves that correcting the operation
+// requires a missing current owner fact. Unlike a failed candidate attempt it
+// spends neither the 0/1 contract retry nor the focus repair budget: the next
+// candidate runs only after a new authority is sealed around the acquired fact.
+func (c *RuntimeController) InvalidateCandidateAttemptForFeasibilityPrerequisite(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, request runtimecontract.RuntimeOperationPrerequisiteRequest) (RuntimeAggregate, error) {
+	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) {
+		return RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	request = request.Normalized()
+	if err := request.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	// Duplicate owner delivery may arrive after the CAS committed a new
+	// prerequisite authority. The persisted invalidated attempt is the exact
+	// idempotency fence; do not reconstruct or consume any budget.
+	for _, record := range aggregate.CandidateAttempts {
+		if record.Attempt == attempt && record.State == runtimecontract.RuntimeCandidateAttemptStateInvalidated && record.PrerequisiteRequest != nil && record.PrerequisiteRequest.Same(request) {
+			return aggregate, nil
+		}
+	}
+	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
+	idx, record, found := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
+	if !found || record.Proposal == nil {
+		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d is not pending", common.ErrConflict, attempt)
+	}
+	operation, found := candidateOperationByID(*record.Proposal, request.OperationID)
+	if !found || !runtimecontract.RuntimeOperationRequiresCurrentTargetSnapshot(operation) || !runtimeOperationTargetsRef(operation, request.SubjectRef) {
+		return RuntimeAggregate{}, fmt.Errorf("%w: prerequisite request is not bound to the pending candidate operation", common.ErrConflict)
+	}
+	descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+	if !known || descriptor.OwnerModuleID != request.OwnerModuleID {
+		return RuntimeAggregate{}, fmt.Errorf("%w: prerequisite request owner does not match candidate operation", common.ErrConflict)
+	}
+	feasibility, found := candidateAttemptFeasibilityForOperation(record.Feasibilities, request.OperationID)
+	if !found || feasibility.Failure == nil || feasibility.PrerequisiteRequest == nil || !feasibility.PrerequisiteRequest.Same(request) {
+		return RuntimeAggregate{}, fmt.Errorf("%w: prerequisite request has no matching persisted owner feasibility fact", common.ErrConflict)
+	}
+
+	expectedRevision := aggregate.StateRevision
+	facts := addFeasibilityPrerequisite(factsWithoutTargetSnapshot(aggregate.Facts, request), request)
+	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateInvalidated
+	aggregate.CandidateAttempts[idx].Proposal = nil
+	aggregate.CandidateAttempts[idx].Feasibilities = nil
+	aggregate.CandidateAttempts[idx].Failure = nil
+	aggregate.CandidateAttempts[idx].Stale = nil
+	requestCopy := request
+	aggregate.CandidateAttempts[idx].PrerequisiteRequest = &requestCopy
+	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	aggregate.Facts = facts
+	aggregate.Decision = decision
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return aggregate, nil
+}
+
+func candidateOperationByID(candidate runtimecontract.RuntimeCandidate, operationID string) (runtimecontract.RuntimeOperation, bool) {
+	operationID = strings.TrimSpace(operationID)
+	for _, operation := range candidateRuntimeOperations(candidate) {
+		if operation.Normalized().ID == operationID {
+			return operation.Normalized(), true
+		}
+	}
+	return runtimecontract.RuntimeOperation{}, false
+}
+
+func runtimeOperationTargetsRef(operation runtimecontract.RuntimeOperation, targetRef string) bool {
+	targetRef = strings.TrimSpace(targetRef)
+	for _, value := range operation.Normalized().TargetRefs {
+		if value == targetRef {
+			return true
+		}
+	}
+	return false
+}
+
+// factsWithoutTargetSnapshot clears exactly the owner resource that will be
+// reacquired. It deliberately does not use stale-refresh bookkeeping: no
+// previously accepted owner observation was disproved, and the repair/candidate
+// contract had simply not requested this input before the feasibility proof.
+func factsWithoutTargetSnapshot(facts runtimecontract.RuntimeFacts, request runtimecontract.RuntimeOperationPrerequisiteRequest) runtimecontract.RuntimeFacts {
+	prerequisiteID := runtimePrerequisiteID(RuntimeRequirement{
+		Kind: request.Kind, OwnerModuleID: request.OwnerModuleID, SubjectRef: request.SubjectRef, MinimumBytes: request.MinimumBytes,
+	})
+	snapshots := make([]runtimecontract.TargetSnapshot, 0, len(facts.Resources.TargetSnapshots))
+	for _, snapshot := range facts.Resources.TargetSnapshots {
+		if strings.TrimSpace(snapshot.TargetRef) != request.SubjectRef {
+			snapshots = append(snapshots, snapshot)
+		}
+	}
+	facts.Resources.TargetSnapshots = snapshots
+	satisfied := make([]runtimecontract.RuntimePrerequisite, 0, len(facts.Prerequisites.Satisfied))
+	for _, prerequisite := range facts.Prerequisites.Satisfied {
+		if prerequisite.ID != prerequisiteID {
+			satisfied = append(satisfied, prerequisite)
+		}
+	}
+	facts.Prerequisites.Satisfied = satisfied
+	observations := make([]runtimecontract.RuntimePrerequisiteObservation, 0, len(facts.Resources.PrerequisiteObservations))
+	for _, observation := range facts.Resources.PrerequisiteObservations {
+		if observation.PrerequisiteID != prerequisiteID {
+			observations = append(observations, observation)
+		}
+	}
+	facts.Resources.PrerequisiteObservations = observations
+	return facts.Normalized()
+}
+
+func addFeasibilityPrerequisite(facts runtimecontract.RuntimeFacts, request runtimecontract.RuntimeOperationPrerequisiteRequest) runtimecontract.RuntimeFacts {
+	request = request.Normalized()
+	requirement := RuntimeRequirement{
+		Kind: request.Kind, OwnerModuleID: request.OwnerModuleID, SubjectRef: request.SubjectRef,
+		MinimumBytes: request.MinimumBytes, Reason: request.Reason,
+	}
+	prerequisite := runtimecontract.RuntimePrerequisite{
+		ID: runtimePrerequisiteID(requirement), Kind: requirement.Kind, OwnerModuleID: requirement.OwnerModuleID,
+		SubjectRef: requirement.SubjectRef, MinimumBytes: requirement.MinimumBytes, Reason: requirement.Reason,
+	}
+	for _, pending := range facts.Prerequisites.Pending {
+		if pending.ID == prerequisite.ID {
+			return facts.Normalized()
+		}
+	}
+	facts.Prerequisites.Pending = append(facts.Prerequisites.Pending, prerequisite)
+	return facts.Normalized()
+}
+
 // InvalidateActiveDispatchForPrerequisiteStale closes a sealed dispatch after
 // an owner has persisted a no-effect stale receipt. The stale receipt remains
 // diagnostic lineage only; it cannot create rejected evidence or repair debt.

@@ -140,6 +140,90 @@ func TestPrerequisiteStaleInvalidatesPendingCandidateRequestWithoutCandidateDebt
 	}
 }
 
+func TestFeasibilityPrerequisiteInvalidatesAttemptWithoutRetryOrRepairDebt(t *testing.T) {
+	ctx := context.Background()
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := controllerFacts()
+	facts.Capabilities.StateChangeKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
+	inventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "operation_admissibility:file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}, TargetRefs: []string{"target.txt"}, ObservedRevision: "tree-v1",
+	}
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	admissibility := runtimecontract.RuntimePrerequisite{
+		ID: inventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindPatchApply},
+	}
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: admissibility.ID, Kind: admissibility.Kind, OwnerModuleID: admissibility.OwnerModuleID, ContentHash: inventory.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: "tree-v1"}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{admissibility}
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
+	gap := runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, MissingEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, Reason: "validation build failed"}
+	facts.Repair = runtimecontract.RuntimeRepairLedger{FocusID: facts.Focus.ID, RepairAttempts: 1, ActiveGap: &gap}
+	initialized, err := controller.Initialize(ctx, facts, controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if initialized.Decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+		t.Fatalf("initial decision = %+v", initialized.Decision)
+	}
+	targetRef, patchType, oldText, newText := "target.txt", "text_replace", "old", "new"
+	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+		ID: "replace-target", Kind: runtimecontract.RuntimeBlockKindPatchApply, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{targetRef},
+		Parameters: []runtimecontract.OperationParameter{{Name: "targetRef", String: &targetRef}, {Name: "patchType", String: &patchType}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}},
+	}}}}}
+	if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.RecordCandidateProposal(ctx, "ws-v2", "run-v2", 0, candidate); err != nil {
+		t.Fatal(err)
+	}
+	request := runtimecontract.RuntimeOperationPrerequisiteRequest{OperationID: "replace-target", Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "target.txt", Reason: "content-bound file operation requires a current owner target snapshot"}
+	failure := runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_replay_proof_unavailable", Signature: "file-preview-content-conflict", Message: "current target content cannot prove the proposed patch", TargetRefs: []string{"target.txt"}}
+	if _, err := controller.RecordCandidateFeasibility(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+		OperationID: "replace-target", AdmissibilitySnapshotID: inventory.SnapshotID, Feasible: false, Failure: &failure, PrerequisiteRequest: &request,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	invalidated, err := controller.InvalidateCandidateAttemptForFeasibilityPrerequisite(ctx, "ws-v2", "run-v2", 0, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invalidated.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(invalidated.Facts.Prerequisites.Pending) != 1 || invalidated.Facts.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindTargetSnapshot {
+		t.Fatalf("feasibility prerequisite did not enter acquire state: %+v", invalidated)
+	}
+	if invalidated.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated || invalidated.CandidateAttempts[0].PrerequisiteRequest == nil || invalidated.Facts.Repair.RepairAttempts != 1 || invalidated.Facts.Recovery.PrerequisiteRefreshes != 0 {
+		t.Fatalf("feasibility prerequisite consumed retry, repair, or stale budget: %+v", invalidated)
+	}
+	beforeAuthority := initialized.Decision.AuthoritySnapshot.ID
+	prerequisite := invalidated.Facts.Prerequisites.Pending[0]
+	snapshot := runtimecontract.TargetSnapshot{TargetRef: "target.txt", Content: "package current", ContentHash: "target-v2", ContentState: runtimecontract.SnapshotContentStateComplete}
+	snapshotObservation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID, ContentHash: snapshot.ContentHash,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: snapshot.TargetRef, Revision: snapshot.ContentHash}},
+	}
+	snapshotObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(snapshotObservation)
+	resumed, err := controller.CommitPrerequisite(ctx, "ws-v2", "run-v2", PrerequisiteResult{PrerequisiteID: prerequisite.ID, TargetSnapshot: &snapshot, Observation: &snapshotObservation})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || resumed.Decision.AuthoritySnapshot.ID == beforeAuthority || len(resumed.Facts.Resources.TargetSnapshots) != 1 || resumed.Facts.Repair.RepairAttempts != 1 {
+		t.Fatalf("snapshot commit did not seal new state-change authority while retaining repair cycle: %+v", resumed)
+	}
+	saves := repository.saves
+	if duplicate, err := controller.InvalidateCandidateAttemptForFeasibilityPrerequisite(ctx, "ws-v2", "run-v2", 0, request); err != nil || duplicate.StateRevision != resumed.StateRevision || repository.saves != saves {
+		t.Fatalf("duplicate feasibility prerequisite was not idempotent: %v", err)
+	}
+}
+
 func TestMCPOwnerCatalogStaleRestartDoesNotReuseFailureTarget(t *testing.T) {
 	ctx := context.Background()
 	repository := &controllerRepository{}

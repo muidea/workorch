@@ -326,12 +326,14 @@ func (m *Biz) requestAndSealRuntimeV2Candidate(
 				Class: runtimecontract.RuntimeCandidateFailureClassInternal, Code: "workspace_resolution_failed", Reason: workspaceErr.Error(),
 			})
 		}
-		if feasibilityFailure, stale, probeErr := m.probeRuntimeV2CandidateFeasibility(ctx, aggregate, workspace.DeliverableDirectory, candidate, candidateAttempt); probeErr != nil {
+		if feasibilityFailure, stale, prerequisiteRequest, probeErr := m.probeRuntimeV2CandidateFeasibility(ctx, aggregate, workspace.DeliverableDirectory, candidate, candidateAttempt); probeErr != nil {
 			return m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, runtimecontract.RuntimeCandidateFailure{
 				Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "operation_feasibility_probe_invalid", Reason: probeErr.Error(),
 			})
 		} else if stale != nil {
 			return m.bizPtr.InvalidateRuntimeV2CandidateAttemptForPrerequisiteStale(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, *stale)
+		} else if prerequisiteRequest != nil {
+			return m.bizPtr.InvalidateRuntimeV2CandidateAttemptForFeasibilityPrerequisite(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, *prerequisiteRequest)
 		} else if feasibilityFailure != nil {
 			return m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, *feasibilityFailure)
 		}
@@ -354,82 +356,104 @@ func runtimeV2PendingCandidateProposal(aggregate runtimev2.RuntimeAggregate, att
 	return runtimecontract.RuntimeCandidate{}, false
 }
 
-func (m *Biz) probeRuntimeV2CandidateFeasibility(ctx context.Context, aggregate runtimev2.RuntimeAggregate, workspaceDirectory string, candidate runtimecontract.RuntimeCandidate, candidateAttempt int) (*runtimecontract.RuntimeCandidateFailure, *runtimecontract.RuntimePrerequisiteStale, error) {
+func (m *Biz) probeRuntimeV2CandidateFeasibility(ctx context.Context, aggregate runtimev2.RuntimeAggregate, workspaceDirectory string, candidate runtimecontract.RuntimeCandidate, candidateAttempt int) (*runtimecontract.RuntimeCandidateFailure, *runtimecontract.RuntimePrerequisiteStale, *runtimecontract.RuntimeOperationPrerequisiteRequest, error) {
 	if m == nil || m.bizPtr == nil || m.EventHub() == nil {
-		return nil, nil, common.ErrInvalidArgument
+		return nil, nil, nil, common.ErrInvalidArgument
 	}
 	// Assessment candidates and governance candidates contain no executable
 	// owner operation. Their authority is validated by their own seal contract,
 	// so an unrelated persisted inventory must not make assessment impossible.
 	if candidate.StateChange == nil && candidate.Validation == nil {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	if len(aggregate.Facts.Resources.OperationAdmissibilities) == 0 {
 		if runtimeV2RequiresOperationAdmissibility(aggregate.Facts.Prerequisites) {
-			return nil, nil, fmt.Errorf("runtime candidate has no persisted owner admissibility inventory")
+			return nil, nil, nil, fmt.Errorf("runtime candidate has no persisted owner admissibility inventory")
 		}
 		// Focused reducer/receipt fixtures can construct facts directly without a
 		// bootstrap prerequisite. Production activation always seals this
 		// prerequisite, so such fixtures cannot bypass the production gate.
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	operations, err := orderedRuntimeV2CandidateOperations(candidate)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	for _, operation := range operations {
 		descriptor, ok := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
 		if !ok || descriptor.OwnerModuleID == "" {
-			return nil, nil, fmt.Errorf("candidate operation %q has no canonical owner", operation.Kind)
+			return nil, nil, nil, fmt.Errorf("candidate operation %q has no canonical owner", operation.Kind)
 		}
 		inventory, found := runtimeV2OperationAdmissibilityForKind(aggregate.Facts.Resources.OperationAdmissibilities, descriptor.OwnerModuleID, operation.Kind)
 		if !found {
-			return nil, nil, fmt.Errorf("candidate operation %q has no persisted owner admissibility inventory", operation.Kind)
+			return nil, nil, nil, fmt.Errorf("candidate operation %q has no persisted owner admissibility inventory", operation.Kind)
 		}
 		if persisted, found := runtimeV2CandidateFeasibilityRecord(aggregate, candidateAttempt, operation.ID); found {
 			if persisted.AdmissibilitySnapshotID != inventory.SnapshotID || persisted.AcquisitionBinding != inventory.AcquisitionBinding {
-				return nil, nil, fmt.Errorf("candidate operation %q feasibility snapshot does not match persisted owner inventory", operation.ID)
+				return nil, nil, nil, fmt.Errorf("candidate operation %q feasibility snapshot does not match persisted owner inventory", operation.ID)
 			}
 			if persisted.Feasible {
 				continue
 			}
 			if persisted.Stale != nil {
-				return nil, persisted.Stale, nil
+				return nil, persisted.Stale, nil, nil
 			}
-			return runtimeCandidateFailureFromFeasibility(persisted), nil, nil
+			if persisted.PrerequisiteRequest != nil {
+				return nil, nil, persisted.PrerequisiteRequest, nil
+			}
+			return runtimeCandidateFailureFromFeasibility(persisted), nil, nil, nil
 		}
 		observation, observed := runtimecontract.RuntimePrerequisiteObservationForID(aggregate.Facts.Resources.PrerequisiteObservations, inventory.PrerequisiteID)
 		if !observed {
-			return nil, nil, fmt.Errorf("candidate operation %q has no freshness observation for owner admissibility", operation.Kind)
+			return nil, nil, nil, fmt.Errorf("candidate operation %q has no freshness observation for owner admissibility", operation.Kind)
 		}
 		response, probeErr := ProbeRuntimeOperationFeasibility(ctx, m.EventHub(), events.ProbeRuntimeOperationFeasibilityCommand{
 			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, Transaction: aggregate.Decision.AuthorityTransaction(),
 			WorkspaceDeliverableDirectory: workspaceDirectory, Operation: operation, Admissibility: inventory,
 			CapabilityStateBinding: inventory.AcquisitionBinding, Observation: &observation,
+			CurrentTargetSnapshot: runtimeV2CurrentTargetSnapshot(aggregate.Facts, operation),
 		})
 		if probeErr != nil {
-			return nil, nil, probeErr
+			return nil, nil, nil, probeErr
 		}
 		recorded, recordErr := m.bizPtr.RecordRuntimeV2CandidateFeasibility(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, runtimecontract.RuntimeCandidateFeasibilityRecord{
 			OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding,
-			Feasible: response.Feasible, ReplayProof: response.ReplayProof, Failure: response.Failure, Stale: response.Stale,
+			Feasible: response.Feasible, ReplayProof: response.ReplayProof, Failure: response.Failure, Stale: response.Stale, PrerequisiteRequest: response.PrerequisiteRequest,
 		})
 		if recordErr != nil {
-			return nil, nil, recordErr
+			return nil, nil, nil, recordErr
 		}
 		aggregate = recorded
 		if response.Feasible {
 			continue
 		}
 		if response.Stale != nil {
-			return nil, response.Stale, nil
+			return nil, response.Stale, nil, nil
+		}
+		if response.PrerequisiteRequest != nil {
+			return nil, nil, response.PrerequisiteRequest, nil
 		}
 		return runtimeCandidateFailureFromFeasibility(runtimecontract.RuntimeCandidateFeasibilityRecord{
 			OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding,
-			Feasible: false, Failure: response.Failure,
-		}), nil, nil
+			Feasible: false, Failure: response.Failure, PrerequisiteRequest: response.PrerequisiteRequest,
+		}), nil, nil, nil
 	}
-	return nil, nil, nil
+	return nil, nil, nil, nil
+}
+
+func runtimeV2CurrentTargetSnapshot(facts runtimecontract.RuntimeFacts, operation runtimecontract.RuntimeOperation) *runtimecontract.TargetSnapshot {
+	if !runtimecontract.RuntimeOperationRequiresCurrentTargetSnapshot(operation) {
+		return nil
+	}
+	for _, targetRef := range operation.Normalized().TargetRefs {
+		for _, snapshot := range facts.Resources.TargetSnapshots {
+			if strings.TrimSpace(snapshot.TargetRef) == targetRef && snapshot.Complete() {
+				copySnapshot := snapshot
+				return &copySnapshot
+			}
+		}
+	}
+	return nil
 }
 
 func runtimeV2CandidateFeasibilityRecord(aggregate runtimev2.RuntimeAggregate, attempt int, operationID string) (runtimecontract.RuntimeCandidateFeasibilityRecord, bool) {

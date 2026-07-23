@@ -106,6 +106,13 @@ func (o *RuntimeOrchestrator) InvalidateRuntimeV2CandidateAttemptForPrerequisite
 	return o.runtimeV2Controller.InvalidateCandidateAttemptForPrerequisiteStale(ctx, workspaceID, runID, attempt, stale)
 }
 
+func (o *RuntimeOrchestrator) InvalidateRuntimeV2CandidateAttemptForFeasibilityPrerequisite(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, request runtimemodel.RuntimeOperationPrerequisiteRequest) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.InvalidateCandidateAttemptForFeasibilityPrerequisite(ctx, workspaceID, runID, attempt, request)
+}
+
 func (o *RuntimeOrchestrator) QueryRuntimeV2OperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID, operationID, executionKey string, fence uint64, grant *runtimemodel.RuntimeOperationGovernanceGrant) (runtimemodel.RuntimeOperationReceipt, bool, error) {
 	if o == nil || o.runtimeV2Controller == nil {
 		return runtimemodel.RuntimeOperationReceipt{}, false, common.ErrInvalidArgument

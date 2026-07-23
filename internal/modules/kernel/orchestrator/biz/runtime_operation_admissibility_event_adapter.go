@@ -104,6 +104,15 @@ func ProbeRuntimeOperationFeasibility(ctx context.Context, hub magicevent.Hub, c
 		}
 		command.Observation = &observation
 	}
+	if command.CurrentTargetSnapshot != nil {
+		snapshot := *command.CurrentTargetSnapshot
+		snapshot.TargetRef = strings.TrimSpace(snapshot.TargetRef)
+		snapshot.ContentHash = strings.TrimSpace(snapshot.ContentHash)
+		if !snapshot.Complete() {
+			return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("runtime operation feasibility probe has an incomplete target snapshot")
+		}
+		command.CurrentTargetSnapshot = &snapshot
+	}
 	result := hub.Send(magicevent.NewEventWithContext(
 		orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility,
 		ModuleID,
@@ -127,7 +136,7 @@ func ProbeRuntimeOperationFeasibility(ctx context.Context, hub magicevent.Hub, c
 		return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("runtime operation feasibility probe returned an invalid result")
 	}
 	if response.Feasible {
-		if response.Failure != nil || response.Stale != nil {
+		if response.Failure != nil || response.Stale != nil || response.PrerequisiteRequest != nil {
 			return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("feasible runtime operation probe returned failure facts")
 		}
 		if response.ReplayProof != nil {
@@ -146,7 +155,7 @@ func ProbeRuntimeOperationFeasibility(ctx context.Context, hub magicevent.Hub, c
 		return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("infeasible runtime operation probe cannot return replay proof")
 	}
 	if response.Stale != nil {
-		if response.Failure != nil {
+		if response.Failure != nil || response.PrerequisiteRequest != nil {
 			return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("stale runtime operation probe returned ordinary failure facts")
 		}
 		stale := response.Stale.Normalized()
@@ -161,6 +170,16 @@ func ProbeRuntimeOperationFeasibility(ctx context.Context, hub magicevent.Hub, c
 	}
 	if response.Failure == nil || strings.TrimSpace(string(response.Failure.Class)) == "" || strings.TrimSpace(response.Failure.Code) == "" || strings.TrimSpace(response.Failure.Signature) == "" || strings.TrimSpace(response.Failure.Message) == "" {
 		return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("infeasible runtime operation probe requires stable failure facts")
+	}
+	if response.PrerequisiteRequest != nil {
+		request := response.PrerequisiteRequest.Normalized()
+		if err := request.Validate(); err != nil {
+			return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, err
+		}
+		if request.OperationID != operation.ID || request.OwnerModuleID != descriptor.OwnerModuleID {
+			return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("runtime operation feasibility probe returned mismatched prerequisite request")
+		}
+		response.PrerequisiteRequest = &request
 	}
 	return response, nil
 }

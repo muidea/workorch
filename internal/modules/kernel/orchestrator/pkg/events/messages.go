@@ -152,6 +152,10 @@ type ProbeRuntimeOperationFeasibilityCommand struct {
 	// supplied by Orchestrator so an owner can return an exact typed stale
 	// detail without reconstructing authority from local process state.
 	Observation *runtimecontract.RuntimePrerequisiteObservation
+	// CurrentTargetSnapshot is the persisted owner snapshot for this operation's
+	// concrete target, when available. It distinguishes a missing repair input
+	// from a candidate that ignored already supplied current content.
+	CurrentTargetSnapshot *runtimecontract.TargetSnapshot
 }
 
 type ProbeRuntimeOperationFeasibilityResult struct {
@@ -162,6 +166,7 @@ type ProbeRuntimeOperationFeasibilityResult struct {
 	ReplayProof             *runtimecontract.RuntimeOperationReplayProof
 	Failure                 *runtimecontract.FailureFact
 	Stale                   *runtimecontract.RuntimePrerequisiteStale
+	PrerequisiteRequest     *runtimecontract.RuntimeOperationPrerequisiteRequest
 }
 
 type AcquireGitCapabilityStateCommand struct {

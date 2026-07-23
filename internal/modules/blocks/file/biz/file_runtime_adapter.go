@@ -496,6 +496,37 @@ func fileOperationInfeasible(operation runtimemodel.RuntimeOperation, code, mess
 	}
 }
 
+// fileOperationSnapshotPrerequisiteRequest classifies only File-owner
+// feasibility facts. It does not infer a repair action: when a content-bound
+// operation was rejected before the candidate received any current target
+// snapshot, it asks Orchestrator to acquire that exact owner fact and seal a
+// new authority. Rejections after a snapshot was already supplied remain
+// ordinary candidate failures, preserving the SM-3 anti-replay fence.
+func fileOperationSnapshotPrerequisiteRequest(operation runtimemodel.RuntimeOperation, failure *runtimemodel.FailureFact, current *runtimemodel.TargetSnapshot) *runtimemodel.RuntimeOperationPrerequisiteRequest {
+	if failure == nil || !runtimemodel.RuntimeOperationRequiresCurrentTargetSnapshot(operation) {
+		return nil
+	}
+	targetRef := fileOperationTargetRef(operation)
+	if targetRef == "" {
+		return nil
+	}
+	if current != nil && current.Complete() && strings.TrimSpace(current.TargetRef) == targetRef {
+		return nil
+	}
+	switch strings.TrimSpace(failure.Code) {
+	case "operation_replay_proof_unavailable", "patch_text_replace_conflict", "patch_unified_diff_conflict", "patch_basehash_mismatch", "operation_base_hash_mismatch":
+		// These codes are emitted by the File owner only after it has compared a
+		// content-bound operation against the current regular-file content.
+	default:
+		return nil
+	}
+	return &runtimemodel.RuntimeOperationPrerequisiteRequest{
+		OperationID: operation.Normalized().ID, Kind: runtimemodel.PrerequisiteKindTargetSnapshot,
+		OwnerModuleID: ModuleID, SubjectRef: targetRef,
+		Reason: "content-bound file operation requires a current owner target snapshot",
+	}
+}
+
 func guardedWorkspacePath(deliverableDirectory string, inputPath string, requireExisting bool) (string, string, string, error) {
 	if strings.TrimSpace(deliverableDirectory) == "" || strings.TrimSpace(inputPath) == "" {
 		return "", "", "", common.ErrInvalidArgument

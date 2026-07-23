@@ -68,6 +68,9 @@ type RuntimeCandidateFeasibilityRecord struct {
 	ReplayProof *RuntimeOperationReplayProof
 	Failure     *FailureFact
 	Stale       *RuntimePrerequisiteStale
+	// PrerequisiteRequest is an owner-authored missing fact. It is neither
+	// execution evidence nor a candidate retry outcome.
+	PrerequisiteRequest *RuntimeOperationPrerequisiteRequest
 }
 
 type RuntimeCandidateAttemptRecord struct {
@@ -83,6 +86,9 @@ type RuntimeCandidateAttemptRecord struct {
 	Feasibilities []RuntimeCandidateFeasibilityRecord
 	Failure       *RuntimeCandidateFailure
 	Stale         *RuntimePrerequisiteStale
+	// PrerequisiteRequest records why this unsealed attempt was invalidated for
+	// owner fact acquisition, making duplicate delivery/restart deterministic.
+	PrerequisiteRequest *RuntimeOperationPrerequisiteRequest
 }
 
 // RuntimeStateRecord 是 Runtime V2 在 Run owner 中持久化的唯一正式状态。
@@ -345,7 +351,7 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 		bySnapshot[value.Transaction.AuthoritySnapshotID] = append(bySnapshot[value.Transaction.AuthoritySnapshotID], value)
 		switch value.State {
 		case RuntimeCandidateAttemptStatePending, RuntimeCandidateAttemptStateAccepted:
-			if value.Failure != nil || value.Stale != nil {
+			if value.Failure != nil || value.Stale != nil || value.PrerequisiteRequest != nil {
 				return fmt.Errorf("runtime candidate attempt %s state %s cannot carry failure", key, value.State)
 			}
 			if value.State == RuntimeCandidateAttemptStateAccepted && value.Proposal != nil {
@@ -358,15 +364,22 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 			if value.Failure == nil || value.Failure.Class == "" || strings.TrimSpace(value.Failure.Reason) == "" {
 				return fmt.Errorf("failed runtime candidate attempt %s requires typed failure", key)
 			}
-			if value.Stale != nil {
+			if value.Stale != nil || value.PrerequisiteRequest != nil {
 				return fmt.Errorf("failed runtime candidate attempt %s cannot carry freshness stale", key)
 			}
 		case RuntimeCandidateAttemptStateInvalidated:
-			if value.Failure != nil || value.Proposal != nil || len(value.Feasibilities) != 0 || value.Stale == nil {
-				return fmt.Errorf("invalidated runtime candidate attempt %s requires only typed stale", key)
+			if value.Failure != nil || value.Proposal != nil || len(value.Feasibilities) != 0 || (value.Stale == nil && value.PrerequisiteRequest == nil) || (value.Stale != nil && value.PrerequisiteRequest != nil) {
+				return fmt.Errorf("invalidated runtime candidate attempt %s requires exactly one typed invalidation reason", key)
 			}
-			if err := value.Stale.Validate(); err != nil {
-				return fmt.Errorf("invalidated runtime candidate attempt %s stale: %w", key, err)
+			if value.Stale != nil {
+				if err := value.Stale.Validate(); err != nil {
+					return fmt.Errorf("invalidated runtime candidate attempt %s stale: %w", key, err)
+				}
+			}
+			if value.PrerequisiteRequest != nil {
+				if err := value.PrerequisiteRequest.Validate(); err != nil {
+					return fmt.Errorf("invalidated runtime candidate attempt %s prerequisite request: %w", key, err)
+				}
 			}
 		default:
 			return fmt.Errorf("runtime candidate attempt %s has invalid state %q", key, value.State)
@@ -404,7 +417,7 @@ func ValidateRuntimeCandidateFeasibilityRecords(values []RuntimeCandidateFeasibi
 		}
 		seen[operationID] = struct{}{}
 		if value.Feasible {
-			if value.Failure != nil || value.Stale != nil {
+			if value.Failure != nil || value.Stale != nil || value.PrerequisiteRequest != nil {
 				return fmt.Errorf("feasible runtime candidate operation %q cannot carry failure", operationID)
 			}
 			if value.ReplayProof != nil {
@@ -422,13 +435,25 @@ func ValidateRuntimeCandidateFeasibilityRecords(values []RuntimeCandidateFeasibi
 			return fmt.Errorf("infeasible runtime candidate operation %q cannot carry replay proof", operationID)
 		}
 		if value.Stale != nil {
-			if value.Failure != nil {
+			if value.Failure != nil || value.PrerequisiteRequest != nil {
 				return fmt.Errorf("stale runtime candidate operation %q cannot carry failure", operationID)
 			}
 			if err := value.Stale.Validate(); err != nil {
 				return fmt.Errorf("stale runtime candidate operation %q: %w", operationID, err)
 			}
 			continue
+		}
+		if value.PrerequisiteRequest != nil {
+			if value.Failure == nil {
+				return fmt.Errorf("infeasible runtime candidate operation %q prerequisite request requires failure facts", operationID)
+			}
+			request := value.PrerequisiteRequest.Normalized()
+			if err := request.Validate(); err != nil {
+				return fmt.Errorf("infeasible runtime candidate operation %q prerequisite request: %w", operationID, err)
+			}
+			if request.OperationID != operationID {
+				return fmt.Errorf("infeasible runtime candidate operation %q prerequisite request operation mismatch", operationID)
+			}
 		}
 		if value.Failure == nil || strings.TrimSpace(string(value.Failure.Class)) == "" || strings.TrimSpace(value.Failure.Code) == "" || strings.TrimSpace(value.Failure.Signature) == "" || strings.TrimSpace(value.Failure.Message) == "" {
 			return fmt.Errorf("infeasible runtime candidate operation %q requires stable failure facts", operationID)
@@ -550,6 +575,10 @@ func (r RuntimeStateRecord) Clone() RuntimeStateRecord {
 			stale := *attempt.Stale
 			ret.CandidateAttempts[idx].Stale = &stale
 		}
+		if attempt.PrerequisiteRequest != nil {
+			request := attempt.PrerequisiteRequest.Normalized()
+			ret.CandidateAttempts[idx].PrerequisiteRequest = &request
+		}
 	}
 	ret.GovernanceRequests = append([]RuntimeGovernanceRequestRecord(nil), r.GovernanceRequests...)
 	ret.GovernanceResolutions = append([]RuntimeGovernanceResolutionRecord(nil), r.GovernanceResolutions...)
@@ -584,6 +613,10 @@ func cloneRuntimeCandidateFeasibilities(values []RuntimeCandidateFeasibilityReco
 		if value.ReplayProof != nil {
 			proof := value.ReplayProof.Clone()
 			ret[idx].ReplayProof = &proof
+		}
+		if value.PrerequisiteRequest != nil {
+			request := value.PrerequisiteRequest.Normalized()
+			ret[idx].PrerequisiteRequest = &request
 		}
 	}
 	return ret

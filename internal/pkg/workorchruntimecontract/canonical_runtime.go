@@ -312,6 +312,52 @@ type RuntimePrerequisite struct {
 	Reason               string
 }
 
+// RuntimeOperationPrerequisiteRequest is an owner-authored, read-only
+// feasibility outcome. It names the missing owner fact needed to make a
+// corrected operation candidate possible; Orchestrator alone decides the
+// RuntimeFacts transition and prerequisite acquisition.
+//
+// It intentionally has no prerequisite ID. IDs and persistence scope remain
+// Orchestrator authority, while an owner may only name its concrete resource.
+type RuntimeOperationPrerequisiteRequest struct {
+	OperationID   string
+	Kind          PrerequisiteKind
+	OwnerModuleID string
+	SubjectRef    string
+	MinimumBytes  int
+	Reason        string
+}
+
+func (r RuntimeOperationPrerequisiteRequest) Normalized() RuntimeOperationPrerequisiteRequest {
+	r.OperationID = strings.TrimSpace(r.OperationID)
+	r.Kind = PrerequisiteKind(strings.TrimSpace(string(r.Kind)))
+	r.OwnerModuleID = strings.TrimSpace(r.OwnerModuleID)
+	r.SubjectRef = strings.TrimSpace(r.SubjectRef)
+	if r.MinimumBytes < 0 {
+		r.MinimumBytes = 0
+	}
+	r.Reason = strings.TrimSpace(r.Reason)
+	return r
+}
+
+func (r RuntimeOperationPrerequisiteRequest) Validate() error {
+	r = r.Normalized()
+	if r.OperationID == "" || r.OwnerModuleID == "" || r.SubjectRef == "" || r.Reason == "" {
+		return fmt.Errorf("runtime operation prerequisite request requires operation, owner, subject and reason")
+	}
+	if r.Kind != PrerequisiteKindTargetSnapshot {
+		return fmt.Errorf("runtime operation prerequisite request has unsupported kind %q", r.Kind)
+	}
+	return nil
+}
+
+func (r RuntimeOperationPrerequisiteRequest) Same(other RuntimeOperationPrerequisiteRequest) bool {
+	r = r.Normalized()
+	other = other.Normalized()
+	return r.OperationID == other.OperationID && r.Kind == other.Kind && r.OwnerModuleID == other.OwnerModuleID &&
+		r.SubjectRef == other.SubjectRef && r.MinimumBytes == other.MinimumBytes && r.Reason == other.Reason
+}
+
 type RuntimeRequirement struct {
 	Kind                 PrerequisiteKind
 	OwnerModuleID        string

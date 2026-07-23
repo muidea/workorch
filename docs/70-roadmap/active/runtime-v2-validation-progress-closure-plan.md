@@ -1591,6 +1591,54 @@ The changes affect SM-2 and SM-3; SM-1 lifecycle and SM-4 projection/recovery au
 not change. Fresh deployed validation is still required. Focus granularity and typed
 coverage-dependency reopening remain open work and must not be hidden by this slice.
 
+#### 2026-07-23 live validation closure update: feasibility prerequisite feedback
+
+Live Run `ws-74e57b0067a0343f/run-005` then exposed an information-dead SM-3 retry:
+the File owner correctly rejected a content-bound `patch/apply` because its preview could
+not prove the proposed old text against the current file, but the sealed state-change
+authority had no `TargetSnapshot`. The generic attempt-1 guidance said to re-read the
+target while the same authority forbade read-only candidate operations. The provider could
+only guess, repeat the shape, and reach `candidate_retry_exhausted` although the existing
+repair cycle still had budget.
+
+The closing contract is deliberately owner-typed and neutral:
+
+```text
+File feasibility: content-bound operation + owner preview conflict + no current snapshot
+  -> typed RuntimeOperationPrerequisiteRequest(target_snapshot, concrete File target)
+  -> persist side-effect-free feasibility result
+  -> Orchestrator atomically invalidates unsealed candidate attempt
+  -> preserve Facts.Repair/Facts.Failure and all candidate/recovery budgets
+  -> acquire existing typed File target snapshot command
+  -> snapshot observation commit -> new authority -> candidate attempt 0
+```
+
+When the candidate context already contains a complete snapshot for that concrete target,
+the File owner returns the normal infeasible result instead. This prevents repeated
+acquisition loops and retains the existing anti-replay/attempt-0-or-1 policy. The
+Orchestrator does not match `oldText` or any owner error string: File maps only its own
+preflight result to the typed request, and the controller validates request operation,
+canonical owner and target membership before state transition.
+
+Responsibilities and state-machine impact:
+
+- `blocks/file/biz` owns content-bound preview and the typed missing-fact request; it does
+  not acquire state into RuntimeFacts, choose an action, or adjust repair/candidate budgets.
+- `workorchruntimecontract` adds DTO validation/clone/equality only; it contains no
+  transition or target-selection logic.
+- `orchestrator/biz/runtimev2` is the sole SM-2/SM-3 CAS authority: it invalidates the
+  unsealed attempt, creates the existing target-snapshot prerequisite, clears only that
+  stale/missing resource, and re-reduces. It neither spends stale-refresh budget nor opens
+  candidate attempt 1.
+- Existing typed `AcquireTargetSnapshotCommand/Result` remains the sole cross-owner I/O;
+  SM-1 lifecycle and SM-4 projection/recovery semantics are unchanged.
+
+Regressions cover owner request emission only without a supplied snapshot, atomic
+attempt-0 → prerequisite conversion, repair-ledger preservation, no retry/stale budget
+consumption, snapshot commit resealing a new authority, and duplicate request idempotency.
+Fresh live validation remains required; focus granularity and declarative coverage-dependency
+reopening are still separate open work.
+
 ### VPC-5 — Async terminal and repair metrics exactly-once
 
 **Affected machines:** SM-4 observability only.

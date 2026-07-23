@@ -853,6 +853,22 @@ func TestRuntimeAdapterPatchApplyReplayProofCoversAllDurableVariants(t *testing.
 	}
 }
 
+func TestFileOperationSnapshotPrerequisiteRequestRequiresMissingCurrentSnapshot(t *testing.T) {
+	targetRef, patchType, oldText, newText := "target.txt", "text_replace", "old", "new"
+	operation := runtimecontract.RuntimeOperation{
+		ID: "replace-target", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{targetRef},
+		Parameters: []runtimecontract.OperationParameter{{Name: "targetRef", String: &targetRef}, {Name: "patchType", String: &patchType}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}},
+	}
+	failure := &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_replay_proof_unavailable", Signature: "file-preview-conflict", Message: "preview cannot prove patch", TargetRefs: []string{targetRef}}
+	request := fileOperationSnapshotPrerequisiteRequest(operation, failure, nil)
+	if request == nil || request.OperationID != operation.ID || request.Kind != runtimecontract.PrerequisiteKindTargetSnapshot || request.OwnerModuleID != ModuleID || request.SubjectRef != targetRef {
+		t.Fatalf("missing-snapshot feasibility request = %+v", request)
+	}
+	if repeated := fileOperationSnapshotPrerequisiteRequest(operation, failure, &runtimecontract.TargetSnapshot{TargetRef: targetRef, ContentHash: "current", ContentState: runtimecontract.SnapshotContentStateComplete}); repeated != nil {
+		t.Fatalf("existing current snapshot must leave a repeated patch as an ordinary candidate failure: %+v", repeated)
+	}
+}
+
 func TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
