@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -17,14 +18,17 @@ func (o *RuntimeOrchestrator) ActivateRuntimeV2Run(ctx context.Context, workspac
 	}
 	run, err := o.runtimeEventRun(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), runID)
 	if err != nil {
-		return err
+		return fmt.Errorf("load run for runtime v2 activation: %w", err)
 	}
 	if run.WorkspaceID != workspaceID {
 		return common.ErrNotFound
 	}
 	if run.State == common.RunStateActive {
 		_, err = o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, run, common.WorkspaceStateActive, nil)
-		return err
+		if err != nil {
+			return fmt.Errorf("project active runtime v2 run: %w", err)
+		}
+		return nil
 	}
 	if run.State != common.RunStateBlockedOnDecision && run.State != common.RunStateBlockedOnApproval {
 		return common.ErrConflict
@@ -44,7 +48,7 @@ func (o *RuntimeOrchestrator) ActivateRuntimeV2Run(ctx context.Context, workspac
 	run.FailureReason = ""
 	_, err = o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, run, common.WorkspaceStateActive, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("project resumed runtime v2 run: %w", err)
 	}
 	return nil
 }

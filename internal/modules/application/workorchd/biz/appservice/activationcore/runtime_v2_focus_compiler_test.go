@@ -118,6 +118,45 @@ func TestRuntimeV2BootstrapSealsProfileProspectiveTargetIntoFocus(t *testing.T) 
 	}
 }
 
+func TestCompileRuntimeV2CoverageFocusesPrependsMatchedBootstrapArtifactsInDependencyOrder(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+			ID: "software-dev",
+			BootstrapRecipes: []runtimecontract.RuntimeBootstrapRecipe{{
+				ID: "go-service", RequiredGoalTerms: []string{"gopls"}, RequiredDoDTerms: []string{"go test"},
+				Artifacts: []runtimecontract.RuntimeBootstrapArtifact{
+					{ID: "test", TargetRole: "test_source", TargetRef: "internal/service/main_test.go", AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}, DependsOnArtifactIDs: []string{"source"}},
+					{ID: "module", TargetRole: "module_definition", TargetRef: "go.mod", AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}},
+					{ID: "source", TargetRole: "implementation", TargetRef: "internal/service/main.go", AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}, DependsOnArtifactIDs: []string{"module"}},
+				},
+			}},
+		}}},
+	}
+	focuses, err := compileRuntimeV2CoverageFocuses(
+		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "build a gopls integration"},
+		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"go test ./... passes"}}, activation,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(focuses) != 4 {
+		t.Fatalf("focus count = %d, want 4: %+v", len(focuses), focuses)
+	}
+	for idx, want := range []string{"go.mod", "internal/service/main.go", "internal/service/main_test.go"} {
+		focus := focuses[idx]
+		if focus.TargetSelectorRef != "file/profile_declared_candidates" || focus.ProspectiveTargetRef != want ||
+			len(focus.TargetSelectorCandidateRefs) != 1 || focus.TargetSelectorCandidateRefs[0] != want ||
+			len(focus.RequiredEvidenceKinds) != 1 || focus.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange ||
+			len(focus.AcceptedStepKinds) != 1 || focus.AcceptedStepKinds[0] != runtimecontract.StepKindFileWrite || !focus.RequireTargetGrounding || focus.RequireAssessment {
+			t.Fatalf("bootstrap focus %d = %+v", idx, focus)
+		}
+	}
+	if focuses[3].AssessmentScope != "dodItem" {
+		t.Fatalf("DoD focus was not retained after bootstrap sequence: %+v", focuses[3])
+	}
+}
+
 func TestRuntimeV2BootstrapSealsProfileDeclaredSelectorBinding(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},

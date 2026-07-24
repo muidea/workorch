@@ -358,6 +358,18 @@ func (s *serverState) executeWorkspaceRuntimeV2Activation(ctx context.Context, r
 		s.notifyRunStatusChanged()
 		return err
 	}
+	// Activation constructs a fresh bootstrap or returns the existing active
+	// Run.  In both cases the scheduler must hand the persisted scope back to
+	// the Runtime V2 owner.  Without this command a Web/TUI `resume` merely
+	// rereads the active Run and no drive is scheduled.  Start/resume races are
+	// intentionally harmless: the Orchestrator owns admission and run-scoped
+	// singleflight, so a newly-created Run reuses its already-scheduled drive.
+	if strings.TrimSpace(activation.Run.ID) != "" && activation.Run.State == string(common.RunStateActive) {
+		if err := s.sendRuntimeV2RunOwnerCommand(runCtx, workspaceID, activation.Run.ID, "resume"); err != nil {
+			s.notifyRunStatusChangedForRun(activation.Run)
+			return err
+		}
+	}
 	s.notifyRunStatusChangedForRun(activation.Run)
 	return nil
 }

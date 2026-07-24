@@ -31,7 +31,7 @@ Last Updated: 2026-07-24
 
 | ID | 项 | 说明 | 当前方案 |
 | --- | --- | --- | --- |
-| RUNTIME-VPC | live contract convergence | validation truthfulness、effective progress、diagnostic routing、typed feasibility prerequisite、focus/coverage dependency、Shell structured failure-target protocol、owner-grounded retarget、same-gap/file-backed restart、output continuation、profile-declared bounded semantic selector 与 metadata-only Runtime V2 audit projection 已完成本地收口；默认 software-dev 空工作区 source/leading DoD create target 已声明，当前只需 fresh live state sequence | [唯一收口方案](../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md) |
+| RUNTIME-VPC | live contract convergence | validation truthfulness、effective progress、diagnostic routing、typed feasibility prerequisite、focus/coverage dependency、Shell structured failure-target protocol、owner-grounded retarget、same-gap/file-backed restart、output continuation、profile-declared bounded semantic selector 与 metadata-only Runtime V2 audit projection 已完成本地收口。2026-07-24 已删除全局 Markdown prospective fallback，并落地 profile-declared bootstrap artifact recipe 的合同、activation 前置 Focus 编译与 focus-scoped target refresh；gopls 默认 recipe 为 `go.mod → internal/lsp/manager.go → internal/lsp/manager_test.go`。仍待 partial-artifact/restart/validation-repair 与 deployed fresh live 验证。Web/TUI active-run activation 的 typed resume 投递已补齐本地回归 | [唯一收口方案](../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md) |
 
 ### B. 运行单元架构 / 生命周期
 

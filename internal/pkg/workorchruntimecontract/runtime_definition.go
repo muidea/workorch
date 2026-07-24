@@ -115,6 +115,20 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 			writeHashString(h, dependency.DependentRequirementID)
 			writeHashStrings(h, dependency.TriggerEvidenceKinds)
 		}
+		writeHashString(h, fmt.Sprintf("%d", len(profile.BootstrapRecipes)))
+		for _, recipe := range profile.BootstrapRecipes {
+			writeHashString(h, recipe.ID)
+			writeHashStrings(h, recipe.RequiredGoalTerms)
+			writeHashStrings(h, recipe.RequiredDoDTerms)
+			writeHashString(h, fmt.Sprintf("%d", len(recipe.Artifacts)))
+			for _, artifact := range recipe.Artifacts {
+				writeHashString(h, artifact.ID)
+				writeHashString(h, artifact.TargetRole)
+				writeHashString(h, artifact.TargetRef)
+				writeHashStrings(h, artifact.AllowedOperationKinds)
+				writeHashStrings(h, artifact.DependsOnArtifactIDs)
+			}
+		}
 	}
 	if execution.AcceptanceSlicePolicy == nil {
 		writeHashString(h, "acceptance-slice-policy:absent")

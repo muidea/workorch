@@ -87,6 +87,15 @@ func TestRuntimeAdapterAcquireRuntimeTargetSelectionIsCardinalityBounded(t *test
 			t.Fatalf("creation selection lost owner selector binding: %+v", selection)
 		}
 	})
+	t.Run("empty workspace without profile artifact is typed absent", func(t *testing.T) {
+		selection, err := adapter.AcquireRuntimeTargetSelection(t.TempDir(), "target-selection-absent", "deliverable", runtimeFileTargetSelectorWorkspaceDeliverable, "", 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selection.Disposition != runtimecontract.RuntimeTargetSelectionAbsent || selection.CandidateCount != 0 || selection.ProspectiveTargetRef != "" || selection.SnapshotID == "" {
+			t.Fatalf("empty workspace absent selection = %+v", selection)
+		}
+	})
 	t.Run("empty workspace rejects noncanonical prospective target", func(t *testing.T) {
 		workspace := t.TempDir()
 		for _, target := range []string{"../escape.txt", "/absolute.txt", "nested/../deliverable.txt", `nested\\deliverable.txt`} {

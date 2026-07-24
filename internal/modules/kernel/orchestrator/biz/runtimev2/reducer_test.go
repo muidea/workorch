@@ -321,6 +321,44 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 	})
 }
 
+func TestAdvanceSatisfiedCoverageFocusDropsPriorFocusTargetFacts(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus = runtimecontract.CoverageFocus{ID: "bootstrap-module", SliceID: "bootstrap", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-module"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}}
+	facts.RemainingFocuses = []runtimecontract.CoverageFocus{{
+		ID: "bootstrap-source", SliceID: "bootstrap", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-source"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		TargetRole: "implementation", TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, TargetSelectorRef: "file/profile_declared_candidates",
+		TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "go-lsp/source", TargetSelectorCandidateRefs: []string{"internal/lsp/manager.go"}, ProspectiveTargetRef: "internal/lsp/manager.go", RequireTargetGrounding: true,
+	}}
+	facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-module", State: runtimecontract.RuntimeCoverageItemStateSatisfied}, {ID: "cwi-source", State: runtimecontract.RuntimeCoverageItemStateOpen}}
+	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{ID: "module-created", Kind: runtimecontract.EvidenceKindStateChange, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-module"}}}
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "selection-module", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: "module_definition", SelectorRef: "file/profile_declared_candidates",
+		Disposition: runtimecontract.RuntimeTargetSelectionSelected, TargetRefs: []string{"go.mod"}, CandidateTargetRefs: []string{"go.mod"}, CandidateCount: 1, ObservedRevision: "tree-module",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	facts.Resources.TargetSelection = &selection
+	facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{TargetRef: "go.mod", ContentHash: "hash", ContentState: runtimecontract.SnapshotContentStateComplete}}
+	facts.Resources.FailureTarget = &runtimecontract.FailureTarget{Signature: "old-focus", TargetRefs: []string{"go.mod"}}
+
+	advanced := advanceSatisfiedCoverageFocus(facts)
+	if advanced.Focus.ID != "bootstrap-source" || advanced.Resources.TargetSelection != nil || len(advanced.Resources.TargetSnapshots) != 0 || advanced.Resources.FailureTarget != nil {
+		t.Fatalf("advanced focus retained predecessor target facts: %+v", advanced)
+	}
+	updated, decision, err := ReduceRuntimeStateWithDirective(advanced, nil)
+	if err != nil || decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(updated.Prerequisites.Pending) == 0 {
+		t.Fatalf("next bootstrap focus did not acquire a fresh target selection: facts=%+v decision=%+v err=%v", updated, decision, err)
+	}
+	found := false
+	for _, prerequisite := range updated.Prerequisites.Pending {
+		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSelection && prerequisite.ProspectiveTargetRef == "internal/lsp/manager.go" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("next bootstrap focus selection prerequisite = %+v", updated.Prerequisites.Pending)
+	}
+}
+
 func TestReduceRuntimeStateUnsupportedTargetSelectorFailsWithoutProviderAuthority(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}

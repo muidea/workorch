@@ -158,6 +158,20 @@ func runtimeV2ExecutionContract(input map[string]any) runtimecontract.RuntimeExe
 				TriggerEvidenceKinds:   runtimeV2Strings(item["triggerEvidenceKinds"]),
 			})
 		}
+		for _, item := range runtimeV2MapSlice(profile["bootstrapRecipes"]) {
+			recipe := runtimecontract.RuntimeBootstrapRecipe{
+				ID:                runtimeV2String(item["id"]),
+				RequiredGoalTerms: runtimeV2Strings(item["requiredGoalTerms"]),
+				RequiredDoDTerms:  runtimeV2Strings(item["requiredDoDTerms"]),
+			}
+			for _, artifact := range runtimeV2MapSlice(item["artifacts"]) {
+				recipe.Artifacts = append(recipe.Artifacts, runtimecontract.RuntimeBootstrapArtifact{
+					ID: runtimeV2String(artifact["id"]), TargetRole: runtimeV2String(artifact["targetRole"]), TargetRef: runtimeV2String(artifact["targetRef"]),
+					AllowedOperationKinds: runtimeV2Strings(artifact["allowedOperationKinds"]), DependsOnArtifactIDs: runtimeV2Strings(artifact["dependsOnArtifactIds"]),
+				})
+			}
+			contract.BootstrapRecipes = append(contract.BootstrapRecipes, recipe)
+		}
 		for _, item := range runtimeV2MapSlice(profile["evidenceRequirements"]) {
 			acceptedVariants := make([]runtimecontract.RuntimeOperationVariantRef, 0)
 			for _, variant := range runtimeV2MapSlice(item["acceptedOperationVariants"]) {

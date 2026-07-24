@@ -12,6 +12,34 @@ type RuntimeProfileContract struct {
 	DeliverableExpectations []RuntimeDeliverableExpectation
 	EvidenceRequirements    []RuntimeProfileEvidenceRequirement
 	CoverageDependencies    []RuntimeCoverageDependency
+	// BootstrapRecipes are profile/template-owned, bounded declarations for
+	// initializing an otherwise empty workspace. They are compiled at
+	// activation into sealed Focus contracts; they do not grant the runtime a
+	// free-form path or let File infer a project layout.
+	BootstrapRecipes []RuntimeBootstrapRecipe
+}
+
+// RuntimeBootstrapRecipe is declarative input for an activation adapter. The
+// matcher terms are profile data rather than orchestrator policy; a profile
+// that cannot select exactly one bounded recipe must leave target grounding
+// unresolved instead of asking a provider to invent an artifact path.
+type RuntimeBootstrapRecipe struct {
+	ID                string
+	RequiredGoalTerms []string
+	RequiredDoDTerms  []string
+	Artifacts         []RuntimeBootstrapArtifact
+}
+
+// RuntimeBootstrapArtifact is one opaque, profile-owned artifact declaration.
+// TargetRef is validated by the File owner against the workspace boundary only.
+// DependsOnArtifactIDs establishes an ordered, finite bootstrap graph; the
+// activation adapter compiles that graph before Runtime V2 is started.
+type RuntimeBootstrapArtifact struct {
+	ID                    string
+	TargetRole            string
+	TargetRef             string
+	AllowedOperationKinds []string
+	DependsOnArtifactIDs  []string
 }
 
 type RuntimeAcceptanceDimension struct {
@@ -87,6 +115,7 @@ func NormalizeRuntimeProfileContracts(values []RuntimeProfileContract) []Runtime
 		value.DeliverableExpectations = normalizeRuntimeDeliverableExpectations(value.DeliverableExpectations)
 		value.EvidenceRequirements = normalizeRuntimeProfileEvidenceRequirements(value.EvidenceRequirements)
 		value.CoverageDependencies = normalizeRuntimeCoverageDependencies(value.CoverageDependencies)
+		value.BootstrapRecipes = normalizeRuntimeBootstrapRecipes(value.BootstrapRecipes)
 		if value.ID != "" {
 			byID[value.ID] = value
 		}
@@ -154,8 +183,147 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 				return fmt.Errorf("runtime coverage dependency %q requires trigger evidence kinds", dependency.ID)
 			}
 		}
+		for _, recipe := range profile.BootstrapRecipes {
+			if err := recipe.Validate(); err != nil {
+				return fmt.Errorf("runtime bootstrap recipe %q: %w", recipe.ID, err)
+			}
+		}
 	}
 	return nil
+}
+
+func normalizeRuntimeBootstrapRecipes(values []RuntimeBootstrapRecipe) []RuntimeBootstrapRecipe {
+	byID := map[string]RuntimeBootstrapRecipe{}
+	for _, value := range values {
+		value = value.Normalized()
+		if value.ID != "" {
+			byID[value.ID] = value
+		}
+	}
+	return sortedMapValues(byID)
+}
+
+func (r RuntimeBootstrapRecipe) Normalized() RuntimeBootstrapRecipe {
+	r.ID = strings.TrimSpace(r.ID)
+	r.RequiredGoalTerms = normalizeStrings(r.RequiredGoalTerms)
+	r.RequiredDoDTerms = normalizeStrings(r.RequiredDoDTerms)
+	byID := map[string]RuntimeBootstrapArtifact{}
+	for _, artifact := range r.Artifacts {
+		artifact = artifact.Normalized()
+		if artifact.ID != "" {
+			byID[artifact.ID] = artifact
+		}
+	}
+	r.Artifacts = sortedMapValues(byID)
+	return r
+}
+
+func (a RuntimeBootstrapArtifact) Normalized() RuntimeBootstrapArtifact {
+	a.ID = strings.TrimSpace(a.ID)
+	a.TargetRole = strings.TrimSpace(a.TargetRole)
+	a.TargetRef = strings.TrimSpace(a.TargetRef)
+	a.AllowedOperationKinds = normalizeStrings(a.AllowedOperationKinds)
+	a.DependsOnArtifactIDs = normalizeStrings(a.DependsOnArtifactIDs)
+	return a
+}
+
+func (r RuntimeBootstrapRecipe) Validate() error {
+	r = r.Normalized()
+	if r.ID == "" || len(r.Artifacts) == 0 {
+		return fmt.Errorf("runtime bootstrap recipe requires id and artifacts")
+	}
+	if len(r.RequiredGoalTerms) == 0 && len(r.RequiredDoDTerms) == 0 {
+		return fmt.Errorf("runtime bootstrap recipe %q requires bounded goal or DoD matcher terms", r.ID)
+	}
+	known := make(map[string]RuntimeBootstrapArtifact, len(r.Artifacts))
+	paths := make(map[string]struct{}, len(r.Artifacts))
+	for _, artifact := range r.Artifacts {
+		if artifact.ID == "" || artifact.TargetRole == "" || artifact.TargetRef == "" || len(artifact.AllowedOperationKinds) == 0 {
+			return fmt.Errorf("runtime bootstrap artifact requires id, role, target and allowed operation kinds")
+		}
+		if _, exists := known[artifact.ID]; exists {
+			return fmt.Errorf("runtime bootstrap recipe %q duplicates artifact %q", r.ID, artifact.ID)
+		}
+		if _, exists := paths[artifact.TargetRef]; exists {
+			return fmt.Errorf("runtime bootstrap recipe %q duplicates artifact target %q", r.ID, artifact.TargetRef)
+		}
+		for _, kind := range artifact.AllowedOperationKinds {
+			descriptor, ok := RuntimeOperationDescriptorForKind(CanonicalRuntimeBlockKind(kind))
+			if !ok || descriptor.OwnerModuleID != RuntimeModuleFile || !descriptor.AllowsNewTarget {
+				return fmt.Errorf("runtime bootstrap artifact %q has non-creating File operation kind %q", artifact.ID, kind)
+			}
+		}
+		known[artifact.ID] = artifact
+		paths[artifact.TargetRef] = struct{}{}
+	}
+	for _, artifact := range r.Artifacts {
+		for _, dependency := range artifact.DependsOnArtifactIDs {
+			if dependency == artifact.ID {
+				return fmt.Errorf("runtime bootstrap artifact %q cannot depend on itself", artifact.ID)
+			}
+			if _, exists := known[dependency]; !exists {
+				return fmt.Errorf("runtime bootstrap artifact %q depends on unknown artifact %q", artifact.ID, dependency)
+			}
+		}
+	}
+	visiting := map[string]bool{}
+	visited := map[string]bool{}
+	var visit func(string) error
+	visit = func(id string) error {
+		if visiting[id] {
+			return fmt.Errorf("runtime bootstrap recipe %q has dependency cycle at %q", r.ID, id)
+		}
+		if visited[id] {
+			return nil
+		}
+		visiting[id] = true
+		for _, dependency := range known[id].DependsOnArtifactIDs {
+			if err := visit(dependency); err != nil {
+				return err
+			}
+		}
+		visiting[id] = false
+		visited[id] = true
+		return nil
+	}
+	for _, artifact := range r.Artifacts {
+		if err := visit(artifact.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// OrderedArtifacts returns a deterministic dependency order. It is a pure
+// value helper so activation can seal the recipe without giving pkg authority
+// to transition any Runtime V2 state.
+func (r RuntimeBootstrapRecipe) OrderedArtifacts() ([]RuntimeBootstrapArtifact, error) {
+	if err := r.Validate(); err != nil {
+		return nil, err
+	}
+	r = r.Normalized()
+	byID := make(map[string]RuntimeBootstrapArtifact, len(r.Artifacts))
+	for _, artifact := range r.Artifacts {
+		byID[artifact.ID] = artifact
+	}
+	ordered := make([]RuntimeBootstrapArtifact, 0, len(r.Artifacts))
+	visited := map[string]bool{}
+	var visit func(string)
+	visit = func(id string) {
+		if visited[id] {
+			return
+		}
+		artifact := byID[id]
+		for _, dependency := range artifact.DependsOnArtifactIDs {
+			visit(dependency)
+		}
+		visited[id] = true
+		ordered = append(ordered, artifact)
+	}
+	for _, artifact := range r.Artifacts {
+		visit(artifact.ID)
+	}
+	return ordered, nil
 }
 
 func runtimeProfileContainsTargetRef(values []string, target string) bool {
@@ -299,7 +467,7 @@ func sameRuntimeProfileContract(left RuntimeProfileContract, right RuntimeProfil
 	left, right = leftValues[0], rightValues[0]
 	if left.ID != right.ID || len(left.AcceptanceDimensions) != len(right.AcceptanceDimensions) ||
 		len(left.DeliverableExpectations) != len(right.DeliverableExpectations) || len(left.EvidenceRequirements) != len(right.EvidenceRequirements) ||
-		len(left.CoverageDependencies) != len(right.CoverageDependencies) {
+		len(left.CoverageDependencies) != len(right.CoverageDependencies) || len(left.BootstrapRecipes) != len(right.BootstrapRecipes) {
 		return false
 	}
 	for idx := range left.AcceptanceDimensions {
@@ -337,6 +505,19 @@ func sameRuntimeProfileContract(left RuntimeProfileContract, right RuntimeProfil
 			l.DependentScope != r.DependentScope || l.DependentRequirementID != r.DependentRequirementID ||
 			!sameStrings(l.TriggerEvidenceKinds, r.TriggerEvidenceKinds) {
 			return false
+		}
+	}
+	for idx := range left.BootstrapRecipes {
+		l, r := left.BootstrapRecipes[idx], right.BootstrapRecipes[idx]
+		if l.ID != r.ID || !sameStrings(l.RequiredGoalTerms, r.RequiredGoalTerms) || !sameStrings(l.RequiredDoDTerms, r.RequiredDoDTerms) || len(l.Artifacts) != len(r.Artifacts) {
+			return false
+		}
+		for artifactIdx := range l.Artifacts {
+			la, ra := l.Artifacts[artifactIdx], r.Artifacts[artifactIdx]
+			if la.ID != ra.ID || la.TargetRole != ra.TargetRole || la.TargetRef != ra.TargetRef ||
+				!sameStrings(la.AllowedOperationKinds, ra.AllowedOperationKinds) || !sameStrings(la.DependsOnArtifactIDs, ra.DependsOnArtifactIDs) {
+				return false
+			}
 		}
 	}
 	return true

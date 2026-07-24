@@ -149,7 +149,12 @@ func (a *RuntimeAdapter) AcquireRuntimeTargetSelection(workspaceDirectory, prere
 	case 0:
 		if selectorRef == runtimeFileTargetSelectorWorkspaceDeliverable {
 			if prospectiveTargetRef == "" {
-				return runtimemodel.RuntimeTargetSelection{}, fmt.Errorf("%w: empty workspace selector requires a profile-declared prospective target", common.ErrInvalidArgument)
+				// An empty inventory without a profile-declared artifact is a
+				// complete File observation, not an adapter failure. SM-2 turns
+				// this typed absence into target_grounding_unresolved without
+				// spending a provider request on a free-form filename guess.
+				selection.Disposition = runtimemodel.RuntimeTargetSelectionAbsent
+				break
 			}
 			if strings.Contains(prospectiveTargetRef, "\\") {
 				return runtimemodel.RuntimeTargetSelection{}, fmt.Errorf("%w: prospective target must use canonical workspace-relative separators", common.ErrInvalidArgument)

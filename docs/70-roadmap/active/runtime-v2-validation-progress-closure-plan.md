@@ -84,7 +84,7 @@ go test ./internal/services/workorch/... -count=1
 | D02 | accepted 与 progress 混淆 | accepted validation 清 repair window，同 gap 循环 | Orchestrator、contract 纯 helper | SM-2/3 | 全面修复 | landed local | coverage dependency reopening |
 | D03 | anti-replay 缺少合法纠正路径 | exact rejected shape 被拒绝，但 authority 没有新事实 | Orchestrator、LLM | SM-2/3 | 全面修复 | owner retarget + same-gap/file-backed restart landed local | fresh live |
 | D04 | provider 输出被固定上限截断 | JSON 在 4096/8192 附近 EOF | LLM catalog/adapter、activation、Orchestrator continuation | SM-3/4 | 全面修复 | landed local | provider fallback 与 fresh live |
-| D05 | target grounding 不完整 | 空 workspace、scope 当 concrete target、目标不存在 | defaults/profile、activation、File、Orchestrator、LLM | SM-2/3 | 全面修复 | landed local | fresh deployed profile-selector sequence pending |
+| D05 | target grounding 不完整 | 空 workspace、scope 当 concrete target、目标不存在 | defaults/profile、activation、File、Orchestrator、LLM | SM-2/3 | 全面修复 | partial | 泛化 Markdown fallback 已移除；空工程 bootstrap artifact 集合仍需完成 restart/live 收口 |
 | D06 | failure target 来源不可信 | command target、验证入口、自由文本被提升为 repair target | Shell/MCP/File、Orchestrator | SM-2/3 | 全面修复 | Shell protocol landed local | clean-data tool/profile live pending |
 | D07 | repair directive 迁移错误 | state change 已完成但仍缺 validation，directive 继续要求 state change | Orchestrator | SM-2 | 全面修复 | landed local | focus/coverage 依赖 open |
 | D08 | candidate schema/operation 不一致 | targetRef/targetRefs、空 target、非法参数、无 durable effect | LLM、contract、File/Shell、Orchestrator | SM-3 | 全面防线；prompt 为单点增强 | landed baseline | owner variant 扩展时需持续回归 |
@@ -240,17 +240,11 @@ workspace 文件不能影响选择，ambiguous 不会请求 provider，workspace
 机制失效 selection/snapshot/admissibility。已覆盖 File one/multiple/create 与 activation sealing；仍需 fresh
 deployed workspace 完成 provider → receipt → restart 的 live sequence。
 
-2026-07-23 另补齐默认 `software-dev` profile 的空工作区首个交付物声明：
-`source_change` 及先于它编译的 `dodItem`/`goalCoverage` direct-evidence policy 都以
-`file/workspace_deliverable` 选择器封存 `workorch-deliverable.md`。DoD work unit 在 profile
-deliverable 之前进入 focus queue；只给后者声明 prospective target 会使空工作区仍在第一个 DoD
-focus 停止。路径由 profile 数据声明、activation 封存、File owner 验证，Runtime V2 和 File 均不从
-Goal/DoD、文件后缀或 provider 文本猜测。该基线由 defaults、activation mapping、leading-DoD focus
-sealing 和 File create-selection 的独立回归共同覆盖。上述三个 policy 同时显式接受 `file/write`：File
-owner 对 sealed `create` observation 只允许该 prospective path 的首个 durable File 操作，`patch/apply`
-在目标尚不存在时不可行；只声明后者会令 provider 的合法首次创建在 sealed contract 阶段被拒绝。任意领域
-profile 如需不同目标，仍必须提供自身
-semantic selector 或明确的 prospective declaration。
+已撤回：默认 `software-dev` profile 曾把 `workorch-deliverable.md` 作为空 workspace 的全局
+prospective target。该 fallback 会把任何未解析工程压缩成 Markdown 改写，现已删除，不保留兼容路径。
+空 inventory 且没有 profile recipe artifact 时，File 返回 typed `absent`；SM-2 以
+`target_grounding_unresolved` 终止且不请求 provider。只有 recipe 封存的 `file/write` artifact 可进入
+`create` observation；`patch/apply` 在目标尚不存在时仍不可行。
 
 同日补齐 create observation 的状态机闭环：若当前 focus 仅要求 validation，但已提交的 File selection
 为 `create` 且不存在 current-focus target-bound durable evidence，SM-2 必须先封存
@@ -260,6 +254,45 @@ File owner selector inventory 与 operation descriptor `AllowsNewTarget` 的 dur
 prerequisite refresh 重取 selected target/snapshot，后续 validation 与 assessment 的 `TargetRefs` 一律从
 同一 `GroundedRepairTargets` 投影。`AllowsNewTarget` 属于 executable descriptor，已纳入
 `OperationContractRevision`，因此旧 Run 不会在重启后静默采用新的 create 语义。
+
+#### WP-2A：空工作区 bootstrap artifact 集合（**open / P0**）
+
+2026-07-24 fresh live 反证表明，上述“单一 prospective target”只能证明 File owner 可以安全创建一个
+文件，不能表达一个可执行工程的最小 bootstrap。`software-dev` profile 当前把
+`workorch-deliverable.md` 封存为唯一 `deliverable_implementation` target；面对明确要求 Go/LSP
+实现与 `go test ./...` 的 Goal/DoD 时，provider 因而只能反复改写 Markdown，Shell 则正确以
+`validation_target_missing` 拒绝不存在的 Go 测试。该行为不是 schema 放宽或 provider retry 可以修复的
+问题。
+
+收口要求：
+
+1. 由 profile/template 的 activation adapter（而非 Orchestrator/File/Shell）把 Goal/DoD、已提交的
+   workspace manifest 与声明式 bootstrap recipe 编译为有序、有限的 artifact 集合；每个 artifact 都有
+   opaque role、canonical path、允许的 create/update operation 和其依赖；
+2. 空工作区不得把文档占位文件当成实现 artifact。若 profile 无法得出有界 bootstrap recipe，必须进入
+   typed `target_grounding_unresolved`，而不是让 provider 在自由路径上猜测；
+3. File owner 只校验 recipe 已封存的 workspace-relative artifact/path 与 manifest，返回每个 artifact 的
+   `create`/`selected` observation；它不从 Goal 文本、后缀或 LLM candidate 推断语言、项目布局或文件名；
+4. SM-2 必须按 recipe dependency 先请求缺失 artifact 的 durable state change，再进入与已创建项目
+   实际可执行的 validation。`validation_target_missing` 要形成该下一 artifact 的 sealed repair contract，
+   不能退回同一 Markdown target 的泛化 `produce_state_change`；
+5. recipe、artifact observation、target snapshot、admissibility 与 repair target 共同进入 authority hash；
+   duplicate/stale/restart 只能复用已 CAS 的集合，不得重新解析 Goal 或让旧文档 target 复活。
+
+退出测试：纯空 workspace 的 profile recipe、已有部分 artifact、manifest revision drift、重复 receipt、
+validation infeasible → 下一 artifact、CAS 前后 restart，以及 fresh Go fixture 的
+`bootstrap → source/test → go validation → assessment` 正向序列。核心 runtime 仍不识别 Go、LSP、
+语言后缀或测试框架；这些仅是 software-dev profile 的 fixture/adapter 输入。
+
+2026-07-24 本地进行中：已新增 `RuntimeBootstrapRecipe` / `RuntimeBootstrapArtifact` 纯合同，覆盖
+规范化、唯一性、可创建 File operation、依赖缺失/环、stable equality 与 definition hash；activation
+将唯一匹配的 profile recipe 拓扑编译为多个前置 `CoverageFocus`。每个 artifact 只封存一个
+`file/profile_declared_candidates` binding 与其 prospective path，File 继续只返回 create/selected
+事实；SM-2 在 focus advance 时清除上一 artifact 的 target selection/snapshot/failure-target，下一
+artifact 必须重新 acquisition，不能复用前一路径。默认 `software-dev` 模板已声明 gopls 目标的
+`go.mod -> internal/lsp/manager.go -> internal/lsp/manager_test.go` recipe。尚未完成：activation
+对已提交 manifest 的 recipe applicability、partial-artifact/restart/receipt matrix、validation
+infeasible 到未满足 artifact 的明确路由，以及 fresh deployed live gate；因此 WP-2A 仍为 open。
 
 ### WP-3：Shell structured failure-target observation
 

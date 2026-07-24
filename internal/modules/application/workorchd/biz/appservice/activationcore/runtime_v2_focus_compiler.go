@@ -17,12 +17,15 @@ type compiledCoverage struct {
 }
 
 type workUnit struct {
-	sourceScope  string
-	sourceID     string
-	text         string
-	evidenceRole string
-	order        int
-	itemID       common.CoverageWorkItemID
+	sourceScope       string
+	sourceID          string
+	text              string
+	evidenceRole      string
+	bootstrapProfile  string
+	bootstrapRecipe   string
+	bootstrapArtifact *runtimecontract.RuntimeBootstrapArtifact
+	order             int
+	itemID            common.CoverageWorkItemID
 }
 
 // compiledEvidencePolicy is the neutral merge result for one coverage focus.
@@ -68,8 +71,17 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 	activation = activation.Normalized()
 	stateChangeRequired := activation.ExecutionContract.StateChangePolicy == runtimecontract.RuntimeStateChangeMustProduce
 
-	// 1) Generate item-level work units in definition order (one item identity per DoD/profile source).
+	// 1) Compile profile-owned bootstrap artifacts first. This is intentionally
+	// done in activation, before Runtime V2 exists: the runtime only receives
+	// ordinary sealed Focus contracts and never derives a project layout from
+	// Goal prose, file suffixes, or provider output.
 	units := make([]workUnit, 0, len(dod.Items)+8)
+	bootstrapUnits, err := compileRuntimeBootstrapWorkUnits(goal, dod, activation.ExecutionContract.ProfileContracts)
+	if err != nil {
+		return compiledCoverage{}, err
+	}
+	units = append(units, bootstrapUnits...)
+	// 2) Generate item-level work units in definition order (one item identity per DoD/profile source).
 	for idx, item := range dod.Items {
 		item = strings.TrimSpace(item)
 		if item == "" {
@@ -144,7 +156,12 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 	}
 	resolved := make([]resolvedItem, 0, len(units))
 	for _, unit := range units {
-		policy, err := resolveCoverageEvidencePolicy(unit.sourceScope, unit.sourceID, activation, stateChangeRequired)
+		var policy compiledEvidencePolicy
+		if unit.bootstrapArtifact != nil {
+			policy, err = compileRuntimeBootstrapArtifactPolicy(unit)
+		} else {
+			policy, err = resolveCoverageEvidencePolicy(unit.sourceScope, unit.sourceID, activation, stateChangeRequired)
+		}
 		if err != nil {
 			return compiledCoverage{}, err
 		}
@@ -339,6 +356,99 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 		return compiledCoverage{}, fmt.Errorf("runtime coverage focus compiler produced %d focuses, exceeding sealed policy limit %d; configure bounded acceptance slices", len(focuses), slicePolicy.MaxFocuses)
 	}
 	return compiledCoverage{Focuses: focuses, Slices: slices, CoverageItems: coverageItems}, nil
+}
+
+// compileRuntimeBootstrapWorkUnits resolves a declarative profile recipe using
+// only activation inputs. A recipe is either exactly selected or not selected;
+// ambiguous profile declarations are rejected before a Run can seal an
+// arbitrary bootstrap target. No filesystem or capability-owner access occurs
+// here, preserving File as the owner of path/manifest observations.
+func compileRuntimeBootstrapWorkUnits(goal *workspacemodel.Goal, dod *workspacemodel.DoD, profiles []runtimecontract.RuntimeProfileContract) ([]workUnit, error) {
+	goalText := ""
+	if goal != nil {
+		goalText = goal.Text
+	}
+	dodText := ""
+	if dod != nil {
+		dodText = strings.Join(dod.Items, "\n")
+	}
+	type selectedRecipe struct {
+		profileID string
+		recipe    runtimecontract.RuntimeBootstrapRecipe
+	}
+	selected := []selectedRecipe{}
+	for _, profile := range runtimecontract.NormalizeRuntimeProfileContracts(profiles) {
+		for _, recipe := range profile.BootstrapRecipes {
+			if runtimeBootstrapRecipeMatches(recipe, goalText, dodText) {
+				selected = append(selected, selectedRecipe{profileID: profile.ID, recipe: recipe})
+			}
+		}
+	}
+	if len(selected) == 0 {
+		return nil, nil
+	}
+	if len(selected) != 1 {
+		ids := make([]string, 0, len(selected))
+		for _, item := range selected {
+			ids = append(ids, item.profileID+"/"+item.recipe.ID)
+		}
+		return nil, fmt.Errorf("runtime bootstrap recipe selection is ambiguous: %s", strings.Join(ids, ","))
+	}
+	artifacts, err := selected[0].recipe.OrderedArtifacts()
+	if err != nil {
+		return nil, err
+	}
+	units := make([]workUnit, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		artifact := artifact
+		units = append(units, workUnit{
+			sourceScope: "bootstrapArtifact", sourceID: selected[0].recipe.ID + "/" + artifact.ID,
+			text: "profile bootstrap artifact " + artifact.ID, evidenceRole: "bootstrap_artifact",
+			bootstrapProfile: selected[0].profileID, bootstrapRecipe: selected[0].recipe.ID, bootstrapArtifact: &artifact,
+		})
+	}
+	return units, nil
+}
+
+func runtimeBootstrapRecipeMatches(recipe runtimecontract.RuntimeBootstrapRecipe, goalText, dodText string) bool {
+	recipe = recipe.Normalized()
+	return runtimeBootstrapTextContainsAll(goalText, recipe.RequiredGoalTerms) && runtimeBootstrapTextContainsAll(dodText, recipe.RequiredDoDTerms)
+}
+
+func runtimeBootstrapTextContainsAll(text string, terms []string) bool {
+	text = strings.ToLower(strings.TrimSpace(text))
+	for _, term := range terms {
+		if !strings.Contains(text, strings.ToLower(strings.TrimSpace(term))) {
+			return false
+		}
+	}
+	return true
+}
+
+func compileRuntimeBootstrapArtifactPolicy(unit workUnit) (compiledEvidencePolicy, error) {
+	if unit.bootstrapArtifact == nil || strings.TrimSpace(unit.bootstrapProfile) == "" || strings.TrimSpace(unit.bootstrapRecipe) == "" {
+		return compiledEvidencePolicy{}, fmt.Errorf("bootstrap work unit requires profile, recipe and artifact")
+	}
+	artifact := unit.bootstrapArtifact.Normalized()
+	if artifact.ID == "" || artifact.TargetRole == "" || artifact.TargetRef == "" || len(artifact.AllowedOperationKinds) == 0 {
+		return compiledEvidencePolicy{}, fmt.Errorf("bootstrap artifact work unit is incomplete")
+	}
+	return compiledEvidencePolicy{
+		RequiredEvidenceKinds:       []string{runtimecontract.EvidenceKindStateChange},
+		AcceptedStepKinds:           append([]string(nil), artifact.AllowedOperationKinds...),
+		EvidenceRole:                "bootstrap_artifact",
+		TargetRole:                  artifact.TargetRole,
+		TargetDiscoverySources:      []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest, runtimecontract.RuntimeValidationDiscoverySourceProjectFiles},
+		TargetSelectorRef:           "file/profile_declared_candidates",
+		TargetSelectorOwnerRef:      unit.bootstrapProfile,
+		TargetSelectorSubjectRef:    unit.bootstrapRecipe + "/" + artifact.ID,
+		TargetSelectorCandidateRefs: []string{artifact.TargetRef},
+		ProspectiveTargetRef:        artifact.TargetRef,
+		RequireTargetGrounding:      true,
+		RequireDirectEvidence:       true,
+		RequireCoverageTargets:      true,
+		Description:                 "profile-declared workspace bootstrap artifact",
+	}, nil
 }
 
 func matchAcceptanceSliceGroup(group runtimecontract.RuntimeAcceptanceSliceGroupPolicy, sourceScope, sourceID string, policy compiledEvidencePolicy) bool {

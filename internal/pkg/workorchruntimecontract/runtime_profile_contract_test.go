@@ -153,3 +153,49 @@ func TestRuntimeProfileDeclaredSelectorCandidatesAreBoundedAndAffectEquality(t *
 		})
 	}
 }
+
+func TestRuntimeBootstrapRecipeIsBoundedOrderedAndAffectsProfileEquality(t *testing.T) {
+	profile := RuntimeProfileContract{ID: "software-dev", BootstrapRecipes: []RuntimeBootstrapRecipe{{
+		ID: "go-module", RequiredGoalTerms: []string{" Go ", "Go"}, RequiredDoDTerms: []string{"test"},
+		Artifacts: []RuntimeBootstrapArtifact{
+			{ID: "source", TargetRole: "implementation", TargetRef: "cmd/service/main.go", AllowedOperationKinds: []string{StepKindFileWrite}, DependsOnArtifactIDs: []string{"module"}},
+			{ID: "module", TargetRole: "module_definition", TargetRef: "go.mod", AllowedOperationKinds: []string{StepKindFileWrite}},
+			{ID: "test", TargetRole: "executable_validation", TargetRef: "cmd/service/main_test.go", AllowedOperationKinds: []string{StepKindFileWrite}, DependsOnArtifactIDs: []string{"source"}},
+		},
+	}}}
+	if err := ValidateRuntimeProfileContracts([]RuntimeProfileContract{profile}); err != nil {
+		t.Fatalf("valid bootstrap recipe rejected: %v", err)
+	}
+	normalized := NormalizeRuntimeProfileContracts([]RuntimeProfileContract{profile})
+	ordered, err := normalized[0].BootstrapRecipes[0].OrderedArtifacts()
+	if err != nil {
+		t.Fatalf("ordered artifacts: %v", err)
+	}
+	if got := []string{ordered[0].ID, ordered[1].ID, ordered[2].ID}; got[0] != "module" || got[1] != "source" || got[2] != "test" {
+		t.Fatalf("artifact dependency order = %v, want module/source/test", got)
+	}
+	changed := NormalizeRuntimeProfileContracts([]RuntimeProfileContract{normalized[0]})
+	changed[0].BootstrapRecipes = append([]RuntimeBootstrapRecipe(nil), normalized[0].BootstrapRecipes...)
+	changed[0].BootstrapRecipes[0].Artifacts = append([]RuntimeBootstrapArtifact(nil), normalized[0].BootstrapRecipes[0].Artifacts...)
+	changed[0].BootstrapRecipes[0].Artifacts[0].TargetRef = "other.go"
+	if SameRuntimeProfileContracts(normalized, changed) {
+		t.Fatal("bootstrap artifact path drift was not detected")
+	}
+	for name, mutate := range map[string]func(*RuntimeBootstrapRecipe){
+		"missing matcher":    func(recipe *RuntimeBootstrapRecipe) { recipe.RequiredGoalTerms = nil; recipe.RequiredDoDTerms = nil },
+		"unknown dependency": func(recipe *RuntimeBootstrapRecipe) { recipe.Artifacts[0].DependsOnArtifactIDs = []string{"missing"} },
+		"noncreating operation": func(recipe *RuntimeBootstrapRecipe) {
+			recipe.Artifacts[0].AllowedOperationKinds = []string{StepKindFileEdit}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			invalid := profile
+			invalid.BootstrapRecipes = append([]RuntimeBootstrapRecipe(nil), profile.BootstrapRecipes...)
+			invalid.BootstrapRecipes[0].Artifacts = append([]RuntimeBootstrapArtifact(nil), profile.BootstrapRecipes[0].Artifacts...)
+			mutate(&invalid.BootstrapRecipes[0])
+			if err := ValidateRuntimeProfileContracts([]RuntimeProfileContract{invalid}); err == nil {
+				t.Fatalf("invalid bootstrap recipe was accepted: %+v", invalid.BootstrapRecipes[0])
+			}
+		})
+	}
+}

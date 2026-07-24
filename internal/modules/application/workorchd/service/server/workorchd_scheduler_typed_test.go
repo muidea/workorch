@@ -6,10 +6,28 @@ import (
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
+
+type recordedRuntimeDispatch struct {
+	workspaceID string
+	runID       string
+	action      string
+}
+
+type recordingWorkspaceRunScheduler struct{ dispatches []recordedRuntimeDispatch }
+
+func (s *recordingWorkspaceRunScheduler) SubmitWorkspaceRun(context.Context, workorchdevents.WorkspaceRunRequestedCommand) error {
+	return nil
+}
+
+func (s *recordingWorkspaceRunScheduler) DispatchRuntimeRun(_ context.Context, workspaceID, runID, action string) error {
+	s.dispatches = append(s.dispatches, recordedRuntimeDispatch{workspaceID: workspaceID, runID: runID, action: action})
+	return nil
+}
 
 func TestWorkorchDSchedulerConsumesTypedWorkspaceRunCommand(t *testing.T) {
 	rawHub := magicevent.NewHub(16)
@@ -68,6 +86,37 @@ func TestWorkorchDSchedulerRejectsInvalidTypedWorkspaceRunCommand(t *testing.T) 
 	response := rawHub.Send(event)
 	if response == nil || response.Error() == nil {
 		t.Fatalf("scheduler response = %v, want invalid command error", response)
+	}
+}
+
+func TestWorkspaceExecutionActivationDispatchesRuntimeV2ResumeForActiveRun(t *testing.T) {
+	rawHub := magicevent.NewHub(16)
+	t.Cleanup(func() { rawHub.Terminate(context.Background()) })
+	state := newTestServerStateWithCommandHubAndBackground(normalizeConfig(Config{Backend: "memory"}), rawHub, &recordingBackgroundRoutine{})
+	scheduler := &recordingWorkspaceRunScheduler{}
+	state.workspaceRunScheduler = scheduler
+	state.resumeWorkspaceExecution = func(ctx context.Context, _, _, workspaceID string, _ appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+		if got := common.RuntimeWorkspaceIDFromContext(ctx); got != common.WorkspaceID(workspaceID) {
+			t.Fatalf("activation workspace scope = %q, want %q", got, workspaceID)
+		}
+		return appservice.WorkspaceExecutionActivation{
+			Run: appservice.Run{ID: "run-active", WorkspaceID: workspaceID, State: string(common.RunStateActive)},
+		}, nil
+	}
+
+	err := state.executeWorkspaceRuntimeV2Activation(context.Background(), workspaceRunRequest{
+		WorkspaceID: "ws-active",
+		Intent:      "resume",
+	})
+	if err != nil {
+		t.Fatalf("executeWorkspaceRuntimeV2Activation: %v", err)
+	}
+	if len(scheduler.dispatches) != 1 {
+		t.Fatalf("runtime dispatches = %+v, want one resume", scheduler.dispatches)
+	}
+	got := scheduler.dispatches[0]
+	if got.workspaceID != "ws-active" || got.runID != "run-active" || got.action != "resume" {
+		t.Fatalf("runtime dispatch = %+v, want ws-active/run-active/resume", got)
 	}
 }
 

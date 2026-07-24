@@ -562,6 +562,15 @@ func advanceSatisfiedCoverageFocus(facts runtimecontract.RuntimeFacts) runtimeco
 	facts.RemainingFocuses = append([]runtimecontract.CoverageFocus(nil), facts.RemainingFocuses[1:]...)
 	facts.Failure = nil
 	facts.Feasibility = nil
+	// Target selections and snapshots are scoped to the completed Focus. A
+	// profile bootstrap recipe intentionally advances through several sealed
+	// artifact targets; retaining the prior File observation would make the
+	// next Focus reuse its predecessor's path and violate its own selector
+	// binding. Manifest and capability inventories remain valid owner facts and
+	// are refreshed normally when their revisions change.
+	facts.Resources.TargetSelection = nil
+	facts.Resources.TargetSnapshots = nil
+	facts.Resources.FailureTarget = nil
 	facts.Repair = facts.Repair.ResetForFocus(facts.Focus.ID, facts.Focus.SliceID, facts.EvidenceRevision)
 	facts.RepairDirective = nil
 	return facts.Normalized()

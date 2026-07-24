@@ -361,12 +361,15 @@ func (m *Biz) resumeRunMagicCommand(ctx context.Context, cmd orchestratorevents.
 		return common.ErrInvalidArgument
 	}
 	if err := m.bizPtr.CanResumeRun(ctx, cmd.RunID); err != nil {
-		return err
+		return fmt.Errorf("runtime v2 resume admission for %s/%s: %w", cmd.WorkspaceID, cmd.RunID, err)
 	}
 	if err := m.bizPtr.ActivateRuntimeV2Run(ctx, cmd.WorkspaceID, cmd.RunID); err != nil {
-		return err
+		return fmt.Errorf("runtime v2 resume activation for %s/%s: %w", cmd.WorkspaceID, cmd.RunID, err)
 	}
-	return m.scheduleRuntimeV2Drive(ctx, cmd.WorkspaceID, cmd.RunID, "resume")
+	if err := m.scheduleRuntimeV2Drive(ctx, cmd.WorkspaceID, cmd.RunID, "resume"); err != nil {
+		return fmt.Errorf("runtime v2 resume scheduling for %s/%s: %w", cmd.WorkspaceID, cmd.RunID, err)
+	}
+	return nil
 }
 
 func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source string) error {

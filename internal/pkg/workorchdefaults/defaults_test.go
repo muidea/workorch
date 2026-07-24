@@ -585,10 +585,10 @@ func TestEnsureBuiltinDefaultsUpsertsEmbeddedSoulsAndTemplates(t *testing.T) {
 }
 
 // assertSoftwareDevWorkspaceDeliverableSelectors guards the startup-default
-// path used by a new workspace. The profile, rather than Runtime V2 or the
-// File owner, declares the canonical first durable target for an empty
-// workspace. File only verifies that declaration before a provider can
-// propose its first concrete operation.
+// path used by a new workspace. Generic direct-evidence selectors intentionally
+// do not invent a document fallback; profile-owned bootstrap recipes declare
+// bounded artifacts where a template can resolve one. File only verifies those
+// declarations before a provider can propose a concrete operation.
 func assertSoftwareDevWorkspaceDeliverableSelectors(t *testing.T, hints map[string]any) {
 	t.Helper()
 	contracts, ok := hints["profileContracts"].(map[string]any)
@@ -614,13 +614,31 @@ func assertSoftwareDevWorkspaceDeliverableSelectors(t *testing.T, hints map[stri
 			if item["targetSelectorRef"] != "file/workspace_deliverable" {
 				t.Fatalf("%s targetSelectorRef = %q, want file/workspace_deliverable", id, item["targetSelectorRef"])
 			}
-			if item["prospectiveTargetRef"] != "workorch-deliverable.md" {
-				t.Fatalf("%s/%s prospectiveTargetRef = %q, want workorch-deliverable.md", id, item["scope"], item["prospectiveTargetRef"])
+			if _, present := item["prospectiveTargetRef"]; present {
+				t.Fatalf("%s/%s retains deprecated prospectiveTargetRef = %q", id, item["scope"], item["prospectiveTargetRef"])
 			}
 			found++
 		}
 		if found == 0 {
 			t.Fatalf("missing grounded %s evidence requirement", id)
+		}
+	}
+	recipes, ok := profile["bootstrapRecipes"].([]any)
+	if !ok || len(recipes) != 1 {
+		t.Fatalf("software-dev bootstrapRecipes = %+v, want one bounded recipe", profile["bootstrapRecipes"])
+	}
+	recipe, ok := recipes[0].(map[string]any)
+	if !ok || recipe["id"] != "go-lsp-empty-workspace" {
+		t.Fatalf("software-dev bootstrap recipe = %+v", recipes[0])
+	}
+	artifacts, ok := recipe["artifacts"].([]any)
+	if !ok || len(artifacts) != 3 {
+		t.Fatalf("bootstrap artifacts = %+v, want module/source/test sequence", recipe["artifacts"])
+	}
+	for idx, want := range []string{"go.mod", "internal/lsp/manager.go", "internal/lsp/manager_test.go"} {
+		artifact, ok := artifacts[idx].(map[string]any)
+		if !ok || artifact["targetRef"] != want {
+			t.Fatalf("bootstrap artifact %d = %+v, want target %q", idx, artifacts[idx], want)
 		}
 	}
 }
@@ -933,8 +951,8 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 			if selector, _ := item["targetSelectorRef"].(string); selector != "file/workspace_deliverable" {
 				t.Fatalf("source_change targetSelectorRef = %q, want file/workspace_deliverable", selector)
 			}
-			if prospectiveTarget, _ := item["prospectiveTargetRef"].(string); prospectiveTarget != "workorch-deliverable.md" {
-				t.Fatalf("source_change prospectiveTargetRef = %q, want workorch-deliverable.md", prospectiveTarget)
+			if _, present := item["prospectiveTargetRef"]; present {
+				t.Fatalf("source_change retains deprecated prospectiveTargetRef = %q", item["prospectiveTargetRef"])
 			}
 			if direct, _ := item["requireDirectEvidence"].(bool); !direct {
 				t.Fatalf("source_change requireDirectEvidence = false, want true")
@@ -1017,8 +1035,8 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 				if selector, _ := item["targetSelectorRef"].(string); selector != "file/workspace_deliverable" {
 					t.Fatalf("%s wildcard targetSelectorRef = %q, want file/workspace_deliverable", scope, selector)
 				}
-				if prospectiveTarget, _ := item["prospectiveTargetRef"].(string); prospectiveTarget != "workorch-deliverable.md" {
-					t.Fatalf("%s wildcard prospectiveTargetRef = %q, want workorch-deliverable.md", scope, prospectiveTarget)
+				if _, present := item["prospectiveTargetRef"]; present {
+					t.Fatalf("%s wildcard retains deprecated prospectiveTargetRef = %q", scope, item["prospectiveTargetRef"])
 				}
 				accepted, ok := item["acceptedStepKinds"].([]any)
 				if !ok {

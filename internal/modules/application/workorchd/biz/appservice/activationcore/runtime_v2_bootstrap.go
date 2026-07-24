@@ -198,6 +198,24 @@ func runtimeV2ProfileCapabilityKinds(profiles []runtimecontract.RuntimeProfileCo
 				ret = append(ret, canonical)
 			}
 		}
+		for _, recipe := range profile.BootstrapRecipes {
+			for _, artifact := range recipe.Artifacts {
+				for _, kind := range artifact.AllowedOperationKinds {
+					canonical := runtimecontract.CanonicalRuntimeBlockKind(kind)
+					if canonical == "" {
+						continue
+					}
+					if _, ok := runtimecontract.RuntimeOperationDescriptorForKind(canonical); !ok {
+						return nil, fmt.Errorf("profile bootstrap artifact operation kind %q has no runtime operation descriptor", kind)
+					}
+					if _, ok := seen[canonical]; ok {
+						continue
+					}
+					seen[canonical] = struct{}{}
+					ret = append(ret, canonical)
+				}
+			}
+		}
 	}
 	return ret, nil
 }
@@ -226,6 +244,26 @@ func runtimeV2ProfileCapabilityRequirements(profiles []runtimecontract.RuntimePr
 					Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: descriptor.OwnerModuleID, CapabilityClass: capabilityClass,
 					RequiredCapabilities: []string{canonical}, Reason: "profile evidence capability required",
 				})
+			}
+		}
+		for _, recipe := range profile.BootstrapRecipes {
+			for _, artifact := range recipe.Artifacts {
+				for _, kind := range artifact.AllowedOperationKinds {
+					canonical := runtimecontract.CanonicalRuntimeBlockKind(kind)
+					descriptor, ok := runtimecontract.RuntimeOperationDescriptorForKind(canonical)
+					if !ok || descriptor.OwnerModuleID == "" {
+						return nil, fmt.Errorf("profile bootstrap artifact operation kind %q has no runtime owner descriptor", kind)
+					}
+					key := descriptor.OwnerModuleID + "|" + string(runtimecontract.RuntimeCapabilityClassStateChange) + "|" + canonical
+					if _, exists := seen[key]; exists {
+						continue
+					}
+					seen[key] = struct{}{}
+					ret = append(ret, runtimecontract.RuntimeRequirement{
+						Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: descriptor.OwnerModuleID, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange,
+						RequiredCapabilities: []string{canonical}, Reason: "profile bootstrap artifact capability required",
+					})
+				}
 			}
 		}
 	}

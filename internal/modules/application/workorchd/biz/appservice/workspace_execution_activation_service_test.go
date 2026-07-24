@@ -3245,7 +3245,8 @@ func TestActivateWorkspaceExecutionWithBackendResumesSealedActiveRunWhenWorkspac
 	if err := exports.Repositories.Runs.Create(ownerCtx, &runmodel.Run{
 		ID: oldRunID, WorkspaceID: common.WorkspaceID(workspace.ID), GoalID: common.GoalID(goal.ID), DoDID: common.DoDID(dod.ID),
 		DefinitionRevision: initialBootstrap.Definition.Revision, InitialStepKind: "llm/workspace_execution", RuntimeBootstrap: initialBootstrap,
-		State: common.RunStateActive,
+		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
+		State:                  common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("create sealed active run: %v", err)
 	}

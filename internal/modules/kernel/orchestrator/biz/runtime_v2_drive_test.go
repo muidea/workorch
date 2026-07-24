@@ -476,6 +476,13 @@ func TestRuntimeV2FileBackedAbsentTargetSelectionFailsWithoutProvider(t *testing
 	testRuntimeV2FileBackedUnresolvedTargetSelectionFailsWithoutProvider(t, runtimeV2GroundedTargetSequenceBootstrap(), runtimecontract.RuntimeTargetSelectionAbsent, nil)
 }
 
+func TestRuntimeV2FileBackedWorkspaceDeliverableWithoutProfileArtifactFailsWithoutProvider(t *testing.T) {
+	bootstrap := runtimeV2GroundedTargetSequenceBootstrap()
+	bootstrap.Focuses[0].TargetSelectorRef = "file/workspace_deliverable"
+	bootstrap.Focuses[0].ProspectiveTargetRef = ""
+	testRuntimeV2FileBackedUnresolvedTargetSelectionFailsWithoutProvider(t, bootstrap, runtimecontract.RuntimeTargetSelectionAbsent, nil)
+}
+
 func TestRuntimeV2FileBackedEmptyWorkspaceCreationSelectionContinuesThroughCandidate(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)

@@ -25,7 +25,7 @@ Runtime V2-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **�
 
 | # | 主题 | 待办 | 当前方案 |
 | --- | --- | --- | --- |
-| A1 | Runtime V2 live 合同正向收敛 | 完成 fresh deployed gate；已由 metadata-only Runtime V2 audit projection + verifier 强校验 authority/grounding/receipt/repair/assessment/terminal/projection watermark，profile-declared bounded semantic selector、默认 software-dev 空工作区 source/leading DoD create declaration，以及已落地的 evidence/progress/diagnostic/prerequisite、focus dependency、Shell structured failure-target、owner-grounded retarget、same-gap/file-backed restart 与 sealed closed-schema candidate boundary 基线不得回退 | [唯一收口方案](../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md) |
+| A1 | Runtime V2 live 合同正向收敛 | 完成 profile-declared 空工程 bootstrap artifact 的 partial-artifact/restart/validation-repair matrix，并完成 fresh deployed gate；recipe DTO、activation 前置 Focus、File typed absence 与 gopls 默认 recipe 已落地，现有 metadata-only Runtime V2 audit projection + verifier、bounded semantic selector、evidence/progress/diagnostic/prerequisite、focus dependency、Shell structured failure-target、owner-grounded retarget、same-gap/file-backed restart、sealed closed-schema candidate boundary 与 active-run typed resume 投递基线不得回退 | [唯一收口方案](../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md) |
 
 ## B. 运行单元架构 / 生命周期
 

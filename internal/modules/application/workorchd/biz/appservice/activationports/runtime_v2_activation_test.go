@@ -48,6 +48,10 @@ func TestRuntimeV2ActivationContextUsesConcreteSelectionSnapshots(t *testing.T) 
 					"acceptanceDimensions":    []any{map[string]any{"id": "runtime_entrypoint", "required": true, "description": "runtime entrypoint is usable"}},
 					"deliverableExpectations": []any{map[string]any{"id": "version_control_snapshot", "required": true, "evidenceRole": "supplemental_evidence"}},
 					"coverageDependencies":    []any{map[string]any{"id": "source-refreshes-validation", "sourceScope": "deliverable", "sourceRequirementId": "source", "dependentScope": "deliverable", "dependentRequirementId": "version_control_snapshot", "triggerEvidenceKinds": []any{"state_change"}}},
+					"bootstrapRecipes": []any{map[string]any{
+						"id": "go-empty-workspace", "requiredGoalTerms": []any{"Go"}, "requiredDoDTerms": []any{"test"},
+						"artifacts": []any{map[string]any{"id": "module", "targetRole": "module_definition", "targetRef": "go.mod", "allowedOperationKinds": []any{"file/write"}}},
+					}},
 					"evidenceRequirements": []any{map[string]any{
 						"id": "version_control_snapshot", "scope": "deliverable", "evidenceRole": "supplemental_evidence",
 						"targetRole": "repository", "targetRefs": []any{".git"}, "targetDiscoverySources": []any{"workspace_manifest"}, "targetSelectorRef": "file/unique_workspace_entry", "prospectiveTargetRef": "initial-deliverable.txt", "requireTargetGrounding": true,
@@ -101,7 +105,8 @@ func TestRuntimeV2ActivationContextUsesConcreteSelectionSnapshots(t *testing.T) 
 		len(profile.EvidenceRequirements[0].AcceptedOperationVariants) != 1 || profile.EvidenceRequirements[0].AcceptedOperationVariants[0] != (runtimecontract.RuntimeOperationVariantRef{Kind: "git/write", VariantID: "commit"}) ||
 		len(profile.EvidenceRequirements[0].RejectedStepKinds) != 1 || profile.EvidenceRequirements[0].RejectedStepKinds[0] != "shell/read" ||
 		len(profile.CoverageDependencies) != 1 || profile.CoverageDependencies[0].ID != "source-refreshes-validation" || profile.CoverageDependencies[0].SourceRequirementID != "source" || profile.CoverageDependencies[0].DependentRequirementID != "version_control_snapshot" ||
-		len(profile.CoverageDependencies[0].TriggerEvidenceKinds) != 1 || profile.CoverageDependencies[0].TriggerEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange {
+		len(profile.CoverageDependencies[0].TriggerEvidenceKinds) != 1 || profile.CoverageDependencies[0].TriggerEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange ||
+		len(profile.BootstrapRecipes) != 1 || profile.BootstrapRecipes[0].ID != "go-empty-workspace" || len(profile.BootstrapRecipes[0].Artifacts) != 1 || profile.BootstrapRecipes[0].Artifacts[0].TargetRef != "go.mod" {
 		t.Fatalf("runtime profile contract = %+v", profile)
 	}
 	stagePolicy := activation.ExecutionContract.TemplateStagePolicy
