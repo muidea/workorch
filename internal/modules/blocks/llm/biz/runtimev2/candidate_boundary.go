@@ -1,16 +1,13 @@
 package runtimev2
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"strings"
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
-	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -290,66 +287,11 @@ func RetrySameContract(request llmmodels.RuntimeCandidateRequest, failure runtim
 }
 
 func DecodeCandidatePayload(action runtimecontract.RuntimeAction, payload []byte) (runtimecontract.RuntimeCandidate, error) {
-	switch action {
-	case runtimecontract.RuntimeActionProduceStateChange:
-		var value operationCandidateDTO
-		if err := strictDecode(payload, &value); err != nil {
-			return runtimecontract.RuntimeCandidate{}, err
-		}
-		operations, err := value.stateChangingOperations()
-		if err != nil {
-			return runtimecontract.RuntimeCandidate{}, err
-		}
-		return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: operations}}, nil
-	case runtimecontract.RuntimeActionProduceValidation:
-		var value operationCandidateDTO
-		if err := strictDecode(payload, &value); err != nil {
-			return runtimecontract.RuntimeCandidate{}, err
-		}
-		operations, err := value.validationOperations()
-		if err != nil {
-			return runtimecontract.RuntimeCandidate{}, err
-		}
-		return runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: operations}}, nil
-	case runtimecontract.RuntimeActionProduceAssessment:
-		var value assessmentCandidateDTO
-		if err := strictDecode(payload, &value); err != nil {
-			return runtimecontract.RuntimeCandidate{}, err
-		}
-		items := make([]runtimecontract.RuntimeAssessmentItemFact, 0, len(value.Items))
-		for _, item := range value.Items {
-			items = append(items, runtimecontract.RuntimeAssessmentItemFact{
-				CoverageWorkItemID: item.CoverageWorkItemID, Satisfied: item.Satisfied, Reason: item.Reason,
-				EvidenceRefs: append([]string(nil), item.EvidenceRefs...),
-			})
-		}
-		var gap *runtimecontract.RuntimeAssessmentGap
-		if value.Gap != nil {
-			gap = &runtimecontract.RuntimeAssessmentGap{
-				CoverageWorkItemIDs:  append([]common.CoverageWorkItemID(nil), value.Gap.CoverageWorkItemIDs...),
-				MissingEvidenceKinds: append([]string(nil), value.Gap.MissingEvidenceKinds...),
-				TargetRefs:           append([]string(nil), value.Gap.TargetRefs...),
-				EvidenceRefs:         append([]string(nil), value.Gap.EvidenceRefs...),
-				Reason:               value.Gap.Reason, FailureClass: runtimecontract.FailureClass(value.Gap.FailureClass),
-				FailureCode: value.Gap.FailureCode, FailureSignature: value.Gap.FailureSignature,
-			}
-		}
-		return runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
-			FocusID: value.FocusID, SliceID: value.SliceID, CoverageWorkItemIDs: value.CoverageWorkItemIDs,
-			Disposition: runtimecontract.AssessmentDisposition(value.Disposition),
-			Items:       items, Gap: gap, Summary: value.Summary, EvidenceRefs: value.EvidenceRefs, ArtifactRefs: value.ArtifactRefs,
-		}}, nil
-	case runtimecontract.RuntimeActionRequestGovernance:
-		var value governanceCandidateDTO
-		if err := strictDecode(payload, &value); err != nil {
-			return runtimecontract.RuntimeCandidate{}, err
-		}
-		return runtimecontract.RuntimeCandidate{Governance: &runtimecontract.GovernanceCandidate{ExternalDependency: runtimecontract.ExternalDependency{
-			Kind: value.ExternalDependency.Kind, SubjectRef: value.ExternalDependency.SubjectRef, Reason: value.ExternalDependency.Reason,
-		}}}, nil
-	default:
-		return runtimecontract.RuntimeCandidate{}, fmt.Errorf("action %s does not accept an LLM candidate", action)
-	}
+	// Candidate wire DTOs are a Runtime V2 contract.  The LLM boundary must not
+	// carry a second strict decoder: continuation recovery also decodes this
+	// document from the contract package, so two implementations can otherwise
+	// silently drift on an accepted JSON field.
+	return runtimecontract.DecodeRuntimeCandidatePayload(action, payload)
 }
 
 func validateCandidateRequest(request llmmodels.RuntimeCandidateRequest) error {
@@ -388,122 +330,4 @@ func validateCandidateRequest(request llmmodels.RuntimeCandidateRequest) error {
 	default:
 		return fmt.Errorf("action %s cannot be sent to the LLM candidate boundary", request.Decision.Action)
 	}
-}
-
-func strictDecode(payload []byte, target any) error {
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
-		return err
-	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		if err == nil {
-			return fmt.Errorf("candidate payload contains multiple JSON values")
-		}
-		return err
-	}
-	return nil
-}
-
-type operationCandidateDTO struct {
-	Operations []operationDTO `json:"operations"`
-}
-
-type operationDTO struct {
-	ID                   string                      `json:"id"`
-	Kind                 string                      `json:"kind"`
-	RequiredOperationRef string                      `json:"requiredOperationRef,omitempty"`
-	DependsOn            []string                    `json:"dependsOn,omitempty"`
-	CoverageWorkItemIDs  []common.CoverageWorkItemID `json:"coverageWorkItemIds,omitempty"`
-	TargetRefs           []string                    `json:"targetRefs,omitempty"`
-	Parameters           []operationParameterDTO     `json:"parameters,omitempty"`
-}
-
-type operationParameterDTO struct {
-	Name       string   `json:"name"`
-	String     *string  `json:"string,omitempty"`
-	Integer    *int64   `json:"integer,omitempty"`
-	Boolean    *bool    `json:"boolean,omitempty"`
-	StringList []string `json:"stringList,omitempty"`
-}
-
-func (d operationCandidateDTO) stateChangingOperations() ([]runtimecontract.StateChangingOperation, error) {
-	operations, err := d.runtimeOperations()
-	if err != nil {
-		return nil, err
-	}
-	ret := make([]runtimecontract.StateChangingOperation, 0, len(operations))
-	for _, operation := range operations {
-		ret = append(ret, runtimecontract.StateChangingOperation{Operation: operation})
-	}
-	return ret, nil
-}
-
-func (d operationCandidateDTO) validationOperations() ([]runtimecontract.ValidationOperation, error) {
-	operations, err := d.runtimeOperations()
-	if err != nil {
-		return nil, err
-	}
-	ret := make([]runtimecontract.ValidationOperation, 0, len(operations))
-	for _, operation := range operations {
-		ret = append(ret, runtimecontract.ValidationOperation{Operation: operation})
-	}
-	return ret, nil
-}
-
-func (d operationCandidateDTO) runtimeOperations() ([]runtimecontract.RuntimeOperation, error) {
-	ret := make([]runtimecontract.RuntimeOperation, 0, len(d.Operations))
-	for _, value := range d.Operations {
-		parameters := make([]runtimecontract.OperationParameter, 0, len(value.Parameters))
-		for _, parameter := range value.Parameters {
-			parameters = append(parameters, runtimecontract.OperationParameter{
-				Name: parameter.Name, String: parameter.String, Integer: parameter.Integer, Boolean: parameter.Boolean, StringList: parameter.StringList,
-			})
-		}
-		ret = append(ret, runtimecontract.RuntimeOperation{
-			ID: value.ID, Kind: value.Kind, RequiredOperationRef: value.RequiredOperationRef, DependsOn: value.DependsOn,
-			CoverageWorkItemIDs: value.CoverageWorkItemIDs, TargetRefs: value.TargetRefs, Parameters: parameters,
-		})
-	}
-	return ret, nil
-}
-
-type governanceCandidateDTO struct {
-	ExternalDependency externalDependencyDTO `json:"externalDependency"`
-}
-
-type assessmentCandidateDTO struct {
-	FocusID             string                      `json:"focusId"`
-	SliceID             string                      `json:"sliceId,omitempty"`
-	CoverageWorkItemIDs []common.CoverageWorkItemID `json:"coverageWorkItemIds"`
-	Disposition         string                      `json:"disposition,omitempty"`
-	Items               []assessmentItemDTO         `json:"items,omitempty"`
-	Gap                 *assessmentGapDTO           `json:"gap,omitempty"`
-	Summary             string                      `json:"summary"`
-	EvidenceRefs        []string                    `json:"evidenceRefs,omitempty"`
-	ArtifactRefs        []string                    `json:"artifactRefs,omitempty"`
-}
-
-type assessmentItemDTO struct {
-	CoverageWorkItemID common.CoverageWorkItemID `json:"coverageWorkItemId"`
-	Satisfied          bool                      `json:"satisfied"`
-	Reason             string                    `json:"reason,omitempty"`
-	EvidenceRefs       []string                  `json:"evidenceRefs,omitempty"`
-}
-
-type assessmentGapDTO struct {
-	CoverageWorkItemIDs  []common.CoverageWorkItemID `json:"coverageWorkItemIds"`
-	MissingEvidenceKinds []string                    `json:"missingEvidenceKinds,omitempty"`
-	TargetRefs           []string                    `json:"targetRefs,omitempty"`
-	EvidenceRefs         []string                    `json:"evidenceRefs,omitempty"`
-	Reason               string                      `json:"reason,omitempty"`
-	FailureClass         string                      `json:"failureClass,omitempty"`
-	FailureCode          string                      `json:"failureCode,omitempty"`
-	FailureSignature     string                      `json:"failureSignature,omitempty"`
-}
-
-type externalDependencyDTO struct {
-	Kind       string `json:"kind"`
-	SubjectRef string `json:"subjectRef,omitempty"`
-	Reason     string `json:"reason"`
 }

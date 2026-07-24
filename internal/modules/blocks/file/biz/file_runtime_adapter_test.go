@@ -42,6 +42,37 @@ func TestRuntimeAdapterProbeRejectsDirectoryPatchTargetWithoutMutation(t *testin
 	}
 }
 
+func TestRuntimeAdapterFileWriteSameContentPreservesWorkspaceManifestRevision(t *testing.T) {
+	workspace := t.TempDir()
+	const targetRef = "existing.txt"
+	const content = "unchanged\n"
+	if err := os.WriteFile(filepath.Join(workspace, targetRef), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	adapter := NewRuntimeAdapter()
+	before, err := adapter.AcquireWorkspaceManifest(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := adapter.ApplyPatch(PatchApplyRequest{
+		WorkspaceDirectory: workspace,
+		TargetRef:          targetRef,
+		PatchType:          patchTypeFileWrite,
+		Content:            content,
+		ContentPresent:     true,
+	})
+	if err != nil || result.BeforeHash != result.AfterHash || result.BeforeHash == "" {
+		t.Fatalf("same-content file write = %+v err=%v", result, err)
+	}
+	after, err := adapter.AcquireWorkspaceManifest(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Revision != before.Revision {
+		t.Fatalf("same-content file write changed workspace revision: before=%s after=%s", before.Revision, after.Revision)
+	}
+}
+
 func TestRuntimeAdapterAcquireRuntimeTargetSelectionIsCardinalityBounded(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	t.Run("empty workspace grounds creation scope", func(t *testing.T) {

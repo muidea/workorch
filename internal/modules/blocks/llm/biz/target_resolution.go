@@ -258,8 +258,9 @@ func ResolveProviderClient(cfg workorchconfig.LLMConfig, target runtimecontract.
 			Model:      target.ModelID,
 			Timeout:    timeout,
 			Capabilities: llmmodels.ProviderCapabilities{
-				ChatCompletions:   true,
-				NonChatOperations: []string{workorchconfig.LLMOperationEmbeddings},
+				ChatCompletions:    true,
+				JSONSchemaResponse: true,
+				NonChatOperations:  []string{workorchconfig.LLMOperationEmbeddings},
 			},
 			InferenceProfile: llmmodels.ProviderInferenceProfile{
 				MaxOutputTokens: profile.EffectiveMaxOutputTokens,

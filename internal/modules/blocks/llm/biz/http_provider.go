@@ -173,7 +173,7 @@ func (p *HTTPProvider) completeOpenAICompatible(ctx context.Context, request llm
 		MaxCompletionTokens: maxOutputTokens(p.config),
 		ReasoningEffort:     p.config.InferenceProfile.ReasoningEffort,
 		Thinking:            compatibleThinkingConfig(p.config),
-		ResponseFormat:      responseFormatForRequest(request),
+		ResponseFormat:      responseFormatForRequest(p.config.Capabilities, request),
 	}
 	payload, err := json.Marshal(requestPayload)
 	if err != nil {
@@ -252,7 +252,7 @@ func (p *HTTPProvider) streamOpenAICompatible(ctx context.Context, request llmmo
 		MaxCompletionTokens: maxOutputTokens(p.config),
 		ReasoningEffort:     p.config.InferenceProfile.ReasoningEffort,
 		Thinking:            compatibleThinkingConfig(p.config),
-		ResponseFormat:      responseFormatForRequest(request),
+		ResponseFormat:      responseFormatForRequest(p.config.Capabilities, request),
 		Stream:              true,
 		StreamOptions:       &chatCompletionStreamOptions{IncludeUsage: true},
 	}
@@ -293,11 +293,23 @@ func (p *HTTPProvider) streamOpenAICompatible(ctx context.Context, request llmmo
 	}, nil
 }
 
-func responseFormatForRequest(request llmmodels.ProviderRequest) map[string]string {
+func responseFormatForRequest(capabilities llmmodels.ProviderCapabilities, request llmmodels.ProviderRequest) map[string]any {
 	if request.RawTextOutput {
 		return nil
 	}
-	return map[string]string{"type": "json_object"}
+	if capabilities.JSONSchemaResponse && strings.TrimSpace(request.Schema) != "" {
+		var schema any
+		if err := json.Unmarshal([]byte(request.Schema), &schema); err == nil {
+			return map[string]any{
+				"type": "json_schema",
+				"json_schema": map[string]any{
+					"name":   "workorch_runtime_v2_candidate",
+					"schema": schema,
+				},
+			}
+		}
+	}
+	return map[string]any{"type": "json_object"}
 }
 
 func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbeddingRequest) (llmmodels.ProviderEmbeddingResult, error) {
@@ -385,7 +397,7 @@ type chatCompletionRequest struct {
 	MaxCompletionTokens int64                          `json:"max_completion_tokens,omitempty"`
 	ReasoningEffort     string                         `json:"reasoning_effort,omitempty"`
 	Thinking            *compatibleThinkingConfigParam `json:"thinking,omitempty"`
-	ResponseFormat      map[string]string              `json:"response_format,omitempty"`
+	ResponseFormat      map[string]any                 `json:"response_format,omitempty"`
 	Stream              bool                           `json:"stream,omitempty"`
 	StreamOptions       *chatCompletionStreamOptions   `json:"stream_options,omitempty"`
 }

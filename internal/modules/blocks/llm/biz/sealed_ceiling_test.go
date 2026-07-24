@@ -78,11 +78,15 @@ func TestResolveProviderClientForSealedCeilingRejectsConfigDrift(t *testing.T) {
 		CapabilityRevision:       "capability-sha256:abc",
 		ConfigurationRevision:    TargetConfigurationRevision(cfg, target),
 	}
-	if _, _, err := ResolveProviderClientForSealedCeiling(cfg, ceiling); err != nil {
+	client, _, err := ResolveProviderClientForSealedCeiling(cfg, ceiling)
+	if err != nil {
 		t.Fatalf("expected matching revision to succeed: %v", err)
 	}
+	if !client.Capabilities.JSONSchemaResponse {
+		t.Fatalf("ai-proxy runtime client did not declare JSON Schema response capability: %+v", client.Capabilities)
+	}
 	cfg.AIProxy.APIKey = "rotated-key-1"
-	_, _, err := ResolveProviderClientForSealedCeiling(cfg, ceiling)
+	_, _, err = ResolveProviderClientForSealedCeiling(cfg, ceiling)
 	if err == nil {
 		t.Fatal("expected configuration drift failure")
 	}

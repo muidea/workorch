@@ -417,6 +417,75 @@ func TestRuntimeV2CandidateSchemasAreActionSpecific(t *testing.T) {
 	if !strings.Contains(catalog, "sole next-action authority") || !strings.Contains(catalog, "completion-audit information only") {
 		t.Fatalf("candidate catalog lost repair authority rules: %s", catalog)
 	}
+	if !strings.Contains(catalog, "dependsOn is never a top-level field") || !strings.Contains(catalog, "Forbidden top-level fields include") {
+		t.Fatalf("candidate catalog lost operation-dependency placement rule: %s", catalog)
+	}
+}
+
+func TestRuntimeV2CandidateSchemaOnlyExposesDependenciesForSealedDependentSequence(t *testing.T) {
+	withoutDependency := runtimeV2CandidateSchemaForDecision(runtimecontract.RuntimeDecision{
+		Action:         runtimecontract.RuntimeActionProduceStateChange,
+		RequiredOutput: runtimecontract.RequiredOutputContract{AcceptedKinds: []string{runtimecontract.StepKindFileWrite}},
+	})
+	if runtimeV2OperationSchemaHasProperty(t, withoutDependency, "dependsOn") {
+		t.Fatalf("ordinary candidate schema exposed an unnecessary dependency field: %s", withoutDependency)
+	}
+
+	withDependency := runtimeV2CandidateSchemaForDecision(runtimecontract.RuntimeDecision{
+		Action: runtimecontract.RuntimeActionProduceStateChange,
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			AcceptedKinds: []string{runtimecontract.StepKindGitWrite},
+			RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{
+				{RequirementID: "init", Kind: runtimecontract.StepKindGitWrite, VariantID: "init"},
+				{RequirementID: "commit", Kind: runtimecontract.StepKindGitWrite, VariantID: "commit", DependsOnRequirementIDs: []string{"init"}},
+			},
+		},
+	})
+	if !runtimeV2OperationSchemaHasProperty(t, withDependency, "dependsOn") {
+		t.Fatalf("dependent sequence schema omitted operation dependency field: %s", withDependency)
+	}
+}
+
+func runtimeV2OperationSchemaHasProperty(t *testing.T, encoded, property string) bool {
+	t.Helper()
+	var root map[string]any
+	if err := json.Unmarshal([]byte(encoded), &root); err != nil {
+		t.Fatal(err)
+	}
+	operations, ok := root["properties"].(map[string]any)["operations"].(map[string]any)
+	if !ok {
+		t.Fatalf("candidate schema has no operations: %s", encoded)
+	}
+	properties, ok := operations["items"].(map[string]any)["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("candidate schema has no operation properties: %s", encoded)
+	}
+	_, found := properties[property]
+	return found
+}
+
+func TestRuntimeV2CandidateOutputContractUsesActionSpecificForbiddenTopLevelFields(t *testing.T) {
+	operation := runtimeV2CandidateOutputContract(runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceStateChange}, nil)
+	if !containsString(operation.ForbiddenTopLevelFields, "dependsOn") || !containsString(operation.ForbiddenTopLevelFields, "parameters") {
+		t.Fatalf("operation forbidden fields = %#v", operation.ForbiddenTopLevelFields)
+	}
+	assessment := runtimeV2CandidateOutputContract(runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceAssessment}, nil)
+	if containsString(assessment.ForbiddenTopLevelFields, "coverageWorkItemIds") {
+		t.Fatalf("assessment forbids its required top-level field: %#v", assessment.ForbiddenTopLevelFields)
+	}
+	governance := runtimeV2CandidateOutputContract(runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionRequestGovernance}, nil)
+	if !containsString(governance.ForbiddenTopLevelFields, "reason") {
+		t.Fatalf("governance forbidden fields = %#v", governance.ForbiddenTopLevelFields)
+	}
+}
+
+func containsString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRuntimeV2CandidateSchemaDerivesPatchTargetRequirementsFromOperationContract(t *testing.T) {

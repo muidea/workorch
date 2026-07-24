@@ -386,6 +386,27 @@ value field` 的 `additionalProperties:false` object 分支渲染；required/var
 operation kinds，消除无 RepairDirective 时 C3 action 为空的双权威表述。Schema 渲染仅位于 LLM block；
 状态迁移和 owner I/O 均未迁移。
 
+2026-07-24 补齐 operation dependency 的单一 wire 合同：`dependsOn` 是 operation 内字段，不是候选
+顶层字段。LLM boundary 已删除重复 strict decoder，统一委托
+`workorchruntimecontract.DecodeRuntimeCandidatePayload`，使普通提交与 output-continuation/restart 使用
+同一 DTO、unknown-field gate 与映射。C3 schema 仅在 sealed required-operation sequence 实际声明依赖时
+才向模型暴露该字段；普通候选明确要求省略它，仍严格拒绝错误层级。该修复只影响 SM-3 的 provider
+payload rendering/decode，不改变 SM-2 reducer、SM-1 Run lifecycle 或 SM-4 recovery/projection。
+
+同日补齐 provider adapter 的 schema 交付链：AI Proxy resolved runtime client 明确声明
+`jsonSchemaResponse` capability；HTTP 与 OpenAI SDK adapter 在该 capability 和 non-empty sealed schema
+同时成立时，以 `response_format.type=json_schema` 发送完整 schema（普通兼容 provider 不假定支持）。
+schema 仍保留在 C3 prompt 供不强制 schema 的模型理解，contract decoder 继续是最终严格 gate。由于当前
+candidate schema 使用跨 provider 的条件/union 规则，adapter 不把 `strict:true` 伪装成普适保证；只有在
+provider 明确接受该 schema profile 后才可升级 strict mode。已覆盖 HTTP、SDK 实际 wire payload 与
+AI Proxy resolved capability；影响仅为 SM-3 provider request rendering。
+
+同日修复 File owner 的 no-op 语义：同内容的 `file_write` 不再调用 `os.WriteFile` 触碰 mtime。工作区
+manifest revision 包含 owner 观察到的 mtime；此前这种无内容变化的触碰会伪造 workspace-tree revision，
+在下一次 admissibility probe 触发无效的 freshness invalidation，并额外请求一次相同的 state-change
+candidate。现以“同内容写入保持 manifest revision”回归测试封存，保证 no-op receipt 不制造 SM-2/SM-3
+伪进展或消耗 prerequisite refresh。该项不改变 reducer 的 action 选择、Run lifecycle 或 recovery 预算。
+
 ### WP-6：Provider ceiling 与 output continuation 审计
 
 **状态：landed local / live pending；优先级：P1；影响：SM-3/SM-4。**

@@ -95,6 +95,38 @@ func TestOpenAIProviderCompleteUsesOfficialSDKChatCompletions(t *testing.T) {
 	}
 }
 
+func TestOpenAIProviderCompleteSendsDeclaredJSONSchemaWhenSupported(t *testing.T) {
+	var gotPayload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-test","object":"chat.completion","created":1,"model":"test-model","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"{}"}}]}`))
+	}))
+	defer server.Close()
+	provider := NewOpenAIProvider(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderOpenAI, BaseURL: server.URL + "/v1", APIKey: "secret-value", Model: "test-model", Timeout: 5 * time.Second,
+		Capabilities: llmmodels.ProviderCapabilities{ChatCompletions: true, JSONSchemaResponse: true},
+	})
+	request := llmProviderRequest()
+	request.Schema = `{"type":"object","additionalProperties":false,"properties":{"operations":{"type":"array"}},"required":["operations"]}`
+	if _, err := provider.Complete(context.Background(), request); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	format, ok := gotPayload["response_format"].(map[string]any)
+	if !ok || format["type"] != "json_schema" {
+		t.Fatalf("response_format = %#v, want json_schema", gotPayload["response_format"])
+	}
+	definition, ok := format["json_schema"].(map[string]any)
+	if !ok || definition["name"] != "workorch_runtime_v2_candidate" {
+		t.Fatalf("json_schema definition = %#v", format["json_schema"])
+	}
+	if schema, ok := definition["schema"].(map[string]any); !ok || schema["type"] != "object" {
+		t.Fatalf("submitted schema = %#v", definition["schema"])
+	}
+}
+
 func TestOpenAIProviderEmbedUsesOfficialSDKEmbeddings(t *testing.T) {
 	var gotPath string
 	var gotPayload map[string]any

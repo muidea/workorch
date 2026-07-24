@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -168,6 +169,20 @@ func (p *OpenAIProvider) chatParams(request llmmodels.ProviderRequest) openai.Ch
 		Temperature: openai.Float(providerTemperature(p.config)),
 	}
 	if !request.RawTextOutput {
+		if p.config.Capabilities.JSONSchemaResponse && strings.TrimSpace(request.Schema) != "" {
+			var schema any
+			if err := json.Unmarshal([]byte(request.Schema), &schema); err == nil {
+				params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{
+					OfJSONSchema: &shared.ResponseFormatJSONSchemaParam{
+						JSONSchema: shared.ResponseFormatJSONSchemaJSONSchemaParam{
+							Name:   "workorch_runtime_v2_candidate",
+							Schema: schema,
+						},
+					},
+				}
+				return params
+			}
+		}
 		params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{
 			OfJSONObject: &shared.ResponseFormatJSONObjectParam{Type: "json_object"},
 		}

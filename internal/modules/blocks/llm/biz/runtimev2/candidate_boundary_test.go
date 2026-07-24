@@ -59,6 +59,7 @@ func TestDecodeCandidatePayloadPreservesRequiredOperationRef(t *testing.T) {
 			"id":"git-init",
 			"kind":"git/write",
 			"requiredOperationRef":"repo-init",
+			"dependsOn":["workspace-init"],
 			"coverageWorkItemIds":["cwi-1"],
 			"parameters":[{"name":"operation","string":"init"}]
 		}]
@@ -71,6 +72,9 @@ func TestDecodeCandidatePayloadPreservesRequiredOperationRef(t *testing.T) {
 	}
 	if got := candidate.StateChange.Operations[0].Operation.RequiredOperationRef; got != "repo-init" {
 		t.Fatalf("required operation ref = %q, want repo-init", got)
+	}
+	if got := candidate.StateChange.Operations[0].Operation.DependsOn; !reflect.DeepEqual(got, []string{"workspace-init"}) {
+		t.Fatalf("operation dependency = %#v, want workspace-init", got)
 	}
 }
 

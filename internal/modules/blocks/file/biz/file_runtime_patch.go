@@ -1,6 +1,7 @@
 package file
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -142,7 +143,11 @@ func executeFileWritePatch(root string, target string, req patchExecutionRequest
 		return patchErrorResult(patchStage(req.Operation), req.Operation, req.PatchType, req.TargetRef, err, "patch_basehash_mismatch"), err
 	}
 	after := []byte(req.Content)
-	if apply {
+	// A same-content file_write is an explicit no-op: touching the target would
+	// mutate its mtime and therefore the File owner's workspace-tree revision.
+	// That phantom revision would invalidate the sealed admissibility snapshot
+	// even though no durable content effect occurred.
+	if apply && (!exists || !bytes.Equal(before, after)) {
 		if err := os.WriteFile(target, after, 0o644); err != nil {
 			return patchErrorResult(patchStage(req.Operation), req.Operation, req.PatchType, req.TargetRef, err, "patch_write_failed"), err
 		}

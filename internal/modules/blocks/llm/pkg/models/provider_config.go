@@ -29,9 +29,10 @@ type ProviderInferenceProfile struct {
 }
 
 type ProviderCapabilities struct {
-	ChatCompletions   bool     `json:"chatCompletions"`
-	Streaming         bool     `json:"streaming,omitempty"`
-	NonChatOperations []string `json:"nonChatOperations,omitempty"`
+	ChatCompletions    bool     `json:"chatCompletions"`
+	Streaming          bool     `json:"streaming,omitempty"`
+	JSONSchemaResponse bool     `json:"jsonSchemaResponse,omitempty"`
+	NonChatOperations  []string `json:"nonChatOperations,omitempty"`
 }
 
 type ProviderCacheCapability struct {

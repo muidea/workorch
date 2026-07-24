@@ -663,6 +663,14 @@ func runtimeV2CandidateSchemaForDecisionWithTargetSelection(decision runtimecont
 	)
 	if itemProperties, ok := items["properties"].(map[string]any); ok {
 		itemProperties["kind"] = map[string]any{"type": "string", "enum": allowedKinds}
+		// An operation dependency is meaningful only for a sealed sequence that
+		// actually declares one.  Advertising this optional field for ordinary
+		// single-operation candidates invites providers to manufacture a graph
+		// (and, in practice, to put it at the candidate root).  The boundary
+		// remains strict; this only narrows C3 to the current authority.
+		if !runtimeV2RequiredOperationSequenceHasDependency(decision.RequiredOutput.RequiredOperationSequence) {
+			delete(itemProperties, "dependsOn")
+		}
 	}
 	if len(conditions) > 0 {
 		items["allOf"] = conditions
@@ -684,6 +692,15 @@ func runtimeV2CandidateSchemaForDecisionWithTargetSelection(decision runtimecont
 		return base
 	}
 	return string(encoded)
+}
+
+func runtimeV2RequiredOperationSequenceHasDependency(values []runtimecontract.RuntimeRequiredOperationVariant) bool {
+	for _, value := range values {
+		if len(value.DependsOnRequirementIDs) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // runtimeV2CandidateAllowedOperationKinds projects a persisted File-owner
@@ -1028,7 +1045,8 @@ func runtimeV2CandidateContractCatalog() string {
 		"produce_validation: " + runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceValidation),
 		"produce_assessment: " + runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceAssessment),
 		"request_governance: " + runtimeV2CandidateSchema(runtimecontract.RuntimeActionRequestGovernance),
-		"Forbidden top-level fields include candidate, candidates, executionGraph, convergenceState, focus, authority, transaction, outputMode, result, and runtimeState.",
+		"Forbidden top-level fields include candidate, candidates, executionGraph, convergenceState, focus, authority, transaction, outputMode, result, runtimeState, id, kind, requiredOperationRef, dependsOn, coverageWorkItemIds, targetRefs, and parameters.",
+		"For operation candidates, the top level contains only operations. dependsOn is never a top-level field: use it only inside an operation when the sealed required operation sequence explicitly declares a dependency; otherwise omit it.",
 		"Use the requested action, required output kinds, coverage work item IDs, and available capabilities from the current runtime authority. Do not invent or modify convergence state, focus, authority, transaction, or output mode. Do not use markdown fences or explanatory text.",
 		"context.requiredAction is the sole next-action authority. When context.repairDirective is present, obey its requiredAction, requiredEffectScopes, requiredEvidenceKinds, allowedOperationKinds, targetRefs, and rejectedOperationShapes.",
 		"context.missingEvidenceKinds is completion-audit information only and must never override context.requiredAction or context.repairDirective.",
@@ -1048,8 +1066,20 @@ func runtimeV2CandidateOutputContract(decision runtimecontract.RuntimeDecision, 
 		Action:                  decision.Action,
 		Schema:                  json.RawMessage(runtimeV2CandidateSchemaForDecisionWithTargetSelection(decision, selection)),
 		RequiredTopLevelExample: runtimeV2CandidateTopLevelExample(decision.Action),
-		ForbiddenTopLevelFields: []string{"candidate", "candidates", "executionGraph", "convergenceState", "focus", "authority", "transaction", "outputMode", "result", "runtimeState"},
+		ForbiddenTopLevelFields: runtimeV2CandidateForbiddenTopLevelFields(decision.Action),
 		OperationContracts:      runtimeV2CandidateOperationContracts(allowedKinds),
+	}
+}
+
+func runtimeV2CandidateForbiddenTopLevelFields(action runtimecontract.RuntimeAction) []string {
+	fields := []string{"candidate", "candidates", "executionGraph", "convergenceState", "focus", "authority", "transaction", "outputMode", "result", "runtimeState"}
+	switch action {
+	case runtimecontract.RuntimeActionProduceStateChange, runtimecontract.RuntimeActionProduceValidation:
+		return append(fields, "id", "kind", "requiredOperationRef", "dependsOn", "coverageWorkItemIds", "targetRefs", "parameters")
+	case runtimecontract.RuntimeActionRequestGovernance:
+		return append(fields, "kind", "subjectRef", "reason")
+	default:
+		return fields
 	}
 }
 
