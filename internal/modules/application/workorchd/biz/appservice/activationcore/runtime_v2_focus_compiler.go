@@ -200,6 +200,29 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 			MaxWorkItems: slicePolicy.MaxWorkItems, Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true},
 		}}
 	}
+	// A matched bootstrap recipe is an activation-time dependency, not a normal
+	// acceptance category.  In particular, an empty workspace cannot satisfy a
+	// generic source-change focus until its profile-declared first artifact has
+	// been selected and created.  Do not let a profile's ordinary acceptance
+	// groups (for example primary_state_change before remaining_acceptance)
+	// reorder that dependency behind an ungrounded focus.
+	//
+	// This remains an application compilation rule: the runtime only receives
+	// the resulting ordered Focus contracts and never interprets profile or
+	// artifact semantics.
+	hasBootstrapArtifacts := false
+	for _, item := range resolved {
+		if item.unit.bootstrapArtifact != nil {
+			hasBootstrapArtifacts = true
+			break
+		}
+	}
+	if hasBootstrapArtifacts {
+		groups = append([]runtimecontract.RuntimeAcceptanceSliceGroupPolicy{{
+			ID: "slice-bootstrap-artifact", Title: "Profile bootstrap artifacts", Scope: "bootstrap_artifact", Priority: -1,
+			MaxWorkItems: 1, Match: runtimecontract.RuntimeAcceptanceSliceMatch{SourceScopes: []string{"bootstrapArtifact"}},
+		}}, groups...)
+	}
 
 	assigned := make([]bool, len(resolved))
 	type sliceBucket struct {

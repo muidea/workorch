@@ -121,7 +121,14 @@ func TestRuntimeV2BootstrapSealsProfileProspectiveTargetIntoFocus(t *testing.T) 
 func TestCompileRuntimeV2CoverageFocusesPrependsMatchedBootstrapArtifactsInDependencyOrder(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
-		ExecutionContract: runtimecontract.RuntimeExecutionContract{ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
+			SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaV2,
+			MaxWorkItems:  4, MaxFocuses: 16, MaxCandidateContextItems: 4,
+			Groups: []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{
+				{ID: "primary", Title: "Primary", Scope: "primary", Priority: 10, MaxWorkItems: 2, Match: runtimecontract.RuntimeAcceptanceSliceMatch{EvidenceRoles: []string{"primary_state_change"}}},
+				{ID: "remaining", Title: "Remaining", Scope: "remaining", Priority: 90, MaxWorkItems: 4, Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true}},
+			},
+		}, ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID: "software-dev",
 			BootstrapRecipes: []runtimecontract.RuntimeBootstrapRecipe{{
 				ID: "go-service", RequiredGoalTerms: []string{"gopls"}, RequiredDoDTerms: []string{"go test"},
@@ -150,6 +157,9 @@ func TestCompileRuntimeV2CoverageFocusesPrependsMatchedBootstrapArtifactsInDepen
 			len(focus.RequiredEvidenceKinds) != 1 || focus.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange ||
 			len(focus.AcceptedStepKinds) != 1 || focus.AcceptedStepKinds[0] != runtimecontract.StepKindFileWrite || !focus.RequireTargetGrounding || focus.RequireAssessment {
 			t.Fatalf("bootstrap focus %d = %+v", idx, focus)
+		}
+		if focus.SliceID != "slice-bootstrap-artifact-00"+fmt.Sprint(idx+1) {
+			t.Fatalf("bootstrap focus %d was not kept ahead of ordinary acceptance groups: %+v", idx, focus)
 		}
 	}
 	if focuses[3].AssessmentScope != "dodItem" {
