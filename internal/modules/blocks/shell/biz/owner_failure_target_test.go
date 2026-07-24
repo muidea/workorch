@@ -107,3 +107,83 @@ func TestShellOwnerDoesNotInferFailureTargetFromValidationCommand(t *testing.T) 
 		t.Fatalf("duplicate shell validation lost persisted diagnostic: %+v", duplicate.Failure)
 	}
 }
+
+func TestShellOwnerEmitsOnlyContentBoundStructuredFailureTarget(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	receipts := map[string]runtimecontract.RuntimeOperationReceipt{}
+	receiptOwner := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
+	receiptOwner.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.QueryRuntimeOperationReceiptCommand)
+		receipt, found := receipts[command.ExecutionKey]
+		result.Set(orchestratorevents.QueryRuntimeOperationReceiptResult{Receipt: &receipt, Found: found}, nil)
+	})
+	receiptOwner.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)
+		receipts[command.Receipt.ExecutionKey] = command.Receipt
+		result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: command.Receipt}, nil)
+	})
+	t.Cleanup(func() {
+		receiptOwner.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
+		receiptOwner.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
+	})
+
+	owner := &Biz{Base: basebiz.New(modulecommon.ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter()}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+	command := orchestratorevents.ExecuteShellOperationCommand{
+		Execution:   orchestratorevents.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/structured", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone},
+		WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
+		OperationID: "structured", EvidenceKind: runtimecontract.EvidenceKindValidation, TargetRole: "implementation", WorkspaceDeliverableDirectory: t.TempDir(),
+		Data: orchestratorevents.ShellOperationData{Command: "sh", Args: []string{"-c", "printf '%s\\n' 'WORKORCH_FAILURE_TARGET_V1={\"schemaVersion\":\"workorch.shell.failure_target.v1\",\"targetRole\":\"implementation\",\"targetRefs\":[\"implementation.go\"],\"diagnosticClass\":\"validation_build_failed\"}'; exit 7"}, ValidationEvidence: runtimecontract.RuntimeValidationEvidence{DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed}},
+	}
+	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorExecuteShellOperation, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID, magicevent.NewHeader(), ctx, command))
+	data, err := result.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, ok := data.(orchestratorevents.ExecuteShellOperationResult)
+	if !ok || response.Failure == nil || response.Failure.TargetObservation == nil {
+		t.Fatalf("structured shell failure = %#v", data)
+	}
+	observation := response.Failure.TargetObservation
+	if observation.OwnerModuleID != ModuleID || observation.SubjectRef != shellFailureTargetObservationSubject || observation.TargetRole != "implementation" ||
+		len(observation.TargetRefs) != 1 || observation.TargetRefs[0] != "implementation.go" || observation.DiagnosticClass != runtimecontract.ValidationDiagnosticBuildFailed ||
+		len(observation.EvidenceRefs) != 1 || len(observation.ContentHash) != 64 {
+		t.Fatalf("structured failure observation = %+v", observation)
+	}
+	if !reflect.DeepEqual(response.Failure.TargetRefs, observation.TargetRefs) || !reflect.DeepEqual(response.Receipt.Failure.TargetObservation, observation) {
+		t.Fatalf("structured receipt lost target binding: response=%+v receipt=%+v", response.Failure, response.Receipt)
+	}
+}
+
+func TestShellFailureTargetObservationRejectsUnstructuredOrMismatchedRecords(t *testing.T) {
+	base := RuntimeCommandResult{
+		ValidationFailureDiagnostic: &runtimecontract.ValidationFailureDiagnostic{Class: runtimecontract.ValidationDiagnosticBuildFailed},
+	}
+	valid := `WORKORCH_FAILURE_TARGET_V1={"schemaVersion":"workorch.shell.failure_target.v1","targetRole":"implementation","targetRefs":["implementation.go"],"diagnosticClass":"validation_build_failed"}`
+	for name, test := range map[string]struct {
+		stdout string
+		role   string
+		want   bool
+	}{
+		"valid":               {stdout: valid, role: "implementation", want: true},
+		"missing":             {stdout: "implementation.go failed", role: "implementation"},
+		"multiple":            {stdout: valid + "\n" + valid, role: "implementation"},
+		"unknown_field":       {stdout: `WORKORCH_FAILURE_TARGET_V1={"schemaVersion":"workorch.shell.failure_target.v1","targetRole":"implementation","targetRefs":["implementation.go"],"diagnosticClass":"validation_build_failed","extra":true}`, role: "implementation"},
+		"role_mismatch":       {stdout: valid, role: "validation"},
+		"diagnostic_mismatch": {stdout: `WORKORCH_FAILURE_TARGET_V1={"schemaVersion":"workorch.shell.failure_target.v1","targetRole":"implementation","targetRefs":["implementation.go"],"diagnosticClass":"validation_test_failed"}`, role: "implementation"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			result := base
+			result.Stdout = test.stdout
+			got := shellFailureTargetObservation(result, test.role, "shell-policy-v1")
+			if (got != nil) != test.want {
+				t.Fatalf("shellFailureTargetObservation() = %+v, want present=%t", got, test.want)
+			}
+		})
+	}
+}

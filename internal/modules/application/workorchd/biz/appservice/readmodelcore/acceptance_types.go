@@ -75,7 +75,10 @@ type AcceptanceProjection struct {
 	CapabilityStates []RuntimeCapabilityState `json:"capabilityStates,omitempty"`
 	Governance       []RuntimeGovernanceState `json:"governance,omitempty"`
 	Operations       []RuntimeOperationStatus `json:"operations,omitempty"`
-	Summary          AcceptanceSummary        `json:"summary"`
+	// Audit is a metadata-only Runtime V2 projection for deployed verifier and
+	// operator inspection. It never accepts evidence or drives transitions.
+	Audit   *RuntimeV2Audit   `json:"audit,omitempty"`
+	Summary AcceptanceSummary `json:"summary"`
 }
 
 type RuntimeRepairDirective struct {

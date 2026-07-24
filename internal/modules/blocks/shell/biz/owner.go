@@ -131,11 +131,15 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 	}
 	if executeErr != nil {
 		response.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
-		// Shell currently has no structured protocol that can bind a related
-		// failure target to an owner, subject, role and revision. The command
-		// target remains execution lineage only; it must not become repair
-		// authority through a local heuristic.
-		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindShellCommand, operationResult.FailureCode, operationResult.FailureMessage, nil)
+		observation := shellFailureTargetObservation(operationResult, command.TargetRole, m.runtimeAdapter.runtimeAdmissibilityPolicyRevision())
+		targetRefs := []string(nil)
+		if observation != nil {
+			targetRefs = append([]string(nil), observation.TargetRefs...)
+		}
+		// Only the closed stdout record above can create a related target. The
+		// command target, validation entry, stderr and LLM summary stay receipt
+		// lineage/diagnostics and cannot become repair authority.
+		response.Failure = orchestratorevents.RuntimeOperationFailureWithTargetObservation(command.Transaction, runtimecontract.StepKindShellCommand, operationResult.FailureCode, operationResult.FailureMessage, targetRefs, observation)
 		if operationResult.ValidationFailureDiagnostic != nil {
 			diagnostic := operationResult.ValidationFailureDiagnostic.Clone()
 			response.Failure.ValidationDiagnostic = &diagnostic

@@ -82,7 +82,7 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 	selection := runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: "target-selection-1", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable",
-		Disposition: runtimecontract.RuntimeTargetSelectionCreate, CandidateCount: 0, ObservedRevision: "workspace-empty-v1",
+		Disposition: runtimecontract.RuntimeTargetSelectionCreate, ProspectiveTargetRef: "initial-deliverable.txt", CandidateCount: 0, ObservedRevision: "workspace-empty-v1",
 	}
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	facts.Resources.TargetSelection = &selection
@@ -115,6 +115,10 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 		FailureSignature: "rejected-shape-signature",
 	}
 	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(facts, decision, []runtimecontract.RuntimeRejectedOperationShape{rejectedShape})
+	if candidateContext.RequiredAction != decision.Action || !slices.Equal(candidateContext.RequiredEffectScopes, decision.RequiredOutput.RequiredEffectScopes) ||
+		!slices.Equal(candidateContext.RequiredEvidenceKinds, decision.RequiredOutput.RequiredEvidenceKinds) {
+		t.Fatalf("candidate context requirements = %+v, want sealed decision output %+v", candidateContext, decision.RequiredOutput)
+	}
 	request, err := runtimeV2ProviderRequest(llmmodels.RuntimeCandidateRequest{
 		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix,
 		DefinitionContext: definition, CandidateContext: candidateContext,
@@ -143,7 +147,7 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 		`"outputContract"`, `"requiredTopLevelExample":"{\"operations\":[...]}"`, `"$id":"workorch.runtime_candidate.state_change.v2"`, `"forbiddenTopLevelFields"`,
 		`"operationContracts":[{"kind":"file/edit"`, `"name":"path"`, `"name":"oldText"`, `"name":"newText"`,
 		`"forbiddenParameters":["filePath","fileContent","targetRef","targetRefs"]`,
-		`"RequirementID":"repo-init"`, `"capabilityStates"`, `"repo-state-hash"`, `"targetSelectionInstruction"`, "empty workspace creation scope", "concrete workspace-relative targetRefs entry",
+		`"RequirementID":"repo-init"`, `"capabilityStates"`, `"repo-state-hash"`, `"targetSelectionInstruction"`, "empty workspace creation scope", `sealed prospective target \"initial-deliverable.txt\"`,
 	} {
 		if !strings.Contains(dynamicSection, value) {
 			t.Fatalf("provider request dynamic output contract lost %q: %s", value, dynamicSection)
@@ -193,7 +197,7 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 	if retryRequest.ContextBudget.CachePlan.StablePrefixHash != request.ContextBudget.CachePlan.StablePrefixHash || retryRequest.PromptContext.Sections[0].Content != contractSection {
 		t.Fatalf("retry changed stable provider contract: initial=%+v retry=%+v", request.ContextBudget.CachePlan, retryRequest.ContextBudget.CachePlan)
 	}
-	freshContext := runtimecontract.RuntimeCandidateContextFromFacts(facts)
+	freshContext := runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil)
 	freshObservation := runtimecontract.RuntimePrerequisiteObservation{
 		PrerequisiteID: "admissibility-file", Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile, ContentHash: "admissibility-v2",
 		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: "tree-v2"}},
@@ -215,7 +219,7 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 	if !strings.Contains(freshRequest.PromptContext.Sections[3].Content, `"prerequisiteObservations"`) || !strings.Contains(freshRequest.PromptContext.Sections[3].Content, "tree-v2") {
 		t.Fatalf("freshness metadata was not rendered in volatile C3: %s", freshRequest.PromptContext.Sections[3].Content)
 	}
-	limitedContext := runtimecontract.RuntimeCandidateContextFromFacts(facts)
+	limitedContext := runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil)
 	limitedContext.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
 		Target:                   runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 		ContextWindowTokens:      128000,
@@ -278,11 +282,11 @@ func TestRuntimeV2TargetSelectionInstructionIsLimitedToFileScopes(t *testing.T) 
 	selection := runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: "target-selection-1", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable",
-		Disposition: runtimecontract.RuntimeTargetSelectionCreate, CandidateCount: 0, ObservedRevision: "workspace-empty-v1",
+		Disposition: runtimecontract.RuntimeTargetSelectionCreate, ProspectiveTargetRef: "initial-deliverable.txt", CandidateCount: 0, ObservedRevision: "workspace-empty-v1",
 	}
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	got := runtimeV2TargetSelectionInstruction(&selection, runtimecontract.RuntimeActionProduceStateChange)
-	for _, required := range []string{"durable File-owner operation", "concrete workspace-relative targetRefs", "do not use this scope to authorize Git, Shell, MCP"} {
+	for _, required := range []string{"durable File-owner operation", `sealed prospective target "initial-deliverable.txt"`, "Git, Shell, MCP, or another owner"} {
 		if !strings.Contains(got, required) {
 			t.Fatalf("creation instruction lost %q: %s", required, got)
 		}
@@ -430,6 +434,235 @@ func TestRuntimeV2CandidateSchemaDerivesPatchTargetRequirementsFromOperationCont
 	if strings.Contains(runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceStateChange), `"const":"patch/apply"`) {
 		t.Fatal("volatile operation constraints leaked into the stable generic contract schema")
 	}
+}
+
+func TestRuntimeV2CandidateSchemaRequiresCanonicalTargetRefsForDurableFileOperations(t *testing.T) {
+	schema := runtimeV2CandidateSchemaForDecision(runtimecontract.RuntimeDecision{
+		Action: runtimecontract.RuntimeActionProduceStateChange,
+		RequiredOutput: runtimecontract.RequiredOutputContract{AcceptedKinds: []string{
+			runtimecontract.StepKindFileWrite,
+			runtimecontract.StepKindFileEdit,
+		}},
+	})
+	for _, kind := range []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileEdit} {
+		if !runtimeV2SchemaRequiresTopLevelTargetRefs(schema, kind) {
+			t.Fatalf("%s schema must require canonical top-level targetRefs", kind)
+		}
+	}
+}
+
+func TestRuntimeV2CandidateSchemaClosesNamedParameterObjects(t *testing.T) {
+	schema := runtimeV2CandidateSchemaForDecision(runtimecontract.RuntimeDecision{
+		Action: runtimecontract.RuntimeActionProduceStateChange,
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.StepKindShellCommand},
+		},
+	})
+	patchParameters := runtimeV2SchemaParametersForKind(t, schema, runtimecontract.RuntimeBlockKindPatchApply)
+	if !runtimeV2SchemaHasClosedNamedParameterBranch(patchParameters, "patchType", "string") {
+		t.Fatalf("patch/apply parameter schema does not close patchType as string: %#v", patchParameters)
+	}
+	if !runtimeV2SchemaHasClosedNamedParameterBranch(patchParameters, "occurrence", "integer") {
+		t.Fatalf("patch/apply parameter schema does not close occurrence as integer: %#v", patchParameters)
+	}
+	if runtimeV2SchemaHasNamedParameterBranch(patchParameters, "unknown") {
+		t.Fatalf("patch/apply parameter schema widened to an unknown parameter: %#v", patchParameters)
+	}
+	if !runtimeV2SchemaRequiresTopLevelTargetRefs(schema, runtimecontract.RuntimeBlockKindPatchApply) {
+		t.Fatal("patch/apply schema must require canonical top-level targetRefs")
+	}
+
+	shellParameters := runtimeV2SchemaParametersForKind(t, schema, runtimecontract.StepKindShellCommand)
+	if runtimeV2SchemaHasNamedParameterBranch(shellParameters, "summary") {
+		t.Fatalf("shell/command schema admitted summary parameter: %#v", shellParameters)
+	}
+	if !runtimeV2SchemaHasClosedNamedParameterBranch(shellParameters, "timeoutMillis", "integer") {
+		t.Fatalf("shell/command parameter schema does not close timeoutMillis as integer: %#v", shellParameters)
+	}
+}
+
+func TestRuntimeV2CandidateSchemaClosesMCPDynamicParameters(t *testing.T) {
+	toolSchema := runtimeV2CandidateSchemaForDecision(runtimecontract.RuntimeDecision{
+		Action:         runtimecontract.RuntimeActionProduceValidation,
+		RequiredOutput: runtimecontract.RequiredOutputContract{AcceptedKinds: []string{runtimecontract.StepKindMCPToolCall}},
+	})
+	toolParameters := runtimeV2SchemaParametersForKind(t, toolSchema, runtimecontract.StepKindMCPToolCall)
+	if !runtimeV2SchemaHasClosedNamedParameterBranch(toolParameters, "serverId", "string") {
+		t.Fatalf("mcp/tool_call lost fixed serverId parameter: %#v", toolParameters)
+	}
+	if !runtimeV2SchemaHasDynamicParameterBranch(toolParameters, `^input\\..*\\S.*$`, "string") ||
+		!runtimeV2SchemaHasDynamicParameterBranch(toolParameters, `^input\\..*\\S.*$`, "integer") ||
+		!runtimeV2SchemaHasDynamicParameterBranch(toolParameters, `^input\\..*\\S.*$`, "boolean") {
+		t.Fatalf("mcp/tool_call dynamic input schema is not closed scalar union: %#v", toolParameters)
+	}
+	if runtimeV2SchemaHasDynamicParameterBranch(toolParameters, `^input\\..*\\S.*$`, "stringList") {
+		t.Fatalf("mcp/tool_call dynamic input schema wrongly permits stringList: %#v", toolParameters)
+	}
+
+	resourceSchema := runtimeV2CandidateSchemaForDecision(runtimecontract.RuntimeDecision{
+		Action:         runtimecontract.RuntimeActionProduceValidation,
+		RequiredOutput: runtimecontract.RequiredOutputContract{AcceptedKinds: []string{runtimecontract.StepKindMCPResourceRead}},
+	})
+	resourceParameters := runtimeV2SchemaParametersForKind(t, resourceSchema, runtimecontract.StepKindMCPResourceRead)
+	if runtimeV2SchemaHasDynamicParameterBranch(resourceParameters, "", "string") {
+		t.Fatalf("mcp/resource_read must not expose dynamic parameter fields: %#v", resourceParameters)
+	}
+}
+
+func runtimeV2SchemaParametersForKind(t *testing.T, encoded string, kind string) map[string]any {
+	t.Helper()
+	var root map[string]any
+	if err := json.Unmarshal([]byte(encoded), &root); err != nil {
+		t.Fatal(err)
+	}
+	properties, ok := root["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("candidate schema has no root properties: %#v", root)
+	}
+	operations, ok := properties["operations"].(map[string]any)
+	if !ok {
+		t.Fatalf("candidate schema has no operations: %#v", root)
+	}
+	items, ok := operations["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("candidate schema has no operation items: %#v", operations)
+	}
+	for _, rawCondition := range runtimeV2SchemaArray(items["allOf"]) {
+		condition, ok := rawCondition.(map[string]any)
+		if !ok {
+			continue
+		}
+		ifPart, ok := condition["if"].(map[string]any)
+		if !ok || runtimeV2SchemaKindConst(ifPart) != kind {
+			continue
+		}
+		thenPart, ok := condition["then"].(map[string]any)
+		if !ok {
+			t.Fatalf("operation condition for %q has no then: %#v", kind, condition)
+		}
+		thenProperties, ok := thenPart["properties"].(map[string]any)
+		if !ok {
+			t.Fatalf("operation condition for %q has no properties: %#v", kind, thenPart)
+		}
+		parameters, ok := thenProperties["parameters"].(map[string]any)
+		if !ok {
+			t.Fatalf("operation condition for %q has no parameter schema: %#v", kind, thenProperties)
+		}
+		return parameters
+	}
+	t.Fatalf("candidate schema has no operation condition for %q: %#v", kind, items["allOf"])
+	return nil
+}
+
+func runtimeV2SchemaRequiresTopLevelTargetRefs(encoded, kind string) bool {
+	var root map[string]any
+	if json.Unmarshal([]byte(encoded), &root) != nil {
+		return false
+	}
+	operations, _ := root["properties"].(map[string]any)["operations"].(map[string]any)
+	items, _ := operations["items"].(map[string]any)
+	for _, rawCondition := range runtimeV2SchemaArray(items["allOf"]) {
+		condition, _ := rawCondition.(map[string]any)
+		ifPart, _ := condition["if"].(map[string]any)
+		if runtimeV2SchemaKindConst(ifPart) != kind {
+			continue
+		}
+		thenPart, _ := condition["then"].(map[string]any)
+		for _, required := range runtimeV2SchemaStringArray(thenPart["required"]) {
+			if required == "targetRefs" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func runtimeV2SchemaHasClosedNamedParameterBranch(parameters map[string]any, name, valueField string) bool {
+	for _, branch := range runtimeV2SchemaParameterBranches(parameters) {
+		properties, _ := branch["properties"].(map[string]any)
+		nameSchema, _ := properties["name"].(map[string]any)
+		if nameSchema["const"] != name || branch["additionalProperties"] != false {
+			continue
+		}
+		if _, ok := properties[valueField].(map[string]any); !ok {
+			continue
+		}
+		if runtimeV2SchemaStringArrayContains(branch["required"], "name") && runtimeV2SchemaStringArrayContains(branch["required"], valueField) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeV2SchemaHasNamedParameterBranch(parameters map[string]any, name string) bool {
+	for _, branch := range runtimeV2SchemaParameterBranches(parameters) {
+		properties, _ := branch["properties"].(map[string]any)
+		nameSchema, _ := properties["name"].(map[string]any)
+		if nameSchema["const"] == name {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeV2SchemaHasDynamicParameterBranch(parameters map[string]any, pattern, valueField string) bool {
+	for _, branch := range runtimeV2SchemaParameterBranches(parameters) {
+		properties, _ := branch["properties"].(map[string]any)
+		nameSchema, _ := properties["name"].(map[string]any)
+		if nameSchema["pattern"] != pattern || branch["additionalProperties"] != false {
+			continue
+		}
+		if _, ok := properties[valueField].(map[string]any); !ok {
+			continue
+		}
+		if runtimeV2SchemaStringArrayContains(branch["required"], "name") && runtimeV2SchemaStringArrayContains(branch["required"], valueField) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeV2SchemaParameterBranches(parameters map[string]any) []map[string]any {
+	items, _ := parameters["items"].(map[string]any)
+	ret := make([]map[string]any, 0)
+	for _, rawBranch := range runtimeV2SchemaArray(items["oneOf"]) {
+		if branch, ok := rawBranch.(map[string]any); ok {
+			ret = append(ret, branch)
+		}
+	}
+	return ret
+}
+
+func runtimeV2SchemaKindConst(condition map[string]any) string {
+	properties, _ := condition["properties"].(map[string]any)
+	kind, _ := properties["kind"].(map[string]any)
+	value, _ := kind["const"].(string)
+	return value
+}
+
+func runtimeV2SchemaArray(value any) []any {
+	values, _ := value.([]any)
+	return values
+}
+
+func runtimeV2SchemaStringArray(value any) []string {
+	values := runtimeV2SchemaArray(value)
+	ret := make([]string, 0, len(values))
+	for _, raw := range values {
+		if value, ok := raw.(string); ok {
+			ret = append(ret, value)
+		}
+	}
+	return ret
+}
+
+func runtimeV2SchemaStringArrayContains(value any, want string) bool {
+	for _, value := range runtimeV2SchemaStringArray(value) {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRuntimeV2CandidateSchemaRequiresNonEmptyCanonicalPatchTarget(t *testing.T) {
@@ -728,7 +961,7 @@ func TestRuntimeV2AssessmentRequestPublishesCanonicalEvidenceRefContract(t *test
 		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod",
 	}
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, facts.Activation.ExecutionContract)
-	context := runtimecontract.RuntimeCandidateContextFromFacts(facts)
+	context := runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil)
 	projection := runtimeV2CandidateContextProjection(context, decision.Action)
 	wantRefs := runtimecontract.AcceptedEvidenceRefsForFocus(facts)
 	if strings.Join(projection.AllowedEvidenceRefs, "|") != strings.Join(wantRefs, "|") || len(wantRefs) != 3 {

@@ -93,21 +93,31 @@ func rejectCandidateOutsideGroundedTargets(facts workorchruntimecontract.Runtime
 		return acceptedCandidateAdmission()
 	}
 	if hasOwnerGroundedCreationScope(facts) {
+		selection := facts.Resources.TargetSelection.Normalized()
+		durableFileEffect := false
 		for _, operation := range candidateRuntimeOperations(candidate) {
 			descriptor, known := workorchruntimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
-			if known && descriptor.OwnerModuleID == workorchruntimecontract.RuntimeModuleFile &&
-				workorchruntimecontract.RuntimeEffectIsDurable(workorchruntimecontract.ResolveExpectedEffectScope(operation, facts.Activation.MCPCapabilities)) &&
-				len(operation.TargetRefs) != 0 {
-				// create is a File-owner workspace scope, not a generic durable
-				// side-effect grant. The concrete relative target remains subject
-				// to the sealed File inventory and feasibility probe.
-				return acceptedCandidateAdmission()
+			if !known || !workorchruntimecontract.RuntimeEffectIsDurable(workorchruntimecontract.ResolveExpectedEffectScope(operation, facts.Activation.MCPCapabilities)) {
+				continue
 			}
+			if descriptor.OwnerModuleID != workorchruntimecontract.RuntimeModuleFile || len(operation.TargetRefs) != 1 || operation.TargetRefs[0] != selection.ProspectiveTargetRef {
+				return rejectedCandidateAdmission(
+					candidateAdmissionCodeTargetOutsideGrounding,
+					candidateAdmissionSignatureTargetOutsideGrounding,
+					"empty workspace creation scope permits durable effects only on the sealed prospective File target",
+				)
+			}
+			// The sealed prospective target is profile-declared and File-owner
+			// verified. It is not a generic durable side-effect grant.
+			durableFileEffect = true
+		}
+		if durableFileEffect {
+			return acceptedCandidateAdmission()
 		}
 		return rejectedCandidateAdmission(
 			candidateAdmissionCodeCreationScopeMissingTarget,
 			candidateAdmissionSignatureCreationScopeTarget,
-			"empty workspace creation scope requires a durable File operation with a concrete workspace-relative target",
+			"empty workspace creation scope requires a durable File operation targeting the sealed prospective workspace-relative path",
 		)
 	}
 	requiredTargets := GroundedRepairTargets(facts)
@@ -173,23 +183,28 @@ func ownerGroundedTargetScopeMaySelectNewFileTarget(facts workorchruntimecontrac
 }
 
 // GroundedRepairTargets returns the single persisted target-precedence set for
-// the current focus. It is an SM-2 fact projection, not target discovery: all
-// members must already originate in the sealed focus, owner observation,
-// failure fact, target selection, or repair directive. SM-3 admission and
-// prerequisite re-acquisition must consume this same set so a resource-change
-// refresh cannot silently fall back to an empty Focus.TargetRefs.
+// the current focus. A committed, owner-grounded FailureTarget is a repair
+// retarget and therefore overrides the original Focus target without mutating
+// that Focus declaration. This is an SM-2 fact projection, not target
+// discovery: all members must already originate in the sealed focus, owner
+// observation, failure fact, target selection, or repair directive. SM-3
+// admission and prerequisite re-acquisition consume the same set so a
+// resource-change refresh cannot silently return to a superseded focus target.
 func GroundedRepairTargets(facts workorchruntimecontract.RuntimeFacts) []string {
-	if len(facts.Focus.TargetRefs) > 0 {
-		return append([]string(nil), facts.Focus.TargetRefs...)
-	}
 	if facts.Resources.FailureTarget != nil && len(facts.Resources.FailureTarget.TargetRefs) > 0 {
 		return append([]string(nil), facts.Resources.FailureTarget.TargetRefs...)
+	}
+	if len(facts.Focus.TargetRefs) > 0 {
+		return append([]string(nil), facts.Focus.TargetRefs...)
 	}
 	if facts.Failure != nil && len(facts.Failure.TargetRefs) > 0 {
 		return append([]string(nil), facts.Failure.TargetRefs...)
 	}
 	if selection := facts.Resources.TargetSelection; selection != nil && targetSelectionHasConcreteTarget(*selection) {
 		return append([]string(nil), selection.TargetRefs...)
+	}
+	if selection := facts.Resources.TargetSelection; hasOwnerGroundedCreationScope(facts) && selection != nil {
+		return []string{selection.ProspectiveTargetRef}
 	}
 	if facts.RepairDirective != nil && len(facts.RepairDirective.TargetRefs) > 0 {
 		return append([]string(nil), facts.RepairDirective.TargetRefs...)

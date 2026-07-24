@@ -222,11 +222,12 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 		facts.Focus.TargetRole = "deliverable"
 		facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
 		facts.Focus.TargetSelectorRef = "file/workspace_deliverable"
+		facts.Focus.ProspectiveTargetRef = "initial-deliverable.txt"
 		facts.Focus.RequireTargetGrounding = true
 		selection := runtimecontract.RuntimeTargetSelection{
 			PrerequisiteID: "selection-1", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 			TargetRole: facts.Focus.TargetRole, SelectorRef: facts.Focus.TargetSelectorRef,
-			Disposition: runtimecontract.RuntimeTargetSelectionCreate, CandidateCount: 0, ObservedRevision: "workspace-empty-v1",
+			Disposition: runtimecontract.RuntimeTargetSelectionCreate, ProspectiveTargetRef: facts.Focus.ProspectiveTargetRef, CandidateCount: 0, ObservedRevision: "workspace-empty-v1",
 		}
 		selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 		facts.Resources.TargetSelection = &selection
@@ -246,13 +247,13 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 		}
 	})
 
-	t.Run("permits owner-declared new-file selector", func(t *testing.T) {
+	t.Run("permits only owner-declared create operation", func(t *testing.T) {
 		facts := newCreationFacts()
-		facts.Focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
-		facts.Capabilities.StateChangeKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
+		facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindPatchApply}
+		facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindPatchApply}
 		inventory := runtimecontract.RuntimeOperationAdmissibility{
 			PrerequisiteID: "admissibility-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
-			OperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}, SelectorRefs: []string{"owner-new-target-selector"},
+			OperationKinds: []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindPatchApply}, SelectorRefs: []string{"owner-new-target-selector"},
 			ObservedRevision: "workspace-empty-v1",
 		}
 		inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
@@ -261,10 +262,86 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 		if err != nil {
 			t.Fatal(err)
 		}
-		if decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(decision.RequiredOutput.AcceptedKinds) != 1 || decision.RequiredOutput.AcceptedKinds[0] != runtimecontract.RuntimeBlockKindPatchApply {
+		if decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(decision.RequiredOutput.AcceptedKinds) != 1 || decision.RequiredOutput.AcceptedKinds[0] != runtimecontract.StepKindFileWrite {
 			t.Fatalf("creation scope File admission decision = %+v", decision)
 		}
 	})
+
+	t.Run("create precedes ordinary validation until durable target evidence exists", func(t *testing.T) {
+		facts := newCreationFacts()
+		facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+		facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
+		facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindFileWrite}
+		facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+		inventory := runtimecontract.RuntimeOperationAdmissibility{
+			PrerequisiteID: "admissibility-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			OperationKinds: []string{runtimecontract.StepKindFileWrite}, SelectorRefs: []string{"owner-new-target-selector"},
+			ObservedRevision: "workspace-empty-v1",
+		}
+		inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+		facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
+		decision, err := ReduceRuntimeState(facts, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(decision.RequiredOutput.AcceptedKinds) != 1 || decision.RequiredOutput.AcceptedKinds[0] != runtimecontract.StepKindFileWrite || len(decision.RequiredOutput.TargetRefs) != 1 || decision.RequiredOutput.TargetRefs[0] != "initial-deliverable.txt" {
+			t.Fatalf("initial creation decision = %+v", decision)
+		}
+
+		facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
+			ID: "created", Kind: runtimecontract.EvidenceKindStateChange, TargetRefs: []string{"initial-deliverable.txt"},
+			CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs, Revision: "evidence-v2-00000000000000000001",
+		}}
+		facts.Resources.TargetSelection = &runtimecontract.RuntimeTargetSelection{
+			PrerequisiteID: "selection-1", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: facts.Focus.TargetRole,
+			SelectorRef: facts.Focus.TargetSelectorRef, Disposition: runtimecontract.RuntimeTargetSelectionSelected,
+			TargetRefs: []string{"initial-deliverable.txt"}, CandidateTargetRefs: []string{"initial-deliverable.txt"}, CandidateCount: 1, ObservedRevision: "workspace-created-v1",
+		}
+		facts.Resources.TargetSelection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(*facts.Resources.TargetSelection)
+		decision, err = ReduceRuntimeState(facts, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if decision.Action != runtimecontract.RuntimeActionProduceValidation || len(decision.RequiredOutput.TargetRefs) != 1 || decision.RequiredOutput.TargetRefs[0] != "initial-deliverable.txt" {
+			t.Fatalf("post-create validation decision = %+v", decision)
+		}
+	})
+
+	t.Run("rejects create observation that does not match the sealed declaration", func(t *testing.T) {
+		facts := newCreationFacts()
+		facts.Resources.TargetSelection.ProspectiveTargetRef = "unsealed-target.txt"
+		facts.Resources.TargetSelection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(*facts.Resources.TargetSelection)
+		decision, err := ReduceRuntimeState(facts, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "target_grounding_unresolved" {
+			t.Fatalf("unsealed creation selection decision = %+v", decision)
+		}
+	})
+}
+
+func TestReduceRuntimeStateUnsupportedTargetSelectorFailsWithoutProviderAuthority(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+	facts.Focus.RequireTargetGrounding = true
+	facts.Focus.TargetRole = "deliverable"
+	facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	facts.Focus.TargetSelectorRef = "profile/semantic_owner_selector"
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "selection-unsupported", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: facts.Focus.TargetRole,
+		SelectorRef: facts.Focus.TargetSelectorRef, Disposition: runtimecontract.RuntimeTargetSelectionUnsupported, ObservedRevision: "unsupported-selector:profile/semantic_owner_selector",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	facts.Resources.TargetSelection = &selection
+	facts.Prerequisites = runtimecontract.PrerequisiteState{}
+	decision, err := ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "target_grounding_unresolved" {
+		t.Fatalf("unsupported selector decision = %+v", decision)
+	}
 }
 
 func TestReduceRuntimeStateAttemptOnlyIncrementsForSameFactsRevision(t *testing.T) {

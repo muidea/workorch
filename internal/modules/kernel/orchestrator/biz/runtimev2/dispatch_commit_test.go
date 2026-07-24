@@ -93,6 +93,108 @@ func TestStaleEvidenceOnlyEntersDiagnosticLineage(t *testing.T) {
 	}
 }
 
+func TestReopenCoverageDependenciesForAcceptedEvidencePreservesLineage(t *testing.T) {
+	coverage := []runtimecontract.RuntimeCoverageItemFact{
+		{ID: "cwi-source", State: runtimecontract.RuntimeCoverageItemStateSatisfied, EvidenceRefs: []string{"state-before"}, ReopenDependencies: []runtimecontract.RuntimeCoverageReopenDependency{{CoverageWorkItemID: "cwi-validation", TriggerEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}}}},
+		{ID: "cwi-validation", State: runtimecontract.RuntimeCoverageItemStateSatisfied, EvidenceRefs: []string{"validation-before"}, LastAssessmentID: "assessment-before"},
+		{ID: "cwi-other", State: runtimecontract.RuntimeCoverageItemStateSatisfied, EvidenceRefs: []string{"other-before"}},
+	}
+	evidence := runtimecontract.EvidenceFact{ID: "state-after", Kind: runtimecontract.EvidenceKindStateChange, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-source"}}
+	updated, reopened := reopenCoverageDependenciesForEvidence(coverage, evidence)
+	if len(reopened) != 1 || reopened[0] != "cwi-validation" {
+		t.Fatalf("reopened coverage = %v, want cwi-validation", reopened)
+	}
+	byID := map[common.CoverageWorkItemID]runtimecontract.RuntimeCoverageItemFact{}
+	for _, item := range updated {
+		byID[item.ID] = item
+	}
+	dependent := byID["cwi-validation"]
+	if dependent.State != runtimecontract.RuntimeCoverageItemStateOpen || dependent.LastAssessmentID != "" || len(dependent.EvidenceRefs) != 1 || dependent.EvidenceRefs[0] != "validation-before" || len(dependent.ReopenedByEvidenceRefs) != 1 || dependent.ReopenedByEvidenceRefs[0] != "state-after" {
+		t.Fatalf("dependent after reopen = %+v", dependent)
+	}
+	if byID["cwi-other"].State != runtimecontract.RuntimeCoverageItemStateSatisfied || byID["cwi-source"].State != runtimecontract.RuntimeCoverageItemStateSatisfied {
+		t.Fatalf("unrelated/source coverage changed: %+v", byID)
+	}
+	updated, reopened = reopenCoverageDependenciesForEvidence(updated, runtimecontract.EvidenceFact{ID: "validation-after", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-source"}})
+	byID = map[common.CoverageWorkItemID]runtimecontract.RuntimeCoverageItemFact{}
+	for _, item := range updated {
+		byID[item.ID] = item
+	}
+	if len(reopened) != 0 || byID["cwi-validation"].State != runtimecontract.RuntimeCoverageItemStateOpen {
+		t.Fatalf("non-trigger evidence reopened coverage: reopened=%v coverage=%+v", reopened, updated)
+	}
+}
+
+func TestRequeueReopenedCoverageFocusesRestoresCompletedFocusAheadOfPendingQueue(t *testing.T) {
+	facts := runtimecontract.RuntimeFacts{
+		Focus:            runtimecontract.CoverageFocus{ID: "focus-source", SliceID: "slice-source", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-source"}},
+		RemainingFocuses: []runtimecontract.CoverageFocus{{ID: "focus-pending", SliceID: "slice-pending", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-pending"}}},
+		CompletedFocuses: []runtimecontract.CoverageFocus{
+			{ID: "focus-validation", SliceID: "slice-validation", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-validation"}},
+			{ID: "focus-unrelated", SliceID: "slice-unrelated", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-unrelated"}},
+		},
+		Coverage: []runtimecontract.RuntimeCoverageItemFact{
+			{ID: "cwi-source", State: runtimecontract.RuntimeCoverageItemStateOpen}, {ID: "cwi-pending", State: runtimecontract.RuntimeCoverageItemStateOpen},
+			{ID: "cwi-validation", State: runtimecontract.RuntimeCoverageItemStateOpen}, {ID: "cwi-unrelated", State: runtimecontract.RuntimeCoverageItemStateSatisfied},
+		},
+	}
+	updated := requeueReopenedCoverageFocuses(facts, []common.CoverageWorkItemID{"cwi-validation"})
+	if len(updated.RemainingFocuses) != 2 || updated.RemainingFocuses[0].ID != "focus-validation" || updated.RemainingFocuses[1].ID != "focus-pending" || len(updated.CompletedFocuses) != 1 || updated.CompletedFocuses[0].ID != "focus-unrelated" {
+		t.Fatalf("requeued focus queues = current=%+v remaining=%+v completed=%+v", updated.Focus, updated.RemainingFocuses, updated.CompletedFocuses)
+	}
+	// Normalization models the persisted/reloaded aggregate shape; the queue
+	// must retain the same reactivation ordering across restart.
+	reloaded := updated.Normalized()
+	if len(reloaded.RemainingFocuses) != 2 || reloaded.RemainingFocuses[0].ID != "focus-validation" || len(reloaded.CompletedFocuses) != 1 || reloaded.CompletedFocuses[0].ID != "focus-unrelated" {
+		t.Fatalf("reloaded focus queues = %+v", reloaded)
+	}
+}
+
+func TestDispatchCommitAtomicallyReopensAndRequeuesCompletedDependency(t *testing.T) {
+	aggregate := stateChangeAggregate(t)
+	aggregate.Facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{
+		{ID: "cwi-1", SliceID: "slice-source", State: runtimecontract.RuntimeCoverageItemStateOpen, ReopenDependencies: []runtimecontract.RuntimeCoverageReopenDependency{{CoverageWorkItemID: "cwi-validation", TriggerEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}}}},
+		{ID: "cwi-validation", SliceID: "slice-validation", State: runtimecontract.RuntimeCoverageItemStateSatisfied, EvidenceRefs: []string{"validation-before"}, LastAssessmentID: "assessment-before"},
+	}
+	aggregate.Facts.Focus.SliceID = "slice-source"
+	aggregate.Facts.CompletedFocuses = []runtimecontract.CoverageFocus{{ID: "focus-validation", SliceID: "slice-validation", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-validation"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}}}
+	decision, err := ReduceRuntimeState(aggregate.Facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Decision = decision
+	repository := &durableRuntimeStateRepository{aggregate: aggregate}
+	coordinator, err := NewDispatchCoordinator(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed := sealCandidateForTest(t, repository, stateChangeCandidate())
+	evidence := ExecutionEvidence{EventID: "event-source-after-validation", WorkspaceID: "ws-1", RunID: "run-1", DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted, SourceRef: "patch/1"}
+	attachRuntimeV2TestOwnerReceipt(t, &repository.aggregate, &evidence)
+	committed, err := coordinator.CommitEvidence(context.Background(), evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if committed.Aggregate.StateRevision <= sealed.StateRevision || len(committed.Aggregate.Facts.RemainingFocuses) != 1 || committed.Aggregate.Facts.RemainingFocuses[0].ID != "focus-validation" || len(committed.Aggregate.Facts.CompletedFocuses) != 0 {
+		t.Fatalf("dependency reopen was not atomically requeued: %+v", committed.Aggregate.Facts)
+	}
+	for _, item := range committed.Aggregate.Facts.Coverage {
+		if item.ID == "cwi-validation" && (item.State != runtimecontract.RuntimeCoverageItemStateOpen || item.LastAssessmentID != "" || len(item.ReopenedByEvidenceRefs) != 1 || item.ReopenedByEvidenceRefs[0] != evidence.EventID) {
+			t.Fatalf("reopened dependent coverage = %+v", item)
+		}
+	}
+	// The repository load is the restart boundary used by the coordinator. The
+	// persisted queue and reopen lineage must survive it unchanged.
+	reloaded, err := repository.Load(context.Background(), "ws-1", "run-1")
+	if err != nil || len(reloaded.Facts.RemainingFocuses) != 1 || reloaded.Facts.RemainingFocuses[0].ID != "focus-validation" {
+		t.Fatalf("reloaded dependency queue = %+v err=%v", reloaded.Facts, err)
+	}
+	duplicate, err := coordinator.CommitEvidence(context.Background(), evidence)
+	if err != nil || duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.StateRevision != committed.Aggregate.StateRevision {
+		t.Fatalf("duplicate dependency evidence changed aggregate: %+v err=%v", duplicate, err)
+	}
+}
+
 func TestRejectedValidationEvidenceAtomicallyReturnsToStateChange(t *testing.T) {
 	aggregate := validationAggregate(t)
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
@@ -277,6 +379,74 @@ func TestRejectedValidationOwnerObservationBindsCompatibleTarget(t *testing.T) {
 	}
 }
 
+func TestOwnerFailureObservationRetargetsExplicitFocusAfterSnapshotRestart(t *testing.T) {
+	aggregate := validationAggregate(t)
+	aggregate.Facts.Focus.RequireTargetGrounding = true
+	aggregate.Facts.Focus.TargetRole = "implementation"
+	addCurrentMCPFailureObservationFreshness(t, &aggregate, "mcp-retarget-v1")
+	repository := &durableRuntimeStateRepository{aggregate: aggregate}
+	coordinator, _ := NewDispatchCoordinator(repository)
+	sealed := sealCandidateForTest(t, repository, validationCandidate())
+	oldAuthority := sealed.Decision.AuthoritySnapshot.ID
+	evidence := ExecutionEvidence{
+		EventID: "event-owner-retarget", WorkspaceID: "ws-1", RunID: "run-1", DispatchID: sealed.ActiveDispatch.ID,
+		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "validate-1",
+		Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusRejected,
+		Failure: &runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassBuildFailure, Signature: "observed-implementation-failure", Message: "owner observed implementation repair target",
+			TargetRefs: []string{"implementation.go"},
+			TargetObservation: &runtimecontract.RuntimeFailureTargetObservation{
+				OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "server-retarget", TargetRole: "implementation",
+				ObservedRevision: "mcp-retarget-v1", TargetRefs: []string{"implementation.go"},
+			},
+		},
+	}
+	attachRuntimeV2TestOwnerReceipt(t, &repository.aggregate, &evidence)
+	committed, err := coordinator.CommitEvidence(context.Background(), evidence)
+	if err != nil || committed.Aggregate.Facts.Resources.FailureTarget == nil ||
+		!sameRuntimeTargetRefs(GroundedRepairTargets(committed.Aggregate.Facts), []string{"implementation.go"}) {
+		t.Fatalf("owner retarget was not committed: aggregate=%+v err=%v", committed.Aggregate, err)
+	}
+	var snapshot runtimecontract.RuntimePrerequisite
+	for _, prerequisite := range committed.Aggregate.Facts.Prerequisites.Pending {
+		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSnapshot && prerequisite.SubjectRef == "implementation.go" {
+			snapshot = prerequisite
+		}
+		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSnapshot && prerequisite.SubjectRef == "main.go" {
+			t.Fatalf("retarget incorrectly reacquired superseded focus target: %+v", committed.Aggregate.Facts.Prerequisites.Pending)
+		}
+	}
+	if snapshot.ID == "" || committed.Aggregate.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite {
+		t.Fatalf("retarget did not wait for the new grounded snapshot: decision=%+v pending=%+v", committed.Aggregate.Decision, committed.Aggregate.Facts.Prerequisites.Pending)
+	}
+
+	// The persisted aggregate is the restart boundary.  Completing the new
+	// owner snapshot must issue a new authority for implementation.go, not
+	// revive the old Focus target or rejected validation dispatch.
+	restarted, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := restarted.CommitPrerequisite(context.Background(), "ws-1", "run-1", PrerequisiteResult{
+		PrerequisiteID: snapshot.ID,
+		TargetSnapshot: &runtimecontract.TargetSnapshot{TargetRef: "implementation.go", ContentHash: "implementation-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
+	})
+	if err != nil || resumed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange ||
+		!sameRuntimeTargetRefs(resumed.Decision.RequiredOutput.TargetRefs, []string{"implementation.go"}) ||
+		resumed.Decision.AuthoritySnapshot.ID == oldAuthority || resumed.Decision.AuthoritySnapshot.Attempt != 0 {
+		t.Fatalf("retarget restart did not issue a fresh implementation authority: aggregate=%+v err=%v", resumed, err)
+	}
+	oldCandidate := stateChangeCandidate()
+	if admission := EvaluateCandidateAdmission(resumed, oldCandidate); admission.Accepted() {
+		t.Fatalf("superseded Focus target remained admissible after retarget: %+v", admission)
+	}
+	newCandidate := stateChangeCandidate()
+	newCandidate.StateChange.Operations[0].Operation = patchApplyTestOperation("patch-implementation", "implementation.go")
+	if admission := EvaluateCandidateAdmission(resumed, newCandidate); !admission.Accepted() {
+		t.Fatalf("retargeted owner target was not admissible: %+v", admission)
+	}
+}
+
 func addCurrentMCPFailureObservationFreshness(t *testing.T, aggregate *RuntimeAggregate, revision string) {
 	t.Helper()
 	if aggregate == nil {
@@ -322,6 +492,39 @@ func TestValidationFailureTargetObservationRequiresCurrentOwnerFreshness(t *test
 	}}
 	if !validationFailureTargetsAreGrounded(facts, failure) {
 		t.Fatal("failure target observation with current owner freshness dependency was not grounded")
+	}
+}
+
+func TestValidationFailureTargetObservationAcceptsOnlyStructuredShellProtocol(t *testing.T) {
+	facts := runtimecontract.RuntimeFacts{
+		Focus: runtimecontract.CoverageFocus{TargetRole: "implementation", RequireTargetGrounding: true},
+		Resources: runtimecontract.RuntimeResourceFacts{PrerequisiteObservations: []runtimecontract.RuntimePrerequisiteObservation{{
+			OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+				Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleShell, SubjectRef: "shell_runtime_policy", Revision: "shell-policy-v1",
+			}},
+		}}},
+	}
+	failure := runtimecontract.FailureFact{
+		TargetRefs:           []string{"implementation.go"},
+		ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{Class: runtimecontract.ValidationDiagnosticBuildFailed},
+		TargetObservation: &runtimecontract.RuntimeFailureTargetObservation{
+			OwnerModuleID: runtimecontract.RuntimeModuleShell, SubjectRef: "shell_runtime_policy", TargetRole: "implementation", ObservedRevision: "shell-policy-v1",
+			TargetRefs: []string{"implementation.go"}, DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed,
+			EvidenceRefs: []string{"workorch://shell/failure-target/sha256/test"}, ContentHash: fmt.Sprintf("%064x", 1),
+		},
+	}
+	if !validationFailureTargetsAreGrounded(facts, failure) {
+		t.Fatal("content-bound Shell observation with current owner freshness was not grounded")
+	}
+	failure.TargetObservation.SubjectRef = "command_target"
+	if validationFailureTargetsAreGrounded(facts, failure) {
+		t.Fatal("Shell command target became repair authority")
+	}
+	failure.TargetObservation.SubjectRef = "shell_runtime_policy"
+	failure.ValidationDiagnostic = nil
+	if validationFailureTargetsAreGrounded(facts, failure) {
+		t.Fatal("Shell observation without matching owner diagnostic became repair authority")
 	}
 }
 

@@ -41,6 +41,34 @@ func TestValidateRuntimeOperationContractMCPDynamicInputAllowed(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeOperationContractMCPDynamicInputRequiresScalarValue(t *testing.T) {
+	err := ValidateRuntimeOperationContract(RuntimeOperation{
+		ID: "op-1", Kind: StepKindMCPToolCall,
+		Parameters: []OperationParameter{
+			{Name: "serverId", String: strPtr("mcp-lsp-bridge")},
+			{Name: "tool", String: strPtr("lsp_definition")},
+			{Name: "input.languageIds", StringList: []string{"go", "rust"}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires exactly one scalar string, integer, or boolean value") {
+		t.Fatalf("dynamic list parameter error = %v", err)
+	}
+
+	value := "go"
+	count := int64(1)
+	err = ValidateRuntimeOperationContract(RuntimeOperation{
+		ID: "op-1", Kind: StepKindMCPToolCall,
+		Parameters: []OperationParameter{
+			{Name: "serverId", String: strPtr("mcp-lsp-bridge")},
+			{Name: "tool", String: strPtr("lsp_definition")},
+			{Name: "input.languageId", String: &value, Integer: &count},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires exactly one scalar string, integer, or boolean value") {
+		t.Fatalf("dynamic multi-value parameter error = %v", err)
+	}
+}
+
 func TestValidateRuntimeOperationContractFileWriteRequiresTargetAndContent(t *testing.T) {
 	target := "README.md"
 	content := ""

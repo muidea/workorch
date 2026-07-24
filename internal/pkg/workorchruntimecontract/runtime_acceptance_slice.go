@@ -65,25 +65,36 @@ type RuntimeAcceptanceSlice struct {
 
 // RuntimeCoverageItem is the stable item-level coverage identity independent of slice size.
 type RuntimeCoverageItem struct {
-	ID          common.CoverageWorkItemID
-	SliceID     string
-	SourceScope string
-	SourceID    string
-	TargetText  string
-	Order       int
+	ID                 common.CoverageWorkItemID
+	SliceID            string
+	SourceScope        string
+	SourceID           string
+	TargetText         string
+	Order              int
+	ReopenDependencies []RuntimeCoverageReopenDependency
+}
+
+// RuntimeCoverageReopenDependency is the compiled coverage-ID form of a
+// profile dependency. It is data only: the Orchestrator decides when an
+// accepted evidence fact satisfies its trigger and performs the transition.
+type RuntimeCoverageReopenDependency struct {
+	CoverageWorkItemID   common.CoverageWorkItemID
+	TriggerEvidenceKinds []string
 }
 
 type RuntimeCoverageItemState string
 
 type RuntimeCoverageItemFact struct {
-	ID               common.CoverageWorkItemID
-	SliceID          string
-	SourceScope      string
-	SourceID         string
-	TargetText       string
-	State            RuntimeCoverageItemState
-	EvidenceRefs     []string
-	LastAssessmentID string
+	ID                     common.CoverageWorkItemID
+	SliceID                string
+	SourceScope            string
+	SourceID               string
+	TargetText             string
+	State                  RuntimeCoverageItemState
+	EvidenceRefs           []string
+	LastAssessmentID       string
+	ReopenDependencies     []RuntimeCoverageReopenDependency
+	ReopenedByEvidenceRefs []string
 }
 
 // InitialRuntimeCoverageFacts materializes the item closure ledger from the
@@ -103,6 +114,7 @@ func InitialRuntimeCoverageFacts(items []RuntimeCoverageItem) []RuntimeCoverageI
 		ret = append(ret, RuntimeCoverageItemFact{
 			ID: item.ID, SliceID: item.SliceID, SourceScope: item.SourceScope, SourceID: item.SourceID,
 			TargetText: item.TargetText, State: RuntimeCoverageItemStateOpen,
+			ReopenDependencies: cloneRuntimeCoverageReopenDependencies(item.ReopenDependencies),
 		})
 	}
 	return NormalizeRuntimeCoverageFacts(ret)
@@ -120,6 +132,8 @@ func NormalizeRuntimeCoverageFacts(values []RuntimeCoverageItemFact) []RuntimeCo
 		value.State = RuntimeCoverageItemState(strings.TrimSpace(string(value.State)))
 		value.EvidenceRefs = normalizeStrings(value.EvidenceRefs)
 		value.LastAssessmentID = strings.TrimSpace(value.LastAssessmentID)
+		value.ReopenDependencies = normalizeRuntimeCoverageReopenDependencies(value.ReopenDependencies)
+		value.ReopenedByEvidenceRefs = normalizeStrings(value.ReopenedByEvidenceRefs)
 		if value.ID == "" || value.State == "" {
 			continue
 		}
@@ -235,7 +249,95 @@ func (c RuntimeCoverageItem) Normalized() RuntimeCoverageItem {
 	c.SourceScope = strings.TrimSpace(c.SourceScope)
 	c.SourceID = strings.TrimSpace(c.SourceID)
 	c.TargetText = strings.TrimSpace(c.TargetText)
+	c.ReopenDependencies = normalizeRuntimeCoverageReopenDependencies(c.ReopenDependencies)
 	return c
+}
+
+func normalizeRuntimeCoverageReopenDependencies(values []RuntimeCoverageReopenDependency) []RuntimeCoverageReopenDependency {
+	byID := map[common.CoverageWorkItemID]RuntimeCoverageReopenDependency{}
+	for _, value := range values {
+		value.CoverageWorkItemID = common.CoverageWorkItemID(strings.TrimSpace(string(value.CoverageWorkItemID)))
+		value.TriggerEvidenceKinds = normalizeStrings(value.TriggerEvidenceKinds)
+		if prior, ok := byID[value.CoverageWorkItemID]; ok {
+			value.TriggerEvidenceKinds = normalizeStrings(append(prior.TriggerEvidenceKinds, value.TriggerEvidenceKinds...))
+		}
+		byID[value.CoverageWorkItemID] = value
+	}
+	keys := make([]string, 0, len(byID))
+	for id := range byID {
+		keys = append(keys, string(id))
+	}
+	sort.Strings(keys)
+	ret := make([]RuntimeCoverageReopenDependency, 0, len(keys))
+	for _, key := range keys {
+		ret = append(ret, byID[common.CoverageWorkItemID(key)])
+	}
+	return nilIfEmpty(ret)
+}
+
+// ValidateRuntimeCoverageItemDependencies verifies the fully compiled coverage
+// graph.  It is a pure contract helper used by activation and bootstrap
+// validation; it does not choose focus ordering or execute a state transition.
+func ValidateRuntimeCoverageItemDependencies(items []RuntimeCoverageItem) error {
+	items = NormalizeRuntimeCoverageItems(items)
+	byID := make(map[common.CoverageWorkItemID]RuntimeCoverageItem, len(items))
+	for _, item := range items {
+		byID[item.ID] = item
+	}
+	edges := make(map[common.CoverageWorkItemID][]common.CoverageWorkItemID, len(items))
+	for _, item := range items {
+		for _, dependency := range item.ReopenDependencies {
+			if dependency.CoverageWorkItemID == "" || len(dependency.TriggerEvidenceKinds) == 0 {
+				return fmt.Errorf("runtime coverage item %s has incomplete reopen dependency", item.ID)
+			}
+			if dependency.CoverageWorkItemID == item.ID {
+				return fmt.Errorf("runtime coverage item %s cannot reopen itself", item.ID)
+			}
+			if _, ok := byID[dependency.CoverageWorkItemID]; !ok {
+				return fmt.Errorf("runtime coverage item %s reopens undeclared coverage item %s", item.ID, dependency.CoverageWorkItemID)
+			}
+			edges[item.ID] = append(edges[item.ID], dependency.CoverageWorkItemID)
+		}
+	}
+	visiting := map[common.CoverageWorkItemID]bool{}
+	visited := map[common.CoverageWorkItemID]bool{}
+	var visit func(common.CoverageWorkItemID) error
+	visit = func(id common.CoverageWorkItemID) error {
+		if visiting[id] {
+			return fmt.Errorf("runtime coverage reopen dependencies contain a cycle at %s", id)
+		}
+		if visited[id] {
+			return nil
+		}
+		visiting[id] = true
+		for _, dependent := range edges[id] {
+			if err := visit(dependent); err != nil {
+				return err
+			}
+		}
+		delete(visiting, id)
+		visited[id] = true
+		return nil
+	}
+	for _, item := range items {
+		if err := visit(item.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func cloneRuntimeCoverageReopenDependencies(values []RuntimeCoverageReopenDependency) []RuntimeCoverageReopenDependency {
+	values = normalizeRuntimeCoverageReopenDependencies(values)
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]RuntimeCoverageReopenDependency, len(values))
+	for idx := range values {
+		ret[idx] = values[idx]
+		ret[idx].TriggerEvidenceKinds = append([]string(nil), values[idx].TriggerEvidenceKinds...)
+	}
+	return ret
 }
 
 func NormalizeRuntimeAcceptanceSlices(values []RuntimeAcceptanceSlice) []RuntimeAcceptanceSlice {

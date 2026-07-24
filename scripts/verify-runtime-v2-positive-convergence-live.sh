@@ -36,6 +36,10 @@ if [[ "$MODE" == "liveness" && "$ACTIVATE" != "0" ]]; then
   echo "liveness mode observes existing Runs and does not activate workspaces" >&2
   exit 2
 fi
+if [[ "$MODE" != "liveness" && "$ACTIVATE" != "1" ]]; then
+  echo "positive and bounded_terminal modes require WORKORCH_E2E_ACTIVATE=1 so the verifier can prove a fresh Run" >&2
+  exit 2
+fi
 mkdir -p "$ARTIFACT_DIR"
 
 echo "runtime-v2 live verifier mode=$MODE"
@@ -76,9 +80,9 @@ if [[ -z "$WS_A" || -z "$WS_B" ]]; then
   cat <<MSG
 Runtime V2 workspace IDs not set.
 Set WORKORCH_E2E_WORKSPACE_ID_A / WORKORCH_E2E_WORKSPACE_ID_B to the deployed
-fixtures or workspaces to observe, optionally with:
+fresh fixtures, with:
   WORKORCH_E2E_PROVIDER_ID / WORKORCH_E2E_MODEL_ID
-  WORKORCH_E2E_ACTIVATE=1 to issue explicit fixture activations before polling
+  WORKORCH_E2E_ACTIVATE=1 to issue required explicit fixture activations before polling
   WORKORCH_E2E_POLL_INTERVAL_SECONDS / WORKORCH_E2E_TIMEOUT_SECONDS
 Then re-run. File-backed sequences are covered by:
   make verify-runtime-v2-positive-convergence-file
@@ -94,7 +98,7 @@ python3 - "$BASE_URL" "$ARTIFACT_DIR" "$WS_A" "$WS_B" "$POLL_INTERVAL" "$TIMEOUT
 import json, os, sys, time, urllib.request, urllib.error, uuid
 
 sys.path.insert(0, os.path.join(os.getcwd(), "scripts"))
-from verify_runtime_v2_live_contract import bounded_git_sequence_errors
+from verify_runtime_v2_live_contract import bounded_git_sequence_errors, provider_ceiling_trace_errors, runtime_v2_audit_errors, runtime_v2_completion_sequence_errors
 
 base, artifact_dir, ws_a, ws_b, poll_s, timeout_s, activate, provider_id, model_id, mode = sys.argv[1:11]
 poll = float(poll_s)
@@ -216,6 +220,17 @@ def operation_receipt_errors(detail):
             errors.append(f"operation {operation.get('operationId')} has outcome_unknown")
     return errors
 
+def runtime_audit_errors(detail, workspace_id, run_id, require_terminal):
+    acceptance = acceptance_from_detail(detail)
+    return runtime_v2_audit_errors(acceptance.get("audit"), workspace_id, run_id, require_terminal)
+
+def provider_ceiling_audit_errors(detail):
+    acceptance = acceptance_from_detail(detail)
+    return provider_ceiling_trace_errors(acceptance.get("audit"), detail.get("usageAudit") or [])
+
+def completion_sequence_errors(detail, require_focus_advance):
+    return runtime_v2_completion_sequence_errors(acceptance_from_detail(detail).get("audit"), require_focus_advance)
+
 def positive_acceptance_errors(detail, bounded):
     acceptance = acceptance_from_detail(detail)
     summary = acceptance.get("summary") or {}
@@ -333,6 +348,40 @@ if do_activate:
     activate_workspace(ws_a, "a")
     activate_workspace(ws_b, "b")
 
+# Positive acceptance is evidence for this invocation only when both explicit
+# activations actually create a new Run.  A prior completed Run could otherwise
+# make an observation-only verifier pass without exercising the deployed binary
+# or this activation's model/definition binding.
+expected_run_ids = {}
+if do_activate:
+    fresh_run_deadline = time.time() + min(30.0, max(5.0, timeout))
+    while time.time() < fresh_run_deadline and len(expected_run_ids) < 2:
+        for ws, label in ((ws_a, "a"), (ws_b, "b")):
+            if ws in expected_run_ids:
+                continue
+            body = snapshot(ws)
+            observe_capability_states(ws, body)
+            current = summarize(ws, body).get("runId")
+            previous = baseline[ws].get("runId")
+            if current and current != previous:
+                expected_run_ids[ws] = current
+                write_json(f"fresh-run-{label}.json", {
+                    "previousRunId": previous,
+                    "activatedRunId": current,
+                    "summary": summarize(ws, body),
+                })
+        if len(expected_run_ids) < 2:
+            time.sleep(min(poll, 1.0))
+    if len(expected_run_ids) != 2:
+        missing = [label for ws, label in ((ws_a, "a"), (ws_b, "b")) if ws not in expected_run_ids]
+        write_json("summary.json", {
+            "mode": mode,
+            "baseline": baseline,
+            "freshRunIDs": expected_run_ids,
+            "errors": [f"activation did not produce a fresh Run for fixtures {missing}"],
+        })
+        raise SystemExit("fresh Run preflight failed: activation did not replace the baseline Run for " + ", ".join(missing))
+
 # A workspace has no authoritative focus slices until its fresh Runtime V2 Run
 # is activated. Recheck the bound after activation so bounded terminal mode cannot
 # accidentally accept an uncompiled or oversized fixture merely because its
@@ -422,11 +471,17 @@ for ws, label in ((ws_a, "a"), (ws_b, "b")):
     detail = detail_snapshot(ws, label, body)
     s = summarize(ws, body)
     results[ws] = s
+    expected_run_id = expected_run_ids.get(ws)
+    if expected_run_id and s.get("runId") != expected_run_id:
+        errors.append(f"{label}: final runId={s.get('runId')} differs from activated fresh Run {expected_run_id}")
     errors.extend(f"{label}: {value}" for value in operation_receipt_errors(detail))
     errors.extend(f"{label}: {value}" for value in governance_binding_errors(detail))
     if (s.get("projectionState") or "ready") not in ("ready", "ok", ""):
         errors.append(f"{label}: projectionState={s.get('projectionState')}")
     if mode != "liveness":
+        errors.extend(f"{label}: {value}" for value in runtime_audit_errors(detail, ws, s.get("runId") or "", True))
+        errors.extend(f"{label}: {value}" for value in provider_ceiling_audit_errors(detail))
+        errors.extend(f"{label}: {value}" for value in completion_sequence_errors(detail, mode == "bounded_terminal"))
         if s.get("runState") != "completed":
             errors.append(f"{label}: runState={s.get('runState')} fail={s.get('failureReason')}")
         if s.get("activeRunId"):
@@ -490,6 +545,7 @@ write_json("summary.json", {
     "timedOut": timed_out and mode != "liveness",
     "observationWindowElapsed": timed_out and mode == "liveness",
     "baseline": baseline,
+    "freshRunIDs": expected_run_ids,
     "results": results,
     "errors": errors,
     "capabilityStateObservations": capability_state_observations,

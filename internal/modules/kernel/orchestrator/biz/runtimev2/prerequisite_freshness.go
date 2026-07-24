@@ -574,7 +574,8 @@ func sameFailureTargetObservationBinding(left *runtimecontract.RuntimeFailureTar
 	}
 	l := left.Normalized()
 	r := right.Normalized()
-	if l.OwnerModuleID != r.OwnerModuleID || l.SubjectRef != r.SubjectRef || l.TargetRole != r.TargetRole || l.ObservedRevision != r.ObservedRevision || len(l.TargetRefs) != len(r.TargetRefs) {
+	if l.OwnerModuleID != r.OwnerModuleID || l.SubjectRef != r.SubjectRef || l.TargetRole != r.TargetRole || l.ObservedRevision != r.ObservedRevision ||
+		l.DiagnosticClass != r.DiagnosticClass || l.ContentHash != r.ContentHash || !sameRuntimeTargetRefs(l.EvidenceRefs, r.EvidenceRefs) || len(l.TargetRefs) != len(r.TargetRefs) {
 		return false
 	}
 	for idx := range l.TargetRefs {

@@ -82,7 +82,7 @@ func (m *Biz) resolveRuntimeV2Prerequisite(
 	case runtimecontract.PrerequisiteKindTargetSelection:
 		result, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, m.EventHub(), events.AcquireRuntimeTargetSelectionCommand{
 			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
-			PrerequisiteID: prerequisite.ID, WorkspaceDeliverableDirectory: deliverableDirectory, TargetRole: prerequisite.SubjectRef, TargetSelectorRef: prerequisite.TargetSelectorRef,
+			PrerequisiteID: prerequisite.ID, WorkspaceDeliverableDirectory: deliverableDirectory, TargetRole: prerequisite.SubjectRef, TargetSelectorRef: prerequisite.TargetSelectorRef, TargetSelectorOwnerRef: prerequisite.TargetSelectorOwnerRef, TargetSelectorSubjectRef: prerequisite.TargetSelectorSubjectRef, TargetSelectorCandidateRefs: prerequisite.TargetSelectorCandidateRefs, ProspectiveTargetRef: prerequisite.ProspectiveTargetRef,
 			MaxItems: aggregate.Facts.ConvergencePolicy.MaxCandidateContextItems,
 		})
 		if err != nil {

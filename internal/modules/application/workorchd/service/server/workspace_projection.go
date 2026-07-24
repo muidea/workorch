@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -86,7 +87,19 @@ func (s *serverState) reconciledWorkspaceProjectionStatus(ctx context.Context) (
 		status.Error = err.Error()
 		return status, err
 	}
-	return s.workspaceProjection.Status(), nil
+	status := s.workspaceProjection.Status()
+	// A ready projection must have consumed every event that remains relevant
+	// to a live workspace.  Reconciliation may have scheduled an asynchronous
+	// rebuild; until that rebuild commits, health must not advertise a stale
+	// read model as ready.  This is an SM-4 observation guard only: it neither
+	// changes Runtime V2 authority nor attempts to replay a Run.
+	if status.SourceEventRevision != status.ProjectedSourceRevision {
+		status.State = workspaceProjectionStateStale
+		status.StaleReason = "source_high_watermark"
+		status.Error = fmt.Sprintf("workspace projection watermark lag: source=%d projected=%d", status.SourceEventRevision, status.ProjectedSourceRevision)
+		return status, fmt.Errorf("%w: %s", common.ErrConflict, status.Error)
+	}
+	return status, nil
 }
 
 func (s *serverState) listProjectedWorkspaces() ([]appservice.Workspace, workspaceProjectionStatus, error) {

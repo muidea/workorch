@@ -1444,9 +1444,6 @@ func (s *Store) hasStaleWorkspaceLocked() bool {
 
 func (s *Store) refreshProjectedSourceRevisionLocked() {
 	var source, projected int64
-	if s.sourceRevision > source {
-		source = s.sourceRevision
-	}
 	for _, entry := range s.workspaces {
 		if entry == nil {
 			continue

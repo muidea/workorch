@@ -299,5 +299,6 @@ func sameRuntimeFailureTargetObservation(left *RuntimeFailureTargetObservation, 
 	r := right.Normalized()
 	return l.OwnerModuleID == r.OwnerModuleID && l.SubjectRef == r.SubjectRef &&
 		l.TargetRole == r.TargetRole && l.ObservedRevision == r.ObservedRevision &&
-		sameStrings(l.TargetRefs, r.TargetRefs)
+		l.DiagnosticClass == r.DiagnosticClass && l.ContentHash == r.ContentHash &&
+		sameStrings(l.TargetRefs, r.TargetRefs) && sameStrings(l.EvidenceRefs, r.EvidenceRefs)
 }

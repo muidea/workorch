@@ -41,6 +41,175 @@ def bounded_git_sequence_errors(operations: list[dict[str, Any]]) -> list[str]:
     return errors
 
 
+def runtime_v2_audit_errors(
+    audit: Any, workspace_id: str, run_id: str, require_terminal: bool
+) -> list[str]:
+    """Check the metadata-only Runtime V2 audit chain retained by live runs."""
+
+    if not isinstance(audit, dict):
+        return ["missing Runtime V2 audit projection"]
+    errors: list[str] = []
+    if audit.get("workspaceId") != workspace_id or audit.get("runId") != run_id:
+        errors.append(
+            "audit scope mismatch "
+            f"workspace/run={audit.get('workspaceId')}/{audit.get('runId')}, want {workspace_id}/{run_id}"
+        )
+    if not audit.get("stateRevision") or not audit.get("definitionRevision") or not audit.get("evidenceRevision"):
+        errors.append("audit lacks persisted state, definition, or evidence revision")
+
+    focus = audit.get("focus") or {}
+    if not focus.get("id") or not (focus.get("coverageWorkItemIds") or []):
+        errors.append("audit lacks current focus or coverage identity")
+    coverage = audit.get("coverage") or []
+    if not coverage or any(not item.get("id") or not item.get("state") for item in coverage):
+        errors.append("audit lacks complete coverage state")
+
+    authority = audit.get("authority") or {}
+    for field in (
+        "snapshotId",
+        "action",
+        "focusId",
+        "requiredOutputHash",
+        "definitionRevision",
+        "evidenceRevision",
+        "operationContractRevision",
+    ):
+        if not authority.get(field):
+            errors.append(f"audit authority lacks {field}")
+    if authority.get("definitionRevision") and authority.get("definitionRevision") != audit.get("definitionRevision"):
+        errors.append("audit authority definition revision differs from aggregate definition revision")
+    if authority.get("evidenceRevision") and authority.get("evidenceRevision") != audit.get("evidenceRevision"):
+        errors.append("audit authority evidence revision differs from aggregate evidence revision")
+
+    attempts = audit.get("candidateAttempts") or []
+    if not attempts:
+        errors.append("audit has no candidate attempt")
+    for item in attempts:
+        if not item.get("authorityContractId") or not item.get("authoritySnapshotId") or not item.get("state"):
+            errors.append("audit candidate attempt lacks authority identity or state")
+        if not item.get("stablePrefixHash"):
+            errors.append("audit candidate attempt lacks stablePrefixHash")
+
+    dispatches = audit.get("dispatches") or []
+    seen_dispatches: set[str] = set()
+    for item in dispatches:
+        dispatch_id = item.get("id")
+        if not dispatch_id or not item.get("authoritySnapshotId") or not item.get("state"):
+            errors.append("audit dispatch lacks identity, authority snapshot, or state")
+            continue
+        if dispatch_id in seen_dispatches:
+            errors.append(f"audit has duplicate dispatch {dispatch_id}")
+        seen_dispatches.add(dispatch_id)
+
+    grounding = audit.get("grounding") or {}
+    observations = grounding.get("prerequisiteObservations") or []
+    if not observations:
+        errors.append("audit lacks owner prerequisite observations")
+    for item in observations:
+        if not item.get("prerequisiteId") or not item.get("ownerModuleId") or not item.get("observationId"):
+            errors.append("audit prerequisite observation lacks owner identity")
+        for dependency in item.get("dependencies") or []:
+            if not all(dependency.get(field) for field in ("domain", "ownerModuleId", "subjectRef", "revision")):
+                errors.append("audit prerequisite freshness dependency is incomplete")
+    selection = grounding.get("targetSelection")
+    if selection is not None:
+        for field in ("snapshotId", "ownerModuleId", "targetRole", "selectorRef", "selectorOwnerRef", "observedRevision"):
+            if not selection.get(field):
+                errors.append(f"audit target selection lacks {field}")
+    for item in grounding.get("targetSnapshots") or []:
+        if not item.get("targetRef") or not item.get("contentHash") or not item.get("contentState"):
+            errors.append("audit target snapshot lacks identity or content state")
+
+    ceiling = grounding.get("providerCeiling")
+    if not isinstance(ceiling, dict):
+        errors.append("audit lacks sealed provider ceiling")
+    else:
+        for field in (
+            "providerId", "modelId", "contextWindowTokens", "providerMaxOutputTokens",
+            "effectiveMaxOutputTokens", "maxInputTokens", "maxBytes", "capabilityRevision", "configurationRevision",
+        ):
+            if not ceiling.get(field):
+                errors.append(f"audit provider ceiling lacks {field}")
+        if (
+            isinstance(ceiling.get("contextWindowTokens"), int)
+            and isinstance(ceiling.get("effectiveMaxOutputTokens"), int)
+            and isinstance(ceiling.get("maxInputTokens"), int)
+            and ceiling["maxInputTokens"] + ceiling["effectiveMaxOutputTokens"] > ceiling["contextWindowTokens"]
+        ):
+            errors.append("audit provider ceiling input plus output exceeds context window")
+
+    repair = audit.get("repair") or {}
+    for field in ("repairAttempts", "validationOnlyRetries", "noProgressCount", "terminalDeliveryAttempts"):
+        if not isinstance(repair.get(field), int) or repair.get(field) < 0:
+            errors.append(f"audit repair counter {field} is invalid")
+
+    if require_terminal:
+        terminal = audit.get("terminal")
+        if not isinstance(terminal, dict):
+            errors.append("completed Run lacks terminal audit record")
+        elif not terminal.get("code"):
+            errors.append("terminal audit lacks terminal code")
+        assessments = audit.get("assessments") or []
+        if not assessments:
+            errors.append("completed Run lacks assessment audit lineage")
+        elif not any(item.get("disposition") == "satisfied" for item in assessments):
+            errors.append("completed Run has no satisfied assessment audit delta")
+    return errors
+
+
+def provider_ceiling_trace_errors(audit: Any, traces: Any) -> list[str]:
+    """Prove at least one provider request used the sealed model ceiling."""
+
+    if not isinstance(audit, dict):
+        return ["missing Runtime V2 audit projection"]
+    ceiling = ((audit.get("grounding") or {}).get("providerCeiling"))
+    if not isinstance(ceiling, dict):
+        return ["missing sealed provider ceiling"]
+    if not isinstance(traces, list) or not traces:
+        return ["missing provider usage audit trace"]
+    for trace in traces:
+        if not isinstance(trace, dict):
+            continue
+        budget = trace.get("contextBudget") or {}
+        if not isinstance(budget, dict):
+            continue
+        provider_id = budget.get("providerId") or trace.get("providerId")
+        model_id = budget.get("modelId") or trace.get("model")
+        if provider_id != ceiling.get("providerId") or model_id != ceiling.get("modelId"):
+            continue
+        if budget.get("capabilityRevision") != ceiling.get("capabilityRevision") or budget.get("configurationRevision") != ceiling.get("configurationRevision"):
+            continue
+        if budget.get("maxBytes") != ceiling.get("maxBytes") or budget.get("maxRequestBytes") != ceiling.get("maxBytes"):
+            continue
+        if budget.get("maxTokens") != ceiling.get("maxInputTokens") or budget.get("estimatedOutputTokens") != ceiling.get("effectiveMaxOutputTokens"):
+            continue
+        if budget.get("overBudget"):
+            return ["provider context-budget trace submitted over the sealed ceiling"]
+        return []
+    return ["no provider context-budget trace matches the sealed model ceiling"]
+
+
+def runtime_v2_completion_sequence_errors(audit: Any, require_focus_advance: bool) -> list[str]:
+    """Check persisted evidence/assessment lineage, never inferred UI activity."""
+
+    if not isinstance(audit, dict):
+        return ["missing Runtime V2 audit projection"]
+    evidence = audit.get("acceptedEvidence") or []
+    kinds = {item.get("kind") for item in evidence if isinstance(item, dict)}
+    errors: list[str] = []
+    if "state_change" not in kinds:
+        errors.append("completion audit lacks accepted durable state-change evidence")
+    if "validation" not in kinds:
+        errors.append("completion audit lacks accepted validation evidence")
+    if not any(item.get("disposition") == "satisfied" for item in (audit.get("assessments") or []) if isinstance(item, dict)):
+        errors.append("completion audit lacks satisfied assessment delta")
+    if require_focus_advance and not (audit.get("completedFocusIds") or []):
+        errors.append("bounded completion audit lacks persisted focus advance")
+    if audit.get("remainingFocusIds"):
+        errors.append("completed Run retains remaining focus queue")
+    return errors
+
+
 def _accepted(variant: str, snapshot_hash: str, operation_id: str) -> dict[str, Any]:
     return {
         "kind": "git/write",
@@ -77,6 +246,42 @@ def _self_test() -> None:
     ]
     if not bounded_git_sequence_errors(reused_snapshot):
         raise AssertionError("reused Git capability-state snapshot was accepted")
+
+    valid_audit = {
+        "workspaceId": "ws-1", "runId": "run-1", "stateRevision": 9,
+        "definitionRevision": "definition-1", "evidenceRevision": "evidence-2",
+        "focus": {"id": "focus-1", "coverageWorkItemIds": ["coverage-1"]},
+        "coverage": [{"id": "coverage-1", "state": "satisfied"}],
+        "authority": {
+            "snapshotId": "authority-1", "action": "complete", "focusId": "focus-1", "requiredOutputHash": "output-1",
+            "definitionRevision": "definition-1", "evidenceRevision": "evidence-2", "operationContractRevision": "operations-1",
+        },
+        "candidateAttempts": [{"authorityContractId": "contract-1", "authoritySnapshotId": "authority-1", "state": "accepted", "stablePrefixHash": "prefix-1"}],
+        "dispatches": [{"id": "dispatch-1", "authoritySnapshotId": "authority-1", "state": "committed"}],
+        "grounding": {"prerequisiteObservations": [{"prerequisiteId": "manifest", "ownerModuleId": "blocks/file", "observationId": "obs-1", "dependencies": [{"domain": "workspace_tree", "ownerModuleId": "blocks/file", "subjectRef": "workspace", "revision": "tree-1"}]}], "providerCeiling": {"providerId": "ai-proxy", "modelId": "model-1", "contextWindowTokens": 128000, "providerMaxOutputTokens": 16384, "effectiveMaxOutputTokens": 16384, "maxInputTokens": 111616, "maxBytes": 446464, "capabilityRevision": "capability-1", "configurationRevision": "configuration-1"}},
+        "repair": {"repairAttempts": 0, "validationOnlyRetries": 0, "noProgressCount": 0, "terminalDeliveryAttempts": 0},
+        "assessments": [{"id": "assessment-1", "disposition": "satisfied"}],
+        "terminal": {"code": "runtime_completed"},
+    }
+    if errors := runtime_v2_audit_errors(valid_audit, "ws-1", "run-1", True):
+        raise AssertionError(f"valid Runtime V2 audit rejected: {errors}")
+    valid_trace = {"providerId": "ai-proxy", "model": "model-1", "contextBudget": {"providerId": "ai-proxy", "modelId": "model-1", "capabilityRevision": "capability-1", "configurationRevision": "configuration-1", "maxBytes": 446464, "maxRequestBytes": 446464, "maxTokens": 111616, "estimatedOutputTokens": 16384, "overBudget": False}}
+    if errors := provider_ceiling_trace_errors(valid_audit, [valid_trace]):
+        raise AssertionError(f"matching sealed provider ceiling trace rejected: {errors}")
+    invalid_trace = dict(valid_trace)
+    invalid_trace["contextBudget"] = dict(valid_trace["contextBudget"])
+    invalid_trace["contextBudget"]["estimatedOutputTokens"] = 4096
+    if not provider_ceiling_trace_errors(valid_audit, [invalid_trace]):
+        raise AssertionError("fixed output-cap trace was accepted")
+    valid_audit["acceptedEvidence"] = [{"kind": "state_change"}, {"kind": "validation"}]
+    valid_audit["completedFocusIds"] = ["focus-1"]
+    valid_audit["remainingFocusIds"] = []
+    if errors := runtime_v2_completion_sequence_errors(valid_audit, True):
+        raise AssertionError(f"valid completion sequence rejected: {errors}")
+    invalid_audit = dict(valid_audit)
+    invalid_audit["candidateAttempts"] = [{"authorityContractId": "contract-1"}]
+    if not runtime_v2_audit_errors(invalid_audit, "ws-1", "run-1", True):
+        raise AssertionError("incomplete Runtime V2 audit was accepted")
 
     print("runtime-v2 live contract self-test passed")
 

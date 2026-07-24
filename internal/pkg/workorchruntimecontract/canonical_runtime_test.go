@@ -6,6 +6,27 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
+func TestRuntimeTargetSelectionCreateRequiresAndHashesProspectiveTarget(t *testing.T) {
+	selection := RuntimeTargetSelection{
+		PrerequisiteID: "selection-1", OwnerModuleID: RuntimeModuleFile, TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable",
+		Disposition: RuntimeTargetSelectionCreate, CandidateCount: 0, ObservedRevision: "workspace-empty-v1",
+	}
+	selection.SnapshotID = StableRuntimeTargetSelectionSnapshotID(selection)
+	if err := selection.Validate(); err == nil {
+		t.Fatal("create selection without prospective target was accepted")
+	}
+	selection.ProspectiveTargetRef = "initial-deliverable.txt"
+	selection.SnapshotID = StableRuntimeTargetSelectionSnapshotID(selection)
+	if err := selection.Validate(); err != nil {
+		t.Fatalf("valid create selection rejected: %v", err)
+	}
+	changed := selection
+	changed.ProspectiveTargetRef = "other-deliverable.txt"
+	if selection.SnapshotID == StableRuntimeTargetSelectionSnapshotID(changed) {
+		t.Fatal("selection snapshot did not change with prospective target")
+	}
+}
+
 func TestRuntimeDecisionActionStateMatrix(t *testing.T) {
 	tests := []struct {
 		name          string

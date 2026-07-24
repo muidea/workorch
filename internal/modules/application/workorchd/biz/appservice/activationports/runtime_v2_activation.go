@@ -148,6 +148,16 @@ func runtimeV2ExecutionContract(input map[string]any) runtimecontract.RuntimeExe
 				EvidenceRole: runtimeV2String(item["evidenceRole"]), Description: runtimeV2String(item["description"]),
 			})
 		}
+		for _, item := range runtimeV2MapSlice(profile["coverageDependencies"]) {
+			contract.CoverageDependencies = append(contract.CoverageDependencies, runtimecontract.RuntimeCoverageDependency{
+				ID:                     runtimeV2String(item["id"]),
+				SourceScope:            runtimeV2String(item["sourceScope"]),
+				SourceRequirementID:    runtimeV2String(item["sourceRequirementId"]),
+				DependentScope:         runtimeV2String(item["dependentScope"]),
+				DependentRequirementID: runtimeV2String(item["dependentRequirementId"]),
+				TriggerEvidenceKinds:   runtimeV2Strings(item["triggerEvidenceKinds"]),
+			})
+		}
 		for _, item := range runtimeV2MapSlice(profile["evidenceRequirements"]) {
 			acceptedVariants := make([]runtimecontract.RuntimeOperationVariantRef, 0)
 			for _, variant := range runtimeV2MapSlice(item["acceptedOperationVariants"]) {
@@ -160,7 +170,7 @@ func runtimeV2ExecutionContract(input map[string]any) runtimecontract.RuntimeExe
 			contract.EvidenceRequirements = append(contract.EvidenceRequirements, runtimecontract.RuntimeProfileEvidenceRequirement{
 				ID: runtimeV2String(item["id"]), Scope: runtimeV2String(item["scope"]), EvidenceRole: runtimeV2String(item["evidenceRole"]),
 				TargetRole: runtimeV2String(item["targetRole"]), TargetRefs: runtimeV2Strings(item["targetRefs"]),
-				TargetDiscoverySources: runtimeV2Strings(item["targetDiscoverySources"]), TargetSelectorRef: runtimeV2String(item["targetSelectorRef"]), RequireTargetGrounding: runtimeV2Bool(item["requireTargetGrounding"]),
+				TargetDiscoverySources: runtimeV2Strings(item["targetDiscoverySources"]), TargetSelectorRef: runtimeV2String(item["targetSelectorRef"]), TargetSelectorOwnerRef: runtimeV2String(item["targetSelectorOwnerRef"]), TargetSelectorSubjectRef: runtimeV2String(item["targetSelectorSubjectRef"]), TargetSelectorCandidateRefs: runtimeV2Strings(item["targetSelectorCandidateRefs"]), ProspectiveTargetRef: runtimeV2String(item["prospectiveTargetRef"]), RequireTargetGrounding: runtimeV2Bool(item["requireTargetGrounding"]),
 				RequiredEvidenceKinds: runtimeV2Strings(item["requiredEvidenceKinds"]),
 				RequireDirectEvidence: runtimeV2Bool(item["requireDirectEvidence"]), RequireClaimEvidence: runtimeV2Bool(item["requireClaimEvidence"]),
 				RequireExecutableBehaviorEvidence: runtimeV2Bool(item["requireExecutableBehaviorEvidence"]), RequireCoverageTargets: runtimeV2Bool(item["requireCoverageTargets"]),

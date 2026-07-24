@@ -19,6 +19,7 @@ func RuntimeConvergenceProgressSignature(aggregate RuntimeAggregate) string {
 	progress := struct {
 		Focus                      runtimecontract.CoverageFocus
 		RemainingFocuses           []runtimecontract.CoverageFocus
+		CompletedFocuses           []runtimecontract.CoverageFocus
 		EvidenceRevision           string
 		Failure                    *runtimecontract.FailureFact
 		Prerequisites              runtimecontract.PrerequisiteState
@@ -40,7 +41,7 @@ func RuntimeConvergenceProgressSignature(aggregate RuntimeAggregate) string {
 		GovernanceRequests         []runtimecontract.RuntimeGovernanceRequestRecord
 		GovernanceResolutions      []runtimecontract.RuntimeGovernanceResolutionRecord
 	}{
-		Focus: facts.Focus, RemainingFocuses: facts.RemainingFocuses,
+		Focus: facts.Focus, RemainingFocuses: facts.RemainingFocuses, CompletedFocuses: facts.CompletedFocuses,
 		EvidenceRevision: facts.EvidenceRevision, Failure: facts.Failure,
 		Prerequisites: facts.Prerequisites, Repair: facts.Repair, RepairDirective: facts.RepairDirective, Recovery: facts.Recovery,
 		FreshnessReacquireCoverage: facts.FreshnessReacquireCoverage,

@@ -679,6 +679,7 @@ func TestRuntimeV2StateRepositoryCreationSelectionCommitCrashRestartIsAtomic(t *
 	facts.Focus.TargetRole = "deliverable"
 	facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
 	facts.Focus.TargetSelectorRef = "file/workspace_deliverable"
+	facts.Focus.ProspectiveTargetRef = "initial-deliverable.txt"
 	facts.Focus.RequireTargetGrounding = true
 	repository := runtimeV2StateRepository{hub: hub}
 	controller, err := runtimev2.NewRuntimeController(repository)
@@ -701,7 +702,7 @@ func TestRuntimeV2StateRepositoryCreationSelectionCommitCrashRestartIsAtomic(t *
 	}
 	selection := runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: prerequisite.ID, OwnerModuleID: runtimecontract.RuntimeModuleFile,
-		TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable",
+		TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable", ProspectiveTargetRef: facts.Focus.ProspectiveTargetRef,
 		Disposition: runtimecontract.RuntimeTargetSelectionCreate, CandidateCount: 0, ObservedRevision: "workspace-tree-empty-v1",
 	}
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
@@ -1239,7 +1240,11 @@ func TestRuntimeV2StateRepositoryOwnerFailureObservationReceiptCrashRestartIsAto
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
-	runs := memory.NewRunRepository()
+	// The response-loss half of this boundary must survive a real Run-owner
+	// persistence reload. An in-memory repository can prove reducer atomicity,
+	// but cannot prove that the committed owner observation is all a restarted
+	// process can observe.
+	runs := filerepository.NewRunRepository(filepath.Join(t.TempDir(), "runs.json"))
 	if err := runs.Create(ctx, runtimeV2RunForTest(common.RunStateActive, runtimeV2Definition())); err != nil {
 		t.Fatal(err)
 	}
@@ -1372,20 +1377,252 @@ func TestRuntimeV2StateRepositoryOwnerFailureObservationReceiptCrashRestartIsAto
 		t.Fatalf("receipt CAS failure partially persisted failure authority: %+v", beforeRetry)
 	}
 
-	committed, err := restarted.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", newExecutor(restarted, false))
+	// The owner receipt and the rejected-evidence/failure-target transition are
+	// separate CAS boundaries.  Lose the response only after the latter becomes
+	// durable: a restart must consume the committed observation, not invoke the
+	// validation owner again or reconstruct a target from diagnostics.
+	responseLossRepository := &panicAfterRuntimeStateSaveRepository{
+		RuntimeStateRepository: repository,
+		marker:                 "failure-observation-evidence-response-loss",
+		match: func(aggregate runtimev2.RuntimeAggregate) bool {
+			return aggregate.ActiveDispatch == nil && len(aggregate.OperationReceipts) == 1 &&
+				len(aggregate.Facts.Evidence.Rejected) == 1 && aggregate.Facts.Failure != nil &&
+				aggregate.Facts.Resources.FailureTarget != nil &&
+				aggregate.Facts.Resources.FailureTarget.TargetObservation != nil &&
+				aggregate.Facts.Resources.FailureTarget.TargetObservation.SubjectRef == "server-a"
+		},
+	}
+	responseLost, err := runtimev2.NewRuntimeController(responseLossRepository)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(committed.OperationReceipts) != 1 || len(committed.Facts.Evidence.Rejected) != 1 || committed.Facts.Failure == nil ||
-		committed.Facts.Resources.FailureTarget == nil || committed.Facts.Resources.FailureTarget.TargetObservation == nil ||
-		committed.Facts.Resources.FailureTarget.TargetObservation.SubjectRef != "server-a" ||
-		committed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange {
-		t.Fatalf("restarted failure-observation commit=%+v", committed)
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != "failure-observation-evidence-response-loss" {
+				t.Fatalf("unexpected failure-observation response-loss marker: %v", recovered)
+			}
+		}()
+		_, _ = responseLost.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", newExecutor(responseLost, false))
+		t.Fatal("expected owner failure observation response loss after durable evidence CAS")
+	}()
+	if !responseLossRepository.fired {
+		t.Fatal("failure-observation evidence response-loss CAS point was not reached")
 	}
-	persisted, err := restarted.Load(ctx, "ws-v2", "run-v2")
-	if err != nil || persisted.StateRevision != committed.StateRevision || len(persisted.OperationReceipts) != 1 ||
-		persisted.Facts.Resources.FailureTarget == nil || len(persisted.Facts.Evidence.Rejected) != 1 {
+
+	restartedAfterResponseLoss, err := runtimev2.NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := restartedAfterResponseLoss.Load(ctx, "ws-v2", "run-v2")
+	if err != nil || len(persisted.OperationReceipts) != 1 || len(persisted.Facts.Evidence.Rejected) != 1 || persisted.Facts.Failure == nil ||
+		persisted.Facts.Resources.FailureTarget == nil || persisted.Facts.Resources.FailureTarget.TargetObservation == nil ||
+		persisted.Facts.Resources.FailureTarget.TargetObservation.SubjectRef != "server-a" ||
+		persisted.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite ||
+		len(persisted.Facts.Prerequisites.Pending) != 1 || persisted.Facts.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindTargetSnapshot ||
+		persisted.Facts.Prerequisites.Pending[0].SubjectRef != "implementation.go" {
 		t.Fatalf("restart did not reuse committed failure observation: aggregate=%+v err=%v", persisted, err)
+	}
+	if _, err := restartedAfterResponseLoss.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", newExecutor(restartedAfterResponseLoss, false)); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("restart replayed completed failure dispatch instead of waiting for its prerequisite: %v", err)
+	}
+	revision := persisted.StateRevision
+	replayed, receipt, err := restartedAfterResponseLoss.CommitOperationReceipt(ctx, "ws-v2", "run-v2", sealed.Aggregate.ActiveDispatch.ID, persisted.OperationReceipts[0].Fence, persisted.OperationReceipts[0])
+	if err != nil || replayed.StateRevision != revision || !runtimecontract.SameRuntimeOperationReceipt(receipt, persisted.OperationReceipts[0]) {
+		t.Fatalf("duplicate owner receipt changed committed failure observation: aggregate=%+v receipt=%+v err=%v", replayed, receipt, err)
+	}
+}
+
+// A same-focus rejected operation shape remains diagnostic lineage until
+// durable progress closes it.  An owner-grounded retarget is the narrow legal
+// way to repair that same gap: after a real process restart the old shape must
+// still be rejected, while the newly observed target receives a fresh
+// authority and a distinct admissible shape.  This intentionally drives only
+// typed receipt/prerequisite contracts; neither the test nor the runtime
+// reconstructs a target from provider text.
+func TestRuntimeV2FileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *testing.T) {
+	ctx := context.Background()
+	runs := filerepository.NewRunRepository(filepath.Join(t.TempDir(), "runs.json"))
+	if err := runs.Create(ctx, runtimeV2RunForTest(common.RunStateActive, runtimeV2Definition())); err != nil {
+		t.Fatal(err)
+	}
+
+	firstHub := magicevent.NewHub(16)
+	t.Cleanup(func() { firstHub.Terminate(ctx) })
+	firstRunOwner := runmodule.New()
+	if err := firstRunOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: firstHub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := firstRunOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = firstRunOwner.Stop(ctx) })
+
+	facts := runtimeV2Aggregate(t, 1).Facts
+	facts.Focus.TargetRefs = []string{"main.go"}
+	facts.Focus.TargetRole = "implementation"
+	facts.Focus.RequireTargetGrounding = true
+	facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
+		TargetRef: "main.go", ContentHash: "main-v1", ContentState: runtimecontract.SnapshotContentStateComplete,
+	}}
+	// A failure target is only authoritative when its owning catalog revision is
+	// already persisted in prerequisite freshness.  This is deliberately an MCP
+	// observation because that owner is allowed to report explicit failureTargets.
+	catalog := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: "capability:blocks/mcp:failure-observer", Kind: runtimecontract.PrerequisiteKindCapability,
+		OwnerModuleID: runtimecontract.RuntimeModuleMCP, ContentHash: "mcp-catalog-v1",
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleMCP,
+			SubjectRef: "mcp_server_catalog", Revision: "mcp-catalog-v1",
+		}},
+	}
+	catalog.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(catalog)
+	facts.Prerequisites.Satisfied = append(facts.Prerequisites.Satisfied, runtimecontract.RuntimePrerequisite{
+		ID: catalog.PrerequisiteID, Kind: catalog.Kind, OwnerModuleID: catalog.OwnerModuleID,
+		RequiredCapabilities: []string{runtimecontract.StepKindMCPToolCall}, Reason: "failure target owner catalog",
+	})
+	facts.Resources.PrerequisiteObservations = append(facts.Resources.PrerequisiteObservations, catalog)
+
+	firstRepository := runtimeV2StateRepository{hub: firstHub}
+	firstController, err := runtimev2.NewRuntimeController(firstRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialized, err := firstController.Initialize(ctx, facts, runtimeV2Definition(), nil)
+	if err != nil || initialized.Decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+		t.Fatalf("initial retarget aggregate=%+v err=%v", initialized, err)
+	}
+	if _, err := firstController.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "retarget-shape-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	mainTarget := "main.go"
+	oldCandidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+		ID: "rejected-main-edit", Kind: runtimecontract.StepKindFileEdit,
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{mainTarget},
+		Parameters: runtimeV2FileEditParameters(mainTarget),
+	}}}}}
+	sealed, err := firstController.AdmitAndSealCandidateAttempt(ctx, "ws-v2", "run-v2", 0, oldCandidate)
+	if err != nil || !sealed.Admission.Accepted() || sealed.Aggregate.ActiveDispatch == nil {
+		t.Fatalf("old candidate seal=%+v err=%v", sealed, err)
+	}
+
+	ownerFailure := runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassExecutionFailure, Code: "implementation_targeted_failure",
+		Signature: "same-gap-owner-retarget", Message: "owner observed a different implementation target",
+		TargetRefs: []string{"implementation.go"},
+		TargetObservation: &runtimecontract.RuntimeFailureTargetObservation{
+			OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "server-a", TargetRole: "implementation",
+			ObservedRevision: "mcp-catalog-v1", TargetRefs: []string{"implementation.go"},
+		},
+	}
+	executor := runtimeOperationExecutorFunc(func(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest) (runtimev2.RuntimeOperationExecutionResult, error) {
+		receipt := runtimecontract.RuntimeOperationReceipt{
+			ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID,
+			// The owner rejected the requested semantic outcome after a durable
+			// attempt. Preserve the expected scope so the executor does not replace
+			// the owner-authored failure target with a generic effect mismatch.
+			Outcome: runtimecontract.RuntimeOperationOutcomeRejected, ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
+			Failure: &ownerFailure, Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "owner observed implementation failure"},
+		}
+		_, committed, err := firstController.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+		if err != nil {
+			return runtimev2.RuntimeOperationExecutionResult{}, err
+		}
+		return runtimev2.RuntimeOperationExecutionResult{
+			EventID: "same-gap-owner-retarget", OperationID: request.Operation.ID, EvidenceKind: runtimecontract.EvidenceKindStateChange,
+			Status: runtimev2.ExecutionEvidenceStatusRejected, SourceRef: "workorch://mcp/failure-target",
+			Failure: &ownerFailure, Evidence: committed.Evidence, Receipt: committed,
+		}, nil
+	})
+	afterFailure, err := firstController.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", executor)
+	if err != nil || afterFailure.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || afterFailure.Facts.Resources.FailureTarget == nil ||
+		len(afterFailure.Facts.Resources.FailureTarget.TargetRefs) != 1 || afterFailure.Facts.Resources.FailureTarget.TargetRefs[0] != "implementation.go" {
+		t.Fatalf("owner retarget was not committed as prerequisite authority: aggregate=%+v err=%v", afterFailure, err)
+	}
+	if shapes := runtimev2.ActiveRejectedOperationShapes(afterFailure); len(shapes) != 1 ||
+		shapes[0].Hash != runtimecontract.StableRuntimeOperationShape(oldCandidate.StateChange.Operations[0].Operation) ||
+		len(shapes[0].Operation.TargetRefs) != 1 || shapes[0].Operation.TargetRefs[0] != "main.go" {
+		t.Fatalf("same-gap rejected shape was not persisted before restart: %+v", shapes)
+	}
+	var rejectedTargetSnapshot runtimecontract.RuntimePrerequisite
+	for _, prerequisite := range afterFailure.Facts.Prerequisites.Pending {
+		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSnapshot && prerequisite.SubjectRef == "main.go" {
+			rejectedTargetSnapshot = prerequisite
+			break
+		}
+	}
+	if rejectedTargetSnapshot.ID == "" {
+		t.Fatalf("rejected durable operation did not request its required freshness snapshot: %+v", afterFailure.Facts.Prerequisites.Pending)
+	}
+
+	// Reconstruct the production Run owner against the same file-backed state.
+	// No process-local controller, dispatch or rejected-shape cache crosses this
+	// boundary.
+	if err := firstRunOwner.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	firstHub.Terminate(ctx)
+	secondHub := magicevent.NewHub(16)
+	t.Cleanup(func() { secondHub.Terminate(ctx) })
+	secondRunOwner := runmodule.New()
+	if err := secondRunOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: secondHub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := secondRunOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = secondRunOwner.Stop(ctx) })
+
+	restarted, err := runtimev2.NewRuntimeController(runtimeV2StateRepository{hub: secondHub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := restarted.Load(ctx, "ws-v2", "run-v2")
+	if err != nil || loaded.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || loaded.Facts.Resources.FailureTarget == nil {
+		t.Fatalf("file-backed restart lost retarget authority: aggregate=%+v err=%v", loaded, err)
+	}
+	if shapes := runtimev2.ActiveRejectedOperationShapes(loaded); len(shapes) != 1 ||
+		shapes[0].Hash != runtimecontract.StableRuntimeOperationShape(oldCandidate.StateChange.Operations[0].Operation) {
+		t.Fatalf("file-backed restart lost old rejected shape: %+v", shapes)
+	}
+
+	afterRejectedTargetRefresh, err := restarted.CommitPrerequisite(ctx, "ws-v2", "run-v2", runtimev2.PrerequisiteResult{
+		PrerequisiteID: rejectedTargetSnapshot.ID,
+		TargetSnapshot: &runtimecontract.TargetSnapshot{TargetRef: "main.go", ContentHash: "main-v2", ContentState: runtimecontract.SnapshotContentStateComplete},
+	})
+	if err != nil || afterRejectedTargetRefresh.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite {
+		t.Fatalf("original target refresh did not preserve owner retarget precedence: aggregate=%+v err=%v", afterRejectedTargetRefresh, err)
+	}
+	var retargetSnapshot runtimecontract.RuntimePrerequisite
+	for _, prerequisite := range afterRejectedTargetRefresh.Facts.Prerequisites.Pending {
+		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSnapshot && prerequisite.SubjectRef == "implementation.go" {
+			retargetSnapshot = prerequisite
+			break
+		}
+	}
+	if retargetSnapshot.ID == "" {
+		t.Fatalf("owner retarget did not request its own snapshot after rejected-target refresh: %+v", afterRejectedTargetRefresh.Facts.Prerequisites.Pending)
+	}
+	resumed, err := restarted.CommitPrerequisite(ctx, "ws-v2", "run-v2", runtimev2.PrerequisiteResult{
+		PrerequisiteID: retargetSnapshot.ID,
+		TargetSnapshot: &runtimecontract.TargetSnapshot{TargetRef: "implementation.go", ContentHash: "implementation-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
+	})
+	if err != nil || resumed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange ||
+		len(resumed.Decision.RequiredOutput.TargetRefs) != 1 || resumed.Decision.RequiredOutput.TargetRefs[0] != "implementation.go" ||
+		resumed.Decision.AuthoritySnapshot.ID == sealed.Aggregate.Decision.AuthoritySnapshot.ID || resumed.Decision.AuthoritySnapshot.Attempt != 0 {
+		t.Fatalf("restart did not create fresh retarget authority: aggregate=%+v err=%v", resumed, err)
+	}
+	if admission := runtimev2.EvaluateCandidateAdmission(resumed, oldCandidate); admission.Accepted() || admission.Failure == nil ||
+		admission.Failure.Code != "candidate_replays_rejected_shape" {
+		t.Fatalf("old same-gap shape became admissible after retarget restart: %+v", admission)
+	}
+	implementationTarget := "implementation.go"
+	newCandidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+		ID: "retargeted-implementation-edit", Kind: runtimecontract.StepKindFileEdit,
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{implementationTarget},
+		Parameters: runtimeV2FileEditParameters(implementationTarget),
+	}}}}}
+	if admission := runtimev2.EvaluateCandidateAdmission(resumed, newCandidate); !admission.Accepted() {
+		t.Fatalf("new owner-retargeted shape was not admissible after restart: %+v", admission)
 	}
 }
 

@@ -2240,6 +2240,27 @@ func TestStoreDeletedWorkspaceClearsGenerationFailure(t *testing.T) {
 	}
 }
 
+func TestStoreDeleteWorkspaceDropsRetiredSourceWatermark(t *testing.T) {
+	store := NewStore()
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-live", State: "active"}, {ID: "ws-retired", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-live":    {Workspace: appmodelcore.Workspace{ID: "ws-live", State: "active"}},
+		"ws-retired": {Workspace: appmodelcore.Workspace{ID: "ws-retired", State: "active"}},
+	}, nil)
+	store.ObserveSourceHighWatermark("ws-live", 60)
+	store.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{Workspace: appmodelcore.Workspace{ID: "ws-live", State: "active"}})
+	store.ObserveSourceHighWatermark("ws-retired", 76)
+	before := store.Status()
+	if before.SourceEventRevision != 76 || before.ProjectedSourceRevision != 60 {
+		t.Fatalf("before delete status = %+v, want retained workspace projected at 60 and retired source at 76", before)
+	}
+
+	store.DeleteWorkspace("ws-retired")
+	after := store.Status()
+	if after.SourceEventRevision != 60 || after.ProjectedSourceRevision != 60 {
+		t.Fatalf("after delete status = %+v, want active workspace watermarks to converge at 60", after)
+	}
+}
+
 func TestManagerRebuildDeletedWorkspaceConvergesWithoutDegradingReadiness(t *testing.T) {
 	manager := NewManager(ManagerOptions{Loader: deletedProjectionLoader{}})
 	manager.store.UpsertWorkspace(appmodelcore.Workspace{ID: "ws-deleted", State: "active"})

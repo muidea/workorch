@@ -32,16 +32,20 @@ func PreflightRuntimeFacts(facts runtimecontract.RuntimeFacts, requirements []Ru
 			continue
 		}
 		pending = append(pending, runtimecontract.RuntimePrerequisite{
-			ID:                   runtimePrerequisiteID(requirement),
-			Kind:                 requirement.Kind,
-			OwnerModuleID:        requirement.OwnerModuleID,
-			SubjectRef:           requirement.SubjectRef,
-			TargetSelectorRef:    requirement.TargetSelectorRef,
-			CapabilityClass:      requirement.CapabilityClass,
-			RequiredCapabilities: requirement.RequiredCapabilities,
-			CapabilityStateKind:  requirement.CapabilityStateKind,
-			MinimumBytes:         requirement.MinimumBytes,
-			Reason:               requirement.Reason,
+			ID:                          runtimePrerequisiteID(requirement),
+			Kind:                        requirement.Kind,
+			OwnerModuleID:               requirement.OwnerModuleID,
+			SubjectRef:                  requirement.SubjectRef,
+			TargetSelectorRef:           requirement.TargetSelectorRef,
+			TargetSelectorOwnerRef:      requirement.TargetSelectorOwnerRef,
+			TargetSelectorSubjectRef:    requirement.TargetSelectorSubjectRef,
+			TargetSelectorCandidateRefs: requirement.TargetSelectorCandidateRefs,
+			ProspectiveTargetRef:        requirement.ProspectiveTargetRef,
+			CapabilityClass:             requirement.CapabilityClass,
+			RequiredCapabilities:        requirement.RequiredCapabilities,
+			CapabilityStateKind:         requirement.CapabilityStateKind,
+			MinimumBytes:                requirement.MinimumBytes,
+			Reason:                      requirement.Reason,
 		})
 	}
 	facts.Prerequisites.Pending = pending
@@ -59,11 +63,17 @@ func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []Ru
 		return nil
 	}
 	requirements := make([]RuntimeRequirement, 0, len(focus.TargetRefs)+len(focus.TargetDiscoverySources)+1)
-	groundedTargets := append([]string(nil), focus.TargetRefs...)
-	if len(groundedTargets) == 0 && facts.Resources.FailureTarget != nil {
-		groundedTargets = append(groundedTargets, facts.Resources.FailureTarget.TargetRefs...)
-	}
+	// Use the same retarget precedence as SM-3 candidate admission. A newly
+	// committed owner failure observation must acquire snapshots for its repair
+	// targets, never silently reuse an older explicit Focus target.
+	groundedTargets := GroundedRepairTargets(facts)
 	for _, target := range groundedTargets {
+		if ownerGroundedCreationTarget(facts, target) {
+			// An empty-workspace create target is a sealed absent path.  It is
+			// concrete operation authority, but cannot and must not be read as a
+			// File snapshot before the durable create has occurred.
+			continue
+		}
 		requirements = append(requirements, RuntimeRequirement{
 			Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 			SubjectRef: target, Reason: "grounded repair target requires owner snapshot",
@@ -80,7 +90,7 @@ func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []Ru
 				case runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest, runtimecontract.RuntimeValidationDiscoverySourceProjectFiles:
 					requirements = append(requirements, RuntimeRequirement{
 						Kind: runtimecontract.PrerequisiteKindTargetSelection, OwnerModuleID: runtimecontract.RuntimeModuleFile,
-						SubjectRef: focus.TargetRole, TargetSelectorRef: focus.TargetSelectorRef, Reason: "focus target grounding requires owner target selection",
+						SubjectRef: focus.TargetRole, TargetSelectorRef: focus.TargetSelectorRef, TargetSelectorOwnerRef: focus.TargetSelectorOwnerRef, TargetSelectorSubjectRef: focus.TargetSelectorSubjectRef, TargetSelectorCandidateRefs: focus.TargetSelectorCandidateRefs, ProspectiveTargetRef: focus.ProspectiveTargetRef, Reason: "focus target grounding requires owner target selection",
 					})
 					// One File-owner observation covers both file-backed source IDs.
 					goto selectionRequirementDone
@@ -114,6 +124,12 @@ selectionRequirementDone:
 		}
 	}
 	return normalizeRuntimeRequirements(requirements)
+}
+
+func ownerGroundedCreationTarget(facts runtimecontract.RuntimeFacts, target string) bool {
+	selection := facts.Resources.TargetSelection
+	return hasOwnerGroundedCreationScope(facts) && selection != nil &&
+		strings.TrimSpace(selection.ProspectiveTargetRef) == strings.TrimSpace(target)
 }
 
 func CommitPrerequisiteResult(facts runtimecontract.RuntimeFacts, result PrerequisiteResult) (runtimecontract.RuntimeFacts, error) {
@@ -175,7 +191,7 @@ func applyPrerequisiteResult(facts *runtimecontract.RuntimeFacts, prerequisite r
 			return fmt.Errorf("target selection prerequisite returned no selection")
 		}
 		selection := result.TargetSelection.Normalized()
-		if selection.PrerequisiteID != prerequisite.ID || selection.OwnerModuleID != prerequisite.OwnerModuleID || selection.TargetRole != prerequisite.SubjectRef || selection.SelectorRef != prerequisite.TargetSelectorRef {
+		if selection.PrerequisiteID != prerequisite.ID || selection.OwnerModuleID != prerequisite.OwnerModuleID || selection.TargetRole != prerequisite.SubjectRef || selection.SelectorRef != prerequisite.TargetSelectorRef || selection.SelectorOwnerRef != prerequisite.TargetSelectorOwnerRef || selection.SelectorSubjectRef != prerequisite.TargetSelectorSubjectRef || !runtimecontract.SameRuntimeTargetSelectorCandidateRefs(selection.SelectorCandidateRefs, prerequisite.TargetSelectorCandidateRefs) || selection.ProspectiveTargetRef != prerequisite.ProspectiveTargetRef {
 			return fmt.Errorf("target selection prerequisite returned a mismatched selection")
 		}
 		if err := selection.Validate(); err != nil {
@@ -364,6 +380,10 @@ func normalizeRuntimeRequirements(values []RuntimeRequirement) []RuntimeRequirem
 	for _, value := range values {
 		value.SubjectRef = strings.TrimSpace(value.SubjectRef)
 		value.TargetSelectorRef = strings.TrimSpace(value.TargetSelectorRef)
+		value.TargetSelectorOwnerRef = strings.TrimSpace(value.TargetSelectorOwnerRef)
+		value.TargetSelectorSubjectRef = strings.TrimSpace(value.TargetSelectorSubjectRef)
+		value.TargetSelectorCandidateRefs = normalizeRequirementStrings(value.TargetSelectorCandidateRefs)
+		value.ProspectiveTargetRef = strings.TrimSpace(value.ProspectiveTargetRef)
 		value.OwnerModuleID = strings.TrimSpace(value.OwnerModuleID)
 		value.CapabilityClass = runtimecontract.RuntimeCapabilityClass(strings.TrimSpace(string(value.CapabilityClass)))
 		value.RequiredCapabilities = normalizeRequirementStrings(value.RequiredCapabilities)
@@ -387,7 +407,7 @@ func normalizeRuntimeRequirements(values []RuntimeRequirement) []RuntimeRequirem
 }
 
 func runtimePrerequisiteID(requirement RuntimeRequirement) string {
-	parts := []string{string(requirement.Kind), requirement.OwnerModuleID, requirement.SubjectRef, requirement.TargetSelectorRef, string(requirement.CapabilityClass), strings.Join(requirement.RequiredCapabilities, ","), requirement.CapabilityStateKind, fmt.Sprintf("%d", requirement.MinimumBytes)}
+	parts := []string{string(requirement.Kind), requirement.OwnerModuleID, requirement.SubjectRef, requirement.TargetSelectorRef, requirement.TargetSelectorOwnerRef, requirement.TargetSelectorSubjectRef, strings.Join(requirement.TargetSelectorCandidateRefs, ","), requirement.ProspectiveTargetRef, string(requirement.CapabilityClass), strings.Join(requirement.RequiredCapabilities, ","), requirement.CapabilityStateKind, fmt.Sprintf("%d", requirement.MinimumBytes)}
 	return strings.Join(parts, ":")
 }
 

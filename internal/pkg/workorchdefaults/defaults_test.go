@@ -585,9 +585,10 @@ func TestEnsureBuiltinDefaultsUpsertsEmbeddedSoulsAndTemplates(t *testing.T) {
 }
 
 // assertSoftwareDevWorkspaceDeliverableSelectors guards the startup-default
-// refresh path used by a new workspace.  The legacy unique-entry selector
-// turns an empty workspace into an unresolved terminal before a provider can
-// propose its first concrete File operation.
+// path used by a new workspace. The profile, rather than Runtime V2 or the
+// File owner, declares the canonical first durable target for an empty
+// workspace. File only verifies that declaration before a provider can
+// propose its first concrete operation.
 func assertSoftwareDevWorkspaceDeliverableSelectors(t *testing.T, hints map[string]any) {
 	t.Helper()
 	contracts, ok := hints["profileContracts"].(map[string]any)
@@ -603,7 +604,7 @@ func assertSoftwareDevWorkspaceDeliverableSelectors(t *testing.T, hints map[stri
 		t.Fatalf("software-dev evidenceRequirements = %T, want list", profile["evidenceRequirements"])
 	}
 	for _, id := range []string{"source_change", "*"} {
-		found := false
+		found := 0
 		for _, raw := range requirements {
 			item, ok := raw.(map[string]any)
 			requiresGrounding, grounded := item["requireTargetGrounding"].(bool)
@@ -613,9 +614,12 @@ func assertSoftwareDevWorkspaceDeliverableSelectors(t *testing.T, hints map[stri
 			if item["targetSelectorRef"] != "file/workspace_deliverable" {
 				t.Fatalf("%s targetSelectorRef = %q, want file/workspace_deliverable", id, item["targetSelectorRef"])
 			}
-			found = true
+			if item["prospectiveTargetRef"] != "workorch-deliverable.md" {
+				t.Fatalf("%s/%s prospectiveTargetRef = %q, want workorch-deliverable.md", id, item["scope"], item["prospectiveTargetRef"])
+			}
+			found++
 		}
-		if !found {
+		if found == 0 {
 			t.Fatalf("missing grounded %s evidence requirement", id)
 		}
 	}
@@ -830,6 +834,28 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 			t.Fatalf("software-dev deliverableExpectations missing required %q in %+v", id, deliverables)
 		}
 	}
+	dependencies, ok := softwareDev["coverageDependencies"].([]any)
+	if !ok || len(dependencies) == 0 {
+		t.Fatalf("software-dev coverageDependencies = %+v, want declared source-to-validation dependency", softwareDev["coverageDependencies"])
+	}
+	dependencyFound := false
+	for _, raw := range dependencies {
+		item, ok := raw.(map[string]any)
+		if !ok || item["id"] != "source-change-refreshes-validation-report" {
+			continue
+		}
+		if item["sourceScope"] != "deliverable" || item["sourceRequirementId"] != "source_change" || item["dependentScope"] != "deliverable" || item["dependentRequirementId"] != "validation_report" {
+			t.Fatalf("source-to-validation dependency = %+v", item)
+		}
+		triggers, ok := item["triggerEvidenceKinds"].([]any)
+		if !ok || len(triggers) != 1 || triggers[0] != "state_change" {
+			t.Fatalf("source-to-validation dependency triggers = %+v", item["triggerEvidenceKinds"])
+		}
+		dependencyFound = true
+	}
+	if !dependencyFound {
+		t.Fatalf("software-dev coverageDependencies missing source-change-refreshes-validation-report in %+v", dependencies)
+	}
 	validationPolicy, ok := softwareDev["validationEnvironmentPolicy"].(map[string]any)
 	if !ok {
 		t.Fatalf("software-dev validationEnvironmentPolicy = %+v, want map", softwareDev["validationEnvironmentPolicy"])
@@ -858,6 +884,7 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 		t.Fatalf("software-dev stateChangingRepairGuidance = %+v, want declared guidance", softwareDev["stateChangingRepairGuidance"])
 	}
 	assertStringListContains(t, guidance, "When repairActionPackage.requiredOutput accepts patch/apply, return at least one patch/apply node that performs a concrete source, configuration, test, documentation, or workspace state change directly tied to the current failure.")
+	assertStringListContains(t, guidance, "When the sealed File target selection has disposition create, use file/write for that exact prospective target; patch/apply is only feasible after the target exists and must not replace the first durable create.")
 	assertStringListContains(t, guidance, "When repairActionPackage.requiredOutput.mustDeclareCoverageTargets is true, every patch/apply or equivalent state-changing evidence node must include coverageTargets copied from the active coverageTargetSet item it intends to close.")
 	assertStringListContains(t, guidance, "A state-changing shell/command must declare only workspace-relative targets that the command itself will actually modify. Build, test, listing, dependency, and toolchain probes are validation, not durable state changes; when project skeleton, module description, configuration, or implementation files are absent, create or patch those concrete paths before shell verification.")
 	assertStringListContains(t, guidance, "When targetSnapshots, failureTargetRepairContext, or repairTargetSet already identify existing implementation or entrypoint files for an unresolved Goal/DoD/source_change gap, patch those targets first; do not spend the primary state-changing turn on placeholder tests, go.sum, coverage_map, report-only files, or other supplemental evidence resources unless the current diagnostics explicitly target them.")
@@ -906,6 +933,9 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 			if selector, _ := item["targetSelectorRef"].(string); selector != "file/workspace_deliverable" {
 				t.Fatalf("source_change targetSelectorRef = %q, want file/workspace_deliverable", selector)
 			}
+			if prospectiveTarget, _ := item["prospectiveTargetRef"].(string); prospectiveTarget != "workorch-deliverable.md" {
+				t.Fatalf("source_change prospectiveTargetRef = %q, want workorch-deliverable.md", prospectiveTarget)
+			}
 			if direct, _ := item["requireDirectEvidence"].(bool); !direct {
 				t.Fatalf("source_change requireDirectEvidence = false, want true")
 			}
@@ -921,6 +951,7 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 				t.Fatalf("source_change rejectedStepKinds = %+v, want list", item["rejectedStepKinds"])
 			}
 			assertStringListContains(t, accepted, "patch/apply")
+			assertStringListContains(t, accepted, "file/write")
 			assertStringListContains(t, rejected, "file/read")
 			assertStringListContains(t, rejected, "file/list")
 			assertStringListContains(t, rejected, "mcp/resource_read")
@@ -986,6 +1017,14 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 				if selector, _ := item["targetSelectorRef"].(string); selector != "file/workspace_deliverable" {
 					t.Fatalf("%s wildcard targetSelectorRef = %q, want file/workspace_deliverable", scope, selector)
 				}
+				if prospectiveTarget, _ := item["prospectiveTargetRef"].(string); prospectiveTarget != "workorch-deliverable.md" {
+					t.Fatalf("%s wildcard prospectiveTargetRef = %q, want workorch-deliverable.md", scope, prospectiveTarget)
+				}
+				accepted, ok := item["acceptedStepKinds"].([]any)
+				if !ok {
+					t.Fatalf("%s wildcard acceptedStepKinds = %+v, want list", scope, item["acceptedStepKinds"])
+				}
+				assertStringListContains(t, accepted, "file/write")
 				directValidationTargetContracts[scope] = true
 			}
 			continue
@@ -1188,6 +1227,7 @@ func assertSoftwareDevValidationPolicies(t *testing.T, hints map[string]any) {
 			t.Fatalf("validation policy maxValidationOnlyRetriesPerFocus = %v, want 2", item["maxValidationOnlyRetriesPerFocus"])
 		}
 		assertStringListContains(t, item["implementationGapDiagnosticClasses"].([]any), "implementation_gap_detected")
+		assertStringListContains(t, item["implementationGapDiagnosticClasses"].([]any), "validation_command_invalid")
 		if item["ifNoTargetRoute"] != "failed_assessment_with_missing_evidence_or_deferred" {
 			t.Fatalf("validation policy ifNoTargetRoute = %v", item["ifNoTargetRoute"])
 		}

@@ -17,6 +17,11 @@ type RuntimeOperationDescriptor struct {
 	CapabilityClass      RuntimeCapabilityClass
 	IdempotencyClass     RuntimeOperationIdempotencyClass
 	RequiresOwnerReceipt bool
+	// AllowsNewTarget is a technical operation-contract property. It means the
+	// owner can apply this kind to an owner-authorized, workspace-relative
+	// target that is absent at observation time. It does not grant a path: the
+	// capability owner must still publish a matching admissibility selector.
+	AllowsNewTarget bool
 }
 
 // RuntimeOperationDescriptors returns the complete normalized, stably sorted descriptor inventory.
@@ -212,7 +217,7 @@ func init() {
 			Kind: StepKindFileWrite, OwnerModuleID: RuntimeModuleFile,
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedActions: []RuntimeAction{RuntimeActionProduceStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
-			RequiresOwnerReceipt: true,
+			RequiresOwnerReceipt: true, AllowsNewTarget: true,
 		},
 		{
 			Kind: RuntimeBlockKindPatchApply, OwnerModuleID: RuntimeModuleFile,

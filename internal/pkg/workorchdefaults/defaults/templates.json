@@ -546,7 +546,8 @@
           "implementationGapDiagnosticClasses": [
             "implementation_gap_detected",
             "validation_build_failed",
-            "validation_test_failed"
+            "validation_test_failed",
+            "validation_command_invalid"
           ],
           "maxValidationOnlyRetriesPerFocus": 2,
           "preferMinimalPatchBeforeRepeatedValidation": true,
@@ -691,8 +692,21 @@
               "description": "Goal-specific user-facing artifact such as binary, package, service endpoint, document, or generated data"
             }
           ],
+          "coverageDependencies": [
+            {
+              "id": "source-change-refreshes-validation-report",
+              "sourceScope": "deliverable",
+              "sourceRequirementId": "source_change",
+              "dependentScope": "deliverable",
+              "dependentRequirementId": "validation_report",
+              "triggerEvidenceKinds": [
+                "state_change"
+              ]
+            }
+          ],
           "stateChangingRepairGuidance": [
             "When repairActionPackage.requiredOutput accepts patch/apply, return at least one patch/apply node that performs a concrete source, configuration, test, documentation, or workspace state change directly tied to the current failure.",
+            "When the sealed File target selection has disposition create, use file/write for that exact prospective target; patch/apply is only feasible after the target exists and must not replace the first durable create.",
             "When repairActionPackage.requiredOutput.mustDeclareCoverageTargets is true, every patch/apply or equivalent state-changing evidence node must include coverageTargets copied from the active coverageTargetSet item it intends to close.",
             "Read-only file/read, file/list, shell validation, LSP, or MCP inspection nodes may prepare context, but they cannot by themselves satisfy a state-changing repair contract.",
             "A state-changing shell/command must declare only workspace-relative targets that the command itself will actually modify. Build, test, listing, dependency, and toolchain probes are validation, not durable state changes; when project skeleton, module description, configuration, or implementation files are absent, create or patch those concrete paths before shell verification.",
@@ -870,10 +884,12 @@
                 "project_files"
               ],
               "targetSelectorRef": "file/workspace_deliverable",
+              "prospectiveTargetRef": "workorch-deliverable.md",
               "requireTargetGrounding": true,
               "requireDirectEvidence": true,
               "requireCoverageTargets": true,
               "acceptedStepKinds": [
+                "file/write",
                 "patch/apply"
               ],
               "rejectedStepKinds": [
@@ -882,7 +898,27 @@
                 "mcp/resource_read",
                 "mcp/prompt_get"
               ],
-              "description": "A satisfied source_change deliverable must cite direct state-changing patch evidence for the workspace output with coverageTargets aligned to the Goal, DoD, or deliverable item, not only read-only inspection or summary artifacts."
+              "description": "A satisfied source_change deliverable must cite direct state-changing File write or patch evidence for the workspace output with coverageTargets aligned to the Goal, DoD, or deliverable item, not only read-only inspection or summary artifacts."
+            },
+            {
+              "id": "validation_report",
+              "scope": "deliverable",
+              "evidenceRole": "supplemental_evidence",
+              "requiredEvidenceKinds": [
+                "validation"
+              ],
+              "requireDirectEvidence": true,
+              "acceptedStepKinds": [
+                "validation/managed_session",
+                "shell/command"
+              ],
+              "rejectedStepKinds": [
+                "file/read",
+                "file/list",
+                "mcp/resource_read",
+                "mcp/prompt_get"
+              ],
+              "description": "A validation_report must cite bounded executed validation evidence. Any accepted source_change evidence declared after this report reopens the report through the sealed coverage dependency."
             },
             {
               "id": "version_control_snapshot",
@@ -923,6 +959,7 @@
                 "project_files"
               ],
               "targetSelectorRef": "file/workspace_deliverable",
+              "prospectiveTargetRef": "workorch-deliverable.md",
               "requireTargetGrounding": true,
               "requireDirectEvidence": true,
               "requireClaimEvidence": true,
@@ -930,6 +967,7 @@
               "acceptedStepKinds": [
                 "validation/managed_session",
                 "shell/command",
+                "file/write",
                 "patch/apply",
                 "mcp/tool_call"
               ],
@@ -950,6 +988,7 @@
                 "project_files"
               ],
               "targetSelectorRef": "file/workspace_deliverable",
+              "prospectiveTargetRef": "workorch-deliverable.md",
               "requireTargetGrounding": true,
               "requireDirectEvidence": true,
               "requireClaimEvidence": true,
@@ -957,6 +996,7 @@
               "acceptedStepKinds": [
                 "validation/managed_session",
                 "shell/command",
+                "file/write",
                 "patch/apply",
                 "mcp/tool_call"
               ],

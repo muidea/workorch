@@ -64,6 +64,10 @@ type CoverageFocus struct {
 	// owning capability validates and applies it; Runtime V2 only seals and
 	// compares the binding.
 	TargetSelectorRef                 string
+	TargetSelectorOwnerRef            string
+	TargetSelectorSubjectRef          string
+	TargetSelectorCandidateRefs       []string
+	ProspectiveTargetRef              string
 	RequireTargetGrounding            bool
 	AcceptedStepKinds                 []string
 	AcceptedOperationVariants         []RuntimeOperationVariantRef
@@ -219,8 +223,7 @@ func (f FailureFact) Clone() FailureFact {
 	f = f.Normalized()
 	f.TargetRefs = append([]string(nil), f.TargetRefs...)
 	if f.TargetObservation != nil {
-		observation := f.TargetObservation.Normalized()
-		observation.TargetRefs = append([]string(nil), observation.TargetRefs...)
+		observation := f.TargetObservation.Clone()
 		f.TargetObservation = &observation
 	}
 	if f.ValidationDiagnostic != nil {
@@ -240,6 +243,12 @@ type RuntimeFailureTargetObservation struct {
 	TargetRole       string
 	ObservedRevision string
 	TargetRefs       []string
+	// Structured observations bind a target claim to the tool output from
+	// which its owner derived it. Capability-specific admission decides whether
+	// these fields are mandatory for a particular owner protocol.
+	DiagnosticClass string
+	EvidenceRefs    []string
+	ContentHash     string
 }
 
 func (o RuntimeFailureTargetObservation) Normalized() RuntimeFailureTargetObservation {
@@ -248,6 +257,9 @@ func (o RuntimeFailureTargetObservation) Normalized() RuntimeFailureTargetObserv
 	o.TargetRole = strings.TrimSpace(o.TargetRole)
 	o.ObservedRevision = strings.TrimSpace(o.ObservedRevision)
 	o.TargetRefs = normalizeStrings(o.TargetRefs)
+	o.DiagnosticClass = strings.TrimSpace(o.DiagnosticClass)
+	o.EvidenceRefs = normalizeStrings(o.EvidenceRefs)
+	o.ContentHash = strings.TrimSpace(o.ContentHash)
 	return o
 }
 
@@ -256,7 +268,23 @@ func (o RuntimeFailureTargetObservation) Validate() error {
 	if o.OwnerModuleID == "" || o.SubjectRef == "" || o.TargetRole == "" || o.ObservedRevision == "" || len(o.TargetRefs) == 0 {
 		return fmt.Errorf("runtime failure target observation requires owner, subject, role, revision and targets")
 	}
+	structured := o.DiagnosticClass != "" || len(o.EvidenceRefs) != 0 || o.ContentHash != ""
+	if structured && (o.DiagnosticClass == "" || len(o.EvidenceRefs) == 0 || len(o.ContentHash) != sha256.Size*2) {
+		return fmt.Errorf("structured runtime failure target observation requires diagnostic class, evidence refs and sha256 content hash")
+	}
+	if o.ContentHash != "" {
+		if _, err := hex.DecodeString(o.ContentHash); err != nil {
+			return fmt.Errorf("runtime failure target observation content hash must be hex: %w", err)
+		}
+	}
 	return nil
+}
+
+func (o RuntimeFailureTargetObservation) Clone() RuntimeFailureTargetObservation {
+	o = o.Normalized()
+	o.TargetRefs = append([]string(nil), o.TargetRefs...)
+	o.EvidenceRefs = append([]string(nil), o.EvidenceRefs...)
+	return o
 }
 
 // ValidateRuntimeFailureTargetObservationBinding checks only the data binding
@@ -300,16 +328,20 @@ const (
 )
 
 type RuntimePrerequisite struct {
-	ID                   string
-	Kind                 PrerequisiteKind
-	OwnerModuleID        string
-	SubjectRef           string
-	TargetSelectorRef    string
-	CapabilityClass      RuntimeCapabilityClass
-	RequiredCapabilities []string
-	CapabilityStateKind  string
-	MinimumBytes         int
-	Reason               string
+	ID                          string
+	Kind                        PrerequisiteKind
+	OwnerModuleID               string
+	SubjectRef                  string
+	TargetSelectorRef           string
+	TargetSelectorOwnerRef      string
+	TargetSelectorSubjectRef    string
+	TargetSelectorCandidateRefs []string
+	ProspectiveTargetRef        string
+	CapabilityClass             RuntimeCapabilityClass
+	RequiredCapabilities        []string
+	CapabilityStateKind         string
+	MinimumBytes                int
+	Reason                      string
 }
 
 // RuntimeOperationPrerequisiteRequest is an owner-authored, read-only
@@ -359,15 +391,19 @@ func (r RuntimeOperationPrerequisiteRequest) Same(other RuntimeOperationPrerequi
 }
 
 type RuntimeRequirement struct {
-	Kind                 PrerequisiteKind
-	OwnerModuleID        string
-	SubjectRef           string
-	TargetSelectorRef    string
-	CapabilityClass      RuntimeCapabilityClass
-	RequiredCapabilities []string
-	CapabilityStateKind  string
-	MinimumBytes         int
-	Reason               string
+	Kind                        PrerequisiteKind
+	OwnerModuleID               string
+	SubjectRef                  string
+	TargetSelectorRef           string
+	TargetSelectorOwnerRef      string
+	TargetSelectorSubjectRef    string
+	TargetSelectorCandidateRefs []string
+	ProspectiveTargetRef        string
+	CapabilityClass             RuntimeCapabilityClass
+	RequiredCapabilities        []string
+	CapabilityStateKind         string
+	MinimumBytes                int
+	Reason                      string
 }
 
 type RuntimeFacts struct {
@@ -377,18 +413,22 @@ type RuntimeFacts struct {
 	EvidenceRevision   string
 	Focus              CoverageFocus
 	RemainingFocuses   []CoverageFocus
-	Evidence           EvidenceLedger
-	Assessments        []RuntimeAssessmentFact
-	Failure            *FailureFact
-	Prerequisites      PrerequisiteState
-	Capabilities       RuntimeCapabilities
-	Resources          RuntimeResourceFacts
-	Activation         RuntimeActivationContext
-	StateChange        RuntimeStateChangeLedger
-	ConvergencePolicy  RuntimeConvergencePolicy
-	RecoveryPolicy     RuntimeRecoveryPolicy
-	Recovery           RuntimeRecoveryLedger
-	Repair             RuntimeRepairLedger
+	// CompletedFocuses retains the already-advanced SM-2 queue entries.  It is
+	// required to deterministically requeue a profile-declared dependent focus
+	// when later accepted source evidence invalidates its prior closure.
+	CompletedFocuses  []CoverageFocus
+	Evidence          EvidenceLedger
+	Assessments       []RuntimeAssessmentFact
+	Failure           *FailureFact
+	Prerequisites     PrerequisiteState
+	Capabilities      RuntimeCapabilities
+	Resources         RuntimeResourceFacts
+	Activation        RuntimeActivationContext
+	StateChange       RuntimeStateChangeLedger
+	ConvergencePolicy RuntimeConvergencePolicy
+	RecoveryPolicy    RuntimeRecoveryPolicy
+	Recovery          RuntimeRecoveryLedger
+	Repair            RuntimeRepairLedger
 	// RepairDirective is the single persisted next-action authority for the current
 	// focus. When set it overrides raw MissingRequiredEvidenceKinds for candidate
 	// action selection (INV-05).
@@ -603,9 +643,9 @@ type RuntimeTargetSelectionDisposition string
 const (
 	RuntimeTargetSelectionSelected RuntimeTargetSelectionDisposition = "selected"
 	// RuntimeTargetSelectionCreate authorizes a creation candidate within an
-	// owner-observed empty workspace. It deliberately carries no path: the
-	// candidate proposes a concrete workspace-relative target and the File
-	// owner validates it against its operation admissibility inventory.
+	// owner-observed empty workspace. It carries an activation-sealed,
+	// profile-declared prospective path; File validates that path against its
+	// workspace boundary and operation admissibility inventory.
 	RuntimeTargetSelectionCreate RuntimeTargetSelectionDisposition = "create"
 	// RuntimeTargetSelectionScope binds a bounded complete File feasibility
 	// inventory selected by an owner-declared scope. It is not a concrete repair
@@ -615,17 +655,29 @@ const (
 	RuntimeTargetSelectionScope     RuntimeTargetSelectionDisposition = "scope"
 	RuntimeTargetSelectionAbsent    RuntimeTargetSelectionDisposition = "absent"
 	RuntimeTargetSelectionAmbiguous RuntimeTargetSelectionDisposition = "ambiguous"
+	// RuntimeTargetSelectionUnsupported records that the queried owner does not
+	// implement the declared selector. It is a typed owner observation, not a
+	// transport or contract failure; SM-2 decides the resulting unresolved
+	// target outcome without requesting a provider candidate.
+	RuntimeTargetSelectionUnsupported RuntimeTargetSelectionDisposition = "unsupported"
 )
 
 type RuntimeTargetSelection struct {
-	PrerequisiteID      string
-	SnapshotID          string
-	OwnerModuleID       string
-	TargetRole          string
-	SelectorRef         string
-	Disposition         RuntimeTargetSelectionDisposition
-	TargetRefs          []string
-	CandidateTargetRefs []string
+	PrerequisiteID        string
+	SnapshotID            string
+	OwnerModuleID         string
+	TargetRole            string
+	SelectorRef           string
+	SelectorOwnerRef      string
+	SelectorSubjectRef    string
+	SelectorCandidateRefs []string
+	Disposition           RuntimeTargetSelectionDisposition
+	TargetRefs            []string
+	CandidateTargetRefs   []string
+	// ProspectiveTargetRef is an activation-sealed profile declaration for an
+	// empty-workspace durable create. The File owner only validates that it is
+	// a bounded workspace-relative absent path; it does not derive the value.
+	ProspectiveTargetRef string
 	// CandidateCount is observed before the bounded candidate projection. It
 	// prevents a max-items=1 context from turning a multi-target workspace into
 	// a false unique selection.
@@ -639,9 +691,13 @@ func (s RuntimeTargetSelection) Normalized() RuntimeTargetSelection {
 	s.OwnerModuleID = strings.TrimSpace(s.OwnerModuleID)
 	s.TargetRole = strings.TrimSpace(s.TargetRole)
 	s.SelectorRef = strings.TrimSpace(s.SelectorRef)
+	s.SelectorOwnerRef = strings.TrimSpace(s.SelectorOwnerRef)
+	s.SelectorSubjectRef = strings.TrimSpace(s.SelectorSubjectRef)
+	s.SelectorCandidateRefs = normalizeStrings(s.SelectorCandidateRefs)
 	s.Disposition = RuntimeTargetSelectionDisposition(strings.TrimSpace(string(s.Disposition)))
 	s.TargetRefs = normalizeStrings(s.TargetRefs)
 	s.CandidateTargetRefs = normalizeStrings(s.CandidateTargetRefs)
+	s.ProspectiveTargetRef = strings.TrimSpace(s.ProspectiveTargetRef)
 	if s.CandidateCount < 0 {
 		s.CandidateCount = 0
 	}
@@ -663,6 +719,9 @@ func (s RuntimeTargetSelection) Validate() error {
 		if s.CandidateCount != 0 || len(s.TargetRefs) != 0 || len(s.CandidateTargetRefs) != 0 {
 			return fmt.Errorf("create runtime target selection requires an empty owner inventory")
 		}
+		if s.ProspectiveTargetRef == "" {
+			return fmt.Errorf("create runtime target selection requires a profile-declared prospective target")
+		}
 	case RuntimeTargetSelectionScope:
 		if s.CandidateCount < 2 || len(s.TargetRefs) != s.CandidateCount || len(s.CandidateTargetRefs) != s.CandidateCount || !sameStrings(s.TargetRefs, s.CandidateTargetRefs) {
 			return fmt.Errorf("scope runtime target selection requires a complete bounded target set")
@@ -674,6 +733,10 @@ func (s RuntimeTargetSelection) Validate() error {
 	case RuntimeTargetSelectionAmbiguous:
 		if s.CandidateCount < 2 || len(s.TargetRefs) != 0 || len(s.CandidateTargetRefs) == 0 || len(s.CandidateTargetRefs) > s.CandidateCount {
 			return fmt.Errorf("ambiguous runtime target selection requires bounded candidate targets and no selected target")
+		}
+	case RuntimeTargetSelectionUnsupported:
+		if s.CandidateCount != 0 || len(s.TargetRefs) != 0 || len(s.CandidateTargetRefs) != 0 {
+			return fmt.Errorf("unsupported runtime target selection cannot contain owner inventory targets")
 		}
 	default:
 		return fmt.Errorf("runtime target selection has invalid disposition %q", s.Disposition)
@@ -691,12 +754,24 @@ func StableRuntimeTargetSelectionSnapshotID(value RuntimeTargetSelection) string
 	writeHashString(h, value.OwnerModuleID)
 	writeHashString(h, value.TargetRole)
 	writeHashString(h, value.SelectorRef)
+	writeHashString(h, value.SelectorOwnerRef)
+	writeHashString(h, value.SelectorSubjectRef)
+	writeHashStrings(h, value.SelectorCandidateRefs)
 	writeHashString(h, string(value.Disposition))
 	writeHashStrings(h, value.TargetRefs)
 	writeHashStrings(h, value.CandidateTargetRefs)
+	writeHashString(h, value.ProspectiveTargetRef)
 	writeHashString(h, fmt.Sprintf("%d", value.CandidateCount))
 	writeHashString(h, value.ObservedRevision)
 	return "target-selection-" + hex.EncodeToString(h.Sum(nil))[:20]
+}
+
+// SameRuntimeTargetSelectorCandidateRefs compares the canonical bounded
+// candidate declaration carried across activation, prerequisite and owner
+// observation contracts. It is deliberately a pure value helper: ownership
+// and semantic interpretation remain outside the runtime contract package.
+func SameRuntimeTargetSelectorCandidateRefs(left, right []string) bool {
+	return sameStrings(normalizeStrings(left), normalizeStrings(right))
 }
 
 func (s TargetSnapshot) Complete() bool {
@@ -833,6 +908,7 @@ func (f RuntimeFacts) Normalized() RuntimeFacts {
 	f.EvidenceRevision = strings.TrimSpace(f.EvidenceRevision)
 	f.Focus = f.Focus.Normalized()
 	f.RemainingFocuses = normalizeCoverageFocusQueue(f.RemainingFocuses)
+	f.CompletedFocuses = normalizeCoverageFocusQueue(f.CompletedFocuses)
 	f.Evidence.Accepted = normalizeEvidenceFacts(f.Evidence.Accepted)
 	f.Evidence.Rejected = normalizeEvidenceFacts(f.Evidence.Rejected)
 	f.Assessments = normalizeRuntimeAssessmentFacts(f.Assessments)
@@ -950,9 +1026,9 @@ func (f RuntimeFacts) Validate() error {
 		}
 	}
 	seenFocus := map[string]struct{}{f.Focus.ID: {}}
-	for _, focus := range f.RemainingFocuses {
+	for _, focus := range append(append([]CoverageFocus(nil), f.RemainingFocuses...), f.CompletedFocuses...) {
 		if focus.ID == "" {
-			return fmt.Errorf("runtime facts remaining focus requires identity")
+			return fmt.Errorf("runtime facts queued focus requires identity")
 		}
 		if _, ok := seenFocus[focus.ID]; ok {
 			return fmt.Errorf("runtime facts coverage focus %s is duplicated", focus.ID)
@@ -963,12 +1039,22 @@ func (f RuntimeFacts) Validate() error {
 	for _, item := range f.Coverage {
 		coverage[item.ID] = struct{}{}
 	}
-	for _, focus := range append([]CoverageFocus{f.Focus}, f.RemainingFocuses...) {
+	for _, focus := range append(append([]CoverageFocus{f.Focus}, f.RemainingFocuses...), f.CompletedFocuses...) {
 		for _, id := range focus.CoverageWorkItemIDs {
 			if _, ok := coverage[id]; !ok {
 				return fmt.Errorf("runtime facts focus coverage item %s has no coverage ledger entry", id)
 			}
 		}
+	}
+	coverageItems := make([]RuntimeCoverageItem, 0, len(f.Coverage))
+	for _, item := range f.Coverage {
+		coverageItems = append(coverageItems, RuntimeCoverageItem{
+			ID: item.ID, SliceID: item.SliceID, SourceScope: item.SourceScope, SourceID: item.SourceID,
+			TargetText: item.TargetText, ReopenDependencies: item.ReopenDependencies,
+		})
+	}
+	if err := ValidateRuntimeCoverageItemDependencies(coverageItems); err != nil {
+		return fmt.Errorf("runtime facts coverage dependencies: %w", err)
 	}
 	if f.RepairDirective != nil {
 		if err := f.RepairDirective.Validate(); err != nil {
@@ -1018,6 +1104,10 @@ func (f CoverageFocus) Normalized() CoverageFocus {
 	f.TargetRole = strings.TrimSpace(f.TargetRole)
 	f.TargetDiscoverySources = normalizeStrings(f.TargetDiscoverySources)
 	f.TargetSelectorRef = strings.TrimSpace(f.TargetSelectorRef)
+	f.TargetSelectorOwnerRef = strings.TrimSpace(f.TargetSelectorOwnerRef)
+	f.TargetSelectorSubjectRef = strings.TrimSpace(f.TargetSelectorSubjectRef)
+	f.TargetSelectorCandidateRefs = normalizeStrings(f.TargetSelectorCandidateRefs)
+	f.ProspectiveTargetRef = strings.TrimSpace(f.ProspectiveTargetRef)
 	f.AcceptedStepKinds = normalizeStrings(f.AcceptedStepKinds)
 	f.AcceptedOperationVariants = NormalizeRuntimeOperationVariantRefs(f.AcceptedOperationVariants)
 	f.RejectedStepKinds = normalizeStrings(f.RejectedStepKinds)
@@ -1075,7 +1165,7 @@ func (r RuntimeResourceFacts) Normalized() RuntimeResourceFacts {
 		target.Signature = strings.TrimSpace(target.Signature)
 		target.TargetRefs = normalizeStrings(target.TargetRefs)
 		if target.TargetObservation != nil {
-			observation := target.TargetObservation.Normalized()
+			observation := target.TargetObservation.Clone()
 			target.TargetObservation = &observation
 		}
 		r.FailureTarget = &target
@@ -1551,6 +1641,10 @@ func normalizeRuntimePrerequisites(values []RuntimePrerequisite) []RuntimePrereq
 		value.OwnerModuleID = strings.TrimSpace(value.OwnerModuleID)
 		value.SubjectRef = strings.TrimSpace(value.SubjectRef)
 		value.TargetSelectorRef = strings.TrimSpace(value.TargetSelectorRef)
+		value.TargetSelectorOwnerRef = strings.TrimSpace(value.TargetSelectorOwnerRef)
+		value.TargetSelectorSubjectRef = strings.TrimSpace(value.TargetSelectorSubjectRef)
+		value.TargetSelectorCandidateRefs = normalizeStrings(value.TargetSelectorCandidateRefs)
+		value.ProspectiveTargetRef = strings.TrimSpace(value.ProspectiveTargetRef)
 		value.CapabilityClass = RuntimeCapabilityClass(strings.TrimSpace(string(value.CapabilityClass)))
 		value.RequiredCapabilities = normalizeStrings(value.RequiredCapabilities)
 		value.Reason = strings.TrimSpace(value.Reason)

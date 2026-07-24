@@ -91,6 +91,116 @@ func TestRuntimeV2BootstrapDefersTargetSelectionToFileOwner(t *testing.T) {
 	}
 }
 
+func TestRuntimeV2BootstrapSealsProfileProspectiveTargetIntoFocus(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+			ID: "profile", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "initial-deliverable", Required: true}}, EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
+				ID: "initial-deliverable", Scope: "deliverable", RequireTargetGrounding: true, TargetRole: "deliverable",
+				TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, TargetSelectorRef: "file/workspace_deliverable", ProspectiveTargetRef: "initial-deliverable.txt",
+				AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite},
+			}},
+		}}},
+	}
+	bootstrap, err := RuntimeV2Bootstrap(&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"}, &workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"initial deliverable"}}, "definition-1", nil, activation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var focus *runtimecontract.CoverageFocus
+	for idx := range bootstrap.Focuses {
+		if bootstrap.Focuses[idx].TargetRole == "deliverable" {
+			focus = &bootstrap.Focuses[idx]
+			break
+		}
+	}
+	if focus == nil || focus.ProspectiveTargetRef != "initial-deliverable.txt" {
+		t.Fatalf("bootstrap lost prospective target: %+v", bootstrap.Focuses)
+	}
+}
+
+func TestRuntimeV2BootstrapSealsProfileDeclaredSelectorBinding(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+			ID: "profile-lsp", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "implementation", Required: true}}, EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
+				ID: "implementation", Scope: "deliverable", RequireTargetGrounding: true, TargetRole: "implementation",
+				TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, TargetSelectorRef: "file/profile_declared_candidates", TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: []string{"internal/lsp/manager.go", "internal/lsp/server.go"},
+				AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+			}},
+		}}},
+	}
+	bootstrap, err := RuntimeV2Bootstrap(&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"}, &workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"implementation"}}, "definition-1", nil, activation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var focus *runtimecontract.CoverageFocus
+	for idx := range bootstrap.Focuses {
+		if bootstrap.Focuses[idx].TargetSelectorRef == "file/profile_declared_candidates" {
+			focus = &bootstrap.Focuses[idx]
+			break
+		}
+	}
+	if focus == nil || focus.TargetSelectorOwnerRef != "profile-lsp" || focus.TargetSelectorSubjectRef != "implementation" || !runtimecontract.SameRuntimeTargetSelectorCandidateRefs(focus.TargetSelectorCandidateRefs, []string{"internal/lsp/manager.go", "internal/lsp/server.go"}) {
+		t.Fatalf("bootstrap lost profile selector binding: %+v", bootstrap.Focuses)
+	}
+}
+
+// DoD work units precede profile deliverables in a fresh activation. A profile
+// that only declares a prospective target on its later source-change item
+// therefore still deadlocks an empty workspace at the first direct-evidence
+// DoD focus. The declaration must be compiled into that leading focus too;
+// File remains the owner that verifies the path and reports the create fact.
+func TestRuntimeV2BootstrapSealsProspectiveTargetIntoLeadingDoDFocus(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+			ID: "profile", EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
+				{
+					ID: "*", Scope: "dodItem", RequireTargetGrounding: true, TargetRole: "deliverable_implementation",
+					TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
+					TargetSelectorRef:      "file/workspace_deliverable", ProspectiveTargetRef: "workorch-deliverable.md",
+					AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindPatchApply},
+				},
+				{
+					ID: "source_change", Scope: "deliverable", RequireTargetGrounding: true, TargetRole: "deliverable_implementation",
+					TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
+					TargetSelectorRef:      "file/workspace_deliverable", ProspectiveTargetRef: "workorch-deliverable.md",
+					AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindPatchApply},
+				},
+			},
+		}}},
+	}
+	bootstrap, err := RuntimeV2Bootstrap(
+		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
+		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"first direct evidence"}},
+		"definition-1", nil, activation,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bootstrap.Focuses) == 0 {
+		t.Fatal("bootstrap has no focuses")
+	}
+	leading := bootstrap.Focuses[0]
+	if leading.AssessmentScope != "dodItem" || leading.TargetSelectorRef != "file/workspace_deliverable" ||
+		leading.ProspectiveTargetRef != "workorch-deliverable.md" || !leading.RequireTargetGrounding {
+		t.Fatalf("leading DoD focus lost profile creation declaration: %+v", leading)
+	}
+	if len(leading.AcceptedStepKinds) != 2 || leading.AcceptedStepKinds[0] != runtimecontract.StepKindFileWrite || leading.AcceptedStepKinds[1] != runtimecontract.RuntimeBlockKindPatchApply {
+		t.Fatalf("leading DoD focus cannot admit the initial File create: %+v", leading.AcceptedStepKinds)
+	}
+	hasFileWriteCapability := false
+	for _, kind := range bootstrap.Definition.CapabilityContract {
+		if kind == runtimecontract.StepKindFileWrite {
+			hasFileWriteCapability = true
+			break
+		}
+	}
+	if !hasFileWriteCapability {
+		t.Fatalf("initial File create capability was not sealed into bootstrap: %+v", bootstrap.Definition.CapabilityContract)
+	}
+}
+
 func TestResolveCoverageEvidencePolicyCompilesGroundedDirectEvidenceScopes(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
@@ -380,7 +490,7 @@ func TestCompileRuntimeV2CoverageFocusesRejectsUngroundedRequiredTarget(t *testi
 	}
 }
 
-func TestCompileRuntimeV2CoverageFocusesRejectsConflictingTargetBindingsWithinSlice(t *testing.T) {
+func TestCompileRuntimeV2CoverageFocusesSplitsIncompatibleTargetBindingsWithinSliceGroup(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
 		firstRole      string
@@ -392,12 +502,12 @@ func TestCompileRuntimeV2CoverageFocusesRejectsConflictingTargetBindingsWithinSl
 		{
 			name: "target_role", firstRole: "implementation", secondRole: "generated_artifact",
 			firstSelector: "file/unique_workspace_entry", secondSelector: "file/unique_workspace_entry",
-			want: "incompatible target roles",
+			want: "target role",
 		},
 		{
 			name: "target_selector", firstRole: "implementation", secondRole: "implementation",
 			firstSelector: "file/unique_workspace_entry", secondSelector: "profile/semantic_owner_selector",
-			want: "incompatible target selector refs",
+			want: "target selector",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -425,13 +535,19 @@ func TestCompileRuntimeV2CoverageFocusesRejectsConflictingTargetBindingsWithinSl
 					}},
 				},
 			}
-			_, err := compileRuntimeV2Coverage(
+			compiled, err := compileRuntimeV2Coverage(
 				&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
 				&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1"},
 				activation,
 			)
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("compile conflicting %s binding error = %v, want %q", tc.name, err, tc.want)
+			if err != nil || len(compiled.Focuses) != 2 || len(compiled.Slices) != 2 {
+				t.Fatalf("compile incompatible %s binding = %+v err=%v, want two isolated focuses", tc.name, compiled, err)
+			}
+			if tc.name == "target_role" && (compiled.Focuses[0].TargetRole != tc.firstRole || compiled.Focuses[1].TargetRole != tc.secondRole) {
+				t.Fatalf("compiled target roles = %+v, want %q then %q", compiled.Focuses, tc.firstRole, tc.secondRole)
+			}
+			if tc.name == "target_selector" && (compiled.Focuses[0].TargetSelectorRef != tc.firstSelector || compiled.Focuses[1].TargetSelectorRef != tc.secondSelector) {
+				t.Fatalf("compiled target selectors = %+v, want %q then %q", compiled.Focuses, tc.firstSelector, tc.secondSelector)
 			}
 		})
 	}
@@ -473,6 +589,69 @@ func TestCompileRuntimeV2CoverageFocusesPreservesSharedTargetBindingWithinSlice(
 	focus := compiled.Focuses[0]
 	if focus.TargetRole != "implementation" || focus.TargetSelectorRef != "file/unique_workspace_entry" || !focus.RequireTargetGrounding || len(focus.TargetDiscoverySources) != 1 {
 		t.Fatalf("shared target binding was not preserved: %+v", focus)
+	}
+}
+
+func TestCompileRuntimeV2CoverageCompilesProfileCoverageDependencies(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{
+			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
+				SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaV2, MaxWorkItems: 2, MaxFocuses: 4, MaxCandidateContextItems: 4,
+				Groups: []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{{ID: "deliverables", Title: "deliverables", Scope: "deliverable", Priority: 1, MaxWorkItems: 2, Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true}}},
+			},
+			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+				ID:                      "profile",
+				DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "source", Required: true, EvidenceRole: "primary_state_change"}, {ID: "validation", Required: true, EvidenceRole: "supplemental_evidence"}},
+				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
+					{ID: "source", Scope: "deliverable", EvidenceRole: "primary_state_change", AcceptedStepKinds: []string{"file/write"}},
+					{ID: "validation", Scope: "deliverable", EvidenceRole: "supplemental_evidence", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{"validation/managed_session"}},
+				},
+				CoverageDependencies: []runtimecontract.RuntimeCoverageDependency{{ID: "source-invalidates-validation", SourceScope: "deliverable", SourceRequirementID: "source", DependentScope: "deliverable", DependentRequirementID: "validation", TriggerEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}}},
+			}},
+		},
+	}
+	compiled, err := compileRuntimeV2Coverage(&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"}, &workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1"}, activation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(compiled.Focuses) != 2 || len(compiled.CoverageItems) != 2 {
+		t.Fatalf("compiled dependency coverage = %+v", compiled)
+	}
+	source := compiled.CoverageItems[0]
+	if source.SourceID != "source" || len(source.ReopenDependencies) != 1 || source.ReopenDependencies[0].CoverageWorkItemID != compiled.CoverageItems[1].ID || len(source.ReopenDependencies[0].TriggerEvidenceKinds) != 1 || source.ReopenDependencies[0].TriggerEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange {
+		t.Fatalf("source dependency = %+v; coverage=%+v", source, compiled.CoverageItems)
+	}
+}
+
+func TestCompileRuntimeV2CoverageRejectsUnresolvedCoverageDependency(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+			ID: "profile", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "source", Required: true}},
+			CoverageDependencies: []runtimecontract.RuntimeCoverageDependency{{ID: "missing-dependent", SourceScope: "deliverable", SourceRequirementID: "source", DependentScope: "deliverable", DependentRequirementID: "missing", TriggerEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}}},
+		}}},
+	}
+	_, err := compileRuntimeV2Coverage(&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"}, &workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1"}, activation)
+	if err == nil || !strings.Contains(err.Error(), "matched no coverage item") {
+		t.Fatalf("unresolved dependency error = %v", err)
+	}
+}
+
+func TestCompileRuntimeV2CoverageRejectsCyclicCoverageDependencies(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+			ID: "profile", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "first", Required: true}, {ID: "second", Required: true}},
+			CoverageDependencies: []runtimecontract.RuntimeCoverageDependency{
+				{ID: "first-refreshes-second", SourceScope: "deliverable", SourceRequirementID: "first", DependentScope: "deliverable", DependentRequirementID: "second", TriggerEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}},
+				{ID: "second-refreshes-first", SourceScope: "deliverable", SourceRequirementID: "second", DependentScope: "deliverable", DependentRequirementID: "first", TriggerEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}},
+			},
+		}}},
+	}
+	_, err := compileRuntimeV2Coverage(&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"}, &workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1"}, activation)
+	if err == nil || !strings.Contains(err.Error(), "contain a cycle") {
+		t.Fatalf("cyclic dependency error = %v", err)
 	}
 }
 
@@ -604,6 +783,27 @@ func TestCompileRuntimeV2CoverageRehydratesUnresolvedContinuation(t *testing.T) 
 	}
 	if len(compiled.Focuses) == 0 {
 		t.Fatal("expected focuses for unresolved items")
+	}
+}
+
+func TestCompileRuntimeV2CoverageContinuationRestoresDependentCoverage(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+			ID: "profile", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "source", Required: true, EvidenceRole: "primary_state_change"}, {ID: "validation", Required: true, EvidenceRole: "supplemental_evidence"}},
+			CoverageDependencies: []runtimecontract.RuntimeCoverageDependency{{ID: "source-refreshes-validation", SourceScope: "deliverable", SourceRequirementID: "source", DependentScope: "deliverable", DependentRequirementID: "validation", TriggerEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}}},
+		}}},
+		Continuation: runtimecontract.RuntimeContinuationContext{RejectedResult: &runtimecontract.RuntimeRejectedResultContinuation{
+			PredecessorRunID: "run-old", ResultID: "result-old", ResultState: common.ResultStateRejected,
+			UnsatisfiedDoDItems: []runtimecontract.RuntimeContinuationItem{{CoverageWorkItemID: "cwi-001", State: "unsatisfied"}},
+		}},
+	}
+	compiled, err := compileRuntimeV2Coverage(&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"}, &workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1"}, activation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(compiled.CoverageItems) != 2 || compiled.CoverageItems[0].SourceID != "source" || compiled.CoverageItems[1].SourceID != "validation" || len(compiled.CoverageItems[0].ReopenDependencies) != 1 || compiled.CoverageItems[0].ReopenDependencies[0].CoverageWorkItemID != compiled.CoverageItems[1].ID {
+		t.Fatalf("continuation dependency closure = %+v", compiled)
 	}
 }
 

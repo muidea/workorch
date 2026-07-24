@@ -107,6 +107,15 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 	} else if ok {
 		return decision, nil
 	}
+	// A File-owner create observation is stronger than the ordinary focus
+	// evidence ordering: the selected target is absent, so an initial validation
+	// cannot truthfully run until one owner-admissible durable create commits.
+	// This is not a domain-specific action choice. SM-2 consumes the persisted
+	// File observation and descriptor contract only; File remains the path and
+	// feasibility authority.
+	if hasOwnerGroundedCreationScope(facts) && !hasCurrentFocusTargetBoundStateChangeEvidence(facts) {
+		return stateChangeDecision(base, facts)
+	}
 	missing := missingEvidenceKinds(facts)
 	if len(missing) == 0 {
 		if !facts.Focus.RequireAssessment {
@@ -229,7 +238,7 @@ func assessmentDecision(base runtimecontract.RuntimeDecision, facts runtimecontr
 	base.State = runtimecontract.ConvergenceStateNeedAssessment
 	base.Action = runtimecontract.RuntimeActionProduceAssessment
 	base.RequiredOutput = runtimecontract.RequiredOutputContract{
-		Kind: runtimecontract.RequiredOutputKindAssessment, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs, TargetRefs: facts.Focus.TargetRefs,
+		Kind: runtimecontract.RequiredOutputKindAssessment, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs, TargetRefs: GroundedRepairTargets(facts),
 	}
 	return base
 }
@@ -250,9 +259,12 @@ func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecont
 	// provider when the persisted File admissibility observation cannot accept a
 	// new target for any sealed durable File kind; otherwise retries would only
 	// cycle through candidates that the File owner must reject.
-	if hasOwnerGroundedCreationScope(facts) && !creationScopeHasAdmissibleFileOperation(facts, acceptedKinds) {
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail,
-			"creation_scope_file_capability_unavailable", "empty workspace creation scope has no admissible durable File operation"), nil
+	if hasOwnerGroundedCreationScope(facts) {
+		acceptedKinds = creationScopeAdmissibleFileOperationKinds(facts, acceptedKinds)
+		if len(acceptedKinds) == 0 {
+			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail,
+				"creation_scope_file_capability_unavailable", "empty workspace creation scope has no owner-admissible durable File create operation"), nil
+		}
 	}
 	base.State = runtimecontract.ConvergenceStateNeedStateChange
 	base.Action = runtimecontract.RuntimeActionProduceStateChange
@@ -270,17 +282,20 @@ func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecont
 	return base, nil
 }
 
-// creationScopeHasAdmissibleFileOperation checks only the committed owner
+// creationScopeAdmissibleFileOperationKinds checks only the committed owner
 // inventory. It does not know a selector name, choose a path, inspect a
 // workspace, or call a capability owner: a non-empty File SelectorRefs list
 // is the owner's opaque assertion that the listed kind may receive a new
-// concrete target. Keeping that interpretation in SM-2 prevents the LLM from
-// treating an empty workspace as authority for Git/Shell/MCP side effects.
-func creationScopeHasAdmissibleFileOperation(facts runtimecontract.RuntimeFacts, acceptedKinds []string) bool {
+// concrete target. The descriptor's AllowsNewTarget property then narrows the
+// candidate contract to operations that can actually create an absent target.
+// Keeping that interpretation in SM-2 prevents the LLM from treating an empty
+// workspace as authority for Git/Shell/MCP side effects.
+func creationScopeAdmissibleFileOperationKinds(facts runtimecontract.RuntimeFacts, acceptedKinds []string) []string {
 	accepted := make(map[string]struct{}, len(acceptedKinds))
 	for _, kind := range acceptedKinds {
 		accepted[runtimecontract.CanonicalRuntimeBlockKind(kind)] = struct{}{}
 	}
+	admissible := make(map[string]struct{}, len(acceptedKinds))
 	for _, inventory := range facts.Resources.OperationAdmissibilities {
 		inventory = inventory.Normalized()
 		if inventory.OwnerModuleID != runtimecontract.RuntimeModuleFile || len(inventory.SelectorRefs) == 0 {
@@ -292,12 +307,19 @@ func creationScopeHasAdmissibleFileOperation(facts runtimecontract.RuntimeFacts,
 				continue
 			}
 			descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(kind)
-			if known && descriptor.OwnerModuleID == runtimecontract.RuntimeModuleFile && runtimecontract.RuntimeEffectIsDurable(descriptor.DefaultEffectScope) {
-				return true
+			if known && descriptor.OwnerModuleID == runtimecontract.RuntimeModuleFile && descriptor.AllowsNewTarget && runtimecontract.RuntimeEffectIsDurable(descriptor.DefaultEffectScope) {
+				admissible[kind] = struct{}{}
 			}
 		}
 	}
-	return false
+	ret := make([]string, 0, len(admissible))
+	for _, kind := range acceptedKinds {
+		kind = runtimecontract.CanonicalRuntimeBlockKind(kind)
+		if _, ok := admissible[kind]; ok {
+			ret = append(ret, kind)
+		}
+	}
+	return ret
 }
 
 // requiredCapabilityStateSequence only contributes a capability owner's
@@ -349,7 +371,7 @@ func validationDecision(base runtimecontract.RuntimeDecision, facts runtimecontr
 		RequiredEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
 		RequiredEvidenceKinds:     []string{runtimecontract.EvidenceKindValidation},
 		CoverageWorkItemIDs:       facts.Focus.CoverageWorkItemIDs,
-		TargetRefs:                facts.Focus.TargetRefs,
+		TargetRefs:                GroundedRepairTargets(facts),
 	}
 	return base, nil
 }
@@ -381,9 +403,17 @@ func targetGroundingDecision(base runtimecontract.RuntimeDecision, facts runtime
 // creation observation; the reducer never derives a file path from Goal, DoD,
 // manifest ordering, or provider text.
 func hasOwnerGroundedCreationScope(facts runtimecontract.RuntimeFacts) bool {
-	selection := facts.Resources.TargetSelection
-	return selection != nil && selection.Disposition == runtimecontract.RuntimeTargetSelectionCreate &&
-		selection.OwnerModuleID == runtimecontract.RuntimeModuleFile
+	if facts.Resources.TargetSelection == nil {
+		return false
+	}
+	selection := facts.Resources.TargetSelection.Normalized()
+	focus := facts.Focus.Normalized()
+	return selection.Disposition == runtimecontract.RuntimeTargetSelectionCreate &&
+		selection.OwnerModuleID == runtimecontract.RuntimeModuleFile &&
+		selection.TargetRole == focus.TargetRole && selection.SelectorRef == focus.TargetSelectorRef &&
+		selection.SelectorOwnerRef == focus.TargetSelectorOwnerRef && selection.SelectorSubjectRef == focus.TargetSelectorSubjectRef &&
+		runtimecontract.SameRuntimeTargetSelectorCandidateRefs(selection.SelectorCandidateRefs, focus.TargetSelectorCandidateRefs) &&
+		selection.ProspectiveTargetRef != "" && selection.ProspectiveTargetRef == focus.ProspectiveTargetRef
 }
 
 func hasOwnerGroundedTargetScope(facts runtimecontract.RuntimeFacts) bool {
@@ -527,6 +557,7 @@ func advanceSatisfiedCoverageFocus(facts runtimecontract.RuntimeFacts) runtimeco
 	if len(missingEvidenceKinds(facts)) != 0 || !currentFocusCoverageSatisfied(facts) || len(facts.RemainingFocuses) == 0 {
 		return facts
 	}
+	facts.CompletedFocuses = append(facts.CompletedFocuses, facts.Focus)
 	facts.Focus = facts.RemainingFocuses[0]
 	facts.RemainingFocuses = append([]runtimecontract.CoverageFocus(nil), facts.RemainingFocuses[1:]...)
 	facts.Failure = nil

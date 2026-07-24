@@ -4,7 +4,7 @@ Status: active
 
 Type: index
 
-Last Updated: 2026-07-21
+Last Updated: 2026-07-24
 
 ## Purpose
 
@@ -25,7 +25,7 @@ Runtime V2-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **�
 
 | # | 主题 | 待办 | 当前方案 |
 | --- | --- | --- | --- |
-| A1 | validation/effective-progress | 收口 all-skipped receipt、accepted 与 effective progress 分离、same-gap shape/counter、grounded discovery、async terminal metrics，并完成 SM-2/3/4 与 fresh deployed gate | [详细方案](../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md) |
+| A1 | Runtime V2 live 合同正向收敛 | 完成 fresh deployed gate；已由 metadata-only Runtime V2 audit projection + verifier 强校验 authority/grounding/receipt/repair/assessment/terminal/projection watermark，profile-declared bounded semantic selector、默认 software-dev 空工作区 source/leading DoD create declaration，以及已落地的 evidence/progress/diagnostic/prerequisite、focus dependency、Shell structured failure-target、owner-grounded retarget、same-gap/file-backed restart 与 sealed closed-schema candidate boundary 基线不得回退 | [唯一收口方案](../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md) |
 
 ## B. 运行单元架构 / 生命周期
 

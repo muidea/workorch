@@ -74,6 +74,14 @@ func TestRuntimeOperationDescriptorForKindCanonicalAndUnknown(t *testing.T) {
 	if RuntimeModuleForOperationKind("unknown/kind") != "" {
 		t.Fatal("unknown kind must have empty owner module")
 	}
+	fileWrite, ok := RuntimeOperationDescriptorForKind(StepKindFileWrite)
+	if !ok || !fileWrite.AllowsNewTarget {
+		t.Fatalf("file/write descriptor must explicitly allow owner-authorized new targets: %+v", fileWrite)
+	}
+	patch, ok := RuntimeOperationDescriptorForKind(RuntimeBlockKindPatchApply)
+	if !ok || patch.AllowsNewTarget {
+		t.Fatalf("patch/apply descriptor must not claim absent-target create semantics: %+v", patch)
+	}
 }
 
 func TestOperationSideEffectsDeriveFromDescriptor(t *testing.T) {

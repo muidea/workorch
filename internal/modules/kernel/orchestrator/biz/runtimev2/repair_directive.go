@@ -178,18 +178,18 @@ func buildRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimeco
 }
 
 // repairDirectiveTargets is an SM-2 ownership rule: an explicit Focus target
-// is immutable authority; otherwise a persisted owner failure target or a
-// uniquely selected owner target grounds the next repair. A File owner scope
-// is deliberately excluded: it is a bounded feasibility inventory, not a
+// remains immutable focus declaration, while a persisted owner failure target
+// may supersede it as the current repair surface. A File owner scope is
+// deliberately excluded: it is a bounded feasibility inventory, not a
 // concrete repair target, and must remain available for the next candidate to
 // propose one concrete File target. The runtime core does not infer
 // source/test roles from path names or provider text.
 func repairDirectiveTargets(facts runtimecontract.RuntimeFacts, fallback []string) []string {
-	if len(facts.Focus.TargetRefs) > 0 {
-		return append([]string(nil), facts.Focus.TargetRefs...)
-	}
 	if facts.Resources.FailureTarget != nil && len(facts.Resources.FailureTarget.TargetRefs) > 0 {
 		return append([]string(nil), facts.Resources.FailureTarget.TargetRefs...)
+	}
+	if len(facts.Focus.TargetRefs) > 0 {
+		return append([]string(nil), facts.Focus.TargetRefs...)
 	}
 	if facts.Failure != nil && len(facts.Failure.TargetRefs) > 0 {
 		return append([]string(nil), facts.Failure.TargetRefs...)

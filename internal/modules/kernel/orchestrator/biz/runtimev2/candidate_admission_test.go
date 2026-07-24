@@ -88,6 +88,43 @@ func TestActiveRejectedOperationShapesRetainsOnlyCurrentLineageAndInfeasibleProp
 	}
 }
 
+func TestOwnerRetargetKeepsOldRejectedShapeDiagnosticButAdmitsNewTargetShape(t *testing.T) {
+	aggregate, oldCandidate := aggregateWithActiveRejectedCandidate(t)
+	aggregate.Facts.Focus.RequireTargetGrounding = true
+	aggregate.Facts.Focus.TargetRole = "implementation"
+	aggregate.Facts.Resources.FailureTarget = &runtimecontract.FailureTarget{
+		Signature: "owner-retarget", TargetRefs: []string{"implementation.go"},
+		TargetObservation: &runtimecontract.RuntimeFailureTargetObservation{
+			OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "server-a", TargetRole: "implementation",
+			ObservedRevision: "mcp-catalog-v2", TargetRefs: []string{"implementation.go"},
+		},
+	}
+	aggregate.Facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
+		TargetRef: "implementation.go", ContentHash: "implementation-v2", ContentState: runtimecontract.SnapshotContentStateComplete,
+	}}
+	updatedFacts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Facts = updatedFacts
+	aggregate.Decision = decision
+	if decision.Action != runtimecontract.RuntimeActionProduceStateChange || !sameRuntimeTargetRefs(decision.RequiredOutput.TargetRefs, []string{"implementation.go"}) {
+		t.Fatalf("retarget decision = %+v", decision)
+	}
+	shapes := ActiveRejectedOperationShapes(aggregate)
+	if len(shapes) != 1 || !sameRuntimeTargetRefs(shapes[0].Operation.TargetRefs, []string{"main.go"}) {
+		t.Fatalf("old rejected shape was not retained as diagnostic lineage: %+v", shapes)
+	}
+	newCandidate := oldCandidate
+	newCandidate.StateChange.Operations[0].Operation = patchApplyTestOperation("patch-implementation", "implementation.go")
+	if runtimecontract.StableRuntimeOperationShape(newCandidate.StateChange.Operations[0].Operation) == shapes[0].Hash {
+		t.Fatal("retarget must produce a distinct canonical operation shape")
+	}
+	if admission := EvaluateCandidateAdmission(aggregate, newCandidate); !admission.Accepted() {
+		t.Fatalf("owner-retargeted operation shape was rejected: %+v", admission)
+	}
+}
+
 func TestEvaluateCandidateAdmissionRespectsRepairDirectiveForValidationGap(t *testing.T) {
 	aggregate := stateChangeAggregate(t)
 	aggregate.Facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
@@ -194,6 +231,8 @@ func TestEvaluateCandidateAdmissionAllowsOwnerGroundedWorkspaceScopeThroughFileA
 	aggregate := stateChangeAggregate(t)
 	aggregate.Facts.Focus.RequireTargetGrounding = true
 	aggregate.Facts.Focus.TargetRole = "deliverable"
+	aggregate.Facts.Focus.TargetSelectorRef = "file/workspace_deliverable"
+	aggregate.Facts.Focus.ProspectiveTargetRef = "new-deliverable.txt"
 	aggregate.Facts.Focus.TargetRefs = nil
 	selection := runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: "target-selection-scope", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: "deliverable",
@@ -235,10 +274,12 @@ func TestEvaluateCandidateAdmissionCreationScopeRequiresConcreteDurableFileTarge
 	aggregate := stateChangeAggregate(t)
 	aggregate.Facts.Focus.RequireTargetGrounding = true
 	aggregate.Facts.Focus.TargetRole = "deliverable"
+	aggregate.Facts.Focus.TargetSelectorRef = "file/workspace_deliverable"
+	aggregate.Facts.Focus.ProspectiveTargetRef = "new-deliverable.txt"
 	aggregate.Facts.Focus.TargetRefs = nil
 	selection := runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: "target-selection-create", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: "deliverable",
-		SelectorRef: "file/workspace_deliverable", Disposition: runtimecontract.RuntimeTargetSelectionCreate, CandidateCount: 0,
+		SelectorRef: "file/workspace_deliverable", Disposition: runtimecontract.RuntimeTargetSelectionCreate, ProspectiveTargetRef: "new-deliverable.txt", CandidateCount: 0,
 		ObservedRevision: "workspace-tree-empty",
 	}
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
@@ -249,7 +290,7 @@ func TestEvaluateCandidateAdmissionCreationScopeRequiresConcreteDurableFileTarge
 		ID: "initialize-repository", Kind: runtimecontract.StepKindGitWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		Parameters: []runtimecontract.OperationParameter{{Name: "operation", String: &gitInit}},
 	}}}}}
-	if result := rejectCandidateOutsideGroundedTargets(aggregate.Facts, aggregate.Decision, nonFileCandidate); result.Disposition != CandidateAdmissionRejectedContract || result.Failure == nil || result.Failure.Code != candidateAdmissionCodeCreationScopeMissingTarget {
+	if result := rejectCandidateOutsideGroundedTargets(aggregate.Facts, aggregate.Decision, nonFileCandidate); result.Disposition != CandidateAdmissionRejectedContract || result.Failure == nil || result.Failure.Code != candidateAdmissionCodeTargetOutsideGrounding {
 		t.Fatalf("non-File creation-scope candidate admission = %+v", result)
 	}
 

@@ -5,6 +5,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -224,6 +225,7 @@ func TestRequestRuntimeCandidatePreservesSealedReadOnlyMCPMetadata(t *testing.T)
 	}
 	context := candidateContextForDecision(decision)
 	context.Activation = activation
+	context.AdmissibleOperationKinds = runtimecontract.FeasibleOperationKindsWithActivation(decision.RequiredOutput, context.Capabilities, activation.MCPCapabilities)
 	response, err := RequestRuntimeCandidate(ctx, hub, orchestratorevents.RequestRuntimeCandidateCommand{
 		WorkspaceID: "ws-1", RunID: "run-1", Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: "stable-prefix-mcp",
 		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{runtimecontract.StepKindMCPToolCall}},
@@ -265,6 +267,22 @@ func TestRequestRuntimeCandidateRejectsRetryWithoutPreviousFailure(t *testing.T)
 	}
 }
 
+func TestRequestRuntimeCandidateRejectsDivergentSealedContextBeforeEventHub(t *testing.T) {
+	decision := sealedCandidateTestDecision(t)
+	candidateContext := candidateContextForDecision(decision)
+	candidateContext.RequiredAction = runtimecontract.RuntimeActionProduceValidation
+	hub := magicevent.NewHub(1)
+	defer hub.Terminate(context.Background())
+	_, err := RequestRuntimeCandidate(context.Background(), hub, orchestratorevents.RequestRuntimeCandidateCommand{
+		WorkspaceID: "ws-1", RunID: "run-1", Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: "stable-prefix-1",
+		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
+		CandidateContext:  candidateContext,
+	})
+	if err == nil || !strings.Contains(err.Error(), "required action") {
+		t.Fatalf("divergent sealed context err = %v", err)
+	}
+}
+
 func sealedCandidateTestDecision(t *testing.T) runtimecontract.RuntimeDecision {
 	t.Helper()
 	facts := runtimecontract.RuntimeFacts{
@@ -290,12 +308,18 @@ func sealedCandidateTestDecision(t *testing.T) runtimecontract.RuntimeDecision {
 }
 
 func candidateContextForDecision(decision runtimecontract.RuntimeDecision) runtimecontract.RuntimeCandidateContext {
-	return runtimecontract.RuntimeCandidateContext{
+	required := decision.RequiredOutput.Normalized()
+	context := runtimecontract.RuntimeCandidateContext{
 		WorkspaceID: decision.AuthoritySnapshot.WorkspaceID, RunID: decision.AuthoritySnapshot.RunID,
 		DefinitionRevision: decision.AuthoritySnapshot.DefinitionRevision, EvidenceRevision: decision.AuthoritySnapshot.EvidenceRevision,
-		Focus:      decision.Focus,
-		Activation: runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		Focus:                 decision.Focus,
+		Activation:            runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		RequiredAction:        decision.Action,
+		RequiredEffectScopes:  append([]runtimecontract.RuntimeEffectScope(nil), required.RequiredEffectScopes...),
+		RequiredEvidenceKinds: append([]string(nil), required.RequiredEvidenceKinds...),
 	}
+	context.AdmissibleOperationKinds = runtimecontract.FeasibleOperationKindsWithActivation(decision.RequiredOutput, context.Capabilities, context.Activation.MCPCapabilities)
+	return context
 }
 
 var _ llmruntimev2.CandidateProvider = eventCandidateProviderFunc(nil)

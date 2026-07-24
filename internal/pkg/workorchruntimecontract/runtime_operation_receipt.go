@@ -617,6 +617,9 @@ func StableRuntimeOperationReceiptHash(receipt RuntimeOperationReceipt) string {
 			writeHashString(h, observation.TargetRole)
 			writeHashString(h, observation.ObservedRevision)
 			writeHashStrings(h, observation.TargetRefs)
+			writeHashString(h, observation.DiagnosticClass)
+			writeHashStrings(h, observation.EvidenceRefs)
+			writeHashString(h, observation.ContentHash)
 		}
 		if receipt.Failure.ValidationDiagnostic == nil {
 			writeHashString(h, "validation-diagnostic:nil")

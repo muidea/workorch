@@ -90,22 +90,30 @@ func TestAcquireRuntimeTargetSelectionPrerequisiteUsesTypedEventHubContract(t *t
 	creation, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, orchestratorevents.AcquireRuntimeTargetSelectionCommand{
 		WorkspaceID: "ws-selection", RunID: "run-selection", AuthoritySnapshotID: "authority-1",
 		PrerequisiteID: "target_selection:blocks/file:deliverable:file/workspace_deliverable:::0", WorkspaceDeliverableDirectory: emptyWorkspace,
-		TargetRole: "deliverable", TargetSelectorRef: "file/workspace_deliverable", MaxItems: 4,
+		TargetRole: "deliverable", TargetSelectorRef: "file/workspace_deliverable", ProspectiveTargetRef: "initial-deliverable.txt", MaxItems: 4,
 	})
 	if err != nil {
 		t.Fatalf("AcquireRuntimeTargetSelectionPrerequisite() empty workspace error = %v", err)
 	}
-	if creation.Selection.Disposition != runtimecontract.RuntimeTargetSelectionCreate || creation.Selection.CandidateCount != 0 || len(creation.Selection.TargetRefs) != 0 || creation.Observation == nil ||
+	if creation.Selection.Disposition != runtimecontract.RuntimeTargetSelectionCreate || creation.Selection.ProspectiveTargetRef != "initial-deliverable.txt" || creation.Selection.CandidateCount != 0 || len(creation.Selection.TargetRefs) != 0 || creation.Observation == nil ||
 		len(creation.Observation.Dependencies) != 1 || creation.Observation.Dependencies[0].Domain != runtimecontract.RuntimeResourceWorkspaceTree || creation.Observation.Dependencies[0].Revision != creation.Selection.ObservedRevision {
 		t.Fatalf("empty workspace creation selection = %+v", creation)
 	}
-	_, err = AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, orchestratorevents.AcquireRuntimeTargetSelectionCommand{
+	unsupported, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, orchestratorevents.AcquireRuntimeTargetSelectionCommand{
 		WorkspaceID: "ws-selection", RunID: "run-selection", AuthoritySnapshotID: "authority-1",
 		PrerequisiteID: "target_selection:blocks/file:deliverable:profile/free_form_selector:::0", WorkspaceDeliverableDirectory: workspace,
 		TargetRole: "deliverable", TargetSelectorRef: "profile/free_form_selector", MaxItems: 4,
 	})
-	if err == nil {
-		t.Fatal("undeclared File owner selector was accepted")
+	if err != nil || unsupported.Selection.Disposition != runtimecontract.RuntimeTargetSelectionUnsupported || unsupported.Observation == nil {
+		t.Fatalf("unsupported File selector result = %+v err=%v", unsupported, err)
+	}
+	profileDeclared, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, orchestratorevents.AcquireRuntimeTargetSelectionCommand{
+		WorkspaceID: "ws-selection", RunID: "run-selection", AuthoritySnapshotID: "authority-1",
+		PrerequisiteID: "target_selection:blocks/file:deliverable:file/profile_declared_candidates:profile-deliverable:implementation:implementation.txt::0", WorkspaceDeliverableDirectory: workspace,
+		TargetRole: "deliverable", TargetSelectorRef: "file/profile_declared_candidates", TargetSelectorOwnerRef: "profile-deliverable", TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: []string{"implementation.txt"}, MaxItems: 4,
+	})
+	if err != nil || profileDeclared.Selection.Disposition != runtimecontract.RuntimeTargetSelectionSelected || profileDeclared.Selection.SelectorOwnerRef != "profile-deliverable" || profileDeclared.Selection.SelectorSubjectRef != "implementation" || !runtimecontract.SameRuntimeTargetSelectorCandidateRefs(profileDeclared.Selection.SelectorCandidateRefs, []string{"implementation.txt"}) || profileDeclared.Observation == nil {
+		t.Fatalf("profile declared File selector result = %+v err=%v", profileDeclared, err)
 	}
 }
 

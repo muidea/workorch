@@ -45,15 +45,25 @@ func TestRuntimeAdapterProbeRejectsDirectoryPatchTargetWithoutMutation(t *testin
 func TestRuntimeAdapterAcquireRuntimeTargetSelectionIsCardinalityBounded(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	t.Run("empty workspace grounds creation scope", func(t *testing.T) {
-		selection, err := adapter.AcquireRuntimeTargetSelection(t.TempDir(), "target-selection-create", "deliverable", runtimeFileTargetSelectorWorkspaceDeliverable, 4)
+		selection, err := adapter.AcquireRuntimeTargetSelection(t.TempDir(), "target-selection-create", "deliverable", runtimeFileTargetSelectorWorkspaceDeliverable, "initial-deliverable.txt", 4)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if selection.Disposition != runtimecontract.RuntimeTargetSelectionCreate || selection.CandidateCount != 0 || len(selection.TargetRefs) != 0 || len(selection.CandidateTargetRefs) != 0 || selection.SnapshotID == "" {
 			t.Fatalf("empty workspace creation selection = %+v", selection)
 		}
-		if selection.SelectorRef != runtimeFileTargetSelectorWorkspaceDeliverable {
+		if selection.SelectorRef != runtimeFileTargetSelectorWorkspaceDeliverable || selection.ProspectiveTargetRef != "initial-deliverable.txt" {
 			t.Fatalf("creation selection lost owner selector binding: %+v", selection)
+		}
+	})
+	t.Run("empty workspace rejects noncanonical prospective target", func(t *testing.T) {
+		workspace := t.TempDir()
+		for _, target := range []string{"../escape.txt", "/absolute.txt", "nested/../deliverable.txt", `nested\\deliverable.txt`} {
+			t.Run(target, func(t *testing.T) {
+				if _, err := adapter.AcquireRuntimeTargetSelection(workspace, "target-selection-invalid-"+strings.ReplaceAll(target, "/", "-"), "deliverable", runtimeFileTargetSelectorWorkspaceDeliverable, target, 4); !errors.Is(err, common.ErrInvalidArgument) {
+					t.Fatalf("prospective target %q error = %v, want invalid argument", target, err)
+				}
+			})
 		}
 	})
 	t.Run("unique", func(t *testing.T) {
@@ -61,7 +71,7 @@ func TestRuntimeAdapterAcquireRuntimeTargetSelectionIsCardinalityBounded(t *test
 		if err := os.WriteFile(filepath.Join(workspace, "deliverable.txt"), []byte("value\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		selection, err := adapter.AcquireRuntimeTargetSelection(workspace, "target-selection-1", "deliverable", runtimeFileTargetSelectorUniqueWorkspaceEntry, 4)
+		selection, err := adapter.AcquireRuntimeTargetSelection(workspace, "target-selection-1", "deliverable", runtimeFileTargetSelectorUniqueWorkspaceEntry, "", 4)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -72,6 +82,19 @@ func TestRuntimeAdapterAcquireRuntimeTargetSelectionIsCardinalityBounded(t *test
 			t.Fatalf("unique selection lost owner selector binding: %+v", selection)
 		}
 	})
+	t.Run("selected inventory preserves prospective declaration", func(t *testing.T) {
+		workspace := t.TempDir()
+		if err := os.WriteFile(filepath.Join(workspace, "initial-deliverable.txt"), []byte("value\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		selection, err := adapter.AcquireRuntimeTargetSelection(workspace, "target-selection-after-create", "deliverable", runtimeFileTargetSelectorWorkspaceDeliverable, "initial-deliverable.txt", 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selection.Disposition != runtimecontract.RuntimeTargetSelectionSelected || selection.TargetRefs[0] != "initial-deliverable.txt" || selection.ProspectiveTargetRef != "initial-deliverable.txt" {
+			t.Fatalf("selection lost prospective declaration after create: %+v", selection)
+		}
+	})
 	t.Run("bounded workspace scope", func(t *testing.T) {
 		workspace := t.TempDir()
 		for _, name := range []string{"implementation.txt", "support.txt"} {
@@ -79,14 +102,14 @@ func TestRuntimeAdapterAcquireRuntimeTargetSelectionIsCardinalityBounded(t *test
 				t.Fatal(err)
 			}
 		}
-		selection, err := adapter.AcquireRuntimeTargetSelection(workspace, "target-selection-scope", "deliverable", runtimeFileTargetSelectorWorkspaceDeliverable, 4)
+		selection, err := adapter.AcquireRuntimeTargetSelection(workspace, "target-selection-scope", "deliverable", runtimeFileTargetSelectorWorkspaceDeliverable, "", 4)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if selection.Disposition != runtimecontract.RuntimeTargetSelectionScope || selection.CandidateCount != 2 || len(selection.TargetRefs) != 2 || len(selection.CandidateTargetRefs) != 2 || selection.TargetRefs[0] != "implementation.txt" || selection.TargetRefs[1] != "support.txt" {
 			t.Fatalf("workspace scope selection = %+v", selection)
 		}
-		bounded, err := adapter.AcquireRuntimeTargetSelection(workspace, "target-selection-scope-bounded", "deliverable", runtimeFileTargetSelectorWorkspaceDeliverable, 1)
+		bounded, err := adapter.AcquireRuntimeTargetSelection(workspace, "target-selection-scope-bounded", "deliverable", runtimeFileTargetSelectorWorkspaceDeliverable, "", 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -101,7 +124,7 @@ func TestRuntimeAdapterAcquireRuntimeTargetSelectionIsCardinalityBounded(t *test
 				t.Fatal(err)
 			}
 		}
-		selection, err := adapter.AcquireRuntimeTargetSelection(workspace, "target-selection-2", "deliverable", runtimeFileTargetSelectorUniqueWorkspaceEntry, 1)
+		selection, err := adapter.AcquireRuntimeTargetSelection(workspace, "target-selection-2", "deliverable", runtimeFileTargetSelectorUniqueWorkspaceEntry, "", 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -109,9 +132,67 @@ func TestRuntimeAdapterAcquireRuntimeTargetSelectionIsCardinalityBounded(t *test
 			t.Fatalf("ambiguous selection = %+v", selection)
 		}
 	})
-	t.Run("unknown selector rejected", func(t *testing.T) {
-		if _, err := adapter.AcquireRuntimeTargetSelection(t.TempDir(), "target-selection-3", "deliverable", "profile/free_form_selector", 4); !errors.Is(err, common.ErrInvalidArgument) {
-			t.Fatalf("unknown File selector error = %v, want invalid argument", err)
+	t.Run("unknown selector returns typed unsupported observation", func(t *testing.T) {
+		selection, err := adapter.AcquireRuntimeTargetSelection(t.TempDir(), "target-selection-3", "deliverable", "profile/free_form_selector", "", 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selection.Disposition != runtimecontract.RuntimeTargetSelectionUnsupported || selection.ObservedRevision != "unsupported-selector:profile/free_form_selector" || selection.SnapshotID == "" {
+			t.Fatalf("unknown File selector observation = %+v", selection)
+		}
+	})
+}
+
+func TestRuntimeAdapterAcquireProfileDeclaredTargetSelectionOnlyIntersectsCandidates(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	binding := runtimeTargetSelectionBinding{ownerRef: "profile-lsp", subjectRef: "implementation", candidateRefs: []string{"internal/lsp/manager.go", "internal/lsp/server.go"}}
+	t.Run("one declared file ignores unrelated workspace files", func(t *testing.T) {
+		workspace := t.TempDir()
+		for name := range map[string]string{"README.md": "unrelated", "internal/lsp/manager.go": "package lsp"} {
+			path := filepath.Join(workspace, name)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(name), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		selection, err := adapter.AcquireRuntimeTargetSelection(workspace, "target-selection-profile-one", "implementation", runtimeFileTargetSelectorProfileCandidates, "", 4, binding)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selection.Disposition != runtimecontract.RuntimeTargetSelectionSelected || len(selection.TargetRefs) != 1 || selection.TargetRefs[0] != "internal/lsp/manager.go" || selection.SelectorOwnerRef != "profile-lsp" || selection.SelectorSubjectRef != "implementation" || !runtimecontract.SameRuntimeTargetSelectorCandidateRefs(selection.SelectorCandidateRefs, binding.candidateRefs) {
+			t.Fatalf("profile declared selection = %+v", selection)
+		}
+	})
+	t.Run("multiple declared files remain ambiguous", func(t *testing.T) {
+		workspace := t.TempDir()
+		for _, name := range binding.candidateRefs {
+			path := filepath.Join(workspace, name)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(name), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		selection, err := adapter.AcquireRuntimeTargetSelection(workspace, "target-selection-profile-many", "implementation", runtimeFileTargetSelectorProfileCandidates, "", 4, binding)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selection.Disposition != runtimecontract.RuntimeTargetSelectionAmbiguous || len(selection.TargetRefs) != 0 || selection.CandidateCount != 2 || len(selection.CandidateTargetRefs) != 2 {
+			t.Fatalf("profile declared ambiguous selection = %+v", selection)
+		}
+	})
+	t.Run("declared absent prospective file is create scope", func(t *testing.T) {
+		workspace := t.TempDir()
+		createBinding := runtimeTargetSelectionBinding{ownerRef: "profile-lsp", subjectRef: "implementation", candidateRefs: []string{"internal/lsp/manager.go"}}
+		selection, err := adapter.AcquireRuntimeTargetSelection(workspace, "target-selection-profile-create", "implementation", runtimeFileTargetSelectorProfileCandidates, "internal/lsp/manager.go", 4, createBinding)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selection.Disposition != runtimecontract.RuntimeTargetSelectionCreate || selection.ProspectiveTargetRef != "internal/lsp/manager.go" || selection.CandidateCount != 0 {
+			t.Fatalf("profile declared create selection = %+v", selection)
 		}
 	})
 }

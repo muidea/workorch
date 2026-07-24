@@ -2,6 +2,7 @@ package activationcore
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
@@ -36,6 +37,10 @@ type compiledEvidencePolicy struct {
 	TargetRefs                        []string
 	TargetDiscoverySources            []string
 	TargetSelectorRef                 string
+	TargetSelectorOwnerRef            string
+	TargetSelectorSubjectRef          string
+	TargetSelectorCandidateRefs       []string
+	ProspectiveTargetRef              string
 	RequireTargetGrounding            bool
 	RequireDirectEvidence             bool
 	RequireClaimEvidence              bool
@@ -104,6 +109,7 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 		units[idx].order = idx + 1
 		units[idx].itemID = common.CoverageWorkItemID(fmt.Sprintf("cwi-%03d", units[idx].order))
 	}
+	allUnits := append([]workUnit(nil), units...)
 	// Continuation rehydration: keep unresolved coverage only when definition revision is stable.
 	units, gapAnalysis, err := applyContinuationToCoverageUnits(units, activation)
 	if err != nil {
@@ -116,6 +122,15 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 			text: "Analyze predecessor rejected result gaps and emit structured unresolved coverage", order: 1,
 			itemID: common.CoverageWorkItemID("cwi-001"),
 		}}
+	} else {
+		// If a continuation must re-run a source coverage item, its declared
+		// dependent proof must join the successor even when predecessor output
+		// recorded that proof as satisfied.  Otherwise the source can change
+		// without a ledger entry available to reopen.
+		units, err = expandContinuationCoverageDependencies(units, allUnits, activation.ExecutionContract.ProfileContracts)
+		if err != nil {
+			return compiledCoverage{}, err
+		}
 	}
 	if len(units) == 0 {
 		return compiledCoverage{}, fmt.Errorf("runtime coverage focus compiler produced no coverage items")
@@ -200,104 +215,122 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 	focuses := make([]runtimecontract.CoverageFocus, 0, len(resolved))
 	slices := make([]runtimecontract.RuntimeAcceptanceSlice, 0, len(buckets))
 	coverageItems := make([]runtimecontract.RuntimeCoverageItem, 0, len(resolved))
+	partitionCompatibleItems := func(items []resolvedItem) [][]resolvedItem {
+		if len(items) == 0 {
+			return nil
+		}
+		ret := make([][]resolvedItem, 0, len(items))
+		current := []resolvedItem{items[0]}
+		currentKey := compiledEvidencePolicyCompatibilityKey(items[0].policy)
+		for _, item := range items[1:] {
+			key := compiledEvidencePolicyCompatibilityKey(item.policy)
+			if key != currentKey {
+				ret = append(ret, current)
+				current = []resolvedItem{item}
+				currentKey = key
+				continue
+			}
+			current = append(current, item)
+		}
+		return append(ret, current)
+	}
 	focusSeq := 0
 	for _, bucket := range buckets {
 		maxItems := slicePolicy.EffectiveMaxWorkItems(bucket.group)
-		// Split by maxItems in original item order; always keep -%03d suffix.
+		// Focuses may contain only work that shares the same operational and
+		// evidence policy. A slice group is a bounded presentation policy, not
+		// permission to merge different target/evidence contracts into one SM-2
+		// authority.
 		ordinal := 0
-		for start := 0; start < len(bucket.items); start += maxItems {
-			end := start + maxItems
-			if end > len(bucket.items) {
-				end = len(bucket.items)
-			}
-			chunk := bucket.items[start:end]
-			ordinal++
-			sliceID := fmt.Sprintf("%s-%03d", bucket.group.ID, ordinal)
-			ids := make([]common.CoverageWorkItemID, 0, len(chunk))
-			requiredKinds := []string{}
-			// Focus-level accepted/rejected kinds: first item's non-empty values; rejected/required kinds union.
-			var acceptedKinds, rejectedKinds []string
-			var acceptedVariants []runtimecontract.RuntimeOperationVariantRef
-			var evidenceRole, targetRole, targetSelectorRef string
-			var targetRefs, targetDiscoverySources []string
-			requireDirect, requireClaim, requireExec, requireTargets, requireTargetGrounding, requireAssessment := false, false, false, false, false, false
-			texts := make([]string, 0, len(chunk))
-			for _, item := range chunk {
-				ids = append(ids, item.itemID)
-				requiredKinds = stableStringUnion(requiredKinds, item.policy.RequiredEvidenceKinds)
-				rejectedKinds = stableStringUnion(rejectedKinds, item.policy.RejectedStepKinds)
-				if len(acceptedKinds) == 0 && len(item.policy.AcceptedStepKinds) > 0 {
-					acceptedKinds = append([]string(nil), item.policy.AcceptedStepKinds...)
+		for _, compatibleItems := range partitionCompatibleItems(bucket.items) {
+			for start := 0; start < len(compatibleItems); start += maxItems {
+				end := start + maxItems
+				if end > len(compatibleItems) {
+					end = len(compatibleItems)
 				}
-				if len(acceptedVariants) == 0 && len(item.policy.AcceptedOperationVariants) > 0 {
-					acceptedVariants = append([]runtimecontract.RuntimeOperationVariantRef(nil), item.policy.AcceptedOperationVariants...)
-				}
-				if evidenceRole == "" && item.policy.EvidenceRole != "" {
-					evidenceRole = item.policy.EvidenceRole
-				}
-				// A Focus has exactly one target role/selector binding. Silently
-				// keeping the first profile value would make the remaining
-				// declarative policy disappear and could let SM-2 acquire a target
-				// for the wrong semantic role. Split such work in the profile's
-				// acceptance-slice policy or make the binding explicitly equal.
-				if item.policy.TargetRole != "" {
-					if targetRole != "" && targetRole != item.policy.TargetRole {
-						return compiledCoverage{}, fmt.Errorf("acceptance slice %s combines incompatible target roles %q and %q", sliceID, targetRole, item.policy.TargetRole)
+				chunk := compatibleItems[start:end]
+				ordinal++
+				sliceID := fmt.Sprintf("%s-%03d", bucket.group.ID, ordinal)
+				ids := make([]common.CoverageWorkItemID, 0, len(chunk))
+				requiredKinds := []string{}
+				// The compatibility partition makes the shared policy exact. Keep
+				// unions below only for fields that are intentionally set-like.
+				var acceptedKinds, rejectedKinds []string
+				var acceptedVariants []runtimecontract.RuntimeOperationVariantRef
+				var evidenceRole, targetRole, targetSelectorRef, targetSelectorOwnerRef, targetSelectorSubjectRef, prospectiveTargetRef string
+				var targetRefs, targetDiscoverySources, targetSelectorCandidateRefs []string
+				requireDirect, requireClaim, requireExec, requireTargets, requireTargetGrounding, requireAssessment := false, false, false, false, false, false
+				texts := make([]string, 0, len(chunk))
+				for _, item := range chunk {
+					ids = append(ids, item.itemID)
+					requiredKinds = stableStringUnion(requiredKinds, item.policy.RequiredEvidenceKinds)
+					rejectedKinds = stableStringUnion(rejectedKinds, item.policy.RejectedStepKinds)
+					if len(acceptedKinds) == 0 && len(item.policy.AcceptedStepKinds) > 0 {
+						acceptedKinds = append([]string(nil), item.policy.AcceptedStepKinds...)
+					}
+					if len(acceptedVariants) == 0 && len(item.policy.AcceptedOperationVariants) > 0 {
+						acceptedVariants = append([]runtimecontract.RuntimeOperationVariantRef(nil), item.policy.AcceptedOperationVariants...)
+					}
+					if evidenceRole == "" && item.policy.EvidenceRole != "" {
+						evidenceRole = item.policy.EvidenceRole
 					}
 					targetRole = item.policy.TargetRole
-				}
-				if item.policy.TargetSelectorRef != "" {
-					if targetSelectorRef != "" && targetSelectorRef != item.policy.TargetSelectorRef {
-						return compiledCoverage{}, fmt.Errorf("acceptance slice %s combines incompatible target selector refs %q and %q", sliceID, targetSelectorRef, item.policy.TargetSelectorRef)
-					}
 					targetSelectorRef = item.policy.TargetSelectorRef
+					targetSelectorOwnerRef = item.policy.TargetSelectorOwnerRef
+					targetSelectorSubjectRef = item.policy.TargetSelectorSubjectRef
+					prospectiveTargetRef = item.policy.ProspectiveTargetRef
+					targetRefs = stableStringUnion(targetRefs, item.policy.TargetRefs)
+					targetDiscoverySources = stableStringUnion(targetDiscoverySources, item.policy.TargetDiscoverySources)
+					targetSelectorCandidateRefs = stableStringUnion(targetSelectorCandidateRefs, item.policy.TargetSelectorCandidateRefs)
+					requireDirect = requireDirect || item.policy.RequireDirectEvidence
+					requireClaim = requireClaim || item.policy.RequireClaimEvidence
+					requireExec = requireExec || item.policy.RequireExecutableBehaviorEvidence
+					requireTargets = requireTargets || item.policy.RequireCoverageTargets
+					requireTargetGrounding = requireTargetGrounding || item.policy.RequireTargetGrounding
+					requireAssessment = requireAssessment || item.policy.RequireAssessment
+					texts = append(texts, item.unit.text)
+					coverageItems = append(coverageItems, runtimecontract.RuntimeCoverageItem{
+						ID: item.itemID, SliceID: sliceID, SourceScope: item.unit.sourceScope, SourceID: item.unit.sourceID,
+						TargetText: item.unit.text, Order: item.unit.order,
+					}.Normalized())
 				}
-				targetRefs = stableStringUnion(targetRefs, item.policy.TargetRefs)
-				targetDiscoverySources = stableStringUnion(targetDiscoverySources, item.policy.TargetDiscoverySources)
-				requireDirect = requireDirect || item.policy.RequireDirectEvidence
-				requireClaim = requireClaim || item.policy.RequireClaimEvidence
-				requireExec = requireExec || item.policy.RequireExecutableBehaviorEvidence
-				requireTargets = requireTargets || item.policy.RequireCoverageTargets
-				requireTargetGrounding = requireTargetGrounding || item.policy.RequireTargetGrounding
-				requireAssessment = requireAssessment || item.policy.RequireAssessment
-				texts = append(texts, item.unit.text)
-				coverageItems = append(coverageItems, runtimecontract.RuntimeCoverageItem{
-					ID: item.itemID, SliceID: sliceID, SourceScope: item.unit.sourceScope, SourceID: item.unit.sourceID,
-					TargetText: item.unit.text, Order: item.unit.order,
+				focusSeq++
+				assessmentScope := bucket.group.Scope
+				assessmentID := sliceID
+				if len(chunk) == 1 {
+					assessmentScope = chunk[0].unit.sourceScope
+					assessmentID = chunk[0].unit.sourceID
+				}
+				focus := runtimecontract.CoverageFocus{
+					ID: fmt.Sprintf("focus-%03d", focusSeq), SliceID: sliceID,
+					AssessmentScope: assessmentScope, AssessmentID: assessmentID,
+					AssessmentText: strings.Join(texts, "; "), CoverageWorkItemIDs: ids, RequiredEvidenceKinds: requiredKinds,
+					EvidenceRole: evidenceRole, TargetRole: targetRole, TargetRefs: targetRefs,
+					TargetDiscoverySources: targetDiscoverySources, TargetSelectorRef: targetSelectorRef, TargetSelectorOwnerRef: targetSelectorOwnerRef, TargetSelectorSubjectRef: targetSelectorSubjectRef, TargetSelectorCandidateRefs: targetSelectorCandidateRefs, ProspectiveTargetRef: prospectiveTargetRef,
+					RequireTargetGrounding: requireTargetGrounding, AcceptedStepKinds: acceptedKinds,
+					AcceptedOperationVariants: acceptedVariants, RejectedStepKinds: rejectedKinds,
+					RequireDirectEvidence: requireDirect, RequireClaimEvidence: requireClaim,
+					RequireExecutableBehaviorEvidence: requireExec, RequireCoverageTargets: requireTargets,
+					RequireAssessment: requireAssessment,
+				}.Normalized()
+				if err := runtimecontract.ValidateRuntimeTargetGrounding(focus.RequireTargetGrounding, focus.TargetRole, focus.TargetRefs, focus.TargetDiscoverySources, focus.TargetSelectorRef); err != nil {
+					return compiledCoverage{}, fmt.Errorf("compiled focus %s: %w", focus.ID, err)
+				}
+				focuses = append(focuses, focus)
+				slices = append(slices, runtimecontract.RuntimeAcceptanceSlice{
+					ID: sliceID, Title: bucket.group.Title, Scope: bucket.group.Scope, Priority: bucket.group.Priority,
+					CoverageWorkItemIDs: ids, RequiredEvidenceKinds: requiredKinds,
+					CompletionPolicy: slicePolicy.CompletionPolicy, ResultPolicy: slicePolicy.ResultPolicy,
 				}.Normalized())
 			}
-			focusSeq++
-			assessmentScope := bucket.group.Scope
-			assessmentID := sliceID
-			// Single-item slices preserve source identity for policy/reducer continuity.
-			if len(chunk) == 1 {
-				assessmentScope = chunk[0].unit.sourceScope
-				assessmentID = chunk[0].unit.sourceID
-			}
-			focus := runtimecontract.CoverageFocus{
-				ID: fmt.Sprintf("focus-%03d", focusSeq), SliceID: sliceID,
-				AssessmentScope: assessmentScope, AssessmentID: assessmentID,
-				AssessmentText:        strings.Join(texts, "; "),
-				CoverageWorkItemIDs:   ids,
-				RequiredEvidenceKinds: requiredKinds,
-				EvidenceRole:          evidenceRole,
-				TargetRole:            targetRole, TargetRefs: targetRefs, TargetDiscoverySources: targetDiscoverySources, TargetSelectorRef: targetSelectorRef,
-				RequireTargetGrounding: requireTargetGrounding,
-				AcceptedStepKinds:      acceptedKinds, AcceptedOperationVariants: acceptedVariants, RejectedStepKinds: rejectedKinds,
-				RequireDirectEvidence: requireDirect, RequireClaimEvidence: requireClaim,
-				RequireExecutableBehaviorEvidence: requireExec, RequireCoverageTargets: requireTargets,
-				RequireAssessment: requireAssessment,
-			}.Normalized()
-			if err := runtimecontract.ValidateRuntimeTargetGrounding(focus.RequireTargetGrounding, focus.TargetRole, focus.TargetRefs, focus.TargetDiscoverySources, focus.TargetSelectorRef); err != nil {
-				return compiledCoverage{}, fmt.Errorf("compiled focus %s: %w", focus.ID, err)
-			}
-			focuses = append(focuses, focus)
-			slices = append(slices, runtimecontract.RuntimeAcceptanceSlice{
-				ID: sliceID, Title: bucket.group.Title, Scope: bucket.group.Scope, Priority: bucket.group.Priority,
-				CoverageWorkItemIDs: ids, RequiredEvidenceKinds: requiredKinds,
-				CompletionPolicy: slicePolicy.CompletionPolicy, ResultPolicy: slicePolicy.ResultPolicy,
-			}.Normalized())
 		}
+	}
+	coverageItems, err = compileRuntimeCoverageDependencies(coverageItems, runtimeCoverageItemsFromWorkUnits(allUnits), activation.ExecutionContract.ProfileContracts)
+	if err != nil {
+		return compiledCoverage{}, err
+	}
+	if err := runtimecontract.ValidateRuntimeCoverageItemDependencies(coverageItems); err != nil {
+		return compiledCoverage{}, fmt.Errorf("compiled coverage dependencies: %w", err)
 	}
 	if len(focuses) == 0 {
 		return compiledCoverage{}, fmt.Errorf("runtime coverage focus compiler produced no focuses")
@@ -369,6 +402,172 @@ func matchAcceptanceSliceGroup(group runtimecontract.RuntimeAcceptanceSliceGroup
 		return false
 	}
 	return ok
+}
+
+// compiledEvidencePolicyCompatibilityKey contains every policy field that is
+// consumed by a sealed focus/authority transaction.  It deliberately excludes
+// Description: prose is audit context and must not split otherwise identical
+// Runtime V2 authority.
+func compiledEvidencePolicyCompatibilityKey(policy compiledEvidencePolicy) string {
+	policy.RequiredEvidenceKinds = stableStringUnion(policy.RequiredEvidenceKinds)
+	policy.AcceptedStepKinds = stableStringUnion(policy.AcceptedStepKinds)
+	policy.AcceptedOperationVariants = runtimecontract.NormalizeRuntimeOperationVariantRefs(policy.AcceptedOperationVariants)
+	policy.RejectedStepKinds = stableStringUnion(policy.RejectedStepKinds)
+	policy.TargetRefs = stableStringUnion(policy.TargetRefs)
+	policy.TargetDiscoverySources = stableStringUnion(policy.TargetDiscoverySources)
+	policy.TargetSelectorCandidateRefs = stableStringUnion(policy.TargetSelectorCandidateRefs)
+	variants := make([]string, 0, len(policy.AcceptedOperationVariants))
+	for _, variant := range policy.AcceptedOperationVariants {
+		variants = append(variants, variant.Kind+"/"+variant.VariantID)
+	}
+	return strings.Join([]string{
+		strings.Join(policy.RequiredEvidenceKinds, ","),
+		strings.Join(policy.AcceptedStepKinds, ","),
+		strings.Join(variants, ","),
+		strings.Join(policy.RejectedStepKinds, ","),
+		strings.TrimSpace(policy.EvidenceRole),
+		strings.TrimSpace(policy.TargetRole),
+		strings.Join(policy.TargetRefs, ","),
+		strings.Join(policy.TargetDiscoverySources, ","),
+		strings.TrimSpace(policy.TargetSelectorRef),
+		strings.TrimSpace(policy.TargetSelectorOwnerRef),
+		strings.TrimSpace(policy.TargetSelectorSubjectRef),
+		strings.Join(policy.TargetSelectorCandidateRefs, ","),
+		strings.TrimSpace(policy.ProspectiveTargetRef),
+		fmt.Sprintf("%t,%t,%t,%t,%t,%t", policy.RequireTargetGrounding, policy.RequireDirectEvidence,
+			policy.RequireClaimEvidence, policy.RequireExecutableBehaviorEvidence, policy.RequireCoverageTargets,
+			policy.RequireAssessment),
+	}, "\x1f")
+}
+
+// compileRuntimeCoverageDependencies resolves profile-owned opaque source
+// references into the stable coverage IDs persisted in a RuntimeBootstrap.
+// It is activation-only compilation: the helper does not infer domain
+// relationships, alter focus state, or access workspace/capability owners.
+func compileRuntimeCoverageDependencies(items []runtimecontract.RuntimeCoverageItem, declaredItems []runtimecontract.RuntimeCoverageItem, profiles []runtimecontract.RuntimeProfileContract) ([]runtimecontract.RuntimeCoverageItem, error) {
+	items = runtimecontract.NormalizeRuntimeCoverageItems(items)
+	declaredItems = runtimecontract.NormalizeRuntimeCoverageItems(declaredItems)
+	if len(items) == 0 {
+		return nil, nil
+	}
+	for _, profile := range runtimecontract.NormalizeRuntimeProfileContracts(profiles) {
+		for _, dependency := range profile.CoverageDependencies {
+			sources := coverageItemsForDependencyBinding(items, dependency.SourceScope, dependency.SourceRequirementID)
+			declaredSources := coverageItemsForDependencyBinding(declaredItems, dependency.SourceScope, dependency.SourceRequirementID)
+			if len(declaredSources) == 0 {
+				return nil, fmt.Errorf("runtime coverage dependency %q source %s/%s matched no coverage item", dependency.ID, dependency.SourceScope, dependency.SourceRequirementID)
+			}
+			dependents := coverageItemsForDependencyBinding(items, dependency.DependentScope, dependency.DependentRequirementID)
+			declaredDependents := coverageItemsForDependencyBinding(declaredItems, dependency.DependentScope, dependency.DependentRequirementID)
+			if len(declaredDependents) == 0 {
+				return nil, fmt.Errorf("runtime coverage dependency %q dependent %s/%s matched no coverage item", dependency.ID, dependency.DependentScope, dependency.DependentRequirementID)
+			}
+			// A predecessor may have fully closed both endpoints. They are valid
+			// declarations but absent from this continuation; no source effect in
+			// this Run can reopen them, so do not manufacture a relationship.
+			if len(sources) == 0 || len(dependents) == 0 {
+				continue
+			}
+			for _, source := range sources {
+				for _, dependent := range dependents {
+					if source.ID == dependent.ID {
+						return nil, fmt.Errorf("runtime coverage dependency %q resolves source and dependent to coverage item %s", dependency.ID, source.ID)
+					}
+					for idx := range items {
+						if items[idx].ID != source.ID {
+							continue
+						}
+						items[idx].ReopenDependencies = append(items[idx].ReopenDependencies, runtimecontract.RuntimeCoverageReopenDependency{
+							CoverageWorkItemID: dependent.ID, TriggerEvidenceKinds: dependency.TriggerEvidenceKinds,
+						})
+						items[idx] = items[idx].Normalized()
+						break
+					}
+				}
+			}
+		}
+	}
+	return runtimecontract.NormalizeRuntimeCoverageItems(items), nil
+}
+
+func runtimeCoverageItemsFromWorkUnits(units []workUnit) []runtimecontract.RuntimeCoverageItem {
+	ret := make([]runtimecontract.RuntimeCoverageItem, 0, len(units))
+	for _, unit := range units {
+		ret = append(ret, runtimecontract.RuntimeCoverageItem{
+			ID: unit.itemID, SourceScope: unit.sourceScope, SourceID: unit.sourceID, TargetText: unit.text, Order: unit.order,
+		})
+	}
+	return runtimecontract.NormalizeRuntimeCoverageItems(ret)
+}
+
+func expandContinuationCoverageDependencies(units []workUnit, allUnits []workUnit, profiles []runtimecontract.RuntimeProfileContract) ([]workUnit, error) {
+	if len(units) == 0 {
+		return nil, nil
+	}
+	active := map[common.CoverageWorkItemID]struct{}{}
+	for _, unit := range units {
+		active[unit.itemID] = struct{}{}
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, profile := range runtimecontract.NormalizeRuntimeProfileContracts(profiles) {
+			for _, dependency := range profile.CoverageDependencies {
+				sourceKnown := matchingWorkUnitsForDependencyBinding(allUnits, dependency.SourceScope, dependency.SourceRequirementID)
+				dependentKnown := matchingWorkUnitsForDependencyBinding(allUnits, dependency.DependentScope, dependency.DependentRequirementID)
+				if len(sourceKnown) == 0 || len(dependentKnown) == 0 {
+					continue // compileRuntimeCoverageDependencies returns the exact activation error.
+				}
+				sourceActive := false
+				for _, source := range sourceKnown {
+					if _, ok := active[source.itemID]; ok {
+						sourceActive = true
+						break
+					}
+				}
+				if !sourceActive {
+					continue
+				}
+				for _, dependent := range dependentKnown {
+					if _, exists := active[dependent.itemID]; exists {
+						continue
+					}
+					active[dependent.itemID] = struct{}{}
+					units = append(units, dependent)
+					changed = true
+				}
+			}
+		}
+	}
+	// Restored dependencies must retain definition order/identity rather than
+	// the order in which graph traversal encountered them.
+	sort.SliceStable(units, func(i, j int) bool { return units[i].order < units[j].order })
+	return units, nil
+}
+
+func matchingWorkUnitsForDependencyBinding(units []workUnit, scope, requirementID string) []workUnit {
+	scope = normalizeEvidenceScope(scope)
+	requirementID = strings.TrimSpace(requirementID)
+	ret := make([]workUnit, 0, len(units))
+	for _, unit := range units {
+		if unit.sourceScope == scope && (requirementID == "*" || unit.sourceID == requirementID) {
+			ret = append(ret, unit)
+		}
+	}
+	return ret
+}
+
+func coverageItemsForDependencyBinding(items []runtimecontract.RuntimeCoverageItem, scope, requirementID string) []runtimecontract.RuntimeCoverageItem {
+	scope = normalizeEvidenceScope(scope)
+	requirementID = strings.TrimSpace(requirementID)
+	ret := make([]runtimecontract.RuntimeCoverageItem, 0, len(items))
+	for _, item := range items {
+		item = item.Normalized()
+		if item.SourceScope != scope || (requirementID != "*" && item.SourceID != requirementID) {
+			continue
+		}
+		ret = append(ret, item)
+	}
+	return ret
 }
 
 // applyContinuationToCoverageUnits filters compiled work units to unresolved coverage from the
@@ -458,6 +657,9 @@ func resolveCoverageEvidencePolicy(scope, id string, activation runtimecontract.
 			if err := validateProfileAcceptedKinds(requirement); err != nil {
 				return compiledEvidencePolicy{}, err
 			}
+			if len(requirement.TargetSelectorCandidateRefs) > 0 && strings.TrimSpace(requirement.TargetSelectorOwnerRef) == "" {
+				requirement.TargetSelectorOwnerRef = profile.ID
+			}
 			candidates = append(candidates, requirement)
 		}
 	}
@@ -535,6 +737,16 @@ func mergeCompiledEvidencePolicy(base compiledEvidencePolicy, requirements []run
 		if base.TargetSelectorRef == "" && strings.TrimSpace(requirement.TargetSelectorRef) != "" {
 			base.TargetSelectorRef = strings.TrimSpace(requirement.TargetSelectorRef)
 		}
+		if base.TargetSelectorOwnerRef == "" && strings.TrimSpace(requirement.TargetSelectorOwnerRef) != "" {
+			base.TargetSelectorOwnerRef = strings.TrimSpace(requirement.TargetSelectorOwnerRef)
+		}
+		if base.TargetSelectorSubjectRef == "" && strings.TrimSpace(requirement.TargetSelectorSubjectRef) != "" {
+			base.TargetSelectorSubjectRef = strings.TrimSpace(requirement.TargetSelectorSubjectRef)
+		}
+		base.TargetSelectorCandidateRefs = stableStringUnion(base.TargetSelectorCandidateRefs, requirement.TargetSelectorCandidateRefs)
+		if base.ProspectiveTargetRef == "" && strings.TrimSpace(requirement.ProspectiveTargetRef) != "" {
+			base.ProspectiveTargetRef = strings.TrimSpace(requirement.ProspectiveTargetRef)
+		}
 		base.TargetRefs = stableStringUnion(base.TargetRefs, requirement.TargetRefs)
 		base.TargetDiscoverySources = stableStringUnion(base.TargetDiscoverySources, requirement.TargetDiscoverySources)
 		base.RequireTargetGrounding = base.RequireTargetGrounding || requirement.RequireTargetGrounding
@@ -565,6 +777,10 @@ func applyCompiledEvidencePolicy(focus runtimecontract.CoverageFocus, policy com
 	}
 	focus.TargetRole = policy.TargetRole
 	focus.TargetSelectorRef = policy.TargetSelectorRef
+	focus.TargetSelectorOwnerRef = policy.TargetSelectorOwnerRef
+	focus.TargetSelectorSubjectRef = policy.TargetSelectorSubjectRef
+	focus.TargetSelectorCandidateRefs = append([]string(nil), policy.TargetSelectorCandidateRefs...)
+	focus.ProspectiveTargetRef = policy.ProspectiveTargetRef
 	focus.TargetRefs = append([]string(nil), policy.TargetRefs...)
 	focus.TargetDiscoverySources = append([]string(nil), policy.TargetDiscoverySources...)
 	focus.RequireTargetGrounding = policy.RequireTargetGrounding

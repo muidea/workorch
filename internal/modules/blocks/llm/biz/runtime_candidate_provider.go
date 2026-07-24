@@ -553,11 +553,10 @@ func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidat
 }
 
 // runtimeV2TargetSelectionInstruction converts the persisted File-owner
-// selection disposition into provider-facing C3 guidance. A create or complete
-// scope is intentionally not a concrete repair target: a candidate may propose
-// one concrete relative path only when the sealed authority contains no
-// higher-precedence concrete target. Only a durable File-owner operation is
-// admissible in that case, and the File owner remains the final path authority.
+// selection disposition into provider-facing C3 guidance. A create selection
+// carries the activation-sealed prospective path; a complete scope does not.
+// Only a durable File-owner operation is admissible for creation, and the File
+// owner remains the final workspace-boundary authority.
 func runtimeV2TargetSelectionInstruction(selection *runtimecontract.RuntimeTargetSelection, action runtimecontract.RuntimeAction) string {
 	if selection == nil || action != runtimecontract.RuntimeActionProduceStateChange {
 		return ""
@@ -568,7 +567,10 @@ func runtimeV2TargetSelectionInstruction(selection *runtimecontract.RuntimeTarge
 	}
 	switch value.Disposition {
 	case runtimecontract.RuntimeTargetSelectionCreate:
-		return "The File owner observed an empty workspace creation scope. Propose at least one durable File-owner operation with a concrete workspace-relative targetRefs entry and matching target parameter. Choose that proposed path from the Goal and DoD; do not leave it blank, and do not use this scope to authorize Git, Shell, MCP, or another owner. The File owner will validate the proposed path before execution."
+		if value.ProspectiveTargetRef == "" {
+			return ""
+		}
+		return fmt.Sprintf("The File owner observed an empty workspace creation scope with sealed prospective target %q. Propose at least one durable File-owner operation whose sole targetRefs entry and matching target parameter are exactly that path. Do not substitute another path, leave it blank, or use this scope to authorize Git, Shell, MCP, or another owner. The File owner will validate the path before execution.", value.ProspectiveTargetRef)
 	case runtimecontract.RuntimeTargetSelectionScope:
 		return "The File owner provided a bounded workspace feasibility scope, not a selected repair target. Follow any concrete target already sealed in the Focus, FailureTarget, current failure, or RepairDirective. Only when none is present, propose at least one durable File-owner operation with a concrete workspace-relative targetRefs entry and matching target parameter; that target may be a new file and remains subject to File-owner feasibility. Do not use this scope to authorize Git, Shell, MCP, or another owner."
 	default:
@@ -762,11 +764,9 @@ func runtimeV2OperationSchemaConditions(
 			continue
 		}
 		seen[contract.Kind] = struct{}{}
-		parameterNames := make([]string, 0, len(contract.Parameters))
 		parameterTypes := make(map[string]runtimecontract.RuntimeOperationParameterType, len(contract.Parameters))
 		parameterRequirements := make([]any, 0, len(contract.Parameters)+1)
 		for _, parameter := range contract.Parameters {
-			parameterNames = append(parameterNames, parameter.Name)
 			parameterTypes[parameter.Name] = parameter.Type
 			if parameter.Required {
 				parameterRequirements = append(parameterRequirements, runtimeV2ParameterContainsSchema(parameter.Name))
@@ -785,7 +785,7 @@ func runtimeV2OperationSchemaConditions(
 		}
 		parameterSchema := map[string]any{
 			"type":  "array",
-			"items": map[string]any{"properties": map[string]any{"name": map[string]any{"enum": parameterNames}}},
+			"items": runtimeV2OperationParameterItemSchema(contract),
 		}
 		if len(parameterRequirements) > 0 {
 			parameterSchema["allOf"] = parameterRequirements
@@ -810,13 +810,101 @@ func runtimeV2OperationSchemaConditions(
 		}
 		thenProperties := map[string]any{"parameters": parameterSchema}
 		then := map[string]any{"properties": thenProperties}
+		if len(parameterRequirements) > 0 || len(contract.Variants) > 0 {
+			then["required"] = []string{"parameters"}
+		}
 		if contract.RequireTargetRefs {
-			then["required"] = []string{"targetRefs"}
+			required, _ := then["required"].([]string)
+			then["required"] = append(required, "targetRefs")
 			thenProperties["targetRefs"] = map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}}
 		}
 		ret = append(ret, map[string]any{
 			"if":   map[string]any{"properties": map[string]any{"kind": map[string]any{"const": contract.Kind}}, "required": []string{"kind"}},
 			"then": then,
+		})
+	}
+	return ret
+}
+
+// runtimeV2OperationParameterItemSchema renders the parameter union for one
+// sealed operation descriptor. Each named parameter has exactly one legal
+// typed value field and is a closed JSON object. Keeping this provider-facing
+// renderer next to the LLM adapter prevents a broad generic parameter DTO from
+// becoming a second operation-contract authority.
+func runtimeV2OperationParameterItemSchema(contract runtimecontract.RuntimeOperationContract) map[string]any {
+	branches := make([]any, 0, len(contract.Parameters)+3)
+	for _, parameter := range contract.Parameters {
+		branches = append(branches, runtimeV2NamedOperationParameterSchema(parameter.Name, parameter.Type))
+	}
+	if runtimeV2AllowsMCPDynamicParameters(contract.Kind) {
+		branches = append(branches, runtimeV2MCPDynamicParameterSchemas(contract.Kind)...)
+	}
+	return map[string]any{"type": "object", "oneOf": branches}
+}
+
+func runtimeV2NamedOperationParameterSchema(name string, parameterType runtimecontract.RuntimeOperationParameterType) map[string]any {
+	valueField, valueSchema := runtimeV2OperationParameterValueSchema(parameterType)
+	return map[string]any{
+		"type": "object", "additionalProperties": false,
+		"required": []string{"name", valueField},
+		"properties": map[string]any{
+			"name":     map[string]any{"const": name},
+			valueField: valueSchema,
+		},
+	}
+}
+
+func runtimeV2OperationParameterValueSchema(parameterType runtimecontract.RuntimeOperationParameterType) (string, map[string]any) {
+	switch parameterType {
+	case runtimecontract.RuntimeOperationParameterTypeInteger:
+		return "integer", map[string]any{"type": "integer"}
+	case runtimecontract.RuntimeOperationParameterTypeBoolean:
+		return "boolean", map[string]any{"type": "boolean"}
+	case runtimecontract.RuntimeOperationParameterTypeStringList:
+		return "stringList", map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}}
+	default:
+		return "string", map[string]any{"type": "string"}
+	}
+}
+
+func runtimeV2AllowsMCPDynamicParameters(kind string) bool {
+	switch runtimecontract.CanonicalRuntimeBlockKind(kind) {
+	case runtimecontract.StepKindMCPToolCall, runtimecontract.StepKindMCPPromptGet:
+		return true
+	default:
+		return false
+	}
+}
+
+func runtimeV2MCPDynamicParameterSchemas(kind string) []any {
+	prefix := ""
+	switch runtimecontract.CanonicalRuntimeBlockKind(kind) {
+	case runtimecontract.StepKindMCPToolCall:
+		prefix = "input"
+	case runtimecontract.StepKindMCPPromptGet:
+		prefix = "arguments"
+	default:
+		return nil
+	}
+	// The shared operation contract permits only scalar dynamic MCP values. The
+	// suffix needs at least one non-space rune, matching the contract helper's
+	// trimmed non-empty suffix check without inventing tool-specific fields.
+	nameSchema := map[string]any{"type": "string", "pattern": "^" + prefix + `\\..*\\S.*$`}
+	ret := make([]any, 0, 3)
+	for _, value := range []struct {
+		field  string
+		schema map[string]any
+	}{
+		{field: "string", schema: map[string]any{"type": "string"}},
+		{field: "integer", schema: map[string]any{"type": "integer"}},
+		{field: "boolean", schema: map[string]any{"type": "boolean"}},
+	} {
+		ret = append(ret, map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"name", value.field},
+			"properties": map[string]any{
+				"name": nameSchema, value.field: value.schema,
+			},
 		})
 	}
 	return ret

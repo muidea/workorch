@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -20,6 +21,7 @@ const (
 	runtimeFileSelectorWorkspaceRelativeNewTarget = "workspace-relative-new-file-target"
 	runtimeFileTargetSelectorUniqueWorkspaceEntry = "file/unique_workspace_entry"
 	runtimeFileTargetSelectorWorkspaceDeliverable = "file/workspace_deliverable"
+	runtimeFileTargetSelectorProfileCandidates    = "file/profile_declared_candidates"
 )
 
 type RuntimeAdapter struct{}
@@ -96,30 +98,76 @@ func (a *RuntimeAdapter) AcquireWorkspaceManifest(workspaceDirectory string) (ru
 // AcquireRuntimeTargetSelection applies the File owner's neutral cardinality
 // rule to a bounded workspace inventory. It does not inspect source syntax,
 // file names, suffixes, or a profile's semantic TargetRole. The
-// workspace-deliverable selector has both a creation form for an empty
-// inventory and a bounded complete-scope form for multiple entries. Neither
-// form guesses a path: the candidate must still name concrete files and File
-// operation admissibility validates every path.
-func (a *RuntimeAdapter) AcquireRuntimeTargetSelection(workspaceDirectory, prerequisiteID, targetRole, selectorRef string, maxItems int) (runtimemodel.RuntimeTargetSelection, error) {
+// workspace-deliverable selector has both a profile-declared creation form for
+// an empty inventory and a bounded complete-scope form for multiple entries.
+// File never derives a path: it only verifies the declared prospective path
+// and operation admissibility validates every operation target.
+type runtimeTargetSelectionBinding struct {
+	ownerRef      string
+	subjectRef    string
+	candidateRefs []string
+}
+
+func (a *RuntimeAdapter) AcquireRuntimeTargetSelection(workspaceDirectory, prerequisiteID, targetRole, selectorRef, prospectiveTargetRef string, maxItems int, bindings ...runtimeTargetSelectionBinding) (runtimemodel.RuntimeTargetSelection, error) {
 	selectorRef = strings.TrimSpace(selectorRef)
-	if strings.TrimSpace(prerequisiteID) == "" || strings.TrimSpace(targetRole) == "" ||
-		(selectorRef != runtimeFileTargetSelectorUniqueWorkspaceEntry && selectorRef != runtimeFileTargetSelectorWorkspaceDeliverable) ||
-		maxItems < 1 || maxItems > runtimemodel.RuntimeCandidateContextItemsMaxCount {
+	prospectiveTargetRef = strings.TrimSpace(prospectiveTargetRef)
+	if strings.TrimSpace(prerequisiteID) == "" || strings.TrimSpace(targetRole) == "" || selectorRef == "" || maxItems < 1 || maxItems > runtimemodel.RuntimeCandidateContextItemsMaxCount {
 		return runtimemodel.RuntimeTargetSelection{}, common.ErrInvalidArgument
+	}
+	binding := runtimeTargetSelectionBinding{}
+	if len(bindings) > 1 {
+		return runtimemodel.RuntimeTargetSelection{}, common.ErrInvalidArgument
+	}
+	if len(bindings) == 1 {
+		binding.ownerRef = strings.TrimSpace(bindings[0].ownerRef)
+		binding.subjectRef = strings.TrimSpace(bindings[0].subjectRef)
+		binding.candidateRefs = normalizeRuntimeFileTargetRefs(bindings[0].candidateRefs)
+	}
+	if selectorRef != runtimeFileTargetSelectorUniqueWorkspaceEntry && selectorRef != runtimeFileTargetSelectorWorkspaceDeliverable && selectorRef != runtimeFileTargetSelectorProfileCandidates {
+		selection := runtimemodel.RuntimeTargetSelection{
+			PrerequisiteID: prerequisiteID, OwnerModuleID: runtimemodel.RuntimeModuleFile, TargetRole: targetRole, SelectorRef: selectorRef,
+			SelectorOwnerRef: binding.ownerRef, SelectorSubjectRef: binding.subjectRef, SelectorCandidateRefs: binding.candidateRefs,
+			ProspectiveTargetRef: prospectiveTargetRef, Disposition: runtimemodel.RuntimeTargetSelectionUnsupported,
+			ObservedRevision: "unsupported-selector:" + selectorRef,
+		}
+		selection.SnapshotID = runtimemodel.StableRuntimeTargetSelectionSnapshotID(selection)
+		return selection, selection.Validate()
 	}
 	manifest, err := a.AcquireWorkspaceManifest(workspaceDirectory)
 	if err != nil {
 		return runtimemodel.RuntimeTargetSelection{}, err
 	}
+	if selectorRef == runtimeFileTargetSelectorProfileCandidates {
+		return acquireProfileDeclaredTargetSelection(workspaceDirectory, prerequisiteID, targetRole, selectorRef, prospectiveTargetRef, maxItems, manifest, binding)
+	}
 	candidates := boundedAdmissibilityTargetRefs(nil, manifest.TargetRefs, maxItems)
 	selection := runtimemodel.RuntimeTargetSelection{
 		PrerequisiteID: prerequisiteID, OwnerModuleID: runtimemodel.RuntimeModuleFile, TargetRole: targetRole, SelectorRef: selectorRef,
-		CandidateTargetRefs: candidates, CandidateCount: len(manifest.TargetRefs), ObservedRevision: manifest.Revision,
+		CandidateTargetRefs: candidates, ProspectiveTargetRef: prospectiveTargetRef, CandidateCount: len(manifest.TargetRefs), ObservedRevision: manifest.Revision,
 	}
 	switch selection.CandidateCount {
 	case 0:
 		if selectorRef == runtimeFileTargetSelectorWorkspaceDeliverable {
+			if prospectiveTargetRef == "" {
+				return runtimemodel.RuntimeTargetSelection{}, fmt.Errorf("%w: empty workspace selector requires a profile-declared prospective target", common.ErrInvalidArgument)
+			}
+			if strings.Contains(prospectiveTargetRef, "\\") {
+				return runtimemodel.RuntimeTargetSelection{}, fmt.Errorf("%w: prospective target must use canonical workspace-relative separators", common.ErrInvalidArgument)
+			}
+			_, target, relative, err := guardedWorkspacePath(workspaceDirectory, prospectiveTargetRef, false)
+			if err != nil {
+				return runtimemodel.RuntimeTargetSelection{}, err
+			}
+			if canonical := filepath.ToSlash(relative); canonical != prospectiveTargetRef {
+				return runtimemodel.RuntimeTargetSelection{}, fmt.Errorf("%w: prospective target %q is not canonical (want %q)", common.ErrInvalidArgument, prospectiveTargetRef, canonical)
+			}
+			if _, err := os.Lstat(target); err == nil {
+				return runtimemodel.RuntimeTargetSelection{}, fmt.Errorf("%w: prospective target %q already exists", common.ErrInvalidArgument, filepath.ToSlash(relative))
+			} else if !os.IsNotExist(err) {
+				return runtimemodel.RuntimeTargetSelection{}, err
+			}
 			selection.Disposition = runtimemodel.RuntimeTargetSelectionCreate
+			selection.ProspectiveTargetRef = filepath.ToSlash(relative)
 		} else {
 			selection.Disposition = runtimemodel.RuntimeTargetSelectionAbsent
 		}
@@ -139,6 +187,86 @@ func (a *RuntimeAdapter) AcquireRuntimeTargetSelection(workspaceDirectory, prere
 		return runtimemodel.RuntimeTargetSelection{}, err
 	}
 	return selection, nil
+}
+
+// acquireProfileDeclaredTargetSelection only intersects the profile-provided,
+// bounded candidate set with the File manifest. The profile binding supplies
+// all semantics; File does not inspect a name, suffix, content or role.
+func acquireProfileDeclaredTargetSelection(workspaceDirectory, prerequisiteID, targetRole, selectorRef, prospectiveTargetRef string, maxItems int, manifest runtimemodel.WorkspaceManifest, binding runtimeTargetSelectionBinding) (runtimemodel.RuntimeTargetSelection, error) {
+	if binding.ownerRef == "" || binding.subjectRef == "" || len(binding.candidateRefs) == 0 || len(binding.candidateRefs) > maxItems {
+		return runtimemodel.RuntimeTargetSelection{}, common.ErrInvalidArgument
+	}
+	for _, candidate := range binding.candidateRefs {
+		if strings.Contains(candidate, "\\") {
+			return runtimemodel.RuntimeTargetSelection{}, common.ErrInvalidArgument
+		}
+		_, _, relative, err := guardedWorkspacePath(workspaceDirectory, candidate, false)
+		if err != nil || filepath.ToSlash(relative) != candidate {
+			return runtimemodel.RuntimeTargetSelection{}, common.ErrInvalidArgument
+		}
+	}
+	declared := make(map[string]struct{}, len(binding.candidateRefs))
+	for _, candidate := range binding.candidateRefs {
+		declared[candidate] = struct{}{}
+	}
+	matched := make([]string, 0, len(binding.candidateRefs))
+	for _, target := range manifest.TargetRefs {
+		if _, ok := declared[target]; ok {
+			matched = append(matched, target)
+		}
+	}
+	matched = boundedAdmissibilityTargetRefs(nil, matched, maxItems)
+	selection := runtimemodel.RuntimeTargetSelection{
+		PrerequisiteID: prerequisiteID, OwnerModuleID: runtimemodel.RuntimeModuleFile, TargetRole: targetRole, SelectorRef: selectorRef,
+		SelectorOwnerRef: binding.ownerRef, SelectorSubjectRef: binding.subjectRef, SelectorCandidateRefs: binding.candidateRefs,
+		CandidateTargetRefs: matched, ProspectiveTargetRef: prospectiveTargetRef, CandidateCount: len(matched), ObservedRevision: manifest.Revision,
+	}
+	switch selection.CandidateCount {
+	case 0:
+		if prospectiveTargetRef == "" {
+			selection.Disposition = runtimemodel.RuntimeTargetSelectionAbsent
+			break
+		}
+		if _, ok := declared[prospectiveTargetRef]; !ok || strings.Contains(prospectiveTargetRef, "\\") {
+			return runtimemodel.RuntimeTargetSelection{}, common.ErrInvalidArgument
+		}
+		_, target, relative, err := guardedWorkspacePath(workspaceDirectory, prospectiveTargetRef, false)
+		if err != nil || filepath.ToSlash(relative) != prospectiveTargetRef {
+			return runtimemodel.RuntimeTargetSelection{}, common.ErrInvalidArgument
+		}
+		if _, err := os.Lstat(target); err == nil || !os.IsNotExist(err) {
+			return runtimemodel.RuntimeTargetSelection{}, common.ErrInvalidArgument
+		}
+		selection.Disposition = runtimemodel.RuntimeTargetSelectionCreate
+	case 1:
+		selection.Disposition = runtimemodel.RuntimeTargetSelectionSelected
+		selection.TargetRefs = append([]string(nil), matched...)
+	default:
+		selection.Disposition = runtimemodel.RuntimeTargetSelectionAmbiguous
+	}
+	selection.SnapshotID = runtimemodel.StableRuntimeTargetSelectionSnapshotID(selection)
+	if err := selection.Validate(); err != nil {
+		return runtimemodel.RuntimeTargetSelection{}, err
+	}
+	return selection, nil
+}
+
+func normalizeRuntimeFileTargetRefs(values []string) []string {
+	seen := map[string]struct{}{}
+	ret := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		ret = append(ret, value)
+	}
+	sort.Strings(ret)
+	return ret
 }
 
 // AcquireRuntimeOperationAdmissibility returns the bounded File-owner view used

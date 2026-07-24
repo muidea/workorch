@@ -503,7 +503,7 @@ func (m *Biz) handleAcquireRuntimeTargetSelection(event magicevent.Event, result
 		setPrerequisiteError(result, common.ErrInvalidArgument)
 		return
 	}
-	selection, err := m.runtimeAdapter.AcquireRuntimeTargetSelection(command.WorkspaceDeliverableDirectory, command.PrerequisiteID, command.TargetRole, command.TargetSelectorRef, command.MaxItems)
+	selection, err := m.runtimeAdapter.AcquireRuntimeTargetSelection(command.WorkspaceDeliverableDirectory, command.PrerequisiteID, command.TargetRole, command.TargetSelectorRef, command.ProspectiveTargetRef, command.MaxItems, runtimeTargetSelectionBinding{ownerRef: command.TargetSelectorOwnerRef, subjectRef: command.TargetSelectorSubjectRef, candidateRefs: command.TargetSelectorCandidateRefs})
 	if setPrerequisiteError(result, err) {
 		return
 	}

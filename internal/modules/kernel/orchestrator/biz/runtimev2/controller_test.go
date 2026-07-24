@@ -1079,6 +1079,47 @@ func TestFailInfeasibleValidationCommandDiagnosticKeepsSameContractRetry(t *test
 	}
 }
 
+func TestFailInfeasibleValidationCommandDiagnosticRoutesToDeclaredImplementationRepair(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := controllerFacts()
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	facts.Capabilities = runtimecontract.RuntimeCapabilities{
+		StateChangeKinds: []string{runtimecontract.StepKindFileWrite},
+		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}
+	// This is profile data, not a core command-name rule: a profile may state
+	// that a rejected validation command proves the required implementation is
+	// not yet present and therefore needs a durable repair before re-validation.
+	facts.Activation.ExecutionContract.ValidationPolicies = []runtimecontract.RuntimeValidationPolicy{{
+		ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+		ValidationFailureImpliesStateChange: true,
+		ImplementationGapDiagnosticClasses:  []string{runtimecontract.ValidationDiagnosticCommandInvalid},
+	}}
+	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.BeginCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	repaired, err := controller.FailCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassInfeasible, Code: "validation_target_missing", Signature: "validation-target-missing", Reason: "declared validation command is unavailable",
+		ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{
+			SchemaVersion: runtimecontract.ValidationFailureDiagnosticSchemaVersion,
+			Class:         runtimecontract.ValidationDiagnosticCommandInvalid, RecommendedEvidenceTargetType: runtimecontract.ValidationEvidenceTargetCommandContract,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repaired.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || repaired.Facts.Failure == nil || repaired.Facts.Repair.RepairAttempts != 1 {
+		t.Fatalf("declared command diagnostic did not produce same-focus implementation repair: %+v", repaired)
+	}
+}
+
 func controllerFacts() runtimecontract.RuntimeFacts {
 	return runtimecontract.RuntimeFacts{
 		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},

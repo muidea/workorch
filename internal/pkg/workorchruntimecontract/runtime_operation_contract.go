@@ -60,7 +60,24 @@ func RuntimeOperationContractRevision() string {
 		if !ok {
 			continue
 		}
+		descriptor, ok := RuntimeOperationDescriptorForKind(kind)
+		if !ok {
+			continue
+		}
 		writeHashString(h, contract.Kind)
+		// Descriptor fields are consumed by reducer feasibility and sealed
+		// dispatch admission.  They must advance the executable contract revision
+		// together with parameter rules so an already-persisted Run never changes
+		// its create/effect semantics after a binary replacement.
+		writeHashString(h, descriptor.OwnerModuleID)
+		writeHashString(h, string(descriptor.DefaultEffectScope))
+		writeHashString(h, string(descriptor.CapabilityClass))
+		writeHashString(h, string(descriptor.IdempotencyClass))
+		writeHashString(h, fmt.Sprintf("%t", descriptor.RequiresOwnerReceipt))
+		writeHashString(h, fmt.Sprintf("%t", descriptor.AllowsNewTarget))
+		for _, action := range descriptor.AllowedActions {
+			writeHashString(h, string(action))
+		}
 		for _, p := range contract.Parameters {
 			writeHashString(h, p.Name)
 			writeHashString(h, string(p.Type))
@@ -69,6 +86,7 @@ func RuntimeOperationContractRevision() string {
 		writeHashStrings(h, contract.RequireOneOfParameters)
 		writeHashString(h, fmt.Sprintf("%t", contract.RequireTargetRefs))
 		writeHashStrings(h, contract.ForbiddenParameters)
+		writeHashString(h, runtimeOperationDynamicParameterPolicy(contract.Kind))
 		for _, v := range contract.Variants {
 			writeHashString(h, v.ID)
 			for _, d := range v.Discriminators {
@@ -239,6 +257,7 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				{Name: "targetRef", Type: RuntimeOperationParameterTypeString, Description: "workspace-relative target path"},
 				{Name: "content", Type: RuntimeOperationParameterTypeString, Required: true, Description: "complete file content; an empty string is allowed"},
 			},
+			RequireTargetRefs:   true,
 			ForbiddenParameters: []string{"input", "output", "payload"},
 			Rules:               []string{"target must be identified by path, targetRef, or operation targetRefs when provided"},
 		}, true
@@ -252,6 +271,7 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				{Name: "baseHash", Type: RuntimeOperationParameterTypeString, Description: "optional current content hash"},
 				{Name: "occurrence", Type: RuntimeOperationParameterTypeInteger, Description: "1-based match index when oldText is not unique"},
 			},
+			RequireTargetRefs:   true,
 			ForbiddenParameters: []string{"filePath", "fileContent", "targetRef", "targetRefs"},
 			Rules: []string{
 				"oldText must be non-empty and different from newText",
@@ -431,6 +451,9 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 	for _, parameter := range operation.Parameters {
 		definition, ok := allowed[parameter.Name]
 		if !ok && isMCPDynamicOperationParameter(operation.Kind, parameter.Name) {
+			if !isMCPDynamicOperationParameterScalar(parameter) {
+				return fmt.Errorf("kind %q dynamic parameter %q requires exactly one scalar string, integer, or boolean value", operation.Kind, parameter.Name)
+			}
 			values[parameter.Name] = parameter
 			continue
 		}
@@ -764,6 +787,42 @@ func isMCPDynamicOperationParameter(kind string, name string) bool {
 	default:
 		return false
 	}
+}
+
+// runtimeOperationDynamicParameterPolicy is included in the executable
+// operation-catalog revision. It makes a change to dynamic MCP parameter
+// semantics invalidate an old Runtime V2 activation instead of silently
+// applying a new contract to an already sealed Run.
+func runtimeOperationDynamicParameterPolicy(kind string) string {
+	switch CanonicalRuntimeBlockKind(kind) {
+	case StepKindMCPToolCall:
+		return "input.scalar"
+	case StepKindMCPPromptGet:
+		return "arguments.scalar"
+	default:
+		return "none"
+	}
+}
+
+// isMCPDynamicOperationParameterScalar keeps the pure operation contract in
+// lockstep with the provider-facing closed schema. Dynamic MCP tool/prompt
+// fields are intentionally scalar: structured payloads belong to the owner
+// protocol, not the generic Runtime V2 candidate DTO.
+func isMCPDynamicOperationParameterScalar(parameter OperationParameter) bool {
+	valueCount := 0
+	if parameter.String != nil {
+		valueCount++
+	}
+	if parameter.Integer != nil {
+		valueCount++
+	}
+	if parameter.Boolean != nil {
+		valueCount++
+	}
+	if len(parameter.StringList) > 0 {
+		return false
+	}
+	return valueCount == 1
 }
 
 func operationParameterMatchesType(parameter OperationParameter, expected RuntimeOperationParameterType) bool {

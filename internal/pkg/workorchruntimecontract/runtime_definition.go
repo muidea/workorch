@@ -87,6 +87,11 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 			writeHashString(h, requirement.TargetRole)
 			writeHashStrings(h, requirement.TargetRefs)
 			writeHashStrings(h, requirement.TargetDiscoverySources)
+			writeHashString(h, requirement.TargetSelectorRef)
+			writeHashString(h, requirement.TargetSelectorOwnerRef)
+			writeHashString(h, requirement.TargetSelectorSubjectRef)
+			writeHashStrings(h, requirement.TargetSelectorCandidateRefs)
+			writeHashString(h, requirement.ProspectiveTargetRef)
 			writeHashString(h, fmt.Sprintf("%t", requirement.RequireTargetGrounding))
 			writeHashStrings(h, requirement.RequiredEvidenceKinds)
 			writeHashString(h, fmt.Sprintf("%t", requirement.RequireDirectEvidence))
@@ -100,6 +105,15 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 			}
 			writeHashStrings(h, requirement.RejectedStepKinds)
 			writeHashString(h, requirement.Description)
+		}
+		writeHashString(h, fmt.Sprintf("%d", len(profile.CoverageDependencies)))
+		for _, dependency := range profile.CoverageDependencies {
+			writeHashString(h, dependency.ID)
+			writeHashString(h, dependency.SourceScope)
+			writeHashString(h, dependency.SourceRequirementID)
+			writeHashString(h, dependency.DependentScope)
+			writeHashString(h, dependency.DependentRequirementID)
+			writeHashStrings(h, dependency.TriggerEvidenceKinds)
 		}
 	}
 	if execution.AcceptanceSlicePolicy == nil {

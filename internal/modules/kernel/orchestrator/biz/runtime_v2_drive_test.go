@@ -491,6 +491,7 @@ func TestRuntimeV2FileBackedEmptyWorkspaceCreationSelectionContinuesThroughCandi
 	bootstrap := runtimeV2GroundedTargetSequenceBootstrap()
 	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}
 	bootstrap.Focuses[0].TargetSelectorRef = "file/workspace_deliverable"
+	bootstrap.Focuses[0].ProspectiveTargetRef = "implementation.txt"
 	bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}
 	bootstrap.Requirements[0].RequiredCapabilities = []string{runtimecontract.StepKindFileWrite}
 	bootstrap.Requirements = append(bootstrap.Requirements, runtimecontract.RuntimeRequirement{
@@ -577,6 +578,7 @@ func TestRuntimeV2FileBackedEmptyWorkspaceCreationReceiptCrashRestartDoesNotRepl
 			bootstrap := runtimeV2GroundedTargetSequenceBootstrap()
 			bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}
 			bootstrap.Focuses[0].TargetSelectorRef = "file/workspace_deliverable"
+			bootstrap.Focuses[0].ProspectiveTargetRef = "implementation.txt"
 			bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}
 			bootstrap.Requirements[0].RequiredCapabilities = []string{runtimecontract.StepKindFileWrite}
 			bootstrap.Requirements = append(bootstrap.Requirements, runtimecontract.RuntimeRequirement{
@@ -795,7 +797,11 @@ func TestRuntimeV2FileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing
 }
 
 func runtimeV2EmptyWorkspaceCreationCandidate(command orchestratorevents.RequestRuntimeCandidateCommand) runtimecontract.RuntimeCandidate {
-	return runtimeV2WorkspaceCreationCandidate(command, "implementation.txt", "created\n")
+	target := "implementation.txt"
+	if selection := command.CandidateContext.Resources.TargetSelection; selection != nil && selection.Disposition == runtimecontract.RuntimeTargetSelectionCreate && selection.ProspectiveTargetRef != "" {
+		target = selection.ProspectiveTargetRef
+	}
+	return runtimeV2WorkspaceCreationCandidate(command, target, "created\n")
 }
 
 func runtimeV2WorkspaceCreationCandidate(command orchestratorevents.RequestRuntimeCandidateCommand, target, content string) runtimecontract.RuntimeCandidate {

@@ -4,7 +4,7 @@ Status: active
 
 Type: roadmap
 
-Last Updated: 2026-07-21
+Last Updated: 2026-07-24
 
 ## Purpose
 
@@ -15,8 +15,8 @@ Last Updated: 2026-07-21
 | 主题 | 状态 |
 | --- | --- |
 | Runtime V2 生产主链 | **代码已收口**（Start/Resume → `DriveRuntimeV2` only） |
-| Runtime V2 正向收敛基础闭环 | **reopened / remediation active**；`run-003` 暴露的 validation-only effective-progress 已完成代码收口，最新 `run-006` 继续证明 failure/repair target grounding 尚未闭环 |
-| Runtime V2 production admissibility + positive acceptance | **partially reopened**；首次 gate、durable-effect freshness、validation evidence quality与 bounded escalation 保持完成，owner-grounded failure/repair target convergence 进入 RUNTIME-VPC/VPC-8 |
+| Runtime V2 正向收敛基础闭环 | **remediation active**；evidence/progress、diagnostic routing、feasibility prerequisite、Shell structured failure-target protocol、owner-grounded retarget、same-gap/file-backed restart matrix、profile-declared bounded semantic selector、metadata-only Runtime V2 audit projection 与默认 software-dev 空工作区 source/leading DoD create declaration已完成本地收口，fresh live 仍未闭环 |
+| Runtime V2 production admissibility + positive acceptance | **partially reopened**；owner feasibility、candidate admission 和 bounded escalation 保持完成，当前按唯一 RUNTIME-VPC 计划补齐严格 admission 所需的 owner-grounded authority |
 | Runtime V2 prerequisite freshness | **completed**；completion record 已归档，覆盖 observation/change/stale、refresh budget、restart/crash 与跨组件回归 |
 | Runtime V2 candidate admission transaction | **completed**；typed admission、attempt 0/1 atomic closure、restart/crash、真实 provider truncation/replay 与隔离 deployed partial-replay acceptance 均通过，completion record 已归档 |
 | 22-component framework boundary | **remediation active**；共享 Base Biz、全量本地 structural/race/file-backed 门禁已完成，待外部 deployed restart-fixture matrix |
@@ -27,7 +27,7 @@ Last Updated: 2026-07-21
 
 | ID | 项 | 说明 | 方案 / 历史过程稿 |
 | --- | --- | --- | --- |
-| RUNTIME-VPC | Runtime V2 validation/effective-progress/repair-target 收口 | `run-003` 的 evidence/progress 缺口已有代码收口；最新 `ws-fa686f29f54bc493/run-006` 在 lifecycle、provider、sealed transaction、projection 均正常时仍因 `Focus.TargetRefs=nil` 持续修改验证入口，最终 `no_progress_exhausted`。需按 VPC-8 收口 profile → activation compiler → Orchestrator grounding/progress → Shell failure target → LLM authority rendering | [详细收口方案](runtime-v2-validation-progress-closure-plan.md) |
+| RUNTIME-VPC | Runtime V2 live 合同正向收敛 | 当前本地基线已落地 validation truthfulness、effective progress、diagnostic routing、typed feasibility prerequisite、Shell structured failure target、owner-grounded retarget、same-gap/file-backed restart、candidate continuation、sealed closed-schema boundary、profile-declared bounded semantic selector、metadata-only Runtime V2 audit projection 与默认 software-dev 空工作区 source/leading DoD create declaration；剩余为 fresh live gate | [唯一收口方案](runtime-v2-validation-progress-closure-plan.md) |
 | ARCH-1 | 22 组件 framework boundary / lifecycle 验证 | Base Biz / Module-root EventHub 拓扑及本地验证已收口；按 22 组件合同矩阵逐项保持独立回归，待有重启后的外部目标与三类 fixture manifest 后执行 deployed SM-4 matrix | [主方案](go-multi-module-22-component-boundary-remediation.md) / [组件矩阵](component-contract-and-regression-closure-matrix.md) |
 | OPS-1 | 生产目录 V1 retirement 正式 apply | 代码/live 已 complete；等待 clean build + 真实生产目录维护窗口执行 `runtime-v1-retirement --apply` | [deployed-workspace-progress-blocker-component-closure-plan.md](../../90-archive/completed/deployed-workspace-progress-blocker-component-closure-plan.md) |
 | OPT-1 | file-patch deployed live（可选） | 代码迁移已完成；可选补一次 `patch apply + validation + DoD closeout` 的 deployed live | [file-patch-side-effect-owner-migration-plan.md](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |

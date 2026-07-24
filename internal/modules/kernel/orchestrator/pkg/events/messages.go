@@ -56,6 +56,10 @@ type AcquireRuntimeTargetSelectionCommand struct {
 	WorkspaceDeliverableDirectory string
 	TargetRole                    string
 	TargetSelectorRef             string
+	TargetSelectorOwnerRef        string
+	TargetSelectorSubjectRef      string
+	TargetSelectorCandidateRefs   []string
+	ProspectiveTargetRef          string
 	MaxItems                      int
 }
 
@@ -567,6 +571,7 @@ type ExecuteShellOperationCommand struct {
 	CoverageWorkItemIDs           []common.CoverageWorkItemID
 	TargetRefs                    []string
 	EvidenceKind                  string
+	TargetRole                    string
 	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
 	WorkspaceDeliverableDirectory string
 	WorkspaceInternalDirectory    string

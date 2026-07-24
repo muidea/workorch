@@ -68,6 +68,9 @@ func (b RuntimeBootstrap) Validate() error {
 		}
 		coverageItems[item.ID] = item
 	}
+	if err := ValidateRuntimeCoverageItemDependencies(b.CoverageItems); err != nil {
+		return fmt.Errorf("runtime bootstrap coverage dependencies: %w", err)
+	}
 	slices := make(map[string]RuntimeAcceptanceSlice, len(b.Slices))
 	for _, slice := range b.Slices {
 		if slice.ID == "" || len(slice.CoverageWorkItemIDs) == 0 {
@@ -126,6 +129,9 @@ func (b RuntimeBootstrap) Clone() RuntimeBootstrap {
 		b.Slices[idx] = b.Slices[idx].Normalized()
 	}
 	b.CoverageItems = append([]RuntimeCoverageItem(nil), b.CoverageItems...)
+	for idx := range b.CoverageItems {
+		b.CoverageItems[idx].ReopenDependencies = cloneRuntimeCoverageReopenDependencies(b.CoverageItems[idx].ReopenDependencies)
+	}
 	b.Requirements = append([]RuntimeRequirement(nil), b.Requirements...)
 	for idx := range b.Requirements {
 		b.Requirements[idx].RequiredCapabilities = append([]string(nil), b.Requirements[idx].RequiredCapabilities...)
@@ -178,12 +184,29 @@ func SameRuntimeBootstrap(left RuntimeBootstrap, right RuntimeBootstrap) bool {
 		}
 	}
 	for idx := range left.CoverageItems {
-		if left.CoverageItems[idx].Normalized() != right.CoverageItems[idx].Normalized() {
+		if !sameRuntimeCoverageItem(left.CoverageItems[idx], right.CoverageItems[idx]) {
 			return false
 		}
 	}
 	for idx := range left.Requirements {
 		if !sameRuntimeRequirement(left.Requirements[idx], right.Requirements[idx]) {
+			return false
+		}
+	}
+	return true
+}
+
+func sameRuntimeCoverageItem(left, right RuntimeCoverageItem) bool {
+	left = left.Normalized()
+	right = right.Normalized()
+	if left.ID != right.ID || left.SliceID != right.SliceID || left.SourceScope != right.SourceScope ||
+		left.SourceID != right.SourceID || left.TargetText != right.TargetText || left.Order != right.Order ||
+		len(left.ReopenDependencies) != len(right.ReopenDependencies) {
+		return false
+	}
+	for idx := range left.ReopenDependencies {
+		l, r := left.ReopenDependencies[idx], right.ReopenDependencies[idx]
+		if l.CoverageWorkItemID != r.CoverageWorkItemID || !sameStrings(l.TriggerEvidenceKinds, r.TriggerEvidenceKinds) {
 			return false
 		}
 	}
@@ -203,10 +226,10 @@ func sameCoverageFocus(left CoverageFocus, right CoverageFocus) bool {
 	right = right.Normalized()
 	return left.ID == right.ID && left.SliceID == right.SliceID && sameCoverageWorkItemIDs(left.CoverageWorkItemIDs, right.CoverageWorkItemIDs) &&
 		left.AssessmentScope == right.AssessmentScope && left.AssessmentID == right.AssessmentID && left.AssessmentText == right.AssessmentText &&
-		left.EvidenceRole == right.EvidenceRole && left.TargetRole == right.TargetRole && left.TargetSelectorRef == right.TargetSelectorRef && left.RequireTargetGrounding == right.RequireTargetGrounding && left.RequireAssessment == right.RequireAssessment &&
+		left.EvidenceRole == right.EvidenceRole && left.TargetRole == right.TargetRole && left.TargetSelectorRef == right.TargetSelectorRef && left.TargetSelectorOwnerRef == right.TargetSelectorOwnerRef && left.TargetSelectorSubjectRef == right.TargetSelectorSubjectRef && left.ProspectiveTargetRef == right.ProspectiveTargetRef && left.RequireTargetGrounding == right.RequireTargetGrounding && left.RequireAssessment == right.RequireAssessment &&
 		left.RequireDirectEvidence == right.RequireDirectEvidence && left.RequireClaimEvidence == right.RequireClaimEvidence &&
 		left.RequireExecutableBehaviorEvidence == right.RequireExecutableBehaviorEvidence && left.RequireCoverageTargets == right.RequireCoverageTargets &&
-		sameStrings(left.RequiredEvidenceKinds, right.RequiredEvidenceKinds) && sameStrings(left.TargetRefs, right.TargetRefs) && sameStrings(left.TargetDiscoverySources, right.TargetDiscoverySources) &&
+		sameStrings(left.RequiredEvidenceKinds, right.RequiredEvidenceKinds) && sameStrings(left.TargetRefs, right.TargetRefs) && sameStrings(left.TargetDiscoverySources, right.TargetDiscoverySources) && sameStrings(left.TargetSelectorCandidateRefs, right.TargetSelectorCandidateRefs) &&
 		sameStrings(left.AcceptedStepKinds, right.AcceptedStepKinds) && SameRuntimeOperationVariantRefs(left.AcceptedOperationVariants, right.AcceptedOperationVariants) &&
 		sameStrings(left.RejectedStepKinds, right.RejectedStepKinds)
 }
@@ -219,9 +242,9 @@ func sameRuntimeRequirement(left RuntimeRequirement, right RuntimeRequirement) b
 	}
 	left = leftValues[0]
 	right = rightValues[0]
-	return left.Kind == right.Kind && left.OwnerModuleID == right.OwnerModuleID && left.SubjectRef == right.SubjectRef && left.TargetSelectorRef == right.TargetSelectorRef &&
+	return left.Kind == right.Kind && left.OwnerModuleID == right.OwnerModuleID && left.SubjectRef == right.SubjectRef && left.TargetSelectorRef == right.TargetSelectorRef && left.TargetSelectorOwnerRef == right.TargetSelectorOwnerRef && left.TargetSelectorSubjectRef == right.TargetSelectorSubjectRef && left.ProspectiveTargetRef == right.ProspectiveTargetRef &&
 		left.CapabilityClass == right.CapabilityClass && left.MinimumBytes == right.MinimumBytes && left.Reason == right.Reason &&
-		sameStrings(left.RequiredCapabilities, right.RequiredCapabilities)
+		sameStrings(left.RequiredCapabilities, right.RequiredCapabilities) && sameStrings(left.TargetSelectorCandidateRefs, right.TargetSelectorCandidateRefs)
 }
 
 func sameStrings(left []string, right []string) bool {
@@ -256,10 +279,14 @@ func normalizeRuntimeRequirements(values []RuntimeRequirement) []RuntimeRequirem
 		value.OwnerModuleID = strings.TrimSpace(value.OwnerModuleID)
 		value.SubjectRef = strings.TrimSpace(value.SubjectRef)
 		value.TargetSelectorRef = strings.TrimSpace(value.TargetSelectorRef)
+		value.TargetSelectorOwnerRef = strings.TrimSpace(value.TargetSelectorOwnerRef)
+		value.TargetSelectorSubjectRef = strings.TrimSpace(value.TargetSelectorSubjectRef)
+		value.TargetSelectorCandidateRefs = normalizeStrings(value.TargetSelectorCandidateRefs)
+		value.ProspectiveTargetRef = strings.TrimSpace(value.ProspectiveTargetRef)
 		value.CapabilityClass = RuntimeCapabilityClass(strings.TrimSpace(string(value.CapabilityClass)))
 		value.RequiredCapabilities = normalizeStrings(value.RequiredCapabilities)
 		value.Reason = strings.TrimSpace(value.Reason)
-		key := strings.Join([]string{string(value.Kind), value.OwnerModuleID, value.SubjectRef, value.TargetSelectorRef, string(value.CapabilityClass), strings.Join(value.RequiredCapabilities, ","), fmt.Sprintf("%d", value.MinimumBytes)}, "|")
+		key := strings.Join([]string{string(value.Kind), value.OwnerModuleID, value.SubjectRef, value.TargetSelectorRef, value.TargetSelectorOwnerRef, value.TargetSelectorSubjectRef, strings.Join(value.TargetSelectorCandidateRefs, ","), value.ProspectiveTargetRef, string(value.CapabilityClass), strings.Join(value.RequiredCapabilities, ","), fmt.Sprintf("%d", value.MinimumBytes)}, "|")
 		if value.Kind == "" || key == "" {
 			continue
 		}

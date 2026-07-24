@@ -89,7 +89,7 @@ func AcquireRuntimeTargetSelectionPrerequisite(ctx context.Context, hub magiceve
 		return orchestratorevents.AcquireRuntimeTargetSelectionResult{}, prerequisiteMagicError(magicErr)
 	}
 	response, ok := data.(orchestratorevents.AcquireRuntimeTargetSelectionResult)
-	if !ok || response.PrerequisiteID != command.PrerequisiteID || response.Selection.PrerequisiteID != command.PrerequisiteID || response.Selection.OwnerModuleID != runtimecontract.RuntimeModuleFile || response.Selection.TargetRole != command.TargetRole || response.Selection.SelectorRef != command.TargetSelectorRef {
+	if !ok || response.PrerequisiteID != command.PrerequisiteID || response.Selection.PrerequisiteID != command.PrerequisiteID || response.Selection.OwnerModuleID != runtimecontract.RuntimeModuleFile || response.Selection.TargetRole != command.TargetRole || response.Selection.SelectorRef != command.TargetSelectorRef || response.Selection.SelectorOwnerRef != command.TargetSelectorOwnerRef || response.Selection.SelectorSubjectRef != command.TargetSelectorSubjectRef || !runtimecontract.SameRuntimeTargetSelectorCandidateRefs(response.Selection.SelectorCandidateRefs, command.TargetSelectorCandidateRefs) || response.Selection.ProspectiveTargetRef != command.ProspectiveTargetRef {
 		return orchestratorevents.AcquireRuntimeTargetSelectionResult{}, fmt.Errorf("target selection prerequisite %q returned an invalid result", command.PrerequisiteID)
 	}
 	if err := response.Selection.Validate(); err != nil {

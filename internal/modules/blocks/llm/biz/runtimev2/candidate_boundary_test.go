@@ -339,6 +339,6 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 	return llmmodels.RuntimeCandidateRequest{
 		Decision: sealed, Transaction: sealed.AuthorityTransaction(), StablePrefixHash: "stable-prefix-1",
 		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply", "validation/managed_session"}},
-		CandidateContext:  runtimecontract.RuntimeCandidateContextFromFacts(facts),
+		CandidateContext:  runtimecontract.RuntimeCandidateContextForDecision(facts, sealed, nil),
 	}
 }

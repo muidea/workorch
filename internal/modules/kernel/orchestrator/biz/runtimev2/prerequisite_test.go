@@ -198,18 +198,21 @@ func TestReduceRuntimeStateWithDirectiveAllowsOwnerGroundedEmptyWorkspaceCreatio
 	facts.Focus.TargetRole = "deliverable"
 	facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
 	facts.Focus.TargetSelectorRef = "file/workspace_deliverable"
+	facts.Focus.ProspectiveTargetRef = "initial-deliverable.txt"
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite}
+	facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindFileWrite}
 	selection := runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: "target_selection:blocks/file:deliverable:file/workspace_deliverable:::0",
 		OwnerModuleID:  runtimecontract.RuntimeModuleFile, TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable",
-		Disposition: runtimecontract.RuntimeTargetSelectionCreate, CandidateCount: 0, ObservedRevision: "empty-workspace-v1",
+		Disposition: runtimecontract.RuntimeTargetSelectionCreate, ProspectiveTargetRef: "initial-deliverable.txt", CandidateCount: 0, ObservedRevision: "empty-workspace-v1",
 	}
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	facts.Resources.TargetSelection = &selection
 	facts.Resources.Manifest = &runtimecontract.WorkspaceManifest{Revision: "empty-workspace-v1"}
 	inventory := runtimecontract.RuntimeOperationAdmissibility{
-		PrerequisiteID: "operation_admissibility:blocks/file:::patch/apply::0", OwnerModuleID: runtimecontract.RuntimeModuleFile,
-		OperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}, SelectorRefs: []string{"workspace-relative-new-file-target"},
+		PrerequisiteID: "operation_admissibility:blocks/file:::file/write::0", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileWrite}, SelectorRefs: []string{"workspace-relative-new-file-target"},
 		ObservedRevision: "empty-workspace-v1",
 	}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
@@ -220,7 +223,7 @@ func TestReduceRuntimeStateWithDirectiveAllowsOwnerGroundedEmptyWorkspaceCreatio
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceStateChange || decision.RequiredOutput.Kind != runtimecontract.RequiredOutputKindStateChange || len(decision.RequiredOutput.TargetRefs) != 0 || len(updated.Prerequisites.Pending) != 0 {
+	if decision.Action != runtimecontract.RuntimeActionProduceStateChange || decision.RequiredOutput.Kind != runtimecontract.RequiredOutputKindStateChange || len(decision.RequiredOutput.AcceptedKinds) != 1 || decision.RequiredOutput.AcceptedKinds[0] != runtimecontract.StepKindFileWrite || len(decision.RequiredOutput.TargetRefs) != 1 || decision.RequiredOutput.TargetRefs[0] != "initial-deliverable.txt" || len(updated.Prerequisites.Pending) != 0 {
 		t.Fatalf("empty workspace creation decision=%+v prerequisites=%+v", decision, updated.Prerequisites)
 	}
 }

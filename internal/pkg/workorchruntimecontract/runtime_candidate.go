@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -67,6 +68,14 @@ func RuntimeCandidateContextFromFacts(facts RuntimeFacts) RuntimeCandidateContex
 // authority; those facts belong to the Orchestrator candidate-admission owner.
 func RuntimeCandidateContextForDecision(facts RuntimeFacts, decision RuntimeDecision, rejectedShapes []RuntimeRejectedOperationShape) RuntimeCandidateContext {
 	context := RuntimeCandidateContextFromFacts(facts)
+	// The decision is the sealed SM-2/SM-3 authority for this request. Copy its
+	// execution requirements even when no RepairDirective exists: leaving the
+	// C3 requiredAction blank made the provider-facing instruction weaker than
+	// the persisted decision and invited candidates for a different action.
+	required := decision.RequiredOutput.Normalized()
+	context.RequiredAction = decision.Action
+	context.RequiredEffectScopes = append([]RuntimeEffectScope(nil), required.RequiredEffectScopes...)
+	context.RequiredEvidenceKinds = append([]string(nil), required.RequiredEvidenceKinds...)
 	context.AdmissibleOperationKinds = FeasibleOperationKindsWithActivation(decision.RequiredOutput, facts.Capabilities, facts.Activation.MCPCapabilities)
 	context.RejectedOperationShapes = NormalizeRuntimeRejectedOperationShapes(rejectedShapes)
 	return context.Normalized()
@@ -124,6 +133,17 @@ func (c RuntimeCandidateContext) Validate(decision RuntimeDecision) error {
 	if c.WorkspaceID != snapshot.WorkspaceID || c.RunID != snapshot.RunID || c.DefinitionRevision != snapshot.DefinitionRevision ||
 		c.EvidenceRevision != snapshot.EvidenceRevision || c.Focus.ID != snapshot.FocusID {
 		return fmt.Errorf("runtime candidate context does not match sealed authority")
+	}
+	required := decision.RequiredOutput.Normalized()
+	if c.RequiredAction != decision.Action {
+		return fmt.Errorf("runtime candidate context required action %q does not match sealed decision action %q", c.RequiredAction, decision.Action)
+	}
+	if !slices.Equal(c.RequiredEffectScopes, required.RequiredEffectScopes) || !slices.Equal(c.RequiredEvidenceKinds, required.RequiredEvidenceKinds) {
+		return fmt.Errorf("runtime candidate context requirements do not match sealed decision output")
+	}
+	wantKinds := FeasibleOperationKindsWithActivation(decision.RequiredOutput, c.Capabilities, c.Activation.MCPCapabilities)
+	if !slices.Equal(c.AdmissibleOperationKinds, wantKinds) {
+		return fmt.Errorf("runtime candidate context admissible operation kinds do not match sealed decision")
 	}
 	return nil
 }

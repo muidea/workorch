@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-07-21
+Last Updated: 2026-07-24
 
 ## Purpose
 
@@ -31,7 +31,7 @@ Last Updated: 2026-07-21
 
 | ID | 项 | 说明 | 当前方案 |
 | --- | --- | --- | --- |
-| RUNTIME-VPC | validation evidence / effective progress / grounded repair target | `run-003` 暴露的 all-skipped/effective-progress/escalation 已完成代码收口；最新 `run-006` 继续反证 repair grounding：`Focus.TargetRefs=nil`，target snapshot 只覆盖验证入口，production adapter 未进入 repair set，最终 `repairAttempts=10/10`、`no_progress_exhausted`。剩余按 VPC-8 收口 profile、activation compiler、Orchestrator、Shell、LLM typed interaction | [详细收口方案](../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md) |
+| RUNTIME-VPC | live contract convergence | validation truthfulness、effective progress、diagnostic routing、typed feasibility prerequisite、focus/coverage dependency、Shell structured failure-target protocol、owner-grounded retarget、same-gap/file-backed restart、output continuation、profile-declared bounded semantic selector 与 metadata-only Runtime V2 audit projection 已完成本地收口；默认 software-dev 空工作区 source/leading DoD create target 已声明，当前只需 fresh live state sequence | [唯一收口方案](../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md) |
 
 ### B. 运行单元架构 / 生命周期
 
@@ -68,7 +68,7 @@ Last Updated: 2026-07-21
 ## Judgment
 
 - **代码主链**：Runtime V2 only；V1 authority 不再是问题来源。
-- **正向收敛基础**：RVC-R5～R26、RPA-1 inventory/selector/feasibility、RPF-1～5 freshness、RCA transaction 及 VPC-1～VPC-7 仍作为已完成基线；最新 `run-006` 表明它们尚未关闭 profile/focus → failure target → repair candidate → effective progress 的 owner-grounded 收敛链，现由 RUNTIME-VPC/VPC-8 继续收口。
+- **正向收敛基础**：RVC/RPF/RCA 与已落地的 evidence/progress/diagnostic/prerequisite 切片继续作为回归基线；当前唯一 RUNTIME-VPC 计划负责关闭 focus dependency → owner-grounded target/diagnostic → repair candidate → effective progress → fresh live 的剩余链路。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；不得再从已归档 plan 推导实现约束。
 - **Active roadmap**：RUNTIME-VPC、ARCH-1、OPS-1（+ 可选 OPT-1）；RCA-1、RPF 和 RPA-1 的历史 completion record 均归 archive，但不得覆盖新的 deployed 反证。
 - **清理原则**：失效主链叙述、重复 audit、过程日记、live 产物一律归档或出库，不在 active 保留“假活跃”项。

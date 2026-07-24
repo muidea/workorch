@@ -343,6 +343,14 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 		if !aggregate.Facts.Focus.RequireAssessment {
 			aggregate.Facts.Coverage = closeCoverageForEvidence(aggregate.Facts.Coverage, fact)
 		}
+		// A profile-declared dependency is the only authority for invalidating a
+		// previously accepted validation/assessment coverage item after a source
+		// effect changes.  Keep both evidence lineages: a reopen means that the
+		// earlier proof is stale for convergence, not that the owner receipt was
+		// false.  This happens inside the same aggregate CAS as evidence admission.
+		var reopenedCoverage []common.CoverageWorkItemID
+		aggregate.Facts.Coverage, reopenedCoverage = reopenCoverageDependenciesForEvidence(aggregate.Facts.Coverage, fact)
+		aggregate.Facts = requeueReopenedCoverageFocuses(aggregate.Facts, reopenedCoverage)
 		if fact.Kind == runtimecontract.EvidenceKindStateChange {
 			currentCoverage := append([]common.CoverageWorkItemID(nil), aggregate.Facts.Focus.CoverageWorkItemIDs...)
 			for _, focus := range aggregate.Facts.RemainingFocuses {
@@ -540,12 +548,28 @@ func validationFailureTargetsAreGrounded(facts runtimecontract.RuntimeFacts, fai
 		return false
 	}
 	value := observation.Normalized()
-	if err := value.Validate(); err != nil || value.OwnerModuleID != runtimecontract.RuntimeModuleMCP ||
+	if err := value.Validate(); err != nil || !runtimeFailureTargetObservationOwnerAllowed(value, failure) ||
 		value.TargetRole != facts.Focus.TargetRole || !sameRuntimeTargetRefs(value.TargetRefs, targets) ||
 		!failureTargetObservationHasCurrentFreshness(facts, value) {
 		return false
 	}
 	return facts.Focus.RequireTargetGrounding
+}
+
+// runtimeFailureTargetObservationOwnerAllowed is the narrow owner-protocol
+// fence for target discovery. MCP stays limited to its explicit response
+// field. Shell must return the owner-parsed, content-bound stdout record;
+// command targets, stderr and validation diagnostics remain non-authoritative.
+func runtimeFailureTargetObservationOwnerAllowed(value runtimecontract.RuntimeFailureTargetObservation, failure runtimecontract.FailureFact) bool {
+	switch value.OwnerModuleID {
+	case runtimecontract.RuntimeModuleMCP:
+		return true
+	case runtimecontract.RuntimeModuleShell:
+		return value.SubjectRef == "shell_runtime_policy" && value.DiagnosticClass != "" && value.ContentHash != "" && len(value.EvidenceRefs) > 0 &&
+			failure.ValidationDiagnostic != nil && value.DiagnosticClass == failure.ValidationDiagnostic.Normalized().Class
+	default:
+		return false
+	}
 }
 
 func failureTargetObservationHasCurrentFreshness(facts runtimecontract.RuntimeFacts, target runtimecontract.RuntimeFailureTargetObservation) bool {
@@ -714,6 +738,100 @@ func reopenCoverageForEvidence(coverage []runtimecontract.RuntimeCoverageItemFac
 		coverage[idx].EvidenceRefs = kept
 	}
 	return runtimecontract.NormalizeRuntimeCoverageFacts(coverage)
+}
+
+// reopenCoverageDependenciesForEvidence applies compiled profile dependency
+// edges to the coverage ledger.  The edges and trigger kinds were sealed at
+// activation, so this reducer helper remains neutral to target paths, owner
+// names, languages and command semantics.  It preserves all accepted evidence
+// references and records why the dependent was reopened for restart/audit.
+func reopenCoverageDependenciesForEvidence(coverage []runtimecontract.RuntimeCoverageItemFact, evidence runtimecontract.EvidenceFact) ([]runtimecontract.RuntimeCoverageItemFact, []common.CoverageWorkItemID) {
+	sourceIDs := map[common.CoverageWorkItemID]struct{}{}
+	for _, id := range evidence.CoverageWorkItemIDs {
+		if id != "" {
+			sourceIDs[id] = struct{}{}
+		}
+	}
+	if len(sourceIDs) == 0 || strings.TrimSpace(evidence.Kind) == "" {
+		return runtimecontract.NormalizeRuntimeCoverageFacts(coverage), nil
+	}
+	reopen := map[common.CoverageWorkItemID]struct{}{}
+	for _, source := range coverage {
+		if _, matches := sourceIDs[source.ID]; !matches {
+			continue
+		}
+		for _, dependency := range source.ReopenDependencies {
+			for _, kind := range dependency.TriggerEvidenceKinds {
+				if strings.TrimSpace(kind) == strings.TrimSpace(evidence.Kind) {
+					reopen[dependency.CoverageWorkItemID] = struct{}{}
+					break
+				}
+			}
+		}
+	}
+	if len(reopen) == 0 {
+		return runtimecontract.NormalizeRuntimeCoverageFacts(coverage), nil
+	}
+	reopened := make([]common.CoverageWorkItemID, 0, len(reopen))
+	for idx := range coverage {
+		item := &coverage[idx]
+		if _, matches := reopen[item.ID]; !matches || item.State == runtimecontract.RuntimeCoverageItemStateOpen {
+			continue
+		}
+		item.State = runtimecontract.RuntimeCoverageItemStateOpen
+		item.LastAssessmentID = ""
+		item.ReopenedByEvidenceRefs = append(item.ReopenedByEvidenceRefs, string(evidence.ID))
+		reopened = append(reopened, item.ID)
+	}
+	coverage = runtimecontract.NormalizeRuntimeCoverageFacts(coverage)
+	if len(reopened) == 0 {
+		return coverage, nil
+	}
+	// Normalization orders ledger facts, not this return value.  Preserve a
+	// deterministic coverage-ID result for diagnostics and focused tests.
+	sort.Slice(reopened, func(i, j int) bool { return string(reopened[i]) < string(reopened[j]) })
+	return coverage, reopened
+}
+
+// requeueReopenedCoverageFocuses restores completed focus contracts before the
+// still-pending queue when a dependency reopened one of their coverage items.
+// It uses only persisted focus/coverage identities and therefore introduces no
+// action choice or domain interpretation into the reducer.
+func requeueReopenedCoverageFocuses(facts runtimecontract.RuntimeFacts, reopened []common.CoverageWorkItemID) runtimecontract.RuntimeFacts {
+	if len(reopened) == 0 || len(facts.CompletedFocuses) == 0 {
+		return facts
+	}
+	needed := map[common.CoverageWorkItemID]struct{}{}
+	for _, id := range reopened {
+		if id != "" {
+			needed[id] = struct{}{}
+		}
+	}
+	if len(needed) == 0 {
+		return facts
+	}
+	requeued := make([]runtimecontract.CoverageFocus, 0, len(facts.CompletedFocuses))
+	completed := make([]runtimecontract.CoverageFocus, 0, len(facts.CompletedFocuses))
+	for _, focus := range facts.CompletedFocuses {
+		match := false
+		for _, id := range focus.CoverageWorkItemIDs {
+			if _, ok := needed[id]; ok {
+				match = true
+				break
+			}
+		}
+		if match {
+			requeued = append(requeued, focus)
+			continue
+		}
+		completed = append(completed, focus)
+	}
+	if len(requeued) == 0 {
+		return facts
+	}
+	facts.CompletedFocuses = completed
+	facts.RemainingFocuses = append(requeued, facts.RemainingFocuses...)
+	return facts.Normalized()
 }
 
 func removeFreshnessReacquireCoverage(values []common.CoverageWorkItemID, completed []common.CoverageWorkItemID) []common.CoverageWorkItemID {

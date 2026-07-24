@@ -86,6 +86,7 @@ func MapAcceptanceProjection(run readmodelcore.Run) readmodelcore.AcceptanceProj
 	projection.Operations = runtimeOperationStatuses(*run.RuntimeState)
 	projection.CapabilityStates = runtimeCapabilityStateStatuses(facts)
 	projection.Governance = runtimeGovernanceStatuses(*run.RuntimeState)
+	projection.Audit = MapRuntimeV2Audit(run)
 	projection.Summary = summarizeAcceptanceSlices(projection.Slices)
 	return projection
 }

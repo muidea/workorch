@@ -272,6 +272,7 @@ func TestMCPOwnerCatalogStaleRestartDoesNotReuseFailureTarget(t *testing.T) {
 	loaded, err := restarted.Load(ctx, "ws-v2", "run-v2")
 	if err != nil || loaded.StateRevision != invalidated.StateRevision || loaded.Facts.Resources.FailureTarget != nil || loaded.Facts.Failure == nil || len(loaded.Facts.Failure.TargetRefs) != 0 ||
 		len(loaded.Facts.Prerequisites.Pending) != 1 || loaded.Facts.Prerequisites.Pending[0].ID != prerequisite.ID || loaded.Facts.RepairDirective != nil ||
+		!sameRuntimeTargetRefs(GroundedRepairTargets(loaded.Facts), []string{"target.txt"}) ||
 		len(invalidated.CandidateAttempts) != 1 || invalidated.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated {
 		t.Fatalf("restart retained stale MCP failure authority: loaded=%+v invalidated=%+v err=%v", loaded, invalidated, err)
 	}
