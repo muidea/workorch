@@ -686,6 +686,24 @@ snapshot/summary 的 `schedulerDiagnostics.latestContinuation` 提供 `workspace
 若产品需要“202 后重启仍保证执行或可查询最终 command outcome”，必须另立 application-owned durable
 command/outbox 合同，不能把该需求偷渡为 Runtime V2 重试或 projection 补偿。
 
+#### P6 software-dev acceptance-slice 容量对齐
+
+`software-dev` 的 bootstrap recipe、profile deliverable 与用户 DoD 都是 activation 编译器的合法输入；它们
+可以同时形成多个独立 acceptance focus。此前模板把 `maxFocuses` 固定为 12，但一个包含 25 项 DoD、3 个
+已匹配 bootstrap artifact 和 4 项 profile deliverable 的合法 workspace 会编译为 14 个 focus，因而在创建
+Run 前被错误拒绝。该拒绝会被投影为 `workspace_activation_failed`，而不是 TUI `/run resume` 未调度或
+SM-2/SM-3 运行时不能继续。
+
+收口方式是在 `software-dev` profile 的声明式 `acceptanceSlicePolicy` 中将 `maxFocuses` 对齐到
+`RuntimeAcceptanceFocusMaxCount=64`。这不是取消边界：每个 slice 的 `maxWorkItems=4` 以及每次候选请求的
+`maxCandidateContextItems=4` 保持不变，Runtime contract 的全局 64-focus 上限仍会拒绝失控定义。该规则只
+属于 template/activation 编译层，影响 SM-1 的 activation entry 与 SM-4 的失败观测；不修改 SM-2 authority、
+SM-3 sealed dispatch、scheduler、TUI 或 Web 的恢复语义。
+
+`TestRuntimeV2BootstrapAllowsBoundedBroadDoDWithBootstrapArtifacts` 固定此边界：长 DoD、匹配 bootstrap
+recipe 和 profile deliverable 必须成功编译为 14 个 focus，且任一 focus 不得超过 4 个 coverage work item。
+`defaults_test.go` 同时固定 production 默认模板使用 64，而非在测试或 UI 侧覆盖 workspace contract。
+
 #### P6 当前证据（2026-07-25）
 
 2026-07-25 的 real-provider isolated artifact

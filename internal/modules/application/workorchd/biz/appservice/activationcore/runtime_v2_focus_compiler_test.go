@@ -200,6 +200,73 @@ func TestCompileRuntimeV2CoverageFocusesPrependsMatchedBootstrapArtifactsInDepen
 	}
 }
 
+func TestRuntimeV2BootstrapAllowsBoundedBroadDoDWithBootstrapArtifacts(t *testing.T) {
+	dodItems := make([]string, 25)
+	for idx := range dodItems {
+		dodItems[idx] = fmt.Sprintf("acceptance item %02d", idx+1)
+	}
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{
+			StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
+			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
+				SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaV2,
+				MaxWorkItems:  4, MaxFocuses: runtimecontract.RuntimeAcceptanceFocusMaxCount, MaxCandidateContextItems: 4,
+				Groups: []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{
+					{ID: "primary", Title: "Primary state change", Scope: "primary", Priority: 10, MaxWorkItems: 2, Match: runtimecontract.RuntimeAcceptanceSliceMatch{EvidenceRoles: []string{"primary_state_change"}}},
+					{ID: "validation", Title: "Validation", Scope: "validation", Priority: 20, MaxWorkItems: 4, Match: runtimecontract.RuntimeAcceptanceSliceMatch{MissingEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}}},
+					{ID: "version", Title: "Version control", Scope: "version", Priority: 25, MaxWorkItems: 2, Match: runtimecontract.RuntimeAcceptanceSliceMatch{SourceRequirementIDs: []string{"version_control_snapshot"}}},
+					{ID: "supplemental", Title: "Supplemental", Scope: "supplemental", Priority: 30, MaxWorkItems: 4, Match: runtimecontract.RuntimeAcceptanceSliceMatch{EvidenceRoles: []string{"supplemental_evidence"}}},
+					{ID: "remaining", Title: "Remaining", Scope: "remaining", Priority: 90, MaxWorkItems: 4, Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true}},
+				},
+			},
+			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+				ID: "software-dev",
+				BootstrapRecipes: []runtimecontract.RuntimeBootstrapRecipe{{
+					ID: "go-lsp", RequiredGoalTerms: []string{"gopls"},
+					Artifacts: []runtimecontract.RuntimeBootstrapArtifact{
+						{ID: "module", TargetRole: "module", TargetRef: "go.mod", AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}},
+						{ID: "implementation", TargetRole: "implementation", TargetRef: "internal/lsp/manager.go", AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}, DependsOnArtifactIDs: []string{"module"}},
+						{ID: "test", TargetRole: "test", TargetRef: "internal/lsp/manager_test.go", AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}, DependsOnArtifactIDs: []string{"implementation"}},
+					},
+				}},
+				DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{
+					{ID: "source_change", Required: true, EvidenceRole: "primary_state_change"},
+					{ID: "validation_report", Required: true, EvidenceRole: "supplemental_evidence"},
+					{ID: "coverage_map", Required: true, EvidenceRole: "supplemental_evidence"},
+					{ID: "version_control_snapshot", Required: true, EvidenceRole: "supplemental_evidence"},
+				},
+				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
+					{ID: "source_change", Scope: "deliverable", EvidenceRole: "primary_state_change", AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite}},
+					{ID: "validation_report", Scope: "deliverable", EvidenceRole: "supplemental_evidence", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}},
+					{ID: "coverage_map", Scope: "deliverable", EvidenceRole: "supplemental_evidence", AcceptedStepKinds: []string{runtimecontract.StepKindMCPToolCall}},
+					{ID: "version_control_snapshot", Scope: "deliverable", EvidenceRole: "supplemental_evidence", AcceptedStepKinds: []string{runtimecontract.StepKindGitWrite}, AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindGitWrite, VariantID: "commit"}}},
+					{ID: "*", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}},
+				},
+			}},
+		},
+	}
+	bootstrap, err := RuntimeV2Bootstrap(
+		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "build a gopls service"},
+		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: dodItems},
+		"definition-1", nil, activation,
+	)
+	if err != nil {
+		t.Fatalf("bootstrap broad bounded DoD: %v", err)
+	}
+	if len(bootstrap.Focuses) != 14 {
+		t.Fatalf("focus count = %d, want 14 from 3 bootstrap artifacts, 25 DoD items, and four deliverables", len(bootstrap.Focuses))
+	}
+	if bootstrap.ConvergencePolicy.MaxFocuses != runtimecontract.RuntimeAcceptanceFocusMaxCount {
+		t.Fatalf("sealed max focuses = %d, want %d", bootstrap.ConvergencePolicy.MaxFocuses, runtimecontract.RuntimeAcceptanceFocusMaxCount)
+	}
+	for _, focus := range bootstrap.Focuses {
+		if len(focus.CoverageWorkItemIDs) > 4 {
+			t.Fatalf("focus %q has %d work items, want bounded slice size <= 4", focus.ID, len(focus.CoverageWorkItemIDs))
+		}
+	}
+}
+
 func TestRuntimeV2BootstrapSealsProfileDeclaredSelectorBinding(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
