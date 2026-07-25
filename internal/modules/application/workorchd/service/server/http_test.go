@@ -5657,6 +5657,55 @@ func TestWorkorchDSchedulerCommandRejectsRecoverIntent(t *testing.T) {
 	}
 }
 
+func TestWorkspaceActivationFailureIsVisibleWithoutRun(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
+	handler := newMuxWithState(state)
+	workspace := createWorkspaceForHTTP(t, handler, "activation diagnostic", "workspaces/activation-diagnostic")
+	const requestID = "request-activation-diagnostic"
+	state.resumeWorkspaceExecution = func(context.Context, string, string, string, appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+		return appservice.WorkspaceExecutionActivation{}, errors.New("activation preflight: provider target is not ready")
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{
+		"intent":"resume",
+		"requestId":"`+requestID+`",
+		"source":"web"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("activation status = %d, want 202, body=%s", rec.Code, rec.Body.String())
+	}
+
+	var snapshot appservice.WorkspaceSnapshot
+	waitForCondition(t, time.Second, func() bool {
+		item, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
+		if err != nil {
+			return false
+		}
+		snapshot = item
+		return snapshot.RunCommand != nil && snapshot.RunCommand.State == "rejected" && snapshot.SchedulerDiagnostics != nil && snapshot.SchedulerDiagnostics.LatestContinuation != nil
+	})
+	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
+	if err != nil {
+		t.Fatalf("read projected workspace snapshot: %v", err)
+	}
+	if snapshot.Run != nil {
+		t.Fatalf("run = %+v, want no Run when activation preflight fails", snapshot.Run)
+	}
+	if snapshot.RunCommand == nil || snapshot.RunCommand.State != "rejected" || snapshot.RunCommand.RequestID != requestID || !strings.Contains(snapshot.RunCommand.Error, "provider target is not ready") {
+		t.Fatalf("run command = %+v, want rejected command with exact activation error", snapshot.RunCommand)
+	}
+	if snapshot.SchedulerDiagnostics == nil || snapshot.SchedulerDiagnostics.LatestContinuation == nil {
+		t.Fatalf("scheduler diagnostics = %+v, want workspace activation failure", snapshot.SchedulerDiagnostics)
+	}
+	latest := snapshot.SchedulerDiagnostics.LatestContinuation
+	if latest.Kind != schedulerKindWorkspaceActivation || latest.State != schedulerDiagnosticStateFailed || latest.Reason != schedulerReasonWorkspaceActivationFailed || !strings.Contains(latest.Detail, "provider target is not ready") {
+		t.Fatalf("latest scheduler diagnostic = %+v, want classified exact activation failure", latest)
+	}
+}
+
 func TestWorkorchDSchedulerCommandRequiresApplicationScheduler(t *testing.T) {
 	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), &recordingBackgroundRoutine{})
 

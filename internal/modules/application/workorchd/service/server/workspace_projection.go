@@ -121,14 +121,22 @@ func (s *serverState) readProjectedWorkspaceSnapshot(workspaceID string) (appser
 	if s == nil || s.workspaceProjection == nil {
 		return appservice.WorkspaceSnapshot{}, workspaceProjectionStatus{State: workspaceProjectionStateFailed}, common.ErrConflict
 	}
-	return s.workspaceProjection.ReadWorkspaceSnapshotWithContext(context.Background(), workspaceID)
+	snapshot, status, err := s.workspaceProjection.ReadWorkspaceSnapshotWithContext(context.Background(), workspaceID)
+	if err != nil {
+		return snapshot, status, err
+	}
+	return s.attachSchedulerDiagnosticsToWorkspaceSnapshot(snapshot), status, nil
 }
 
 func (s *serverState) readProjectedWorkspaceSummarySnapshot(workspaceID string) (appservice.WorkspaceSnapshot, workspaceProjectionStatus, error) {
 	if s == nil || s.workspaceProjection == nil {
 		return appservice.WorkspaceSnapshot{}, workspaceProjectionStatus{State: workspaceProjectionStateFailed}, common.ErrConflict
 	}
-	return s.workspaceProjection.ReadWorkspaceSummarySnapshot(workspaceID)
+	snapshot, status, err := s.workspaceProjection.ReadWorkspaceSummarySnapshot(workspaceID)
+	if err != nil {
+		return snapshot, status, err
+	}
+	return s.attachSchedulerDiagnosticsToWorkspaceSnapshot(snapshot), status, nil
 }
 
 func (s *HTTPServer) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (appservice.WorkspaceSnapshot, error) {

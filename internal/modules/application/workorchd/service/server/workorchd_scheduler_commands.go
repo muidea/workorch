@@ -200,6 +200,27 @@ func (s *serverState) recordSchedulerCommandEnqueueFailure(topic string, workspa
 	})
 }
 
+// recordWorkspaceRunFailure captures an application activation failure even
+// when no Run was created. It is a scheduler/read-model diagnostic only: it
+// neither creates a Run nor changes Runtime V2 authority.
+func (s *serverState) recordWorkspaceRunFailure(req workspaceRunRequest, kind string, reason string, cause error) {
+	if s == nil || s.schedulerDiagnostics == nil || strings.TrimSpace(req.WorkspaceID) == "" || cause == nil {
+		return
+	}
+	if strings.TrimSpace(kind) == "" {
+		kind = schedulerKindWorkspaceActivation
+	}
+	s.schedulerDiagnostics.recordContinuation(schedulerDiagnosticInput{
+		WorkspaceID: strings.TrimSpace(req.WorkspaceID),
+		RunID:       strings.TrimSpace(req.RunID),
+		Kind:        kind,
+		State:       schedulerDiagnosticStateFailed,
+		Reason:      reason,
+		Detail:      cause.Error(),
+		DedupeKey:   schedulerDedupeKey(req.WorkspaceID, req.RunID, kind, reason),
+	})
+}
+
 func schedulerSubjectID(topic string, command workorchdevents.WorkspaceRunRequestedCommand) string {
 	switch topic {
 	case workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested:
@@ -324,18 +345,26 @@ func (s *serverState) handleWorkorchDSchedulerCommand(ctx context.Context, comma
 			if action == "" {
 				action = "resume"
 			}
-			return s.sendRuntimeV2RunOwnerCommand(ctx, req.WorkspaceID, req.RunID, action)
+			err := s.sendRuntimeV2RunOwnerCommand(ctx, req.WorkspaceID, req.RunID, action)
+			if err != nil {
+				s.recordWorkspaceRunFailure(req, schedulerKindRunContinuation, schedulerReasonOwnerCommandFailed, err)
+			}
+			return err
 		}
 		req.Command.Restart = false
 		return s.executeWorkspaceRuntimeV2Activation(ctx, req)
 	case "restart":
 		if strings.TrimSpace(req.RunID) != "" {
-			return common.ErrInvalidArgument
+			err := common.ErrInvalidArgument
+			s.recordWorkspaceRunFailure(req, schedulerKindWorkspaceRestart, schedulerReasonWorkspaceNotEligible, err)
+			return err
 		}
 		req.Command.Restart = true
 		return s.executeWorkspaceRuntimeV2Activation(ctx, req)
 	default:
-		return common.ErrInvalidArgument
+		err := common.ErrInvalidArgument
+		s.recordWorkspaceRunFailure(req, schedulerKindWorkspaceActivation, schedulerReasonWorkspaceNotEligible, err)
+		return err
 	}
 }
 
@@ -349,12 +378,14 @@ func (s *serverState) executeWorkspaceRuntimeV2Activation(ctx context.Context, r
 	release, err := s.acquireRunSlotWithPriority(runCtx, req.Priority)
 	if err != nil {
 		s.metrics.runCanceled.Add(1)
+		s.recordWorkspaceRunFailure(req, schedulerKindWorkspaceActivation, schedulerReasonRunSlotUnavailable, err)
 		return err
 	}
 	defer release()
 	req.Command.Priority = req.Priority
 	activation, err := s.resumeWorkspaceExecution(runCtx, s.config.Backend, s.config.DataRoot, workspaceID, req.Command)
 	if err != nil {
+		s.recordWorkspaceRunFailure(req, schedulerKindWorkspaceActivation, schedulerReasonWorkspaceActivationFailed, err)
 		s.notifyRunStatusChanged()
 		return err
 	}
@@ -366,6 +397,7 @@ func (s *serverState) executeWorkspaceRuntimeV2Activation(ctx context.Context, r
 	// singleflight, so a newly-created Run reuses its already-scheduled drive.
 	if strings.TrimSpace(activation.Run.ID) != "" && activation.Run.State == string(common.RunStateActive) {
 		if err := s.sendRuntimeV2RunOwnerCommand(runCtx, workspaceID, activation.Run.ID, "resume"); err != nil {
+			s.recordWorkspaceRunFailure(req, schedulerKindWorkspaceActivation, schedulerReasonOwnerCommandFailed, err)
 			s.notifyRunStatusChangedForRun(activation.Run)
 			return err
 		}

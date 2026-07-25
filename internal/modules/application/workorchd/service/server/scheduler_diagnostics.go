@@ -31,6 +31,7 @@ const (
 
 	schedulerReasonEnqueueFailed                           = "scheduler_enqueue_failed"
 	schedulerReasonBackgroundFailed                        = "background_execution_failed"
+	schedulerReasonWorkspaceActivationFailed               = "workspace_activation_failed"
 	schedulerReasonOwnerCommandFailed                      = "owner_command_failed"
 	schedulerReasonRunSlotUnavailable                      = "run_slot_unavailable"
 	schedulerReasonServiceShuttingDown                     = "service_shutting_down"
@@ -399,7 +400,7 @@ func schedulerRecoverabilityFor(state, reason string) string {
 	switch reason {
 	case schedulerReasonWorkspaceNotEligible, schedulerReasonRunNotEligible:
 		return schedulerRecoverabilityNoAction
-	case schedulerReasonOwnerCommandFailed, schedulerReasonBackgroundFailed, schedulerReasonOwnerReadbackNotAdvanced:
+	case schedulerReasonWorkspaceActivationFailed, schedulerReasonOwnerCommandFailed, schedulerReasonBackgroundFailed, schedulerReasonOwnerReadbackNotAdvanced:
 		return schedulerRecoverabilityInspect
 	default:
 		return schedulerRecoverabilityManualRetry

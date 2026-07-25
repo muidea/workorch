@@ -672,6 +672,20 @@ workspace `DefaultLLMTarget`。
 TUI/Web/SSE 只验证 committed revision、high-watermark、ticket、terminal 和 request audit identity；`/run resume`、
 网页 activation 和 watcher 不得作为恢复补偿。
 
+#### P6 activation 接受边界的可观测性
+
+HTTP `202 Accepted` 仅表示 application 已接收并排入 activation 背景任务；它不表示已创建 Run、更不表示
+Runtime V2 已开始 drive。若 activation 在创建 Run 前失败，application 必须在同一 workspace 投影
+`runCommand.state=rejected`（保留 request ID、intent、source 与脱敏后的准确 error），并在 workspace
+snapshot/summary 的 `schedulerDiagnostics.latestContinuation` 提供 `workspace_activation_failed`、失败 detail 和
+可恢复性。该诊断属于 P6 的 SM-1/SM-4 display/activation observation：不得创建空 Run、不得由 TUI/Web
+自动 Resume、不得修改 SM-2 authority 或 SM-3 dispatch。`TestWorkspaceActivationFailureIsVisibleWithoutRun`
+固定此无 Run 回归。
+
+该 scheduler diagnostic 是进程内观测状态；服务重启后的长期审计仍以 owner/eventstream 的正式状态为准。
+若产品需要“202 后重启仍保证执行或可查询最终 command outcome”，必须另立 application-owned durable
+command/outbox 合同，不能把该需求偷渡为 Runtime V2 重试或 projection 补偿。
+
 #### P6 当前证据（2026-07-25）
 
 2026-07-25 的 real-provider isolated artifact
