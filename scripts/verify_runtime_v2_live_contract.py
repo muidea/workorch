@@ -7,6 +7,22 @@ import sys
 from typing import Any
 
 
+def external_provider_unavailable_reason(failure_reason: Any) -> str:
+    """Classify the terminal transport boundary without accepting the run.
+
+    A real-provider verifier must preserve the first failed contract boundary.
+    Once the Runtime V2 transport ledger is exhausted, absence of a candidate,
+    dispatch, evidence, or assessment is expected and must not replace the
+    external provider diagnosis with derived acceptance noise.
+    """
+
+    reason = str(failure_reason or "").strip()
+    if not reason.startswith("provider_transport_exhausted:"):
+        return ""
+    detail = reason.split(":", 1)[1].strip()
+    return detail or "provider transport retry budget exhausted"
+
+
 def bounded_git_sequence_errors(operations: list[dict[str, Any]]) -> list[str]:
     """Validate accepted Git effects, excluding invalidated-dispatch history."""
 
@@ -236,6 +252,11 @@ def _accepted(variant: str, snapshot_hash: str, operation_id: str) -> dict[str, 
 
 
 def _self_test() -> None:
+    if external_provider_unavailable_reason("target_grounding_unresolved: no target"):
+        raise AssertionError("non-provider terminal was classified as external provider unavailable")
+    if external_provider_unavailable_reason("provider_transport_exhausted: upstream 502") != "upstream 502":
+        raise AssertionError("provider transport terminal was not classified")
+
     # Unexecuted add/commit operations from invalidated dispatches are retained
     # for lineage.  They are not duplicate durable effects.
     valid = [

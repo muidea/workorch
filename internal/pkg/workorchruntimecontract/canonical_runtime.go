@@ -701,11 +701,11 @@ const (
 	// profile-declared prospective path; File validates that path against its
 	// workspace boundary and operation admissibility inventory.
 	RuntimeTargetSelectionCreate RuntimeTargetSelectionDisposition = "create"
-	// RuntimeTargetSelectionScope binds a bounded complete File feasibility
-	// inventory selected by an owner-declared scope. It is not a concrete repair
-	// target or a filename heuristic: a candidate still proposes concrete
-	// operations and their owner validates every target against the sealed
-	// admissibility inventory.
+	// RuntimeTargetSelectionScope binds either a bounded complete File
+	// feasibility inventory or a profile-declared empty-workspace creation
+	// scope. It is not a concrete repair target or a filename heuristic: a
+	// candidate still proposes concrete operations and their owner validates
+	// every target against the sealed admissibility inventory.
 	RuntimeTargetSelectionScope     RuntimeTargetSelectionDisposition = "scope"
 	RuntimeTargetSelectionAbsent    RuntimeTargetSelectionDisposition = "absent"
 	RuntimeTargetSelectionAmbiguous RuntimeTargetSelectionDisposition = "ambiguous"
@@ -777,7 +777,11 @@ func (s RuntimeTargetSelection) Validate() error {
 			return fmt.Errorf("create runtime target selection requires a profile-declared prospective target")
 		}
 	case RuntimeTargetSelectionScope:
-		if s.CandidateCount < 2 || len(s.TargetRefs) != s.CandidateCount || len(s.CandidateTargetRefs) != s.CandidateCount || !sameStrings(s.TargetRefs, s.CandidateTargetRefs) {
+		if s.CandidateCount == 0 {
+			if len(s.TargetRefs) != 0 || len(s.CandidateTargetRefs) != 0 || s.ProspectiveTargetRef != "" || s.SelectorOwnerRef == "" || s.SelectorSubjectRef == "" {
+				return fmt.Errorf("empty workspace scope requires a profile owner and subject without selected or prospective targets")
+			}
+		} else if s.CandidateCount < 2 || len(s.TargetRefs) != s.CandidateCount || len(s.CandidateTargetRefs) != s.CandidateCount || !sameStrings(s.TargetRefs, s.CandidateTargetRefs) {
 			return fmt.Errorf("scope runtime target selection requires a complete bounded target set")
 		}
 	case RuntimeTargetSelectionAbsent:

@@ -98,7 +98,7 @@ python3 - "$BASE_URL" "$ARTIFACT_DIR" "$WS_A" "$WS_B" "$POLL_INTERVAL" "$TIMEOUT
 import json, os, sys, time, urllib.request, urllib.error, uuid
 
 sys.path.insert(0, os.path.join(os.getcwd(), "scripts"))
-from verify_runtime_v2_live_contract import bounded_git_sequence_errors, provider_ceiling_trace_errors, runtime_v2_audit_errors, runtime_v2_completion_sequence_errors
+from verify_runtime_v2_live_contract import bounded_git_sequence_errors, external_provider_unavailable_reason, provider_ceiling_trace_errors, runtime_v2_audit_errors, runtime_v2_completion_sequence_errors
 
 base, artifact_dir, ws_a, ws_b, poll_s, timeout_s, activate, provider_id, model_id, mode = sys.argv[1:11]
 poll = float(poll_s)
@@ -457,6 +457,7 @@ readyz = get("/readyz")
 write_json("readyz-final.json", readyz)
 
 errors = []
+external_provider_failures = []
 proj = readyz.get("projection") or {}
 if (proj.get("state") or "").lower() != "ready":
     errors.append(f"global projection state={proj.get('state')}")
@@ -479,6 +480,18 @@ for ws, label in ((ws_a, "a"), (ws_b, "b")):
     if (s.get("projectionState") or "ready") not in ("ready", "ok", ""):
         errors.append(f"{label}: projectionState={s.get('projectionState')}")
     if mode != "liveness":
+        provider_unavailable = external_provider_unavailable_reason(s.get("failureReason"))
+        if provider_unavailable:
+            external_provider_failures.append({"workspaceId": ws, "runId": s.get("runId"), "reason": provider_unavailable})
+            errors.append(f"{label}: external_provider_unavailable: {provider_unavailable}")
+            if s.get("runState") != "failed":
+                errors.append(f"{label}: provider transport terminal has runState={s.get('runState')}, want failed")
+            if s.get("activeRunId"):
+                errors.append(f"{label}: provider transport terminal retained activeRunId ({s.get('activeRunId')})")
+            # Transport exhaustion occurs before a complete candidate document;
+            # all acceptance/audit requirements below are intentionally not
+            # applicable to this non-success P6 invocation.
+            continue
         errors.extend(f"{label}: {value}" for value in runtime_audit_errors(detail, ws, s.get("runId") or "", True))
         errors.extend(f"{label}: {value}" for value in provider_ceiling_audit_errors(detail))
         errors.extend(f"{label}: {value}" for value in completion_sequence_errors(detail, mode == "bounded_terminal"))
@@ -536,6 +549,8 @@ if mode == "liveness":
         classification = "lifecycle_liveness"
 elif mode == "bounded_terminal":
     classification = "bounded_terminal_acceptance"
+elif external_provider_failures:
+    classification = "external_provider_unavailable"
 else:
     classification = "positive_acceptance"
 
@@ -548,6 +563,7 @@ write_json("summary.json", {
     "freshRunIDs": expected_run_ids,
     "results": results,
     "errors": errors,
+    "externalProviderFailures": external_provider_failures,
     "capabilityStateObservations": capability_state_observations,
     "projection": proj,
 })

@@ -339,6 +339,35 @@ func TestReduceRuntimeStateWithDirectiveAllowsBoundedOwnerWorkspaceScopeWithoutC
 	}
 }
 
+func TestReduceRuntimeStateWithDirectiveAllowsProfileBoundEmptyWorkspaceScope(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.RequireTargetGrounding = true
+	facts.Focus.TargetRole = "deliverable"
+	facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	facts.Focus.TargetSelectorRef = "file/workspace_deliverable"
+	facts.Focus.TargetSelectorOwnerRef = "software-dev"
+	facts.Focus.TargetSelectorSubjectRef = "workspace_deliverable_create_scope"
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "target_selection:blocks/file:deliverable:file/workspace_deliverable:software-dev:workspace_deliverable_create_scope:0", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable", SelectorOwnerRef: "software-dev", SelectorSubjectRef: "workspace_deliverable_create_scope",
+		Disposition: runtimecontract.RuntimeTargetSelectionScope, CandidateCount: 0, ObservedRevision: "workspace-empty-v1",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	facts.Resources.TargetSelection = &selection
+	facts.Resources.Manifest = &runtimecontract.WorkspaceManifest{Revision: "workspace-empty-v1"}
+	facts.Prerequisites = runtimecontract.PrerequisiteState{}
+	bindCurrentFocusTargetSelection(&facts)
+
+	updated, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(decision.RequiredOutput.TargetRefs) != 0 || len(updated.Prerequisites.Pending) != 0 {
+		t.Fatalf("empty workspace scope decision=%+v prerequisites=%+v", decision, updated.Prerequisites)
+	}
+}
+
 func TestReduceRuntimeStateWithDirectiveTerminatesUngroundedStateChangeWithoutGovernance(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.RequireTargetGrounding = true

@@ -96,6 +96,17 @@ func TestRuntimeAdapterAcquireRuntimeTargetSelectionIsCardinalityBounded(t *test
 			t.Fatalf("empty workspace absent selection = %+v", selection)
 		}
 	})
+	t.Run("profile-bound empty workspace is a File-owner creation scope", func(t *testing.T) {
+		binding := runtimeTargetSelectionBinding{ownerRef: "software-dev", subjectRef: "workspace_deliverable_create_scope"}
+		selection, err := adapter.AcquireRuntimeTargetSelection(t.TempDir(), "target-selection-empty-profile-scope", "deliverable", runtimeFileTargetSelectorWorkspaceDeliverable, "", 4, binding)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selection.Disposition != runtimecontract.RuntimeTargetSelectionScope || selection.CandidateCount != 0 || len(selection.TargetRefs) != 0 ||
+			selection.SelectorOwnerRef != binding.ownerRef || selection.SelectorSubjectRef != binding.subjectRef || selection.ProspectiveTargetRef != "" {
+			t.Fatalf("profile-bound empty workspace scope = %+v", selection)
+		}
+	})
 	t.Run("empty workspace rejects noncanonical prospective target", func(t *testing.T) {
 		workspace := t.TempDir()
 		for _, target := range []string{"../escape.txt", "/absolute.txt", "nested/../deliverable.txt", `nested\\deliverable.txt`} {

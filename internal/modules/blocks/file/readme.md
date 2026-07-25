@@ -9,6 +9,7 @@
 - `kernel/orchestrator` 通过 Orchestrator 定义的 `ExecuteRuntimeOperationCommand/Result` 同步投递文件操作；本组件直接订阅 EventHub，不再启动通用 runtime executor 或发布 V1 执行通知。
 - Runtime V2 target snapshot prerequisite 使用 Orchestrator 定义的 `AcquireTargetSnapshotCommand` / `AcquireTargetSnapshotResult`；本 block 直接订阅 EventHub 并返回具体 `TargetSnapshot`，不使用跨组件 map 或 JSON bridge。
 - Runtime V2 workspace manifest 与 File capability preflight 同样使用 Orchestrator 定义的 typed EventHub command/result；manifest revision 对文件路径和内容变化敏感。
+- 对 profile 显式绑定的空工作区，File 可以返回不含具体路径的 `scope` selection；它只授权 LLM 提出一个具体 workspace-relative File target，并由同一 owner feasibility/admissibility gate 验证。File 不从 Goal、DoD、目录名或文件后缀推断路径；未绑定 profile 的空工作区仍返回 `absent`。
 - Runtime V2 state-change/validation operation 只返回 typed status、failure 与 evidence 摘要，不返回跨组件 map。
 - request 必须携带 workspace/run/step scope、step kind、operation、path/ref 和有界输入；result 返回状态、摘要、target refs、side-effect metadata 和 raw ref。
 - Orchestrator 负责 state-changing admission、approval、evidence quality、coverage binding 和 next action。

@@ -27,6 +27,23 @@ func TestRuntimeTargetSelectionCreateRequiresAndHashesProspectiveTarget(t *testi
 	}
 }
 
+func TestRuntimeTargetSelectionEmptyWorkspaceScopeRequiresProfileBinding(t *testing.T) {
+	selection := RuntimeTargetSelection{
+		PrerequisiteID: "selection-1", OwnerModuleID: RuntimeModuleFile, TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable",
+		Disposition: RuntimeTargetSelectionScope, CandidateCount: 0, ObservedRevision: "workspace-empty-v1",
+	}
+	selection.SnapshotID = StableRuntimeTargetSelectionSnapshotID(selection)
+	if err := selection.Validate(); err == nil {
+		t.Fatal("unbound empty workspace scope was accepted")
+	}
+	selection.SelectorOwnerRef = "software-dev"
+	selection.SelectorSubjectRef = "workspace_deliverable_create_scope"
+	selection.SnapshotID = StableRuntimeTargetSelectionSnapshotID(selection)
+	if err := selection.Validate(); err != nil {
+		t.Fatalf("profile-bound empty workspace scope rejected: %v", err)
+	}
+}
+
 func TestRuntimeDecisionActionStateMatrix(t *testing.T) {
 	tests := []struct {
 		name          string

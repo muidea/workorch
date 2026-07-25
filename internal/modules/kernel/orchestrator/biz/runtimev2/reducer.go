@@ -478,8 +478,15 @@ func hasOwnerGroundedCreationScope(facts runtimecontract.RuntimeFacts) bool {
 
 func hasOwnerGroundedTargetScope(facts runtimecontract.RuntimeFacts) bool {
 	selection := currentFocusTargetSelection(facts)
-	return selection != nil && selection.Disposition == runtimecontract.RuntimeTargetSelectionScope &&
-		selection.OwnerModuleID == runtimecontract.RuntimeModuleFile && len(selection.TargetRefs) != 0
+	if selection == nil || selection.Disposition != runtimecontract.RuntimeTargetSelectionScope || selection.OwnerModuleID != runtimecontract.RuntimeModuleFile {
+		return false
+	}
+	// A complete existing-workspace scope has the bounded target set. An empty
+	// scope is legal only when activation sealed an owning profile/subject pair;
+	// File never obtains that authority from Goal/DoD prose or directory names.
+	return len(selection.TargetRefs) != 0 ||
+		(selection.CandidateCount == 0 && len(selection.CandidateTargetRefs) == 0 && selection.ProspectiveTargetRef == "" &&
+			selection.SelectorOwnerRef != "" && selection.SelectorSubjectRef != "")
 }
 
 // targetSelectionHasConcreteTarget is intentionally narrower than an owner

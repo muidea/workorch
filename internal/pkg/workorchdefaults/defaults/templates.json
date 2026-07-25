@@ -924,6 +924,8 @@
                 "project_files"
               ],
               "targetSelectorRef": "file/workspace_deliverable",
+              "targetSelectorOwnerRef": "software-dev",
+              "targetSelectorSubjectRef": "workspace_deliverable_create_scope",
               "requireTargetGrounding": true,
               "requireDirectEvidence": true,
               "requireCoverageTargets": true,

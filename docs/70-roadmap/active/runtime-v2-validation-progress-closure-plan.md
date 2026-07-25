@@ -523,8 +523,10 @@ read-only ledger 上限设为 1；第二次删除 scratch 后得到 `prerequisit
 
 P4-B 只收口 resource/focus 事实的原子性：
 
-1. 空 workspace 的 first target 必须由已持久化 Goal/DoD、workspace deliverable directory 的 File manifest
-   和 owner-declared selector 合同推导；不得要求用户再次声明，也不得从自然语言或目录猜具体文件。
+1. 空 workspace 的 first target 必须由已持久化 Goal/DoD 所选择的 profile、workspace deliverable directory 的
+   File manifest 和 owner-declared selector 合同共同约束；profile 可以封存无具体路径的 creation scope，但不得要求
+   用户再次声明，也不得从自然语言或目录猜具体文件。LLM 仍须在该 scope 内提出具体 workspace-relative File target，
+   并由 File owner 的 admissibility/feasibility gate 逐项确认。
 2. selection、prospective new target、durable create receipt、post-create snapshot 与 failure-target 必须按
    定义的先后关系持久化；new target snapshot 只在 durable create receipt 已提交后取得。
 3. 每个 selection/snapshot/failure target 都有 CAS 前/后、duplicate、stale、fresh-process matrix；旧
@@ -671,6 +673,25 @@ TUI/Web/SSE 只验证 committed revision、high-watermark、ticket、terminal �
 网页 activation 和 watcher 不得作为恢复补偿。
 
 #### P6 当前证据（2026-07-25）
+
+2026-07-25 的 real-provider isolated artifact
+`/tmp/workorch-e2e/runtime-v2-real-provider-20260725T145126Z` 发现：通用 `software-dev/source_change`
+profile 在空 deliverable 下只声明 `file/workspace_deliverable`，未声明 selector owner/subject。File owner 因而正确
+返回 `absent`，SM-2 在任何 provider request、candidate attempt、dispatch、ticket 或 effect 之前以
+`target_grounding_unresolved` 终态化。这不是让 kernel 从 Goal/DoD 猜文件名的理由。当前修复将
+`software-dev + workspace_deliverable_create_scope` 作为 activation/profile 的显式、持久化 selector binding；
+File 仅在 empty manifest 且 binding 完整时返回无路径 `scope`。SM-3 仍要求一个 durable File operation 的具体
+workspace-relative target，并保持 owner feasibility/admissibility 与路径边界。缺少 binding 的空 workspace 继续返回
+`absent`，作为零 provider-call 的负向回归。
+
+对照 artifact `/tmp/workorch-e2e/runtime-v2-real-provider-bootstrap-20260725T145346Z` 已越过上述 selection，
+首个 focus 得到 `create go.mod` 的 File selection；随后 ai-proxy 上游在 candidate transport 阶段连续返回
+`502 upstream_unavailable ... EOF`。Runtime 以独立的 `providerTransportAttempts=3` 收敛为
+`provider_transport_exhausted`，没有完整 candidate、attempt、dispatch、operation 或 effect。这是外部 provider
+可达性阻断，不是 candidate/evidence/assessment 合同缺陷，也不能靠 Resume 或人工 ticket 修复。P6 verifier 必须将
+它标记为 `external_provider_unavailable` 失败，并仅报告该首失真边界及 terminal/activeRun 基本一致性；不得把预期
+缺失的 candidate/evidence/assessment 叠加成派生噪声。真实 provider 恢复后必须使用新的 fresh activation/Run
+重新取证，旧 terminal Run 不能 Resume。
 
 `WORKORCH_MANAGED_VERIFY_ARTIFACT_DIR=/tmp/workorch-managed-p6-retry-1784981173`
 配合 `WORKORCH_MANAGED_VERIFY_KEEP_ARTIFACTS=1`、临时 config/data/workspace root 和随机端口执行

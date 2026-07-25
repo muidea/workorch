@@ -118,6 +118,39 @@ func TestRuntimeV2BootstrapSealsProfileProspectiveTargetIntoFocus(t *testing.T) 
 	}
 }
 
+func TestRuntimeV2BootstrapSealsProfileBoundEmptyWorkspaceScopeIntoFocus(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+			ID: "software-dev", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "source_change", Required: true, EvidenceRole: "primary_state_change"}},
+			EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
+				ID: "source_change", Scope: "deliverable", EvidenceRole: "primary_state_change", RequireTargetGrounding: true, TargetRole: "deliverable_implementation",
+				TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, TargetSelectorRef: "file/workspace_deliverable",
+				TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "workspace_deliverable_create_scope",
+				AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite},
+			}},
+		}}},
+	}
+	bootstrap, err := RuntimeV2Bootstrap(
+		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "create a minimal Go command"},
+		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"main.go exists"}},
+		"definition-1", nil, activation,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var focus *runtimecontract.CoverageFocus
+	for idx := range bootstrap.Focuses {
+		if bootstrap.Focuses[idx].TargetRole == "deliverable_implementation" {
+			focus = &bootstrap.Focuses[idx]
+			break
+		}
+	}
+	if focus == nil || focus.TargetSelectorOwnerRef != "software-dev" || focus.TargetSelectorSubjectRef != "workspace_deliverable_create_scope" || focus.ProspectiveTargetRef != "" {
+		t.Fatalf("bootstrap lost profile-bound empty workspace scope: %+v", bootstrap.Focuses)
+	}
+}
+
 func TestCompileRuntimeV2CoverageFocusesPrependsMatchedBootstrapArtifactsInDependencyOrder(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},

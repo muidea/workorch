@@ -614,6 +614,9 @@ func assertSoftwareDevWorkspaceDeliverableSelectors(t *testing.T, hints map[stri
 			if item["targetSelectorRef"] != "file/workspace_deliverable" {
 				t.Fatalf("%s targetSelectorRef = %q, want file/workspace_deliverable", id, item["targetSelectorRef"])
 			}
+			if id == "source_change" && (item["targetSelectorOwnerRef"] != "software-dev" || item["targetSelectorSubjectRef"] != "workspace_deliverable_create_scope") {
+				t.Fatalf("%s empty-workspace scope binding = %q/%q, want software-dev/workspace_deliverable_create_scope", id, item["targetSelectorOwnerRef"], item["targetSelectorSubjectRef"])
+			}
 			if _, present := item["prospectiveTargetRef"]; present {
 				t.Fatalf("%s/%s retains deprecated prospectiveTargetRef = %q", id, item["scope"], item["prospectiveTargetRef"])
 			}

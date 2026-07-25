@@ -143,17 +143,24 @@ func (a *RuntimeAdapter) AcquireRuntimeTargetSelection(workspaceDirectory, prere
 	candidates := boundedAdmissibilityTargetRefs(nil, manifest.TargetRefs, maxItems)
 	selection := runtimemodel.RuntimeTargetSelection{
 		PrerequisiteID: prerequisiteID, OwnerModuleID: runtimemodel.RuntimeModuleFile, TargetRole: targetRole, SelectorRef: selectorRef,
+		SelectorOwnerRef: binding.ownerRef, SelectorSubjectRef: binding.subjectRef, SelectorCandidateRefs: binding.candidateRefs,
 		CandidateTargetRefs: candidates, ProspectiveTargetRef: prospectiveTargetRef, CandidateCount: len(manifest.TargetRefs), ObservedRevision: manifest.Revision,
 	}
 	switch selection.CandidateCount {
 	case 0:
 		if selectorRef == runtimeFileTargetSelectorWorkspaceDeliverable {
 			if prospectiveTargetRef == "" {
-				// An empty inventory without a profile-declared artifact is a
-				// complete File observation, not an adapter failure. SM-2 turns
-				// this typed absence into target_grounding_unresolved without
-				// spending a provider request on a free-form filename guess.
-				selection.Disposition = runtimemodel.RuntimeTargetSelectionAbsent
+				// A profile may explicitly authorize the owner-grounded empty
+				// workspace scope. File still does not derive a path: SM-3 must
+				// propose a concrete File target and the normal owner feasibility
+				// gate validates it before any side effect. Unbound selectors retain
+				// the deterministic absent result and never authorize a provider
+				// filename guess.
+				if binding.ownerRef != "" && binding.subjectRef != "" {
+					selection.Disposition = runtimemodel.RuntimeTargetSelectionScope
+				} else {
+					selection.Disposition = runtimemodel.RuntimeTargetSelectionAbsent
+				}
 				break
 			}
 			if strings.Contains(prospectiveTargetRef, "\\") {
