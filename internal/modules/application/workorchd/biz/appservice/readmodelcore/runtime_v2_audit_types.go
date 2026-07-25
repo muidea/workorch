@@ -60,12 +60,25 @@ type RuntimeV2AuditCoverage struct {
 }
 
 type RuntimeV2AuditGrounding struct {
-	TargetSelection          *RuntimeV2AuditTargetSelection          `json:"targetSelection,omitempty"`
-	FailureTarget            *RuntimeV2AuditFailureTarget            `json:"failureTarget,omitempty"`
-	ProviderCeiling          *RuntimeV2AuditProviderCeiling          `json:"providerCeiling,omitempty"`
-	TargetSnapshots          []RuntimeV2AuditTargetSnapshot          `json:"targetSnapshots,omitempty"`
-	PrerequisiteObservations []RuntimeV2AuditPrerequisiteObservation `json:"prerequisiteObservations,omitempty"`
-	OperationAdmissibilities []RuntimeV2AuditOperationAdmissibility  `json:"operationAdmissibilities,omitempty"`
+	TargetSelection                 *RuntimeV2AuditTargetSelection          `json:"targetSelection,omitempty"`
+	FailureTarget                   *RuntimeV2AuditFailureTarget            `json:"failureTarget,omitempty"`
+	ProviderCeiling                 *RuntimeV2AuditProviderCeiling          `json:"providerCeiling,omitempty"`
+	TargetSnapshots                 []RuntimeV2AuditTargetSnapshot          `json:"targetSnapshots,omitempty"`
+	ActivePrerequisites             []RuntimeV2AuditPrerequisite            `json:"activePrerequisites,omitempty"`
+	RetiredPrerequisites            []RuntimeV2AuditPrerequisite            `json:"retiredPrerequisites,omitempty"`
+	PrerequisiteObservations        []RuntimeV2AuditPrerequisiteObservation `json:"prerequisiteObservations,omitempty"`
+	RetiredPrerequisiteObservations []RuntimeV2AuditPrerequisiteObservation `json:"retiredPrerequisiteObservations,omitempty"`
+	OperationAdmissibilities        []RuntimeV2AuditOperationAdmissibility  `json:"operationAdmissibilities,omitempty"`
+}
+
+// RuntimeV2AuditPrerequisite exposes prerequisite lifecycle binding without
+// exposing owner-private fact content.  The projection remains read-only.
+type RuntimeV2AuditPrerequisite struct {
+	ID            string `json:"id,omitempty"`
+	Kind          string `json:"kind,omitempty"`
+	Scope         string `json:"scope,omitempty"`
+	FocusID       string `json:"focusId,omitempty"`
+	OwnerModuleID string `json:"ownerModuleId,omitempty"`
 }
 
 // RuntimeV2AuditProviderCeiling exposes the immutable model capability sealed

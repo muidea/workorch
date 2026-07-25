@@ -28,7 +28,7 @@ func TestRuntimeControllerPersistsIndependentRecoveryBudget(t *testing.T) {
 	}
 }
 
-func TestReduceRuntimeStateRoutesExhaustedProviderTransportToGovernance(t *testing.T) {
+func TestReduceRuntimeStateRoutesExhaustedProviderTransportToTerminal(t *testing.T) {
 	facts := controllerFacts()
 	facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindDecisionRequest}
 	facts.RecoveryPolicy = runtimecontract.RuntimeRecoveryPolicy{MaxProviderTransportAttempts: 2}
@@ -41,7 +41,7 @@ func TestReduceRuntimeStateRoutesExhaustedProviderTransportToGovernance(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionRequestGovernance {
-		t.Fatalf("decision = %+v, want request_governance", decision)
+	if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "provider_transport_exhausted" {
+		t.Fatalf("decision = %+v, want provider_transport_exhausted terminal", decision)
 	}
 }

@@ -5,6 +5,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -240,7 +241,18 @@ func AcquireAndCommitRuntimeCapabilitiesPrerequisite(ctx context.Context, hub ma
 	}
 	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, ModuleID, command.ModuleID, magicevent.NewHeader(), ctx, command))
 	if result == nil {
-		return runtimecontract.RuntimeFacts{}, common.ErrInvalidArgument
+		return runtimecontract.RuntimeFacts{}, &orchestratorevents.RuntimeCapabilityUnsupportedError{
+			ModuleID: command.ModuleID, CapabilityClass: command.CapabilityClass, RequiredKinds: append([]string(nil), command.RequiredKinds...), Reason: "owner_unavailable",
+		}
+	}
+	// magicCommon represents a missing destination observer as a non-nil Result
+	// carrying an Unexpected framework error. At this typed owner boundary it
+	// means the sealed capability owner is absent, not a transient provider or
+	// generic governance dependency.
+	if magicErr := result.Error(); magicErr != nil && strings.HasPrefix(strings.TrimSpace(magicErr.Message), "missing observer,") {
+		return runtimecontract.RuntimeFacts{}, &orchestratorevents.RuntimeCapabilityUnsupportedError{
+			ModuleID: command.ModuleID, CapabilityClass: command.CapabilityClass, RequiredKinds: append([]string(nil), command.RequiredKinds...), Reason: "owner_unavailable",
+		}
 	}
 	if err := prerequisiteResultError(result); err != nil {
 		return runtimecontract.RuntimeFacts{}, err

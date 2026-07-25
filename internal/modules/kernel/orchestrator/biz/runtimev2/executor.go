@@ -127,6 +127,17 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 			if !found {
 				return RuntimeAggregate{}, fmt.Errorf("operation %q owner_committed without persisted receipt", operation.ID)
 			}
+			// A prerequisite-stale receipt is persisted before the aggregate
+			// invalidation CAS. If that second CAS loses its response, restart
+			// must finish the SM-2 invalidation from this durable receipt rather
+			// than turn it into ordinary rejected evidence and request another
+			// candidate for the stale authority.
+			if receipt.PrerequisiteStale != nil {
+				return c.InvalidateActiveDispatchForPrerequisiteStale(ctx, workspaceID, runID, dispatch.ID, receipt)
+			}
+			if receipt.CapabilityStateStale != nil {
+				return c.RefreshCapabilityStateAfterStaleReceipt(ctx, workspaceID, runID, dispatch.ID, receipt)
+			}
 			commit, commitErr := c.commitPersistedOperationReceiptEvidence(ctx, aggregate, dispatch, operation, receipt)
 			if commitErr != nil {
 				return RuntimeAggregate{}, commitErr
@@ -139,6 +150,12 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 			continue
 		case runtimecontract.OperationExecutionClaimed:
 			if receipt, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(aggregate.OperationReceipts, execution.ExecutionKey, execution.Fence); found {
+				if receipt.PrerequisiteStale != nil {
+					return c.InvalidateActiveDispatchForPrerequisiteStale(ctx, workspaceID, runID, dispatch.ID, receipt)
+				}
+				if receipt.CapabilityStateStale != nil {
+					return c.RefreshCapabilityStateAfterStaleReceipt(ctx, workspaceID, runID, dispatch.ID, receipt)
+				}
 				commit, commitErr := c.commitPersistedOperationReceiptEvidence(ctx, aggregate, dispatch, operation, receipt)
 				if commitErr != nil {
 					return RuntimeAggregate{}, commitErr
@@ -394,6 +411,10 @@ func (c *RuntimeController) recordOperationGovernanceRequired(ctx context.Contex
 		Signature:  "governance-" + string(gov.Kind) + "-" + gov.SubjectRef,
 		Message:    firstNonEmpty(gov.Reason, "operation requires governance before side effects"),
 		TargetRefs: []string{gov.SubjectRef},
+		GovernanceDependency: &runtimecontract.ExternalDependency{
+			Kind: string(gov.Kind), SubjectRef: gov.SubjectRef,
+			Reason: firstNonEmpty(gov.Reason, "operation requires governance before side effects"),
+		},
 	}
 	// Close active dispatch as committed-without-evidence so reduce can open governance.
 	if aggregate.ActiveDispatch != nil {

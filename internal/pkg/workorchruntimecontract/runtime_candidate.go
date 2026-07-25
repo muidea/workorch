@@ -165,12 +165,209 @@ const (
 )
 
 type RuntimeCandidateFailure struct {
-	Class                RuntimeCandidateFailureClass
-	Code                 string
-	Signature            string
-	Reason               string
-	TargetRefs           []string
+	Class      RuntimeCandidateFailureClass
+	Code       string
+	Signature  string
+	Reason     string
+	TargetRefs []string
+	// Diagnostic is machine-actionable correction metadata for a schema or
+	// sealed-manifest rejection. Reason remains persisted/audit context and
+	// must never be rendered back into a provider correction request.
+	Diagnostic           *RuntimeCandidateFailureDiagnostic
 	ValidationDiagnostic *ValidationFailureDiagnostic
+}
+
+// RuntimeCandidateFailureDiagnostic is the bounded, provider-safe projection
+// of a schema or semantic candidate rejection. It is a pure value DTO: no
+// action selection, aggregate mutation, EventHub, or I/O belongs here.
+type RuntimeCandidateFailureDiagnostic struct {
+	OperationID       string                                `json:"operationId,omitempty"`
+	Path              string                                `json:"path,omitempty"`
+	Actual            string                                `json:"actual,omitempty"`
+	Allowed           []string                              `json:"allowed,omitempty"`
+	Required          []string                              `json:"required,omitempty"`
+	Forbidden         []string                              `json:"forbidden,omitempty"`
+	ManifestHash      string                                `json:"manifestHash,omitempty"`
+	RejectedShapeHash string                                `json:"rejectedShapeHash,omitempty"`
+	Objectives        []RuntimeCandidateCorrectionObjective `json:"objectives,omitempty"`
+}
+
+// RuntimeCandidateCorrectionObjective is a bounded, machine-readable delta
+// for the one permitted same-contract correction. It is a DTO vocabulary, not
+// an action selector or retry policy.
+type RuntimeCandidateCorrectionObjective string
+
+const (
+	RuntimeCandidateCorrectionRemoveForbiddenField RuntimeCandidateCorrectionObjective = "remove_forbidden_field"
+	RuntimeCandidateCorrectionSupplyRequiredField  RuntimeCandidateCorrectionObjective = "supply_required_field"
+	RuntimeCandidateCorrectionReplaceTarget        RuntimeCandidateCorrectionObjective = "replace_target_with_allowed_target"
+	RuntimeCandidateCorrectionSelectDurableEffect  RuntimeCandidateCorrectionObjective = "select_durable_effect"
+	RuntimeCandidateCorrectionChangeReplayedShape  RuntimeCandidateCorrectionObjective = "change_replayed_shape"
+	RuntimeCandidateCorrectionSatisfyCoverage      RuntimeCandidateCorrectionObjective = "satisfy_required_coverage"
+	RuntimeCandidateCorrectionSatisfyDependency    RuntimeCandidateCorrectionObjective = "satisfy_dependency_binding"
+)
+
+func (d *RuntimeCandidateFailureDiagnostic) Clone() *RuntimeCandidateFailureDiagnostic {
+	if d == nil {
+		return nil
+	}
+	clone := d.Normalized()
+	return &clone
+}
+
+func (d RuntimeCandidateFailureDiagnostic) Normalized() RuntimeCandidateFailureDiagnostic {
+	d.OperationID = strings.TrimSpace(d.OperationID)
+	d.Path = strings.TrimSpace(d.Path)
+	d.Actual = strings.TrimSpace(d.Actual)
+	d.ManifestHash = strings.TrimSpace(d.ManifestHash)
+	d.RejectedShapeHash = strings.TrimSpace(d.RejectedShapeHash)
+	d.Allowed = normalizeStrings(d.Allowed)
+	d.Required = normalizeStrings(d.Required)
+	d.Forbidden = normalizeStrings(d.Forbidden)
+	seen := map[RuntimeCandidateCorrectionObjective]struct{}{}
+	objectives := make([]RuntimeCandidateCorrectionObjective, 0, len(d.Objectives))
+	for _, objective := range d.Objectives {
+		objective = RuntimeCandidateCorrectionObjective(strings.TrimSpace(string(objective)))
+		if objective == "" {
+			continue
+		}
+		if _, found := seen[objective]; !found {
+			seen[objective] = struct{}{}
+			objectives = append(objectives, objective)
+		}
+	}
+	sort.Slice(objectives, func(left, right int) bool { return objectives[left] < objectives[right] })
+	d.Objectives = objectives
+	return d
+}
+
+// RuntimeCandidateCorrectionObjectivesForFailure derives the bounded
+// structural delta for a same-contract correction. It is deliberately pure:
+// callers still decide whether to retry and persist that decision in SM-3.
+// An empty result means the failure is not safe to send back to a model as a
+// correction request.
+func RuntimeCandidateCorrectionObjectivesForFailure(failure *RuntimeCandidateFailure) []RuntimeCandidateCorrectionObjective {
+	if failure == nil {
+		return nil
+	}
+	var diagnostic RuntimeCandidateFailureDiagnostic
+	if failure.Diagnostic != nil {
+		diagnostic = failure.Diagnostic.Normalized()
+	}
+	objectives := append([]RuntimeCandidateCorrectionObjective(nil), diagnostic.Objectives...)
+	if len(diagnostic.Forbidden) != 0 {
+		objectives = append(objectives, RuntimeCandidateCorrectionRemoveForbiddenField)
+	}
+	if len(diagnostic.Required) != 0 {
+		objectives = append(objectives, RuntimeCandidateCorrectionSupplyRequiredField)
+	}
+	if (strings.Contains(diagnostic.Path, "targetRefs") || strings.Contains(diagnostic.Path, "targetRef")) && len(diagnostic.Allowed) != 0 {
+		objectives = append(objectives, RuntimeCandidateCorrectionReplaceTarget)
+	}
+	if strings.Contains(diagnostic.Path, "coverage") {
+		objectives = append(objectives, RuntimeCandidateCorrectionSatisfyCoverage)
+	}
+	if strings.Contains(diagnostic.Path, "dependsOn") {
+		objectives = append(objectives, RuntimeCandidateCorrectionSatisfyDependency)
+	}
+	switch strings.TrimSpace(failure.Code) {
+	case "candidate_replays_rejected_shape", "candidate_partially_replays_rejected_shape", "candidate_replays_no_progress_shape":
+		objectives = append(objectives, RuntimeCandidateCorrectionChangeReplayedShape)
+	case "candidate_target_outside_grounding", "candidate_creation_scope_missing_file_target", "operation_target_not_regular":
+		if len(diagnostic.Allowed) != 0 {
+			objectives = append(objectives, RuntimeCandidateCorrectionReplaceTarget)
+		}
+	case "candidate_action_evidence_mismatch":
+		objectives = append(objectives, RuntimeCandidateCorrectionSatisfyCoverage)
+	}
+	return (&RuntimeCandidateFailureDiagnostic{Objectives: objectives}).Normalized().Objectives
+}
+
+// RuntimeCandidateFailureDiagnosticForFeasibility converts a persisted,
+// owner-authored feasibility fact into the bounded correction facts for the
+// same sealed candidate. It intentionally reads neither FailureFact.Message
+// nor any workspace state: the proposed operation supplies actual values, and
+// the sealed manifest plus owner admissibility snapshot supply allowed values.
+//
+// A missing operation ID, manifest operation, or alternative admissible target
+// yields an incomplete diagnostic with no target objective. SM-3, not this
+// pure helper, decides whether that absence permits a retry or requires a
+// terminal route.
+func RuntimeCandidateFailureDiagnosticForFeasibility(
+	failure *FailureFact,
+	operation RuntimeOperation,
+	manifest RuntimeCandidateContractManifest,
+	admissibility RuntimeOperationAdmissibility,
+	candidate RuntimeCandidate,
+) *RuntimeCandidateFailureDiagnostic {
+	if failure == nil {
+		return nil
+	}
+	operation = operation.Normalized()
+	manifest = manifest.Normalized()
+	admissibility = admissibility.Normalized()
+	if operation.ID == "" || manifest.Hash == "" {
+		return nil
+	}
+	if _, found := runtimeCandidatePayloadOperationManifest(manifest, operation.Kind); !found {
+		return nil
+	}
+	diagnostic := RuntimeCandidateFailureDiagnostic{
+		OperationID:       operation.ID,
+		ManifestHash:      manifest.Hash,
+		RejectedShapeHash: StableRuntimeCandidateSemanticShape(candidate),
+	}
+	if runtimeCandidateFeasibilityFailureTargets(failure.Code) {
+		diagnostic.Path = "$.operations[id=" + operation.ID + "].targetRefs"
+		diagnostic.Actual = strings.Join(operation.TargetRefs, ",")
+		diagnostic.Allowed = runtimeCandidateFeasibilityAlternativeTargets(manifest, admissibility, operation.TargetRefs)
+	}
+	converted := RuntimeCandidateFailure{
+		Class:      RuntimeCandidateFailureClassInfeasible,
+		Code:       failure.Code,
+		Signature:  failure.Signature,
+		TargetRefs: append([]string(nil), failure.TargetRefs...),
+		Diagnostic: &diagnostic,
+	}
+	diagnostic.Objectives = RuntimeCandidateCorrectionObjectivesForFailure(&converted)
+	return diagnostic.Clone()
+}
+
+func runtimeCandidateFeasibilityFailureTargets(code string) bool {
+	switch strings.TrimSpace(code) {
+	case "operation_target_not_regular", "candidate_target_outside_grounding", "candidate_creation_scope_missing_file_target":
+		return true
+	default:
+		return false
+	}
+}
+
+func runtimeCandidateFeasibilityAlternativeTargets(manifest RuntimeCandidateContractManifest, admissibility RuntimeOperationAdmissibility, rejected []string) []string {
+	manifest = manifest.Normalized()
+	admissibility = admissibility.Normalized()
+	rejectedSet := make(map[string]struct{}, len(rejected))
+	for _, target := range rejected {
+		if target = strings.TrimSpace(target); target != "" {
+			rejectedSet[target] = struct{}{}
+		}
+	}
+	allowedByManifest := make(map[string]struct{}, len(manifest.TargetRefs))
+	for _, target := range manifest.TargetRefs {
+		allowedByManifest[target] = struct{}{}
+	}
+	allowed := make([]string, 0, len(admissibility.TargetRefs))
+	for _, target := range admissibility.TargetRefs {
+		if _, rejected := rejectedSet[target]; rejected {
+			continue
+		}
+		if len(allowedByManifest) != 0 {
+			if _, allowed := allowedByManifest[target]; !allowed {
+				continue
+			}
+		}
+		allowed = append(allowed, target)
+	}
+	return normalizeStrings(allowed)
 }
 
 func StableRuntimeCandidateHash(candidate RuntimeCandidate) string {
@@ -320,6 +517,29 @@ type ExternalDependency struct {
 	Reason     string
 }
 
+// Normalized returns the canonical, value-only representation of an external
+// dependency. It deliberately carries no owner handle, ticket, or state
+// transition: the dependency is an input contract, while the Orchestrator
+// remains the governance state owner.
+func (d ExternalDependency) Normalized() ExternalDependency {
+	d.Kind = strings.TrimSpace(d.Kind)
+	d.SubjectRef = strings.TrimSpace(d.SubjectRef)
+	d.Reason = strings.TrimSpace(d.Reason)
+	return d
+}
+
+func (d ExternalDependency) Validate() error {
+	d = d.Normalized()
+	if d.Kind == "" || d.SubjectRef == "" || d.Reason == "" {
+		return fmt.Errorf("external dependency requires kind, subject ref and reason")
+	}
+	return nil
+}
+
+func (d ExternalDependency) Clone() ExternalDependency {
+	return d.Normalized()
+}
+
 type GovernanceCandidate struct {
 	ExternalDependency ExternalDependency
 }
@@ -425,9 +645,8 @@ func (c RuntimeCandidate) ValidateWithActivation(decision RuntimeDecision, activ
 		if c.Governance == nil {
 			return fmt.Errorf("action %s requires a governance candidate", decision.Action)
 		}
-		dependency := c.Governance.ExternalDependency
-		if strings.TrimSpace(dependency.Kind) == "" || strings.TrimSpace(dependency.Reason) == "" {
-			return fmt.Errorf("governance candidate requires a concrete external dependency")
+		if err := c.Governance.ExternalDependency.Validate(); err != nil {
+			return fmt.Errorf("governance candidate: %w", err)
 		}
 		return nil
 	default:

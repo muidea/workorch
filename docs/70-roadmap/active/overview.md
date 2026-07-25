@@ -4,7 +4,7 @@ Status: active
 
 Type: roadmap
 
-Last Updated: 2026-07-24
+Last Updated: 2026-07-25
 
 ## Purpose
 
@@ -15,10 +15,8 @@ Last Updated: 2026-07-24
 | 主题 | 状态 |
 | --- | --- |
 | Runtime V2 生产主链 | **代码已收口**（Start/Resume → `DriveRuntimeV2` only） |
-| Runtime V2 正向收敛基础闭环 | **remediation active**；evidence/progress、diagnostic routing、feasibility prerequisite、Shell structured failure-target protocol、owner-grounded retarget、same-gap/file-backed restart matrix、profile-declared bounded semantic selector、metadata-only Runtime V2 audit projection 与 active-run typed resume 投递已完成本地收口。全局 Markdown fallback 已删除，profile-declared bootstrap artifact recipe/activation Focus 编译已落地；partial-artifact/restart/validation-repair 与 fresh live 未闭环 |
-| Runtime V2 production admissibility + positive acceptance | **partially reopened**；owner feasibility、candidate admission 和 bounded escalation 保持完成，当前按唯一 RUNTIME-VPC 计划补齐严格 admission 所需的 owner-grounded authority |
-| Runtime V2 prerequisite freshness | **completed**；completion record 已归档，覆盖 observation/change/stale、refresh budget、restart/crash 与跨组件回归 |
-| Runtime V2 candidate admission transaction | **completed**；typed admission、attempt 0/1 atomic closure、restart/crash、真实 provider truncation/replay 与隔离 deployed partial-replay acceptance 均通过，completion record 已归档 |
+| Runtime V2 正向收敛基础闭环 | **remediation active**；R4 已清除 core 文档中与 V2-only 冲突的 V1 graph/continuation 叙述。C4～C6、P0～P5 已关闭；当前唯一活动卡为 **Q7/P6 隔离 scripted/live**。最新临时部署通过 HTTP、template/soul、mock LLM 和 MCP stdio execution，继续保留全仓门禁与真实 provider 可达性验证。 |
+| 历史 prerequisite / candidate closure records | **archive baseline only**；此前的 freshness、admission、positive-acceptance 证据不得独立定义当前状态或实施顺序，剩余链路均由 RUNTIME-VPC 统一收口 |
 | 22-component framework boundary | **remediation active**；共享 Base Biz、全量本地 structural/race/file-backed 门禁已完成，待外部 deployed restart-fixture matrix |
 | V1 StagePacket / NextAction / graph dispatch 主链 | **已删除** |
 | 设计结论上提 | 见 [00-core/runtime-stage-contract.md](../../00-core/runtime-stage-contract.md)、[current-state.md](../../01-overview/current-state.md) |
@@ -27,8 +25,8 @@ Last Updated: 2026-07-24
 
 | ID | 项 | 说明 | 方案 / 历史过程稿 |
 | --- | --- | --- | --- |
-| RUNTIME-VPC | Runtime V2 live 合同正向收敛 | 当前本地基线已落地 validation truthfulness、effective progress、diagnostic routing、typed feasibility prerequisite、Shell structured failure target、owner-grounded retarget、same-gap/file-backed restart、candidate continuation、sealed closed-schema boundary、profile-declared bounded semantic selector、metadata-only Runtime V2 audit projection 与 active-run typed resume 投递；空工程 bootstrap artifact recipe、activation 前置 Focus 与 File typed absence 已实现，仍需 partial-artifact/restart/validation-repair matrix，随后进行 fresh live gate | [唯一收口方案](runtime-v2-validation-progress-closure-plan.md) |
-| ARCH-1 | 22 组件 framework boundary / lifecycle 验证 | Base Biz / Module-root EventHub 拓扑及本地验证已收口；按 22 组件合同矩阵逐项保持独立回归，待有重启后的外部目标与三类 fixture manifest 后执行 deployed SM-4 matrix | [主方案](go-multi-module-22-component-boundary-remediation.md) / [组件矩阵](component-contract-and-regression-closure-matrix.md) |
+| RUNTIME-VPC | Runtime V2 live 合同正向收敛 | R4 已将 core 合同归一到 V2 四状态机，LLM 视为不可靠 protocol client，严格合同不放宽。C4～C6、P0～P5 的证明均为回归基线；当前唯一活动卡是 Q7/P6 隔离 scripted/live。不得以 fallback、预算调整或 live 热修跳卡。 | [唯一收口方案](runtime-v2-validation-progress-closure-plan.md) |
+| ARCH-1 | 22 组件 framework boundary / lifecycle 验证 | Base Biz / Module-root EventHub 拓扑及本地验证已收口；按 22 组件合同矩阵逐项保持独立回归，待有重启后的外部目标与三类 fixture manifest 后执行 deployed SM-4 matrix | [组件矩阵](component-contract-and-regression-closure-matrix.md) |
 | OPS-1 | 生产目录 V1 retirement 正式 apply | 代码/live 已 complete；等待 clean build + 真实生产目录维护窗口执行 `runtime-v1-retirement --apply` | [deployed-workspace-progress-blocker-component-closure-plan.md](../../90-archive/completed/deployed-workspace-progress-blocker-component-closure-plan.md) |
 | OPT-1 | file-patch deployed live（可选） | 代码迁移已完成；可选补一次 `patch apply + validation + DoD closeout` 的 deployed live | [file-patch-side-effect-owner-migration-plan.md](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
 
@@ -36,47 +34,16 @@ Last Updated: 2026-07-24
 
 统一清单：[current-unclosed-matrix.md](../../01-overview/current-unclosed-matrix.md)、[unfinished-todo-index.md](../../01-overview/unfinished-todo-index.md)。
 
-## 2026-07-16–18 Docs Cleanup Ingest
+## Active 文档清理规则
 
-本轮从 `active/` 与验证过程目录迁出 / 移除：
-
-### → `90-archive/completed/`
-
-- `runtime-v2-positive-convergence-closure-plan.md`（历史 RVC-01～18 completion record；其 deployed 结论已由当前 remediation 复核作废）
-- `runtime-v2-production-admissibility-closure-2026-07-18.md`（RPA-1 当时切片完成；首次 inventory/selector/feasibility 与 bounded/positive acceptance 证据保留，durable-effect freshness 已由 RPF 重新打开）
-- `ai-proxy-primary-llm-provider-cutover-design-2026-07-15.md`（code-closed + live 通过）
-- `operation-map-json-contract-audit-2026-07-14.md`
-- `module-block-initiator-inventory-audit-2026-07-09.md`
-- `runtime-v2-typed-event-contract-closure-summary-2026-07-14.md`
-- `auto-governance-ticket-approval-plan.md`（AG 全 verified）
-- `software-dev-dod-repair-closure-plan.md`（SDR 全 completed）
-- `software-requirement-development-orchestration-plan.md`（SRD 全 verified/implemented）
-- `next-mvp-acceptance.md`（N1–N4 completed）
-- `unified-tui-console-migration-plan.md`（仅勿回退约束）
-- `run-closure-quality-improvement-plan.md`（过程日记）
-- `authority-live-verification-e2e-closure-design.md`（V1-era，P0–P2 已 code-closed）
-- `module-block-contract-closure-validation-plan.md`（收口方法论）
-- `deployed-workspace-progress-blocker-component-closure-plan.md`（长日记；residual 仅 OPS-1）
-- `file-patch-side-effect-owner-migration-plan.md`（长日记；residual 仅 OPT-1）
-- `llm-context-budget-todo.md`（基础已收口；高级项进 candidates）
-- `docs-domain-module-flow-reorganization-plan.md`（目录重组历史计划）
-- `tui-data-stability-command-optimization-plan.md`（TUI 过程收口）
-
-### → `90-archive/records/`
-
-- `ai-proxy-primary-llm-provider-cutover-live-verification-2026-07-15.md`
-- `tui-workspace-runtime-refresh-history-closure-verification-2026-07-15.md`
-- `authority-live-e2e-closure-verification.md`
-- `tui-display-closure-tracking.md`
-
-### 从仓库移除
-
-- `docs/60-verification/artifacts/**`（live 运行产物；结论保留在 records markdown；git 历史可找回）
-
-## Rules
-
-1. 新增 active 项必须对应真实未完成工作；已归档 plan 只有在代码/证据复核给出明确反证并同步作废旧 completion record 时才允许重新打开。
-2. 实现约束以 `00-core` + 模块 readme + `workorchruntimecontract` 为准。
-3. 某项 code-closed 且无运维/产品尾巴时，应 `git mv` 至 `90-archive/completed/` 并更新本 overview。
-4. active **不**存放 100KB+ 过程日记；过程细节只在 archive 检索。
-5. 清理失效内容：V1 主链术语、重复 audit、假活跃 Status 不得继续占用 active。
+1. Runtime V2 正向收敛只由 `RUNTIME-VPC` 主方案定义。旧正向收敛、freshness、candidate-admission
+   completion record 仅是回归基线；与新 fresh aggregate 反证冲突时，不得再充当 active 约束。
+2. 新增 active 项必须对应真实未完成工作；已归档 plan 只有在代码/证据复核给出明确反证并同步作废
+   旧 completion record 时才允许重新打开。
+3. 实现约束以 `00-core` + 模块 readme + `workorchruntimecontract` 为准。
+4. 某项 code-closed 且无运维/产品尾巴时，应 `git mv` 至 `90-archive/completed/` 并更新本 overview。
+5. active 不存放过程日记、历史文件清单或 live 原始产物；过程细节只在 archive 检索。
+6. 清理失效内容：V1 主链术语、重复 audit、假活跃 Status 不得继续占用 active。
+7. 2026-07-25 复核结论：当前 `active/` 仅保留 RUNTIME-VPC 主方案、ARCH-1 组件矩阵与本索引；旧的
+   22 组件整改过程已归档。以后若出现第二份 Runtime V2 实施顺序、状态迁移或 live
+   修复计划，必须先删除冲突文本或迁入 archive，只能链接 RUNTIME-VPC 的工作卡。

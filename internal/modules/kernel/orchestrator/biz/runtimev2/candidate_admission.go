@@ -1,6 +1,7 @@
 package runtimev2
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -18,16 +19,18 @@ const (
 )
 
 const (
-	candidateAdmissionCodeInvalid                     = "candidate_admission_invalid"
+	candidateAdmissionCodeInvalid                     = "candidate_contract_invalid"
 	candidateAdmissionCodeReplaysRejectedShape        = "candidate_replays_rejected_shape"
 	candidateAdmissionCodePartiallyReplaysRejected    = "candidate_partially_replays_rejected_shape"
+	candidateAdmissionCodeReplaysRejectedCandidate    = "candidate_replays_rejected_candidate_shape"
 	candidateAdmissionCodeReplaysNoProgressShape      = "candidate_replays_no_progress_shape"
 	candidateAdmissionCodeActionEvidenceMismatch      = "candidate_action_evidence_mismatch"
 	candidateAdmissionCodeTargetOutsideGrounding      = "candidate_target_outside_grounding"
 	candidateAdmissionCodeCreationScopeMissingTarget  = "candidate_creation_scope_missing_file_target"
-	candidateAdmissionSignatureInvalid                = "candidate-admission-invalid"
+	candidateAdmissionSignatureInvalid                = "candidate-contract-invalid"
 	candidateAdmissionSignatureReplaysRejectedShape   = "candidate-replays-rejected-shape"
 	candidateAdmissionSignaturePartialReplay          = "candidate-partially-replays-rejected-shape"
+	candidateAdmissionSignatureRejectedCandidate      = "candidate-replays-rejected-candidate-shape"
 	candidateAdmissionSignatureNoProgressReplay       = "candidate-replays-no-progress-shape"
 	candidateAdmissionSignatureActionEvidenceMismatch = "candidate-action-evidence-mismatch"
 	candidateAdmissionSignatureTargetOutsideGrounding = "candidate-target-outside-grounding"
@@ -59,15 +62,34 @@ func rejectedCandidateAdmission(code, signature, reason string) CandidateAdmissi
 	return CandidateAdmissionResult{Disposition: CandidateAdmissionRejectedContract, Failure: &failure}
 }
 
-// EvaluateCandidateAdmission is the sole owner-local admission policy for a
-// candidate before its proposal or seal transition. It reads persisted runtime
-// lineage but does not mutate the aggregate, choose a new RuntimeAction, call
-// EventHub, or invoke the reducer.
-func EvaluateCandidateAdmission(aggregate RuntimeAggregate, candidate workorchruntimecontract.RuntimeCandidate) CandidateAdmissionResult {
+func rejectedCandidateAdmissionDiagnostic(code, signature string, err error) CandidateAdmissionResult {
+	result := rejectedCandidateAdmission(code, signature, err.Error())
+	var diagnostic *workorchruntimecontract.RuntimeCandidateContractDiagnostic
+	if errors.As(err, &diagnostic) {
+		result.Failure.Diagnostic = workorchruntimecontract.RuntimeCandidateFailureDiagnosticFromContractDiagnostic(diagnostic)
+	}
+	return result
+}
+
+// EvaluateCandidateAdmissionWithManifest is the manifest-bound SM-3
+// admission policy. The caller supplies the exact manifest carried by the
+// request session; this function only verifies it against the current sealed
+// authority and evaluates the decoded candidate. It does not mutate the
+// aggregate, choose a RuntimeAction, call EventHub, or invoke the reducer.
+func EvaluateCandidateAdmissionWithManifest(aggregate RuntimeAggregate, manifest workorchruntimecontract.RuntimeCandidateContractManifest, candidate workorchruntimecontract.RuntimeCandidate) CandidateAdmissionResult {
+	if err := workorchruntimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, currentFocusTargetSelection(aggregate.Facts)); err != nil {
+		return rejectedCandidateAdmission(candidateAdmissionCodeInvalid, candidateAdmissionInvalidSignature(candidate), fmt.Sprintf("runtime candidate manifest contract: %v", err))
+	}
+	if err := workorchruntimecontract.ValidateRuntimeCandidateAgainstManifest(manifest, candidate); err != nil {
+		return rejectedCandidateAdmissionDiagnostic(candidateAdmissionCodeInvalid, candidateAdmissionInvalidSignature(candidate), err)
+	}
 	if err := candidate.ValidateWithActivation(aggregate.Decision, aggregate.Facts.Activation); err != nil {
 		return rejectedCandidateAdmission(candidateAdmissionCodeInvalid, candidateAdmissionInvalidSignature(candidate), err.Error())
 	}
 	if result := rejectCandidateReplay(aggregate, candidate); !result.Accepted() {
+		return result
+	}
+	if result := rejectCandidateAttemptSemanticReplay(aggregate, candidate); !result.Accepted() {
 		return result
 	}
 	if result := rejectCandidateNoProgressReplay(aggregate, candidate); !result.Accepted() {
@@ -93,7 +115,7 @@ func rejectCandidateOutsideGroundedTargets(facts workorchruntimecontract.Runtime
 		return acceptedCandidateAdmission()
 	}
 	if hasOwnerGroundedCreationScope(facts) {
-		selection := facts.Resources.TargetSelection.Normalized()
+		selection := currentFocusTargetSelection(facts).Normalized()
 		durableFileEffect := false
 		for _, operation := range candidateRuntimeOperations(candidate) {
 			descriptor, known := workorchruntimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
@@ -200,10 +222,10 @@ func GroundedRepairTargets(facts workorchruntimecontract.RuntimeFacts) []string 
 	if facts.Failure != nil && len(facts.Failure.TargetRefs) > 0 {
 		return append([]string(nil), facts.Failure.TargetRefs...)
 	}
-	if selection := facts.Resources.TargetSelection; selection != nil && targetSelectionHasConcreteTarget(*selection) {
+	if selection := currentFocusTargetSelection(facts); selection != nil && targetSelectionHasConcreteTarget(*selection) {
 		return append([]string(nil), selection.TargetRefs...)
 	}
-	if selection := facts.Resources.TargetSelection; hasOwnerGroundedCreationScope(facts) && selection != nil {
+	if selection := currentFocusTargetSelection(facts); hasOwnerGroundedCreationScope(facts) && selection != nil {
 		return []string{selection.ProspectiveTargetRef}
 	}
 	if facts.RepairDirective != nil && len(facts.RepairDirective.TargetRefs) > 0 {
@@ -344,6 +366,34 @@ func rejectCandidateReplay(aggregate RuntimeAggregate, candidate workorchruntime
 		candidateAdmissionSignaturePartialReplay,
 		fmt.Sprintf("runtime candidate includes %d operation(s) that replay active rejected shape(s); remove or rewrite those operations", replayCount),
 	)
+}
+
+// rejectCandidateAttemptSemanticReplay is the correction-specific replay fence.
+// Rejected owner evidence is represented by operation shapes above; this fence
+// closes the gap where an otherwise complete, structurally valid candidate was
+// rejected before any owner receipt existed. The first failed proposal is the
+// only persisted comparison source, and the pure contract hash deliberately
+// ignores operation IDs and JSON order while retaining variant, target, effect,
+// coverage, dependency graph and execution parameters.
+func rejectCandidateAttemptSemanticReplay(aggregate RuntimeAggregate, candidate workorchruntimecontract.RuntimeCandidate) CandidateAdmissionResult {
+	transaction := aggregate.Decision.AuthorityTransaction()
+	contractID := workorchruntimecontract.StableAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction)
+	wanted := workorchruntimecontract.StableRuntimeCandidateSemanticShape(candidate)
+	for _, attempt := range aggregate.CandidateAttempts {
+		if attempt.Attempt != 0 || attempt.State != workorchruntimecontract.RuntimeCandidateAttemptStateFailed || attempt.Proposal == nil ||
+			workorchruntimecontract.CandidateAttemptAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, attempt) != contractID {
+			continue
+		}
+		if workorchruntimecontract.StableRuntimeCandidateSemanticShape(*attempt.Proposal) != wanted {
+			continue
+		}
+		return rejectedCandidateAdmission(
+			candidateAdmissionCodeReplaysRejectedCandidate,
+			candidateAdmissionSignatureRejectedCandidate,
+			"runtime candidate replays the prior rejected complete candidate shape; change kind, targets, coverage, dependencies, or structural parameters before retry",
+		)
+	}
+	return acceptedCandidateAdmission()
 }
 
 func rejectCandidateMissingValidationGap(facts workorchruntimecontract.RuntimeFacts, decision workorchruntimecontract.RuntimeDecision, candidate workorchruntimecontract.RuntimeCandidate) CandidateAdmissionResult {

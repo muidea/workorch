@@ -26,3 +26,8 @@ func llmContextBudgetPromptCaptured(budget workorcheventpayload.Payload) bool {
 	value, _ := budget.Bool("promptCaptured")
 	return value
 }
+
+func llmContextBudgetProviderSubmitted(budget workorcheventpayload.Payload) bool {
+	value, _ := budget.Bool("providerSubmitted")
+	return value
+}

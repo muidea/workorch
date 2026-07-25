@@ -602,7 +602,13 @@ func classifyRuntimeV2DriveFailure(err error) runtimecontract.FailureFact {
 		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeInvariantDefect, Code: "runtime_v2_drive_failed", Signature: "runtime-v2-drive-failed", Message: "unknown drive failure"}
 	}
 	msg := err.Error()
+	var unsupportedCapability *orchestratorevents.RuntimeCapabilityUnsupportedError
 	switch {
+	case errors.As(err, &unsupportedCapability):
+		return runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_capability_unsupported",
+			Signature: "runtime-capability-unsupported", Message: msg,
+		}
 	case errors.Is(err, common.ErrConflict):
 		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassCASConflict, Code: "cas_conflict", Signature: "cas-conflict", Message: msg}
 	case strings.Contains(msg, "outcome_unknown"):

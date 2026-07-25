@@ -2,6 +2,7 @@ package runtimev2
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -159,7 +160,9 @@ func TestReduceRuntimeStateProgression(t *testing.T) {
 			f.Evidence.Accepted = []runtimecontract.EvidenceFact{{ID: "e-validation", Kind: runtimecontract.EvidenceKindValidation}}
 		}, state: runtimecontract.ConvergenceStateComplete, action: runtimecontract.RuntimeActionComplete},
 		{name: "governance", mutate: func(f *runtimecontract.RuntimeFacts) {
-			f.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassGovernanceDependency}
+			f.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassGovernanceDependency, GovernanceDependency: &runtimecontract.ExternalDependency{
+				Kind: "external-approval", SubjectRef: "subject-1", Reason: "external approval required",
+			}}
 			f.Capabilities.GovernanceKinds = []string{"decision/resolution"}
 		}, state: runtimecontract.ConvergenceStateNeedGovernance, action: runtimecontract.RuntimeActionRequestGovernance},
 		{name: "runtime defect fails", mutate: func(f *runtimecontract.RuntimeFacts) {
@@ -191,7 +194,7 @@ func TestReduceRuntimeStateMissingConcreteCapabilityUsesFormalDecision(t *testin
 		code       string
 	}{
 		{name: "bounded terminal without governance", action: runtimecontract.RuntimeActionFail, code: "capability_unavailable"},
-		{name: "governance when capability exists", governance: true, action: runtimecontract.RuntimeActionRequestGovernance},
+		{name: "bounded terminal with unused governance capability", governance: true, action: runtimecontract.RuntimeActionFail, code: "capability_unavailable"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -231,6 +234,7 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 		}
 		selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 		facts.Resources.TargetSelection = &selection
+		bindCurrentFocusTargetSelection(&facts)
 		return facts
 	}
 
@@ -298,6 +302,7 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 			TargetRefs: []string{"initial-deliverable.txt"}, CandidateTargetRefs: []string{"initial-deliverable.txt"}, CandidateCount: 1, ObservedRevision: "workspace-created-v1",
 		}
 		facts.Resources.TargetSelection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(*facts.Resources.TargetSelection)
+		bindCurrentFocusTargetSelection(&facts)
 		decision, err = ReduceRuntimeState(facts, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -339,10 +344,41 @@ func TestAdvanceSatisfiedCoverageFocusDropsPriorFocusTargetFacts(t *testing.T) {
 	facts.Resources.TargetSelection = &selection
 	facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{TargetRef: "go.mod", ContentHash: "hash", ContentState: runtimecontract.SnapshotContentStateComplete}}
 	facts.Resources.FailureTarget = &runtimecontract.FailureTarget{Signature: "old-focus", TargetRefs: []string{"go.mod"}}
+	prerequisite := runtimecontract.RuntimePrerequisite{
+		ID: selection.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindTargetSelection,
+		Scope: runtimecontract.RuntimePrerequisiteScopeFocus, FocusID: facts.Focus.ID,
+		OwnerModuleID: runtimecontract.RuntimeModuleFile,
+	}
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID,
+		ContentHash: selection.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", Revision: "tree-module",
+		}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
 
 	advanced := advanceSatisfiedCoverageFocus(facts)
 	if advanced.Focus.ID != "bootstrap-source" || advanced.Resources.TargetSelection != nil || len(advanced.Resources.TargetSnapshots) != 0 || advanced.Resources.FailureTarget != nil {
 		t.Fatalf("advanced focus retained predecessor target facts: %+v", advanced)
+	}
+	if len(advanced.Prerequisites.Satisfied) != 0 || len(advanced.Resources.PrerequisiteObservations) != 0 ||
+		len(advanced.Prerequisites.Retired) != 1 || advanced.Prerequisites.Retired[0].ID != prerequisite.ID ||
+		len(advanced.Resources.RetiredPrerequisiteObservations) != 1 || advanced.Resources.RetiredPrerequisiteObservations[0].ObservationID != observation.ObservationID {
+		t.Fatalf("advanced focus did not retire predecessor target selection authority: %+v", advanced)
+	}
+	if _, err := CommitPrerequisiteResult(advanced, PrerequisiteResult{PrerequisiteID: prerequisite.ID, TargetSelection: &selection, Observation: &observation}); err == nil {
+		t.Fatal("delayed predecessor target-selection result was accepted after focus advance")
+	}
+	refreshed, prerequisiteIDs, observationIDs, _, err := invalidatePrerequisiteObservationsForChanges(advanced, []runtimecontract.RuntimeResourceChange{{
+		Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		SubjectRef: "workspace_deliverable", AfterRevision: "tree-source",
+	}})
+	if err != nil || len(prerequisiteIDs) != 0 || len(observationIDs) != 0 || len(refreshed.Prerequisites.Pending) != 0 {
+		t.Fatalf("workspace change reactivated retired target selection: facts=%+v prerequisiteIDs=%v observationIDs=%v err=%v", refreshed, prerequisiteIDs, observationIDs, err)
 	}
 	updated, decision, err := ReduceRuntimeStateWithDirective(advanced, nil)
 	if err != nil || decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(updated.Prerequisites.Pending) == 0 {
@@ -350,12 +386,45 @@ func TestAdvanceSatisfiedCoverageFocusDropsPriorFocusTargetFacts(t *testing.T) {
 	}
 	found := false
 	for _, prerequisite := range updated.Prerequisites.Pending {
-		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSelection && prerequisite.ProspectiveTargetRef == "internal/lsp/manager.go" {
+		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSelection && prerequisite.ProspectiveTargetRef == "internal/lsp/manager.go" &&
+			prerequisite.Scope == runtimecontract.RuntimePrerequisiteScopeFocus && prerequisite.FocusID == "bootstrap-source" {
 			found = true
 		}
 	}
 	if !found {
 		t.Fatalf("next bootstrap focus selection prerequisite = %+v", updated.Prerequisites.Pending)
+	}
+}
+
+func TestRuntimeFactsRejectsHistoricalFocusScopedPrerequisiteAsCurrentAuthority(t *testing.T) {
+	facts := validationFacts()
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "selection-history", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		TargetRole: "deliverable", SelectorRef: "file/profile_declared_candidates",
+		Disposition: runtimecontract.RuntimeTargetSelectionSelected, TargetRefs: []string{"go.mod"},
+		CandidateTargetRefs: []string{"go.mod"}, CandidateCount: 1, ObservedRevision: "tree-history",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	prerequisite := runtimecontract.RuntimePrerequisite{
+		ID: selection.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindTargetSelection,
+		Scope: runtimecontract.RuntimePrerequisiteScopeFocus, FocusID: "focus-history",
+		OwnerModuleID: runtimecontract.RuntimeModuleFile,
+	}
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID,
+		ContentHash: selection.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", Revision: "tree-history",
+		}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	facts.Resources.TargetSelection = &selection
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
+
+	if _, err := ReduceRuntimeState(facts, nil); err == nil || !strings.Contains(err.Error(), "current-focus prerequisite") {
+		t.Fatalf("historical focus-scoped prerequisite was accepted as current authority: %v", err)
 	}
 }
 
@@ -373,6 +442,7 @@ func TestReduceRuntimeStateUnsupportedTargetSelectorFailsWithoutProviderAuthorit
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	facts.Resources.TargetSelection = &selection
 	facts.Prerequisites = runtimecontract.PrerequisiteState{}
+	bindCurrentFocusTargetSelection(&facts)
 	decision, err := ReduceRuntimeState(facts, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -961,6 +1031,9 @@ func TestReduceRuntimeStateGovernanceRequiredOpensGovernance(t *testing.T) {
 		Class: runtimecontract.FailureClassGovernanceRequired, Code: "approval_required",
 		Signature: "governance-approval-web", Message: "web operation requires approval before side effects",
 		TargetRefs: []string{"https://example.com"},
+		GovernanceDependency: &runtimecontract.ExternalDependency{
+			Kind: string(runtimecontract.GovernanceApproval), SubjectRef: "https://example.com", Reason: "web operation requires approval before side effects",
+		},
 	}
 	facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindApprovalRequest}
 	decision, err := ReduceRuntimeState(facts, nil)
@@ -972,12 +1045,30 @@ func TestReduceRuntimeStateGovernanceRequiredOpensGovernance(t *testing.T) {
 	}
 }
 
+func TestReduceRuntimeStateGenericGovernanceFailureDoesNotOpenTicket(t *testing.T) {
+	facts := controllerFacts()
+	facts.Failure = &runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassGovernanceRequired, Code: "approval_required",
+		Signature: "unbound-governance", Message: "approval required",
+		TargetRefs: []string{".env"},
+	}
+	facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindApprovalRequest}
+	decision, err := ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "governance_dependency_missing" {
+		t.Fatalf("generic governance decision = %+v, want dependency-missing terminal", decision)
+	}
+}
+
 func TestReduceRuntimeStateProviderAuthenticationOpensConfigurationGovernance(t *testing.T) {
 	facts := controllerFacts()
 	facts.Failure = &runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassProviderAuthentication, Code: "provider_authentication",
 		Message: "provider rejected the configured credential",
 	}
+	facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-1"}}
 	facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindDecisionRequest}
 	decision, err := ReduceRuntimeState(facts, nil)
 	if err != nil {

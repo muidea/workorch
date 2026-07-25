@@ -11,7 +11,7 @@ func llmUsageTraceStreaming(payload workorcheventpayload.Payload) bool {
 
 func llmUsageTraceContextBudget(payload workorcheventpayload.Payload) workorcheventpayload.Payload {
 	value, _ := payload.Object(events.PayloadKeyContextBudget)
-	return value
+	return sanitizeLLMContextBudgetAudit(value)
 }
 
 func llmUsageTraceCacheUsage(payload workorcheventpayload.Payload) workorcheventpayload.Payload {

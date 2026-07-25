@@ -2,7 +2,7 @@
 
 Status: active
 
-Last Updated: 2026-07-21
+Last Updated: 2026-07-25
 
 ## Purpose
 
@@ -31,7 +31,7 @@ Last Updated: 2026-07-21
   [runtime-stage-contract.md](00-core/runtime-stage-contract.md)
 - Runtime V2 candidate admission / attempt transaction 完成记录：
   [runtime-v2-candidate-admission-transaction-closure.md](90-archive/completed/runtime-v2-candidate-admission-transaction-closure.md)
-- Runtime V2 validation/effective-progress 当前收口：
+- Runtime V2 live 合同正向收敛当前收口：
   [runtime-v2-validation-progress-closure-plan.md](70-roadmap/active/runtime-v2-validation-progress-closure-plan.md)
 - 当前仓库事实 / 未关项：
   [current-state.md](01-overview/current-state.md),
@@ -98,13 +98,17 @@ Last Updated: 2026-07-21
 
 若旧文档与核心合约冲突，以 `00-core/runtime-stage-contract.md` 为准。若设计文档与模块 readme/代码冲突，以代码与模块 readme 为准并回写设计文档。
 
-## Current Documentation Status（2026-07-16）
+## Current Documentation Status（2026-07-25）
 
 - **生产代码路径 = Runtime V2 only**（Start/Resume → `DriveRuntimeV2`）。
 - 权威层已按 V2 刷新：`00-core` 双层映射、`01-overview` 事实入口、`20-runtime-flow` / `30-module-architecture` 主链。
 - 2026-07-14：约 146 份 completed / V1-absorbed plan 已迁 `90-archive/completed/`。
 - **2026-07-16 文档清理**：`active/` 假活跃产品/审计/收口日记全部归档；dated live verification 迁 `records/`；`60-verification/artifacts/**` 出库。
-- **RPF-1～5 prerequisite freshness 已完成**：归档执行规格保留组件职责、typed EventHub 交接、逐组件直接回归、交接门与当时的 fresh deployed evidence；2026-07-21 新 deployed 反证已将 validation/effective-progress 作为 RUNTIME-VPC 重新打开。active 当前包含 RUNTIME-VPC、ARCH-1、OPS-1 与可选 OPT-1。
+- **RUNTIME-VPC 是唯一 active Runtime V2 收口方案**：历史 focus authority、strict manifest/admission、
+  correction renderer、C4 request-session matrix、C5 complete admission/restart、C6 semantic replay/exhaustion 与 P0～P3 均只作回归基线。当前唯一未关闭队列是
+  P4 authority restart → P5 delivery restart → P6 isolated fresh-live；每卡的唯一 owner、I/O、预算、
+  负例和退出条件都在 RUNTIME-VPC 中定义。active 当前包含
+  RUNTIME-VPC、ARCH-1、OPS-1 与可选 OPT-1。
 - **已废止作为生产主链叙述**：StagePacket、NextAction、graph dispatch checkpoint、ExecutionContextPatch、自动 replan successor。
 - 根目录正式导航：本文。历史目录重组计划见 `90-archive/completed/docs-domain-module-flow-reorganization-plan.md`。
 

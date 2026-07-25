@@ -68,49 +68,87 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 		}
 		return llmmodels.RuntimeCandidateResponse{Transaction: request.Transaction, OutputFragment: &fragment, Audit: generation.Audit, Usage: generation.Usage, RequestID: generation.RequestID, Status: firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted)}, nil
 	}
-	candidate, err := DecodeCandidatePayload(request.Decision.Action, generation.Payload)
-	if err != nil {
-		if candidatePayloadReachedOutputLimit(generation, err) {
-			fragment := runtimecontract.RuntimeCandidateOutputFragment{Content: append([]byte(nil), generation.Payload...), ReachedProviderLimit: true}
-			return llmmodels.RuntimeCandidateResponse{Transaction: request.Transaction, OutputFragment: &fragment, Audit: generation.Audit, Usage: generation.Usage, RequestID: generation.RequestID, Status: firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted)}, nil
-		}
-		code, signature, reason := candidateSchemaFailureIdentity(generation, err)
+	manifest := request.CandidateManifest
+	if manifestErr := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, request.Decision, request.CandidateContext.Resources.TargetSelection); manifestErr != nil {
 		return llmmodels.RuntimeCandidateResponse{
 			Transaction: request.Transaction,
 			Audit:       generation.Audit,
 			Usage:       generation.Usage,
 			RequestID:   generation.RequestID,
 			Status:      firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted),
-		}, candidateRequestErrorWithIdentity(CandidateFailureClassSchema, code, signature, errors.New(reason), generation.Audit, generation.RequestID, generation.Status)
+		}, candidateRequestError(CandidateFailureClassInternal, fmt.Errorf("runtime candidate contract manifest: %w", manifestErr), generation.Audit, generation.RequestID, generation.Status)
+	}
+	candidate, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, generation.Payload)
+	if err != nil {
+		switch runtimecontract.RuntimeCandidateDocumentDispositionForError(err) {
+		case runtimecontract.RuntimeCandidateDocumentIncomplete:
+			// EOF is structural evidence that the first document is incomplete.
+			// Provider output-limit telemetry is retained only as audit metadata;
+			// a mid-token/network-cut body must follow the same continuation path.
+			fragment := runtimecontract.RuntimeCandidateOutputFragment{Content: append([]byte(nil), generation.Payload...), ReachedProviderLimit: candidatePayloadReachedOutputLimit(generation, err)}
+			return llmmodels.RuntimeCandidateResponse{Transaction: request.Transaction, OutputFragment: &fragment, Audit: generation.Audit, Usage: generation.Usage, RequestID: generation.RequestID, Status: firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted)}, nil
+		case runtimecontract.RuntimeCandidateDocumentEmpty:
+			return llmmodels.RuntimeCandidateResponse{
+				Transaction: request.Transaction,
+				Audit:       generation.Audit,
+				Usage:       generation.Usage,
+				RequestID:   generation.RequestID,
+				Status:      firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted),
+			}, candidateRequestErrorWithIdentity(CandidateFailureClassProvider, "provider_empty_response", "provider-empty-response", err, generation.Audit, generation.RequestID, generation.Status)
+		}
+		code, signature, reason := candidateSchemaFailureIdentity(generation, err)
+		var payloadDiagnostic *runtimecontract.RuntimeCandidatePayloadDiagnostic
+		errors.As(err, &payloadDiagnostic)
+		return llmmodels.RuntimeCandidateResponse{
+				Transaction: request.Transaction,
+				Audit:       generation.Audit,
+				Usage:       generation.Usage,
+				RequestID:   generation.RequestID,
+				Status:      firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted),
+			}, candidateRequestErrorWithDocument(
+				candidateRequestErrorWithDiagnosticIdentity(CandidateFailureClassSchema, code, signature, runtimecontract.RuntimeCandidateFailureDiagnosticFromPayloadDiagnostic(payloadDiagnostic), errors.New(reason), generation.Audit, generation.RequestID, generation.Status),
+				generation.Payload,
+			)
 	}
 	if err := candidate.ValidateWithActivation(request.Decision, request.CandidateContext.Activation); err != nil {
 		return llmmodels.RuntimeCandidateResponse{
-			Transaction: request.Transaction,
-			Audit:       generation.Audit,
-			Usage:       generation.Usage,
-			RequestID:   generation.RequestID,
-			Status:      firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted),
-		}, candidateRequestError(CandidateFailureClassContract, err, generation.Audit, generation.RequestID, generation.Status)
+				Transaction: request.Transaction,
+				Audit:       generation.Audit,
+				Usage:       generation.Usage,
+				RequestID:   generation.RequestID,
+				Status:      firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted),
+			}, candidateRequestErrorWithDocument(
+				candidateRequestError(CandidateFailureClassContract, err, generation.Audit, generation.RequestID, generation.Status),
+				generation.Payload,
+			)
 	}
 	return llmmodels.RuntimeCandidateResponse{
-		Transaction: request.Transaction,
-		Candidate:   candidate,
-		Audit:       generation.Audit,
-		Usage:       generation.Usage,
-		RequestID:   generation.RequestID,
-		Status:      firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted),
+		Transaction:     request.Transaction,
+		Candidate:       candidate,
+		DocumentContent: append([]byte(nil), generation.Payload...),
+		Audit:           generation.Audit,
+		Usage:           generation.Usage,
+		RequestID:       generation.RequestID,
+		Status:          firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted),
 	}, nil
 }
 
 type CandidateRequestError struct {
-	Class     CandidateFailureClass
-	Code      string
-	Signature string
-	Err       error
-	Audit     *llmmodels.ProviderRequestAudit
-	RequestID string
-	Status    string
-	Stale     *runtimecontract.RuntimePrerequisiteStale
+	Class      CandidateFailureClass
+	Code       string
+	Signature  string
+	Diagnostic *runtimecontract.RuntimeCandidateFailureDiagnostic
+	Err        error
+	Audit      *llmmodels.ProviderRequestAudit
+	RequestID  string
+	Status     string
+	Stale      *runtimecontract.RuntimePrerequisiteStale
+	// DocumentContent is a synchronous, in-process handoff for a complete
+	// provider document that failed schema/contract validation. It must never
+	// be included in audit, JSON serialization, or error text. The LLM owner
+	// may forward it only to the Orchestrator request-content store, which
+	// persists it before C5 allocates a candidate attempt.
+	DocumentContent []byte
 }
 
 func (e *CandidateRequestError) Error() string {
@@ -138,6 +176,7 @@ func CandidateFailureFromError(err error) runtimecontract.RuntimeCandidateFailur
 		failure.Class = typed.Class
 		failure.Code = typed.Code
 		failure.Signature = typed.Signature
+		failure.Diagnostic = typed.Diagnostic.Clone()
 	}
 	return failure
 }
@@ -162,15 +201,48 @@ func CandidatePrerequisiteStaleFromError(err error) *runtimecontract.RuntimePrer
 	return &stale
 }
 
+// CandidateDocumentContentFromError returns a defensive copy of the complete
+// provider document attached to a schema/contract rejection. Provider,
+// transport, authentication, configuration, stale and internal failures never
+// expose a document through this boundary.
+func CandidateDocumentContentFromError(err error) []byte {
+	var typed *CandidateRequestError
+	if !errors.As(err, &typed) || typed == nil || len(typed.DocumentContent) == 0 {
+		return nil
+	}
+	switch typed.Class {
+	case CandidateFailureClassSchema, CandidateFailureClassContract:
+		return append([]byte(nil), typed.DocumentContent...)
+	default:
+		return nil
+	}
+}
+
 func candidateRequestError(class CandidateFailureClass, err error, audit *llmmodels.ProviderRequestAudit, requestID, status string) error {
 	return &CandidateRequestError{Class: class, Err: err, Audit: audit, RequestID: requestID, Status: status}
 }
 
 func candidateRequestErrorWithIdentity(class CandidateFailureClass, code, signature string, err error, audit *llmmodels.ProviderRequestAudit, requestID, status string) error {
+	return candidateRequestErrorWithDiagnosticIdentity(class, code, signature, nil, err, audit, requestID, status)
+}
+
+func candidateRequestErrorWithDiagnosticIdentity(class CandidateFailureClass, code, signature string, diagnostic *runtimecontract.RuntimeCandidateFailureDiagnostic, err error, audit *llmmodels.ProviderRequestAudit, requestID, status string) error {
 	return &CandidateRequestError{
-		Class: class, Code: strings.TrimSpace(code), Signature: strings.TrimSpace(signature),
+		Class: class, Code: strings.TrimSpace(code), Signature: strings.TrimSpace(signature), Diagnostic: diagnostic.Clone(),
 		Err: err, Audit: audit, RequestID: requestID, Status: status,
 	}
+}
+
+func candidateRequestErrorWithDocument(err error, content []byte) error {
+	var typed *CandidateRequestError
+	if !errors.As(err, &typed) || typed == nil || len(content) == 0 {
+		return err
+	}
+	switch typed.Class {
+	case CandidateFailureClassSchema, CandidateFailureClassContract:
+		typed.DocumentContent = append([]byte(nil), content...)
+	}
+	return typed
 }
 
 func candidateSchemaFailureIdentity(generation llmmodels.RuntimeCandidateGenerationResult, decodeErr error) (string, string, string) {
@@ -178,14 +250,11 @@ func candidateSchemaFailureIdentity(generation llmmodels.RuntimeCandidateGenerat
 	if decodeErr != nil {
 		reason = decodeErr.Error()
 	}
-	if candidatePayloadReachedOutputLimit(generation, decodeErr) {
-		return "candidate_response_truncated", "candidate-response-truncated", "provider response reached the sealed output token limit before candidate JSON completed: " + reason
-	}
 	return "candidate_schema_invalid", "candidate-schema-invalid", reason
 }
 
 func candidatePayloadReachedOutputLimit(generation llmmodels.RuntimeCandidateGenerationResult, decodeErr error) bool {
-	if decodeErr == nil || (!errors.Is(decodeErr, io.ErrUnexpectedEOF) && !strings.Contains(strings.ToLower(decodeErr.Error()), "unexpected eof")) ||
+	if decodeErr == nil || (!errors.Is(decodeErr, io.ErrUnexpectedEOF) && runtimecontract.RuntimeCandidateDocumentDispositionForError(decodeErr) != runtimecontract.RuntimeCandidateDocumentIncomplete) ||
 		generation.Usage == nil || generation.Audit == nil || generation.Audit.ContextBudget == nil {
 		return false
 	}
@@ -284,14 +353,6 @@ func RetrySameContract(request llmmodels.RuntimeCandidateRequest, failure runtim
 		return llmmodels.RuntimeCandidateRequest{}, fmt.Errorf("same-contract retry changed sealed authority")
 	}
 	return retry, nil
-}
-
-func DecodeCandidatePayload(action runtimecontract.RuntimeAction, payload []byte) (runtimecontract.RuntimeCandidate, error) {
-	// Candidate wire DTOs are a Runtime V2 contract.  The LLM boundary must not
-	// carry a second strict decoder: continuation recovery also decodes this
-	// document from the contract package, so two implementations can otherwise
-	// silently drift on an accepted JSON field.
-	return runtimecontract.DecodeRuntimeCandidatePayload(action, payload)
 }
 
 func validateCandidateRequest(request llmmodels.RuntimeCandidateRequest) error {

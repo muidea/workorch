@@ -51,7 +51,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	}
 
 	// --- 1) attempt 0: schema/contract failure ---
-	if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	failed0, err := controller.FailCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
@@ -66,7 +66,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	}
 
 	// --- 2) attempt 1: corrected sealed state-change ---
-	if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 1, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 1, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	sealedSC, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 1, runtimecontract.RuntimeCandidate{
@@ -107,7 +107,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	// If validation is next, produce managed validation evidence.
 	agg := afterSC.Aggregate
 	if agg.Decision.Action == runtimecontract.RuntimeActionProduceValidation {
-		if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "validation-prefix"); err != nil {
+		if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "validation-prefix"); err != nil {
 			t.Fatal(err)
 		}
 		sealedVal, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
@@ -147,7 +147,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	}
 
 	// --- 4) first assessment: partial + repairable_gap ---
-	if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "assessment-prefix-1"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "assessment-prefix-1"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
@@ -189,7 +189,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	// --- 5) same-focus repair state-change ---
 	agg = afterGap
 	if agg.Decision.Action == runtimecontract.RuntimeActionProduceStateChange {
-		if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "repair-sc-prefix"); err != nil {
+		if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "repair-sc-prefix"); err != nil {
 			t.Fatal(err)
 		}
 		sealedRepair, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
@@ -221,7 +221,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 
 	// --- 6) validation after repair if required ---
 	if agg.Decision.Action == runtimecontract.RuntimeActionProduceValidation {
-		if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "repair-val-prefix"); err != nil {
+		if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "repair-val-prefix"); err != nil {
 			t.Fatal(err)
 		}
 		sealedVal2, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
@@ -257,7 +257,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	}
 
 	// --- 7) second assessment: satisfied → complete ---
-	if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "assessment-prefix-2"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "assessment-prefix-2"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
@@ -319,7 +319,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 	}
 
 	// Seed accepted state-change so assessment is required.
-	if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "sc"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "sc"); err != nil {
 		t.Fatal(err)
 	}
 	sealed, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
@@ -347,7 +347,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 	for step := 0; step < 4 && agg.Decision.Action != runtimecontract.RuntimeActionProduceAssessment; step++ {
 		switch agg.Decision.Action {
 		case runtimecontract.RuntimeActionProduceValidation:
-			if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "val-"+string(rune('a'+step))); err != nil {
+			if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "val-"+string(rune('a'+step))); err != nil {
 				t.Fatal(err)
 			}
 			sv, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
@@ -382,7 +382,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 	}
 
 	// First repairable assessment opens a repair cycle.
-	if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "a1"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "a1"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
@@ -409,7 +409,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 
 	// Perform one repair and re-assess with same gap to exhaust budget.
 	if after1.Decision.Action == runtimecontract.RuntimeActionProduceStateChange {
-		if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "r1"); err != nil {
+		if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "r1"); err != nil {
 			t.Fatal(err)
 		}
 		sr, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
@@ -439,7 +439,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 	// Reach assessment again.
 	for step := 0; step < 4 && agg.Decision.Action != runtimecontract.RuntimeActionProduceAssessment && agg.Decision.Action != runtimecontract.RuntimeActionFail; step++ {
 		if agg.Decision.Action == runtimecontract.RuntimeActionProduceValidation {
-			if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "val2"); err != nil {
+			if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "val2"); err != nil {
 				t.Fatal(err)
 			}
 			sv, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
@@ -475,7 +475,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 	if agg.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
 		t.Fatalf("want assessment for exhaustion, got %s", agg.Decision.Action)
 	}
-	if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "a2"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "a2"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
@@ -523,7 +523,7 @@ func TestPositiveConvergenceFixture_PartialSlicePersistsAcrossControllerRestart(
 	if _, err := first.Initialize(ctx, facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := first.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "assessment-prefix"); err != nil {
+	if _, err := first.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "assessment-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := first.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
@@ -583,7 +583,7 @@ func TestPositiveConvergenceFixture_FocusAdvanceAfterSatisfiedAssessment(t *test
 	}
 
 	// Satisfy first focus via state-change + assessment.
-	if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "sc"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "sc"); err != nil {
 		t.Fatal(err)
 	}
 	sealed, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
@@ -611,7 +611,7 @@ func TestPositiveConvergenceFixture_FocusAdvanceAfterSatisfiedAssessment(t *test
 	for step := 0; step < 6 && agg.Decision.Action != runtimecontract.RuntimeActionProduceAssessment; step++ {
 		switch agg.Decision.Action {
 		case runtimecontract.RuntimeActionProduceValidation:
-			if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "val"); err != nil {
+			if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "val"); err != nil {
 				t.Fatal(err)
 			}
 			sv, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
@@ -647,7 +647,7 @@ func TestPositiveConvergenceFixture_FocusAdvanceAfterSatisfiedAssessment(t *test
 	if agg.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
 		t.Fatalf("want assessment, got %s", agg.Decision.Action)
 	}
-	if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "a1"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "a1"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{

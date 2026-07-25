@@ -8,6 +8,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+if [[ "${1:-}" == "--self-test" ]]; then
+  exec python3 "$ROOT_DIR/scripts/verify_runtime_v2_restart_contract.py" --self-test
+fi
+
 BASE_URL="${WORKORCH_BASE_URL:-http://127.0.0.1:8080}"
 MANIFEST="${WORKORCH_E2E_RESTART_FIXTURE_MANIFEST:-}"
 ARTIFACT_DIR="$(realpath -m "${WORKORCH_E2E_ARTIFACT_DIR:-${TMPDIR:-/tmp}/workorch-e2e/runtime-v2-restart-recovery-live/$(date -u +%Y%m%dT%H%M%SZ)}")"
@@ -39,17 +43,19 @@ import sys
 import time
 import urllib.request
 
+sys.path.insert(0, os.path.join(os.getcwd(), "scripts"))
+from verify_runtime_v2_restart_contract import (
+    fixture_final_errors,
+    fixture_manifest_errors,
+)
+
 base, artifact_dir, poll_s, timeout_s = sys.argv[1:5]
 poll = float(poll_s)
 timeout = float(timeout_s)
 manifest = json.load(open(os.path.join(artifact_dir, "fixture-manifest.json"), encoding="utf-8"))
-fixtures = manifest.get("fixtures") or []
-expected_classes = {"active_no_dispatch", "active_sealed_dispatch", "terminal_delivery_pending"}
-if {item.get("class") for item in fixtures} != expected_classes or len(fixtures) != 3:
-    raise SystemExit("fixture manifest must contain exactly active_no_dispatch, active_sealed_dispatch, terminal_delivery_pending")
-for item in fixtures:
-    if not isinstance(item.get("workspaceId"), str) or not item["workspaceId"].strip() or not isinstance(item.get("runId"), str) or not item["runId"].strip():
-        raise SystemExit(f"{item.get('class')!r} fixture requires non-empty workspaceId and runId")
+if manifest_errors := fixture_manifest_errors(manifest):
+    raise SystemExit("invalid restart fixture manifest: " + "; ".join(manifest_errors))
+fixtures = manifest["fixtures"]
 
 def request(path):
     req = urllib.request.Request(base.rstrip("/") + path, headers={"Accept": "application/json"})
@@ -79,18 +85,19 @@ def projection_errors(body):
         errors.append(f"projection revision source={source} projected={projected}")
     return errors
 
-def receipt_errors(item, root):
+def runtime_observability(item, root):
     run = root.get("run") or {}
     run_id = run.get("id")
     if not run_id:
-        return ["missing run id"]
+        raise RuntimeError("missing run id")
     try:
         body = request(f"/api/v1/workorch/workspaces/{item['workspaceId']}/runs/{run_id}/observability")
     except Exception as exc:
-        return [f"observability read failed: {exc}"]
+        raise RuntimeError(f"observability read failed: {exc}") from exc
     observed = body.get("observability") or {}
-    acceptance = observed.get("acceptance") or {}
-    operations = acceptance.get("operations") or []
+    return observed.get("acceptance") or {}
+
+def receipt_errors(operations):
     seen = set()
     errors = []
     for operation in operations:
@@ -98,8 +105,6 @@ def receipt_errors(item, root):
         if key[0] and key in seen:
             errors.append(f"duplicate owner receipt executionKey/fence={key[0]}/{key[1]}")
         seen.add(key)
-        if operation.get("executionState") == "outcome_unknown":
-            errors.append(f"operation {operation.get('operationId')} is outcome_unknown")
     return errors
 
 baseline = {}
@@ -125,26 +130,22 @@ while True:
             workspace = root.get("workspace") or {}
             state = (run.get("state") or "").lower()
             active_run = workspace.get("activeRunId") or workspace.get("activeRunID") or ""
+            acceptance = runtime_observability(item, root)
+            audit = acceptance.get("audit")
+            operations = acceptance.get("operations") or []
             current = {
                 "runState": state,
                 "activeRunId": active_run,
                 "projectionErrors": projection_errors(body),
-                "receiptErrors": receipt_errors(item, root),
+                "receiptErrors": receipt_errors(operations),
+                "transitionErrors": fixture_final_errors(item, state, active_run, audit, operations),
                 "snapshot": body,
             }
             last[cls] = current
-            if current["projectionErrors"] or current["receiptErrors"]:
-                errors.extend(f"{cls}: {error}" for error in current["projectionErrors"] + current["receiptErrors"])
+            if current["projectionErrors"] or current["receiptErrors"] or current["transitionErrors"]:
+                errors.extend(f"{cls}: {error}" for error in current["projectionErrors"] + current["receiptErrors"] + current["transitionErrors"])
                 all_converged = False
                 continue
-            governed_wait = state in ("blocked_on_decision", "blocked_on_approval")
-            terminal = state in ("completed", "failed", "cancelled", "superseded")
-            if not (governed_wait or terminal):
-                all_converged = False
-                continue
-            if terminal and active_run:
-                errors.append(f"{cls}: terminal run still owns workspace activeRunId={active_run}")
-                all_converged = False
         except Exception as exc:
             errors.append(f"{cls}: {exc}")
             all_converged = False

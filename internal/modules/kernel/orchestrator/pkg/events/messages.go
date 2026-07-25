@@ -114,6 +114,34 @@ type AcquireRuntimeCapabilitiesResult struct {
 	Observation    *runtimecontract.RuntimePrerequisiteObservation
 }
 
+// RuntimeCapabilityUnsupportedError is a typed prerequisite failure returned
+// by the addressed owner when a sealed owner/class/kind triple has no
+// responder. It is not a candidate rejection and must never be converted into
+// a generic governance ticket by a caller.
+type RuntimeCapabilityUnsupportedError struct {
+	ModuleID        string
+	CapabilityClass runtimecontract.RuntimeCapabilityClass
+	RequiredKinds   []string
+	Reason          string
+}
+
+func (e *RuntimeCapabilityUnsupportedError) Error() string {
+	if e == nil {
+		return "runtime capability unavailable"
+	}
+	moduleID := strings.TrimSpace(e.ModuleID)
+	reason := strings.TrimSpace(e.Reason)
+	kinds := append([]string(nil), e.RequiredKinds...)
+	for idx := range kinds {
+		kinds[idx] = strings.TrimSpace(kinds[idx])
+	}
+	sort.Strings(kinds)
+	if reason == "" {
+		reason = "unsupported"
+	}
+	return fmt.Sprintf("runtime capability %s for owner %s is %s: %s", e.CapabilityClass, moduleID, reason, strings.Join(kinds, ","))
+}
+
 // AcquireRuntimeOperationAdmissibilityCommand requests a bounded, read-only
 // parameter inventory from one canonical operation owner before candidate
 // generation. The owner must not allocate resources, mutate a deliverable, or
@@ -191,13 +219,20 @@ type AcquireGitCapabilityStateResult struct {
 }
 
 type RequestRuntimeCandidateCommand struct {
-	WorkspaceID       common.WorkspaceID
-	RunID             common.RunID
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	// LogicalRequestID and RequestSequence identify a persisted Orchestrator
+	// request session. PhysicalCallID identifies one provider submission within
+	// that session. All three are mandatory for every physical provider request.
+	LogicalRequestID  string
+	RequestSequence   int
+	PhysicalCallID    string
 	Decision          runtimecontract.RuntimeDecision
 	Transaction       runtimecontract.AuthorityTransaction
 	CandidateAttempt  int
 	PreviousFailure   *runtimecontract.RuntimeCandidateFailure
 	StablePrefixHash  string
+	CandidateManifest runtimecontract.RuntimeCandidateContractManifest
 	DefinitionContext runtimecontract.RuntimeDefinitionContext
 	CandidateContext  runtimecontract.RuntimeCandidateContext
 	// OutputContinuation is absent for the initial structured-candidate
@@ -206,10 +241,42 @@ type RequestRuntimeCandidateCommand struct {
 	OutputContinuation *runtimecontract.RuntimeCandidateOutputContinuationRequest
 }
 
-type RequestRuntimeCandidateResult struct {
+// PreflightRuntimeCandidateCommand asks the LLM owner to render and inspect a
+// sealed candidate request without calling a provider. It exists so context
+// integrity failures are classified before SM-3 allocates a correction attempt.
+type PreflightRuntimeCandidateCommand struct {
+	WorkspaceID       common.WorkspaceID
+	RunID             common.RunID
+	Decision          runtimecontract.RuntimeDecision
+	Transaction       runtimecontract.AuthorityTransaction
+	CandidateAttempt  int
+	PreviousFailure   *runtimecontract.RuntimeCandidateFailure
+	StablePrefixHash  string
+	CandidateManifest runtimecontract.RuntimeCandidateContractManifest
+	DefinitionContext runtimecontract.RuntimeDefinitionContext
+	CandidateContext  runtimecontract.RuntimeCandidateContext
+}
+
+// PreflightRuntimeCandidateResult contains only the secret-free rendering
+// outcome. It cannot carry a candidate, provider usage or a mutable authority.
+type PreflightRuntimeCandidateResult struct {
 	Transaction runtimecontract.AuthorityTransaction
-	Candidate   runtimecontract.RuntimeCandidate
-	Failure     *runtimecontract.RuntimeCandidateFailure
+	Ready       bool
+	Reason      string
+	Audit       *runtimecontract.ProviderRequestAuditView
+}
+
+type RequestRuntimeCandidateResult struct {
+	Transaction      runtimecontract.AuthorityTransaction
+	LogicalRequestID string
+	RequestSequence  int
+	PhysicalCallID   string
+	Candidate        runtimecontract.RuntimeCandidate
+	// DocumentContent is an in-process handoff for a complete decoded document.
+	// It is never an audit/projection payload and must be persisted only by the
+	// Orchestrator-owned request content store.
+	DocumentContent []byte
+	Failure         *runtimecontract.RuntimeCandidateFailure
 	// Stale is an owner-confirmed pre-candidate freshness outcome. It is
 	// mutually exclusive with Candidate and Failure; Orchestrator invalidates
 	// and reacquires without spending candidate or provider-recovery budget.
@@ -1033,7 +1100,9 @@ func ResolveRuntimeCapabilities(command AcquireRuntimeCapabilitiesCommand, modul
 	for _, kind := range command.RequiredKinds {
 		kind = strings.TrimSpace(kind)
 		if _, ok := supported[kind]; !ok {
-			return AcquireRuntimeCapabilitiesResult{}, fmt.Errorf("runtime module %s does not provide capability %s", moduleID, kind)
+			return AcquireRuntimeCapabilitiesResult{}, &RuntimeCapabilityUnsupportedError{
+				ModuleID: moduleID, CapabilityClass: command.CapabilityClass, RequiredKinds: []string{kind}, Reason: "unsupported_kind",
+			}
 		}
 		if _, ok := seen[kind]; ok {
 			continue
@@ -1163,6 +1232,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[ProbeRuntimeOperationFeasibilityCommand, ProbeRuntimeOperationFeasibilityResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorProbeRuntimeOperationFeasibility).MessageContract(),
 		eventcontract.CommandTopic[AcquireGitCapabilityStateCommand, AcquireGitCapabilityStateResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireGitCapabilityState).MessageContract(),
 		eventcontract.CommandTopic[DriveRuntimeV2Command, DriveRuntimeV2Result]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorDriveRuntimeV2).MessageContract(),
+		eventcontract.CommandTopic[PreflightRuntimeCandidateCommand, PreflightRuntimeCandidateResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorPreflightRuntimeCandidate).MessageContract(),
 		eventcontract.CommandTopic[QueryRuntimeOperationReceiptCommand, QueryRuntimeOperationReceiptResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorQueryRuntimeOperationReceipt).MessageContract(),
 		eventcontract.CommandTopic[CommitRuntimeOperationReceiptCommand, CommitRuntimeOperationReceiptResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommitRuntimeOperationReceipt).MessageContract(),
 		eventcontract.CommandTopic[RequestRuntimeCandidateCommand, RequestRuntimeCandidateResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorRequestRuntimeCandidate).MessageContract(),

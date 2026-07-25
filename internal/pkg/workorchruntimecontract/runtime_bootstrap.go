@@ -242,7 +242,7 @@ func sameRuntimeRequirement(left RuntimeRequirement, right RuntimeRequirement) b
 	}
 	left = leftValues[0]
 	right = rightValues[0]
-	return left.Kind == right.Kind && left.OwnerModuleID == right.OwnerModuleID && left.SubjectRef == right.SubjectRef && left.TargetSelectorRef == right.TargetSelectorRef && left.TargetSelectorOwnerRef == right.TargetSelectorOwnerRef && left.TargetSelectorSubjectRef == right.TargetSelectorSubjectRef && left.ProspectiveTargetRef == right.ProspectiveTargetRef &&
+	return left.Kind == right.Kind && left.Scope == right.Scope && left.FocusID == right.FocusID && left.OwnerModuleID == right.OwnerModuleID && left.SubjectRef == right.SubjectRef && left.TargetSelectorRef == right.TargetSelectorRef && left.TargetSelectorOwnerRef == right.TargetSelectorOwnerRef && left.TargetSelectorSubjectRef == right.TargetSelectorSubjectRef && left.ProspectiveTargetRef == right.ProspectiveTargetRef &&
 		left.CapabilityClass == right.CapabilityClass && left.MinimumBytes == right.MinimumBytes && left.Reason == right.Reason &&
 		sameStrings(left.RequiredCapabilities, right.RequiredCapabilities) && sameStrings(left.TargetSelectorCandidateRefs, right.TargetSelectorCandidateRefs)
 }
@@ -276,6 +276,15 @@ func normalizeRuntimeRequirements(values []RuntimeRequirement) []RuntimeRequirem
 	seen := map[string]struct{}{}
 	for _, value := range values {
 		value.Kind = PrerequisiteKind(strings.TrimSpace(string(value.Kind)))
+		value.Scope = RuntimePrerequisiteScope(strings.TrimSpace(string(value.Scope)))
+		if value.Scope == "" {
+			value.Scope = RuntimePrerequisiteScopeGlobal
+		}
+		value.FocusID = strings.TrimSpace(value.FocusID)
+		if value.Scope != RuntimePrerequisiteScopeFocus {
+			value.Scope = RuntimePrerequisiteScopeGlobal
+			value.FocusID = ""
+		}
 		value.OwnerModuleID = strings.TrimSpace(value.OwnerModuleID)
 		value.SubjectRef = strings.TrimSpace(value.SubjectRef)
 		value.TargetSelectorRef = strings.TrimSpace(value.TargetSelectorRef)
@@ -286,7 +295,7 @@ func normalizeRuntimeRequirements(values []RuntimeRequirement) []RuntimeRequirem
 		value.CapabilityClass = RuntimeCapabilityClass(strings.TrimSpace(string(value.CapabilityClass)))
 		value.RequiredCapabilities = normalizeStrings(value.RequiredCapabilities)
 		value.Reason = strings.TrimSpace(value.Reason)
-		key := strings.Join([]string{string(value.Kind), value.OwnerModuleID, value.SubjectRef, value.TargetSelectorRef, value.TargetSelectorOwnerRef, value.TargetSelectorSubjectRef, strings.Join(value.TargetSelectorCandidateRefs, ","), value.ProspectiveTargetRef, string(value.CapabilityClass), strings.Join(value.RequiredCapabilities, ","), fmt.Sprintf("%d", value.MinimumBytes)}, "|")
+		key := strings.Join([]string{string(value.Kind), string(value.Scope), value.FocusID, value.OwnerModuleID, value.SubjectRef, value.TargetSelectorRef, value.TargetSelectorOwnerRef, value.TargetSelectorSubjectRef, strings.Join(value.TargetSelectorCandidateRefs, ","), value.ProspectiveTargetRef, string(value.CapabilityClass), strings.Join(value.RequiredCapabilities, ","), fmt.Sprintf("%d", value.MinimumBytes)}, "|")
 		if value.Kind == "" || key == "" {
 			continue
 		}

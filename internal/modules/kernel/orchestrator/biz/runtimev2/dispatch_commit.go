@@ -90,6 +90,7 @@ type RuntimeAggregate struct {
 	CompletedDispatches         []SealedDispatch
 	ProcessedEventIDs           []string
 	Diagnostics                 []DiagnosticEvidence
+	CandidateRequestSessions    []runtimecontract.RuntimeCandidateRequestSession
 	CandidateAttempts           []runtimecontract.RuntimeCandidateAttemptRecord
 	GovernanceRequests          []runtimecontract.RuntimeGovernanceRequestRecord
 	GovernanceResolutions       []runtimecontract.RuntimeGovernanceResolutionRecord
@@ -528,7 +529,7 @@ func validationFailureTargetsAreGrounded(facts runtimecontract.RuntimeFacts, fai
 	// repair surface.  A validation command that happens to name a member of
 	// that inventory cannot turn it into FailureTarget authority.  Only a
 	// selected owner target was already concrete before this receipt.
-	if selection := facts.Resources.TargetSelection; selection != nil &&
+	if selection := currentFocusTargetSelection(facts); selection != nil &&
 		selection.Disposition == runtimecontract.RuntimeTargetSelectionSelected && len(selection.TargetRefs) > 0 {
 		grounded = append(grounded, selection.TargetRefs...)
 	}
@@ -879,6 +880,25 @@ func (a RuntimeAggregate) Validate() error {
 	}
 	if err := runtimecontract.ValidateRuntimeCandidateAttemptRecordsForScope(a.Facts.WorkspaceID, a.Facts.RunID, a.CandidateAttempts); err != nil {
 		return err
+	}
+	if err := runtimecontract.ValidateRuntimeCandidateRequestSessions(a.CandidateRequestSessions); err != nil {
+		return err
+	}
+	for _, attempt := range a.CandidateAttempts {
+		matched := false
+		for _, session := range a.CandidateRequestSessions {
+			if session.LogicalRequestID != attempt.LogicalRequestID {
+				continue
+			}
+			if session.Transaction != attempt.Transaction || session.StablePrefixHash != attempt.StablePrefixHash || session.ManifestHash != attempt.ManifestHash || session.State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete {
+				return fmt.Errorf("runtime candidate attempt request-session binding does not match its complete document")
+			}
+			matched = true
+			break
+		}
+		if !matched {
+			return fmt.Errorf("runtime candidate attempt has no complete request-session binding")
+		}
 	}
 	if (isTerminalRuntimeAction(a.Decision.Action) || a.Decision.Terminal != nil) && hasPendingCandidateAttempt(a.CandidateAttempts) {
 		return fmt.Errorf("terminal runtime aggregate cannot retain a pending candidate attempt")

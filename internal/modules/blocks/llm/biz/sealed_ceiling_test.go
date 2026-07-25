@@ -82,8 +82,8 @@ func TestResolveProviderClientForSealedCeilingRejectsConfigDrift(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected matching revision to succeed: %v", err)
 	}
-	if !client.Capabilities.JSONSchemaResponse {
-		t.Fatalf("ai-proxy runtime client did not declare JSON Schema response capability: %+v", client.Capabilities)
+	if client.Capabilities.JSONSchemaResponse {
+		t.Fatalf("ai-proxy runtime client invented JSON Schema response capability: %+v", client.Capabilities)
 	}
 	cfg.AIProxy.APIKey = "rotated-key-1"
 	_, _, err = ResolveProviderClientForSealedCeiling(cfg, ceiling)

@@ -343,9 +343,30 @@ func projectLLMContextBudgetTraceView(item readmodelcore.LLMContextBudgetTrace) 
 	item.NormalizedSections = compactStringSlice(item.NormalizedSections, workspaceSnapshotTraceSliceLimit)
 	item.CompressedSections = compactStringSlice(item.CompressedSections, workspaceSnapshotTraceSliceLimit)
 	item.OmittedSections = compactStringSlice(item.OmittedSections, workspaceSnapshotTraceSliceLimit)
+	item.RedactedPaths = compactStringSlice(item.RedactedPaths, workspaceSnapshotTraceSliceLimit)
+	item.ProtectedFields = compactStringSlice(item.ProtectedFields, workspaceSnapshotTraceSliceLimit)
+	item.IntegrityWarnings = compactStringSlice(item.IntegrityWarnings, workspaceSnapshotTraceSliceLimit)
+	item.SectionHashes = projectLLMContextBudgetSections(item.SectionHashes)
 	item.Profile = compactTracePayload(item.Profile)
 	item.CachePlan = compactTracePayload(item.CachePlan)
 	return item
+}
+
+func projectLLMContextBudgetSections(items []readmodelcore.LLMContextBudgetSection) []readmodelcore.LLMContextBudgetSection {
+	if len(items) > workspaceSnapshotTraceSliceLimit {
+		items = items[:workspaceSnapshotTraceSliceLimit]
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]readmodelcore.LLMContextBudgetSection, 0, len(items))
+	for _, item := range items {
+		item.ID = trimTraceString(item.ID)
+		item.Hash = trimTraceString(item.Hash)
+		item.SourceRefs = compactStringSlice(item.SourceRefs, workspaceSnapshotTraceSliceLimit)
+		ret = append(ret, item)
+	}
+	return ret
 }
 
 func compactTracePayload(input workorcheventpayload.Payload) workorcheventpayload.Payload {

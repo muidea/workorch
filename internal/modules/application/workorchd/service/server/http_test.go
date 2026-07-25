@@ -5331,18 +5331,20 @@ func TestWorkorchDActivationHTTPProjectsRequestID(t *testing.T) {
 		t.Fatalf("projected run command = %+v, want HTTP request id, reason, source, definition revision, and decision id", snapshot.RunCommand)
 	}
 	var persistedWorkspace appservice.Workspace
+	var runs []appservice.Run
 	waitForCondition(t, time.Second, func() bool {
 		item, err := state.readWorkspace(context.Background(), state.config.Backend, state.config.DataRoot, workspace.ID)
 		if err != nil {
 			return false
 		}
 		persistedWorkspace = item
-		return persistedWorkspace.DefaultLLMTarget != nil
+		items, err := state.listRuns(context.Background(), state.config.Backend, state.config.DataRoot, workspace.ID)
+		if err != nil {
+			return false
+		}
+		runs = items
+		return persistedWorkspace.DefaultLLMTarget != nil && len(runs) == 1 && runs[0].SealedLLMTarget != nil && persistedWorkspace.DefaultLLMTarget.Same(*runs[0].SealedLLMTarget)
 	})
-	runs, err := state.listRuns(context.Background(), state.config.Backend, state.config.DataRoot, workspace.ID)
-	if err != nil {
-		t.Fatalf("list runs after web activation: %v", err)
-	}
 	if len(runs) != 1 || runs[0].SealedLLMTarget == nil || !persistedWorkspace.DefaultLLMTarget.Same(*runs[0].SealedLLMTarget) {
 		t.Fatalf("web workspace/run model targets = %+v/%+v, want one matching first activation target", persistedWorkspace.DefaultLLMTarget, runs)
 	}

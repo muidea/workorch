@@ -4,7 +4,7 @@ Status: active
 
 Type: index
 
-Last Updated: 2026-07-24
+Last Updated: 2026-07-25
 
 ## Purpose
 
@@ -25,13 +25,13 @@ Runtime V2-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **�
 
 | # | 主题 | 待办 | 当前方案 |
 | --- | --- | --- | --- |
-| A1 | Runtime V2 live 合同正向收敛 | 完成 profile-declared 空工程 bootstrap artifact 的 partial-artifact/restart/validation-repair matrix，并完成 fresh deployed gate；recipe DTO、activation 前置 Focus、File typed absence 与 gopls 默认 recipe 已落地，现有 metadata-only Runtime V2 audit projection + verifier、bounded semantic selector、evidence/progress/diagnostic/prerequisite、focus dependency、Shell structured failure-target、owner-grounded retarget、same-gap/file-backed restart、sealed closed-schema candidate boundary 与 active-run typed resume 投递基线不得回退 | [唯一收口方案](../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md) |
+| A1 | Runtime V2 live 合同正向收敛 | R4 已将 core 文档归一为 V2 四状态机；LLM 不稳定输出按 request session、strict candidate protocol 与 sealed receipt 分流，不回退 strict admission。C4～C6、P0～P5 均为回归基线。唯一活动卡为 Q7/P6 隔离 scripted/live；已完成 mock HTTP/LLM/MCP 样本，继续记录独立 artifact、全仓门禁和真实 provider 可达性。不得加入 compatibility fallback | [唯一收口方案](../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md) |
 
 ## B. 运行单元架构 / 生命周期
 
 | # | 主题 | 待办 | 当前方案 |
 | --- | --- | --- | --- |
-| B1 | 22 组件 boundary | 按组件矩阵逐项收口状态权威、typed I/O、禁止边界和独立回归；最终执行 SM-4 deployed matrix | [主方案](../70-roadmap/active/go-multi-module-22-component-boundary-remediation.md) / [组件矩阵](../70-roadmap/active/component-contract-and-regression-closure-matrix.md) |
+| B1 | 22 组件 boundary | 按组件矩阵逐项收口状态权威、typed I/O、禁止边界和独立回归；最终执行 SM-4 deployed matrix | [组件矩阵](../70-roadmap/active/component-contract-and-regression-closure-matrix.md) |
 
 ## C. 运维切换
 
@@ -68,9 +68,8 @@ Runtime V2-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **�
 - 被 Runtime V2 reducer 吸收的 `convergence-authority-*`、`runtime-*-closure-plan`、`*-nextaction-*` hardening
 - 2026-07-16 归档的产品/审计日记：ai-proxy cutover、operation-map、module-inventory、auto-gov、software-dev DoD/SRD、next-mvp、TUI 统一、run-quality、authority-live design、module-block contract validation、deployed blocker 长文、file-patch 长文、llm-context-budget todo、docs reorg plan
 - dated live verification 记录与 `60-verification/artifacts/**`（出库；结论在 records markdown）
-- RPA-1 首次 inventory/selector/feasibility 切片（历史验证见 `90-archive/completed/runtime-v2-production-admissibility-closure-2026-07-18.md`；durable effect 后 freshness 已由 RPF-1～5 重新打开）
-- RPF-1～5 prerequisite freshness（fresh deployed bounded acceptance 已通过；completion record 随 RPF 计划归档）
-- RCA-1 candidate admission transaction（typed admission、atomic attempt closure、restart/crash 与 fresh deployed acceptance 已通过；completion record 已归档）
+- dated prerequisite freshness、candidate admission 与 production admissibility completion record（仅 archive
+  regression baseline；当前实施顺序统一由 RUNTIME-VPC 定义）
 
 事实入口：[current-state.md](current-state.md)  
 未关矩阵：[current-unclosed-matrix.md](current-unclosed-matrix.md)  

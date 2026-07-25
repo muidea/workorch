@@ -74,6 +74,45 @@ func TestRuntimeControllerInitializeRunsPreflightReduceAndPersistOnce(t *testing
 	}
 }
 
+func TestRuntimeControllerReconcileMissingSealedProviderCeilingReturnsToPrerequisiteWithoutCandidateBudget(t *testing.T) {
+	ctx := context.Background()
+	aggregate := stateChangeAggregate(t)
+	requirement := RuntimeRequirement{
+		Kind: runtimecontract.PrerequisiteKindProviderCeiling, OwnerModuleID: runtimecontract.RuntimeModuleLLM,
+		MinimumBytes: 96 * 1024, Reason: "provider ceiling required",
+	}
+	requirement = normalizeRuntimeRequirements([]RuntimeRequirement{requirement})[0]
+	prerequisite := runtimecontract.RuntimePrerequisite{
+		ID: runtimePrerequisiteID(requirement), Kind: requirement.Kind, OwnerModuleID: requirement.OwnerModuleID,
+		MinimumBytes: requirement.MinimumBytes, Reason: requirement.Reason,
+	}
+	aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, prerequisite)
+	aggregate.Facts.Resources.ProviderCeiling = nil
+	repository := &controllerRepository{aggregate: &aggregate}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reconciled, err := controller.ReconcileAuthorityBeforeCandidate(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if err != nil {
+		t.Fatalf("ReconcileAuthorityBeforeCandidate: %v", err)
+	}
+	if reconciled.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite ||
+		len(reconciled.CandidateAttempts) != 0 || reconciled.Facts.Repair.RepairAttempts != 0 ||
+		reconciled.Facts.Recovery.ProviderTransportAttempts != 0 || reconciled.Facts.Recovery.PrerequisiteRefreshes != 0 ||
+		reconciled.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 {
+		t.Fatalf("missing provider ceiling consumed a candidate or recovery budget: %+v", reconciled)
+	}
+	if len(reconciled.Facts.Prerequisites.Pending) != 1 || reconciled.Facts.Prerequisites.Pending[0].ID != prerequisite.ID ||
+		len(reconciled.Facts.Prerequisites.Satisfied) != 0 || reconciled.Facts.Resources.ProviderCeiling != nil {
+		t.Fatalf("missing provider ceiling was not returned to its sealed prerequisite: %+v", reconciled.Facts)
+	}
+	if violations := InspectRuntimeAuthorityInvariants(reconciled).Violations; len(violations) != 0 {
+		t.Fatalf("reconciled provider ceiling retains authority violations: %+v", violations)
+	}
+}
+
 func TestRuntimeControllerRestartReusesCommittedOwnerTargetSelection(t *testing.T) {
 	ctx := context.Background()
 	repository := &controllerRepository{}
@@ -285,11 +324,135 @@ func TestRuntimeControllerCommitsPrerequisiteAndReducesAtomically(t *testing.T) 
 	}
 }
 
+func TestRuntimeControllerReconcilesHistoricalFocusAuthorityBeforeCandidate(t *testing.T) {
+	ctx := context.Background()
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Start from the current Focus's normal prerequisite acquisition. The
+	// historical satisfied selection is then injected as a persisted corruption
+	// representative of a delayed/reacquired predecessor result. It must be
+	// resolved entirely by SM-2 before any provider-facing candidate path.
+	facts := controllerFacts()
+	facts.Focus.TargetRefs = nil
+	facts.Focus.TargetRole = "implementation"
+	facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	facts.Focus.TargetSelectorRef = "file/profile_declared_candidates"
+	facts.Focus.TargetSelectorOwnerRef = "profile-bootstrap"
+	facts.Focus.TargetSelectorSubjectRef = "manager"
+	facts.Focus.TargetSelectorCandidateRefs = []string{"internal/lsp/manager.go"}
+	facts.Focus.RequireTargetGrounding = true
+	facts.Prerequisites = runtimecontract.PrerequisiteState{}
+	preparedFacts, preparedDecision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preparedDecision.Action != runtimecontract.RuntimeActionAcquirePrerequisite {
+		t.Fatalf("prepared decision = %+v", preparedDecision)
+	}
+
+	historicalSelection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "selection-old-go-mod", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		TargetRole: "module_definition", SelectorRef: "file/profile_declared_candidates",
+		Disposition: runtimecontract.RuntimeTargetSelectionSelected, TargetRefs: []string{"go.mod"},
+		CandidateTargetRefs: []string{"go.mod"}, CandidateCount: 1, ObservedRevision: "tree-old",
+	}
+	historicalSelection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(historicalSelection)
+	historicalPrerequisite := runtimecontract.RuntimePrerequisite{
+		ID: historicalSelection.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindTargetSelection,
+		Scope: runtimecontract.RuntimePrerequisiteScopeFocus, FocusID: "focus-module", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+	}
+	historicalObservation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: historicalPrerequisite.ID, Kind: historicalPrerequisite.Kind, OwnerModuleID: historicalPrerequisite.OwnerModuleID,
+		ContentHash: historicalSelection.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", Revision: "tree-old",
+		}},
+	}
+	historicalObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(historicalObservation)
+	preparedFacts.Prerequisites.Satisfied = append(preparedFacts.Prerequisites.Satisfied, historicalPrerequisite)
+	preparedFacts.Resources.TargetSelection = &historicalSelection
+	preparedFacts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
+		TargetRef: "go.mod", ContentHash: "go-mod-old", ContentState: runtimecontract.SnapshotContentStateComplete,
+	}}
+	preparedFacts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{historicalObservation}
+	repository.aggregate = &RuntimeAggregate{
+		StateRevision: 7,
+		Definition:    controllerDefinition(),
+		Facts:         preparedFacts,
+		Decision:      preparedDecision,
+	}
+
+	reconciled, err := controller.ReconcileAuthorityBeforeCandidate(ctx, facts.WorkspaceID, facts.RunID)
+	if err != nil {
+		t.Fatalf("ReconcileAuthorityBeforeCandidate: %v", err)
+	}
+	if reconciled.StateRevision != 8 || reconciled.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite ||
+		len(reconciled.CandidateAttempts) != 0 || reconciled.Facts.Repair.RepairAttempts != 0 ||
+		reconciled.Facts.Recovery.PrerequisiteRefreshes != 0 || reconciled.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 {
+		t.Fatalf("authority reconciliation consumed candidate or recovery state: %+v", reconciled)
+	}
+	if reconciled.Facts.Resources.TargetSelection != nil || len(reconciled.Facts.Resources.TargetSnapshots) != 0 ||
+		len(reconciled.Facts.Prerequisites.Satisfied) != 0 || len(reconciled.Facts.Resources.PrerequisiteObservations) != 0 ||
+		len(reconciled.Facts.Prerequisites.Retired) != 1 || reconciled.Facts.Prerequisites.Retired[0].ID != historicalPrerequisite.ID ||
+		len(reconciled.Facts.Resources.RetiredPrerequisiteObservations) != 1 || reconciled.Facts.Resources.RetiredPrerequisiteObservations[0].ObservationID != historicalObservation.ObservationID {
+		t.Fatalf("historical authority was not retired: %+v", reconciled.Facts)
+	}
+	currentSelectionPending := false
+	for _, prerequisite := range reconciled.Facts.Prerequisites.Pending {
+		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSelection &&
+			prerequisite.Scope == runtimecontract.RuntimePrerequisiteScopeFocus && prerequisite.FocusID == facts.Focus.ID &&
+			reflect.DeepEqual(prerequisite.TargetSelectorCandidateRefs, []string{"internal/lsp/manager.go"}) {
+			currentSelectionPending = true
+		}
+	}
+	if !currentSelectionPending {
+		t.Fatalf("current focus selection was not reacquired: %+v", reconciled.Facts.Prerequisites.Pending)
+	}
+	if violations := InspectRuntimeAuthorityInvariants(reconciled).Violations; len(violations) != 0 {
+		t.Fatalf("reconciled aggregate retains authority violations: %+v", violations)
+	}
+
+	var currentSelectionPrerequisite runtimecontract.RuntimePrerequisite
+	for _, prerequisite := range reconciled.Facts.Prerequisites.Pending {
+		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSelection {
+			currentSelectionPrerequisite = prerequisite
+			break
+		}
+	}
+	if currentSelectionPrerequisite.ID == "" {
+		t.Fatal("reconciled current selection prerequisite is absent")
+	}
+	currentSelection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: currentSelectionPrerequisite.ID, OwnerModuleID: currentSelectionPrerequisite.OwnerModuleID,
+		TargetRole: currentSelectionPrerequisite.SubjectRef, SelectorRef: currentSelectionPrerequisite.TargetSelectorRef,
+		SelectorOwnerRef: currentSelectionPrerequisite.TargetSelectorOwnerRef, SelectorSubjectRef: currentSelectionPrerequisite.TargetSelectorSubjectRef,
+		SelectorCandidateRefs: currentSelectionPrerequisite.TargetSelectorCandidateRefs,
+		Disposition:           runtimecontract.RuntimeTargetSelectionSelected, TargetRefs: []string{"internal/lsp/manager.go"},
+		CandidateTargetRefs: []string{"internal/lsp/manager.go"}, CandidateCount: 1, ObservedRevision: "tree-current",
+	}
+	currentSelection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(currentSelection)
+	reacquired, err := controller.CommitPrerequisite(ctx, facts.WorkspaceID, facts.RunID, PrerequisiteResult{
+		PrerequisiteID: currentSelectionPrerequisite.ID, TargetSelection: &currentSelection,
+	})
+	if err != nil {
+		t.Fatalf("commit current focus selection: %v", err)
+	}
+	if reacquired.Decision.AuthoritySnapshot.Attempt != 0 || reacquired.Facts.Resources.TargetSelection == nil ||
+		reacquired.Facts.Resources.TargetSelection.PrerequisiteID != currentSelectionPrerequisite.ID ||
+		len(reacquired.CandidateAttempts) != 0 {
+		t.Fatalf("reacquired selection did not begin a new candidate authority: %+v", reacquired)
+	}
+}
+
 func TestRuntimeControllerRecordsInfeasibleCandidateAsReducerFact(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
 	facts := controllerFacts()
-	facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindDecisionRequest}
 	aggregate, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -301,7 +464,7 @@ func TestRuntimeControllerRecordsInfeasibleCandidateAsReducerFact(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if progressed.Decision.Action != runtimecontract.RuntimeActionRequestGovernance || progressed.Facts.Feasibility == nil || len(progressed.CandidateAttempts) != 0 {
+	if progressed.Decision.Action != runtimecontract.RuntimeActionFail || progressed.Decision.Terminal == nil || progressed.Decision.Terminal.Code != "capability_unavailable" || progressed.Facts.Feasibility == nil || len(progressed.CandidateAttempts) != 0 {
 		t.Fatalf("feasibility transition = %+v", progressed)
 	}
 }
@@ -332,6 +495,42 @@ func TestRuntimeControllerRecordsFailureFactBeforeTerminalDecision(t *testing.T)
 	}
 }
 
+func TestRuntimeControllerReacquiresFailureTargetWhenRecordedTypedFailureChanges(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := controllerFacts()
+	facts.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateInfeasible, Signature: "failure-v1", Message: "first owner failure", TargetRefs: []string{"old.go"}}
+	aggregate, err := controller.Initialize(context.Background(), facts, controllerDefinition(), []RuntimeRequirement{{
+		Kind: runtimecontract.PrerequisiteKindFailureTarget, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
+		Reason: "typed failure repair surface",
+	}})
+	if err != nil || len(aggregate.Facts.Prerequisites.Pending) != 1 {
+		t.Fatalf("initialize failure-target prerequisite aggregate=%+v err=%v", aggregate, err)
+	}
+	prerequisite := aggregate.Facts.Prerequisites.Pending[0]
+	aggregate, err = controller.CommitPrerequisite(context.Background(), "ws-v2", "run-v2", PrerequisiteResult{
+		PrerequisiteID: prerequisite.ID, FailureTarget: &runtimecontract.FailureTarget{Signature: "failure-v1", TargetRefs: []string{"old.go"}},
+	})
+	if err != nil || aggregate.Facts.Resources.FailureTarget == nil {
+		t.Fatalf("commit first failure target aggregate=%+v err=%v", aggregate, err)
+	}
+
+	updated, err := controller.RecordFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassCandidateInfeasible, Signature: "failure-v2", Message: "new owner failure", TargetRefs: []string{"next.go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || updated.Facts.Resources.FailureTarget != nil ||
+		len(updated.Facts.Prerequisites.Pending) != 1 || updated.Facts.Prerequisites.Pending[0].ID != prerequisite.ID ||
+		len(updated.Facts.Prerequisites.Satisfied) != 0 || len(updated.CandidateRequestSessions) != 0 || len(updated.CandidateAttempts) != 0 || updated.ActiveDispatch != nil {
+		t.Fatalf("changed failure did not atomically retire mapping into reacquisition: %+v", updated)
+	}
+}
+
 func TestRuntimeControllerOwnsDispatchAndEvidenceCommit(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
@@ -342,7 +541,7 @@ func TestRuntimeControllerOwnsDispatchAndEvidenceCommit(t *testing.T) {
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "write-1", Kind: "file/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("state"),
 	}}}}}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	sealed, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, candidate)
@@ -384,7 +583,7 @@ func TestRuntimeControllerRejectsExecutableSealWithoutPersistedOwnerFeasibility(
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "write-1", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("state"),
 	}}}}}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, candidate); err == nil || !strings.Contains(err.Error(), "no current persisted feasibility result") {
@@ -411,7 +610,7 @@ func TestRuntimeControllerCommitsTypedAssessmentBeforeCompletion(t *testing.T) {
 	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	sealed, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
@@ -430,7 +629,7 @@ func TestRuntimeControllerCommitsTypedAssessmentBeforeCompletion(t *testing.T) {
 	if err != nil || evidence.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
 		t.Fatalf("assessment authority = %+v err=%v", evidence.Aggregate.Decision, err)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "assessment-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "assessment-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
@@ -462,7 +661,7 @@ func TestRuntimeControllerAssessmentGapDeltaResetsWindowButRetainsRemainingGap(t
 	if _, err := controller.Initialize(ctx, facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "state-change-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "state-change-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	sealed, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
@@ -494,7 +693,7 @@ func TestRuntimeControllerAssessmentGapDeltaResetsWindowButRetainsRemainingGap(t
 		NoProgressOperationShapes: []runtimecontract.RuntimeRejectedOperationShape{{Operation: runtimecontract.RuntimeOperation{Kind: runtimecontract.StepKindFileWrite}}},
 		ActiveGap:                 &runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-a", "cwi-b"}, MissingEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, Reason: "both remain open"},
 	}
-	if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "assessment-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "assessment-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
@@ -570,7 +769,7 @@ func prepareAssessmentController(t *testing.T, assessment runtimecontract.Assess
 	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "state-change-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "state-change-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	sealed, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
@@ -589,7 +788,7 @@ func prepareAssessmentController(t *testing.T, assessment runtimecontract.Assess
 	if err != nil || evidence.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
 		t.Fatalf("prepare assessment evidence = %+v err=%v", evidence, err)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "assessment-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "assessment-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{Assessment: &assessment}); err != nil {
@@ -606,14 +805,14 @@ func TestRuntimeControllerCandidateRetryIsPersistedAndLimitedToTwoAttempts(t *te
 	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
-	firstPending, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix")
+	firstPending, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatalf("pending attempt replay should be idempotent: %v", err)
 	}
-	if repository.saves != 2 {
+	if repository.saves != 5 {
 		t.Fatalf("pending replay performed another save: %d", repository.saves)
 	}
 	firstFailed, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
@@ -625,10 +824,10 @@ func TestRuntimeControllerCandidateRetryIsPersistedAndLimitedToTwoAttempts(t *te
 	if firstFailed.Decision.AuthoritySnapshot.ID != firstPending.Decision.AuthoritySnapshot.ID || firstFailed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange {
 		t.Fatalf("attempt 0 failure changed contract: %+v", firstFailed.Decision)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, "different-prefix"); !errors.Is(err, common.ErrConflict) {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "different-prefix"); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("different-prefix retry err = %v, want conflict", err)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	exhausted, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, runtimecontract.RuntimeCandidateFailure{
@@ -640,7 +839,7 @@ func TestRuntimeControllerCandidateRetryIsPersistedAndLimitedToTwoAttempts(t *te
 	if exhausted.Decision.Action != runtimecontract.RuntimeActionFail || exhausted.Decision.Terminal == nil || exhausted.Decision.Terminal.Code != "candidate_retry_exhausted" {
 		t.Fatalf("exhausted decision = %+v", exhausted.Decision)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); !errors.Is(err, common.ErrConflict) {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("third request err = %v, want conflict", err)
 	}
 }
@@ -654,7 +853,7 @@ func TestRuntimeControllerCandidateRetryExhaustionClosesAtomicallyWithFreshnessD
 	if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
@@ -662,7 +861,7 @@ func TestRuntimeControllerCandidateRetryExhaustionClosesAtomicallyWithFreshnessD
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	repository.aggregate.Facts.FreshnessReacquireCoverage = append([]common.CoverageWorkItemID(nil), repository.aggregate.Facts.Focus.CoverageWorkItemIDs...)
@@ -695,7 +894,7 @@ func TestRuntimeControllerTerminalDriveFailureClosesPendingCandidateWithFreshnes
 	if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	repository.aggregate.Facts.FreshnessReacquireCoverage = append([]common.CoverageWorkItemID(nil), repository.aggregate.Facts.Focus.CoverageWorkItemIDs...)
@@ -734,6 +933,7 @@ func TestRuntimeControllerReopensInvalidatedAttemptZeroWithoutCandidateDebt(t *t
 		Transaction:         transaction, Attempt: 0, StablePrefixHash: "stable-prefix", State: runtimecontract.RuntimeCandidateAttemptStateInvalidated,
 		Stale: &stale,
 	}}
+	bindRuntimeCandidateAttemptForTest(t, &aggregate, 0)
 	aggregate.PrerequisiteInvalidations = []runtimecontract.RuntimePrerequisiteInvalidationRecord{{
 		Signature: signature, PrerequisiteIDs: []string{stale.PrerequisiteID}, ObservationIDs: []string{stale.ObservationID}, Stale: &stale,
 	}}
@@ -744,13 +944,18 @@ func TestRuntimeControllerReopensInvalidatedAttemptZeroWithoutCandidateDebt(t *t
 	}
 
 	beforeRevision := aggregate.StateRevision
-	if _, err := controller.BeginCandidateAttempt(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "drifted-prefix"); !errors.Is(err, common.ErrConflict) {
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, currentFocusTargetSelection(aggregate.Facts))
+	if err != nil {
+		t.Fatal(err)
+	}
+	logicalRequestID := aggregate.CandidateAttempts[0].LogicalRequestID
+	if _, err := controller.BeginCandidateAttempt(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "drifted-prefix", manifest, logicalRequestID); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("stable-prefix drift err=%v, want conflict", err)
 	}
 	if repository.saves != 0 || repository.aggregate.StateRevision != beforeRevision {
 		t.Fatalf("stable-prefix drift mutated aggregate: revision=%d saves=%d", repository.aggregate.StateRevision, repository.saves)
 	}
-	reopened, err := controller.BeginCandidateAttempt(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "stable-prefix")
+	reopened, err := controller.BeginCandidateAttempt(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "stable-prefix", manifest, logicalRequestID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -768,7 +973,7 @@ func TestRuntimeControllerReopensInvalidatedAttemptZeroWithoutCandidateDebt(t *t
 	if repository.saves != 1 {
 		t.Fatalf("reopen saves=%d, want 1", repository.saves)
 	}
-	duplicate, err := controller.BeginCandidateAttempt(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "stable-prefix")
+	duplicate, err := controller.BeginCandidateAttempt(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "stable-prefix", manifest, logicalRequestID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -790,7 +995,7 @@ func TestRuntimeControllerCandidateFailureDoesNotResealPreExistingExecutionFailu
 	if err != nil {
 		t.Fatal(err)
 	}
-	pending, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix")
+	pending, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -806,7 +1011,7 @@ func TestRuntimeControllerCandidateFailureDoesNotResealPreExistingExecutionFailu
 	if failed.Facts.Failure == nil || failed.Facts.Failure.Signature != "patch-base-hash" {
 		t.Fatalf("attempt 0 failure replaced execution failure: %+v", failed.Facts.Failure)
 	}
-	retried, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix")
+	retried, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -821,7 +1026,7 @@ func TestRuntimeControllerRejectsRetryWhenPersistedContractIDIsMissing(t *testin
 	if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	failed, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
@@ -838,7 +1043,7 @@ func TestRuntimeControllerRejectsRetryWhenPersistedContractIDIsMissing(t *testin
 	failed.Decision = resealed
 	failed.StateRevision++
 	repository.aggregate = &failed
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err == nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err == nil {
 		t.Fatal("candidate retry accepted persisted attempt without authority contract id")
 	}
 }
@@ -851,13 +1056,13 @@ func TestRuntimeControllerCandidateExhaustionWithGovernanceCapabilityIsTerminal(
 	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProvider, Reason: "provider unavailable"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	terminal, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProvider, Reason: "provider still unavailable"})
@@ -875,13 +1080,13 @@ func TestRuntimeControllerCandidateExhaustionWithoutGovernanceIsTerminal(t *test
 	if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: "invalid operation"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	terminal, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: "invalid operation again"})
@@ -899,7 +1104,7 @@ func TestRuntimeControllerInternalCandidateFailureIsImmediatelyTerminal(t *testi
 	if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	terminal, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: "transaction mismatch"})
@@ -934,7 +1139,7 @@ func TestFailInfeasibleValidationCandidateRoutesToSealedStateChangeRepair(t *tes
 	if initialized.Decision.Action != runtimecontract.RuntimeActionProduceValidation {
 		t.Fatalf("initial decision = %+v, want validation", initialized.Decision)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	repaired, err := controller.FailCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
@@ -986,7 +1191,7 @@ func TestFailInfeasibleValidationCandidateExhaustsSameFocusRepairBudget(t *testi
 	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	terminal, err := controller.FailCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
@@ -1023,7 +1228,7 @@ func TestFailInfeasibleValidationCandidateKeepsValidationWhenPolicyAllowsAlterna
 	if initialized.Decision.Action != runtimecontract.RuntimeActionProduceValidation {
 		t.Fatalf("initial decision = %+v, want validation", initialized.Decision)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	continued, err := controller.FailCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
@@ -1058,7 +1263,7 @@ func TestFailInfeasibleValidationCommandDiagnosticKeepsSameContractRetry(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	continued, err := controller.FailCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
@@ -1102,7 +1307,7 @@ func TestFailInfeasibleValidationCommandDiagnosticRoutesToDeclaredImplementation
 	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	repaired, err := controller.FailCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{

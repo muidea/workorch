@@ -61,8 +61,11 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 	if gotAuthorization != "Bearer secret-value" {
 		t.Fatalf("authorization = %q, want bearer secret", gotAuthorization)
 	}
-	if gotPayload.Model != "test-model" || len(gotPayload.Messages) != 2 || gotPayload.ResponseFormat["type"] != "json_object" {
-		t.Fatalf("payload = %+v, want chat completion json request", gotPayload)
+	if gotPayload.Model != "test-model" || len(gotPayload.Messages) != 2 {
+		t.Fatalf("payload = %+v, want chat completion request", gotPayload)
+	}
+	if _, ok := gotRawPayload["response_format"]; ok {
+		t.Fatalf("payload = %+v, undeclared compatible provider capability must omit response_format", gotRawPayload)
 	}
 	if gotPayload.MaxCompletionTokens != 65536 ||
 		gotPayload.ReasoningEffort != "high" ||
@@ -444,8 +447,8 @@ func TestHTTPProviderCompleteParsesNonStreamingUsage(t *testing.T) {
 	if gotPayload.Stream {
 		t.Fatalf("stream flag = true, want false")
 	}
-	if gotPayload.ResponseFormat == nil || gotPayload.ResponseFormat["type"] != "json_object" {
-		t.Fatalf("payload response_format = %+v, want json_object", gotPayload.ResponseFormat)
+	if gotPayload.ResponseFormat != nil {
+		t.Fatalf("payload response_format = %+v, want omitted without declared capability", gotPayload.ResponseFormat)
 	}
 	if result.Usage == nil ||
 		result.Usage.InputTokens != 11 ||

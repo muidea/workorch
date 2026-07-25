@@ -74,6 +74,8 @@ func (m *Biz) Start() error {
 	}
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
 	m.topics = append(m.topics, orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
+	m.SubscribeFunc(orchestratorevents.TopicOrchestratorPreflightRuntimeCandidate, m.handleRuntimeCandidatePreflight)
+	m.topics = append(m.topics, orchestratorevents.TopicOrchestratorPreflightRuntimeCandidate)
 	if m.candidateProvider != nil {
 		m.SubscribeFunc(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, m.handleRuntimeCandidate)
 		m.topics = append(m.topics, orchestratorevents.TopicOrchestratorRequestRuntimeCandidate)
@@ -88,7 +90,7 @@ func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magiceven
 		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
 		return
 	}
-	response, err := orchestratorevents.ResolveRuntimeCapabilities(command, ModuleID, StepKindWorkspaceExecution)
+	response, err := orchestratorevents.ResolveRuntimeCapabilities(command, ModuleID, modulecommon.RuntimeCapabilityKinds()...)
 	if err != nil {
 		setPrerequisiteMagicError(result, err)
 		return
@@ -109,6 +111,65 @@ func (m *Biz) Teardown(context.Context) {
 	m.candidateProvider = nil
 }
 
+// handleRuntimeCandidatePreflight renders the sealed C0-C5 request and runs
+// its integrity/ceiling gate without contacting the configured provider. The
+// Orchestrator owns the resulting acquire/terminal transition; this block only
+// reports a bounded, secret-free rendering outcome.
+func (m *Biz) handleRuntimeCandidatePreflight(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.PreflightRuntimeCandidateCommand)
+	if !ok || command.WorkspaceID == "" || command.RunID == "" ||
+		command.Decision.AuthoritySnapshot.WorkspaceID != command.WorkspaceID ||
+		command.Decision.AuthoritySnapshot.RunID != command.RunID {
+		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
+		return
+	}
+	request := llmmodels.RuntimeCandidateRequest{
+		Decision: command.Decision, Transaction: command.Transaction,
+		CandidateAttempt: command.CandidateAttempt, PreviousFailure: command.PreviousFailure,
+		StablePrefixHash: command.StablePrefixHash, DefinitionContext: command.DefinitionContext,
+		CandidateManifest: command.CandidateManifest, CandidateContext: command.CandidateContext,
+	}
+	startedAt := time.Now().UTC()
+	providerRequest, preflightErr := runtimeV2ProviderRequest(request)
+	completedAt := time.Now().UTC()
+	budget := providerRequest.ContextBudget
+	if budget != nil {
+		budget.ProviderSubmitted = false
+	}
+	status := llmmodels.RuntimeCandidateStatusCompleted
+	failureClass := ""
+	reason := ""
+	if preflightErr != nil {
+		status = llmmodels.RuntimeCandidateStatusFailed
+		failureClass = "context_integrity"
+		reason = runtimeCandidatePreflightReason(preflightErr)
+	}
+	audit := sealedAuditFromRequest(request, newProviderRequestID(request), budget, startedAt, completedAt, false, status, failureClass, 0)
+	if audit != nil {
+		audit.Kind = "runtime_v2_candidate_preflight"
+		audit.Operation = "runtime_candidate_preflight"
+	}
+	m.publishLLMUsageRecorded(event.Context(), audit, nil, status, failureClass)
+	result.Set(orchestratorevents.PreflightRuntimeCandidateResult{
+		Transaction: command.Transaction,
+		Ready:       preflightErr == nil,
+		Reason:      reason,
+		Audit:       providerRequestAuditView(audit),
+	}, nil)
+}
+
+func runtimeCandidatePreflightReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	const maxBytes = 1024
+	reason := strings.TrimSpace(err.Error())
+	if len(reason) <= maxBytes {
+		return reason
+	}
+	return reason[:maxBytes]
+}
+
 func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.Result) {
 	command, ok := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
 	if !ok || command.WorkspaceID == "" || command.RunID == "" || m.candidateProvider == nil ||
@@ -116,12 +177,20 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
 		return
 	}
+	if err := runtimecontract.ValidateRuntimeCandidateRequestIdentity(command.LogicalRequestID, command.RequestSequence, command.PhysicalCallID); err != nil {
+		setPrerequisiteMagicError(result, err)
+		return
+	}
 	response, err := llmruntimev2.RequestCandidate(event.Context(), m.candidateProvider, llmmodels.RuntimeCandidateRequest{
+		LogicalRequestID:   command.LogicalRequestID,
+		RequestSequence:    command.RequestSequence,
+		PhysicalCallID:     command.PhysicalCallID,
 		Decision:           command.Decision,
 		Transaction:        command.Transaction,
 		CandidateAttempt:   command.CandidateAttempt,
 		PreviousFailure:    command.PreviousFailure,
 		StablePrefixHash:   command.StablePrefixHash,
+		CandidateManifest:  command.CandidateManifest,
 		DefinitionContext:  command.DefinitionContext,
 		CandidateContext:   command.CandidateContext,
 		OutputContinuation: command.OutputContinuation,
@@ -146,24 +215,28 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 		if stale := llmruntimev2.CandidatePrerequisiteStaleFromError(err); stale != nil {
 			m.publishLLMUsageRecorded(event.Context(), audit, usage, status, "")
 			result.Set(orchestratorevents.RequestRuntimeCandidateResult{
-				Transaction: command.Transaction,
-				Stale:       stale,
-				RequestID:   requestID,
-				Status:      status,
-				Audit:       providerRequestAuditView(audit),
-				Usage:       providerUsageView(usage),
+				Transaction:      command.Transaction,
+				LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
+				Stale:     stale,
+				RequestID: requestID,
+				Status:    status,
+				Audit:     providerRequestAuditView(audit),
+				Usage:     providerUsageView(usage),
 			}, nil)
 			return
 		}
 		failure := llmruntimev2.CandidateFailureFromError(err)
+		documentContent := llmruntimev2.CandidateDocumentContentFromError(err)
 		m.publishLLMUsageRecorded(event.Context(), audit, usage, status, string(failure.Class))
 		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
-			Transaction: command.Transaction,
-			Failure:     &failure,
-			RequestID:   requestID,
-			Status:      status,
-			Audit:       providerRequestAuditView(audit),
-			Usage:       providerUsageView(usage),
+			Transaction:      command.Transaction,
+			LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
+			Failure:         &failure,
+			DocumentContent: documentContent,
+			RequestID:       requestID,
+			Status:          status,
+			Audit:           providerRequestAuditView(audit),
+			Usage:           providerUsageView(usage),
 		}, nil)
 		return
 	}
@@ -172,13 +245,15 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 	}
 	m.publishLLMUsageRecorded(event.Context(), audit, usage, status, "")
 	result.Set(orchestratorevents.RequestRuntimeCandidateResult{
-		Transaction:    response.Transaction,
-		Candidate:      response.Candidate,
-		OutputFragment: response.OutputFragment,
-		RequestID:      requestID,
-		Status:         status,
-		Audit:          providerRequestAuditView(audit),
-		Usage:          providerUsageView(usage),
+		Transaction:      response.Transaction,
+		LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
+		Candidate:       response.Candidate,
+		DocumentContent: append([]byte(nil), response.DocumentContent...),
+		OutputFragment:  response.OutputFragment,
+		RequestID:       requestID,
+		Status:          status,
+		Audit:           providerRequestAuditView(audit),
+		Usage:           providerUsageView(usage),
 	}, nil)
 }
 
@@ -317,11 +392,81 @@ func providerContextBudgetAudit(budget *llmmodels.ProviderContextBudget) llmaudi
 		ProviderSubmitted: budget.ProviderSubmitted, OverBudget: budget.OverBudget, Truncated: budget.Truncated,
 		ContextGateAction: budget.ContextGateAction, ContextGateReason: budget.ContextGateReason,
 		BudgetFailureClass: budget.BudgetFailureClass,
+		IncludedSections:   boundedLLMAuditStrings(budget.IncludedSections),
+		NormalizedSections: boundedLLMAuditStrings(budget.NormalizedSections),
+		CompressedSections: boundedLLMAuditStrings(budget.CompressedSections),
+		OmittedSections:    boundedLLMAuditStrings(budget.OmittedSections),
+		RedactedPaths:      boundedLLMAuditStrings(budget.RedactedPaths),
+		ProtectedFields:    boundedLLMAuditStrings(budget.ProtectedFields),
+		IntegrityWarnings:  boundedLLMAuditStrings(budget.IntegrityWarnings),
+		SourceRefs:         boundedLLMAuditStrings(budget.SourceRefs),
 	}
 	if budget.CachePlan != nil {
 		ret.StablePrefixHash = budget.CachePlan.StablePrefixHash
 		ret.RenderedStablePrefixHash = budget.CachePlan.RenderedStablePrefixHash
 		ret.CacheStrategy = budget.CachePlan.Strategy
+		ret.SectionHashes = boundedLLMAuditSections(budget.CachePlan.SectionHashes)
+	}
+	return ret
+}
+
+const (
+	llmAuditSliceLimit      = 24
+	llmAuditStringByteLimit = 512
+)
+
+// boundedLLMAuditStrings prevents an owner-provided diagnostic, path, or ref
+// from turning the audit event into a prompt-content transport. The original
+// provider request remains private to the LLM adapter; cross-owner audit only
+// carries short identifiers and warnings.
+func boundedLLMAuditStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]string, 0, min(len(values), llmAuditSliceLimit))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if len(value) > llmAuditStringByteLimit {
+			value = value[:llmAuditStringByteLimit] + "...[truncated]"
+		}
+		if _, duplicate := seen[value]; duplicate {
+			continue
+		}
+		seen[value] = struct{}{}
+		ret = append(ret, value)
+		if len(ret) == llmAuditSliceLimit {
+			break
+		}
+	}
+	return ret
+}
+
+func boundedLLMAuditSections(values []llmmodels.ProviderCacheSectionHash) []llmaudit.ContextSection {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]llmaudit.ContextSection, 0, min(len(values), llmAuditSliceLimit))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		id := strings.TrimSpace(value.SectionID)
+		if id == "" {
+			continue
+		}
+		if _, duplicate := seen[id]; duplicate {
+			continue
+		}
+		seen[id] = struct{}{}
+		ret = append(ret, llmaudit.ContextSection{
+			ID: id, Hash: strings.TrimSpace(value.Hash), SizeBytes: value.SizeBytes,
+			SourceRefs: boundedLLMAuditStrings(value.SourceRefs),
+		})
+		if len(ret) == llmAuditSliceLimit {
+			break
+		}
 	}
 	return ret
 }

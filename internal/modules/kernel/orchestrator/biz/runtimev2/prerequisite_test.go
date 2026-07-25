@@ -111,6 +111,89 @@ func TestReduceRuntimeStateWithDirectiveAcquiresDeclaredFocusTargetBeforeCandida
 	}
 }
 
+func TestReduceRuntimeStateWithDirectiveRetiresHistoricalSelectionBeforeCurrentFocusPreflight(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus = runtimecontract.CoverageFocus{
+		ID: "focus-manager", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, TargetRole: "implementation",
+		TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
+		TargetSelectorRef:      "file/profile_declared_candidates", TargetSelectorOwnerRef: "profile-bootstrap",
+		TargetSelectorSubjectRef: "manager", TargetSelectorCandidateRefs: []string{"internal/lsp/manager.go"},
+		RequireTargetGrounding: true,
+	}
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "selection-go-mod", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		TargetRole: "module_definition", SelectorRef: "file/profile_declared_candidates",
+		Disposition: runtimecontract.RuntimeTargetSelectionSelected, TargetRefs: []string{"go.mod"},
+		CandidateTargetRefs: []string{"go.mod"}, CandidateCount: 1, ObservedRevision: "tree-old",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: selection.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindTargetSelection,
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, ContentHash: selection.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", Revision: "tree-old",
+		}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	facts.Resources.TargetSelection = &selection
+	facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{TargetRef: "go.mod", ContentHash: "go-mod-old", ContentState: runtimecontract.SnapshotContentStateComplete}}
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{{
+		ID: selection.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindTargetSelection,
+		Scope: runtimecontract.RuntimePrerequisiteScopeFocus, FocusID: "focus-module", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+	}}
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
+
+	updated, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || updated.Resources.TargetSelection != nil || len(updated.Resources.TargetSnapshots) != 0 ||
+		len(updated.Prerequisites.Satisfied) != 0 || len(updated.Resources.PrerequisiteObservations) != 0 ||
+		len(updated.Prerequisites.Retired) != 1 || updated.Prerequisites.Retired[0].ID != selection.PrerequisiteID ||
+		len(updated.Resources.RetiredPrerequisiteObservations) != 1 || updated.Resources.RetiredPrerequisiteObservations[0].ObservationID != observation.ObservationID {
+		t.Fatalf("historical target authority was not retired before preflight: facts=%+v decision=%+v", updated, decision)
+	}
+	foundCurrentSelection := false
+	for _, prerequisite := range updated.Prerequisites.Pending {
+		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSelection && prerequisite.Scope == runtimecontract.RuntimePrerequisiteScopeFocus &&
+			prerequisite.FocusID == facts.Focus.ID && prerequisite.TargetSelectorCandidateRefs[0] == "internal/lsp/manager.go" {
+			foundCurrentSelection = true
+		}
+	}
+	if !foundCurrentSelection {
+		t.Fatalf("current focus target selection was not acquired: %+v", updated.Prerequisites.Pending)
+	}
+}
+
+func TestPreflightRuntimeFactsReacquiresFailureTargetWhenTypedFailureChanges(t *testing.T) {
+	requirement := RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindFailureTarget, Scope: runtimecontract.RuntimePrerequisiteScopeGlobal, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator}
+	facts := runtimecontract.RuntimeFacts{
+		Failure:       &runtimecontract.FailureFact{Signature: "failure-v2", TargetRefs: []string{"next.go"}},
+		Resources:     runtimecontract.RuntimeResourceFacts{FailureTarget: &runtimecontract.FailureTarget{Signature: "failure-v1", TargetRefs: []string{"old.go"}}},
+		Prerequisites: runtimecontract.PrerequisiteState{Satisfied: []runtimecontract.RuntimePrerequisite{{ID: runtimePrerequisiteID(requirement), Kind: runtimecontract.PrerequisiteKindFailureTarget, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator}}},
+	}
+	prepared := PreflightRuntimeFacts(facts, []RuntimeRequirement{requirement})
+	if len(prepared.Prerequisites.Pending) != 1 || prepared.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindFailureTarget || len(prepared.Prerequisites.Satisfied) != 0 {
+		t.Fatalf("changed failure target did not re-enter acquisition: %+v", prepared.Prerequisites)
+	}
+}
+
+func TestCommitPrerequisiteResultRejectsFailureTargetOutsideCurrentTypedFailure(t *testing.T) {
+	requirement := RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindFailureTarget, Scope: runtimecontract.RuntimePrerequisiteScopeGlobal, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator}
+	facts := runtimecontract.RuntimeFacts{
+		Failure:       &runtimecontract.FailureFact{Signature: "failure-v2", TargetRefs: []string{"next.go"}},
+		Prerequisites: runtimecontract.PrerequisiteState{Pending: []runtimecontract.RuntimePrerequisite{{ID: runtimePrerequisiteID(requirement), Kind: requirement.Kind, Scope: requirement.Scope, OwnerModuleID: requirement.OwnerModuleID}}},
+	}
+	if _, err := CommitPrerequisiteResult(facts, PrerequisiteResult{PrerequisiteID: runtimePrerequisiteID(requirement), FailureTarget: &runtimecontract.FailureTarget{Signature: "failure-v1", TargetRefs: []string{"old.go"}}}); err == nil {
+		t.Fatal("failure target with a different typed failure identity was accepted")
+	}
+	if facts.Resources.FailureTarget != nil || len(facts.Prerequisites.Pending) != 1 {
+		t.Fatalf("rejected local mapping mutated source facts: %+v", facts)
+	}
+}
+
 func TestReduceRuntimeStateWithDirectiveAcquiresSnapshotForPersistedFailureTargetBeforeCandidate(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.RequireTargetGrounding = true
@@ -218,6 +301,7 @@ func TestReduceRuntimeStateWithDirectiveAllowsOwnerGroundedEmptyWorkspaceCreatio
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
 	facts.Prerequisites = runtimecontract.PrerequisiteState{}
+	bindCurrentFocusTargetSelection(&facts)
 
 	updated, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
 	if err != nil {
@@ -244,6 +328,7 @@ func TestReduceRuntimeStateWithDirectiveAllowsBoundedOwnerWorkspaceScopeWithoutC
 	facts.Resources.TargetSelection = &selection
 	facts.Resources.Manifest = &runtimecontract.WorkspaceManifest{Revision: "workspace-tree-v1", TargetRefs: []string{"implementation.go", "support.go"}}
 	facts.Prerequisites = runtimecontract.PrerequisiteState{}
+	bindCurrentFocusTargetSelection(&facts)
 
 	updated, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
 	if err != nil {
@@ -266,6 +351,7 @@ func TestReduceRuntimeStateWithDirectiveTerminatesUngroundedStateChangeWithoutGo
 	selection := testRuntimeTargetSelection("target_selection:blocks/file:implementation::::0", "implementation", runtimecontract.RuntimeTargetSelectionAmbiguous, []string{"validation-entry.go", "implementation.go"})
 	facts.Resources.TargetSelection = &selection
 	facts.Prerequisites = runtimecontract.PrerequisiteState{}
+	bindCurrentFocusTargetSelection(&facts)
 
 	_, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
 	if err != nil {
@@ -289,6 +375,7 @@ func TestReduceRuntimeStateWithDirectiveTerminatesUngroundedDirectValidationWith
 	selection := testRuntimeTargetSelection("target_selection:blocks/file:implementation:file/unique_workspace_entry:::0", "implementation", runtimecontract.RuntimeTargetSelectionAmbiguous, []string{"validation-entry.go", "implementation.go"})
 	facts.Resources.TargetSelection = &selection
 	facts.Prerequisites = runtimecontract.PrerequisiteState{}
+	bindCurrentFocusTargetSelection(&facts)
 
 	_, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
 	if err != nil {
@@ -364,6 +451,7 @@ func testRuntimeTargetSelection(prerequisiteID, targetRole string, disposition r
 
 func TestPreflightRuntimeFactsChecksAllRuntimeManagedPrerequisites(t *testing.T) {
 	facts := validationFacts()
+	facts.Failure = &runtimecontract.FailureFact{Signature: "failure-1", TargetRefs: []string{"main.go"}}
 	requirements := []RuntimeRequirement{
 		{Kind: runtimecontract.PrerequisiteKindManifest},
 		{Kind: runtimecontract.PrerequisiteKindFailureTarget},

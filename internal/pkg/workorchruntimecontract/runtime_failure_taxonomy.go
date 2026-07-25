@@ -48,6 +48,8 @@ func FailureClassDisposition(class FailureClass) RuntimeFailureDisposition {
 	case FailureClassCandidateSchemaFailure, FailureClassCandidateContractFailure,
 		FailureClassCandidateExhausted:
 		return RuntimeFailureDispositionSameContractRetry
+	case FailureClassCandidateCorrectionUndefined:
+		return RuntimeFailureDispositionBoundedFail
 	case FailureClassProviderTransient:
 		return RuntimeFailureDispositionProviderRetry
 	case FailureClassProviderAuthentication, FailureClassProviderConfiguration:
@@ -61,7 +63,11 @@ func FailureClassDisposition(class FailureClass) RuntimeFailureDisposition {
 		FailureClassBuildFailure, FailureClassEffectMismatch:
 		return RuntimeFailureDispositionSameFocusRepair
 	case FailureClassOperationOutcomeUnknown:
-		return RuntimeFailureDispositionGovernance
+		// An unknown owner outcome is not itself an external dependency. Only a
+		// separately sealed dependency may enter governance; otherwise the
+		// Orchestrator must terminal it deterministically instead of inventing a
+		// decision ticket from an error classification.
+		return RuntimeFailureDispositionBoundedFail
 	case FailureClassCASConflict:
 		return RuntimeFailureDispositionCASReload
 	case FailureClassProjectionDeliveryFailure:

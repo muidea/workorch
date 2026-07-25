@@ -182,11 +182,11 @@ func TestRuntimeV2FileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "mcp-owner-grounding-prefix"); err != nil {
+				if _, err := beginRuntimeV2CandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, "mcp-owner-grounding-prefix"); err != nil {
 					t.Fatal(err)
 				}
 				candidate := runtimeV2FileBackedMCPFailureCandidate()
-				if _, err := controller.AdmitCandidateProposal(ctx, "ws-v2", "run-v2", 0, candidate); err != nil {
+				if _, err := admitRuntimeV2CandidateProposalForTest(ctx, controller, "ws-v2", "run-v2", 0, candidate); err != nil {
 					t.Fatal(err)
 				}
 				probeResult := hub.Send(magicevent.NewEventWithContext(
@@ -214,7 +214,7 @@ func TestRuntimeV2FileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing
 				}); err != nil {
 					t.Fatal(err)
 				}
-				sealed, err := controller.AdmitAndSealCandidateAttempt(ctx, "ws-v2", "run-v2", 0, candidate)
+				sealed, err := admitAndSealRuntimeV2CandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, candidate)
 				if err != nil || !sealed.Admission.Accepted() || sealed.Aggregate.ActiveDispatch == nil {
 					t.Fatalf("MCP validation seal=%+v err=%v", sealed, err)
 				}
@@ -390,7 +390,7 @@ func TestRuntimeV2FileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing
 						command.CandidateContext.Focus.TargetRole == "implementation" {
 						contextBound = true
 					}
-					result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Candidate: fileCandidate}, nil)
+					result.Set(runtimeV2CandidateResultForTest(t, command, fileCandidate), nil)
 				})
 				t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
 				patchOwner := NewRuntimeOrchestrator(nil, nil, nil, nil)

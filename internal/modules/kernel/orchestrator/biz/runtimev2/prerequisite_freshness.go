@@ -9,6 +9,173 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+// InvalidatePrerequisitesForReadOnlyStale applies an owner-observed freshness
+// change before any current-authority candidate work or dispatch exists. It is
+// the SM-2 route for a prerequisite probe: the owner supplies only the typed
+// stale identity, while the controller atomically retires every
+// exactly-intersecting observation and records the read-only refresh ledger
+// entry. Historical sessions/attempts from an already-invalidated dispatch are
+// immutable audit lineage, not live SM-3 work; rejecting them would make a
+// later local prerequisite stale unable to converge after an external receipt
+// resource change.
+func (c *RuntimeController) InvalidatePrerequisitesForReadOnlyStale(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, stale runtimecontract.RuntimePrerequisiteStale) (RuntimeAggregate, error) {
+	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
+		return RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	stale = stale.Normalized()
+	if err := stale.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	signature := runtimecontract.StableRuntimePrerequisiteStaleSignature(stale)
+	if prerequisiteInvalidationExists(aggregate, signature) {
+		return aggregate, nil
+	}
+	if aggregate.ActiveDispatch != nil || runtimeAggregateHasCurrentCandidateWork(aggregate) {
+		return RuntimeAggregate{}, fmt.Errorf("%w: read-only prerequisite stale requires no current candidate or dispatch", common.ErrConflict)
+	}
+	expectedRevision := aggregate.StateRevision
+	facts, prerequisiteIDs, observationIDs, invalidatedDependencies, err := invalidatePrerequisiteObservationsForStale(aggregate.Facts, stale)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	ledger, consumed, err := facts.Recovery.Consume(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh, facts.RecoveryPolicy)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	facts.Recovery = ledger
+	staleCopy := stale
+	aggregate.PrerequisiteInvalidations = append(aggregate.PrerequisiteInvalidations, runtimecontract.RuntimePrerequisiteInvalidationRecord{
+		Signature: signature, PrerequisiteIDs: prerequisiteIDs, ObservationIDs: observationIDs,
+		InvalidatedDependencies: invalidatedDependencies, Stale: &staleCopy,
+	})
+	if !consumed {
+		facts.Failure = &runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassPrerequisiteRefreshExhausted, Code: "prerequisite_refresh_exhausted",
+			Signature: signature, Message: "prerequisite refresh budget exhausted: " + stale.Reason,
+		}
+	}
+	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	aggregate.Facts = facts
+	aggregate.Decision = decision
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return aggregate, nil
+}
+
+// runtimeAggregateHasCurrentCandidateWork distinguishes active SM-3 work from
+// immutable lineage that belongs to a prior authority snapshot.  Resource
+// receipt invalidation intentionally keeps the accepted candidate/session that
+// authorized the durable effect; a later SM-2 stale fact may proceed only when
+// it cannot invalidate a current provider request or pending candidate.
+func runtimeAggregateHasCurrentCandidateWork(aggregate RuntimeAggregate) bool {
+	transaction := aggregate.Decision.AuthorityTransaction()
+	if transaction.AuthoritySnapshotID == "" {
+		return false
+	}
+	for _, session := range aggregate.CandidateRequestSessions {
+		if session.Transaction == transaction && session.State != runtimecontract.RuntimeCandidateRequestSessionTerminal {
+			return true
+		}
+	}
+	for _, attempt := range aggregate.CandidateAttempts {
+		if attempt.Transaction != transaction {
+			continue
+		}
+		switch attempt.State {
+		case runtimecontract.RuntimeCandidateAttemptStatePending, runtimecontract.RuntimeCandidateAttemptStateAccepted:
+			return true
+		}
+	}
+	return false
+}
+
+// InvalidateCandidateRequestSessionForPrerequisiteStale is the session-first
+// stale route for a provider response or freshness observation received before
+// C5 admission. A C4 document may already be complete, but it is not yet a
+// candidate attempt and must never be decoded/admitted after the authority
+// turns stale. The method deliberately has no candidate-attempt parameter:
+// stale authority is an SM-2 prerequisite fact, not an SM-3 candidate
+// rejection. The session is retained as terminal audit lineage while the
+// reducer seals a new authority around the reacquired active prerequisite.
+func (c *RuntimeController) InvalidateCandidateRequestSessionForPrerequisiteStale(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, stale runtimecontract.RuntimePrerequisiteStale) (RuntimeAggregate, error) {
+	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" {
+		return RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	stale = stale.Normalized()
+	if err := stale.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	signature := runtimecontract.StableRuntimePrerequisiteStaleSignature(stale)
+	if prerequisiteInvalidationExists(aggregate, signature) {
+		return aggregate, nil
+	}
+	idx, session, err := currentCandidateRequestSession(aggregate, logicalRequestID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if !session.ProviderSubmitted {
+		return RuntimeAggregate{}, fmt.Errorf("%w: stale candidate response does not match a submitted physical call", common.ErrConflict)
+	}
+
+	expectedRevision := aggregate.StateRevision
+	facts, affectedPrerequisites, affectedObservations, invalidatedDependencies, err := invalidatePrerequisiteObservationsForStale(aggregate.Facts, stale)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	ledger, consumed, err := facts.Recovery.Consume(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh, facts.RecoveryPolicy)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	facts.Recovery = ledger
+	staleCopy := stale
+	aggregate.CandidateRequestSessions[idx].State = runtimecontract.RuntimeCandidateRequestSessionTerminal
+	aggregate.CandidateRequestSessions[idx].ProviderSubmitted = false
+	aggregate.CandidateRequestSessions[idx].LastOutcome = runtimecontract.RuntimeCandidateRequestOutcome{
+		Class: runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale,
+		Code:  "prerequisite_stale", Signature: runtimecontract.StableRuntimePrerequisiteStaleSignature(stale),
+	}
+	aggregate.PrerequisiteInvalidations = append(aggregate.PrerequisiteInvalidations, runtimecontract.RuntimePrerequisiteInvalidationRecord{
+		Signature: signature, PrerequisiteIDs: affectedPrerequisites, ObservationIDs: affectedObservations,
+		InvalidatedDependencies: invalidatedDependencies, Stale: &staleCopy,
+	})
+	if !consumed {
+		facts.Failure = &runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassPrerequisiteRefreshExhausted, Code: "prerequisite_refresh_exhausted",
+			Signature: signature, Message: "prerequisite refresh budget exhausted: " + stale.Reason,
+		}
+	}
+	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	aggregate.Facts = facts
+	aggregate.Decision = decision
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return aggregate, nil
+}
+
 // InvalidateCandidateAttemptForPrerequisiteStale abandons an unsealed
 // candidate request/proposal after an owner read-only probe proves that one
 // prerequisite observation is obsolete. It is deliberately not
@@ -419,7 +586,24 @@ func invalidatePrerequisiteObservationsForStale(facts runtimecontract.RuntimeFac
 	if !matchedDependency {
 		return runtimecontract.RuntimeFacts{}, nil, nil, nil, fmt.Errorf("%w: stale prerequisite dependency is not current", common.ErrConflict)
 	}
-	updated, prerequisiteIDs, observationIDs, dependencies, err := invalidatePrerequisiteObservations(facts, []runtimecontract.RuntimePrerequisiteObservation{observation})
+	// A stale owner observation proves that the exact dependency revision is no
+	// longer authoritative, not merely that the responder which reported it is
+	// stale. Retire every current observation with that same typed dependency.
+	// This matters for a Git admissibility inventory: it is bound to a Git
+	// repository-state snapshot that carries the identical repository revision.
+	// Keeping that snapshot would force re-acquisition to reuse the obsolete
+	// binding and make the next owner result uncommittable.
+	affected := make([]runtimecontract.RuntimePrerequisiteObservation, 0, 1)
+	for _, candidate := range facts.Resources.PrerequisiteObservations {
+		for _, dependency := range candidate.Normalized().Dependencies {
+			if dependency.Domain == stale.Domain && dependency.OwnerModuleID == stale.OwnerModuleID &&
+				dependency.SubjectRef == stale.SubjectRef && dependency.Revision == stale.ExpectedRevision {
+				affected = append(affected, candidate)
+				break
+			}
+		}
+	}
+	updated, prerequisiteIDs, observationIDs, dependencies, err := invalidatePrerequisiteObservations(facts, affected)
 	if err != nil {
 		return runtimecontract.RuntimeFacts{}, nil, nil, nil, err
 	}

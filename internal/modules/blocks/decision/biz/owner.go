@@ -91,7 +91,7 @@ func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magiceven
 		setDecisionRuntimeCapabilityResult(result, orchestratorevents.AcquireRuntimeCapabilitiesResult{}, common.ErrInvalidArgument)
 		return
 	}
-	response, err := orchestratorevents.ResolveRuntimeCapabilities(command, ModuleID, runtimecontract.RuntimeBlockKindDecisionRequest)
+	response, err := orchestratorevents.ResolveRuntimeCapabilities(command, ModuleID, modulecommon.RuntimeCapabilityKinds()...)
 	setDecisionRuntimeCapabilityResult(result, response, err)
 }
 

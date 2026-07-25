@@ -36,6 +36,32 @@ func TestRuntimeControllerGovernanceRequestBindingIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestRuntimeControllerRejectsGovernanceSealWithoutSealedDependencySource(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, _ := NewRuntimeController(repository)
+	governed := sealGovernanceDispatch(t, controller)
+	// Simulate a persisted-but-invalid authority that would previously have
+	// received a generic decision ticket. The controller is the last write-side
+	// fence and must reject it even when a caller provides a syntactically valid
+	// governance candidate.
+	*repository.aggregate = governed
+	repository.aggregate.ActiveDispatch = nil
+	repository.aggregate.GovernanceRequests = nil
+	repository.aggregate.Facts.Failure.GovernanceDependency = nil
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(repository.aggregate.Decision, currentFocusTargetSelection(repository.aggregate.Facts))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = controller.SealGovernanceDispatch(context.Background(), repository.aggregate.Facts.WorkspaceID, repository.aggregate.Facts.RunID, manifest, runtimecontract.RuntimeCandidate{
+		Governance: &runtimecontract.GovernanceCandidate{ExternalDependency: runtimecontract.ExternalDependency{
+			Kind: "external-approval", SubjectRef: "subject-1", Reason: "需要外部裁决",
+		}},
+	})
+	if !errors.Is(err, common.ErrConflict) || repository.aggregate.ActiveDispatch != nil || len(repository.aggregate.GovernanceRequests) != 0 {
+		t.Fatalf("unsealed governance source err=%v aggregate=%+v", err, repository.aggregate)
+	}
+}
+
 func TestRuntimeControllerCommitsGovernanceContinueAndResumesReducer(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
@@ -99,16 +125,22 @@ func sealGovernanceDispatch(t *testing.T, controller *RuntimeController) Runtime
 	facts.Capabilities.GovernanceKinds = []string{"decision/resolution"}
 	facts.Failure = &runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassGovernanceDependency, Signature: "external-approval", Message: "需要外部裁决",
+		GovernanceDependency: &runtimecontract.ExternalDependency{Kind: "external-approval", SubjectRef: "subject-1", Reason: "需要外部裁决"},
 	}
 	definition := controllerDefinition()
 	definition.CapabilityContract = append(definition.CapabilityContract, "decision/resolution")
 	if _, err := controller.Initialize(context.Background(), facts, definition, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, "stable-prefix"); err != nil {
+	aggregate, err := controller.Load(context.Background(), facts.WorkspaceID, facts.RunID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	sealed, err := controller.AcceptCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidate{
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, currentFocusTargetSelection(aggregate.Facts))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := controller.SealGovernanceDispatch(context.Background(), facts.WorkspaceID, facts.RunID, manifest, runtimecontract.RuntimeCandidate{
 		Governance: &runtimecontract.GovernanceCandidate{ExternalDependency: runtimecontract.ExternalDependency{
 			Kind: "external-approval", SubjectRef: "subject-1", Reason: "需要外部裁决",
 		}},
@@ -144,7 +176,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 		t.Fatal(err)
 	}
 	// Seed an active sealed dispatch with operation execution ledger.
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{
@@ -207,10 +239,15 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 		binding.ExecutionKey != execution.ExecutionKey || binding.Fence != execution.Fence || binding.GovernanceReceiptHash != runtimecontract.StableRuntimeOperationReceiptHash(committed) {
 		t.Fatalf("suspended operation governance binding = %+v", binding)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "governance-prefix"); err != nil {
+	governanceAggregate, err := controller.Load(context.Background(), "ws-v2", "run-v2")
+	if err != nil {
 		t.Fatal(err)
 	}
-	governed, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(governanceAggregate.Decision, currentFocusTargetSelection(governanceAggregate.Facts))
+	if err != nil {
+		t.Fatal(err)
+	}
+	governed, err := controller.SealGovernanceDispatch(context.Background(), "ws-v2", "run-v2", manifest, runtimecontract.RuntimeCandidate{
 		Governance: &runtimecontract.GovernanceCandidate{ExternalDependency: runtimecontract.ExternalDependency{
 			Kind: string(requirement.Kind), SubjectRef: requirement.SubjectRef, Reason: requirement.Reason,
 		}},

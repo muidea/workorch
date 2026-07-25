@@ -27,6 +27,7 @@ const (
 	TopicOrchestratorProbeRuntimeOperationFeasibility     = "/orchestrator/runtime-operation/probe-feasibility"
 	TopicOrchestratorAcquireGitCapabilityState            = "/orchestrator/prerequisite/acquire-git-capability-state"
 	TopicOrchestratorDriveRuntimeV2                       = "/orchestrator/runtime-v2/drive"
+	TopicOrchestratorPreflightRuntimeCandidate            = "/orchestrator/runtime-candidate/preflight"
 	TopicOrchestratorRequestRuntimeCandidate              = "/orchestrator/runtime-candidate/request"
 	TopicOrchestratorExecuteFileListOperation             = "/orchestrator/runtime-operation/file-list"
 	TopicOrchestratorExecuteFileReadOperation             = "/orchestrator/runtime-operation/file-read"

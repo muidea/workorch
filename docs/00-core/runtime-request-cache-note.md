@@ -70,6 +70,8 @@ core 仍只输出 provider-neutral `PromptContext` 与 `ProviderCachePlan`，但
 
 每次 request 应可追溯：
 
+- `logicalRequestId`（同一 sealed authority 的 request session identity）与每次 HTTP 调用独立的 `physicalCallId`；
+- continuation 的 `sequence`、fragment hash/bytes、document disposition 与 `providerSubmitted`；
 - `stablePrefixHash`
 - `workspaceDefinitionHash`
 - `capabilityContractHash`
@@ -80,6 +82,11 @@ core 仍只输出 provider-neutral `PromptContext` 与 `ProviderCachePlan`，但
 - included / normalized / compressed / omitted sections
 
 审计字段名可保留历史 `stageBundleHash` 标识，但其语义是 **focus / requiredOutput bundle**，不是 V1 StagePacket / NextAction。
+
+完整 document 前的 fragment、timeout、401/403、5xx 与提交结果未知都属于 request-session audit，不能被
+记录为 candidate attempt。continuation suffix 仅携带上一片段的受限 tail/sequence，C0～C3 与同一 sealed
+transaction 的 stable prefix 不得因此漂移；raw fragment、provider body、credential 和 endpoint 不得进入
+审计或下一次普通 candidate context。
 
 ### Context Priority Tiers
 

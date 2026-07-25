@@ -4,6 +4,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,6 +20,31 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestAcquireRuntimeCapabilitiesPrerequisiteReturnsTypedOwnerUnavailable(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(8)
+	defer hub.Terminate(ctx)
+	facts := runtimev2.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
+		WorkspaceID: "ws-capability", RunID: "run-capability", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
+		Focus: runtimecontract.CoverageFocus{ID: "focus-1"},
+	}, []runtimev2.RuntimeRequirement{{
+		Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleWeb,
+		CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.StepKindWebFetch},
+	}})
+	prerequisite := facts.Prerequisites.Pending[0]
+	_, err := AcquireAndCommitRuntimeCapabilitiesPrerequisite(ctx, hub, facts, orchestratorevents.AcquireRuntimeCapabilitiesCommand{
+		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: "authority-1", PrerequisiteID: prerequisite.ID,
+		ModuleID: prerequisite.OwnerModuleID, CapabilityClass: prerequisite.CapabilityClass, RequiredKinds: prerequisite.RequiredCapabilities,
+	})
+	var unsupported *orchestratorevents.RuntimeCapabilityUnsupportedError
+	if !errors.As(err, &unsupported) || unsupported.ModuleID != runtimecontract.RuntimeModuleWeb || unsupported.Reason != "owner_unavailable" {
+		t.Fatalf("missing capability owner error = %#v, want typed owner_unavailable", err)
+	}
+	if len(facts.Capabilities.StateChangeKinds) != 0 || len(facts.Capabilities.ValidationKinds) != 0 || len(facts.Prerequisites.Satisfied) != 0 {
+		t.Fatalf("absent owner mutated prerequisite facts: %+v", facts)
+	}
+}
 
 func TestAcquireTargetSnapshotPrerequisiteUsesTypedEventHubContract(t *testing.T) {
 	ctx := context.Background()

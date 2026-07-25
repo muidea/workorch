@@ -7,6 +7,9 @@ const ModuleID = runtimemodel.RuntimeModuleWeb
 const StepKindSearch = runtimemodel.StepKindWebSearch
 const StepKindFetch = runtimemodel.StepKindWebFetch
 
+// RuntimeCapabilityKinds is the Web owner's complete Runtime V2 capability inventory.
+func RuntimeCapabilityKinds() []string { return []string{StepKindSearch, StepKindFetch} }
+
 const ProviderHTTP = "http"
 
 const (

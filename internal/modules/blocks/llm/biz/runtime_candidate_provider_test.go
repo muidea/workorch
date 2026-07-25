@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -25,6 +26,72 @@ func TestRuntimeCandidateProviderClassifiesAuthenticationConfigurationAndTransie
 	if got := runtimeCandidateProviderFailureClass(context.DeadlineExceeded, true); got != runtimecontract.RuntimeCandidateFailureClassProviderTransient {
 		t.Fatalf("deadline class = %s, want ordinary provider transport failure", got)
 	}
+}
+
+func TestRuntimeCandidateProviderUsesOrchestratorPhysicalCallID(t *testing.T) {
+	request := llmmodels.RuntimeCandidateRequest{LogicalRequestID: "candidate-request-1", RequestSequence: 3, PhysicalCallID: "physical-call-3"}
+	if got := newProviderRequestID(request); got != request.PhysicalCallID {
+		t.Fatalf("provider request ID = %q, want persisted physical call ID %q", got, request.PhysicalCallID)
+	}
+}
+
+func TestRuntimeV2ProviderRequestRejectsUnsealedManifestBeforeProviderConfiguration(t *testing.T) {
+	_, err := runtimeV2ProviderRequest(llmmodels.RuntimeCandidateRequest{})
+	if err == nil || !strings.Contains(err.Error(), "runtime candidate contract manifest") {
+		t.Fatalf("provider request error = %v, want manifest preflight failure", err)
+	}
+}
+
+func runtimeCandidateManifestForRequest(t *testing.T, decision runtimecontract.RuntimeDecision, context runtimecontract.RuntimeCandidateContext) runtimecontract.RuntimeCandidateContractManifest {
+	t.Helper()
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, context.Resources.TargetSelection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return manifest
+}
+
+// runtimeCandidateManifestForSchema is deliberately test-only. Production
+// renderers receive the manifest carried by the sealed EventHub request and
+// never compile one from a decision. Unit tests build the same canonical value
+// explicitly so no legacy decision-to-schema fallback survives in production.
+func runtimeCandidateManifestForSchema(t *testing.T, decision runtimecontract.RuntimeDecision, selection *runtimecontract.RuntimeTargetSelection) runtimecontract.RuntimeCandidateContractManifest {
+	t.Helper()
+	if decision.RequiredOutput.Kind == runtimecontract.RequiredOutputKindNone {
+		switch decision.Action {
+		case runtimecontract.RuntimeActionProduceStateChange:
+			decision.RequiredOutput.Kind = runtimecontract.RequiredOutputKindStateChange
+		case runtimecontract.RuntimeActionProduceValidation:
+			decision.RequiredOutput.Kind = runtimecontract.RequiredOutputKindValidation
+		case runtimecontract.RuntimeActionProduceAssessment:
+			decision.RequiredOutput.Kind = runtimecontract.RequiredOutputKindAssessment
+		case runtimecontract.RuntimeActionRequestGovernance:
+			decision.RequiredOutput.Kind = runtimecontract.RequiredOutputKindGovernance
+		}
+	}
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return manifest
+}
+
+func runtimeCandidateSchemaForDecision(t *testing.T, decision runtimecontract.RuntimeDecision, selection *runtimecontract.RuntimeTargetSelection) string {
+	t.Helper()
+	return runtimeV2CandidateSchemaForManifest(runtimeCandidateManifestForSchema(t, decision, selection))
+}
+
+func runtimeCandidateOutputContractForDecision(t *testing.T, decision runtimecontract.RuntimeDecision, selection *runtimecontract.RuntimeTargetSelection) runtimeCandidateOutputContractProjection {
+	t.Helper()
+	return runtimeV2CandidateOutputContractForManifest(runtimeCandidateManifestForSchema(t, decision, selection))
+}
+
+func runtimeCandidateContextManifest(action runtimecontract.RuntimeAction, kinds ...string) runtimecontract.RuntimeCandidateContractManifest {
+	operations := make([]runtimecontract.RuntimeCandidateOperationManifest, 0, len(kinds))
+	for _, kind := range kinds {
+		operations = append(operations, runtimecontract.RuntimeCandidateOperationManifest{Kind: kind})
+	}
+	return runtimecontract.RuntimeCandidateContractManifest{Action: action, Operations: operations}
 }
 
 func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T) {
@@ -86,6 +153,7 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 	}
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	facts.Resources.TargetSelection = &selection
+	bindRuntimeCandidateTestSelection(&facts, selection)
 	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedStateChange, Action: runtimecontract.RuntimeActionProduceStateChange, Focus: facts.Focus,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
@@ -119,32 +187,43 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 		!slices.Equal(candidateContext.RequiredEvidenceKinds, decision.RequiredOutput.RequiredEvidenceKinds) {
 		t.Fatalf("candidate context requirements = %+v, want sealed decision output %+v", candidateContext, decision.RequiredOutput)
 	}
+	manifest := runtimeCandidateManifestForRequest(t, decision, candidateContext)
 	request, err := runtimeV2ProviderRequest(llmmodels.RuntimeCandidateRequest{
 		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix,
-		DefinitionContext: definition, CandidateContext: candidateContext,
+		CandidateManifest: manifest, DefinitionContext: definition, CandidateContext: candidateContext,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if request.ContextBudget == nil || request.ContextBudget.CachePlan == nil || request.ContextBudget.CachePlan.StablePrefixHash != prefix ||
-		request.ContextBudget.CachePlan.RenderedStablePrefixHash != prefix || len(request.PromptContext.Sections) != 4 {
+		request.ContextBudget.CachePlan.RenderedStablePrefixHash == "" || len(request.PromptContext.Sections) != 6 {
 		t.Fatalf("provider request cache plan = %+v prompt=%+v", request.ContextBudget, request.PromptContext)
 	}
 	if request.ContextBudget.ActualBytes <= 0 || request.ContextBudget.ActualBytes >= 96*1024 {
 		t.Fatalf("provider request actual bytes = %d, want current-stage projection below 96 KiB", request.ContextBudget.ActualBytes)
 	}
-	if request.PromptContext.Sections[3].Content == "" || request.Schema == "" {
+	if request.PromptContext.Sections[3].Content == "" || request.PromptContext.Sections[4].Content == "" || request.Schema == "" {
 		t.Fatalf("provider request lost dynamic context: %+v", request)
 	}
 	contractSection := request.PromptContext.Sections[0].Content
-	for _, value := range []string{`"operations"`, `"focusId"`, `"externalDependency"`, "candidate", "candidates", "executionGraph", "durable-effect witnesses", "copy that exact value into its top-level targetRefs"} {
+	for _, value := range []string{"one JSON object", "context.outputContract is the sole structured-output contract", "manifestHash", "sole next-action authority", "completion-audit information only"} {
 		if !strings.Contains(contractSection, value) {
 			t.Fatalf("provider request stable contract lost %q: %s", value, contractSection)
 		}
 	}
+	for _, forbidden := range []string{`"operations"`, `"focusId"`, `"externalDependency"`, "copy that exact value into its top-level targetRefs"} {
+		if strings.Contains(contractSection, forbidden) {
+			t.Fatalf("provider request stable contract retained manifest-specific rule %q: %s", forbidden, contractSection)
+		}
+	}
 	dynamicSection := request.PromptContext.Sections[3].Content
+	executionTail := request.PromptContext.Sections[4].Content
+	largeRefs := request.PromptContext.Sections[5].Content
+	if request.PromptContext.Sections[3].ID != "C3.runtime-authority" || request.PromptContext.Sections[4].ID != "C4.execution-tail" || request.PromptContext.Sections[5].ID != "C5.large-refs" {
+		t.Fatalf("runtime prompt sections = %+v", request.PromptContext.Sections)
+	}
 	for _, value := range []string{
-		`"outputContract"`, `"requiredTopLevelExample":"{\"operations\":[...]}"`, `"$id":"workorch.runtime_candidate.state_change.v2"`, `"forbiddenTopLevelFields"`,
+		`"outputContract"`, `"manifestHash"`, `"structuredOutputInstruction"`, `"$id":"workorch.runtime_candidate.state_change.v2"`, `"forbiddenTopLevelFields"`,
 		`"operationContracts":[{"kind":"file/edit"`, `"name":"path"`, `"name":"oldText"`, `"name":"newText"`,
 		`"forbiddenParameters":["filePath","fileContent","targetRef","targetRefs"]`,
 		`"RequirementID":"repo-init"`, `"capabilityStates"`, `"repo-state-hash"`, `"targetSelectionInstruction"`, "empty workspace creation scope", `sealed prospective target \"initial-deliverable.txt\"`,
@@ -160,7 +239,7 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 		!strings.Contains(request.PromptContext.Sections[3].Content, "execution-only-soul") || strings.Contains(request.PromptContext.Sections[3].Content, "validation-only-soul") ||
 		strings.Contains(request.PromptContext.Sections[3].Content, "default-only-soul") || strings.Contains(request.PromptContext.Sections[3].Content, "must_produce_state_change") ||
 		strings.Contains(request.PromptContext.Sections[3].Content, "lsp_diagnostics") ||
-		!strings.Contains(request.PromptContext.Sections[3].Content, "signature-old") || !strings.Contains(request.PromptContext.Sections[3].Content, "target-old") {
+		!strings.Contains(executionTail, "signature-old") || !strings.Contains(executionTail, "target-old") {
 		t.Fatalf("provider request lost typed activation context: %s", request.PromptContext.Sections[3].Content)
 	}
 	capabilitySection := request.PromptContext.Sections[2].Content
@@ -177,25 +256,118 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 			t.Fatalf("rejected shape leaked into stable C%d section: %s", idx, request.PromptContext.Sections[idx].Content)
 		}
 	}
-	if !strings.Contains(request.PromptContext.Sections[3].Content, "rejectedOperationShapes") || !strings.Contains(request.PromptContext.Sections[3].Content, "rejected-shape-signature") {
-		t.Fatalf("rejected shape is not rendered in volatile candidate context: %s", request.PromptContext.Sections[3].Content)
+	if !strings.Contains(executionTail, "rejectedOperationShapes") || !strings.Contains(executionTail, "rejected-shape-signature") {
+		t.Fatalf("rejected shape is not rendered in volatile execution tail: %s", executionTail)
 	}
-	retryFailure := runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassSchema, Reason: `json: unknown field "candidate"`}
-	retryRequest, err := runtimeV2ProviderRequest(llmmodels.RuntimeCandidateRequest{
-		Decision: decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1, PreviousFailure: &retryFailure, StablePrefixHash: prefix,
-		DefinitionContext: definition, CandidateContext: candidateContext,
-	})
-	if err != nil {
-		t.Fatal(err)
+	if strings.Contains(dynamicSection, "rejected-shape-signature") || strings.Contains(dynamicSection, "signature-old") || strings.Contains(dynamicSection, `"continuation":{}`) || strings.Contains(largeRefs, "package main") {
+		t.Fatalf("volatile or large content leaked into C3/C5: c3=%s c5=%s", dynamicSection, largeRefs)
 	}
-	retrySection := retryRequest.PromptContext.Sections[3].Content
-	for _, value := range []string{`"candidateAttempt":1`, `"previousFailure"`, `unknown field \"candidate\"`, "do not repeat any wrapper", "executionGraph"} {
-		if !strings.Contains(retrySection, value) {
-			t.Fatalf("provider retry lost correction %q: %s", value, retrySection)
-		}
-	}
-	if retryRequest.ContextBudget.CachePlan.StablePrefixHash != request.ContextBudget.CachePlan.StablePrefixHash || retryRequest.PromptContext.Sections[0].Content != contractSection {
-		t.Fatalf("retry changed stable provider contract: initial=%+v retry=%+v", request.ContextBudget.CachePlan, retryRequest.ContextBudget.CachePlan)
+	for _, testCase := range []struct {
+		name    string
+		failure runtimecontract.RuntimeCandidateFailure
+		want    []string
+	}{
+		{
+			name: "schema diagnostic",
+			failure: runtimecontract.RuntimeCandidateFailure{
+				Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
+				Reason: "raw decoder text must not be rendered: json: unknown field candidate",
+				Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+					Path: "$.operations[0].parameters[0].name", Actual: "summary", Allowed: []string{"command", "args"}, Forbidden: []string{"summary"},
+				},
+			},
+			want: []string{`"class":"schema"`, `"code":"candidate_schema_invalid"`, `"path":"$.operations[0].parameters[0].name"`, `"actual":"summary"`},
+		},
+		{
+			name: "semantic manifest diagnostic",
+			failure: runtimecontract.RuntimeCandidateFailure{
+				Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid", Signature: "candidate-contract-invalid",
+				Reason: "raw semantic cause must not be rendered",
+				Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+					OperationID: "write", Path: "$.operations[0].targetRefs", Actual: "other.go", Required: []string{"main.go"},
+				},
+			},
+			want: []string{`"class":"contract"`, `"code":"candidate_contract_invalid"`, `"operationId":"write"`, `"path":"$.operations[0].targetRefs"`},
+		},
+		{
+			name: "grounded target rejection",
+			failure: runtimecontract.RuntimeCandidateFailure{
+				Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_target_outside_grounding", Signature: "candidate-target-outside-grounding",
+				Reason: "raw owner explanation must not be rendered", TargetRefs: []string{"main.go"},
+			},
+			want: []string{`"code":"candidate_target_outside_grounding"`, `"targetRefs":["main.go"]`},
+		},
+		{
+			name: "owner feasibility diagnostic",
+			failure: runtimecontract.RuntimeCandidateFailure{
+				Class: runtimecontract.RuntimeCandidateFailureClassInfeasible, Code: "operation_target_not_regular", Signature: "owner-target-not-regular",
+				Reason: "owner-private path detail must not be rendered", TargetRefs: []string{"directory"},
+				Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+					OperationID: "edit-directory", Path: "$.operations[id=edit-directory].targetRefs", Actual: "directory",
+					Allowed: []string{"replacement.txt"}, RejectedShapeHash: "owner-rejected-shape",
+					Objectives: []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionReplaceTarget},
+				},
+			},
+			want: []string{`"class":"infeasible"`, `"code":"operation_target_not_regular"`, `"operationId":"edit-directory"`, `"allowed":["replacement.txt"]`, `"rejectedShapeHash":"owner-rejected-shape"`, `"objectives":["replace_target_with_allowed_target"]`},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if diagnostic := testCase.failure.Diagnostic; diagnostic != nil {
+				if diagnostic.ManifestHash == "" {
+					diagnostic.ManifestHash = manifest.Hash
+				}
+				if diagnostic.RejectedShapeHash == "" {
+					diagnostic.RejectedShapeHash = testCase.failure.Signature
+				}
+				if len(diagnostic.Objectives) == 0 {
+					diagnostic.Objectives = runtimecontract.RuntimeCandidateCorrectionObjectivesForFailure(&testCase.failure)
+				}
+			}
+			retryRequest, err := runtimeV2ProviderRequest(llmmodels.RuntimeCandidateRequest{
+				Decision: decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1, PreviousFailure: &testCase.failure, StablePrefixHash: prefix,
+				CandidateManifest: manifest, DefinitionContext: definition, CandidateContext: candidateContext,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			retrySection := retryRequest.PromptContext.Sections[4].Content
+			for _, value := range append([]string{`"candidateAttempt":1`, `"previousFailure"`, "context.outputContract.structuredOutputInstruction", "sealed manifest hash"}, testCase.want...) {
+				if !strings.Contains(retrySection, value) {
+					t.Fatalf("provider retry lost correction %q: %s", value, retrySection)
+				}
+			}
+			if strings.Contains(retrySection, testCase.failure.Reason) {
+				t.Fatalf("provider retry leaked raw prior failure into C4: %s", retrySection)
+			}
+			var tail struct {
+				Retry struct {
+					PreviousFailure struct {
+						Diagnostic *runtimecontract.RuntimeCandidateFailureDiagnostic `json:"diagnostic"`
+					} `json:"previousFailure"`
+				} `json:"retry"`
+			}
+			if err := json.Unmarshal([]byte(retrySection), &tail); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(retrySection, `"reason"`) {
+				t.Fatalf("provider retry serialized a previous-failure reason: %s", retrySection)
+			}
+			if testCase.failure.Diagnostic != nil {
+				diagnostic := tail.Retry.PreviousFailure.Diagnostic
+				want := testCase.failure.Diagnostic.Normalized()
+				if diagnostic == nil || !reflect.DeepEqual(diagnostic.Normalized(), want) {
+					t.Fatalf("provider retry changed typed correction delta: got=%+v want=%+v", diagnostic, want)
+				}
+			}
+			for idx := 0; idx <= 3; idx++ {
+				if retryRequest.PromptContext.Sections[idx].Content != request.PromptContext.Sections[idx].Content {
+					t.Fatalf("same-transaction retry changed C%d", idx)
+				}
+			}
+			if retryRequest.PromptContext.Sections[4].Content == request.PromptContext.Sections[4].Content || retryRequest.ContextBudget.CachePlan.StablePrefixHash != request.ContextBudget.CachePlan.StablePrefixHash || retryRequest.PromptContext.Sections[0].Content != contractSection {
+				t.Fatalf("retry changed stable provider contract: initial=%+v retry=%+v", request.ContextBudget.CachePlan, retryRequest.ContextBudget.CachePlan)
+			}
+		})
 	}
 	freshContext := runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil)
 	freshObservation := runtimecontract.RuntimePrerequisiteObservation{
@@ -206,7 +378,7 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 	freshContext.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{freshObservation}
 	freshRequest, err := runtimeV2ProviderRequest(llmmodels.RuntimeCandidateRequest{
 		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix,
-		DefinitionContext: definition, CandidateContext: freshContext,
+		CandidateManifest: runtimeCandidateManifestForRequest(t, decision, freshContext), DefinitionContext: definition, CandidateContext: freshContext,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -232,9 +404,30 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 	}
 	if _, err := runtimeV2ProviderRequest(llmmodels.RuntimeCandidateRequest{
 		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix,
-		DefinitionContext: definition, CandidateContext: limitedContext,
+		CandidateManifest: runtimeCandidateManifestForRequest(t, decision, limitedContext), DefinitionContext: definition, CandidateContext: limitedContext,
 	}); err == nil || !strings.Contains(err.Error(), "provider ceiling") {
 		t.Fatalf("runtimeV2ProviderRequest ceiling err = %v, want typed provider ceiling failure", err)
+	}
+}
+
+func TestValidateRuntimeCandidateContextIntegrityRejectsProtectedContextLoss(t *testing.T) {
+	definition := runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", DoDID: "dod-1"}
+	context := runtimecontract.RuntimeCandidateContext{
+		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: runtimecontract.InitialRuntimeEvidenceRevision,
+		Focus:          runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
+		RequiredAction: runtimecontract.RuntimeActionProduceStateChange,
+	}
+	budget := &llmmodels.ProviderContextBudget{RedactionApplied: true, RedactedPaths: []string{"context.resources.targetSnapshots"}}
+	prompt := &llmmodels.PromptContext{Sections: []llmmodels.PromptSection{
+		{ID: "C0.runtime", Content: "contract"}, {ID: "C1.goal", Content: "definition"}, {ID: "C2.capability", Content: "capability"},
+		{ID: "C3.authority", Content: "authority"}, {ID: "C4.execution", Content: "tail"},
+	}}
+	err := validateRuntimeCandidateContextIntegrity(definition, context, 0, nil, budget, prompt)
+	if err == nil || !strings.Contains(err.Error(), "P0.contract") || !strings.Contains(err.Error(), "P4.current_snapshots") || !strings.Contains(err.Error(), "protected_context_redacted") {
+		t.Fatalf("integrity error = %v", err)
+	}
+	if len(budget.IntegrityWarnings) < 3 {
+		t.Fatalf("integrity warnings = %v", budget.IntegrityWarnings)
 	}
 }
 
@@ -260,21 +453,6 @@ func TestRuntimeV2CandidateRetryExplainsOperationShapeReplayWithoutChangingStabl
 		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_admission_invalid",
 	}); retry == nil || strings.Contains(retry.Instruction, "materially different operation shape") {
 		t.Fatalf("non-replay retry instruction = %+v, want no replay-specific correction", retry)
-	}
-}
-
-func TestRuntimeV2CandidateRetryExplainsCanonicalTargetRefConsistency(t *testing.T) {
-	retry := runtimeV2CandidateRetry(1, &runtimecontract.RuntimeCandidateFailure{
-		Class:  runtimecontract.RuntimeCandidateFailureClassContract,
-		Reason: `runtime candidate operation "op-write": kind "patch/apply" targetRefs must contain targetRef "new/manager.go"`,
-	})
-	if retry == nil {
-		t.Fatal("retry projection is nil")
-	}
-	for _, want := range []string{"non-empty canonical targetRef or path", "top-level targetRefs", "even when the file does not yet exist"} {
-		if !strings.Contains(retry.Instruction, want) {
-			t.Fatalf("retry instruction lost %q: %s", want, retry.Instruction)
-		}
 	}
 }
 
@@ -336,7 +514,7 @@ func TestRuntimeV2CandidateContextProjectionPreservesRepairDirectiveAuthority(t 
 		RequiredEvidenceKinds: directive.RequiredEvidenceKinds, RepairDirective: &directive,
 		AdmissibleOperationKinds: []string{runtimecontract.StepKindFileWrite},
 	}
-	projection := runtimeV2CandidateContextProjection(context, runtimecontract.RuntimeActionProduceStateChange)
+	projection := runtimeV2CandidateContextProjection(context, runtimeCandidateContextManifest(runtimecontract.RuntimeActionProduceStateChange, runtimecontract.StepKindFileWrite))
 	if projection.RequiredAction != runtimecontract.RuntimeActionProduceStateChange || projection.RepairDirective == nil {
 		t.Fatalf("projection lost repair authority: %+v", projection)
 	}
@@ -378,7 +556,7 @@ func TestRuntimeV2CandidateContextProjectionPreservesTargetGroundingInVolatileAu
 		},
 	}
 	context.Resources.TargetSelection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(*context.Resources.TargetSelection)
-	projection := runtimeV2CandidateContextProjection(context, runtimecontract.RuntimeActionProduceStateChange)
+	projection := runtimeV2CandidateContextProjection(context, runtimeCandidateContextManifest(runtimecontract.RuntimeActionProduceStateChange, runtimecontract.RuntimeBlockKindPatchApply))
 	encoded, err := json.Marshal(projection)
 	if err != nil {
 		t.Fatal(err)
@@ -417,21 +595,22 @@ func TestRuntimeV2CandidateSchemasAreActionSpecific(t *testing.T) {
 	if !strings.Contains(catalog, "sole next-action authority") || !strings.Contains(catalog, "completion-audit information only") {
 		t.Fatalf("candidate catalog lost repair authority rules: %s", catalog)
 	}
-	if !strings.Contains(catalog, "dependsOn is never a top-level field") || !strings.Contains(catalog, "Forbidden top-level fields include") {
-		t.Fatalf("candidate catalog lost operation-dependency placement rule: %s", catalog)
+	if !strings.Contains(catalog, "context.outputContract") || strings.Contains(catalog, "workorch.runtime_candidate.state_change.v2") ||
+		strings.Contains(catalog, "dependsOn") || strings.Contains(catalog, "targetRefs") {
+		t.Fatalf("stable catalog retained a second operation contract: %s", catalog)
 	}
 }
 
 func TestRuntimeV2CandidateSchemaOnlyExposesDependenciesForSealedDependentSequence(t *testing.T) {
-	withoutDependency := runtimeV2CandidateSchemaForDecision(runtimecontract.RuntimeDecision{
+	withoutDependency := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
 		Action:         runtimecontract.RuntimeActionProduceStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{AcceptedKinds: []string{runtimecontract.StepKindFileWrite}},
-	})
+	}, nil)
 	if runtimeV2OperationSchemaHasProperty(t, withoutDependency, "dependsOn") {
 		t.Fatalf("ordinary candidate schema exposed an unnecessary dependency field: %s", withoutDependency)
 	}
 
-	withDependency := runtimeV2CandidateSchemaForDecision(runtimecontract.RuntimeDecision{
+	withDependency := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
 		Action: runtimecontract.RuntimeActionProduceStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
 			AcceptedKinds: []string{runtimecontract.StepKindGitWrite},
@@ -440,7 +619,7 @@ func TestRuntimeV2CandidateSchemaOnlyExposesDependenciesForSealedDependentSequen
 				{RequirementID: "commit", Kind: runtimecontract.StepKindGitWrite, VariantID: "commit", DependsOnRequirementIDs: []string{"init"}},
 			},
 		},
-	})
+	}, nil)
 	if !runtimeV2OperationSchemaHasProperty(t, withDependency, "dependsOn") {
 		t.Fatalf("dependent sequence schema omitted operation dependency field: %s", withDependency)
 	}
@@ -465,15 +644,18 @@ func runtimeV2OperationSchemaHasProperty(t *testing.T, encoded, property string)
 }
 
 func TestRuntimeV2CandidateOutputContractUsesActionSpecificForbiddenTopLevelFields(t *testing.T) {
-	operation := runtimeV2CandidateOutputContract(runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceStateChange}, nil)
+	operation := runtimeCandidateOutputContractForDecision(t, runtimecontract.RuntimeDecision{
+		Action:         runtimecontract.RuntimeActionProduceStateChange,
+		RequiredOutput: runtimecontract.RequiredOutputContract{AcceptedKinds: []string{runtimecontract.StepKindFileWrite}},
+	}, nil)
 	if !containsString(operation.ForbiddenTopLevelFields, "dependsOn") || !containsString(operation.ForbiddenTopLevelFields, "parameters") {
 		t.Fatalf("operation forbidden fields = %#v", operation.ForbiddenTopLevelFields)
 	}
-	assessment := runtimeV2CandidateOutputContract(runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceAssessment}, nil)
+	assessment := runtimeCandidateOutputContractForDecision(t, runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceAssessment}, nil)
 	if containsString(assessment.ForbiddenTopLevelFields, "coverageWorkItemIds") {
 		t.Fatalf("assessment forbids its required top-level field: %#v", assessment.ForbiddenTopLevelFields)
 	}
-	governance := runtimeV2CandidateOutputContract(runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionRequestGovernance}, nil)
+	governance := runtimeCandidateOutputContractForDecision(t, runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionRequestGovernance}, nil)
 	if !containsString(governance.ForbiddenTopLevelFields, "reason") {
 		t.Fatalf("governance forbidden fields = %#v", governance.ForbiddenTopLevelFields)
 	}
@@ -489,12 +671,12 @@ func containsString(values []string, wanted string) bool {
 }
 
 func TestRuntimeV2CandidateSchemaDerivesPatchTargetRequirementsFromOperationContract(t *testing.T) {
-	schema := runtimeV2CandidateSchemaForDecision(runtimecontract.RuntimeDecision{
+	schema := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
 		Action: runtimecontract.RuntimeActionProduceStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
 			AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
 		},
-	})
+	}, nil)
 	for _, value := range []string{`"const":"patch/apply"`, `"const":"patchType"`, `"const":"targetRef"`, `"const":"path"`, `"targetRefs"`, `"minItems":1`, `"minLength":1`} {
 		if !strings.Contains(schema, value) {
 			t.Fatalf("descriptor-driven patch schema lost %q: %s", value, schema)
@@ -506,13 +688,13 @@ func TestRuntimeV2CandidateSchemaDerivesPatchTargetRequirementsFromOperationCont
 }
 
 func TestRuntimeV2CandidateSchemaRequiresCanonicalTargetRefsForDurableFileOperations(t *testing.T) {
-	schema := runtimeV2CandidateSchemaForDecision(runtimecontract.RuntimeDecision{
+	schema := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
 		Action: runtimecontract.RuntimeActionProduceStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{AcceptedKinds: []string{
 			runtimecontract.StepKindFileWrite,
 			runtimecontract.StepKindFileEdit,
 		}},
-	})
+	}, nil)
 	for _, kind := range []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileEdit} {
 		if !runtimeV2SchemaRequiresTopLevelTargetRefs(schema, kind) {
 			t.Fatalf("%s schema must require canonical top-level targetRefs", kind)
@@ -521,12 +703,12 @@ func TestRuntimeV2CandidateSchemaRequiresCanonicalTargetRefsForDurableFileOperat
 }
 
 func TestRuntimeV2CandidateSchemaClosesNamedParameterObjects(t *testing.T) {
-	schema := runtimeV2CandidateSchemaForDecision(runtimecontract.RuntimeDecision{
+	schema := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
 		Action: runtimecontract.RuntimeActionProduceStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
 			AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.StepKindShellCommand},
 		},
-	})
+	}, nil)
 	patchParameters := runtimeV2SchemaParametersForKind(t, schema, runtimecontract.RuntimeBlockKindPatchApply)
 	if !runtimeV2SchemaHasClosedNamedParameterBranch(patchParameters, "patchType", "string") {
 		t.Fatalf("patch/apply parameter schema does not close patchType as string: %#v", patchParameters)
@@ -551,10 +733,10 @@ func TestRuntimeV2CandidateSchemaClosesNamedParameterObjects(t *testing.T) {
 }
 
 func TestRuntimeV2CandidateSchemaClosesMCPDynamicParameters(t *testing.T) {
-	toolSchema := runtimeV2CandidateSchemaForDecision(runtimecontract.RuntimeDecision{
+	toolSchema := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
 		Action:         runtimecontract.RuntimeActionProduceValidation,
 		RequiredOutput: runtimecontract.RequiredOutputContract{AcceptedKinds: []string{runtimecontract.StepKindMCPToolCall}},
-	})
+	}, nil)
 	toolParameters := runtimeV2SchemaParametersForKind(t, toolSchema, runtimecontract.StepKindMCPToolCall)
 	if !runtimeV2SchemaHasClosedNamedParameterBranch(toolParameters, "serverId", "string") {
 		t.Fatalf("mcp/tool_call lost fixed serverId parameter: %#v", toolParameters)
@@ -568,10 +750,10 @@ func TestRuntimeV2CandidateSchemaClosesMCPDynamicParameters(t *testing.T) {
 		t.Fatalf("mcp/tool_call dynamic input schema wrongly permits stringList: %#v", toolParameters)
 	}
 
-	resourceSchema := runtimeV2CandidateSchemaForDecision(runtimecontract.RuntimeDecision{
+	resourceSchema := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
 		Action:         runtimecontract.RuntimeActionProduceValidation,
 		RequiredOutput: runtimecontract.RequiredOutputContract{AcceptedKinds: []string{runtimecontract.StepKindMCPResourceRead}},
-	})
+	}, nil)
 	resourceParameters := runtimeV2SchemaParametersForKind(t, resourceSchema, runtimecontract.StepKindMCPResourceRead)
 	if runtimeV2SchemaHasDynamicParameterBranch(resourceParameters, "", "string") {
 		t.Fatalf("mcp/resource_read must not expose dynamic parameter fields: %#v", resourceParameters)
@@ -768,7 +950,8 @@ func TestRuntimeV2CandidateSchemaNarrowsFileOwnerScopeToDurableFileKinds(t *test
 			runtimecontract.StepKindGitWrite,
 		}},
 	}
-	schema := runtimeV2CandidateSchemaForDecisionWithTargetSelection(decision, selection)
+	manifest := runtimeCandidateManifestForSchema(t, decision, selection)
+	schema := runtimeV2CandidateSchemaForManifest(manifest)
 	if !strings.Contains(schema, `"enum":["patch/apply"]`) {
 		t.Fatalf("scope schema = %s, want only durable File kind", schema)
 	}
@@ -777,56 +960,86 @@ func TestRuntimeV2CandidateSchemaNarrowsFileOwnerScopeToDurableFileKinds(t *test
 			t.Fatalf("scope schema admitted non-File kind %s: %s", forbidden, schema)
 		}
 	}
-	output := runtimeV2CandidateOutputContract(decision, selection)
+	output := runtimeV2CandidateOutputContractForManifest(manifest)
 	if len(output.OperationContracts) != 1 || output.OperationContracts[0].Kind != runtimecontract.RuntimeBlockKindPatchApply {
 		t.Fatalf("scope operation contracts = %#v, want patch/apply only", output.OperationContracts)
 	}
-	kinds := runtimeV2CandidateAllowedOperationKinds(decision.Action, decision.RequiredOutput.AcceptedKinds, nil, selection)
+	kinds := runtimeV2CandidateManifestOperationKinds(manifest)
 	if len(kinds) != 1 || kinds[0] != runtimecontract.RuntimeBlockKindPatchApply {
 		t.Fatalf("scope admissible kinds = %v, want patch/apply only", kinds)
 	}
 }
 
-func TestRuntimeV2CandidateRetryExplainsFileOwnerScopeRestriction(t *testing.T) {
-	retry := runtimeV2CandidateRetry(1, &runtimecontract.RuntimeCandidateFailure{
-		Class:  runtimecontract.RuntimeCandidateFailureClassContract,
-		Code:   "candidate_target_outside_grounding",
-		Reason: "owner-grounded workspace scope permits only a durable File operation with a concrete target",
-	})
-	if retry == nil {
-		t.Fatal("retry projection is nil")
+func TestRuntimeV2CandidateManifestDrivesSchemaInstructionAndRetryCorrection(t *testing.T) {
+	cases := []struct {
+		name      string
+		decision  runtimecontract.RuntimeDecision
+		contains  []string
+		omits     []string
+		dependsOn bool
+	}{
+		{
+			name: "patch target and closed parameters",
+			decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceStateChange, RequiredOutput: runtimecontract.RequiredOutputContract{
+				Kind: runtimecontract.RequiredOutputKindStateChange, AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+				AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
+			}},
+			contains: []string{"patch/apply", "targetRefs is required", "targetRef:string", "Forbidden parameters"},
+		},
+		{
+			name: "shell summary remains forbidden",
+			decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceValidation, RequiredOutput: runtimecontract.RequiredOutputContract{
+				Kind: runtimecontract.RequiredOutputKindValidation, AcceptedKinds: []string{runtimecontract.StepKindShellCommand},
+				AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
+				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+			}},
+			contains: []string{"shell/command", "command:string"},
+			omits:    []string{"summary"},
+		},
+		{
+			name: "required sequence exposes operation-local dependency",
+			decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceStateChange, RequiredOutput: runtimecontract.RequiredOutputContract{
+				Kind: runtimecontract.RequiredOutputKindStateChange, AcceptedKinds: []string{runtimecontract.StepKindGitWrite},
+				AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{
+					{RequirementID: "stage", Kind: runtimecontract.StepKindGitWrite, VariantID: "add"},
+					{RequirementID: "commit", Kind: runtimecontract.StepKindGitWrite, VariantID: "commit", DependsOnRequirementIDs: []string{"stage"}},
+				},
+			}},
+			contains:  []string{"git/write", "dependsOn", "requiredOperationRef", "stage=git/write/add", "commit=git/write/commit"},
+			dependsOn: true,
+		},
 	}
-	for _, want := range []string{"target-selection scope", "durable File-owner operation", "do not use Shell, Git, MCP, Web, or SSH"} {
-		if !strings.Contains(retry.Instruction, want) {
-			t.Fatalf("scope retry instruction lost %q: %s", want, retry.Instruction)
-		}
-	}
-}
-
-func TestRuntimeV2CandidateRetryExplainsSealedTargetAndClosedParameterContract(t *testing.T) {
-	targetRetry := runtimeV2CandidateRetry(1, &runtimecontract.RuntimeCandidateFailure{
-		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_target_outside_grounding",
-		Reason: "runtime state-changing candidate does not target the sealed focus, failure, or repair target set",
-	})
-	if targetRetry == nil {
-		t.Fatal("sealed-target retry projection is nil")
-	}
-	for _, want := range []string{"sealed concrete target set", "context.resources.failureTarget", "top-level targetRefs", "build, test, read"} {
-		if !strings.Contains(targetRetry.Instruction, want) {
-			t.Fatalf("sealed-target retry instruction lost %q: %s", want, targetRetry.Instruction)
-		}
-	}
-	parameterRetry := runtimeV2CandidateRetry(1, &runtimecontract.RuntimeCandidateFailure{
-		Class:  runtimecontract.RuntimeCandidateFailureClassContract,
-		Reason: `runtime candidate operation "op-1": kind "shell/command" does not accept parameter "summary"; allowed parameters: command, args`,
-	})
-	if parameterRetry == nil {
-		t.Fatal("parameter retry projection is nil")
-	}
-	for _, want := range []string{"Remove every rejected parameter", "exact parameter names", "summary, narrative, explanation, metadata", "never a legal substitute"} {
-		if !strings.Contains(parameterRetry.Instruction, want) {
-			t.Fatalf("parameter retry instruction lost %q: %s", want, parameterRetry.Instruction)
-		}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(testCase.decision, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			output := runtimeV2CandidateOutputContractForManifest(manifest)
+			if output.ManifestHash != manifest.Hash || output.StructuredOutputInstruction == "" {
+				t.Fatalf("output contract did not retain manifest identity: %+v", output)
+			}
+			instruction := output.StructuredOutputInstruction
+			for _, want := range testCase.contains {
+				if !strings.Contains(instruction, want) {
+					t.Fatalf("manifest instruction lost %q: %s", want, instruction)
+				}
+			}
+			for _, unwanted := range testCase.omits {
+				if strings.Contains(instruction, unwanted) {
+					t.Fatalf("manifest instruction admitted %q: %s", unwanted, instruction)
+				}
+			}
+			if runtimeV2OperationSchemaHasProperty(t, string(output.Schema), "dependsOn") != testCase.dependsOn {
+				t.Fatalf("schema dependency exposure = %t, want %t: %s", runtimeV2OperationSchemaHasProperty(t, string(output.Schema), "dependsOn"), testCase.dependsOn, output.Schema)
+			}
+			retry := runtimeV2CandidateRetryForManifest(1, &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: `arbitrary stale error text with parameter "summary"`}, manifest)
+			if retry == nil || !strings.Contains(retry.Instruction, manifest.Hash) || !strings.Contains(retry.Instruction, "context.outputContract.structuredOutputInstruction") || strings.Contains(retry.Instruction, "arbitrary stale error text") {
+				t.Fatalf("retry correction was not manifest-derived: %+v", retry)
+			}
+		})
 	}
 }
 
@@ -845,11 +1058,12 @@ func TestRuntimeV2CandidateSchemaKeepsExplicitSequenceDuringFileScopeNarrowing(t
 			}},
 		},
 	}
-	kinds := runtimeV2CandidateAllowedOperationKinds(decision.Action, decision.RequiredOutput.AcceptedKinds, decision.RequiredOutput.RequiredOperationSequence, selection)
-	if got, want := kinds, []string{runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.StepKindGitWrite}; !slices.Equal(got, want) {
+	manifest := runtimeCandidateManifestForSchema(t, decision, selection)
+	kinds := runtimeV2CandidateManifestOperationKinds(manifest)
+	if got, want := kinds, []string{runtimecontract.StepKindGitWrite, runtimecontract.RuntimeBlockKindPatchApply}; !slices.Equal(got, want) {
 		t.Fatalf("scope kinds = %v, want %v", got, want)
 	}
-	schema := runtimeV2CandidateSchemaForDecisionWithTargetSelection(decision, selection)
+	schema := runtimeV2CandidateSchemaForManifest(manifest)
 	if strings.Contains(schema, `"shell/command"`) || !strings.Contains(schema, `"patch/apply"`) || !strings.Contains(schema, `"git/write"`) {
 		t.Fatalf("scope sequence schema = %s", schema)
 	}
@@ -880,6 +1094,7 @@ func TestRuntimeV2ProviderRequestNarrowsFileScopeAcrossSchemaContextAndRetry(t *
 		},
 		Activation: runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 	}
+	bindRuntimeCandidateTestSelection(&facts, selection)
 	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedStateChange, Action: runtimecontract.RuntimeActionProduceStateChange, Focus: facts.Focus,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
@@ -897,7 +1112,7 @@ func TestRuntimeV2ProviderRequestNarrowsFileScopeAcrossSchemaContextAndRetry(t *
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, facts.Activation.ExecutionContract)
 	request, err := runtimeV2ProviderRequest(llmmodels.RuntimeCandidateRequest{
 		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix, DefinitionContext: definition,
-		CandidateContext: runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil),
+		CandidateManifest: runtimeCandidateManifestForRequest(t, decision, runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil)), CandidateContext: runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -924,18 +1139,34 @@ func TestRuntimeV2ProviderRequestNarrowsFileScopeAcrossSchemaContextAndRetry(t *
 	retryRequest, err := runtimeV2ProviderRequest(llmmodels.RuntimeCandidateRequest{
 		Decision: decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1,
 		PreviousFailure:  &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_target_outside_grounding", Reason: "owner-grounded workspace scope permits only a durable File operation with a concrete target"},
-		StablePrefixHash: prefix, DefinitionContext: definition, CandidateContext: runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil),
+		StablePrefixHash: prefix, CandidateManifest: runtimeCandidateManifestForRequest(t, decision, runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil)), DefinitionContext: definition, CandidateContext: runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(retryRequest.PromptContext.Sections[3].Content, "do not use Shell, Git, MCP, Web, or SSH") {
-		t.Fatalf("scope provider retry lost owner-bound correction: %s", retryRequest.PromptContext.Sections[3].Content)
+	retryTail := retryRequest.PromptContext.Sections[4].Content
+	if !strings.Contains(retryTail, "context.outputContract.structuredOutputInstruction") ||
+		!strings.Contains(retryTail, "sealed manifest hash") || strings.Contains(retryTail, "do not use Shell, Git, MCP, Web, or SSH") {
+		t.Fatalf("scope provider retry did not use manifest-bound correction: %s", retryTail)
 	}
 }
 
+func bindRuntimeCandidateTestSelection(facts *runtimecontract.RuntimeFacts, selection runtimecontract.RuntimeTargetSelection) {
+	if facts == nil {
+		return
+	}
+	facts.Prerequisites.Satisfied = append(facts.Prerequisites.Satisfied, runtimecontract.RuntimePrerequisite{
+		ID:            selection.PrerequisiteID,
+		Kind:          runtimecontract.PrerequisiteKindTargetSelection,
+		Scope:         runtimecontract.RuntimePrerequisiteScopeFocus,
+		FocusID:       facts.Focus.ID,
+		OwnerModuleID: selection.OwnerModuleID,
+		SubjectRef:    selection.TargetRole,
+	})
+}
+
 func TestRuntimeV2CandidateSchemaRestrictsVariantsToSealedAuthority(t *testing.T) {
-	patchSchema := runtimeV2CandidateSchemaForDecision(runtimecontract.RuntimeDecision{
+	patchSchema := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
 		Action: runtimecontract.RuntimeActionProduceStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
 			AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
@@ -943,7 +1174,7 @@ func TestRuntimeV2CandidateSchemaRestrictsVariantsToSealedAuthority(t *testing.T
 				Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "file_write",
 			}},
 		},
-	})
+	}, nil)
 	if !strings.Contains(patchSchema, `"const":"file_write"`) || strings.Contains(patchSchema, `"const":"text_replace"`) || strings.Contains(patchSchema, `"const":"unified_diff"`) {
 		t.Fatalf("patch schema did not restrict variants to sealed file_write authority: %s", patchSchema)
 	}
@@ -951,7 +1182,7 @@ func TestRuntimeV2CandidateSchemaRestrictsVariantsToSealedAuthority(t *testing.T
 		t.Fatalf("patch schema did not project the sealed variant rule id: %s", patchSchema)
 	}
 
-	commitSchema := runtimeV2CandidateSchemaForDecision(runtimecontract.RuntimeDecision{
+	commitSchema := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
 		Action: runtimecontract.RuntimeActionProduceStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
 			AcceptedKinds: []string{runtimecontract.StepKindGitWrite},
@@ -959,12 +1190,12 @@ func TestRuntimeV2CandidateSchemaRestrictsVariantsToSealedAuthority(t *testing.T
 				Kind: runtimecontract.StepKindGitWrite, VariantID: "commit",
 			}},
 		},
-	})
+	}, nil)
 	if !strings.Contains(commitSchema, `"const":"commit"`) || strings.Contains(commitSchema, `"const":"add"`) || strings.Contains(commitSchema, `"const":"init"`) || !strings.Contains(commitSchema, `"const":"pathspecs"`) {
 		t.Fatalf("commit schema did not retain only commit rule including forbidden pathspecs: %s", commitSchema)
 	}
 
-	sequenceSchema := runtimeV2CandidateSchemaForDecision(runtimecontract.RuntimeDecision{
+	sequenceSchema := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
 		Action: runtimecontract.RuntimeActionProduceStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
 			AcceptedKinds: []string{runtimecontract.StepKindGitWrite},
@@ -977,14 +1208,14 @@ func TestRuntimeV2CandidateSchemaRestrictsVariantsToSealedAuthority(t *testing.T
 				{RequirementID: "create-commit", Kind: runtimecontract.StepKindGitWrite, VariantID: "commit", DependsOnRequirementIDs: []string{"stage-changes"}},
 			},
 		},
-	})
+	}, nil)
 	for _, variant := range []string{"init", "add", "commit"} {
 		if !strings.Contains(sequenceSchema, `"const":"`+variant+`"`) {
 			t.Fatalf("required sequence schema lost variant %q: %s", variant, sequenceSchema)
 		}
 	}
 
-	unknownVariantSchema := runtimeV2CandidateSchemaForDecision(runtimecontract.RuntimeDecision{
+	unknownVariantDecision := runtimecontract.RuntimeDecision{
 		Action: runtimecontract.RuntimeActionProduceStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
 			AcceptedKinds: []string{runtimecontract.StepKindGitWrite},
@@ -992,9 +1223,9 @@ func TestRuntimeV2CandidateSchemaRestrictsVariantsToSealedAuthority(t *testing.T
 				Kind: runtimecontract.StepKindGitWrite, VariantID: "does-not-exist",
 			}},
 		},
-	})
-	if !strings.Contains(unknownVariantSchema, `"oneOf":[]`) {
-		t.Fatalf("unknown sealed variant widened provider schema instead of failing closed: %s", unknownVariantSchema)
+	}
+	if _, err := runtimecontract.BuildRuntimeCandidateContractManifest(unknownVariantDecision, nil); err == nil {
+		t.Fatal("unknown sealed variant must fail manifest compilation instead of producing a widened schema")
 	}
 }
 
@@ -1031,14 +1262,14 @@ func TestRuntimeV2AssessmentRequestPublishesCanonicalEvidenceRefContract(t *test
 	}
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, facts.Activation.ExecutionContract)
 	context := runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil)
-	projection := runtimeV2CandidateContextProjection(context, decision.Action)
+	projection := runtimeV2CandidateContextProjection(context, runtimeCandidateManifestForRequest(t, decision, context))
 	wantRefs := runtimecontract.AcceptedEvidenceRefsForFocus(facts)
 	if strings.Join(projection.AllowedEvidenceRefs, "|") != strings.Join(wantRefs, "|") || len(wantRefs) != 3 {
 		t.Fatalf("allowed evidence refs = %+v, want %+v", projection.AllowedEvidenceRefs, wantRefs)
 	}
 	request, err := runtimeV2ProviderRequest(llmmodels.RuntimeCandidateRequest{
 		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix,
-		DefinitionContext: definition, CandidateContext: context,
+		CandidateManifest: runtimeCandidateManifestForRequest(t, decision, context), DefinitionContext: definition, CandidateContext: context,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1058,7 +1289,7 @@ func TestRuntimeV2AssessmentRequestPublishesCanonicalEvidenceRefContract(t *test
 	retryFailure := runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassSchema, Reason: "missing evidenceRefs"}
 	retry, err := runtimeV2ProviderRequest(llmmodels.RuntimeCandidateRequest{
 		Decision: decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1, PreviousFailure: &retryFailure, StablePrefixHash: prefix,
-		DefinitionContext: definition, CandidateContext: context,
+		CandidateManifest: runtimeCandidateManifestForRequest(t, decision, context), DefinitionContext: definition, CandidateContext: context,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1090,7 +1321,7 @@ func TestRuntimeV2CandidateContextPublishesExactRejectedShapes(t *testing.T) {
 	context := runtimecontract.RuntimeCandidateContextForDecision(facts, decision, []runtimecontract.RuntimeRejectedOperationShape{{
 		Operation: operation, FailureSignature: "sig-1",
 	}})
-	projection := runtimeV2CandidateContextProjection(context, decision.Action)
+	projection := runtimeV2CandidateContextProjection(context, runtimeCandidateManifestForRequest(t, decision, context))
 	if len(projection.AdmissibleOperationKinds) != 1 || len(projection.RejectedOperationShapes) != 1 || projection.RejectedOperationShapes[0].FailureSignature != "sig-1" {
 		t.Fatalf("candidate admissibility projection = %+v", projection)
 	}

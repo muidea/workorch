@@ -1,0 +1,305 @@
+package workorchruntimecontract
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/muidea/workorch/internal/pkg/common"
+)
+
+// RuntimeCandidateRequestSessionState is the persisted lifecycle of provider
+// I/O before a complete candidate exists. It is intentionally separate from
+// RuntimeCandidateAttemptState: transport and incomplete documents must never
+// consume the schema/semantic correction budget.
+type RuntimeCandidateRequestSessionState string
+
+const (
+	RuntimeCandidateRequestSessionPrepared            RuntimeCandidateRequestSessionState = "prepared"
+	RuntimeCandidateRequestSessionContinuationPending RuntimeCandidateRequestSessionState = "continuation_pending"
+	RuntimeCandidateRequestSessionTransportPending    RuntimeCandidateRequestSessionState = "transport_retry_pending"
+	RuntimeCandidateRequestSessionDocumentComplete    RuntimeCandidateRequestSessionState = "document_complete"
+	RuntimeCandidateRequestSessionTerminal            RuntimeCandidateRequestSessionState = "terminal"
+)
+
+// RuntimeCandidateRequestOutcomeClass is the last durable provider/session
+// result. It is deliberately distinct from candidate schema/contract failure:
+// no value here may allocate or fail a candidate attempt.
+type RuntimeCandidateRequestOutcomeClass string
+
+const (
+	RuntimeCandidateRequestOutcomeNone                      RuntimeCandidateRequestOutcomeClass = ""
+	RuntimeCandidateRequestOutcomeDocumentIncomplete        RuntimeCandidateRequestOutcomeClass = "document_incomplete"
+	RuntimeCandidateRequestOutcomeDocumentComplete          RuntimeCandidateRequestOutcomeClass = "document_complete"
+	RuntimeCandidateRequestOutcomeProviderTransient         RuntimeCandidateRequestOutcomeClass = "provider_transient"
+	RuntimeCandidateRequestOutcomeProviderAuthentication    RuntimeCandidateRequestOutcomeClass = "provider_authentication"
+	RuntimeCandidateRequestOutcomeProviderConfiguration     RuntimeCandidateRequestOutcomeClass = "provider_configuration"
+	RuntimeCandidateRequestOutcomeProviderProtocol          RuntimeCandidateRequestOutcomeClass = "provider_protocol"
+	RuntimeCandidateRequestOutcomeProviderSubmissionUnknown RuntimeCandidateRequestOutcomeClass = "provider_submission_unknown"
+	RuntimeCandidateRequestOutcomePrerequisiteStale         RuntimeCandidateRequestOutcomeClass = "prerequisite_stale"
+	RuntimeCandidateRequestOutcomeContinuationExhausted     RuntimeCandidateRequestOutcomeClass = "candidate_output_continuation_exhausted"
+)
+
+// RuntimeCandidateRequestOutcome is bounded audit-safe metadata. It never
+// contains a provider body, prompt, credential, endpoint, or free-form error.
+type RuntimeCandidateRequestOutcome struct {
+	Class     RuntimeCandidateRequestOutcomeClass
+	Code      string
+	Signature string
+}
+
+func (o RuntimeCandidateRequestOutcome) Normalized() RuntimeCandidateRequestOutcome {
+	o.Class = RuntimeCandidateRequestOutcomeClass(strings.TrimSpace(string(o.Class)))
+	o.Code = strings.TrimSpace(o.Code)
+	o.Signature = strings.TrimSpace(o.Signature)
+	return o
+}
+
+func (o RuntimeCandidateRequestOutcome) Validate() error {
+	o = o.Normalized()
+	switch o.Class {
+	case RuntimeCandidateRequestOutcomeNone:
+		return nil
+	case RuntimeCandidateRequestOutcomeDocumentIncomplete,
+		RuntimeCandidateRequestOutcomeDocumentComplete,
+		RuntimeCandidateRequestOutcomeProviderTransient,
+		RuntimeCandidateRequestOutcomeProviderAuthentication,
+		RuntimeCandidateRequestOutcomeProviderConfiguration,
+		RuntimeCandidateRequestOutcomeProviderProtocol,
+		RuntimeCandidateRequestOutcomeProviderSubmissionUnknown,
+		RuntimeCandidateRequestOutcomePrerequisiteStale,
+		RuntimeCandidateRequestOutcomeContinuationExhausted:
+		if o.Class != RuntimeCandidateRequestOutcomeDocumentComplete && o.Code == "" {
+			return common.ErrInvalidArgument
+		}
+		return nil
+	default:
+		return common.ErrInvalidArgument
+	}
+}
+
+// RuntimeCandidateRequestFragment is aggregate-safe metadata for an opaque
+// raw fragment held by the Orchestrator evidence repository. No payload bytes
+// or provider-private text is persisted in RuntimeStateRecord.
+type RuntimeCandidateRequestFragment struct {
+	Sequence             int
+	ContentHash          string
+	Bytes                int64
+	ReachedProviderLimit bool
+	PhysicalCallID       string
+}
+
+func (f RuntimeCandidateRequestFragment) Normalized() RuntimeCandidateRequestFragment {
+	f.ContentHash = strings.TrimSpace(f.ContentHash)
+	f.PhysicalCallID = strings.TrimSpace(f.PhysicalCallID)
+	return f
+}
+
+func (f RuntimeCandidateRequestFragment) Validate() error {
+	f = f.Normalized()
+	if f.Sequence <= 0 || f.ContentHash == "" || f.Bytes <= 0 {
+		return common.ErrInvalidArgument
+	}
+	return nil
+}
+
+// RuntimeCandidateRequestSession is the SM-3 provider request ledger. A
+// correction after a complete candidate rejection creates a distinct session
+// fingerprint; a continuation of one incomplete document keeps the same ID.
+type RuntimeCandidateRequestSession struct {
+	LogicalRequestID   string
+	Transaction        AuthorityTransaction
+	StablePrefixHash   string
+	ManifestHash       string
+	CorrectionHash     string
+	State              RuntimeCandidateRequestSessionState
+	NextSequence       int
+	Fragments          []RuntimeCandidateRequestFragment
+	LastPhysicalCallID string
+	ProviderSubmitted  bool
+	LastOutcome        RuntimeCandidateRequestOutcome
+}
+
+// ValidateRuntimeCandidateRequestIdentity validates the value contract carried
+// across Orchestrator -> LLM -> provider boundaries for one physical request.
+// It is intentionally pure: session state and submission ordering remain in
+// the Orchestrator aggregate controller.
+func ValidateRuntimeCandidateRequestIdentity(logicalRequestID string, sequence int, physicalCallID string) error {
+	if strings.TrimSpace(logicalRequestID) == "" || sequence <= 0 || strings.TrimSpace(physicalCallID) == "" {
+		return common.ErrInvalidArgument
+	}
+	return nil
+}
+
+func (s RuntimeCandidateRequestSession) Normalized() RuntimeCandidateRequestSession {
+	s.LogicalRequestID = strings.TrimSpace(s.LogicalRequestID)
+	s.StablePrefixHash = strings.TrimSpace(s.StablePrefixHash)
+	s.ManifestHash = strings.TrimSpace(s.ManifestHash)
+	s.CorrectionHash = strings.TrimSpace(s.CorrectionHash)
+	s.State = RuntimeCandidateRequestSessionState(strings.TrimSpace(string(s.State)))
+	s.LastPhysicalCallID = strings.TrimSpace(s.LastPhysicalCallID)
+	s.LastOutcome = s.LastOutcome.Normalized()
+	fragments := make([]RuntimeCandidateRequestFragment, 0, len(s.Fragments))
+	for _, fragment := range s.Fragments {
+		fragments = append(fragments, fragment.Normalized())
+	}
+	sort.Slice(fragments, func(i, j int) bool { return fragments[i].Sequence < fragments[j].Sequence })
+	s.Fragments = nilIfEmpty(fragments)
+	return s
+}
+
+func (s RuntimeCandidateRequestSession) Validate() error {
+	s = s.Normalized()
+	if s.LogicalRequestID == "" || s.StablePrefixHash == "" || s.ManifestHash == "" ||
+		strings.TrimSpace(s.Transaction.AuthoritySnapshotID) == "" || s.NextSequence <= 0 {
+		return common.ErrInvalidArgument
+	}
+	if err := s.LastOutcome.Validate(); err != nil {
+		return err
+	}
+	switch s.State {
+	case RuntimeCandidateRequestSessionPrepared, RuntimeCandidateRequestSessionContinuationPending,
+		RuntimeCandidateRequestSessionTransportPending, RuntimeCandidateRequestSessionDocumentComplete,
+		RuntimeCandidateRequestSessionTerminal:
+	default:
+		return common.ErrInvalidArgument
+	}
+	for idx, fragment := range s.Fragments {
+		if err := fragment.Validate(); err != nil || fragment.Sequence != idx+1 {
+			return common.ErrInvalidArgument
+		}
+	}
+	if s.State == RuntimeCandidateRequestSessionContinuationPending && len(s.Fragments) == 0 {
+		return common.ErrInvalidArgument
+	}
+	if s.ProviderSubmitted && s.LastPhysicalCallID == "" {
+		return common.ErrInvalidArgument
+	}
+	switch s.State {
+	case RuntimeCandidateRequestSessionPrepared:
+		if len(s.Fragments) != 0 || s.LastOutcome.Class != RuntimeCandidateRequestOutcomeNone {
+			return common.ErrInvalidArgument
+		}
+	case RuntimeCandidateRequestSessionContinuationPending:
+		if s.LastOutcome.Class != RuntimeCandidateRequestOutcomeDocumentIncomplete {
+			return common.ErrInvalidArgument
+		}
+	case RuntimeCandidateRequestSessionTransportPending:
+		if s.LastOutcome.Class != RuntimeCandidateRequestOutcomeProviderTransient {
+			return common.ErrInvalidArgument
+		}
+	case RuntimeCandidateRequestSessionDocumentComplete:
+		if s.LastOutcome.Class != RuntimeCandidateRequestOutcomeDocumentComplete || !s.ProviderSubmitted {
+			return common.ErrInvalidArgument
+		}
+	case RuntimeCandidateRequestSessionTerminal:
+		switch s.LastOutcome.Class {
+		case RuntimeCandidateRequestOutcomeProviderAuthentication,
+			RuntimeCandidateRequestOutcomeProviderConfiguration,
+			RuntimeCandidateRequestOutcomeProviderProtocol,
+			RuntimeCandidateRequestOutcomeProviderSubmissionUnknown,
+			RuntimeCandidateRequestOutcomePrerequisiteStale,
+			RuntimeCandidateRequestOutcomeContinuationExhausted:
+		default:
+			return common.ErrInvalidArgument
+		}
+	}
+	if s.NextSequence != len(s.Fragments)+1 {
+		return common.ErrInvalidArgument
+	}
+	return nil
+}
+
+func (s RuntimeCandidateRequestSession) Clone() RuntimeCandidateRequestSession {
+	s = s.Normalized()
+	s.Fragments = append([]RuntimeCandidateRequestFragment(nil), s.Fragments...)
+	return s
+}
+
+// StableRuntimeCandidateRequestSessionID identifies one candidate document.
+// It intentionally excludes candidate attempt number: an incomplete initial
+// response has no candidate attempt. CorrectionHash differentiates a later
+// C4 correction document without relying on an attempt ordinal.
+func StableRuntimeCandidateRequestSessionID(workspaceID common.WorkspaceID, runID common.RunID, transaction AuthorityTransaction, stablePrefixHash, manifestHash, correctionHash string) string {
+	h := sha256.New()
+	writeHashString(h, "runtime-candidate-request-session-v1")
+	writeHashString(h, string(workspaceID))
+	writeHashString(h, string(runID))
+	writeHashString(h, transaction.AuthoritySnapshotID)
+	writeHashString(h, transaction.RequiredOutputHash)
+	writeHashString(h, strings.TrimSpace(stablePrefixHash))
+	writeHashString(h, strings.TrimSpace(manifestHash))
+	writeHashString(h, strings.TrimSpace(correctionHash))
+	return "candidate-request-" + hex.EncodeToString(h.Sum(nil))[:20]
+}
+
+// StableRuntimeCandidatePhysicalCallID identifies one physical submission in
+// a logical request session. It is deterministic so an adapter can use it as
+// an idempotency key when the provider supports one; it carries no attempt
+// number and contains no provider credential or response content.
+func StableRuntimeCandidatePhysicalCallID(logicalRequestID string, sequence int) string {
+	h := sha256.New()
+	writeHashString(h, "runtime-candidate-physical-call-v1")
+	writeHashString(h, strings.TrimSpace(logicalRequestID))
+	writeHashString(h, fmt.Sprintf("%d", sequence))
+	return "candidate-call-" + hex.EncodeToString(h.Sum(nil))[:20]
+}
+
+// StableRuntimeCandidateRequestContentID identifies the Orchestrator-owned
+// opaque content record for one logical request session. It deliberately uses
+// the logical request ID rather than candidate attempt so raw provider output
+// remains available before a candidate exists.
+func StableRuntimeCandidateRequestContentID(logicalRequestID string) common.ArtifactContinuationID {
+	h := sha256.New()
+	writeHashString(h, "runtime-candidate-request-content-v1")
+	writeHashString(h, strings.TrimSpace(logicalRequestID))
+	return common.ArtifactContinuationID("candidate-request-content-" + hex.EncodeToString(h.Sum(nil))[:20])
+}
+
+// StableRuntimeCandidateRequestCorrectionHash differentiates a correction
+// document from an initial request without using a candidate-attempt ordinal.
+// Reason is deliberately excluded because it can contain unstable or verbose
+// provider text; the typed failure identity is the correction contract.
+func StableRuntimeCandidateRequestCorrectionHash(failure *RuntimeCandidateFailure) string {
+	if failure == nil {
+		return ""
+	}
+	h := sha256.New()
+	writeHashString(h, "runtime-candidate-request-correction-v1")
+	writeHashString(h, string(failure.Class))
+	writeHashString(h, strings.TrimSpace(failure.Code))
+	writeHashString(h, strings.TrimSpace(failure.Signature))
+	writeHashStrings(h, normalizeStrings(failure.TargetRefs))
+	if diagnostic := failure.Diagnostic; diagnostic != nil {
+		value := diagnostic.Normalized()
+		writeHashString(h, value.OperationID)
+		writeHashString(h, value.Path)
+		writeHashString(h, value.Actual)
+		writeHashStrings(h, value.Allowed)
+		writeHashStrings(h, value.Required)
+		writeHashStrings(h, value.Forbidden)
+		writeHashString(h, value.ManifestHash)
+		writeHashString(h, value.RejectedShapeHash)
+		for _, objective := range value.Objectives {
+			writeHashString(h, string(objective))
+		}
+	}
+	return "candidate-correction-" + hex.EncodeToString(h.Sum(nil))[:20]
+}
+
+func ValidateRuntimeCandidateRequestSessions(values []RuntimeCandidateRequestSession) error {
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = value.Normalized()
+		if err := value.Validate(); err != nil {
+			return fmt.Errorf("runtime candidate request session: %w", err)
+		}
+		if _, found := seen[value.LogicalRequestID]; found {
+			return fmt.Errorf("runtime candidate request session %q is duplicated", value.LogicalRequestID)
+		}
+		seen[value.LogicalRequestID] = struct{}{}
+	}
+	return nil
+}

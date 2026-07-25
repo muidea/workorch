@@ -309,7 +309,11 @@ func responseFormatForRequest(capabilities llmmodels.ProviderCapabilities, reque
 			}
 		}
 	}
-	return map[string]any{"type": "json_object"}
+	// An OpenAI-compatible surface is not evidence that a routed model accepts
+	// response_format, and /v1/models does not advertise that feature.  Omitting
+	// the field keeps the provider protocol conservative; the sealed manifest,
+	// prompt and strict decoder remain the Runtime V2 structured-output boundary.
+	return nil
 }
 
 func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbeddingRequest) (llmmodels.ProviderEmbeddingResult, error) {

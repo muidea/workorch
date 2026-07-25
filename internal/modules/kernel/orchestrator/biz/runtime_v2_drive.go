@@ -146,6 +146,20 @@ func (m *Biz) driveRuntimeV2Locked(ctx context.Context, command orchestratoreven
 func (m *Biz) driveRuntimeV2Decision(ctx context.Context, aggregate runtimev2.RuntimeAggregate, stablePrefixHash string) (runtimev2.RuntimeAggregate, error) {
 	var err error
 	if aggregate.ActiveDispatch == nil {
+		// This gate runs before BeginCandidateAttempt. A stale selection or
+		// focus-scoped prerequisite is SM-2 authority debt, not a malformed
+		// provider candidate; persist the deterministic cleanup and let the
+		// outer drive acquire the current owner fact on the next transition.
+		if report := runtimev2.InspectRuntimeAuthorityInvariants(aggregate); len(report.Violations) != 0 {
+			return m.bizPtr.ReconcileRuntimeV2AuthorityBeforeCandidate(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+		}
+		stale, staleErr := InspectValidationScratchPrerequisite(aggregate.Facts)
+		if staleErr != nil {
+			return runtimev2.RuntimeAggregate{}, staleErr
+		}
+		if stale != nil {
+			return m.bizPtr.InvalidateRuntimeV2PrerequisitesForReadOnlyStale(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, *stale)
+		}
 		if feasibility, feasibilityErr := runtimeV2FeasibilityFact(aggregate); feasibilityErr != nil {
 			return runtimev2.RuntimeAggregate{}, feasibilityErr
 		} else if feasibility != nil {

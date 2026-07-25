@@ -245,17 +245,22 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	}
 	t.Cleanup(func() { llmOwner.Teardown(ctx) })
 	stablePrefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(persisted.Definition, persisted.Facts.Activation.ExecutionContract)
-	persisted, err = controller.BeginCandidateAttempt(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, 0, stablePrefix)
+	persisted, err = controller.BeginCandidateAttemptForTest(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, 0, stablePrefix)
 	if err != nil {
 		t.Fatal(err)
 	}
 	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(persisted.Facts, persisted.Decision, ActiveRejectedOperationShapes(persisted))
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(persisted.Decision, candidateContext.Resources.TargetSelection)
+	if err != nil {
+		t.Fatal(err)
+	}
 	requestResult := hub.Send(magicevent.NewEventWithContext(
 		orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleLLM,
 		magicevent.NewHeader(), ctx, orchestratorevents.RequestRuntimeCandidateCommand{
 			WorkspaceID: persisted.Facts.WorkspaceID, RunID: persisted.Facts.RunID,
+			LogicalRequestID: "candidate-request-observed", RequestSequence: 1, PhysicalCallID: "candidate-call-observed",
 			Decision: persisted.Decision, Transaction: persisted.Decision.AuthorityTransaction(), CandidateAttempt: 0,
-			StablePrefixHash: stablePrefix, DefinitionContext: persisted.Definition, CandidateContext: candidateContext,
+			StablePrefixHash: stablePrefix, CandidateManifest: manifest, DefinitionContext: persisted.Definition, CandidateContext: candidateContext,
 		},
 	))
 	if requestResult == nil {
@@ -273,7 +278,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		t.Fatalf("LLM provider calls = %d, want 1", len(provider.requests))
 	}
 	assertObservedTargetAuthorityInCandidateRequest(t, provider.requests[0], stablePrefix)
-	proposal, err := controller.AdmitCandidateProposal(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, 0, response.Candidate)
+	proposal, err := controller.AdmitCandidateProposalForTest(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, 0, response.Candidate)
 	if err != nil || !proposal.Admission.Accepted() {
 		t.Fatalf("target-bound candidate proposal was not admitted: result=%+v err=%v", proposal, err)
 	}
@@ -312,7 +317,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	sealed, err := controller.AdmitAndSealCandidateAttempt(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, 0, response.Candidate)
+	sealed, err := controller.AdmitAndSealCandidateAttemptForTest(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, 0, response.Candidate)
 	if err != nil || !sealed.Admission.Accepted() || sealed.Aggregate.ActiveDispatch == nil {
 		t.Fatalf("target-bound candidate was not sealed: result=%+v err=%v", sealed, err)
 	}
@@ -728,11 +733,16 @@ func requestAndSealObservedCandidate(t *testing.T, ctx context.Context, hub magi
 	t.Helper()
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
 	var err error
-	aggregate, err = controller.BeginCandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, prefix)
+	aggregate, err = controller.BeginCandidateAttemptForTest(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, prefix)
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleLLM, magicevent.NewHeader(), ctx, orchestratorevents.RequestRuntimeCandidateCommand{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, Decision: aggregate.Decision, Transaction: aggregate.Decision.AuthorityTransaction(), StablePrefixHash: prefix, DefinitionContext: aggregate.Definition, CandidateContext: runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, ActiveRejectedOperationShapes(aggregate))}))
+	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, ActiveRejectedOperationShapes(aggregate))
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, candidateContext.Resources.TargetSelection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleLLM, magicevent.NewHeader(), ctx, orchestratorevents.RequestRuntimeCandidateCommand{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, LogicalRequestID: "candidate-request-observed-seal", RequestSequence: 1, PhysicalCallID: "candidate-call-observed-seal", Decision: aggregate.Decision, Transaction: aggregate.Decision.AuthorityTransaction(), StablePrefixHash: prefix, CandidateManifest: manifest, DefinitionContext: aggregate.Definition, CandidateContext: candidateContext}))
 	data, requestErr := result.Get()
 	if requestErr != nil {
 		t.Fatal(requestErr)
@@ -741,7 +751,7 @@ func requestAndSealObservedCandidate(t *testing.T, ctx context.Context, hub magi
 	if !ok || response.Failure != nil {
 		t.Fatalf("candidate response = %#v", data)
 	}
-	proposal, err := controller.AdmitCandidateProposal(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, response.Candidate)
+	proposal, err := controller.AdmitCandidateProposalForTest(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, response.Candidate)
 	if err != nil || !proposal.Admission.Accepted() {
 		t.Fatalf("candidate proposal = %+v err=%v", proposal, err)
 	}
@@ -773,7 +783,7 @@ func requestAndSealObservedCandidate(t *testing.T, ctx context.Context, hub magi
 			t.Fatal(err)
 		}
 	}
-	sealed, err := controller.AdmitAndSealCandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, response.Candidate)
+	sealed, err := controller.AdmitAndSealCandidateAttemptForTest(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, response.Candidate)
 	if err != nil || !sealed.Admission.Accepted() {
 		t.Fatalf("candidate seal = %+v err=%v", sealed, err)
 	}

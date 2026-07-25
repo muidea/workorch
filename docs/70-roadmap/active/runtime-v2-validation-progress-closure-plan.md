@@ -1,685 +1,854 @@
-# Runtime V2 Live 合同正向收敛收口方案
+# Runtime V2 持续正向收敛：执行收口规格
 
 Status: active
 
 Type: implementation closure plan
 
-Last Updated: 2026-07-24
+Last Updated: 2026-07-25
 
-## 1. 目的与适用范围
+Execution Revision: R4 — single-source contract, reachable-owner closure, then convergence gates
 
-本文是当前 Runtime V2 live 正向收敛问题的唯一可执行代码收口清单。此前在同一路径下持续
-累积的历史 live 日记、阶段性实现记录和旧状态表已经清理，不再作为实现依据。
+## 1. 目的、范围与唯一性
 
-本文解决的问题不是“让某一条候选通过”，而是保证以下闭环在不同 workspace 内容、provider
-输出和进程重启条件下都能够确定性前进：
+本文件是 `RUNTIME-VPC` 唯一可产生 Runtime V2 代码任务的活动执行规格。它替代此前在同一文件中
+并存的 C4/C5/C6、A-3M、P4-A 子表和 live 修复清单：那些内容中已关闭的部分只作为回归事实保留，
+不再定义“下一步”。
+
+R4 同时完成文档权威对齐：`00-core/runtime-stage-contract.md` 现只保留 Runtime V2 四状态机、
+权威与禁止迁移；已删除与 V2-only 冲突的 V1 graph/step、`ExecutionContext`、自动 successor 和
+旧 repair-flow 叙述。后续不得从 archive 或其他 flow 文档恢复这些术语作为实现依据。
+
+本轮目标不是降低合同强度以迁就不稳定的 LLM 输出，而是证明完整合同链只有一个解释，并在每个
+持久化边界中恢复：
 
 ```text
-Goal / DoD / workspace observation
-  -> typed Focus + coverage dependency + target role
-  -> owner-grounded target / diagnostic / snapshot prerequisite
-  -> Runtime V2 authority transaction
-  -> provider candidate
-  -> sealed dispatch
-  -> capability owner receipt
-  -> evidence admission
-  -> effective progress / repair / retarget
-  -> assessment / focus advance / typed terminal
-  -> idempotent Result + Run + Workspace projection
+SM-2 authority / prerequisite / required output
+  -> CandidateContractManifest
+  -> LLM request renderer and strict decoder
+  -> SM-3 candidate admission and sealed dispatch
+  -> owner feasibility / operation receipt
+  -> SM-2 evidence / coverage / focus
+  -> SM-1 terminal projection, driven by SM-4 recovery
 ```
 
-本文从以下权威合同派生，不建立第二套 Runtime 规则：
+近期 live 中的 `unknown field`、参数白名单、目标或 effect 不匹配、replay、无意义 governance、
+prerequisite refresh 耗尽以及重启后不收敛，均按这条链定位第一个失真点；不得按错误文本逐点热修。
 
-1. [Runtime 核心合同](../../00-core/runtime-stage-contract.md)；
-2. [Runtime 请求与缓存规则](../../00-core/runtime-request-cache-note.md)；
-3. `internal/modules/kernel/orchestrator/readme.md`；
-4. `internal/pkg/workorchruntimecontract`；
-5. [22 组件合同矩阵](component-contract-and-regression-closure-matrix.md)。
+本计划只覆盖 Runtime V2 生产路径。禁止恢复 V1 `StagePacket`、`NextAction`、
+`DispatchNextStep`、`ExecutionContextPatch`、auto-replan successor、map/JSON authority bridge 或任何
+兼容 fallback。当前阶段不做历史数据兼容；验证一律使用 fresh Run。
 
-## 2. 当前基线与结论
+约束优先级为：
 
-当前代码基线为 `5a6adcf3`。截至 2026-07-23，本地以下验证通过：
+1. [Runtime V2 核心合同](../../00-core/runtime-stage-contract.md)；
+2. [request/cache 从属合同](../../00-core/runtime-request-cache-note.md)；
+3. `internal/modules/kernel/orchestrator/readme.md` 与
+   `internal/pkg/workorchruntimecontract`；
+4. 本文件；
+5. [组件合同与回归矩阵](component-contract-and-regression-closure-matrix.md)。
 
-```text
-go test ./internal/modules/blocks/shell/... -count=1
-go test ./internal/modules/blocks/file/... -count=1
+## 2. 当前判定
+
+### 2.1 根因与处理原则
+
+当前阻塞的主要风险不是“校验过严”，也不是仅靠提高 token、bytes、retry 就能解决，而是同一事实曾在
+manifest compiler、prompt renderer、wire DTO、decoder、admission、owner receipt 与 fixture 中拥有多份
+解释。模型即使遵循可见提示，也可能因另一层的字段名、默认值、allow-list、target 或 effect 规则漂移
+而被拒绝。若拒绝后的 correction 只得到自然语言摘要，又没有确定的合法候选空间，就会表现为 shape
+replay、错误 ticket 或 refresh 空转。
+
+严格的 target、effect、coverage、owner admissibility、参数白名单和 evidence 质量仍然是安全边界，
+不可放宽。收口的判断标准是：
+
+- 每个可提交字段只有一个 typed 编译来源；
+- renderer、schema、decoder、admission、owner feasibility 与 fixture 对同一 manifest 闭包；
+- 不完整 document、transport、configuration、stale prerequisite 与 complete-invalid candidate 走不同且
+  有界的状态机路径；
+- 任一 CAS 前/后中断后，旧 document、旧 resource、旧 receipt、旧 dispatch 都不会复活或重放。
+
+### 2.2 适应不稳定 LLM 的执行模型
+
+LLM 输出不稳定不是降低合同的理由，而是必须缩小每次 LLM 可选择空间的原因。每张代码卡必须先
+固定 deterministic owner facts，再让 LLM 只填写同一 `CandidateContractManifest` 允许的候选字段。
+
+| 层 | 先后关系 | 失败归属 | 不允许的替代方案 |
+| --- | --- | --- | --- |
+| authority / prerequisite | owner receipt、local mapping、freshness commit 先完成 | SM-2 | 从 Goal/DoD、目录、错误字符串或旧 prompt 猜资源 |
+| candidate protocol | manifest renderer → strict decoder → admission → owner feasibility | SM-3 | unknown-field 忽略、双 schema、allow-list 旁路 |
+| durable execution | sealed dispatch → exact fence receipt → evidence | SM-3/SM-2 | UI Resume、重放 operation、把 action 当 evidence |
+| recovery/display | aggregate reload → bounded drive → derived projection | SM-4/SM-1 | Web/TUI watcher 重建 authority 或补偿状态 |
+
+因此 live 症状只用于取得脱敏 trace 并生成最小 deterministic fixture；它不能直接授权修改 prompt、
+token/byte 上限、预算、TUI/Web 或合同宽严度。一次卡内代码改动只能消除一个首失真点，并须保留其
+负向断言（零 query/attempt/dispatch/ticket/effect 或精确一次 effect）。
+
+### 2.3 已关闭的回归基线
+
+以下内容已通过定向验证，必须保留回归；它们不是新的代码工作卡。
+
+| 基线 | 已证明的合同 | 不得回退 |
+| --- | --- | --- |
+| C4 | request session first、fragment/continuation、transport/configuration/stale 分流 | 不完整 provider document 不进入 candidate attempt |
+| C5 | complete document strict admission、一次 correction、proposal/dispatch restart | 不以 EventHub 内存 body 或 compatibility DTO seal candidate |
+| C6 | semantic replay 判等、attempt 1 原子 exhaustion、CAS reload | 不用 operation ID、JSON 顺序或错误字符串绕过 replay fence |
+| P0–P2 | 单一 `CandidateContractManifest`，canonical renderer/wire/strict decoder round-trip | 不恢复 legacy decision/schema fallback |
+| P3 | admission、diagnostic、correction、governance route 与 file-backed restart matrix | 不创建无信息 ticket，不把 terminal fence 变为 retry |
+| P4-A0–A3M | File/Git/Shell 单 owner receipt，以及三 owner merge、精确 stale intersection、fresh-process stale/reload、两条 ledger source split | 不扩大 stale 影响集，不交叉扣减两条 refresh ledger |
+
+已验证的三 owner 组合回归包括：
+
+- `TestRuntimeV2FileBackedAdmissibilityThreeOwnerMergeRestart`；
+- `TestThreeOwnerAdmissibilityStaleIntersection`；
+- `TestRuntimeV2FileBackedAdmissibilityThreeOwnerStaleRestart`；
+- Git read-only stale 和 receipt-resource-change 的 CAS 前/后 restart 用例。
+
+它们要求 File、Git、Shell 的真实 owner 分别通过 typed EventHub result 提供 receipt；Run owner 只 CAS，
+SM-2 只按 `(domain, ownerModuleID, subjectRef, expectedRevision)` 的精确相交退休 observation。所有这些
+用例均断言零 candidate session/attempt、provider call、sealed dispatch、governance ticket、operation 与
+durable effect（receipt-resource-change 用例只读取已持久化 receipt，且不得重放它的 effect）。
+
+## 3. 不可违反的状态机和组件边界
+
+| 状态机 | 唯一职责 | 禁止事项 |
+| --- | --- | --- |
+| SM-1 Run lifecycle | 持久化 Run 生命周期并消费 Orchestrator 的 blocked/terminal 投影 | 选择 action、修改 candidate、补偿 Resume |
+| SM-2 authority/focus | reducer、prerequisite、freshness、focus/repair、required output、terminal decision | 调 provider、执行 capability operation、直读其他 owner repository |
+| SM-3 candidate/dispatch | request session、complete document、attempt、admission、sealed dispatch/evidence transaction | 从错误文本选择下一 action、修补 authority |
+| SM-4 drive/recovery/projection | 有界 drive、CAS reload、singleflight、派生投影重试 | 由 TUI/Web/projection 重建 authority 或重放副作用 |
+
+| 组件 | 可承担的职责 | 独立回归边界 | 明确禁止 |
+| --- | --- | --- | --- |
+| `internal/pkg/workorchruntimecontract` | DTO、合同描述、Normalize/Validate/Clone/Hash 等纯无状态 helper | pure contract/property test | 状态迁移、CAS、EventHub、I/O、retry 决策 |
+| `orchestrator/biz/runtimev2` | SM-2 reducer、freshness、admission 的纯/聚合逻辑 | reducer/invariant/stale/duplicate/budget test | provider-specific 兼容、跨 owner repository |
+| `orchestrator/biz` | session/content CAS、drive、typed EventHub prerequisite/operation 编排 | file-backed fresh-process restart test | 从提示词或错误字符串推断领域修复 |
+| `kernel/run` | aggregate CAS、reload、startup inventory | CAS/reload/idempotency test | action、candidate、evidence quality 判定 |
+| LLM block | sealed manifest rendering、provider request、strict decode、provider ceiling receipt/audit | renderer/decode/provider-ceiling producer-consumer test | 修改 Runtime aggregate、消耗 repair budget |
+| File/Git/Shell 及其他 capability owner | 本 owner 的 prerequisite/feasibility/operation 与 typed receipt | owner producer-consumer and receipt test | 扩展授权目标、关闭 coverage、写 Runtime aggregate |
+| Decision/Approval owner | 只处理真实 governance dependency 与 bound resolution | ticket/binding/reload test | 把 candidate rejection 变成泛化 decision |
+| `workorchd`、TUI、Web、eventstream | activation command、审计、只读投影 | projection/high-watermark/UI command test | authority rebuild、隐式 Resume、状态补偿 |
+
+跨 owner I/O 只能是具体 typed EventHub command/result；禁止跨 owner service/repository、`map[string]any`、
+`any`、JSON/reflect bridge 和生产 compatibility adapter。
+
+## 4. 工作方法：一张卡、一个首失真点、一个退出条件
+
+每张卡严格按以下顺序执行，任一项失败就停在本卡：
+
+1. 用最小 typed input 写失败的组件级测试，同时断言正向结果和不得变化的 ledger/side effect。
+2. 存在持久化边界时，用同一输入升级为 file-backed fresh-process 测试：销毁 repository adapter、Run
+   owner、Orchestrator、EventHub、真实 responder 和临时配置对象后重建，不能复用进程内对象。
+3. 仅修改本卡列出的 owner。发现缺字段时，先补 owner-defined DTO 和 producer/consumer 回归；不引入
+   test-only runtime owner、通用 receipt 或兼容路径。
+4. 先跑本卡的选择器，再跑相邻 owner、Run CAS 和边界门禁。全部通过后才更新状态并解锁下一卡。
+5. P6 以前不以 live 成功、TUI/Web `/run resume`、人工 decision、修改 prompt 或提高预算作为完成证据。
+
+每个持久化用例必须覆盖：normal、duplicate、CAS 前崩溃、CAS 后响应丢失和 fresh reload。若某格在语义
+上不可达，测试必须显式证明不可达，而不是省略。
+
+### 4.1 live 症状的归类规则
+
+| 分类 | 第一个判定边界 | 回流工作卡 | 禁止的伪修复 |
+| --- | --- | --- | --- |
+| F0 request/context | manifest、C0–C5 rendering、strict decode | P0–P2 回归 corpus | 忽略未知字段、截断 P0–P4、提高 retry/budget |
+| F1 candidate route | admission、correction、semantic replay、governance binding | P3 corpus/restart | UI Resume、泛化 decision、按 message 猜 operation |
+| F2 prerequisite | receipt acquisition、observation、stale/invalidation、refresh ledger | P4-A | provider call、candidate attempt、live 热修 |
+| F3 authority resource | selection、snapshot、failure target | P4-B | 从 Goal/DoD 文本猜文件、扩大 owner authority |
+| F4 convergence fact | evidence、coverage、focus advance、assessment/failure | P4-C/D | 历史 summary/evidence 关闭当前 coverage、清零总 repair budget |
+| F5 side effect/delivery | seal/claim、receipt、evidence、governance fence、terminal projection | P5 | 重放 provider/durable effect、projection 重建 authority |
+| F6 display/activation | committed revision、activation/projection | P5/P6 的观察用例 | 修改 reducer、watcher 自动 Resume |
+
+一个 live 样本只能落在**第一个**失真边界。先记录脱敏 `ContractTrace`（manifest/diagnostic/shape/request
+hash、ledger delta、revision），再形成 deterministic fixture；不得直接改模型、提示词、预算或运行时分支。
+
+## 5. 唯一串行执行队列
+
+下表是唯一“下一步”定义。`done` 只表示必须保留回归；只有第一张 `in_progress` 卡允许产生代码改动。
+
+| 顺序 | 工作卡 / 状态 | 单一目标 | 涉及状态机和 owner | 解锁条件 |
+| --- | --- | --- | --- | --- |
+| Q0 | P0–P3、A-0–A-3M `done` | 维持既有合同与三 owner freshness 基线 | 已关闭基线 | 所有后续卡均以此为回归前置 |
+| Q1 | **A-4 reachable prerequisite owner inventory `done`** | resolver 的九种 prerequisite 已完成 owner、receipt 类型、CAS/restart 或 local mapping 证据 | SM-2 + typed owner；Run 仅 CAS；SM-4 仅重启 drive | A-4-0 至 A-4-4 已全部完成 |
+| Q2 | **A-5 mixed-owner budget/exhaustion `done`** | 两条 prerequisite refresh ledger 的混合 owner 上限、typed terminal 与无 query loop | SM-2 freshness/reducer + Run CAS | 已完成；保持回归 |
+| Q3 | **P4-B resource/focus `done`** | selection、snapshot、failure target 取得/退休的原子性 | SM-2 + File owner typed receipt | 已完成；保持回归 |
+| Q4 | **P4-C receipt/evidence/coverage/focus `done`** | accepted receipt 到 evidence、coverage、focus advance 的恰一次推进 | SM-2；SM-3 仅消费 sealed dispatch | 已完成；保持回归 |
+| Q5 | **P4-D assessment/failure/repair `done`** | assessment、failure、repair budget 的恰一次推进 | SM-2；SM-3 仅消费 sealed dispatch | 已完成；保持回归 |
+| Q6 | **P5 side effect/delivery `done`** | seal/claim、owner receipt、governance fence、terminal delivery 的 exactly-once | SM-3、SM-2、SM-1、SM-4 | 已完成；保持 P5-A～P5-D fresh-process 回归 |
+| Q7 | **P6 isolated scripted/live `in_progress`** | 已证明脚本的部署、投影和真实 provider 可达性 | SM-1/SM-4 observation only | P0–P5 全部关闭；继续保留隔离 artifact 与全仓门禁 |
+
+## 6. Q1 / A-4：可达 prerequisite owner inventory
+
+### 6.1 问题定义
+
+`resolveRuntimeV2Prerequisite` 是 production reachability 的唯一入口。此前已充分验证 Manifest、Target
+Selection、Target Snapshot、Operation Admissibility 和 Git Capability State 的代表路径，却尚未对其余可达
+kind 做逐项 file-backed CAS 前/后证明。若忽略它们，新的 prerequisite 即可在 restart 后重新查询、泄漏
+未提交 resource，或把 local filesystem/LLM owner 的结果错误带入 candidate 事务。
+
+本卡不重新讨论目标选择语义、candidate JSON 或 operation side effect；它只证明 prerequisite acquisition、
+commit、reload 和 retirement 的权威边界。
+
+### 6.2 可达性清单与证据要求
+
+| prerequisite kind | 当前来源 / owner | 结果归属 | A-4 必须证明 |
+| --- | --- | --- | --- |
+| Manifest | File typed EventHub | File manifest + observation | 已完成；保持回归 |
+| TargetSelection | File typed EventHub | selection + observation | 已完成；保持回归 |
+| TargetSnapshot | File typed EventHub | snapshot + observation | 已完成；保持回归 |
+| OperationAdmissibility | File/Git/Shell typed EventHub | owner inventory + observation | 已完成三 owner merge/stale；保持回归 |
+| CapabilityState | Git typed EventHub | Git state + observation/binding | 已完成；保持回归 |
+| ProviderCeiling | LLM typed EventHub | provider ceiling + observation | **已由 `TestRuntimeV2FileBackedProviderCeilingCommitCrashRestart` 覆盖 before/after-CAS fresh-process matrix** |
+| Capability | capability owner typed EventHub，owner 由 definition 指定 | capability set + owner-catalog observation | File、Git、Shell receiver 已分别由 `TestRuntimeV2FileBackedFileCapabilityCommitCrashRestart`、`TestRuntimeV2FileBackedGitCapabilityCommitCrashRestart`、`TestRuntimeV2FileBackedShellCapabilityCommitCrashRestart` 覆盖；**仍须按真实可达 owner 分类，并为其余 receipt 实现补证明或不可达证明** |
+| FailureTarget | Orchestrator-local typed failure 映射 | failure target | **已完成** exact typed identity、invalid input、signature/target 变化 retirement 与 CAS 前/后全 actor restart：`TestRuntimeV2FileBackedFailureTargetCommitCrashRestart`、`TestRuntimeV2StateRepositoryFailureTargetCommitCrashRestartIsAtomic`、`TestRuntimeControllerReacquiresFailureTargetWhenRecordedTypedFailureChanges` |
+| ValidationScratch | Orchestrator-local filesystem prerequisite | scratch reference/revision | **已完成** scoped root、resource incarnation revision、CAS 两侧、全 actor restart、duplicate/no-op 与无关 stale 隔离：`TestRuntimeV2FileBackedValidationScratchCommitCrashRestart`、`TestRuntimeV2FileBackedValidationScratchStaleInvalidationCrashRestart`、`TestRuntimeV2StateRepositoryValidationScratchStaleInvalidationIsAtomic` |
+
+任何新增 `PrerequisiteKind`、或 switch 中新增 case，必须在同一提交更新这张清单并增加对应
+before-CAS/after-CAS 或 reachability-unreachable test；不能先上线后补覆盖。
+
+### 6.3 A-4-0：冻结可达性和 owner 分类（`done`）
+
+**影响：SM-2；无外部副作用。**
+
+先新增 resolver reachability test，枚举全部 `PrerequisiteKind` 并对每种结果断言恰好一个分类：
+
+1. 外部 owner typed EventHub receipt；
+2. Orchestrator-local deterministic mapping；
+3. definition/profile 在当前 production path 不可达，且 reducer 无法生成它。
+
+测试还必须断言 external case 的 command destination 等于 `OwnerModuleID`（或该 kind 固定的 LLM/File/Git
+owner），不得落到通用 responder。local case 不得伪造 EventHub owner receipt。若 `Capability` 使用动态
+owner，测试需从实际 activation/definition 逐项生成 File、Git、Shell、Decision/Approval 等真实可达样本；
+未被 production profile 声明的 owner 必须返回 typed unsupported/infeasible，而不是由默认能力集合兜底。
+
+**退出条件：** 本节 6.2 每行均有 producer、consumer、persistent result、dependency/observation（若有）、
+测试定位和分类结论；unknown kind 在无 provider/session/attempt/dispatch/ticket/effect 的前提下 fail-fast。
+
+已完成：`TestRuntimeV2PrerequisiteResolverInventoryUsesProductionRequirementSources` 直接调用 production
+`activationcore.RuntimeV2Bootstrap`，再驱动 SM-2 reducer 的 target-selection/target-snapshot 路径和 typed
+failure-target 路径，覆盖 contract 的全部九种 `PrerequisiteKind`；它不维护第二份手写 kind 清单。
+每个 activation requirement 断言 canonical owner 与 external/local 分类，动态 File requirement 同样断言
+owner。`TestRuntimeV2PrerequisiteResolverClassificationCoversContractKinds` 还调用实际 resolver 验证 unknown
+kind 在任何 Hub/owner interaction 之前 fail-fast。各 external owner 的 producer/consumer 与 CAS matrix 继续
+由 A-4-1/A-4-2 的对应 receiver 用例承担。
+
+#### A-4-0 完成证据
+
+已以仅读取 contract/production bootstrap 的 reachability inventory test 取代手写清单。其输出覆盖：
+
+| 字段 | 要求 |
+| --- | --- |
+| `PrerequisiteKind` / requirement ID | 来自 reducer 实际可生成的 typed requirement |
+| classification | `external_owner`、`orchestrator_local` 或 `unreachable` 三选一 |
+| owner / command / result | external 必须是 canonical `OwnerModuleID` 与具体 EventHub command/result；local 不得伪造 owner |
+| persisted fact | `Facts.Resources` 中唯一写入位置，以及是否写入 observation |
+| freshness dependency | observation 的 domain/owner/subject/revision，或明确 `none` |
+| recovery fixture | owner producer-consumer test、before-CAS、after-CAS、fresh-process reload 的测试名 |
+| unsupported path | 无 responder/不支持三元组的 typed failure code，及零副作用断言 |
+
+执行顺序固定为：先让 inventory 覆盖所有枚举/实际 bootstrap，再补一个缺项的 owner 合同；只有 inventory
+报告完整后才补该 kind 的 crash/restart matrix。不得先以默认 capability、generic governance 或空结果
+隐藏缺项。
+
+### 6.4 A-4-1：ProviderCeiling 的完整 CAS/restart 闭环（`done`）
+
+**影响：SM-2 acquisition/receipt；SM-4 restart；LLM owner 只返回 typed ceiling。**
+
+在 `runtime_v2_drive_test.go` 增加独立 file-backed 场景，参照 manifest restart harness，不复用旧 Hub、
+LLM module、Run repository、workspace responder 或配置对象：
+
+1. 用 `t.TempDir`、`t.Setenv` 和 cleanup 设置 test-only LLM config；不得修改运行环境的 default chat、
+   workspace `DefaultLLMTarget`、`config/`、`.workorch-data` 或 `.workorch-workspaces`。
+2. bootstrap 只要求 `ProviderCeiling`，activation provider target 固定为测试专用
+   `custom-test/model-1`；启动 File-backed Run repository、Run module、LLM module 和只计数的 query spy。
+   spy 不能作为 responder。
+3. fault repository 在 `Facts.Resources.ProviderCeiling != nil` 的 save 点注入一次中断。
+4. **before-CAS：** 已持久化 aggregate 不含 ceiling/observation；销毁全部进程对象后重建，LLM acquire
+   query 恰增加一次；仅新查询结果可提交。
+5. **after-CAS：** reload 的 ceiling、configuration revision、snapshot/observation ID、content hash 和
+   acquisition binding 完全相同；LLM acquire query 增量为零。
+6. 两侧均断言零 candidate request/session/attempt、provider completion、sealed dispatch、governance
+   ticket、operation receipt/effect；duplicate response 不能增加 revision 或 observation。
+
+**完成证据：** `TestRuntimeV2FileBackedProviderCeilingCommitCrashRestart` 已以真实 LLM module、query
+spy、before/after-CAS fault repository 和新建的 Run/EventHub/LLM/config source 通过上述矩阵。它同时断言
+candidate/session/attempt、provider completion、dispatch、ticket、operation receipt/effect 均为零。
+
+provider configuration 不可用时仍须走已定义的 typed configuration route，不得被错误归为 candidate
+rejection 或 prerequisite refresh；该行为继续由 LLM producer-consumer 和 request-session 回归守护。
+
+### 6.5 A-4-2：Capability 的真实 owner 覆盖（`done`）
+
+**影响：SM-2 acquisition/receipt；各 capability owner 的单 owner 状态；Run 仅 CAS。**
+
+`Capability` 不是一个通用的“已具备能力”布尔值。它由 definition 的 `OwnerModuleID`、capability class 和
+required kinds 共同限定，必须通过具体 owner typed command/result 获得。执行顺序如下：
+
+1. **已完成的 receiver：** File state-change capability 已由
+   `TestRuntimeV2FileBackedFileCapabilityCommitCrashRestart` 在真实 File module 上覆盖 CAS 前/后、
+   duplicate/reload 和零 candidate/dispatch/effect。Git state-change capability 已由
+   `TestRuntimeV2FileBackedGitCapabilityCommitCrashRestart` 在真实 Git module、独立 Git adapter/receipt
+   store、全 actor restart 上证明相同边界。Shell validation capability 已由
+   `TestRuntimeV2FileBackedShellCapabilityCommitCrashRestart` 在真实 Shell module、全 actor restart 上覆盖
+   CAS 两侧、catalog observation 与零 candidate/dispatch/effect。三者均通过同一 typed
+   `AcquireRuntimeCapabilitiesCommand/Result` 及 `ResolveRuntimeCapabilities` 的 canonical receipt constructor；
+   但它们仍分别验证 owner subscription、允许 kind 和错误隔离，不能替代 Decision、LLM、MCP、SSH 或 Web。
+2. 从当前 production profiles/definitions 枚举实际会产生 capability prerequisite 的 owner/class/kind
+   三元组；将其分为 File、Git、Shell、Decision/Approval 与其他已注册 capability owner。
+3. 每个三元组先有 owner producer-consumer test，验证结果不能夹带其他 owner capability；缺 owner、空
+   `OwnerModuleID`、required kinds 不匹配均需 typed failure，不能静默返回空 capability set。
+4. 对每个**不同 receipt/observation 实现**补一个 file-backed before/after-CAS matrix。共享同一 owner
+   receipt 实现的多种 kind 可在一张参数化用例中覆盖，但报告必须列出所有三元组。
+5. capability 不附带 observation 时，显式断言其不参加 stale retirement；附带 observation 时，验证它只
+   随精确 dependency stale 退休，并使用正确的 refresh ledger。
+
+**退出条件：** 任何 definition 可声明、但当前 module 没有 responder 的 capability prerequisite 在 activation
+或 acquire 处确定失败；绝不变成 LLM request、默认 capability、generic governance 或无限 retry。
+
+#### A-4-2 剩余实施分包
+
+`Capability` 的关闭单位是“不同 receipt/observation 实现”，不是 capability 字符串数量。A-4-0 的
+production bootstrap/reducer inventory 与当前 owner inventory 共同覆盖 File、Git、Shell、LLM、Decision、
+SSH、MCP、Web；Approval、assessment、memory 等非 capability receiver 不以默认集合伪装支持，而是在
+owner/class/kind acquire 处走 typed unsupported route。
+
+每个分包必须按以下次序交付，且单独提交：
+
+1. owner producer-consumer：验证 canonical owner、required kinds、receipt 内容和其它 owner 隔离；
+2. capability commit：验证 `CommitPrerequisiteResult` 的唯一 resource/observation 写入与 duplicate no-op；
+3. file-backed before-CAS：摧毁全部进程对象后不泄漏未提交 result；
+4. file-backed after-CAS：重建后零 owner query、零 candidate/session/attempt/dispatch/ticket/operation/effect；
+5. 若带 observation：只对相交 dependency stale 退休，且只扣对应 ledger；若不带：显式断言不参加 stale；
+6. 无 responder/owner mismatch/empty kinds：typed unsupported/infeasible，且步骤 4 的所有计数仍为零。
+
+同一 owner 的多个 kind 只有在**同一 command/result、hash、observation 与 commit 分支**完全共享时，
+才能使用参数化测试合并；报告中仍须列出每个三元组。File 的既有通过用例只可作为这个规则的样本，
+不能替代其他 receiver。
+
+#### A-4-2 当前 receiver inventory 收口证据
+
+Capability receiver 的支持 kind 不再散落在各 `biz.handleRuntimeCapabilities` 调用点：File、Git、Shell、
+MCP、SSH、Web、LLM、Decision 各自在自己的 `pkg/common.RuntimeCapabilityKinds()` 声明只读 inventory，
+handler 只将该 inventory 交给 shared `ResolveRuntimeCapabilities`。该 helper 是唯一的 result、catalog
+revision、observation hash 与 dependency 构造点；`RuntimeCapabilityKinds()` 每次返回新 slice，调用方不能
+变更 owner authority。此处 `pkg/common` 仅含常量/纯 helper，不含状态迁移、Hub、I/O 或 retry。
+
+不匹配或无 responder 的 owner/class/kind 不再退化为普通字符串错误：
+`RuntimeCapabilityUnsupportedError{owner,class,kinds,reason}` 是 typed prerequisite failure。SM-4 将它
+分类为 `runtime_capability_unsupported` / terminal contract defect，而不是 `CapabilityUnavailable` 的治理
+分支，因此不会创建泛化 decision ticket、candidate/session/attempt/dispatch 或 effect。
+`ResolveRuntimeCapabilities` 的 unsupported kind、`AcquireAndCommitRuntimeCapabilitiesPrerequisite` 的 absent
+responder 与 `classifyRuntimeV2DriveFailure` 均保留该类型；
+`TestRuntimeCapabilityOwnerInventoriesProduceCanonicalReceipts` 枚举八个 registered owner 的 inventory、
+defensive-copy、class、result 与 owner-catalog observation；
+`TestRuntimeCapabilityReceiverModulesPublishDeclaredInventory` 另外以真实 MCP、SSH、Web、LLM、Decision
+module/EventHub producer-consumer 验证 subscription 与 owner-isolated receipt。
+`TestResolveRuntimeCapabilitiesRejectsUnsupportedKind`、
+`TestAcquireRuntimeCapabilitiesPrerequisiteReturnsTypedOwnerUnavailable`、
+`TestClassifyRuntimeV2DriveFailureKeepsUnsupportedCapabilityOutOfGovernance` 覆盖 unsupported/absent-owner
+边界。
+
+A-4-2 已满足退出条件：所有 registered receiver 均有 owner inventory 和 producer-consumer 证据；所有
+receipt 共享同一 command/result/hash/observation/commit branch，File/Git/Shell 已覆盖实际 owner 的 CAS
+两侧与 fresh-process restart；unsupported/absent owner 不会进入 provider、candidate、ticket 或 effect。
+后续不得重新复制同构 capability crash harness，下一张唯一工作卡为 A-5。
+
+### 6.6 A-4-3：FailureTarget 的 local mapping 闭环（`done`）
+
+**影响：SM-2；无跨 owner I/O。**
+
+FailureTarget 必须仅从当前 persisted typed `Facts.Failure.TargetRefs` 和 signature 派生，不从错误消息、
+workspace tree、历史 evidence 或 LLM 输出猜测。补充：
+
+- pure reducer/local adapter 测试：缺 typed failure 或空 target 时 fail-fast；结果只包含当前 signature 和
+  target refs；重复 commit canonical no-op；
+- file-backed before-CAS：未提交 FailureTarget 在 restart 后不可见，重建后只能从同一 persisted failure
+  重新派生；
+- after-CAS：不改变 target/signature、不重复生成 observation、无 provider/attempt/dispatch；
+- failure signature/target 变化时，旧 FailureTarget 必须按 SM-2 的 resource/freshness 合同退休；该跨
+  focus 具体选择语义留给 P4-B，不在本卡扩大 target 集。
+
+**退出条件：** local prerequisite 仍是 Orchestrator 内部映射，不被包装成 EventHub “假 owner”，且其 CAS
+行为与外部 receipt 一样可验证。
+
+已完成：local adapter 对缺失 typed identity fail-fast；commit 与 satisfied 判定均要求 mapping 与当前
+`Failure.Signature + TargetRefs` 精确相等；`TestRuntimeV2FileBackedFailureTargetCommitCrashRestart` 覆盖
+Run-owner CAS 前、CAS 后响应丢失、销毁 Hub/Run owner/Workspace responder 后的 full fresh-process restart，
+并断言零 observation、provider/session/attempt/dispatch/ticket/effect；
+`TestRuntimeControllerReacquiresFailureTargetWhenRecordedTypedFailureChanges` 覆盖 signature/target set 改变时
+旧 mapping 在记录新 failure 的同一 SM-2 CAS 内清除并回到既有 prerequisite。duplicate no-op 继续由
+`TestRuntimeV2StateRepositoryFailureTargetCommitCrashRestartIsAtomic` 守护。
+
+#### A-4-3 精确实现边界
+
+本卡只允许读取已持久化的 `Facts.Failure`，并且结果 identity 必须由 failure signature 与 canonical
+target refs 决定。实现不得读取 workspace tree、manifest、历史 evidence、LLM body 或 diagnostics 文本来
+补 target。推荐测试断言如下：
+
+- `Facts.Failure == nil`、signature 为空或 target refs 为空时，在 prerequisite acquisition 直接返回 typed
+  failure，且 aggregate/query/attempt/dispatch/ticket/effect 均不变化；
+- 相同 signature/refs 的 duplicate commit 为 canonical no-op；
+- fault 在 local result 写入前触发时，fresh process 看不到 result；fault 在 CAS 后/响应前触发时，reload
+  复用完全相同的 result，不产生新 observation；
+- signature 或 target set 变化时，旧 mapping 的 retirement 只能由 SM-2 invalidation 发生；本卡不扩大新
+  target 的选择权，也不跨 focus 重建 selection。
+
+### 6.7 A-4-4：ValidationScratch 的 local filesystem 闭环（`done`）
+
+**影响：SM-2 local prerequisite；SM-4 restart；不得触及 candidate/operation。**
+
+Validation scratch 是执行前置资源而非交付物证据。需验证：
+
+当前实现已移除 `os.TempDir()` fallback：`AcquireValidationScratchPrerequisite` 只能接收 Workspace owner
+已持久化的 `InternalDirectory`，并在其下建立 `validation-scratch/<workspace>/<run>/<focus>`。缺少该 root
+会在 SM-2 prerequisite acquire 处确定失败；它不会再写入 process-global temporary directory。
+`TestRuntimeV2FileBackedValidationScratchCommitCrashRestart` 已覆盖该 resource 的 before/after-CAS、全进程
+重建、路径 root containment 与零 candidate/dispatch/effect。scratch 同时持久化本地 incarnation revision
+marker：同一路径被删除后重建会获得新 revision，不能被旧 invalidation receipt 误当作同一资源。目录删除、
+非目录、不可写、marker 丢失或 revision 不匹配均在 candidate 前转换为 SM-2 read-only stale。
+`TestRuntimeV2FileBackedValidationScratchStaleInvalidationCrashRestart` 已覆盖 stale invalidation CAS 前/后
+的全 actor fresh-process matrix；`TestRuntimeV2StateRepositoryValidationScratchStaleInvalidationIsAtomic`
+覆盖 duplicate/no-op、无关 stale 零 revision/ledger 变化。该卡已关闭。
+
+- scratch path 仅由 workspace/run/focus 等 scoped identity 推导，经过路径安全规范化，且在 test 中使用
+  临时根目录；不得写运行环境的全局临时目录或 workspace deliverable；
+- before-CAS 重启后，未提交 scratch reference 不得进入 aggregate；允许重建同一 deterministic scoped
+  resource，但不得将旧进程的未持久化 reference 视作已满足 prerequisite；
+- after-CAS 重启后，只有 committed reference/revision 可被使用；目录丢失、权限异常或 revision 不匹配
+  必须进入 typed prerequisite failure/reacquire，不得进入 provider/attempt；
+- duplicate 和无关 stale 不增加 revision/ledger；其清理策略必须由 owner 生命周期或 validation policy
+  明确定义，不能由 TUI/Web 执行。
+
+若实现无法在不污染 process temp 的前提下满足上述契约，先调整 local prerequisite 的 scoped root 注入和
+测试隔离，再继续；不要把 filesystem I/O 下沉到 `workorchruntimecontract`。
+
+#### A-4-4 resource-loss 完成证据
+
+“已提交资源后来失效”已按以下合同完成；目录删除不会被归类为普通 candidate failure：
+
+1. 在 `workorchruntimecontract` 仅补 owner-neutral local-resource DTO/domain 常量（如确有缺口）；不得
+   放 probe、CAS 或状态迁移。
+2. `AcquireValidationScratchPrerequisite` 产生 `RuntimePrerequisiteObservation`：kind 为 scratch、owner 为
+   Orchestrator local mapping、subject 为稳定 scoped identity、revision 为已验证的 scratch revision。
+3. candidate 前的 local probe 只检查该 scoped path 的存在、目录属性和可写性；发现删除、不可写或 revision
+   不匹配时构造 typed `RuntimePrerequisiteStale`。
+4. 只有无 active candidate/dispatch 的 read-only safe point 才调用
+   `InvalidatePrerequisitesForReadOnlyStale`。它只退休 scratch 与精确相交 observation、只消耗
+   `PrerequisiteRefreshes`，再回到 acquire；不得产生 provider call、candidate attempt、dispatch、ticket 或
+   effect。
+5. `TestRuntimeV2FileBackedValidationScratchStaleInvalidationCrashRestart` 证明目录删除后的 before/after
+   invalidation-CAS：before 保持旧 aggregate 并在重启时只退休后重获；after 仅获取新 incarnation scratch；
+   全程零 provider/session/attempt/dispatch/ticket/effect。
+6. `TestRuntimeV2StateRepositoryValidationScratchStaleInvalidationIsAtomic` 证明 duplicate stale 无
+   CAS/ledger 增量、无关 stale 不影响 scratch；probe 只在无 active dispatch 的 candidate 前 safe point 运行，
+   不会由正常 Shell cleanup 触发执行期循环。
+
+### 6.8 A-4 总体验收与提交边界
+
+A-4 关闭前必须同时满足：
+
+1. 6.2 中每个可达 kind 都有 before/after-CAS fresh-process test，或有可执行的不可达证明；
+2. after-CAS 无重复 owner query，before-CAS 不泄漏 aggregate resource/observation；
+3. 所有 acquisition 期间 candidate/session/attempt/provider completion/dispatch/ticket/operation/effect 均为零；
+4. 外部 receipt 与 local mapping 都使用同一 SM-2 commit/invalidation 事实模型，但不伪装 owner；
+5. 新增或修改的 `pkg` 只有 DTO、合同和纯 helper，不含状态迁移、EventHub、CAS、filesystem 或 retry。
+
+**A-4 completed evidence (2026-07-25):** A-4-0 resolver inventory、A-4-1 ProviderCeiling、A-4-3
+FailureTarget 与 A-4-4 ValidationScratch 的指定 fresh-process matrices 均已完成。A-4-2 以
+`TestRuntimeV2FileBackedFileCapabilityCommitCrashRestart`、
+`TestRuntimeV2FileBackedGitCapabilityCommitCrashRestart`、
+`TestRuntimeV2FileBackedShellCapabilityCommitCrashRestart` 覆盖真实 receiver 的 CAS 两侧；
+`TestRuntimeCapabilityOwnerInventoriesProduceCanonicalReceipts` 和
+`TestRuntimeCapabilityReceiverModulesPublishDeclaredInventory` 覆盖全部 shared receiver/result/observation
+branch；typed unavailable 的 adapter/classifier 回归保证零 candidate/governance/effect 路径。定向
+Orchestrator、RuntimeV2、contract 测试及 `make verify-boundary-contract` 已通过。A-5 是唯一解锁的后续卡。
+
+一个提交只覆盖一个 receipt kind 或一个不可拆分的同 owner receipt 实现。提交说明必须写明：影响的 SM、
+producer/consumer、CAS 断点、query/ledger 期望变化、零副作用断言、执行命令和仍被阻塞的下一张卡。
+
+## 7. 后续工作卡的具体执行方案
+
+### 7.1 Q2 / A-5：mixed-owner refresh budget and exhaustion
+
+**影响：SM-2 freshness/reducer；SM-4 restart；Run 仅 CAS。**
+
+在 A-4 关闭后，用已证明的真实 owner 组成 matrix：先后提交外部 receipt 与 local prerequisite，分别制造
+duplicate、无交集 stale、read-only stale 和 accepted receipt resource change。每种输入只允许改变其对应
+ledger：
+
+- read-only stale 只增加 `PrerequisiteRefreshes`；
+- accepted receipt 的真实资源变更只增加 `PrerequisiteResourceChangeRefreshes`；
+- duplicate/无交集 stale 无 CAS、无 query、无 ledger 变化；
+- 只耗尽的一条账本生成确定的 `prerequisite_*_refresh_exhausted` terminal，另一账本和所有
+  candidate/provider/dispatch/ticket/effect 不变；terminal 后没有 query loop。
+
+测试必须在每次 ledger 临界值的 CAS 前/后中断并新建进程。禁止调高预算、把两账本合并、以重复 query
+掩盖 stale，或让 capability owner 读取 Runtime aggregate。
+
+#### A-5 完成证据
+
+`TestMixedOwnerPrerequisiteRefreshLedgersRemainIndependent` 使用同一 SM-2 aggregate 组合 File 的
+`workspace_tree` owner receipt 与 Orchestrator-local `ValidationScratch` observation，证明前者只增加
+`PrerequisiteResourceChangeRefreshes`，后者只增加 `PrerequisiteRefreshes`；duplicate 与无交集变更不产生
+新的 invalidation、ledger 消耗或 candidate/dispatch/governance/effect。
+
+`TestMixedOwnerPrerequisiteRefreshExhaustionKeepsOtherLedgerStable` 则在两项 prerequisite 重获后分别耗尽
+receipt 和 read-only ledger。两种 terminal 的 code 分别固定为
+`prerequisite_receipt_refresh_exhausted` 与 `prerequisite_refresh_exhausted`，另一 ledger 保持原值，且重复
+输入不增加 revision。这只是 reducer/controller 组件证据；A-5 仍需补齐这两个交错临界点的 file-backed
+CAS 前、CAS 后 response-loss 与完整 fresh-process actor 重建矩阵，完成前不得进入 P4-B。
+
+`TestRuntimeV2FileBackedMixedOwnerReceiptThenLocalScratchStaleCrashRestart` 已补齐混合的第一个
+file-backed 轴：Git owner 的已接受 `repo-init` receipt 先以 receipt ledger 提交 resource invalidation；销毁
+全部 Hub、Run owner、Git owner 与 workspace responder 后，删除 local scratch，再分别在 local stale CAS 前和
+CAS 后中断。最终 fresh process 只重获 prerequisite，保留原 Git receipt/effect 恰一次，并得到
+`PrerequisiteResourceChangeRefreshes=1`、`PrerequisiteRefreshes=1`。为支持该路径，read-only stale 入口只
+拒绝**当前 authority** 的 live session/attempt；前一已 invalidated dispatch 的 candidate/session 是不可变审计
+谱系，不能阻断新的 SM-2 freshness fact。
+
+`TestRuntimeV2FileBackedGitReceiptResourceChangeRefreshExhaustionIsTerminal` 以真实 Git receipt 将 receipt
+ledger 上限设为 1；fresh-process recovery 中第二个 resource change 直接提交
+`prerequisite_receipt_refresh_exhausted`，不借用 read-only ledger。该测试分别在**该 terminal 写入** CAS 前和
+CAS 后中断，再销毁 Hub、Run owner、Git owner、workspace responder 与 LLM observer 并启动全新进程：CAS 前
+只允许从同一已持久化 owner receipt 收敛一次，CAS 后只允许 terminal delivery；两者均断言零新 candidate
+request、dispatch、ticket 或 effect。
+
+`TestRuntimeV2FileBackedValidationScratchStaleRefreshExhaustionIsTerminal` 则以真实本地目录 incarnation 将
+read-only ledger 上限设为 1；第二次删除 scratch 后得到 `prerequisite_refresh_exhausted`，receipt ledger 保持
+0，并在 terminal CAS 前/后 response-loss 后由 fresh-process reload 完成同样的无 query-loop 断言。至此两条
+独立 ledger 的普通、duplicate、无交集、临界耗尽、CAS 两侧与完整 actor 重建矩阵均已覆盖；A-5 关闭，唯一
+可修改的后续卡为 P4-B。
+
+### 7.2 Q3 / P4-B：target selection、snapshot、failure target（`done`）
+
+**影响：SM-2；File owner typed receipt；SM-4 restart。**
+
+P4-B 只收口 resource/focus 事实的原子性：
+
+1. 空 workspace 的 first target 必须由已持久化 Goal/DoD、workspace deliverable directory 的 File manifest
+   和 owner-declared selector 合同推导；不得要求用户再次声明，也不得从自然语言或目录猜具体文件。
+2. selection、prospective new target、durable create receipt、post-create snapshot 与 failure-target 必须按
+   定义的先后关系持久化；new target snapshot 只在 durable create receipt 已提交后取得。
+3. 每个 selection/snapshot/failure target 都有 CAS 前/后、duplicate、stale、fresh-process matrix；旧
+   selector/target/snapshot 不能在 restart 后复活。
+4. ambiguity 或 owner 无法选择时，必须是 typed unresolved/infeasible route；只有真实外部 governance
+   dependency 才能创建绑定 ticket。
+
+完成证据：`TestRuntimeV2FileBackedEmptyWorkspaceCreationSelectionContinuesThroughCandidate` 与
+`TestRuntimeV2FileBackedCreationSelectionCommitCrashRestart` 证明 empty workspace 从已持久化
+Goal/DoD、deliverable directory manifest 和 File selector 得到 prospective target，并在 selection CAS
+两侧由 fresh process 精确重查或复用；`TestRuntimeV2FileBackedEmptyWorkspaceCreationReceiptCrashRestartDoesNotReplayCreate`
+证明 durable create 先于 post-create snapshot，且 create receipt 不重放。`TestRuntimeV2FileBackedTargetSnapshotCommitCrashRestart`
+覆盖 snapshot 的 CAS 两侧、duplicate、read-only stale 与第三进程重获；
+`TestRuntimeV2FileBackedFailureTargetCommitCrashRestart`、
+`TestRuntimeV2FileBackedMCPOwnerFailureTargetReceiptRestartMatrix` 及 Shell owner stale 回归覆盖 local/
+owner-observed failure target 的 CAS、duplicate、owner-catalog stale 与 reload。焦点切换后的旧 selection/
+snapshot 退休由 `TestAdvanceSatisfiedCoverageFocusDropsPriorFocusTargetFacts` 和
+`TestRuntimeV2FileBackedFocusScopedSelectionsStayRetiredAcrossDurableWrites` 固化，ambiguous/absent selector
+则由 File-backed zero-provider 用例走 typed unresolved route；没有 generic decision ticket。
+
+### 7.3 Q4 / P4-C：receipt、evidence、coverage、focus（`done`）
+
+**影响：SM-2；SM-3 仅消费 sealed dispatch。**
+
+accepted owner receipt → evidence → coverage → focus advance。验证 evidence 只满足本 run、本 focus、被 sealed
+operation 绑定的 coverage；duplicate receipt 不重复 evidence/coverage；CAS 前后重启不跳过或重复 focus
+advance。要求 normal、duplicate、stale、CAS 前/后和 reload；禁止用历史 evidence、summary、memory、projection
+或 UI 状态关闭当前 coverage。
+
+**完成证据：** `TestRuntimeV2FileBackedEvidenceCoverageFocusAdvanceCrashRestart` 使用两个 state-change
+focus，覆盖已接受 owner receipt 的 evidence CAS 前中断、CAS 后响应丢失、销毁并重建 Run repository、Run/File
+owner、EventHub 与 Orchestrator 后的恢复。两侧均断言 focus-1 的 evidence 仅关闭 `cwi-1`、在同一次 SM-2 CAS
+推进到 focus-2、关闭 active dispatch，且恢复不得重新执行 owner operation 或创建 candidate/ticket。测试还从
+持久化 evidence 读取真实幂等 event ID，验证重复提交不增加 state revision。既有
+`TestRuntimeV2FileBackedClaimEvidenceAndDispatchCloseCrashMatrix`、
+`TestRuntimeV2FileBackedFocusScopedSelectionsStayRetiredAcrossDurableWrites` 与
+`TestDriveRuntimeV2FileBackedTwoFocusStateValidationAssessmentAndRestart` 分别守护 receipt/evidence close、
+focus 资源退休和多 focus 正向收敛；`runtimev2/dispatch_commit_test.go` 守护纯 reducer 的 duplicate/stale
+语义。
+
+### 7.4 Q5 / P4-D：assessment、failure、repair（`done`）
+
+验证 assessment-only focus 不运行 executable operation；failure signature、no-progress、validation-only 与总
+repair budget 的变化严格按 reducer；有效新 evidence 不会清零同 focus 总预算，只有 focus advance 创建新的
+ledger。同样要求 normal、duplicate、stale、CAS 前/后和 reload。
+
+**完成证据：** `TestRuntimeV2StateRepositoryAssessmentCommitCrashRestartIsAtomic`、
+`TestRuntimeV2StateRepositorySameGapAssessmentCrashRestartRetainsRepairWindow` 与
+`TestRuntimeV2StateRepositoryPartialGapAssessmentCrashRestartPersistsSingleDelta` 分别覆盖 satisfied、相同 gap
+和严格收窄的 partial gap；每一用例都在 CAS 前失败和 CAS 后响应丢失后销毁并重建 EventHub、Run owner、
+repository adapter 与 controller，断言 assessment dispatch、coverage、active gap、no-progress shape、repair/
+validation-only ledger 和 focus/terminal authority 只产生一次 delta。新增的
+`TestRuntimeV2StateRepositoryFailureFactCrashRestartIsAtomic` 同样证明 SM-2 failure fact 与 terminal authority
+不可分割，且 terminal duplicate 不改变 revision。`assessment_evidence_gate_test.go`、
+`effective_progress_test.go`、`repair_directive_test.go`、`candidate_admission_test.go`、
+`positive_convergence_fixture_test.go` 和 contract 的 `runtime_repair_ledger_test.go` 继续守护 assessment-only、
+current-focus evidence、stale assessment retirement、same-gap shape fence、validation-only/no-progress 上限、
+partial progress 与 focus advance 的纯语义。
+
+### 7.5 Q6 / P5：sealed side effect and terminal delivery（`done`）
+
+**影响：SM-3 dispatch、SM-2 evidence、SM-1 projection、SM-4 recovery。**
+
+按独立子卡验证：candidate seal 前后、execution claim/fence、owner receipt、receipt→evidence、
+operation-scoped governance grant、terminal Result/Run/Workspace delivery。每张卡在外部 side effect 前后及
+Run CAS 前后分别中断，并要求：
+
+- 已知 provider call 和 durable operation 均至多一次；
+- receipt/evidence/coverage 只提交一次；
+- governance continue 保留 execution key 并将 fence `N` 推进为 `N+1`；不得用普通 receipt 绕过 grant；
+- reducer terminal 一旦 sealed，后续只允许 delivery retry；projection、TUI/Web、Resume 和 startup recovery
+  均不得重算 authority 或重放 dispatch。
+
+#### P5-A sealed candidate transaction（`done`）
+
+SM-3 proposal 与 sealed dispatch 是不同的 Run-owner CAS 边界。`TestRuntimeV2StateRepositoryDispatchSealFreshProcessCrashRestart`
+在 seal CAS 前失败和 CAS 后响应丢失两侧销毁并重建 EventHub、Run owner、repository adapter 与 controller：前者只保留
+pending proposal，后者只保留原 dispatch ID；重复 seal 不增加 revision、completed dispatch 或任何 operation。既有
+`TestRuntimeV2StateRepositoryCandidateProposalAndDispatchSealCrashRestartAreAtomic` 继续覆盖 proposal/seal 的细粒度
+CAS 和 idempotency；本卡不执行 operation、创建 governance 或投影 terminal。
+
+#### P5-B claim、owner receipt 与 receipt→evidence（`done`）
+
+只验证 execution key/fence claim、receipt query/commit、receipt→evidence/dispatch close 的 exactly-once。需要按
+safe-to-replay、at-most-once/replay-proof、owner-committed receipt 三类分别覆盖外部 side effect 前后、receipt CAS 前后，
+并在每一恢复点重建全部 actor；已提交 receipt 必须被消费而非再次执行。不得在本卡修改 governance binding 或 terminal
+delivery。
+
+**完成证据：** `TestRuntimeV2FileBackedClaimEvidenceAndDispatchCloseCrashMatrix` 现在在 claim CAS 前、claim
+CAS 后执行前、evidence/dispatch-close CAS 前和 CAS 后四个点均销毁并重建 EventHub、Run owner、File owner、
+workspace/receipt responder 与 controller；safe-to-replay read 仅在无 receipt 时按 recovery ledger 重试，durable
+write 的 receipt/evidence/coverage 只提交一次。`TestDriveRuntimeV2FileBackedRestartRecoversCrashAfterOwnerReceipt`
+证明 owner-committed durable receipt 的 fresh-process drive 只消费 receipt，不重新调用 provider 或改写文件。
+`TestRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure` 证明 at-most-once patch 在 receipt CAS
+失败后只能以 sealed execution key/fence/replay proof 恢复，重建后的 File owner 对 delayed duplicate 只返回同一
+receipt；后续 assessment/terminal 也不得生成第二个 state change。`runtimev2/executor_test.go`、
+`operation_receipt_test.go` 和 `dispatch_commit_test.go` 保留 claim/fence、unknown outcome、safe replay、receipt
+identity 与纯 aggregate duplicate 语义。
+
+#### P5-C operation-scoped governance grant（`done`）
+
+验证 governance-required receipt、ticket binding、continue grant 与 resume fence `N→N+1` 的 CAS/restart；旧 fence 的
+普通 receipt 不能消费 grant，resolution duplicate/stale 不得创建第二次 effect。
+
+**完成证据：** `TestRuntimeV2FileBackedOperationGovernanceGrantFreshProcessCrashRestart` 对 grant CAS 前中断和
+CAS 后响应丢失分别销毁并重建 EventHub、Run owner、Decision owner、File owner、workspace/receipt responder 和
+Orchestrator controller。两条路径都由 Run-owner aggregate 恢复同一 ticket、operation `ExecutionKey` 与唯一
+`N→N+1` fence：旧 fence 携带 grant 的 preflight 被拒绝，原 governance receipt 保持为 `governance_required`，只有
+resume fence 的 File write 获得 accepted receipt 并产生一次 durable effect；stale 与 duplicate resolution 均不能产生
+第二次 owner invocation。`runtimev2/governance_test.go` 继续守护绑定、grant identity、dependency drift 和纯 aggregate
+duplicate/stale 语义。
+
+#### P5-D terminal delivery（`done`）
+
+验证 terminal 已封印后 Result/Run/Workspace projection 的 delivery retry。任何 Resume、startup recovery、TUI/Web/SSE
+仅可重投递，不能重算 authority、重新请求 candidate、重新执行 dispatch 或重开 governance。
+
+**完成证据：** `TestDeliverRuntimeV2TerminalRestartsAfterOwnerProjectionAcknowledgementLoss` 在 Workspace release
+和 Run terminal 各自已经落盘但确认丢失时，销毁并重建 EventHub、Result/Workspace/Run owner 及 Orchestrator，验证
+Result 仅一份、Workspace 最终释放、Run 最终终态且 `RuntimeState` 的 terminal revision/authority 不变；延迟 stale
+candidate 结果被拒绝，不能重新打开 authority。`TestDeliverRuntimeV2TerminalRestartsAfterResultPersistenceBeforeOwnerProjection`
+与 `TestDeliverRuntimeV2PrerequisiteRefreshExhaustedRestartsAfterTerminalPersistenceBeforeResult` 覆盖 Result 已落盘和
+Result 尚未落盘两侧的 fresh-process recovery；`TestRuntimeV2TerminalDeliveryBudgetExhaustionRetainsStartupRecoveryInventory`
+与 `TestRuntimeV2StartupRecoveryDeliversPendingTerminalThroughOwnerChain` 证明 delivery budget 耗尽只保留 Run-owner
+terminal-delivery inventory，启动恢复只重投递已封印 terminal。`TestDeliverRuntimeV2TerminalUsesTypedOwnerEventContracts`
+守护 Result、Workspace、Run 的 concrete typed EventHub delivery 与 duplicate 幂等性。
+
+### 7.6 Q7 / P6：隔离 scripted/live 验证
+
+**影响：SM-1/SM-4 observation only；禁止借 live 修改运行时语义。**
+
+P6 只在 P0–P5 全部关闭后执行。每轮使用新的临时 config、data root、workspace root、workspace/run ID 和
+本次构建 binary；不得污染 `config/`、`.workorch-data`、`.workorch-workspaces`、default chat 或
+workspace `DefaultLLMTarget`。
+
+| 场景 | 必须观察 | 失败回流 |
+| --- | --- | --- |
+| scripted positive | empty workspace discovery → first durable change → validation/repair → assessment → terminal；每轮 revision/progress signature 有真实 delta | 首个不符的 P1–P5 卡 |
+| adversarial corpus | wire mutation、semantic exhaustion、transport/configuration、stale、真实 governance、P4/P5 restart；每类只改变所属 ledger | P0 trace 与第一个 owner |
+| deployed recovery | `active_no_dispatch`、`active_sealed_dispatch`、`terminal_delivery_pending` 重启后单飞收敛；projection watermark 一致 | P4/P5 或 projection 观察卡 |
+| real provider reachability | 只验证已通过 canonical scripted contract 的 target、request identity、manifest/stable prefix 可达 | P0 增加 deterministic fault/trace，不直接改模型/预算 |
+
+TUI/Web/SSE 只验证 committed revision、high-watermark、ticket、terminal 和 request audit identity；`/run resume`、
+网页 activation 和 watcher 不得作为恢复补偿。
+
+#### P6 当前证据（2026-07-25）
+
+`WORKORCH_MANAGED_VERIFY_ARTIFACT_DIR=/tmp/workorch-managed-p6-retry-1784981173`
+配合 `WORKORCH_MANAGED_VERIFY_KEEP_ARTIFACTS=1`、临时 config/data/workspace root 和随机端口执行
+`WORKORCH_MANAGED_VERIFY_TARGET=verify-ci-mvp-file ./scripts/verify-workorch-managed-full.sh`。该轮在
+MCP stdio workspace 路径完成后返回 `runState=completed`、`completedDispatches=4`、
+`evidenceSequence=4`，并同时通过 deployed HTTP、workspace/template/soul 与 mock LLM workspace
+execution 验证。此前 `validation_scratch:global` 被 acquisition/inspection 强制按当前 focus 解释，
+造成“has no local resource dependency”；现改为由 persisted prerequisite 的 `Scope/FocusID` 共同派生
+scratch directory、observation dependency 与 stale identity。当前 production bootstrap 与 declared-command
+discovery 都复用 run-global scratch；它们不再把同一资源误解释为 focus-scoped prerequisite。
+
+该证据只证明 scripted/mock provider 的当前 P6 样本，P6 仍保持 `in_progress`：每次继续必须使用新的
+隔离根目录；全仓 `go test ./...`、boundary gate 和未配置真实 provider 的可达性仍须分别记录，不能将
+本轮 mock 成功扩展为真实 provider 成功。
+
+此后 scripted/mock 的唯一入口为 `make verify-runtime-v2-p6-scripted`。它固定使用 managed harness 的临时
+binary、config、data root、workspace root、随机端口和 `verify-ci-mvp-file` mock LLM/MCP target，并总是保留
+artifact；可用 `WORKORCH_P6_SCRIPTED_ARTIFACT_DIR=/tmp/workorch-e2e/runtime-v2-p6-scripted-...` 指定本轮根目录。
+成功 artifact 的 `p6-scripted-summary.json` 是本轮 scripted gate 的判据；该入口仍不能替代 real-provider 或
+deployed-recovery evidence。该摘要必须由 `verify_runtime_v2_p6_scripted_contract.py` 从 artifact 的实际
+`managed-runtime-state.json` 和 step logs 编译：它要求临时 config/data/server log 均位于 artifact 根目录，
+managed server 已停止，并包含 fmt、console build、vet、全仓 Go test、binary build 与 `verify-ci-mvp-file`
+的唯一成功日志；后者还必须保留 HTTP、template/soul、mock LLM、MCP stdio 以及
+`runState=completed`/dispatch/evidence marker。禁止使用静态 `passed` 摘要替代这些事实。
+
+2026-07-25 再次通过 `make fmt-check`、`./scripts/verify-runtime-v2-positive-convergence-live.sh --self-test`、
+`make verify-runtime-v2-positive-convergence-file`、`make verify-boundary-contract` 与 `git diff --check`。
+同日以新的隔离根目录 `/tmp/workorch-p6-scripted-20260725T133447Z` 执行
+`make verify-runtime-v2-p6-scripted`；其 `p6-scripted-summary.json` 为 `status=passed`，并依次通过
+`make fmt-check`、console build、`make vet`、`go test -count=1 ./...` 与 `verify-ci-mvp-file`。后者的
+HTTP、template/soul、mock LLM workspace 和 MCP stdio workspace 样本全部成功；MCP 样本记录
+`runState=completed`、`completedDispatches=4`、`evidenceSequence=4`。该 artifact 只追加 scripted/mock
+证据，不改变 P6 的完成判据。
+在 P6 artifact 合同校验器接入后，再以全新隔离根目录
+`/tmp/workorch-p6-scripted-contract-20260725T134228Z` 完整执行同一 gate；`artifactContractVersion=1` 的
+摘要确认 config/data/server log 均为该 artifact 内的临时路径、managed server 已停止，并确认全部六项
+scripted gate 为 true。该次结果验证 verifier 自身没有将旧 artifact 或仓库运行目录误作为正向证据。
+最新部署的首个真实 provider 样本返回 `400 This response_format type is unavailable now`；其 catalog 仅声明
+`chat_completions` 和容量，未声明 `response_format`。因此将该问题归类为 F0 provider capability/request
+失真：adapter 不得由 OpenAI-compatible surface 或 catalog operation 虚构 JSON Schema/JSON object 支持，
+未显式声明 JSON Schema 时必须省略 `response_format`，仍由 sealed manifest、prompt 和 strict decoder
+形成候选边界。该修正后必须使用 fresh Run 重新执行 P6，旧的 configuration-ticket Run 不构成通过证据。
+当前部署已可达且 catalog ready；在包含上述 F0 修正的 binary 重新部署前，现有 `provider_configuration`
+ticket 和旧 Run 不得作为 real-provider 或 deployed-recovery 证据。待最新 binary、两个 fresh workspace、
+真实 provider target 与三类 restart fixture manifest 可用后，按本节表格执行并将 artifact path、run IDs、
+revision/watermark 与 receipt 唯一性结论补入本节。
+
+#### P6 real-provider canonical gate（待外部 fixture；不得以 preflight 结案）
+
+真实 provider 的唯一 P6 入口是 `make verify-real-runtime-closure`。该入口只复用 Runtime V2
+positive-convergence live verifier：先检查 deployed `/healthz`、`/readyz` 与 projection watermark，再为两条
+**fresh Runtime V2** fixture 明确发出 activation，并验证本次 activation 新建的 Run、sealed provider
+ceiling、request/audit identity、owner receipt/evidence、assessment、terminal projection 与 watermark。它不再
+依赖历史 scheduler/watchdog 指标、loadtest、`replan_continuation` 或运行时观测脚本；这些工具若仍保留，只能
+作为独立的性能/观测工具，不构成 P6 通过条件。
+
+在已部署、已配置 ready real provider，且已创建两条新的 fixture workspace 后执行：
+
+```bash
+WORKORCH_REAL_RUNTIME_BASE_URL=http://127.0.0.1:8080 \
+WORKORCH_REAL_RUNTIME_WORKSPACE_ID_A=<fresh-workspace-a> \
+WORKORCH_REAL_RUNTIME_WORKSPACE_ID_B=<fresh-workspace-b> \
+WORKORCH_REAL_RUNTIME_PROVIDER_ID=<ready-provider-id> \
+WORKORCH_REAL_RUNTIME_MODEL_ID=<ready-model-id> \
+WORKORCH_REAL_RUNTIME_ARTIFACT_DIR=/tmp/workorch-e2e/runtime-v2-real-provider-$(date -u +%Y%m%dT%H%M%SZ) \
+make verify-real-runtime-closure
+```
+
+`WORKORCH_REAL_RUNTIME_PREFLIGHT_ONLY=1` 只保存并检查部署 readiness/watermark，**不能**作为 real-provider
+success 或 P6 完成证据。缺失 workspace/provider/model 输入必须失败；脚本不得创建隐式 default target、复用
+历史 completed Run，或通过 TUI/Web Resume 补偿。完整 run 的 artifact 至少保留两个 activation request、两个
+fresh Run ID、每个 Run 的 final snapshot/observability、provider-ceiling/audit、owner receipts、terminal
+projection 及 `readyz-final` watermark。P6 仍须另行取得 `active_no_dispatch`、`active_sealed_dispatch` 与
+`terminal_delivery_pending` 的 deployed SM-4 restart artifact；real-provider positive 成功不能替代该三态证明。
+除明确 `PREFLIGHT_ONLY` 外，脚本必须在访问部署端点前验证四个 fixture 输入；缺输入时以 exit 2 和可操作
+的变量清单失败，不能被服务不可达错误掩盖。`--self-test` 固化此输入优先级；preflight 仍只检查 endpoint，
+不生成 P6 success artifact。
+
+三态 fixture 由外部在**服务重启后**准备；只读 verifier 不得 activation 或 Resume：
+
+```bash
+WORKORCH_BASE_URL=http://127.0.0.1:8080 \
+WORKORCH_E2E_RESTART_FIXTURE_MANIFEST=/absolute/path/runtime-v2-restart-fixtures.json \
+WORKORCH_E2E_ARTIFACT_DIR=/tmp/workorch-e2e/runtime-v2-restart-$(date -u +%Y%m%dT%H%M%SZ) \
+make verify-runtime-v2-restart-recovery-live
+```
+
+manifest 必须且只能含 `active_no_dispatch`、`active_sealed_dispatch`、`terminal_delivery_pending` 三项，每项提供
+`workspaceId` 与重启前已记录的 `runId`；三项必须使用不同的 workspace，避免一个 snapshot 被伪装成多个
+recovery class。`./scripts/verify-runtime-v2-restart-recovery-live.sh --self-test` 覆盖此 manifest 的正反例。
+每项还必须提供 `preRestart`：公共字段为 `stateRevision`、`authoritySnapshotId`、`candidateAttemptCount` 与
+`dispatchCount`；`active_no_dispatch` 的 `dispatchCount` 必须为 `0`，`active_sealed_dispatch` 另提供
+`sealedDispatchId` 与非空且不重复的 `operationExecutionKeys`，`terminal_delivery_pending` 另提供
+`terminalCode`。验证器只接受每项收敛到 terminal 或真实 governance wait（terminal delivery 只能 terminal），并同时要求
+projection watermark 一致、terminal workspace 不再持有 `activeRunId`，以及 owner receipt 的
+`executionKey/fence` 无重复。sealed-dispatch 的 `outcome_unknown` 是显式 idempotency 结果，不能被 verifier
+误当作第二次 effect；但它仍必须保留预先登记的 `sealedDispatchId` 和每个 `operationExecutionKey`。terminal
+delivery 还要求 authority snapshot/terminal code/candidate attempt 数/dispatch 数与重启前完全一致。缺任一 fixture
+或部署地址不可达均保留 P6
+`in_progress`，不是 Runtime 语义失败的替代结论。
+
+## 8. LLM 不稳定输出下的合同协议
+
+LLM 是不可靠的 protocol client，不是合同 owner。系统不承诺任意模型一次输出正确 JSON；系统必须保证
+每类输出进入确定、有界且不污染其他状态机的路径。
+
+| 输出或依赖状态 | 首个接收层 | 可持久化信息 | 唯一后续动作 | 禁止 |
+| --- | --- | --- | --- | --- |
+| fragment、EOF、429/5xx、连接超时 | request session / SM-4 | request identity、continuation cursor、transport class | continuation 或 transport recovery | candidate attempt、repair/ticket、dispatch |
+| 401/403、catalog/model/configuration 不可用 | provider dependency | sealed provider target、typed code、configuration dependency | actionable configuration route 或真实 bound governance | 盲重试、attempt、generic decision |
+| complete JSON 但 wire/manifest 不合法 | strict decoder / SM-3 | field path、expected/actual、manifest/shape hash | attempt-0 diagnostic；仅 objective 完整时一次 correction | 忽略字段、放宽 schema、side effect |
+| typed candidate 但 admission/owner feasibility 不合法 | SM-3 | operation identity、admissibility、rejected shape、objective | 一次 manifest-bound correction，或 deterministic terminal | 从目录/错误信息猜 target、ticket、repair |
+| correction 重放或再次拒绝 | SM-3 | 两个 persisted shape/diagnostic | atomic `candidate_retry_exhausted` | attempt-2、重编译 authority、自动 Resume |
+| authority/prerequisite stale | SM-2 | stale dependency/revision | invalidate → acquire prerequisite → new authority | 复用旧 document、计入 candidate/transport |
+
+同一 sealed transaction 的 C0–C3 必须稳定，correction 只改变 C4，C5 只保留有界 ref。`stablePrefixHash`
+漂移首先是 renderer defect。P0–P4 必要上下文缺失时不得提交 provider；审计只保存 hash、枚举、长度和
+脱敏 diagnostic，不保存 prompt、raw document、workspace content、credential 或 endpoint。
+
+## 9. 验证门禁和文档纪律
+
+每卡先跑受影响选择器，再跑相邻 owner 与阶段门禁：
+
+```bash
+# L1: pure contracts and manifest/wire properties
+go test ./internal/pkg/workorchruntimecontract ./internal/pkg/llmaudit -count=1
+
+# L2: owner contracts (根据本卡实际触及的 owner 收缩或扩展)
 go test ./internal/modules/blocks/llm/... -count=1
-go test ./internal/pkg/workorchruntimecontract -count=1
-go test ./internal/modules/kernel/orchestrator/... -count=1
-go test ./internal/modules/application/workorchd/... -count=1
-go test ./internal/services/workorch/... -count=1
-./scripts/verify-boundary-contract.sh
-```
-
-这只能证明已覆盖的局部合同和状态序列成立，不能证明 fresh deployed Run 已完成端到端正向
-收敛。最新两项代码增量仍需 fresh live 证据：
-
-- `f75ba969`：validation diagnostic 从 Shell owner receipt 进入 Failure、RepairDirective 和 LLM C3；
-- `5a6adcf3`：File feasibility 在缺 target snapshot 时返回 typed prerequisite request，Orchestrator
-  将未封存 candidate 转换为 snapshot acquisition，并保留 repair/recovery budget。
-
-### 2.1 总体判断
-
-| 判断项 | 结论 |
-| --- | --- |
-| Runtime V2 四状态机 | 总体设计成立，不推翻 SM-1～SM-4 |
-| live 无法持续推进的首要原因 | owner-grounded 事实供给与严格 admission 之间存在合同缺口 |
-| 次要原因 | SM-2/SM-3 曾把 receipt accepted、evidence admitted、effective progress 混为一谈 |
-| 复杂度问题 | 合同数量本身有必要，但同一语义分散、fallback 隐式、状态序列验证不足 |
-| provider/LLM | 是缺口触发器，不是 authority 事实源，也不是主要根因 |
-| 当前状态 | 局部代码基线通过；P0 合同项和 fresh live gate 未关闭 |
-
-## 3. 缺陷分类与修复性质
-
-修复性质定义：
-
-- **单点修复**：仅修正一个 owner 内部的事实生成或协议适配，不改变跨组件状态迁移；
-- **全面修复**：必须同时覆盖 typed DTO、owner observation、Orchestrator transition、restart 与
-  live state sequence；
-- **已撤回方案**：曾落地但与当前设计目标冲突，不得作为兼容路径保留。
-
-| ID | 缺陷类别 | 典型表现 | 主要组件 | 影响 SM | 修复性质 | 当前状态 | 主要遗留 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| D01 | validation evidence 失真 | all-skipped、zero-work 被当成 valid | Shell、contract、Orchestrator admission | SM-3 | 全面修复 | landed local | fresh live 复核 |
-| D02 | accepted 与 progress 混淆 | accepted validation 清 repair window，同 gap 循环 | Orchestrator、contract 纯 helper | SM-2/3 | 全面修复 | landed local | coverage dependency reopening |
-| D03 | anti-replay 缺少合法纠正路径 | exact rejected shape 被拒绝，但 authority 没有新事实 | Orchestrator、LLM | SM-2/3 | 全面修复 | owner retarget + same-gap/file-backed restart landed local | fresh live |
-| D04 | provider 输出被固定上限截断 | JSON 在 4096/8192 附近 EOF | LLM catalog/adapter、activation、Orchestrator continuation | SM-3/4 | 全面修复 | landed local | provider fallback 与 fresh live |
-| D05 | target grounding 不完整 | 空 workspace、scope 当 concrete target、目标不存在 | defaults/profile、activation、File、Orchestrator、LLM | SM-2/3 | 全面修复 | partial | 泛化 Markdown fallback 已移除；空工程 bootstrap artifact 集合仍需完成 restart/live 收口 |
-| D06 | failure target 来源不可信 | command target、验证入口、自由文本被提升为 repair target | Shell/MCP/File、Orchestrator | SM-2/3 | 全面修复 | Shell protocol landed local | clean-data tool/profile live pending |
-| D07 | repair directive 迁移错误 | state change 已完成但仍缺 validation，directive 继续要求 state change | Orchestrator | SM-2 | 全面修复 | landed local | focus/coverage 依赖 open |
-| D08 | candidate schema/operation 不一致 | targetRef/targetRefs、空 target、非法参数、无 durable effect | LLM、contract、File/Shell、Orchestrator | SM-3 | 全面防线；prompt 为单点增强 | landed baseline | owner variant 扩展时需持续回归 |
-| D09 | File governance 误分类 | 普通 source patch 被要求 approval | File、Orchestrator executor | SM-3 | 全面修复 | landed local | clean-data live |
-| D10 | metrics/projection 事实源错误 | activation/EventStream 推断 terminal 或 repair | Run notification、workorchd、EventStream | SM-4 | 全面修复 | landed local | duplicate/restart 观察 |
-| D11 | capability preflight 适配错误 | `./path/...` 被当成真实 `...` 目录 | Shell | SM-3 input | 单点修复 | landed local | 其他 command grammar 变体 |
-| D12 | validation diagnostic 丢失 | owner 有 diagnostic，LLM C3 只有自由文本 | Shell、contract、Orchestrator、LLM、defaults | SM-2/3 | 全面修复 | landed local | fresh live |
-| D13 | feasibility 信息死锁 | patch 需要重读，但 same authority 禁止 read-only candidate | File、Orchestrator、contract、EventHub | SM-2/3 | 全面修复 | landed local | crash/live 组合 |
-| D14 | TUI/Web activation 生命周期 | resume、模型继承、退出、事件刷新表现不一致 | workorchd、Workspace/Run、TUI/Web、LLM target resolution | SM-1/4 边界 | 单点与生命周期修复 | baseline landed | 不得成为 Runtime 补偿入口 |
-| D15 | 显式交付目标方案不符合设计 | 空 workspace 要求用户手工声明文件 | workorchd、Workspace、File | bootstrap input | 已撤回方案 | replaced | 不恢复兼容字段 |
-
-## 4. 目标状态与核心不变量
-
-### 4.1 四状态机停止线
-
-| 状态机 | 唯一职责 | 本轮允许修改 | 明确禁止 |
-| --- | --- | --- | --- |
-| SM-1 Run lifecycle | pending/active/blocked/terminal 与 lineage | 仅补 bootstrap/fresh activation 和 projection 回归 | 选择 next action、从 UI 重建 authority |
-| SM-2 authority/focus convergence | focus、coverage、prerequisite、repair、assessment、terminal decision | focus 拆分、dependency reopening、grounding、progress、retarget | 执行 operation、访问 capability repository |
-| SM-3 candidate/sealed dispatch | candidate attempt、admission、seal、execution receipt、evidence commit | typed prerequisite feedback、target-bound admission、output continuation | 选择 next action、从 prompt 扩展 authority |
-| SM-4 drive/recovery/projection | bounded drive、CAS reload、singleflight、terminal delivery | restart matrix、projection exactly-once | 从 projection/EventStream 恢复 target、repair 或 dispatch |
-
-### 4.2 必须始终成立的不变量
-
-1. `owner receipt accepted != evidence admitted != effective convergence progress`。
-2. 只有 Orchestrator reducer/commit 路径可以修改 `Facts.Repair`、coverage、focus 和 decision。
-3. `pkg` 只保存 DTO、合同及纯无状态 helper，不执行 I/O、不选择 action、不修改 aggregate。
-4. repair target 必须来自已提交的 owner observation，并绑定 owner、subject、role、revision 和 refs。
-5. File manifest 只说明文件存在性；不得从“第一项”“后缀”或 LLM 建议猜业务 target。
-6. 缺少 provider 所需事实时进入 typed prerequisite；不得让 attempt 1 在同一信息集合上猜测。
-7. exact replay 必须拒绝；合法 retarget 必须由新的 persisted observation 或 dependency delta 证明。
-8. candidate 的 kind、variant、parameters、target refs 和 effect scope 必须同时满足 sealed
-   `RequiredOutputContract` 与 owner admissibility。
-9. C0～C2 stable prefix 不得因 snapshot、diagnostic、repair、rejected shape 或 retry 漂移；动态事实
-   只能进入 C3～C5。
-10. CAS 前状态对重启完全不可见；CAS 后只能以同一 identity 幂等消费。
-
-## 5. 组件职责与 typed 交互合同
-
-### 5.1 直接修改组件
-
-| 组件 | 唯一职责 | 本轮输出 | 不得承担 |
-| --- | --- | --- | --- |
-| `workorchdefaults` | 声明 profile 的 focus 粒度、target role、selector、validation/coverage policy | declarative profile contract | 状态迁移、workspace 探测 |
-| `application/workorchd/.../activationcore` | 将 Goal/DoD/profile/workspace observation 编译为 typed bootstrap | Focus、coverage item、dependency、selector binding | 猜 repair target、选择 action |
-| `blocks/file/biz` | manifest、selection、snapshot、admissibility、patch feasibility、receipt | owner observation/result | 业务语义 target、progress 裁决 |
-| `blocks/shell/biz` | 执行 validation，形成质量、diagnostic 与可验证 related target observation | typed owner receipt | coverage、repair、next action |
-| `blocks/mcp/biz` | 仅采纳失败协议显式返回的 structured failure target | typed observation | 从自由文本或 request target 补靶 |
-| `blocks/llm/biz` | 渲染 sealed authority，调用 provider，返回 candidate/fragment | typed candidate、usage、provider failure | 发现 target、接受 evidence、修改 budget/ledger |
-| `kernel/orchestrator/biz/runtimev2` | 唯一 reducer、prerequisite、admission、repair、retarget、dispatch authority | CAS transition、sealed dispatch、typed terminal | 领域硬编码、跨 owner repository |
-| `kernel/run` | Runtime V2 aggregate CAS 与 recovery inventory | committed state/revision | action、evidence 质量和 progress 判定 |
-| `workorchruntimecontract` | DTO、Validate/Normalize/Clone/Hash/Equal/纯集合 delta | immutable values | EventHub/repository、state transition |
-
-### 5.2 相邻回归组件
-
-`blocks/workspace`、`blocks/result`、`blocks/git`、`kernel/eventstream`、`kernel/governance`、
-Decision/Approval、Web/TUI 只验证已裁决事实的保存、治理或展示，不因本轮新增 target、repair、
-Resume 或 completion 判断。
-
-### 5.3 跨 owner I/O
-
-所有强一致获取与执行使用 concrete typed EventHub `Send`：
-
-```text
-activationcore -> Run owner: Create/Start Runtime V2 bootstrap
-Orchestrator -> capability owner: Acquire/Probe/Execute command
-capability owner -> Orchestrator: concrete Result / persisted receipt
-Orchestrator -> Run owner: CAS RuntimeStateRecord
-Orchestrator -> Result/Run/Workspace: terminal delivery
-Run owner -> workorchd: typed state notification
-```
-
-禁止跨 owner service/repository、`map[string]any` authority、JSON/reflect bridge、通用 Envelope，
-以及由 EventStream audit record触发 Resume 或状态补写。
-
-## 6. P0 代码收口包
-
-### WP-1：Focus 拆分与 coverage dependency reopening
-
-**状态：landed local / live pending；优先级：P0；影响：SM-2 输入与迁移。**
-
-目标：一个 focus 只包含能够共享 action、target role、evidence policy 和 assessment gap 的
-coverage item。跨 focus 依赖必须显式声明，不能依赖文件名、语言或测试框架推断。
-
-实现要求：
-
-1. profile contract 增加或完善纯声明式 coverage dependency：source coverage、validation
-   coverage、assessment coverage 的关系使用 opaque IDs 表达；
-2. activation compiler 保持 Goal/DoD identity，按声明式边界拆分 focus，稳定排序并生成确定 hash；
-3. source-changing evidence 命中 dependency 时，Orchestrator 原子重新打开依赖 validation/
-   assessment coverage；已关闭且无依赖 delta 的 item 不得回退；
-4. reopening 与 receipt/evidence commit 在同一次 aggregate CAS 中完成；duplicate receipt 不得
-   二次 reopening；
-5. core 不识别 `.go`、`_test.go`、LSP、MCP 或具体命令名称。
-
-主要落点：
-
-- `internal/pkg/workorchruntimecontract/runtime_profile_contract.go`；
-- `internal/pkg/workorchruntimecontract/runtime_bootstrap.go` / coverage DTO；
-- `internal/pkg/workorchdefaults/defaults/templates.json`；
-- `internal/modules/application/workorchd/biz/appservice/activationcore/runtime_v2_focus_compiler.go`；
-- `internal/modules/kernel/orchestrator/biz/runtimev2/dispatch_commit.go`、assessment/reducer focused files。
-
-退出测试：exact/neutral profile 编译、stable hash、dependency cycle/unknown ID rejection、source
-change reopening、duplicate/stale receipt、CAS 前后 restart、focus advance 后 ledger 隔离。
-
-2026-07-23 本地已落地：profile 依赖 DTO/解析/hash、按完整 evidence/target policy 的 focus 拆分、
-依赖图 cycle/unknown rejection，以及在 evidence commit 同一 CAS 内的 coverage reopening 与 completed
-focus requeue；software-dev default 声明 `source_change -> validation_report`。已覆盖 duplicate、
-repository reload（restart shape）和 queue reactivation。仍需 fresh deployed workspace 证明真实 provider
-候选能依序完成 source、validation、reopen 后 validation 的正向收敛。
-
-### WP-2：Profile/capability semantic target selector
-
-**状态：landed local / live pending；优先级：P0；影响：SM-2 prerequisite、SM-3 admission。**
-
-目标：空工作区允许通过 Goal/DoD 与 profile 声明产生“可创建目标”选择合同；非空工作区由
-有权拥有领域语义的 profile/capability owner提供 selector，File 只执行有界文件事实查询。
-
-实现要求：
-
-1. selector 必须包含 selector ID、target role、owner、subject、revision dependency 与 bounded scope；
-2. File owner只能返回 `selected`、`create`、`scope`、`absent`、`ambiguous` 或 `unsupported`；
-3. `absent` 在 profile 明确允许 durable create 且提供 canonical prospective target 时，形成可创建
-   target observation；不得要求用户重复输入已经包含在 Goal/DoD/profile 中的目标；
-4. `ambiguous` 不请求 provider，进入新的 owner observation acquisition、governance 或 typed
-   `target_grounding_unresolved`；
-5. workspace scope 只能限制 File operation surface，不能自动扩权 Shell/Git/MCP；
-6. target observation revision 变化必须失效相交 snapshot/admissibility/candidate authority。
-
-主要落点：defaults/profile、activationcore、File owner、Orchestrator prerequisite/controller、LLM
-C3 rendering。禁止在 Orchestrator 添加“选第一个文件”或业务路径模板。
-
-退出测试：empty/one/multiple/large workspace、prospective create、unsupported selector、revision
-drift、zero-provider-call ambiguous、snapshot reacquire、restart only sees committed selection。
-
-2026-07-23 本地已补齐 File-backed prospective-create 合同：profile 声明经 activation focus、
-prerequisite ID 与 typed EventHub command 封存到 File owner；File 仅验证 workspace-relative
-缺失路径并在创建后重选时保留同一 declaration；Orchestrator 只接受与 prerequisite 及 sealed Focus
-的 role、selector、prospective path 完全一致的 observation，并只允许该路径上的 durable File operation。
-未知 File selector 现返回 typed
-`unsupported` observation，并由 SM-2 以 `target_grounding_unresolved` 终止、零 provider call，
-不再退化为 adapter/drive error。已覆盖 canonical/escape、snapshot hash、candidate target mismatch
-和 receipt-CAS/restart 夹具。未声明 selector 的 profile/capability 仍必须保持 typed unresolved，不能在
-Orchestrator 或 File 中猜测路径。
-
-2026-07-24 本地已补齐 `file/profile_declared_candidates`：profile 通过 `selector owner`、opaque
-`selector subject` 和有界 canonical candidate refs 显式拥有语义声明；activation 将 profile ID（未显式
-给出时）封存为 owner identity，且把完整 binding 写入 Focus、prerequisite、typed EventHub command 与
-File observation/hash。File 仅对声明 candidates 与 manifest 做存在性交集：恰好一个为 `selected`，多个为
-`ambiguous`，没有为 `absent`，只有被声明为 candidate 的 prospective target 可返回 `create`。因此无关
-workspace 文件不能影响选择，ambiguous 不会请求 provider，workspace-tree revision 改变仍按既有 freshness
-机制失效 selection/snapshot/admissibility。已覆盖 File one/multiple/create 与 activation sealing；仍需 fresh
-deployed workspace 完成 provider → receipt → restart 的 live sequence。
-
-已撤回：默认 `software-dev` profile 曾把 `workorch-deliverable.md` 作为空 workspace 的全局
-prospective target。该 fallback 会把任何未解析工程压缩成 Markdown 改写，现已删除，不保留兼容路径。
-空 inventory 且没有 profile recipe artifact 时，File 返回 typed `absent`；SM-2 以
-`target_grounding_unresolved` 终止且不请求 provider。只有 recipe 封存的 `file/write` artifact 可进入
-`create` observation；`patch/apply` 在目标尚不存在时仍不可行。
-
-同日补齐 create observation 的状态机闭环：若当前 focus 仅要求 validation，但已提交的 File selection
-为 `create` 且不存在 current-focus target-bound durable evidence，SM-2 必须先封存
-`produce_state_change`，而不能对尚不存在的目标发起 validation。该 RequiredOutput 仅保留同时满足
-File owner selector inventory 与 operation descriptor `AllowsNewTarget` 的 durable kind（当前为
-`file/write`）；`patch/apply` 不会再作为空目标的候选。创建 receipt 使 workspace revision 变化后，正常的
-prerequisite refresh 重取 selected target/snapshot，后续 validation 与 assessment 的 `TargetRefs` 一律从
-同一 `GroundedRepairTargets` 投影。`AllowsNewTarget` 属于 executable descriptor，已纳入
-`OperationContractRevision`，因此旧 Run 不会在重启后静默采用新的 create 语义。
-
-#### WP-2A：空工作区 bootstrap artifact 集合（**open / P0**）
-
-2026-07-24 fresh live 反证表明，上述“单一 prospective target”只能证明 File owner 可以安全创建一个
-文件，不能表达一个可执行工程的最小 bootstrap。`software-dev` profile 当前把
-`workorch-deliverable.md` 封存为唯一 `deliverable_implementation` target；面对明确要求 Go/LSP
-实现与 `go test ./...` 的 Goal/DoD 时，provider 因而只能反复改写 Markdown，Shell 则正确以
-`validation_target_missing` 拒绝不存在的 Go 测试。该行为不是 schema 放宽或 provider retry 可以修复的
-问题。
-
-收口要求：
-
-1. 由 profile/template 的 activation adapter（而非 Orchestrator/File/Shell）把 Goal/DoD、已提交的
-   workspace manifest 与声明式 bootstrap recipe 编译为有序、有限的 artifact 集合；每个 artifact 都有
-   opaque role、canonical path、允许的 create/update operation 和其依赖；
-2. 空工作区不得把文档占位文件当成实现 artifact。若 profile 无法得出有界 bootstrap recipe，必须进入
-   typed `target_grounding_unresolved`，而不是让 provider 在自由路径上猜测；
-3. File owner 只校验 recipe 已封存的 workspace-relative artifact/path 与 manifest，返回每个 artifact 的
-   `create`/`selected` observation；它不从 Goal 文本、后缀或 LLM candidate 推断语言、项目布局或文件名；
-4. SM-2 必须按 recipe dependency 先请求缺失 artifact 的 durable state change，再进入与已创建项目
-   实际可执行的 validation。`validation_target_missing` 要形成该下一 artifact 的 sealed repair contract，
-   不能退回同一 Markdown target 的泛化 `produce_state_change`；
-5. recipe、artifact observation、target snapshot、admissibility 与 repair target 共同进入 authority hash；
-   duplicate/stale/restart 只能复用已 CAS 的集合，不得重新解析 Goal 或让旧文档 target 复活。
-
-退出测试：纯空 workspace 的 profile recipe、已有部分 artifact、manifest revision drift、重复 receipt、
-validation infeasible → 下一 artifact、CAS 前后 restart，以及 fresh Go fixture 的
-`bootstrap → source/test → go validation → assessment` 正向序列。核心 runtime 仍不识别 Go、LSP、
-语言后缀或测试框架；这些仅是 software-dev profile 的 fixture/adapter 输入。
-
-2026-07-24 本地进行中：已新增 `RuntimeBootstrapRecipe` / `RuntimeBootstrapArtifact` 纯合同，覆盖
-规范化、唯一性、可创建 File operation、依赖缺失/环、stable equality 与 definition hash；activation
-将唯一匹配的 profile recipe 拓扑编译为多个前置 `CoverageFocus`。每个 artifact 只封存一个
-`file/profile_declared_candidates` binding 与其 prospective path，File 继续只返回 create/selected
-事实；SM-2 在 focus advance 时清除上一 artifact 的 target selection/snapshot/failure-target，下一
-artifact 必须重新 acquisition，不能复用前一路径。默认 `software-dev` 模板已声明 gopls 目标的
-`go.mod -> internal/lsp/manager.go -> internal/lsp/manager_test.go` recipe。尚未完成：activation
-对已提交 manifest 的 recipe applicability、partial-artifact/restart/receipt matrix、validation
-infeasible 到未满足 artifact 的明确路由，以及 fresh deployed live gate；因此 WP-2A 仍为 open。
-
-### WP-3：Shell structured failure-target observation
-
-**状态：landed local / live pending；优先级：P0；影响：SM-3 receipt input、SM-2 repair grounding。**
-
-目标：Shell 只在能够验证来源时报告 implementation-related target；无法验证时明确返回 nil，
-由 reducer 选��其他 prerequisite、governance 或 terminal，不使用自由文本补靶。
-
-最小 DTO 语义：
-
-```text
-FailureTargetObservation
-  sourceOwnerModuleID
-  subjectRef
-  targetRole
-  targetRefs[]
-  observedRevision
-  diagnosticClass
-  evidenceRefs[]
-  contentHash
-```
-
-实现要求：
-
-1. Shell parser/adapter 只能从结构化工具输出或已声明 mapping 产生 observation；
-2. command target、validation entry、operation `targetRefs`、stderr 文件名和 LLM summary 默认都
-   不是 related implementation target；
-3. observation 必须匹配当前 operation、owner catalog、focus role 和 revision；
-4. multiple targets 保留为 bounded observation，不在 Shell 内选择；
-5. duplicate execution key/fence 返回相同 receipt/observation；stale revision 由 Orchestrator拒绝；
-6. MCP 保持“仅失败 response 顶层显式 `failureTargets`”的受限基线。
-
-主要落点：Shell owner/validation observation、owner events、runtime contract DTO、Orchestrator
-receipt admission。`pkg` 只做字段校验、canonical sort/hash/clone。
-
-退出测试：structured/missing/multiple/mismatched role、success response、duplicate receipt、stale
-owner revision、receipt CAS 前后 restart、nil observation 不触发 provider 猜测。
-
-2026-07-23 本地已落地固定 `WORKORCH_FAILURE_TARGET_V1=` stdout JSONL record：仅单条、闭合
-schema、与 sealed `TargetRole` 和 Shell owner diagnostic 严格一致的 record 才生成 observation。
-Shell owner 以 `shell_runtime_policy` revision、canonical record content hash 与 `workorch://` evidence
-ref 写入 receipt；命令 target、validation entry、stderr 和 LLM summary 仍只保留为执行/诊断
-lineage。Orchestrator 仅对 MCP 既有显式 response 或此 Shell content-bound protocol 开放 repair
-authority，并继续要求 focus role、目标集合和 current owner-catalog freshness 完全一致。已覆盖
-structured/missing/multiple/unknown-field/role/diagnostic mismatch、receipt replay、DTO hash/clone 和
-stale/missing owner-freshness admission。尚需在 clean-data live 验证实际 profile/tool 是否输出该
-protocol；未输出时保持 nil observation，不得 fallback 猜测。
-
-2026-07-24 已补齐 Shell 的跨 owner 回归：真实 Shell 执行结构化失败记录，经 typed EventHub
-查询/提交 receipt 后，只有已 CAS 的 observation 会形成 `FailureTarget`，随后由 File owner 为
-`implementation.go` 获取 target snapshot；重启只读取该已提交 target/snapshot，重复同
-`executionKey + fence` 返回原 receipt，不执行替换 command。另覆盖 `shell_runtime_policy` owner
-catalog stale：失效的 admissibility observation 会在同一 SM-2 transition 清除 FailureTarget、
-Failure 的 target refs 和 RepairDirective，candidate attempt 标为 invalidated；重启后仅重新获取
-该 prerequisite，不会复活旧 target。实现仍不从 validation entry、stderr 或自由文本派生 repair
-target。
-
-### WP-4：统一 grounded authority、progress 与 same-signature retarget
-
-**状态：landed local / live pending；优先级：P0；影响：SM-2/SM-3，是主收口面。**
-
-目标：selection、FailureTarget、snapshot、RequiredOutput、RepairDirective、candidate admission、
-evidence target 和 assessment delta 始终使用同一组已提交 grounded refs。
-
-实现要求：
-
-1. Orchestrator 校验并 CAS 接受 owner observation；未提交 observation 对 candidate 不可见；
-2. `RequiredOutput.TargetRefs`、snapshot refs、admissibility refs 与 state-changing operation refs
-   必须一致；scope selector 不可替代 concrete target；
-3. accepted receipt 只有形成 coverage/focus/grounded durable change/assessment gap strict delta 时才
-   构成 effective progress；
-4. require-assessment focus 中，durable change 只使旧 assessment stale；必须等待新 assessment 才
-   决定 gap 是否缩小；
-5. same gap 保存 accepted-no-progress canonical shapes，并拒绝 cosmetic 变化产生的 exact replay；
-6. same-signature retarget 仅在新的 owner observation、grounded target revision 或 coverage dependency
-   delta 已 CAS 提交后发生；retarget 必须生成新 authority，不复用旧 dispatch；
-7. `RepairAttempts` 是同 focus 总预算，只有 focus advance 创建新 ledger；candidate/provider/
-   prerequisite/recovery 各自使用独立预算；
-8. state change 已完成但 validation/assessment 缺失时，RepairDirective 必须允许 reducer 选择
-   `produce_validation`，不得被旧 `produce_state_change` 固化。
-
-主要落点：`runtimev2/controller.go`、`reducer.go`、`dispatch_commit.go`、
-`candidate_admission.go`、`repair_directive.go`、`prerequisite*.go`。
-
-2026-07-23 本地已统一 `FailureTarget > Focus.TargetRefs` 的 repair precedence：CAS 提交的 owner
-observation 会令 snapshot acquisition、`RequiredOutput`、repair directive 与 candidate admission 同时
-切换到新 target；重启后仅在新 snapshot 已提交时生成 attempt `0` 的新 authority，旧 dispatch/shape
-不得复活。owner catalog stale 会原子清除该 observation、failure target 与派生 directive，并退回
-sealed Focus target。空 workspace 的 profile-declared prospective create path 是同样封存的 candidate
-target，但因其经 File owner 确认不存在，明确不请求 target snapshot；它只能允许该路径上的 durable
-File operation，不能扩大为其他 owner 或其他路径的写权限。已覆盖 retarget、snapshot restart、stale
-restart、creation receipt crash、owner-failure receipt crash，以及 same-gap rejected shape → owner retarget
-→ file-backed process restart；仍需 fresh live 证据。
-
-退出测试：non-target/no-op/weak validation、same-gap/partial-gap/satisfied、exact replay、合法 retarget、
-focus advance、duplicate/stale、governance、terminal，以及每个 transition 的 CAS/restart。
-
-## 7. P1 完整性收口包
-
-### WP-5：Candidate sealed context 与 closed schema
-
-**状态：landed local / live pending；优先级：P1；影响：SM-3。**
-
-1. LLM 只渲染 committed Focus、grounded target、snapshot、diagnostic、RepairDirective、
-   admissibility 和 no-progress shapes；
-2. operation schema 对每个 kind/variant封闭 allowed/required/forbidden parameters；
-3. `targetRef` 与 `targetRefs` 采用单一 canonical 映射；进入 contract 后只保留一种权威表示；
-4. `produce_state_change` 至少包含一个具有 durable effect scope 的 admissible operation；
-5. retry context 必须包含具体 sealed mismatch，不得只返回自然语言“换一种操作”；
-6. snapshot/prerequisite 更新后创建新 authority attempt 0，不将它记为 same-contract attempt 1；
-7. C3～C5 增量不得改变 C0～C2 `stablePrefixHash`。
-
-退出测试：所有 operation variant schema、unknown parameter、target mismatch、durable effect、retry
-contract、stable prefix、uncommitted observation invisible、provider candidate boundary。
-
-2026-07-23 本地已补齐 provider-facing parameter union：每个固定参数都以 `name + 唯一已声明 typed
-value field` 的 `additionalProperties:false` object 分支渲染；required/variant operation 也必须显式提供
-`parameters`。`file/write` 与 `file/edit` 现在和既有 admission 合同一致，要求 canonical top-level
-`targetRefs`。MCP 仅允许 `mcp/tool_call` 的 `input.<name>` 与 `mcp/prompt_get` 的
-`arguments.<name>` 动态标量（string/integer/boolean）分支；resource read 仍无动态字段。纯合同层同步
-拒绝 string-list 或多 typed-field 的动态 MCP 参数，并把该规则纳入 executable operation catalog revision，
-因此已封存旧 Run 不会静默切换到新合同。普通与 repair candidate context 均从 sealed
-`RuntimeDecision.RequiredOutput` 填充并校验 `requiredAction`、effect/evidence requirements 与 admissible
-operation kinds，消除无 RepairDirective 时 C3 action 为空的双权威表述。Schema 渲染仅位于 LLM block；
-状态迁移和 owner I/O 均未迁移。
-
-2026-07-24 补齐 operation dependency 的单一 wire 合同：`dependsOn` 是 operation 内字段，不是候选
-顶层字段。LLM boundary 已删除重复 strict decoder，统一委托
-`workorchruntimecontract.DecodeRuntimeCandidatePayload`，使普通提交与 output-continuation/restart 使用
-同一 DTO、unknown-field gate 与映射。C3 schema 仅在 sealed required-operation sequence 实际声明依赖时
-才向模型暴露该字段；普通候选明确要求省略它，仍严格拒绝错误层级。该修复只影响 SM-3 的 provider
-payload rendering/decode，不改变 SM-2 reducer、SM-1 Run lifecycle 或 SM-4 recovery/projection。
-
-同日补齐 provider adapter 的 schema 交付链：AI Proxy resolved runtime client 明确声明
-`jsonSchemaResponse` capability；HTTP 与 OpenAI SDK adapter 在该 capability 和 non-empty sealed schema
-同时成立时，以 `response_format.type=json_schema` 发送完整 schema（普通兼容 provider 不假定支持）。
-schema 仍保留在 C3 prompt 供不强制 schema 的模型理解，contract decoder 继续是最终严格 gate。由于当前
-candidate schema 使用跨 provider 的条件/union 规则，adapter 不把 `strict:true` 伪装成普适保证；只有在
-provider 明确接受该 schema profile 后才可升级 strict mode。已覆盖 HTTP、SDK 实际 wire payload 与
-AI Proxy resolved capability；影响仅为 SM-3 provider request rendering。
-
-同日修复 File owner 的 no-op 语义：同内容的 `file_write` 不再调用 `os.WriteFile` 触碰 mtime。工作区
-manifest revision 包含 owner 观察到的 mtime；此前这种无内容变化的触碰会伪造 workspace-tree revision，
-在下一次 admissibility probe 触发无效的 freshness invalidation，并额外请求一次相同的 state-change
-candidate。现以“同内容写入保持 manifest revision”回归测试封存，保证 no-op receipt 不制造 SM-2/SM-3
-伪进展或消耗 prerequisite refresh。该项不改变 reducer 的 action 选择、Run lifecycle 或 recovery 预算。
-
-### WP-6：Provider ceiling 与 output continuation 审计
-
-**状态：landed local / live pending；优先级：P1；影响：SM-3/SM-4。**
-
-1. selected model catalog 的 context window 和 max output 是 hard capability；不再叠加通用固定
-   4096/8192 output cap 或固定 `MaxRequestBytes`；
-2. input bytes 由模型能力、reserved output、利用率和 token/byte 估算派生；
-3. catalog 不可用时不得静默冒充完整模型能力；adapter 必须返回明确 unavailable/degraded
-   capability source；
-4. provider hard limit 内仍被截断的合法 structured output 使用已封存 bounded continuation；
-5. fragment/chunk CAS 后重启只继续同一 transaction、stable prefix、sequence 和 tail hash；
-6. adapter fallback 常量只能是 provider API 缺省兼容值，不得再次成为 Runtime 通用 ceiling。
-
-退出测试：catalog 65536、small model、catalog unavailable、fragment+suffix、duplicate/hash conflict、
-restart、budget exhausted、stable prefix 不变和 fresh provider request audit。
-
-2026-07-24 补齐 fresh-live 的 capability-source 审计闭环：metadata-only `AcceptanceProjection.Audit`
-投影 Run 已封存的 provider/model、context window、provider/effective output、input/byte ceiling 与 capability/
-configuration revision；live verifier 必须从同一 Run 的 LLM usage event `contextBudget` 找到完全匹配的
-provider/model/revision/input/output/byte 记录，且拒绝 `overBudget`。因此 adapter 私有 fallback 或旧固定
-4096/8192 output trace 不能再伪装为本次 sealed model ceiling。该投影不携带 endpoint、credential、raw prompt
-或 provider payload，不改变 SM-2/SM-3 authority；本地 projection/self-test 已通过，尚待 fresh deployed
-provider request 验收。
-
-### WP-7：SM-4 crash/restart 组合矩阵
-
-**状态：landed local / live pending；优先级：P1；影响：SM-3/SM-4。**
-
-逐项覆盖下列 commit boundary：
-
-| 阶段 | CAS 前 | CAS 后响应丢失 | 重启期望 |
-| --- | --- | --- | --- |
-| owner selection/failure observation | 不可见 | committed observation 可见 | 不重建/不猜测 |
-| manifest/admissibility/snapshot | 不可见 | 复用 acquisition identity | 不重复扣 freshness |
-| candidate proposal | 不可见 | 复用 proposal | 不重放 provider |
-| dispatch seal | 无 dispatch | 复用 ID/key/fence | 不生成第二 dispatch |
-| owner receipt | 查询/重放同 key/fence | 返回同 receipt | side effect exactly-once |
-| evidence/progress/assessment | 不可见 | 只消费 committed delta | 不重复关 coverage/清 ledger |
-| retarget | 旧 authority 保持 | 新 authority 可见 | 不复活旧 target/shape |
-| terminal delivery | terminal authority 已定 | Result/Run/Workspace 幂等补齐 | 不改写 terminal |
-
-矩阵至少组合 duplicate result、stale dependency、CAS reload、process restart 和 terminal delivery
-failure。只覆盖单个 happy-path restart 不得关闭 WP-7。
-
-2026-07-23 本地审计已将已有回归按 CAS 边界重新索引；它们不是过程日志，而是本 work package
-的可执行证据：
-
-| 边界 | CAS 前 / CAS 后 / restart 回归 |
-| --- | --- |
-| owner selection、failure observation | `TestRuntimeV2StateRepositoryTargetSelectionCommitCrashRestartIsAtomic`、`TestRuntimeV2StateRepositoryOwnerFailureObservationReceiptCrashRestartIsAtomic`（含 failure evidence 已提交后的 response-loss、restart 与 duplicate receipt） |
-| manifest、admissibility、snapshot | `TestRuntimeV2StateRepositoryPrerequisiteCommitCrashRestartIsAtomic`、`TestRuntimeV2StateRepositoryTargetSnapshotCommitCrashRestartIsAtomic`、`TestRuntimeV2FileBackedGitQueryReceiptCrashBeforePrerequisiteCommitReusesSnapshot`、`TestRuntimeV2FileBackedGitSnapshotCommitCrashBeforeCandidateReusesCommittedSnapshot` |
-| candidate proposal、dispatch seal | `TestRuntimeV2StateRepositoryCandidateProposalAndDispatchSealCrashRestartAreAtomic`、`TestRuntimeV2MainlineRestartsFromPersistedCandidateProposalWithoutProviderReplay` |
-| owner receipt、evidence / progress / assessment | `TestDriveRuntimeV2FileBackedRestartRecoversCrashAfterOwnerReceipt`、`TestRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure`、`TestRuntimeV2FileBackedClaimEvidenceAndDispatchCloseCrashMatrix`、`TestRuntimeV2StateRepositoryAssessmentCommitCrashRestartIsAtomic`、`TestRuntimeV2StateRepositorySameGapAssessmentCrashRestartRetainsRepairWindow` |
-| stale dependency、retarget | `TestRuntimeV2FileBackedGitStaleRefreshCrashRestartDoesNotReplayOldDispatch`、`TestOwnerFailureObservationRetargetsExplicitFocusAfterSnapshotRestart`、`TestRuntimeV2FileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget`、`TestMCPOwnerCatalogStaleRestartDoesNotReuseFailureTarget` |
-| terminal delivery | `TestDeliverRuntimeV2TerminalRestartsAfterOwnerProjectionAcknowledgementLoss`、`TestDeliverRuntimeV2TerminalRestartsAfterResultPersistenceBeforeOwnerProjection`、`TestRuntimeV2TerminalDeliveryBudgetExhaustionRetainsStartupRecoveryInventory` |
-
-本轮新增的 failure-observation response-loss 补齐“owner observation + rejected evidence”的 CAS-after
-组合；`TestRuntimeV2FileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget` 补齐 **same-gap rejected
-shape → 合法 owner retarget → 完整 file-backed process restart**：旧 shape 在重启后仍被拒绝，而新
-owner target 的 distinct shape 以新 authority attempt 0 通过 admission。WP-7 的本地矩阵已落地；
-只能由 fresh deployed workspace 验证关闭 live gate。
-
-## 8. P2 边界与文档收口
-
-### WP-8：Application、TUI/Web 与 projection 非权威回归
-
-**状态：baseline landed；优先级：P2；影响：SM-1/SM-4 边界。**
-
-- TUI/Web 首次启动使用 explicit workspace target → workspace default → system default 的统一解析；
-- `/run resume` 只发送 scope/intent，不提交 execution-context patch，不区分 restart；
-- `/exit` 只管理本地进程/TUI lifecycle，不修改 Run authority；
-- activation `202 Accepted` 只代表请求已接受，不代表 terminal/progress；
-- EventStream/SSE/Web/TUI 只展示 typed facts，不触发补偿 Resume；
-- decision ticket 只在 reducer 产生真实 governance dependency 时创建，普通 contract defect 不提交
-  无信息 ticket；
-- deployed 验证脚本必须使用隔离 data/config/workspace 目录，不写默认配置或真实 workspace model。
-
-### WP-9：文档状态同步
-
-每个代码切片提交时同步更新：
-
-- 本文 work package 状态与对应 focused test；
-- [current-state.md](../../01-overview/current-state.md)；
-- [current-unclosed-matrix.md](../../01-overview/current-unclosed-matrix.md)；
-- [active overview](overview.md)；
-- [unfinished todo index](../../01-overview/unfinished-todo-index.md)。
-
-历史 Run 只能作为反例；不得用旧 terminal Run 证明新二进制已通过。完成后将本文迁入
-`docs/90-archive/completed/`，active 只保留真实 open 项。
-
-## 9. 实施顺序与提交切片
-
-必须按下列依赖顺序实施，避免先增强 prompt、后补 authority：
-
-1. `define runtime focus and coverage dependency contracts`（WP-1 DTO/default/compiler）；
-2. `ground runtime semantic target selection`（WP-2 owner selection/prerequisite）；
-3. `add shell structured failure target observations`（WP-3 owner receipt）；
-4. `close runtime grounded repair and retarget transitions`（WP-4 reducer/admission/ledger）；
-5. `seal runtime candidate target and schema context`（WP-5 LLM/admission）；
-6. `complete runtime v2 restart convergence matrix`（WP-7）；
-7. `verify runtime v2 fresh live convergence`（WP-6/WP-8/live/docs）。
-
-每个提交说明必须写明：
-
-- 影响的 SM ID；
-- 唯一状态 owner；
-- concrete typed I/O；
-- CAS commit point；
-- duplicate/stale/restart 行为；
-- 不构成 progress 的反例；
-- focused regression 命令；
-- 尚未满足的 fresh live 证据。
-
-## 10. 组件独立回归入口
-
-| 组件 | 最低独立回归 |
-| --- | --- |
-| runtime contract | `go test ./internal/pkg/workorchruntimecontract -count=1` |
-| defaults/profile | `go test ./internal/pkg/workorchdefaults -count=1` |
-| activationcore | `go test ./internal/modules/application/workorchd/biz/appservice/activationcore -count=1` |
-| File owner | `go test ./internal/modules/blocks/file/... -count=1` |
-| Shell owner | `go test ./internal/modules/blocks/shell/... -count=1` |
-| MCP owner | `go test ./internal/modules/blocks/mcp/... -count=1` |
-| LLM owner | `go test ./internal/modules/blocks/llm/... -count=1` |
-| Orchestrator | `go test ./internal/modules/kernel/orchestrator/... -count=1` |
-| Run owner | `go test ./internal/modules/kernel/run/... -count=1` |
-| workorchd | `go test ./internal/modules/application/workorchd/... -count=1` |
-| TUI/process service | `go test ./internal/services/workorch/... -count=1` |
-| boundary | `make verify-boundary-contract` |
-
-切片完成后再运行：
-
-```text
+go test ./internal/modules/blocks/file/... ./internal/modules/blocks/git/... \\
+  ./internal/modules/blocks/shell/... -count=1
+
+# L3: SM-2/SM-3 and fresh-process prerequisite suites
+go test ./internal/modules/kernel/orchestrator/biz/runtimev2 -count=1
+go test ./internal/modules/kernel/orchestrator/biz \\
+  -run 'TestRuntimeV2FileBacked.*(Manifest|Selection|Snapshot|Admissibility|Stale|Refresh|ProviderCeiling|Capability|FailureTarget|ValidationScratch)' -count=1
+go test ./internal/modules/kernel/run/... -count=1
+
+# L4/L5: stage exit and repository boundaries
+make verify-runtime-v2-positive-convergence-file
 make fmt-check
 go vet ./...
 go test ./... -count=1
 make verify-boundary-contract
-make verify-runtime-v2-positive-convergence-file
+git diff --check
+
+# L6: only after P0–P5 are closed
+make verify-runtime-v2-positive-convergence-live
+
+# documentation authority: active core must not regain retired V1 graph/continuation contracts
+! rg -n 'executionGraph|ConvergenceContract|incrementalArtifact|artifactContinuationContext' \
+  docs/00-core/runtime-stage-contract.md docs/70-roadmap/active \
+  --glob '!runtime-v2-validation-progress-closure-plan.md'
 ```
 
-## 11. Fresh live 验收序列
+`verify-boundary-contract` 在没有 `rg` 的最小环境必须使用等价 `grep -R` fallback；工具缺失不能让边界
+门禁被跳过。对 `StagePacket`、`NextAction`、`DispatchNextStep`、`ExecutionContextPatch` 等仅能存在于
+retired-surface 表的名称，应逐项人工复核其上下文，不能因名称扫描误报而跳过。
 
-必须使用新建 workspace、新建 Run、清洁 data root 和本次构建二进制。不得复用旧 aggregate 或
-手工修改 runtime data。
+本文件是 active 目录中唯一的 Runtime V2 执行队列。`overview`、`current-state`、未关矩阵和 todo 索引
+只摘要本文件状态，不复制状态迁移或定义第二个“下一步”。archive 的旧计划只能帮助定位回归 fixture，
+不得重新定义预算、fallback、Resume 或 live 结论。发现与本文件冲突的 active 旧计划时，迁移必要的审计
+线索到 archive 后删除其 active 副本。
 
-`make verify-runtime-v2-positive-convergence-live` 的 `positive` 与 `bounded_terminal` 模式必须设置
-两个 fresh fixture workspace ID 和 `WORKORCH_E2E_ACTIVATE=1`。脚本会把 activation 前的 Run ID 与
-本次 activation 后的 Run ID 写入 artifact，并拒绝复用旧 Run；只读的 `liveness` 模式不构成此 DoD
-证据。
+## 10. Definition of Done
 
-### 11.1 必须观察到的正向序列
+仅当以下条件全部满足时，`RUNTIME-VPC` 才可关闭：
 
-```text
-Start
-  -> typed bootstrap contains bounded focuses/dependencies/selector
-  -> missing owner fact enters AcquirePrerequisite with zero provider call
-  -> committed target/diagnostic/snapshot creates authority attempt 0
-  -> state-changing candidate matches sealed concrete targets
-  -> durable owner receipt is admitted exactly once
-  -> validation executes real work and returns truthful quality/diagnostic
-  -> assessment strictly shrinks gap or closes coverage
-  -> dependency coverage is reopened/closed exactly once when required
-  -> focus advances and receives a fresh repair ledger
-  -> closeout operation/assessment completes
-  -> Result, Run terminal and Workspace release converge
-```
+1. Q1–Q6 逐卡退出，既有 C4–C6/P0–P3/A-0–A-3M 回归持续通过；
+2. 一个 sealed authority transaction 只有一个 manifest，renderer、decoder、admission、fixture、owner
+   feasibility 对其给出一致结论；
+3. authority 缺失、stale 或矛盾绝不调用 provider、创建 candidate attempt 或无信息 decision；
+4. complete invalid candidate 至多 attempt 0/1；不完整 document、transport 和 stale 从不污染 attempt；
+5. restart 不复活 retired resource、旧 target/session 或未提交 focus advance，不重放已知 provider/durable
+   effect，不重复关闭 coverage；
+6. terminal authority 后只允许 delivery retry，projection、TUI/Web、Resume 和 restart 均不能改写它；
+7. L1–L6 通过，审计中没有 prompt、raw document、snapshot content、credential 或 endpoint；
+8. 本文件、组件矩阵、`current-state`、未关矩阵、active overview、todo 与 archive index 同步。
 
-### 11.2 失败也必须符合预期
-
-遇到真实不可行情况时，只允许：
-
-- 缺 owner fact：进入 typed prerequisite；
-- target ambiguous：governance 或 `target_grounding_unresolved`；
-- owner明确不可执行：typed infeasible terminal或有界 retarget；
-- provider transport：独立 recovery ledger；
-- provider输出截断：bounded output continuation；
-- repeated same gap：单调 repair/no-progress budget后 typed terminal。
-
-不得出现：无信息 decision ticket、同 authority 无限 attempt、exact shape replay、projection 触发
-Resume、accepted receipt 伪 progress、旧 target 在重启后复活。
-
-### 11.3 Live 审计字段
-
-至少保存并核对：workspace/run、definition/evidence/state revision、focus/coverage、grounded refs、
-selector/observation/snapshot revision、authority transaction、candidate attempt、stable prefix、dispatch
-ID、execution key/fence、owner receipt hash、repair counters、assessment gap delta、terminal delivery 和
-projection watermark。
-
-2026-07-24 已补充只读 `AcceptanceProjection.Audit`：它从 Run owner 已持久化的 Runtime V2 aggregate
-投影 scope/revision、focus/coverage、selector/freshness/snapshot metadata、authority transaction、candidate
-attempt/stable prefix、dispatch、repair/assessment 与 terminal-delivery counter；不序列化 snapshot content、
-candidate parameters 或 owner-private payload，也不成为新的 authority。fresh-live verifier 现强制核对该
-审计链与 `/readyz` projection watermark；本地 projection 与 verifier self-test 已通过，仍待重部署后的
-fresh fixture 运行完成外部验收。
-
-同日继续补齐 completion lineage：audit 现在保留 accepted/rejected evidence 的 identity/kind/revision/
-dispatch/target/coverage metadata，以及 remaining/completed focus queue identity。live verifier 因而不再把
-terminal UI 状态当作正向收敛证明：必须观察到 accepted state-change、validation、satisfied assessment，且
-bounded dual-focus fixture 还必须有持久化 focus advance 和清空的 remaining queue。该投影不含 evidence
-summary/content 或 candidate payload；最终 sequence 仍仅由 fresh deployed run 关闭。
-
-## 12. 可能遗留问题与风险
-
-| 风险 | 处理原则 |
-| --- | --- |
-| profile 仍未提供某业务域 semantic selector | 保持 typed unresolved；不得把领域规则写进 core |
-| Shell 工具没有 structured related target | 返回 nil observation；走 prerequisite/governance/terminal |
-| focus 拆分过细导致请求膨胀 | 通过 profile 声明和 bounded context优化，不合并不相容 coverage |
-| coverage dependency 图循环或漂移 | activation fail-fast；definition revision 冲突，不运行时猜测 |
-| provider catalog 401/不可用 | 明确 target not-ready/capability unavailable，不采用 UI 缓存冒充 ready |
-| adapter 私有 4096 fallback 再次变成 ceiling | 增加 capability-source 审计与 provider adapter test |
-| exact replay 拒绝后无合法 retarget | 只允许新的 owner observation；预算耗尽进入 typed terminal |
-| deployed crash/restart 仍未观察 | WP-7 本地矩阵已落地；fresh deployment 只核对实际 binary 与 owner store 的恢复，不以旧 Run 代替 |
-| 文档与部署二进制漂移 | live 记录 commit/build identity；每轮先确认 fresh Run |
-
-## 13. 非目标
-
-- 不恢复 V1 StagePacket、NextAction、DispatchNextStep、ExecutionContextPatch 或 auto replan；
-- 不在 Orchestrator hard-code 软件开发、Go、LSP、MCP、文件后缀或测试框架规则；
-- 不让 LLM、File、Shell、MCP、Run、Result、EventStream、Web/TUI 选择 next action；
-- 不通过提高 repair/candidate/prerequisite budget隐藏无进展；
-- 不通过 prompt 文案替代 owner observation、candidate admission 或 CAS transition；
-- 不为历史 aggregate 增加兼容迁移；验证使用 fresh Run。
-
-## 14. Definition of Done
-
-只有以下条件全部满足，`RUNTIME-VPC` 才能关闭：
-
-1. WP-1～WP-9 的 open/partial 项全部 landed，并链接 focused tests；
-2. `pkg` 边界扫描确认没有状态迁移、EventHub/repository I/O 或 action 选择；
-3. direct owner、Orchestrator、Run、workorchd、TUI 均可独立回归；
-4. transition、invariant、duplicate/stale、budget、CAS/restart 测试完整；
-5. C0～C2 stable prefix 在 snapshot/diagnostic/repair/retarget 中保持不变；
-6. fresh live 完成“diagnostic → snapshot → corrected durable change → validation → assessment delta
-   → focus advance → terminal delivery”的完整序列；
-7. fresh live 不再出现 rejected shape 无合法纠正路径、无信息 governance ticket或 accepted receipt
-   伪 progress；
-8. File governance、provider continuation、projection exactly-once 均有 clean-data deployed 证据；
-9. full test、vet、boundary 和 positive convergence verifier 通过；
-10. current-state、active overview、unclosed matrix 和 todo index同步，本文归档为 completed。
-
-仅让 Run 更早失败、仅修改 prompt、仅提高预算、仅通过单组件测试或单次偶然 live 成功，均不
-构成完成。
+一次偶然的 real-provider 成功、放宽合同、提高预算、只通过单组件测试或在 live 中手工 Resume，均不构成
+完成证据。

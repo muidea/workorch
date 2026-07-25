@@ -1,9 +1,39 @@
 package workorchruntimecontract
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
+
+func TestDecodeRuntimeCandidatePayloadClassifiesIncompleteAndEmptyDocuments(t *testing.T) {
+	for name, payload := range map[string][]byte{
+		"mid token":  []byte(`{"operations":[{"id":"write"`),
+		"open array": []byte(`{"operations":[`),
+		"empty":      nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := DecodeRuntimeCandidatePayload(RuntimeActionProduceStateChange, payload)
+			if err == nil {
+				t.Fatal("decode unexpectedly succeeded")
+			}
+			got := RuntimeCandidateDocumentDispositionForError(err)
+			want := RuntimeCandidateDocumentIncomplete
+			if name == "empty" {
+				want = RuntimeCandidateDocumentEmpty
+			}
+			if got != want {
+				t.Fatalf("document disposition = %q, want %q (err=%v)", got, want, err)
+			}
+			if name != "empty" {
+				var incomplete *RuntimeCandidatePayloadIncompleteError
+				if !errors.As(err, &incomplete) {
+					t.Fatalf("error %T does not preserve incomplete marker", err)
+				}
+			}
+		})
+	}
+}
 
 func TestDecodeRuntimeCandidatePayloadAcceptsOperationDependencyOnly(t *testing.T) {
 	candidate, err := DecodeRuntimeCandidatePayload(RuntimeActionProduceStateChange, []byte(`{

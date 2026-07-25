@@ -3,7 +3,9 @@ package llmaudit
 import "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 
 // ContextBudget is the concrete cross-owner audit DTO for a sealed provider
-// request budget. It carries audit-safe scalar values only.
+// request budget. It carries only bounded, secret-free metadata; it must never
+// carry prompt text, snapshot content, credentials, endpoints or owner-private
+// provider payloads.
 type ContextBudget struct {
 	ProviderID               string
 	ModelID                  string
@@ -30,12 +32,41 @@ type ContextBudget struct {
 	ContextGateAction        string
 	ContextGateReason        string
 	BudgetFailureClass       string
+	IncludedSections         []string
+	NormalizedSections       []string
+	CompressedSections       []string
+	OmittedSections          []string
+	RedactedPaths            []string
+	ProtectedFields          []string
+	IntegrityWarnings        []string
+	SourceRefs               []string
+	SectionHashes            []ContextSection
 }
 
-func (v ContextBudget) Empty() bool { return v == ContextBudget{} }
+// ContextSection is the audit-safe identity of one rendered prompt section.
+// SourceRefs are opaque identifiers only; they must not contain source content.
+type ContextSection struct {
+	ID         string
+	Hash       string
+	SizeBytes  int
+	SourceRefs []string
+}
+
+func (v ContextBudget) Empty() bool {
+	return v.ProviderID == "" && v.ModelID == "" && v.CapabilityRevision == "" && v.ConfigurationRevision == "" &&
+		v.ContextWindowTokens == 0 && v.ProviderMaxOutputTokens == 0 && v.EffectiveMaxOutputTokens == 0 &&
+		v.MaxBytes == 0 && v.ActualBytes == 0 && v.MaxTokens == 0 && v.EstimatedInputTokens == 0 &&
+		v.EstimatedOutputTokens == 0 && v.ActualTokens == 0 && v.MaxRequestBytes == 0 && v.ProfileMode == "" &&
+		v.CapabilitySource == "" && !v.ProviderSubmitted && !v.OverBudget && !v.Truncated &&
+		v.StablePrefixHash == "" && v.RenderedStablePrefixHash == "" && v.CacheStrategy == "" &&
+		v.ContextGateAction == "" && v.ContextGateReason == "" && v.BudgetFailureClass == "" &&
+		len(v.IncludedSections) == 0 && len(v.NormalizedSections) == 0 && len(v.CompressedSections) == 0 &&
+		len(v.OmittedSections) == 0 && len(v.RedactedPaths) == 0 && len(v.ProtectedFields) == 0 &&
+		len(v.IntegrityWarnings) == 0 && len(v.SourceRefs) == 0 && len(v.SectionHashes) == 0
+}
 
 func (v ContextBudget) Payload() workorcheventpayload.Payload {
-	return workorcheventpayload.New(
+	fields := []workorcheventpayload.Field{
 		workorcheventpayload.StringField("providerId", v.ProviderID),
 		workorcheventpayload.StringField("modelId", v.ModelID),
 		workorcheventpayload.StringField("capabilityRevision", v.CapabilityRevision),
@@ -61,7 +92,28 @@ func (v ContextBudget) Payload() workorcheventpayload.Payload {
 		workorcheventpayload.StringField("contextGateAction", v.ContextGateAction),
 		workorcheventpayload.StringField("contextGateReason", v.ContextGateReason),
 		workorcheventpayload.StringField("budgetFailureClass", v.BudgetFailureClass),
-	)
+		workorcheventpayload.StringArrayField("includedSections", v.IncludedSections),
+		workorcheventpayload.StringArrayField("normalizedSections", v.NormalizedSections),
+		workorcheventpayload.StringArrayField("compressedSections", v.CompressedSections),
+		workorcheventpayload.StringArrayField("omittedSections", v.OmittedSections),
+		workorcheventpayload.StringArrayField("redactedPaths", v.RedactedPaths),
+		workorcheventpayload.StringArrayField("protectedFields", v.ProtectedFields),
+		workorcheventpayload.StringArrayField("integrityWarnings", v.IntegrityWarnings),
+		workorcheventpayload.StringArrayField("sourceRefs", v.SourceRefs),
+	}
+	if len(v.SectionHashes) > 0 {
+		sections := make([]workorcheventpayload.Value, 0, len(v.SectionHashes))
+		for _, section := range v.SectionHashes {
+			sections = append(sections, workorcheventpayload.Value{Kind: workorcheventpayload.ValueObject, Object: workorcheventpayload.New(
+				workorcheventpayload.StringField("id", section.ID),
+				workorcheventpayload.StringField("hash", section.Hash),
+				workorcheventpayload.IntField("sizeBytes", int64(section.SizeBytes)),
+				workorcheventpayload.StringArrayField("sourceRefs", section.SourceRefs),
+			).Fields})
+		}
+		fields = append(fields, workorcheventpayload.Field{Name: "sectionHashes", Value: workorcheventpayload.Value{Kind: workorcheventpayload.ValueArray, Array: sections}})
+	}
+	return workorcheventpayload.New(fields...)
 }
 
 // CacheUsage is the concrete cross-owner representation of provider cache

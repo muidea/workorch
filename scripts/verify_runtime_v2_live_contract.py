@@ -84,11 +84,25 @@ def runtime_v2_audit_errors(
     attempts = audit.get("candidateAttempts") or []
     if not attempts:
         errors.append("audit has no candidate attempt")
+    seen_attempts: set[tuple[str, int]] = set()
     for item in attempts:
         if not item.get("authorityContractId") or not item.get("authoritySnapshotId") or not item.get("state"):
             errors.append("audit candidate attempt lacks authority identity or state")
         if not item.get("stablePrefixHash"):
             errors.append("audit candidate attempt lacks stablePrefixHash")
+        authority_snapshot_id = item.get("authoritySnapshotId")
+        # Attempt zero is omitted by the read-model's omitempty JSON tag.
+        attempt = item.get("attempt", 0)
+        if not isinstance(authority_snapshot_id, str) or not authority_snapshot_id or not isinstance(attempt, int) or attempt < 0:
+            errors.append("audit candidate attempt lacks authority snapshot or valid numeric attempt")
+            continue
+        attempt_key = (authority_snapshot_id, attempt)
+        if attempt_key in seen_attempts:
+            errors.append(
+                "audit has duplicate candidate attempt "
+                f"authoritySnapshotId/attempt={authority_snapshot_id}/{attempt}"
+            )
+        seen_attempts.add(attempt_key)
 
     dispatches = audit.get("dispatches") or []
     seen_dispatches: set[str] = set()
@@ -282,6 +296,10 @@ def _self_test() -> None:
     invalid_audit["candidateAttempts"] = [{"authorityContractId": "contract-1"}]
     if not runtime_v2_audit_errors(invalid_audit, "ws-1", "run-1", True):
         raise AssertionError("incomplete Runtime V2 audit was accepted")
+    duplicate_attempt_audit = dict(valid_audit)
+    duplicate_attempt_audit["candidateAttempts"] = valid_audit["candidateAttempts"] * 2
+    if not runtime_v2_audit_errors(duplicate_attempt_audit, "ws-1", "run-1", True):
+        raise AssertionError("duplicate Runtime V2 candidate attempt was accepted")
 
     print("runtime-v2 live contract self-test passed")
 

@@ -1,6 +1,8 @@
 package events
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -36,5 +38,10 @@ func TestResolveRuntimeCapabilitiesRejectsUnsupportedKind(t *testing.T) {
 	}, "module-1", "kind-1")
 	if err == nil {
 		t.Fatal("unsupported capability was accepted")
+	}
+	var unsupported *RuntimeCapabilityUnsupportedError
+	if !errors.As(err, &unsupported) || unsupported.ModuleID != "module-1" || unsupported.CapabilityClass != runtimecontract.RuntimeCapabilityClassValidation ||
+		len(unsupported.RequiredKinds) != 1 || unsupported.RequiredKinds[0] != "missing" || !strings.Contains(unsupported.Error(), "unsupported_kind") {
+		t.Fatalf("unsupported capability error = %#v, want typed owner/class/kind failure", err)
 	}
 }

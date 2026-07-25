@@ -318,8 +318,8 @@ func TestFailureClassDispositionTaxonomy(t *testing.T) {
 	if FailureClassDisposition(FailureClassProviderAuthentication) != RuntimeFailureDispositionConfigurationGov {
 		t.Fatal("provider auth must be configuration governance")
 	}
-	if FailureClassDisposition(FailureClassOperationOutcomeUnknown) != RuntimeFailureDispositionGovernance {
-		t.Fatal("outcome unknown must go to governance")
+	if FailureClassDisposition(FailureClassOperationOutcomeUnknown) != RuntimeFailureDispositionBoundedFail {
+		t.Fatal("outcome unknown without a separate dependency must bounded-fail")
 	}
 	if FailureClassDisposition(FailureClassExecutionRejected) != RuntimeFailureDispositionSameFocusRepair {
 		t.Fatal("execution rejected must same-focus repair")

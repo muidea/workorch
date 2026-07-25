@@ -1,10 +1,15 @@
 # WorkOrch 22-Component Framework Boundary Remediation
 
-Status: active
+Status: archived
 
-Type: remediation plan
+Type: historical remediation record
 
-Last Updated: 2026-07-20
+Archived: 2026-07-25
+
+Superseded as an active execution plan by
+[22-component contract and regression closure matrix](../../70-roadmap/active/component-contract-and-regression-closure-matrix.md).
+This record preserves the completed framework migration evidence and rationale only. It must not be used to
+derive Runtime V2 state transitions, implementation order, or new code tasks.
 
 ## Implementation Progress
 
@@ -30,9 +35,10 @@ matrix):
 GMM-R6 inventory and the pre-existing GMM-R7 documentation edits are present
 in this worktree. A follow-up static audit on 2026-07-19 found that the former
 module-root topology retained EventHub directly and there was no shared
-`internal/modules/base/biz`. GMM-R8 source migration is now complete; this
-plan remains active only for the externally supplied deployed restart-fixture
-matrix described below.
+`internal/modules/base/biz`. GMM-R8 source migration is now complete. The
+externally supplied deployed restart-fixture matrix remains open, but its
+current execution and acceptance criteria are owned solely by the active
+component matrix and `RUNTIME-VPC`; this archived record defines no work card.
 
 Repository verification recorded on 2026-07-19:
 
@@ -57,12 +63,13 @@ was completed on 2026-07-19: `go test -p 1 ./... -count=1`, `make
 release-check`, `make build`, `make verify-runtime-v2-positive-convergence-file`,
 and the two-iteration `make verify-managed-service-smoke` all completed.
 No deployed restart fixture manifest or target service is recorded in this
-repository, so the external SM-4 restart matrix remains open.
+repository. That historical observation is retained for audit only; the
+remaining external SM-4 evidence is tracked by the active component matrix.
 
 ## Purpose
 
-本方案用于收口 2026-07-18 基于 `go-multi-module-dev` 对 WorkOrch 22 个
-framework 运行组件进行只读核对后确认的真实遗留项。目标不是重新命名
+本记录保留 2026-07-18 基于 `go-multi-module-dev` 对 WorkOrch 22 个
+framework 运行组件进行只读核对、迁移和验证的历史背景。其目标不是重新命名
 `kernel` / `blocks`、拆分 `go.mod`，也不是按文件数量机械拆包，而是确保：
 
 - framework lifecycle 不丢失 Runtime V2 restart recovery；
@@ -72,18 +79,17 @@ framework 运行组件进行只读核对后确认的真实遗留项。目标不�
 - 测试运行数据全部落在显式临时目录，源码树保持可重复、可审计；
 - 22 个组件的职责分类、入口加载、状态权威、交互合同和直接功能测试一致。
 
-本方案是当前真实未关项。Runtime 核心语义仍以
+它不是当前未关项或实施计划。Runtime 核心语义仍以
 [runtime-stage-contract.md](../../00-core/runtime-stage-contract.md) 为唯一设计
 SoT，Orchestrator 实现仍以
 `internal/modules/kernel/orchestrator/readme.md` 与
 `internal/pkg/workorchruntimecontract` 为准。本方案只约束组件边界、生命周期
 交付和内部合同收口，不创建第二份 Runtime V2 状态语义。
 
-按 22 个组件逐一实施时，必须同时遵循
-[component-contract-and-regression-closure-matrix.md](component-contract-and-regression-closure-matrix.md)。
-该矩阵是本方案的执行层：逐项定义状态权威、入站/出站 typed EventHub 合同、禁止
-边界、组件级回归和跨组件/部署完成条件；本文件仍保留整改背景、全局设计和 ARCH-1
-最终验收。
+当前的 22 组件工作仅遵循
+[component-contract-and-regression-closure-matrix.md](../../70-roadmap/active/component-contract-and-regression-closure-matrix.md)。
+该矩阵逐项定义状态权威、入站/出站 typed EventHub 合同、禁止边界、组件级回归和
+跨组件/部署完成条件；本文件只保留整改背景、全局设计和当时的验收证据。
 
 ## Audit Baseline
 
@@ -185,6 +191,13 @@ framework component shape
    所有文件写入必须进入 `t.TempDir()` 或显式 `/tmp` artifact root。
 
 ## Runtime V2 State-Machine Impact
+
+本节只约束 **ARCH-1 framework boundary remediation 自身**。它不是 Runtime V2
+正向收敛的第二份实施计划：任何 authority、candidate、request-integrity 或 live
+收口均必须回到 [RUNTIME-VPC 唯一方案](../../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md)。
+因此，下面的“无 SM-2/SM-3 变更”不能用于否决该主方案中明确归属给
+Orchestrator 的工作卡；反过来，RUNTIME-VPC 也不得借 ARCH-1 的名义进行无关的
+框架迁移。
 
 | 状态机 | 本方案影响 | 必须保持 |
 | --- | --- | --- |
@@ -815,6 +828,12 @@ make build
 
 ### Deployed Restart Acceptance
 
+本节保留为 ARCH-1 的证据消费规则，不创建独立的 restart 实现队列。`active_no_dispatch`、
+`active_sealed_dispatch`、`terminal_delivery_pending` 的 fixture 设计、crash 边界与
+通过条件由 [RUNTIME-VPC P4～P6](../../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md)
+唯一规定；ARCH-1 仅在该证据通过后更新相关组件的 `D` 状态。不得以此文档的
+deployed 成功、人工 Resume 或 `Weight()` 顺序替代 P4～P6 的状态机回归。
+
 必须新增或扩展 deployed verifier，覆盖至少三种 fresh file-backed Runtime V2
 restart fixture：
 
@@ -859,9 +878,9 @@ owner snapshot/observability，验证三类 fixture 自动到达 terminal 或 go
 没有重复 executionKey/fence receipt、terminal activeRun 已释放且 projection revision
 已经对齐。
 
-## Completion Criteria
+## Historical Completion Criteria
 
-本方案只有在以下条件全部满足时才能归档：
+以下是当时用于判断整改完成的历史标准，当前不得据此新建实施任务：
 
 1. Runtime V2 startup recovery 不依赖 Run/Orchestrator `Weight()` 偶然顺序，真实
    restart fixture 可无人工 Resume 自动推进。
@@ -878,16 +897,13 @@ owner snapshot/observability，验证三类 fixture 自动到达 terminal 或 go
 9. 22 个组件 direct tests、race tests、全量 tests、vet、boundary、build 通过。
 10. file-backed crash/restart matrix 与 fresh deployed positive acceptance 通过。
 11. `current-state`、module readme、active matrix 和 verification 文档与最终实现一致。
-12. [组件合同与独立回归矩阵](component-contract-and-regression-closure-matrix.md)中每个
+12. [组件合同与独立回归矩阵](../../70-roadmap/active/component-contract-and-regression-closure-matrix.md)中每个
     组件均达到 `C`；任何 deployed `D` 项不得以本地全仓测试或人工 Resume 替代。
 
-## Closure Documentation
+## Historical Closeout Instructions
 
-代码和 live 全部完成后：
+以下为迁档前的历史收尾说明，保留以解释当时的文档关系，不应再次执行：
 
-1. 将本文件 `git mv` 到 `docs/90-archive/completed/`，文件名追加完成日期；
-2. 更新 `docs/70-roadmap/active/overview.md` 删除 `ARCH-1`；
-3. 更新 `docs/01-overview/current-state.md` 与
-   `current-unclosed-matrix.md` 的完成事实；
-4. 在 completed overview 登记最终 commit、验证命令和 deployed artifact root；
-5. 不把 live JSON、runtime data 或临时目录提交到仓库。
+1. 将 active execution constraint 迁入当前组件矩阵，并让本记录保持 archived；
+2. 只在 active overview、current state 与 unclosed matrix 中维护真实未关项；
+3. 不把 live JSON、runtime data 或临时目录提交到仓库。

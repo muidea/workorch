@@ -18,7 +18,7 @@ CONSOLE_DEPS_STAMP := $(CONSOLE_NODE_MODULES)/.workorch-deps-stamp
 NPM_CI_FLAGS ?=
 NPM_INSTALL_FLAGS ?=
 
-.PHONY: help deps go-deps console-deps fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-runtime-v2-positive-convergence-file verify-runtime-v2-positive-convergence-live verify-runtime-v2-restart-recovery-live verify-runtime-v2-bounded-terminal-live observe-runtime-v2-liveness verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-incremental-artifact-e2e verify-contract-violation-recovery-e2e verify-service-restart-recoverable-e2e verify-runtime-profile-software-dev verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration verify-software-requirement-orchestration-deployed verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-auto-governance-ticket-approval verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-workspace-projection-switch verify-run-resume-gap-confirmation-e2e verify-dual-workspace-resume-replan-e2e verify-approval-decision-resolution-e2e observe-runtime-closure verify-convergence-authority-dispatch-live verify-authority-live-e2e-closure verify-runtime-idle-baseline verify-cpu-io-observation-e2e verify-web-console-projection-visual verify-tui-web-projection-e2e verify-e2e-template-contract verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-runtime-closure verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file verify-e2e-full verify-managed-full verify-managed-service-smoke loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file cli-build cli-test cli-clean verify-tui-agent verify-tui-workspace-switch-visual verify-tui-runtime-refresh-history-live verify-tui-terminal-render verify-tui-long-output release release-check install-latest ci
+.PHONY: help deps go-deps console-deps fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-runtime-v2-positive-convergence-file verify-runtime-v2-positive-convergence-live verify-runtime-v2-restart-recovery-live verify-runtime-v2-p6-scripted verify-runtime-v2-bounded-terminal-live observe-runtime-v2-liveness verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-incremental-artifact-e2e verify-contract-violation-recovery-e2e verify-service-restart-recoverable-e2e verify-runtime-profile-software-dev verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration verify-software-requirement-orchestration-deployed verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-auto-governance-ticket-approval verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-workspace-projection-switch verify-run-resume-gap-confirmation-e2e verify-dual-workspace-resume-replan-e2e verify-approval-decision-resolution-e2e observe-runtime-closure verify-convergence-authority-dispatch-live verify-runtime-idle-baseline verify-cpu-io-observation-e2e verify-web-console-projection-visual verify-tui-web-projection-e2e verify-e2e-template-contract verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-runtime-closure verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file verify-e2e-full verify-managed-full verify-managed-service-smoke loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file cli-build cli-test cli-clean verify-tui-agent verify-tui-workspace-switch-visual verify-tui-runtime-refresh-history-live verify-tui-terminal-render verify-tui-long-output release release-check install-latest ci
 
 help:
 	@echo "Targets:"
@@ -39,6 +39,7 @@ help:
 	@echo "  verify-runtime-v2-positive-convergence-file - deterministic Runtime V2 positive-convergence fixtures"
 	@echo "  verify-runtime-v2-positive-convergence-live - deployed Runtime V2 positive acceptance"
 	@echo "  verify-runtime-v2-restart-recovery-live - deployed SM-4 recovery fixture verification"
+	@echo "  verify-runtime-v2-p6-scripted - isolated P6 scripted mock-provider verification"
 	@echo "  verify-runtime-v2-bounded-terminal-live - bounded deployed dual-workspace terminal acceptance"
 	@echo "  observe-runtime-v2-liveness - deployed real-workspace Runtime V2 liveness observation"
 	@echo "  verify-service      - verify the deployed workorch --server HTTP service at WORKORCH_BASE_URL"
@@ -80,7 +81,7 @@ help:
 	@echo "  verify-mvp      - verify deployed service with local real LLM MVP checks"
 	@echo "  verify-mvp-file - alias of verify-mvp; e2e uses the deployed instance only"
 	@echo "  verify-real-llm - verify a running workorch --server against its configured real LLM provider"
-	@echo "  verify-real-runtime-closure - verify real provider concurrency, projection observation, and optional cache baseline"
+	@echo "  verify-real-runtime-closure - verify fresh real-provider Runtime V2 authority, audit, receipts and terminal projection"
 	@echo "  verify-real-mcp-stdio - verify a running workorch --server can execute MCP stdio through LLM graph"
 	@echo "  verify-real-vector-memory - verify vector Memory recall on a running workorch --server"
 	@echo "  verify-real-weather - verify real LLM + MCP stdio current weather query for Zhejiang Hangzhou"
@@ -184,6 +185,9 @@ verify-runtime-v2-positive-convergence-live:
 
 verify-runtime-v2-restart-recovery-live:
 	./scripts/verify-runtime-v2-restart-recovery-live.sh
+
+verify-runtime-v2-p6-scripted:
+	./scripts/verify-runtime-v2-p6-scripted.sh
 
 verify-runtime-v2-bounded-terminal-live:
 	WORKORCH_E2E_MODE=bounded_terminal ./scripts/verify-runtime-v2-positive-convergence-live.sh

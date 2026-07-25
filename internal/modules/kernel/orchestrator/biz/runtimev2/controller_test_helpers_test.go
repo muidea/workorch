@@ -12,7 +12,7 @@ import (
 // second production admission API. Production callers must consume the typed
 // CandidateAdmissionCommitResult transitions directly.
 func (c *RuntimeController) RecordCandidateProposal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimecontract.RuntimeCandidate) (RuntimeAggregate, error) {
-	result, err := c.AdmitCandidateProposal(ctx, workspaceID, runID, attempt, candidate)
+	result, err := c.AdmitCandidateProposalForTest(ctx, workspaceID, runID, attempt, candidate)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -23,7 +23,7 @@ func (c *RuntimeController) RecordCandidateProposal(ctx context.Context, workspa
 }
 
 func (c *RuntimeController) AcceptCandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimecontract.RuntimeCandidate) (RuntimeAggregate, error) {
-	result, err := c.AdmitAndSealCandidateAttempt(ctx, workspaceID, runID, attempt, candidate)
+	result, err := c.AdmitAndSealCandidateAttemptForTest(ctx, workspaceID, runID, attempt, candidate)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}

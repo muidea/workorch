@@ -1,10 +1,7 @@
 package workorchruntimecontract
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -51,7 +48,6 @@ type RuntimeCandidateOutputContinuationRequest struct {
 }
 
 func (r RuntimeCandidateOutputContinuationRequest) Normalized() RuntimeCandidateOutputContinuationRequest {
-	r.PreviousChunkTail = strings.TrimSpace(r.PreviousChunkTail)
 	return r
 }
 
@@ -77,15 +73,4 @@ func (f RuntimeCandidateOutputFragment) Validate() error {
 		return common.ErrInvalidArgument
 	}
 	return nil
-}
-
-func StableRuntimeCandidateOutputContinuationID(workspaceID common.WorkspaceID, runID common.RunID, transaction AuthorityTransaction, attempt int) common.ArtifactContinuationID {
-	h := sha256.New()
-	writeHashString(h, "runtime-candidate-output-continuation-v1")
-	writeHashString(h, string(workspaceID))
-	writeHashString(h, string(runID))
-	writeHashString(h, transaction.AuthoritySnapshotID)
-	writeHashString(h, transaction.RequiredOutputHash)
-	writeHashString(h, fmt.Sprintf("%d", attempt))
-	return common.ArtifactContinuationID("candidate-output-" + hex.EncodeToString(h.Sum(nil))[:20])
 }

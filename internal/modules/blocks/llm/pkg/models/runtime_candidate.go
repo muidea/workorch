@@ -3,11 +3,15 @@ package models
 import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 
 type RuntimeCandidateRequest struct {
+	LogicalRequestID   string
+	RequestSequence    int
+	PhysicalCallID     string
 	Decision           runtimecontract.RuntimeDecision
 	Transaction        runtimecontract.AuthorityTransaction
 	CandidateAttempt   int
 	PreviousFailure    *runtimecontract.RuntimeCandidateFailure
 	StablePrefixHash   string
+	CandidateManifest  runtimecontract.RuntimeCandidateContractManifest
 	DefinitionContext  runtimecontract.RuntimeDefinitionContext
 	CandidateContext   runtimecontract.RuntimeCandidateContext
 	OutputContinuation *runtimecontract.RuntimeCandidateOutputContinuationRequest
@@ -65,8 +69,16 @@ type ProviderRequestAudit struct {
 
 // Runtime candidate response returned across the EventHub boundary after decode/validation.
 type RuntimeCandidateResponse struct {
-	Transaction runtimecontract.AuthorityTransaction
-	Candidate   runtimecontract.RuntimeCandidate
+	Transaction      runtimecontract.AuthorityTransaction
+	LogicalRequestID string `json:"logicalRequestId,omitempty"`
+	RequestSequence  int    `json:"requestSequence,omitempty"`
+	PhysicalCallID   string `json:"physicalCallId,omitempty"`
+	Candidate        runtimecontract.RuntimeCandidate
+	// DocumentContent carries a complete, successfully decoded provider
+	// document only across the synchronous LLM-owner EventHub exchange. It is
+	// intentionally excluded from JSON/audit projection; Orchestrator must
+	// durably store it before any session or candidate transition consumes it.
+	DocumentContent []byte `json:"-"`
 	// Audit is present for successful and failed provider requests when generation ran.
 	Audit *ProviderRequestAudit `json:"audit,omitempty"`
 	// Usage is present when the provider reported token usage.

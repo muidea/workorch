@@ -162,6 +162,7 @@ func TestAcceptedDurableStateChangeOutsideSelectedTargetDoesNotResetRepairProgre
 	}
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	aggregate.Facts.Resources.TargetSelection = &selection
+	bindCurrentFocusTargetSelection(&aggregate.Facts)
 	aggregate.Facts.Repair = runtimecontract.RuntimeRepairLedger{
 		FocusID: aggregate.Facts.Focus.ID, SliceID: aggregate.Facts.Focus.SliceID,
 		RepairAttempts: 2, ValidationOnlyRetries: 1, LastCycleID: "repair-cycle-2",

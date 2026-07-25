@@ -50,11 +50,25 @@ func (o *RuntimeOrchestrator) LoadRuntimeV2(ctx context.Context, workspaceID com
 	return o.runtimeV2Controller.Load(ctx, workspaceID, runID)
 }
 
+func (o *RuntimeOrchestrator) ReconcileRuntimeV2AuthorityBeforeCandidate(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.ReconcileAuthorityBeforeCandidate(ctx, workspaceID, runID)
+}
+
 func (o *RuntimeOrchestrator) CommitRuntimeV2Prerequisite(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, result runtimev2.PrerequisiteResult) (runtimev2.RuntimeAggregate, error) {
 	if o == nil || o.runtimeV2Controller == nil {
 		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	return o.runtimeV2Controller.CommitPrerequisite(ctx, workspaceID, runID, result)
+}
+
+func (o *RuntimeOrchestrator) InvalidateRuntimeV2PrerequisitesForReadOnlyStale(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, stale runtimemodel.RuntimePrerequisiteStale) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.InvalidatePrerequisitesForReadOnlyStale(ctx, workspaceID, runID, stale)
 }
 
 func (o *RuntimeOrchestrator) RecordRuntimeV2FeasibilityFact(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, fact runtimemodel.RuntimeFeasibilityFact) (runtimev2.RuntimeAggregate, error) {
@@ -78,18 +92,63 @@ func (o *RuntimeOrchestrator) ConsumeRuntimeV2RecoveryBudget(ctx context.Context
 	return o.runtimeV2Controller.ConsumeRecoveryBudget(ctx, workspaceID, runID, kind)
 }
 
-func (o *RuntimeOrchestrator) BeginRuntimeV2CandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string) (runtimev2.RuntimeAggregate, error) {
+// The following narrow facade methods expose the Orchestrator-owned
+// pre-candidate request-session ledger to its drive. They do not grant the
+// caller authority to allocate attempts, reduce facts, or mutate Run state.
+func (o *RuntimeOrchestrator) EnsureRuntimeV2CandidateRequestSession(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, stablePrefixHash, manifestHash, correctionHash string) (runtimev2.RuntimeAggregate, runtimemodel.RuntimeCandidateRequestSession, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, runtimemodel.RuntimeCandidateRequestSession{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.EnsureCandidateRequestSession(ctx, workspaceID, runID, stablePrefixHash, manifestHash, correctionHash)
+}
+
+func (o *RuntimeOrchestrator) MarkRuntimeV2CandidateRequestSubmitted(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, sequence int, physicalCallID string) (runtimev2.RuntimeAggregate, error) {
 	if o == nil || o.runtimeV2Controller == nil {
 		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	return o.runtimeV2Controller.BeginCandidateAttempt(ctx, workspaceID, runID, attempt, stablePrefixHash)
+	return o.runtimeV2Controller.MarkCandidateRequestSubmitted(ctx, workspaceID, runID, logicalRequestID, sequence, physicalCallID)
 }
 
-func (o *RuntimeOrchestrator) AdmitRuntimeV2CandidateProposal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimemodel.RuntimeCandidate) (runtimev2.CandidateAdmissionCommitResult, error) {
+func (o *RuntimeOrchestrator) RecordRuntimeV2CandidateRequestFragment(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, fragment runtimemodel.RuntimeCandidateRequestFragment) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.RecordCandidateRequestFragment(ctx, workspaceID, runID, logicalRequestID, fragment)
+}
+
+func (o *RuntimeOrchestrator) RecordRuntimeV2CandidateRequestTransportOutcome(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID, physicalCallID string, outcome runtimemodel.RuntimeCandidateRequestOutcome) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.RecordCandidateRequestTransportOutcome(ctx, workspaceID, runID, logicalRequestID, physicalCallID, outcome)
+}
+
+func (o *RuntimeOrchestrator) CompleteRuntimeV2CandidateRequestDocument(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID, physicalCallID string) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.CompleteCandidateRequestDocument(ctx, workspaceID, runID, logicalRequestID, physicalCallID)
+}
+
+func (o *RuntimeOrchestrator) TerminateRuntimeV2CandidateRequestSession(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, outcome runtimemodel.RuntimeCandidateRequestOutcome) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.TerminateCandidateRequestSession(ctx, workspaceID, runID, logicalRequestID, outcome)
+}
+
+func (o *RuntimeOrchestrator) BeginRuntimeV2CandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string, manifest runtimemodel.RuntimeCandidateContractManifest, logicalRequestID string) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.BeginCandidateAttempt(ctx, workspaceID, runID, attempt, stablePrefixHash, manifest, logicalRequestID)
+}
+
+func (o *RuntimeOrchestrator) AdmitRuntimeV2CandidateProposal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, manifest runtimemodel.RuntimeCandidateContractManifest, logicalRequestID string, candidate runtimemodel.RuntimeCandidate) (runtimev2.CandidateAdmissionCommitResult, error) {
 	if o == nil || o.runtimeV2Controller == nil {
 		return runtimev2.CandidateAdmissionCommitResult{}, common.ErrInvalidArgument
 	}
-	return o.runtimeV2Controller.AdmitCandidateProposal(ctx, workspaceID, runID, attempt, candidate)
+	return o.runtimeV2Controller.AdmitCandidateProposal(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
 }
 
 func (o *RuntimeOrchestrator) RecordRuntimeV2CandidateFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, record runtimemodel.RuntimeCandidateFeasibilityRecord) (runtimev2.RuntimeAggregate, error) {
@@ -104,6 +163,13 @@ func (o *RuntimeOrchestrator) InvalidateRuntimeV2CandidateAttemptForPrerequisite
 		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	return o.runtimeV2Controller.InvalidateCandidateAttemptForPrerequisiteStale(ctx, workspaceID, runID, attempt, stale)
+}
+
+func (o *RuntimeOrchestrator) InvalidateRuntimeV2CandidateRequestSessionForPrerequisiteStale(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, stale runtimemodel.RuntimePrerequisiteStale) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.InvalidateCandidateRequestSessionForPrerequisiteStale(ctx, workspaceID, runID, logicalRequestID, stale)
 }
 
 func (o *RuntimeOrchestrator) InvalidateRuntimeV2CandidateAttemptForFeasibilityPrerequisite(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, request runtimemodel.RuntimeOperationPrerequisiteRequest) (runtimev2.RuntimeAggregate, error) {
@@ -127,11 +193,18 @@ func (o *RuntimeOrchestrator) CommitRuntimeV2OperationReceipt(ctx context.Contex
 	return o.runtimeV2Controller.CommitOperationReceipt(ctx, workspaceID, runID, dispatchID, fence, receipt)
 }
 
-func (o *RuntimeOrchestrator) AdmitAndSealRuntimeV2CandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimemodel.RuntimeCandidate) (runtimev2.CandidateAdmissionCommitResult, error) {
+func (o *RuntimeOrchestrator) AdmitAndSealRuntimeV2CandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, manifest runtimemodel.RuntimeCandidateContractManifest, logicalRequestID string, candidate runtimemodel.RuntimeCandidate) (runtimev2.CandidateAdmissionCommitResult, error) {
 	if o == nil || o.runtimeV2Controller == nil {
 		return runtimev2.CandidateAdmissionCommitResult{}, common.ErrInvalidArgument
 	}
-	return o.runtimeV2Controller.AdmitAndSealCandidateAttempt(ctx, workspaceID, runID, attempt, candidate)
+	return o.runtimeV2Controller.AdmitAndSealCandidateAttempt(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
+}
+
+func (o *RuntimeOrchestrator) SealRuntimeV2GovernanceDispatch(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, manifest runtimemodel.RuntimeCandidateContractManifest, candidate runtimemodel.RuntimeCandidate) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.SealGovernanceDispatch(ctx, workspaceID, runID, manifest, candidate)
 }
 
 func (o *RuntimeOrchestrator) FailRuntimeV2CandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, failure runtimemodel.RuntimeCandidateFailure) (runtimev2.RuntimeAggregate, error) {

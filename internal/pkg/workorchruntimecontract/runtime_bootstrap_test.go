@@ -61,3 +61,15 @@ func TestRuntimeBootstrapRejectsUnknownCoverageReopenDependency(t *testing.T) {
 		t.Fatal("bootstrap accepted a coverage dependency with unknown target")
 	}
 }
+
+func TestRuntimeBootstrapRequirementScopeIsPartOfIdentityAndEquality(t *testing.T) {
+	global := RuntimeRequirement{Kind: PrerequisiteKindValidationScratch, OwnerModuleID: RuntimeModuleOrchestrator}
+	focus := RuntimeRequirement{Kind: PrerequisiteKindValidationScratch, Scope: RuntimePrerequisiteScopeFocus, FocusID: "focus-1", OwnerModuleID: RuntimeModuleOrchestrator}
+	normalized := normalizeRuntimeRequirements([]RuntimeRequirement{global, focus})
+	if len(normalized) != 2 || normalized[0].Scope != RuntimePrerequisiteScopeGlobal || normalized[0].FocusID != "" || normalized[1].Scope != RuntimePrerequisiteScopeFocus || normalized[1].FocusID != "focus-1" {
+		t.Fatalf("normalized prerequisite scopes = %+v", normalized)
+	}
+	if sameRuntimeRequirement(global, focus) {
+		t.Fatal("global and focus prerequisite requirements compare equal")
+	}
+}

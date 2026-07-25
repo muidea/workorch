@@ -194,7 +194,7 @@ func repairDirectiveTargets(facts runtimecontract.RuntimeFacts, fallback []strin
 	if facts.Failure != nil && len(facts.Failure.TargetRefs) > 0 {
 		return append([]string(nil), facts.Failure.TargetRefs...)
 	}
-	if selection := facts.Resources.TargetSelection; selection != nil && selection.Disposition == runtimecontract.RuntimeTargetSelectionSelected && len(selection.TargetRefs) > 0 {
+	if selection := currentFocusTargetSelection(facts); selection != nil && selection.Disposition == runtimecontract.RuntimeTargetSelectionSelected && len(selection.TargetRefs) > 0 {
 		return append([]string(nil), selection.TargetRefs...)
 	}
 	if hasOwnerGroundedTargetScope(facts) {

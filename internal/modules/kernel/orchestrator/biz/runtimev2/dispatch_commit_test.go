@@ -267,6 +267,7 @@ func TestRejectedValidationScopeMemberDoesNotBecomeFailureTarget(t *testing.T) {
 	}
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	aggregate.Facts.Resources.TargetSelection = &selection
+	bindCurrentFocusTargetSelection(&aggregate.Facts)
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	coordinator, _ := NewDispatchCoordinator(repository)
 	candidate := validationCandidate()
@@ -771,6 +772,8 @@ func TestRuntimeAggregateRequiresReducerTransitionAfterCandidateAttemptOneFailur
 		{AuthorityContractID: contractID, Transaction: transaction, Attempt: 0, StablePrefixHash: "stable-prefix", State: runtimecontract.RuntimeCandidateAttemptStateFailed, Failure: failure},
 		{AuthorityContractID: contractID, Transaction: transaction, Attempt: 1, StablePrefixHash: "stable-prefix", State: runtimecontract.RuntimeCandidateAttemptStateFailed, Failure: failure},
 	}
+	bindRuntimeCandidateAttemptForTest(t, &aggregate, 0)
+	bindRuntimeCandidateAttemptForTest(t, &aggregate, 1)
 	if err := aggregate.Validate(); err == nil {
 		t.Fatal("same-authority attempt 1 failure was accepted without a reducer transition")
 	}
@@ -810,11 +813,25 @@ func sealCandidateForTest(t *testing.T, repository *durableRuntimeStateRepositor
 		t.Fatal(err)
 	}
 	transaction := aggregate.Decision.AuthorityTransaction()
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, currentFocusTargetSelection(aggregate.Facts))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stablePrefixHash := "test-sealed-dispatch"
+	logicalRequestID := runtimecontract.StableRuntimeCandidateRequestSessionID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction, stablePrefixHash, manifest.Hash, "test-sealed-dispatch")
+	aggregate.CandidateRequestSessions = append(aggregate.CandidateRequestSessions, runtimecontract.RuntimeCandidateRequestSession{
+		LogicalRequestID: logicalRequestID, Transaction: transaction, StablePrefixHash: stablePrefixHash, ManifestHash: manifest.Hash,
+		CorrectionHash: "test-sealed-dispatch", State: runtimecontract.RuntimeCandidateRequestSessionDocumentComplete, NextSequence: 1,
+		LastPhysicalCallID: runtimecontract.StableRuntimeCandidatePhysicalCallID(logicalRequestID, 1), ProviderSubmitted: true,
+		LastOutcome: runtimecontract.RuntimeCandidateRequestOutcome{Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentComplete},
+	})
 	aggregate.CandidateAttempts = append(aggregate.CandidateAttempts, runtimecontract.RuntimeCandidateAttemptRecord{
 		AuthorityContractID: runtimecontract.StableAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction),
 		Transaction:         transaction,
 		Attempt:             0,
-		StablePrefixHash:    "test-sealed-dispatch",
+		StablePrefixHash:    stablePrefixHash,
+		ManifestHash:        manifest.Hash,
+		LogicalRequestID:    logicalRequestID,
 		State:               runtimecontract.RuntimeCandidateAttemptStateAccepted,
 	})
 	aggregate.ActiveDispatch = &dispatch

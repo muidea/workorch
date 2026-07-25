@@ -26,14 +26,20 @@ type PrerequisiteResult struct {
 
 func PreflightRuntimeFacts(facts runtimecontract.RuntimeFacts, requirements []RuntimeRequirement) runtimecontract.RuntimeFacts {
 	facts = facts.Normalized()
-	pending := make([]runtimecontract.RuntimePrerequisite, 0, len(requirements))
-	for _, requirement := range normalizeRuntimeRequirements(requirements) {
+	normalizedRequirements := normalizeRuntimeRequirements(requirements)
+	pending := make([]runtimecontract.RuntimePrerequisite, 0, len(normalizedRequirements))
+	reacquiring := make(map[string]struct{})
+	for _, requirement := range normalizedRequirements {
 		if runtimeRequirementSatisfied(facts, requirement) {
 			continue
 		}
+		prerequisiteID := runtimePrerequisiteID(requirement)
+		reacquiring[prerequisiteID] = struct{}{}
 		pending = append(pending, runtimecontract.RuntimePrerequisite{
-			ID:                          runtimePrerequisiteID(requirement),
+			ID:                          prerequisiteID,
 			Kind:                        requirement.Kind,
+			Scope:                       requirement.Scope,
+			FocusID:                     requirement.FocusID,
 			OwnerModuleID:               requirement.OwnerModuleID,
 			SubjectRef:                  requirement.SubjectRef,
 			TargetSelectorRef:           requirement.TargetSelectorRef,
@@ -47,6 +53,41 @@ func PreflightRuntimeFacts(facts runtimecontract.RuntimeFacts, requirements []Ru
 			MinimumBytes:                requirement.MinimumBytes,
 			Reason:                      requirement.Reason,
 		})
+	}
+	if len(reacquiring) != 0 {
+		// A resource may have been invalidated or cleared while its old
+		// prerequisite identity is still persisted (for example, authority
+		// reconciliation after a delayed Focus result). A prerequisite cannot
+		// assert both "satisfied" and "must be acquired" in the same SM-2
+		// authority. Remove the stale satisfaction and its active observation
+		// before scheduling the replacement; retired lineage is reserved for a
+		// completed Focus and must not be abused for current-Focus reacquisition.
+		satisfied := make([]runtimecontract.RuntimePrerequisite, 0, len(facts.Prerequisites.Satisfied))
+		for _, prerequisite := range facts.Prerequisites.Satisfied {
+			if _, stale := reacquiring[prerequisite.ID]; stale {
+				continue
+			}
+			satisfied = append(satisfied, prerequisite)
+		}
+		facts.Prerequisites.Satisfied = satisfied
+		observations := make([]runtimecontract.RuntimePrerequisiteObservation, 0, len(facts.Resources.PrerequisiteObservations))
+		for _, observation := range facts.Resources.PrerequisiteObservations {
+			if _, stale := reacquiring[observation.PrerequisiteID]; stale {
+				continue
+			}
+			observations = append(observations, observation)
+		}
+		facts.Resources.PrerequisiteObservations = observations
+		// A FailureTarget is local current-failure authority rather than audit
+		// history. If the same prerequisite identity must be reacquired because
+		// the typed signature/target set changed, retaining its old resource
+		// pointer would leave two contradictory repair surfaces in SM-2.
+		for _, prerequisite := range pending {
+			if prerequisite.Kind == runtimecontract.PrerequisiteKindFailureTarget {
+				facts.Resources.FailureTarget = nil
+				break
+			}
+		}
 	}
 	facts.Prerequisites.Pending = pending
 	return facts.Normalized()
@@ -74,34 +115,34 @@ func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []Ru
 			// File snapshot before the durable create has occurred.
 			continue
 		}
-		requirements = append(requirements, RuntimeRequirement{
+		requirements = append(requirements, focusScopedRuntimeRequirement(facts, RuntimeRequirement{
 			Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 			SubjectRef: target, Reason: "grounded repair target requires owner snapshot",
-		})
+		}))
 	}
 	// A failure target is already an owner-selected repair surface. Otherwise a
 	// File owner may only make the neutral cardinality observation below; it
 	// must not infer an implementation role from paths, suffixes, or content.
 	if len(groundedTargets) == 0 {
-		selection := facts.Resources.TargetSelection
+		selection := currentFocusTargetSelection(facts)
 		if selection == nil {
 			for _, source := range focus.TargetDiscoverySources {
 				switch source {
 				case runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest, runtimecontract.RuntimeValidationDiscoverySourceProjectFiles:
-					requirements = append(requirements, RuntimeRequirement{
+					requirements = append(requirements, focusScopedRuntimeRequirement(facts, RuntimeRequirement{
 						Kind: runtimecontract.PrerequisiteKindTargetSelection, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 						SubjectRef: focus.TargetRole, TargetSelectorRef: focus.TargetSelectorRef, TargetSelectorOwnerRef: focus.TargetSelectorOwnerRef, TargetSelectorSubjectRef: focus.TargetSelectorSubjectRef, TargetSelectorCandidateRefs: focus.TargetSelectorCandidateRefs, ProspectiveTargetRef: focus.ProspectiveTargetRef, Reason: "focus target grounding requires owner target selection",
-					})
+					}))
 					// One File-owner observation covers both file-backed source IDs.
 					goto selectionRequirementDone
 				}
 			}
 		} else if targetSelectionHasConcreteTarget(*selection) {
 			for _, target := range selection.TargetRefs {
-				requirements = append(requirements, RuntimeRequirement{
+				requirements = append(requirements, focusScopedRuntimeRequirement(facts, RuntimeRequirement{
 					Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 					SubjectRef: target, Reason: "selected focus target requires owner snapshot",
-				})
+				}))
 			}
 		}
 	}
@@ -127,9 +168,34 @@ selectionRequirementDone:
 }
 
 func ownerGroundedCreationTarget(facts runtimecontract.RuntimeFacts, target string) bool {
-	selection := facts.Resources.TargetSelection
+	selection := currentFocusTargetSelection(facts)
 	return hasOwnerGroundedCreationScope(facts) && selection != nil &&
 		strings.TrimSpace(selection.ProspectiveTargetRef) == strings.TrimSpace(target)
+}
+
+// currentFocusTargetSelection returns only a File-owner selection committed as
+// a satisfied Focus-scoped prerequisite for the current Focus.  A raw resource
+// pointer is not authority by itself: it can be historical audit lineage or a
+// malformed aggregate and must never skip a current acquisition.
+func currentFocusTargetSelection(facts runtimecontract.RuntimeFacts) *runtimecontract.RuntimeTargetSelection {
+	facts = facts.Normalized()
+	if facts.Resources.TargetSelection == nil {
+		return nil
+	}
+	selection := facts.Resources.TargetSelection.Normalized()
+	for _, prerequisite := range facts.Prerequisites.Satisfied {
+		if prerequisite.ID == selection.PrerequisiteID && prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSelection &&
+			prerequisite.Scope == runtimecontract.RuntimePrerequisiteScopeFocus && prerequisite.FocusID == facts.Focus.ID {
+			return &selection
+		}
+	}
+	return nil
+}
+
+func focusScopedRuntimeRequirement(facts runtimecontract.RuntimeFacts, requirement RuntimeRequirement) RuntimeRequirement {
+	requirement.Scope = runtimecontract.RuntimePrerequisiteScopeFocus
+	requirement.FocusID = facts.Focus.ID
+	return requirement
 }
 
 func CommitPrerequisiteResult(facts runtimecontract.RuntimeFacts, result PrerequisiteResult) (runtimecontract.RuntimeFacts, error) {
@@ -199,10 +265,20 @@ func applyPrerequisiteResult(facts *runtimecontract.RuntimeFacts, prerequisite r
 		}
 		facts.Resources.TargetSelection = &selection
 	case runtimecontract.PrerequisiteKindFailureTarget:
-		if result.FailureTarget == nil || len(result.FailureTarget.TargetRefs) == 0 {
-			return fmt.Errorf("failure target prerequisite returned no targets")
+		if facts.Failure == nil || strings.TrimSpace(facts.Failure.Signature) == "" || len(facts.Failure.TargetRefs) == 0 {
+			return fmt.Errorf("failure target prerequisite has no typed failure identity")
 		}
-		facts.Resources.FailureTarget = result.FailureTarget
+		if result.FailureTarget == nil || strings.TrimSpace(result.FailureTarget.Signature) == "" || len(result.FailureTarget.TargetRefs) == 0 {
+			return fmt.Errorf("failure target prerequisite returned no typed target identity")
+		}
+		failure := facts.Failure.Normalized()
+		if strings.TrimSpace(result.FailureTarget.Signature) != failure.Signature || !sameRuntimeTargetRefs(result.FailureTarget.TargetRefs, failure.TargetRefs) {
+			return fmt.Errorf("failure target prerequisite does not match current typed failure")
+		}
+		target := *result.FailureTarget
+		target.Signature = strings.TrimSpace(target.Signature)
+		target.TargetRefs = normalizeRuntimeTargetRefs(target.TargetRefs)
+		facts.Resources.FailureTarget = &target
 	case runtimecontract.PrerequisiteKindCapability:
 		if result.Capabilities == nil || !capabilitiesSatisfy(*result.Capabilities, prerequisite.CapabilityClass, prerequisite.RequiredCapabilities) {
 			return fmt.Errorf("capability prerequisite returned no required capabilities")
@@ -301,9 +377,22 @@ func runtimeRequirementSatisfied(facts runtimecontract.RuntimeFacts, requirement
 		}
 		return false
 	case runtimecontract.PrerequisiteKindTargetSelection:
-		return facts.Resources.TargetSelection != nil && facts.Resources.TargetSelection.PrerequisiteID == runtimePrerequisiteID(requirement)
+		selection := facts.Resources.TargetSelection
+		if selection == nil || selection.PrerequisiteID != runtimePrerequisiteID(requirement) {
+			return false
+		}
+		if requirement.Scope != runtimecontract.RuntimePrerequisiteScopeFocus {
+			return true
+		}
+		return currentFocusTargetSelection(facts) != nil
 	case runtimecontract.PrerequisiteKindFailureTarget:
-		return facts.Resources.FailureTarget != nil && len(facts.Resources.FailureTarget.TargetRefs) > 0
+		if facts.Failure == nil || facts.Resources.FailureTarget == nil || strings.TrimSpace(facts.Failure.Signature) == "" || len(facts.Failure.TargetRefs) == 0 {
+			return false
+		}
+		target := *facts.Resources.FailureTarget
+		target.Signature = strings.TrimSpace(target.Signature)
+		failure := facts.Failure.Normalized()
+		return target.Signature == failure.Signature && sameRuntimeTargetRefs(target.TargetRefs, failure.TargetRefs)
 	case runtimecontract.PrerequisiteKindCapability:
 		return capabilitiesSatisfy(facts.Capabilities, requirement.CapabilityClass, requirement.RequiredCapabilities)
 	case runtimecontract.PrerequisiteKindCapabilityState:
@@ -379,12 +468,27 @@ func normalizeRuntimeRequirements(values []RuntimeRequirement) []RuntimeRequirem
 	byID := make(map[string]RuntimeRequirement, len(values))
 	for _, value := range values {
 		value.SubjectRef = strings.TrimSpace(value.SubjectRef)
+		value.Scope = runtimecontract.RuntimePrerequisiteScope(strings.TrimSpace(string(value.Scope)))
+		if value.Scope == "" {
+			value.Scope = runtimecontract.RuntimePrerequisiteScopeGlobal
+		}
+		value.FocusID = strings.TrimSpace(value.FocusID)
+		if value.Scope != runtimecontract.RuntimePrerequisiteScopeFocus {
+			value.Scope = runtimecontract.RuntimePrerequisiteScopeGlobal
+			value.FocusID = ""
+		}
 		value.TargetSelectorRef = strings.TrimSpace(value.TargetSelectorRef)
 		value.TargetSelectorOwnerRef = strings.TrimSpace(value.TargetSelectorOwnerRef)
 		value.TargetSelectorSubjectRef = strings.TrimSpace(value.TargetSelectorSubjectRef)
 		value.TargetSelectorCandidateRefs = normalizeRequirementStrings(value.TargetSelectorCandidateRefs)
 		value.ProspectiveTargetRef = strings.TrimSpace(value.ProspectiveTargetRef)
 		value.OwnerModuleID = strings.TrimSpace(value.OwnerModuleID)
+		if value.Kind == runtimecontract.PrerequisiteKindValidationScratch && value.OwnerModuleID == "" {
+			// Scratch is an Orchestrator-local prerequisite. Recording its owner
+			// in the normalized requirement makes its observation/invalidation
+			// binding explicit rather than treating a local resource as ownerless.
+			value.OwnerModuleID = runtimecontract.RuntimeModuleOrchestrator
+		}
 		value.CapabilityClass = runtimecontract.RuntimeCapabilityClass(strings.TrimSpace(string(value.CapabilityClass)))
 		value.RequiredCapabilities = normalizeRequirementStrings(value.RequiredCapabilities)
 		value.CapabilityStateKind = strings.TrimSpace(value.CapabilityStateKind)
@@ -407,7 +511,7 @@ func normalizeRuntimeRequirements(values []RuntimeRequirement) []RuntimeRequirem
 }
 
 func runtimePrerequisiteID(requirement RuntimeRequirement) string {
-	parts := []string{string(requirement.Kind), requirement.OwnerModuleID, requirement.SubjectRef, requirement.TargetSelectorRef, requirement.TargetSelectorOwnerRef, requirement.TargetSelectorSubjectRef, strings.Join(requirement.TargetSelectorCandidateRefs, ","), requirement.ProspectiveTargetRef, string(requirement.CapabilityClass), strings.Join(requirement.RequiredCapabilities, ","), requirement.CapabilityStateKind, fmt.Sprintf("%d", requirement.MinimumBytes)}
+	parts := []string{string(requirement.Kind), string(requirement.Scope), requirement.FocusID, requirement.OwnerModuleID, requirement.SubjectRef, requirement.TargetSelectorRef, requirement.TargetSelectorOwnerRef, requirement.TargetSelectorSubjectRef, strings.Join(requirement.TargetSelectorCandidateRefs, ","), requirement.ProspectiveTargetRef, string(requirement.CapabilityClass), strings.Join(requirement.RequiredCapabilities, ","), requirement.CapabilityStateKind, fmt.Sprintf("%d", requirement.MinimumBytes)}
 	return strings.Join(parts, ":")
 }
 

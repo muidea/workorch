@@ -24,7 +24,7 @@ func MapRuntimeV2Audit(run readmodelcore.Run) *readmodelcore.RuntimeV2Audit {
 		Focus: runtimeV2AuditFocus(facts.Focus), Coverage: runtimeV2AuditCoverage(facts.Coverage),
 		RemainingFocusIDs: runtimeV2AuditFocusIDs(facts.RemainingFocuses), CompletedFocusIDs: runtimeV2AuditFocusIDs(facts.CompletedFocuses),
 		AcceptedEvidence: runtimeV2AuditEvidence(facts.Evidence.Accepted), RejectedEvidence: runtimeV2AuditEvidence(facts.Evidence.Rejected),
-		Grounding: runtimeV2AuditGrounding(facts.Resources), Authority: runtimeV2AuditAuthority(state.Decision.AuthoritySnapshot),
+		Grounding: runtimeV2AuditGrounding(facts.Prerequisites, facts.Resources), Authority: runtimeV2AuditAuthority(state.Decision.AuthoritySnapshot),
 		CandidateAttempts: runtimeV2AuditCandidateAttempts(state.CandidateAttempts), Dispatches: runtimeV2AuditDispatches(state),
 		Repair: runtimeV2AuditRepair(facts), Assessments: runtimeV2AuditAssessments(facts.Assessments),
 	}
@@ -82,12 +82,15 @@ func runtimeV2AuditCoverage(values []runtimecontract.RuntimeCoverageItemFact) []
 	return ret
 }
 
-func runtimeV2AuditGrounding(resources runtimecontract.RuntimeResourceFacts) readmodelcore.RuntimeV2AuditGrounding {
+func runtimeV2AuditGrounding(prerequisites runtimecontract.PrerequisiteState, resources runtimecontract.RuntimeResourceFacts) readmodelcore.RuntimeV2AuditGrounding {
 	resources = resources.Normalized()
 	ret := readmodelcore.RuntimeV2AuditGrounding{
-		TargetSnapshots:          runtimeV2AuditTargetSnapshots(resources.TargetSnapshots),
-		PrerequisiteObservations: runtimeV2AuditPrerequisiteObservations(resources.PrerequisiteObservations),
-		OperationAdmissibilities: runtimeV2AuditOperationAdmissibilities(resources.OperationAdmissibilities),
+		TargetSnapshots:                 runtimeV2AuditTargetSnapshots(resources.TargetSnapshots),
+		ActivePrerequisites:             runtimeV2AuditPrerequisites(prerequisites.Pending, prerequisites.Satisfied),
+		RetiredPrerequisites:            runtimeV2AuditPrerequisites(prerequisites.Retired),
+		PrerequisiteObservations:        runtimeV2AuditPrerequisiteObservations(resources.PrerequisiteObservations),
+		RetiredPrerequisiteObservations: runtimeV2AuditPrerequisiteObservations(resources.RetiredPrerequisiteObservations),
+		OperationAdmissibilities:        runtimeV2AuditOperationAdmissibilities(resources.OperationAdmissibilities),
 	}
 	if resources.TargetSelection != nil {
 		selection := resources.TargetSelection.Normalized()
@@ -124,6 +127,30 @@ func runtimeV2AuditGrounding(resources runtimecontract.RuntimeResourceFacts) rea
 			MaxBytes: ceiling.MaxBytes, CapabilityRevision: ceiling.CapabilityRevision, ConfigurationRevision: ceiling.ConfigurationRevision,
 		}
 	}
+	return ret
+}
+
+func runtimeV2AuditPrerequisites(groups ...[]runtimecontract.RuntimePrerequisite) []readmodelcore.RuntimeV2AuditPrerequisite {
+	values := make([]runtimecontract.RuntimePrerequisite, 0)
+	for _, group := range groups {
+		values = append(values, group...)
+	}
+	seen := make(map[string]struct{}, len(values))
+	ret := make([]readmodelcore.RuntimeV2AuditPrerequisite, 0, len(values))
+	for _, raw := range values {
+		value := raw
+		if value.ID == "" {
+			continue
+		}
+		if _, found := seen[value.ID]; found {
+			continue
+		}
+		seen[value.ID] = struct{}{}
+		ret = append(ret, readmodelcore.RuntimeV2AuditPrerequisite{
+			ID: value.ID, Kind: string(value.Kind), Scope: string(value.Scope), FocusID: value.FocusID, OwnerModuleID: value.OwnerModuleID,
+		})
+	}
+	sort.Slice(ret, func(i, j int) bool { return ret[i].ID < ret[j].ID })
 	return ret
 }
 

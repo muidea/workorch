@@ -33,6 +33,22 @@ func ReduceRuntimeState(facts runtimecontract.RuntimeFacts, previous *runtimecon
 // with RepairDirective synchronized to the sealed decision (INV-05).
 func ReduceRuntimeStateWithDirective(facts runtimecontract.RuntimeFacts, previous *runtimecontract.AuthoritySnapshot) (runtimecontract.RuntimeFacts, runtimecontract.RuntimeDecision, error) {
 	facts = facts.Normalized()
+	// A delayed prerequisite result from a completed focus is never current
+	// authority. Retire it before ordinary preflight: otherwise the raw resource
+	// pointer makes RuntimeFacts invalid and a drive can surface a process error
+	// instead of deterministically acquiring the current focus's owner fact.
+	// This is an SM-2 aggregate transition, not a pkg fallback or a candidate
+	// admission relaxation.
+	facts = retireNonCurrentFocusScopedPrerequisites(facts)
+	if currentFocusTargetSelection(facts) == nil && facts.Resources.TargetSelection != nil {
+		facts.Resources.TargetSelection = nil
+		// A selection-derived snapshot without a current selection must not
+		// become an implicit repair target. Explicit focus refs and owner
+		// failure targets are independently grounded and retain their snapshots.
+		if len(facts.Focus.TargetRefs) == 0 && (facts.Resources.FailureTarget == nil || len(facts.Resources.FailureTarget.TargetRefs) == 0) {
+			facts.Resources.TargetSnapshots = nil
+		}
+	}
 	// Target grounding is an SM-2 prerequisite, not a candidate-generation
 	// hint. Restrict this to the boundary between acquisition batches so an
 	// existing persisted owner acquisition can never be erased.
@@ -45,6 +61,59 @@ func ReduceRuntimeStateWithDirective(facts runtimecontract.RuntimeFacts, previou
 	}
 	facts = syncRepairDirective(facts, decision)
 	return facts, decision, nil
+}
+
+// retireNonCurrentFocusScopedPrerequisites is the defensive half of the
+// active/retired lifecycle. Focus advance performs the normal atomic retire;
+// this helper handles a delayed result that arrived after that CAS boundary.
+// It is intentionally invoked only before an SM-2 reduction, so no provider
+// request, candidate attempt, operation, or projection can observe the stale
+// fact as current authority.
+func retireNonCurrentFocusScopedPrerequisites(facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeFacts {
+	facts = facts.Normalized()
+	currentFocusID := facts.Focus.ID
+	retired := make(map[string]runtimecontract.RuntimePrerequisite)
+	filter := func(values []runtimecontract.RuntimePrerequisite) []runtimecontract.RuntimePrerequisite {
+		kept := make([]runtimecontract.RuntimePrerequisite, 0, len(values))
+		for _, prerequisite := range values {
+			if prerequisite.Scope == runtimecontract.RuntimePrerequisiteScopeFocus && prerequisite.FocusID != currentFocusID {
+				retired[prerequisite.ID] = prerequisite
+				continue
+			}
+			kept = append(kept, prerequisite)
+		}
+		return kept
+	}
+	facts.Prerequisites.Pending = filter(facts.Prerequisites.Pending)
+	facts.Prerequisites.Satisfied = filter(facts.Prerequisites.Satisfied)
+	if len(retired) == 0 {
+		return facts
+	}
+	knownRetired := make(map[string]struct{}, len(facts.Prerequisites.Retired))
+	for _, prerequisite := range facts.Prerequisites.Retired {
+		knownRetired[prerequisite.ID] = struct{}{}
+	}
+	for _, prerequisite := range retired {
+		if _, found := knownRetired[prerequisite.ID]; !found {
+			facts.Prerequisites.Retired = append(facts.Prerequisites.Retired, prerequisite)
+		}
+	}
+	activeObservations := make([]runtimecontract.RuntimePrerequisiteObservation, 0, len(facts.Resources.PrerequisiteObservations))
+	knownRetiredObservations := make(map[string]struct{}, len(facts.Resources.RetiredPrerequisiteObservations))
+	for _, observation := range facts.Resources.RetiredPrerequisiteObservations {
+		knownRetiredObservations[observation.ObservationID] = struct{}{}
+	}
+	for _, observation := range facts.Resources.PrerequisiteObservations {
+		if _, found := retired[observation.PrerequisiteID]; found {
+			if _, exists := knownRetiredObservations[observation.ObservationID]; !exists {
+				facts.Resources.RetiredPrerequisiteObservations = append(facts.Resources.RetiredPrerequisiteObservations, observation)
+			}
+			continue
+		}
+		activeObservations = append(activeObservations, observation)
+	}
+	facts.Resources.PrerequisiteObservations = activeObservations
+	return facts.Normalized()
 }
 
 func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision, error) {
@@ -95,10 +164,7 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 		return stateChangeDecision(base, facts)
 	}
 	if feasibilityBlocksCurrentAction(facts) {
-		if len(facts.Capabilities.GovernanceKinds) == 0 {
-			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "capability_unavailable", firstNonEmpty(facts.Feasibility.Reason, "current focus has no feasible operation under sealed capabilities")), nil
-		}
-		return governanceDecision(base, facts, firstNonEmpty(facts.Feasibility.Reason, "current focus has no feasible operation under sealed capabilities"))
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "capability_unavailable", firstNonEmpty(facts.Feasibility.Reason, "current focus has no feasible operation under sealed capabilities")), nil
 	}
 	// INV-05: persisted RepairDirective is the sole next-action authority for the focus.
 	// Raw MissingRequiredEvidenceKinds and anti-replay must not override it.
@@ -134,7 +200,7 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 		case runtimecontract.AssessmentDispositionRepairableGap:
 			return repairableAssessmentDecision(base, facts, assessment)
 		case runtimecontract.AssessmentDispositionGovernanceRequired:
-			return governanceDecision(base, facts, firstNonEmptyAssessmentSummary(assessment, "assessment requires governance"))
+			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "governance_dependency_missing", firstNonEmptyAssessmentSummary(assessment, "assessment requires a typed external dependency")), nil
 		case runtimecontract.AssessmentDispositionTerminalRejection:
 			// The candidate can report irrecoverability, but terminal authority stays
 			// in the reducer. Only an already-persisted governance rejection is an
@@ -174,29 +240,28 @@ func reduceDeterminedFailure(base runtimecontract.RuntimeDecision, facts runtime
 		if facts.Recovery.ProviderTransportAttempts < facts.RecoveryPolicy.MaxProviderTransportAttempts {
 			return runtimecontract.RuntimeDecision{}, false, nil
 		}
-		if len(facts.Capabilities.GovernanceKinds) > 0 {
-			decision, err := governanceDecision(base, facts, failure.Message)
-			return decision, true, err
-		}
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "provider_transport_exhausted", failure.Message), true, nil
 	case runtimecontract.FailureClassOwnerTransientUnavailable:
 		if facts.Recovery.OperationRecoveryAttempts < facts.RecoveryPolicy.MaxOperationRecoveryAttempts {
 			return runtimecontract.RuntimeDecision{}, false, nil
 		}
-		if len(facts.Capabilities.GovernanceKinds) > 0 {
-			decision, err := governanceDecision(base, facts, failure.Message)
-			return decision, true, err
-		}
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "operation_recovery_exhausted", failure.Message), true, nil
 	case runtimecontract.FailureClassGovernanceDependency, runtimecontract.FailureClassGovernanceRequired,
-		runtimecontract.FailureClassProviderAuthentication, runtimecontract.FailureClassProviderConfiguration,
-		runtimecontract.FailureClassOperationOutcomeUnknown:
+		runtimecontract.FailureClassProviderAuthentication, runtimecontract.FailureClassProviderConfiguration:
 		decision, err := governanceDecision(base, facts, failure.Message)
 		return decision, true, err
+	case runtimecontract.FailureClassOperationOutcomeUnknown:
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "operation_outcome_unknown", failure.Message), true, nil
 	case runtimecontract.FailureClassRuntimeContractMisalignment:
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "runtime_contract_defect", failure.Message), true, nil
+	case runtimecontract.FailureClassProviderProtocol:
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "provider_protocol_failure", failure.Message), true, nil
+	case runtimecontract.FailureClassProviderSubmissionUnknown:
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "provider_submission_unknown", failure.Message), true, nil
 	case runtimecontract.FailureClassCandidateExhausted:
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "candidate_retry_exhausted", failure.Message), true, nil
+	case runtimecontract.FailureClassCandidateCorrectionUndefined:
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "candidate_correction_undefined", failure.Message), true, nil
 	case runtimecontract.FailureClassCandidateOutputExhausted:
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "candidate_output_continuation_exhausted", failure.Message), true, nil
 	case runtimecontract.FailureClassPrerequisiteRefreshExhausted:
@@ -249,9 +314,6 @@ func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecont
 	}
 	acceptedKinds := focusAcceptedKinds(facts.Capabilities.StateChangeKinds, facts.Focus)
 	if len(acceptedKinds) == 0 {
-		if len(facts.Capabilities.GovernanceKinds) > 0 {
-			return governanceDecision(base, facts, "state-change authority has no concrete runtime capability")
-		}
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "capability_unavailable", "state-change authority has no concrete runtime capability"), nil
 	}
 	// An empty-workspace create scope is owner-grounded permission to propose a
@@ -356,9 +418,6 @@ func validationDecision(base runtimecontract.RuntimeDecision, facts runtimecontr
 	}
 	acceptedKinds := focusAcceptedKinds(facts.Capabilities.ValidationKinds, facts.Focus)
 	if len(acceptedKinds) == 0 {
-		if len(facts.Capabilities.GovernanceKinds) > 0 {
-			return governanceDecision(base, facts, "validation authority has no concrete runtime capability")
-		}
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "capability_unavailable", "validation authority has no concrete runtime capability"), nil
 	}
 	base.State = runtimecontract.ConvergenceStateNeedValidation
@@ -403,21 +462,22 @@ func targetGroundingDecision(base runtimecontract.RuntimeDecision, facts runtime
 // creation observation; the reducer never derives a file path from Goal, DoD,
 // manifest ordering, or provider text.
 func hasOwnerGroundedCreationScope(facts runtimecontract.RuntimeFacts) bool {
-	if facts.Resources.TargetSelection == nil {
+	selection := currentFocusTargetSelection(facts)
+	if selection == nil {
 		return false
 	}
-	selection := facts.Resources.TargetSelection.Normalized()
+	value := selection.Normalized()
 	focus := facts.Focus.Normalized()
-	return selection.Disposition == runtimecontract.RuntimeTargetSelectionCreate &&
-		selection.OwnerModuleID == runtimecontract.RuntimeModuleFile &&
-		selection.TargetRole == focus.TargetRole && selection.SelectorRef == focus.TargetSelectorRef &&
-		selection.SelectorOwnerRef == focus.TargetSelectorOwnerRef && selection.SelectorSubjectRef == focus.TargetSelectorSubjectRef &&
-		runtimecontract.SameRuntimeTargetSelectorCandidateRefs(selection.SelectorCandidateRefs, focus.TargetSelectorCandidateRefs) &&
-		selection.ProspectiveTargetRef != "" && selection.ProspectiveTargetRef == focus.ProspectiveTargetRef
+	return value.Disposition == runtimecontract.RuntimeTargetSelectionCreate &&
+		value.OwnerModuleID == runtimecontract.RuntimeModuleFile &&
+		value.TargetRole == focus.TargetRole && value.SelectorRef == focus.TargetSelectorRef &&
+		value.SelectorOwnerRef == focus.TargetSelectorOwnerRef && value.SelectorSubjectRef == focus.TargetSelectorSubjectRef &&
+		runtimecontract.SameRuntimeTargetSelectorCandidateRefs(value.SelectorCandidateRefs, focus.TargetSelectorCandidateRefs) &&
+		value.ProspectiveTargetRef != "" && value.ProspectiveTargetRef == focus.ProspectiveTargetRef
 }
 
 func hasOwnerGroundedTargetScope(facts runtimecontract.RuntimeFacts) bool {
-	selection := facts.Resources.TargetSelection
+	selection := currentFocusTargetSelection(facts)
 	return selection != nil && selection.Disposition == runtimecontract.RuntimeTargetSelectionScope &&
 		selection.OwnerModuleID == runtimecontract.RuntimeModuleFile && len(selection.TargetRefs) != 0
 }
@@ -464,8 +524,11 @@ func focusAcceptedKinds(capabilityKinds []string, focus runtimecontract.Coverage
 }
 
 func governanceDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, summary string) (runtimecontract.RuntimeDecision, error) {
+	if _, found := governanceDependencyForFacts(facts); !found {
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "governance_dependency_missing", "runtime governance requires a sealed external dependency"), nil
+	}
 	if len(facts.Capabilities.GovernanceKinds) == 0 {
-		return runtimecontract.RuntimeDecision{}, fmt.Errorf("governance authority requires a concrete runtime capability")
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "governance_capability_unavailable", "runtime governance dependency has no concrete runtime capability"), nil
 	}
 	base.State = runtimecontract.ConvergenceStateNeedGovernance
 	base.Action = runtimecontract.RuntimeActionRequestGovernance
@@ -474,6 +537,35 @@ func governanceDecision(base runtimecontract.RuntimeDecision, facts runtimecontr
 		AcceptedKinds: facts.Capabilities.GovernanceKinds,
 	}
 	return base, nil
+}
+
+// governanceDependencyForFacts recognizes only a dependency explicitly sealed
+// into a failure fact or the provider configuration dependency whose subject
+// is derived from the sealed provider ceiling. It never turns a summary,
+// focus, target, feasibility result, or retry exhaustion into a ticket.
+func governanceDependencyForFacts(facts runtimecontract.RuntimeFacts) (runtimecontract.ExternalDependency, bool) {
+	facts = facts.Normalized()
+	if facts.Failure != nil && facts.Failure.GovernanceDependency != nil {
+		dependency := facts.Failure.GovernanceDependency.Normalized()
+		if dependency.Validate() == nil {
+			return dependency, true
+		}
+		return runtimecontract.ExternalDependency{}, false
+	}
+	if facts.Failure == nil || (facts.Failure.Class != runtimecontract.FailureClassProviderAuthentication && facts.Failure.Class != runtimecontract.FailureClassProviderConfiguration) || facts.Resources.ProviderCeiling == nil {
+		return runtimecontract.ExternalDependency{}, false
+	}
+	target := facts.Resources.ProviderCeiling.Target.Normalized()
+	if target.ProviderID == "" || target.ModelID == "" {
+		return runtimecontract.ExternalDependency{}, false
+	}
+	reason := "provider configuration requires attention"
+	if facts.Failure.Class == runtimecontract.FailureClassProviderAuthentication {
+		reason = "provider authentication requires configuration"
+	}
+	return runtimecontract.ExternalDependency{
+		Kind: string(runtimecontract.GovernanceConfiguration), SubjectRef: target.ProviderID + "/" + target.ModelID, Reason: reason,
+	}, true
 }
 
 // completeOrAdvanceDecision completes the current focus only when remaining focuses are empty
@@ -557,9 +649,11 @@ func advanceSatisfiedCoverageFocus(facts runtimecontract.RuntimeFacts) runtimeco
 	if len(missingEvidenceKinds(facts)) != 0 || !currentFocusCoverageSatisfied(facts) || len(facts.RemainingFocuses) == 0 {
 		return facts
 	}
+	completedFocusID := facts.Focus.ID
 	facts.CompletedFocuses = append(facts.CompletedFocuses, facts.Focus)
 	facts.Focus = facts.RemainingFocuses[0]
 	facts.RemainingFocuses = append([]runtimecontract.CoverageFocus(nil), facts.RemainingFocuses[1:]...)
+	retireFocusScopedPrerequisites(&facts, completedFocusID)
 	facts.Failure = nil
 	facts.Feasibility = nil
 	// Target selections and snapshots are scoped to the completed Focus. A
@@ -574,6 +668,49 @@ func advanceSatisfiedCoverageFocus(facts runtimecontract.RuntimeFacts) runtimeco
 	facts.Repair = facts.Repair.ResetForFocus(facts.Focus.ID, facts.Focus.SliceID, facts.EvidenceRevision)
 	facts.RepairDirective = nil
 	return facts.Normalized()
+}
+
+// retireFocusScopedPrerequisites moves the completed Focus's owner facts out
+// of the active prerequisite graph in the same SM-2 transition that advances
+// Focus.  Retained values are audit lineage only: freshness never sees them,
+// so a later workspace-tree change cannot recreate an old target authority.
+func retireFocusScopedPrerequisites(facts *runtimecontract.RuntimeFacts, focusID string) {
+	if facts == nil {
+		return
+	}
+	focusID = strings.TrimSpace(focusID)
+	if focusID == "" {
+		return
+	}
+	retired := make(map[string]runtimecontract.RuntimePrerequisite)
+	retire := func(values []runtimecontract.RuntimePrerequisite) []runtimecontract.RuntimePrerequisite {
+		kept := make([]runtimecontract.RuntimePrerequisite, 0, len(values))
+		for _, prerequisite := range values {
+			if prerequisite.Scope == runtimecontract.RuntimePrerequisiteScopeFocus && prerequisite.FocusID == focusID {
+				retired[prerequisite.ID] = prerequisite
+				continue
+			}
+			kept = append(kept, prerequisite)
+		}
+		return kept
+	}
+	facts.Prerequisites.Pending = retire(facts.Prerequisites.Pending)
+	facts.Prerequisites.Satisfied = retire(facts.Prerequisites.Satisfied)
+	if len(retired) == 0 {
+		return
+	}
+	for _, prerequisite := range retired {
+		facts.Prerequisites.Retired = append(facts.Prerequisites.Retired, prerequisite)
+	}
+	activeObservations := make([]runtimecontract.RuntimePrerequisiteObservation, 0, len(facts.Resources.PrerequisiteObservations))
+	for _, observation := range facts.Resources.PrerequisiteObservations {
+		if _, found := retired[observation.PrerequisiteID]; found {
+			facts.Resources.RetiredPrerequisiteObservations = append(facts.Resources.RetiredPrerequisiteObservations, observation)
+			continue
+		}
+		activeObservations = append(activeObservations, observation)
+	}
+	facts.Resources.PrerequisiteObservations = activeObservations
 }
 
 // repairableAssessmentDecision keeps the Run active and re-opens state-change or validation

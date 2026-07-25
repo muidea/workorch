@@ -21,6 +21,10 @@ const (
 	RuntimeResourceOwnerCatalog    RuntimeResourceDomain = "owner_catalog"
 	RuntimeResourceProviderConfig  RuntimeResourceDomain = "provider_config"
 	RuntimeResourceRemoteResource  RuntimeResourceDomain = "remote_resource"
+	// RuntimeResourceLocalResource identifies an Orchestrator-local prerequisite
+	// resource. It is owner-neutral metadata only: lifecycle probes, CAS and
+	// invalidation remain in the Orchestrator SM-2 implementation.
+	RuntimeResourceLocalResource RuntimeResourceDomain = "local_resource"
 )
 
 func (d RuntimeResourceDomain) Normalized() RuntimeResourceDomain {
@@ -30,7 +34,8 @@ func (d RuntimeResourceDomain) Normalized() RuntimeResourceDomain {
 func ValidRuntimeResourceDomain(domain RuntimeResourceDomain) bool {
 	switch domain.Normalized() {
 	case RuntimeResourceWorkspaceTree, RuntimeResourceWorkspaceTarget, RuntimeResourceRepositoryState,
-		RuntimeResourceOwnerCatalog, RuntimeResourceProviderConfig, RuntimeResourceRemoteResource:
+		RuntimeResourceOwnerCatalog, RuntimeResourceProviderConfig, RuntimeResourceRemoteResource,
+		RuntimeResourceLocalResource:
 		return true
 	default:
 		return false

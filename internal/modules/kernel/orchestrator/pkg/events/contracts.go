@@ -18,6 +18,7 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorAcquireRuntimeOperationAdmissibility,
 		TopicOrchestratorProbeRuntimeOperationFeasibility,
 		TopicOrchestratorAcquireGitCapabilityState,
+		TopicOrchestratorPreflightRuntimeCandidate,
 		TopicOrchestratorQueryRuntimeOperationReceipt,
 	)...)
 	ret = append(ret, eventcontract.Build("orchestrator", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,

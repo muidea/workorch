@@ -4,12 +4,13 @@ Status: active
 
 Type: implementation closure matrix
 
-Last Updated: 2026-07-20
+Last Updated: 2026-07-24
 
 ## Purpose
 
-本矩阵将 [22-component framework boundary remediation](go-multi-module-22-component-boundary-remediation.md)
-细化为可以逐组件实施、审查和回归的工作单元。它不重述或替代 Runtime V2
+本矩阵是 22 组件当前唯一的 active 收口清单；原整改过程与已完成迁移记录已归档至
+[framework boundary remediation record](../../90-archive/records/go-multi-module-22-component-boundary-remediation-2026-07-25.md)。
+它不重述或替代 Runtime V2
 状态机：状态转换仍以
 [runtime-stage-contract.md](../../00-core/runtime-stage-contract.md)、
 `kernel/orchestrator/readme.md` 和 `workorchruntimecontract` 为准。
@@ -46,9 +47,12 @@ degraded projection。
 | `D` | 外部部署验证待完成 | latest 服务上的 restart/projection fixture；不得用人工 Resume 替代 |
 | `C` | 完成 | L + I + 所需 D 均成立，并同步更新当前事实文档 |
 
-若修改触及 Runtime V2，变更说明必须标出 SM-1～SM-4 的影响；本矩阵中的
-orchestrator/run/recovery 项仅允许修改 SM-4 交付，不得借机修改 SM-2 reducer
-或 SM-3 dispatch 语义。
+若修改触及 Runtime V2，变更说明必须标出 SM-1～SM-4 的影响。本矩阵只定义
+组件边界与独立回归，**不定义** Runtime V2 语义收口的实施顺序或状态迁移。
+`RUNTIME-VPC` 主方案中已明确授权的工作卡可以修改其指定的 SM-2/SM-3 唯一
+owner；矩阵不得以“仅 SM-4”阻断该收口，也不得创建第二套 reducer/dispatch
+任务。反之，ARCH-1 自身的 framework/lifecycle 整改仍只可修改 SM-4 交付，
+不得借机改写 authority、candidate 或 evidence 语义。
 
 ## Common Interaction Contract
 
@@ -157,7 +161,13 @@ consumer-side contract test。
 最后执行本矩阵的 repository gate。不得以端到端成功掩盖某一 owner 的 scope、
 idempotency 或 lifecycle 单测缺失。
 
-## SM-4 Deployed Closure (Remaining D Evidence)
+## SM-4 Deployed Closure (ARCH-1 的 Remaining D Evidence)
+
+本节是 ARCH-1 的**验收索引**，不是独立 Runtime V2 实施计划。前三种 Runtime
+fixture 的构造、crash/restart 序列、唯一状态 owner 与退出条件完全以
+[RUNTIME-VPC 的 P4～P6](runtime-v2-validation-progress-closure-plan.md)
+为准；本矩阵只消费其通过证据来关闭组件的 `D` 标记。`workspace_deleted_late_event`
+仍由 EventStream/WorkOrchd 的组件合同单独验证，但不得影响 Runtime authority。
 
 部署验证使用最新构建重启服务后执行，不能调用 Activate/Resume 作为补偿，也不能
 通过放宽 `/readyz` 掩盖投影问题：

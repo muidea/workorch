@@ -33,3 +33,12 @@ func llmContextBudgetTracePolicy(budget workorcheventpayload.Payload) string {
 func llmContextBudgetEstimator(budget workorcheventpayload.Payload) string {
 	return llmContextBudgetString(budget, "estimator")
 }
+func llmContextBudgetContextGateAction(budget workorcheventpayload.Payload) string {
+	return llmContextBudgetString(budget, "contextGateAction")
+}
+func llmContextBudgetContextGateReason(budget workorcheventpayload.Payload) string {
+	return llmContextBudgetString(budget, "contextGateReason")
+}
+func llmContextBudgetBudgetFailureClass(budget workorcheventpayload.Payload) string {
+	return llmContextBudgetString(budget, "budgetFailureClass")
+}

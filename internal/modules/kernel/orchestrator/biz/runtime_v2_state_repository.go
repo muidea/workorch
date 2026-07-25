@@ -74,6 +74,7 @@ func runtimeStateRecordFromAggregate(aggregate runtimev2.RuntimeAggregate) runti
 		Facts:                       aggregate.Facts,
 		Decision:                    aggregate.Decision,
 		ProcessedEventIDs:           append([]string(nil), aggregate.ProcessedEventIDs...),
+		CandidateRequestSessions:    cloneRuntimeCandidateRequestSessions(aggregate.CandidateRequestSessions),
 		CandidateAttempts:           append([]runtimecontract.RuntimeCandidateAttemptRecord(nil), aggregate.CandidateAttempts...),
 		GovernanceRequests:          append([]runtimecontract.RuntimeGovernanceRequestRecord(nil), aggregate.GovernanceRequests...),
 		GovernanceResolutions:       append([]runtimecontract.RuntimeGovernanceResolutionRecord(nil), aggregate.GovernanceResolutions...),
@@ -111,6 +112,7 @@ func runtimeAggregateFromRecord(record runtimecontract.RuntimeStateRecord) runti
 		Facts:                       record.Facts,
 		Decision:                    record.Decision,
 		ProcessedEventIDs:           append([]string(nil), record.ProcessedEventIDs...),
+		CandidateRequestSessions:    cloneRuntimeCandidateRequestSessions(record.CandidateRequestSessions),
 		CandidateAttempts:           append([]runtimecontract.RuntimeCandidateAttemptRecord(nil), record.CandidateAttempts...),
 		GovernanceRequests:          append([]runtimecontract.RuntimeGovernanceRequestRecord(nil), record.GovernanceRequests...),
 		GovernanceResolutions:       append([]runtimecontract.RuntimeGovernanceResolutionRecord(nil), record.GovernanceResolutions...),
@@ -145,6 +147,21 @@ func cloneRuntimeOperationGovernanceBindings(values []runtimecontract.RuntimeOpe
 		return nil
 	}
 	ret := make([]runtimecontract.RuntimeOperationGovernanceBinding, len(values))
+	for idx := range values {
+		ret[idx] = values[idx].Clone()
+	}
+	return ret
+}
+
+// cloneRuntimeCandidateRequestSessions keeps the Run-owner record conversion
+// ownership-neutral. Request-session state is advanced only by runtimev2's
+// controller; this adapter merely preserves its persisted value across a
+// file-backed reload and must never share fragment metadata backing arrays.
+func cloneRuntimeCandidateRequestSessions(values []runtimecontract.RuntimeCandidateRequestSession) []runtimecontract.RuntimeCandidateRequestSession {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]runtimecontract.RuntimeCandidateRequestSession, len(values))
 	for idx := range values {
 		ret[idx] = values[idx].Clone()
 	}

@@ -156,6 +156,7 @@ func TestBuildRepairDirectiveDoesNotPromoteOwnerScopeToConcreteRepairTarget(t *t
 	}
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	facts.Resources.TargetSelection = &selection
+	bindCurrentFocusTargetSelection(&facts)
 	facts.Failure = &runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassEffectMismatch, Code: "operation_effect_mismatch",
 		Signature: "effect-mismatch", Message: "durable effect not observed",
@@ -177,6 +178,59 @@ func TestBuildRepairDirectiveDoesNotPromoteOwnerScopeToConcreteRepairTarget(t *t
 	if directive.CurrentFailure == nil || directive.CurrentFailure.Signature != "effect-mismatch" {
 		t.Fatalf("effect mismatch lineage was not retained: %+v", directive)
 	}
+}
+
+func TestFailureWithoutConcreteTargetDoesNotFallbackToHistoricalSelection(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.TargetRefs = nil
+	facts.Focus.TargetRole = "implementation"
+	facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	facts.Focus.TargetSelectorRef = "file/profile_declared_candidates"
+	facts.Focus.TargetSelectorOwnerRef = "profile-bootstrap"
+	facts.Focus.TargetSelectorSubjectRef = "manager"
+	facts.Focus.TargetSelectorCandidateRefs = []string{"internal/lsp/manager.go"}
+	facts.Focus.RequireTargetGrounding = true
+	// No concrete target survived the rejected validation receipt. The old
+	// selection is a predecessor Focus fact, not a valid repair fallback.
+	facts.Failure = &runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassExecutionFailure, Code: "validation_failed",
+		Signature: "validation-failed", Message: "validation did not identify a grounded repair target",
+	}
+	historicalSelection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "selection-old-go-mod", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		TargetRole: "module_definition", SelectorRef: "file/profile_declared_candidates",
+		Disposition: runtimecontract.RuntimeTargetSelectionSelected, TargetRefs: []string{"go.mod"},
+		CandidateTargetRefs: []string{"go.mod"}, CandidateCount: 1, ObservedRevision: "tree-old",
+	}
+	historicalSelection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(historicalSelection)
+	facts.Resources.TargetSelection = &historicalSelection
+	facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
+		TargetRef: "go.mod", ContentHash: "go-mod-old", ContentState: runtimecontract.SnapshotContentStateComplete,
+	}}
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{{
+		ID: historicalSelection.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindTargetSelection,
+		Scope: runtimecontract.RuntimePrerequisiteScopeFocus, FocusID: "focus-module", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+	}}
+
+	updated, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || updated.Resources.TargetSelection != nil ||
+		len(updated.Resources.TargetSnapshots) != 0 || updated.Resources.FailureTarget != nil ||
+		len(updated.Failure.TargetRefs) != 0 || updated.RepairDirective != nil || len(GroundedRepairTargets(updated)) != 0 {
+		t.Fatalf("historical selection leaked into nil-target repair authority: facts=%+v decision=%+v", updated, decision)
+	}
+	if len(updated.Prerequisites.Retired) != 1 || updated.Prerequisites.Retired[0].ID != historicalSelection.PrerequisiteID {
+		t.Fatalf("historical selection was not retired: %+v", updated.Prerequisites)
+	}
+	for _, prerequisite := range updated.Prerequisites.Pending {
+		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSelection && prerequisite.FocusID == facts.Focus.ID &&
+			len(prerequisite.TargetSelectorCandidateRefs) == 1 && prerequisite.TargetSelectorCandidateRefs[0] == "internal/lsp/manager.go" {
+			return
+		}
+	}
+	t.Fatalf("current focus selection was not reacquired: %+v", updated.Prerequisites.Pending)
 }
 
 func TestRepairDirectiveStateChangeEvidenceCanAdvanceBeforeRequiredAssessment(t *testing.T) {

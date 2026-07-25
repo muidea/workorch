@@ -426,7 +426,7 @@ func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magiceven
 		setPrerequisiteError(result, common.ErrInvalidArgument)
 		return
 	}
-	response, err := orchestratorevents.ResolveRuntimeCapabilities(command, ModuleID, StepKindList, StepKindRead, StepKindEdit, StepKindWrite, StepKindPatchApply, StepKindPatchPreview)
+	response, err := orchestratorevents.ResolveRuntimeCapabilities(command, ModuleID, modulecommon.RuntimeCapabilityKinds()...)
 	if setPrerequisiteError(result, err) {
 		return
 	}

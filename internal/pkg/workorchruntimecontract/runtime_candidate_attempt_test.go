@@ -15,8 +15,8 @@ func TestRuntimeCandidateAttemptScopeValidationRequiresExplicitContractAndReject
 	contractID := StableAuthorityContractID(facts.WorkspaceID, facts.RunID, current)
 	failure := &RuntimeCandidateFailure{Class: RuntimeCandidateFailureClassContract, Reason: "invalid candidate"}
 	values := []RuntimeCandidateAttemptRecord{
-		{Transaction: resealed, Attempt: 0, StablePrefixHash: "stable-prefix", State: RuntimeCandidateAttemptStateFailed, Failure: failure},
-		{AuthorityContractID: contractID, Transaction: current, Attempt: 1, StablePrefixHash: "stable-prefix", State: RuntimeCandidateAttemptStatePending},
+		{Transaction: resealed, Attempt: 0, StablePrefixHash: "stable-prefix", ManifestHash: "manifest-1", LogicalRequestID: "request-0", State: RuntimeCandidateAttemptStateFailed, Failure: failure},
+		{AuthorityContractID: contractID, Transaction: current, Attempt: 1, StablePrefixHash: "stable-prefix", ManifestHash: "manifest-1", LogicalRequestID: "request-1", State: RuntimeCandidateAttemptStatePending},
 	}
 	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, values); err == nil {
 		t.Fatal("candidate attempt without authority contract id was accepted")
@@ -29,8 +29,8 @@ func TestRuntimeCandidateAttemptScopeValidationRequiresExplicitContractAndReject
 	duplicate.AuthoritySnapshotID = "duplicate-snapshot"
 	duplicate.Attempt = 1
 	values = []RuntimeCandidateAttemptRecord{
-		{AuthorityContractID: contractID, Transaction: current, Attempt: 0, StablePrefixHash: "stable-prefix", State: RuntimeCandidateAttemptStateFailed, Failure: failure},
-		{AuthorityContractID: contractID, Transaction: duplicate, Attempt: 0, StablePrefixHash: "stable-prefix", State: RuntimeCandidateAttemptStateFailed, Failure: failure},
+		{AuthorityContractID: contractID, Transaction: current, Attempt: 0, StablePrefixHash: "stable-prefix", ManifestHash: "manifest-1", LogicalRequestID: "request-0", State: RuntimeCandidateAttemptStateFailed, Failure: failure},
+		{AuthorityContractID: contractID, Transaction: duplicate, Attempt: 0, StablePrefixHash: "stable-prefix", ManifestHash: "manifest-1", LogicalRequestID: "request-duplicate", State: RuntimeCandidateAttemptStateFailed, Failure: failure},
 	}
 	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, values); err == nil {
 		t.Fatal("new duplicate attempt 0 was accepted across snapshots")
@@ -48,7 +48,7 @@ func TestRuntimeCandidateAttemptScopeValidationRejectsRunawayAttempts(t *testing
 		resealed.AuthoritySnapshotID = "resealed-snapshot-" + string(rune('a'+attempt))
 		resealed.Attempt = attempt
 		values = append(values, RuntimeCandidateAttemptRecord{
-			AuthorityContractID: contractID, Transaction: resealed, Attempt: 0, StablePrefixHash: "stable-prefix",
+			AuthorityContractID: contractID, Transaction: resealed, Attempt: 0, StablePrefixHash: "stable-prefix", ManifestHash: "manifest-1", LogicalRequestID: "request-runaway",
 			State: RuntimeCandidateAttemptStateFailed, Failure: failure,
 		})
 	}
@@ -71,7 +71,7 @@ func TestRuntimeCandidateFeasibilityRecordValidationRejectsAmbiguousOrAcceptedLe
 	values = values[:1]
 	attempt := RuntimeCandidateAttemptRecord{
 		AuthorityContractID: StableAuthorityContractID(facts.WorkspaceID, facts.RunID, transaction), Transaction: transaction,
-		Attempt: 0, StablePrefixHash: "stable-prefix", State: RuntimeCandidateAttemptStateAccepted, Feasibilities: values,
+		Attempt: 0, StablePrefixHash: "stable-prefix", ManifestHash: "manifest-1", LogicalRequestID: "request-0", State: RuntimeCandidateAttemptStateAccepted, Feasibilities: values,
 	}
 	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, []RuntimeCandidateAttemptRecord{attempt}); err == nil {
 		t.Fatal("accepted candidate attempt retained an unsealed feasibility ledger")
@@ -95,6 +95,8 @@ func TestRuntimeStateRecordRejectsTerminalDecisionWithPendingCandidateAttempt(t 
 			Transaction:         transaction,
 			Attempt:             0,
 			StablePrefixHash:    "stable-prefix",
+			ManifestHash:        "manifest-1",
+			LogicalRequestID:    "request-0",
 			State:               RuntimeCandidateAttemptStatePending,
 		}},
 	}

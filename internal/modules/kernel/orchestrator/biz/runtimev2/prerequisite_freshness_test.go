@@ -9,6 +9,18 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func sameFreshnessStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for index := range got {
+		if got[index] != want[index] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestPrerequisiteStaleInvalidatesProposalAndReacquiresWithoutCandidateDebt(t *testing.T) {
 	ctx := context.Background()
 	repository := &controllerRepository{}
@@ -52,7 +64,7 @@ func TestPrerequisiteStaleInvalidatesProposalAndReacquiresWithoutCandidateDebt(t
 		ID: "write-1", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 		TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("state"),
 	}}}}}
-	if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.RecordCandidateProposal(ctx, "ws-v2", "run-v2", 0, candidate); err != nil {
@@ -105,7 +117,7 @@ func TestPrerequisiteStaleInvalidatesProposalAndReacquiresWithoutCandidateDebt(t
 		reacquired.Decision.AuthoritySnapshot.PrerequisiteFreshnessHash == initialFreshnessHash {
 		t.Fatalf("fresh acquisition did not seal a new authority transaction: %+v", reacquired.Decision)
 	}
-	if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "fresh-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "fresh-prefix"); err != nil {
 		t.Fatalf("new authority did not reopen candidate attempt 0: %v", err)
 	}
 }
@@ -119,7 +131,7 @@ func TestPrerequisiteStaleInvalidatesPendingCandidateRequestWithoutCandidateDebt
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttempt(ctx, "ws-1", "run-1", 0, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-1", "run-1", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	stale := runtimecontract.RuntimePrerequisiteStale{
@@ -137,6 +149,112 @@ func TestPrerequisiteStaleInvalidatesPendingCandidateRequestWithoutCandidateDebt
 		invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 || len(invalidated.Facts.Evidence.Accepted) != 0 ||
 		len(invalidated.Facts.Evidence.Rejected) != 0 || invalidated.Facts.Repair.RepairAttempts != 0 {
 		t.Fatalf("pending candidate stale consumed candidate/repair/evidence authority: %+v", invalidated)
+	}
+}
+
+// A File target snapshot is a separate owner observation from manifest and
+// admissibility. Its read-only freshness loss must retire only that snapshot,
+// preserve the other recovery ledgers, and make the same prerequisite ID
+// pending for a new owner observation. The candidate attempt is invalidated
+// audit lineage, not candidate/repair debt.
+func TestTargetSnapshotReadOnlyStaleReacquiresOnlyFileSnapshot(t *testing.T) {
+	ctx := context.Background()
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	facts := controllerFacts()
+	facts.Focus.RequireTargetGrounding = true
+	requirement := normalizeRuntimeRequirements([]RuntimeRequirement{{
+		Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		SubjectRef: "target.txt", Reason: "grounded target requires owner snapshot",
+	}})[0]
+	prerequisite := runtimecontract.RuntimePrerequisite{
+		ID: runtimePrerequisiteID(requirement), Kind: requirement.Kind, OwnerModuleID: requirement.OwnerModuleID,
+		SubjectRef: requirement.SubjectRef, Reason: requirement.Reason,
+	}
+	snapshot := runtimecontract.TargetSnapshot{
+		TargetRef: "target.txt", Content: "before\n", ContentHash: "target-v1",
+		ContentState: runtimecontract.SnapshotContentStateComplete,
+	}
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID,
+		ContentHash: snapshot.ContentHash,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: snapshot.TargetRef, Revision: snapshot.ContentHash,
+		}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{snapshot}
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
+
+	initialized, err := controller.Initialize(ctx, facts, controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if initialized.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(initialized.Facts.Prerequisites.Pending) != 0 {
+		t.Fatalf("fresh target snapshot did not satisfy grounding prerequisite: %+v", initialized)
+	}
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "target-snapshot-stale-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	stale := runtimecontract.RuntimePrerequisiteStale{
+		PrerequisiteID: prerequisite.ID, ObservationID: observation.ObservationID,
+		Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		SubjectRef: "target.txt", ExpectedRevision: "target-v1", ObservedRevision: "target-v2",
+		Reason: "File owner observed a newer target revision",
+	}
+	invalidated, err := controller.InvalidateCandidateAttemptForPrerequisiteStale(ctx, "ws-v2", "run-v2", 0, stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invalidated.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite ||
+		len(invalidated.Facts.Resources.TargetSnapshots) != 0 || len(invalidated.Facts.Resources.PrerequisiteObservations) != 0 ||
+		len(invalidated.Facts.Prerequisites.Satisfied) != 0 || len(invalidated.Facts.Prerequisites.Pending) != 1 ||
+		invalidated.Facts.Prerequisites.Pending[0].ID != prerequisite.ID ||
+		invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 || invalidated.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 ||
+		invalidated.Facts.Repair.RepairAttempts != 0 || invalidated.Facts.Recovery.ProviderTransportAttempts != 0 || invalidated.ActiveDispatch != nil {
+		t.Fatalf("target snapshot stale did not isolate prerequisite freshness: %+v", invalidated)
+	}
+	if len(invalidated.CandidateAttempts) != 1 || invalidated.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated ||
+		invalidated.CandidateAttempts[0].Proposal != nil || invalidated.CandidateAttempts[0].Failure != nil {
+		t.Fatalf("target snapshot stale did not retain only invalidated candidate lineage: %+v", invalidated.CandidateAttempts)
+	}
+
+	saves := repository.saves
+	duplicate, err := controller.InvalidateCandidateAttemptForPrerequisiteStale(ctx, "ws-v2", "run-v2", 0, stale)
+	if err != nil || duplicate.StateRevision != invalidated.StateRevision || repository.saves != saves ||
+		duplicate.Facts.Recovery != invalidated.Facts.Recovery {
+		t.Fatalf("duplicate target snapshot stale was not a no-op: aggregate=%+v saves=%d err=%v", duplicate, repository.saves, err)
+	}
+	if _, err := controller.CommitPrerequisite(ctx, "ws-v2", "run-v2", PrerequisiteResult{
+		PrerequisiteID: prerequisite.ID, TargetSnapshot: &snapshot, Observation: &observation,
+	}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("stale target snapshot was accepted for re-acquisition: %v", err)
+	}
+
+	freshSnapshot := snapshot
+	freshSnapshot.Content = "after\n"
+	freshSnapshot.ContentHash = "target-v2"
+	freshObservation := observation
+	freshObservation.ContentHash = freshSnapshot.ContentHash
+	freshObservation.Dependencies[0].Revision = freshSnapshot.ContentHash
+	freshObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(freshObservation)
+	reacquired, err := controller.CommitPrerequisite(ctx, "ws-v2", "run-v2", PrerequisiteResult{
+		PrerequisiteID: prerequisite.ID, TargetSnapshot: &freshSnapshot, Observation: &freshObservation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reacquired.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(reacquired.Facts.Resources.TargetSnapshots) != 1 ||
+		reacquired.Facts.Resources.TargetSnapshots[0].ContentHash != "target-v2" || len(reacquired.Facts.Resources.PrerequisiteObservations) != 1 ||
+		reacquired.Facts.Resources.PrerequisiteObservations[0].ObservationID != freshObservation.ObservationID ||
+		reacquired.Facts.Recovery.PrerequisiteRefreshes != 1 || reacquired.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 {
+		t.Fatalf("fresh target snapshot did not replace stale owner fact: %+v", reacquired)
 	}
 }
 
@@ -180,7 +298,7 @@ func TestFeasibilityPrerequisiteInvalidatesAttemptWithoutRetryOrRepairDebt(t *te
 		ID: "replace-target", Kind: runtimecontract.RuntimeBlockKindPatchApply, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{targetRef},
 		Parameters: []runtimecontract.OperationParameter{{Name: "targetRef", String: &targetRef}, {Name: "patchType", String: &patchType}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}},
 	}}}}}
-	if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.RecordCandidateProposal(ctx, "ws-v2", "run-v2", 0, candidate); err != nil {
@@ -257,7 +375,7 @@ func TestMCPOwnerCatalogStaleRestartDoesNotReuseFailureTarget(t *testing.T) {
 	if initialized.Decision.AuthoritySnapshot.PrerequisiteFreshnessHash == "" {
 		t.Fatal("MCP owner-catalog observation was not sealed into authority")
 	}
-	if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	stale := runtimecontract.RuntimePrerequisiteStale{PrerequisiteID: prerequisite.ID, ObservationID: observation.ObservationID, Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "mcp_server_catalog", ExpectedRevision: "mcp-catalog-v1", ObservedRevision: "mcp-catalog-v2", Reason: "mcp catalog changed"}
@@ -423,6 +541,296 @@ func TestAcceptedReceiptResourceChangeExhaustionSealsTerminalFact(t *testing.T) 
 	}
 }
 
+// The two prerequisite refresh ledgers have different causes and must remain
+// independent even when an external owner receipt and an orchestrator-local
+// resource become stale during the same authority lifetime.  In particular,
+// an accepted File receipt is forward progress and consumes only the receipt
+// ledger; loss of the local validation scratch is read-only freshness loss and
+// consumes only the stale ledger.
+func TestMixedOwnerPrerequisiteRefreshLedgersRemainIndependent(t *testing.T) {
+	ctx := context.Background()
+	aggregate := stateChangeAggregate(t)
+	filePrerequisite, _ := addFreshFileAdmissibilityObservation(t, &aggregate)
+	scratchPrerequisite, scratchObservation := addFreshValidationScratchObservation(t, &aggregate, "scratch-v1")
+	aggregate.Facts = aggregate.Facts.Normalized()
+	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Facts = facts
+	aggregate.Decision = decision
+
+	changed, err := applyReceiptResourceChangeInvalidation(&aggregate, "dispatch-file", "write-main", runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: "exec/ws-1/run-1/dispatch-file/write-main", Fence: 1, OperationID: "write-main",
+		ResourceChanges: []runtimecontract.RuntimeResourceChange{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", BeforeRevision: "tree-v1", AfterRevision: "tree-v2",
+		}},
+	})
+	if err != nil || !changed {
+		t.Fatalf("external resource-change invalidation = changed:%t err:%v", changed, err)
+	}
+	if aggregate.Facts.Recovery.PrerequisiteRefreshes != 0 || aggregate.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 ||
+		len(aggregate.Facts.Prerequisites.Pending) != 1 || aggregate.Facts.Prerequisites.Pending[0].ID != filePrerequisite.ID ||
+		len(aggregate.Facts.Prerequisites.Satisfied) != 1 || aggregate.Facts.Prerequisites.Satisfied[0].ID != scratchPrerequisite.ID ||
+		aggregate.Facts.Resources.ValidationScratch == nil || len(aggregate.Facts.Resources.PrerequisiteObservations) != 1 ||
+		aggregate.Facts.Resources.PrerequisiteObservations[0].PrerequisiteID != scratchPrerequisite.ID {
+		t.Fatalf("external receipt did not retire only File owner facts: %+v", aggregate.Facts)
+	}
+	commitFreshnessInvalidationForTest(t, &aggregate)
+
+	repository := &durableRuntimeStateRepository{aggregate: aggregate}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := runtimecontract.RuntimePrerequisiteStale{
+		PrerequisiteID: scratchPrerequisite.ID, ObservationID: scratchObservation.ObservationID,
+		Domain: runtimecontract.RuntimeResourceLocalResource, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
+		SubjectRef: "validation-scratch/ws-1/run-1/cwi-1", ExpectedRevision: "scratch-v1", ObservedRevision: "scratch-v2", Reason: "local scratch disappeared",
+	}
+	invalidated, err := controller.InvalidatePrerequisitesForReadOnlyStale(ctx, "ws-1", "run-1", stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 || invalidated.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 ||
+		len(invalidated.Facts.Prerequisites.Pending) != 2 || len(invalidated.Facts.Prerequisites.Satisfied) != 0 ||
+		invalidated.Facts.Resources.ValidationScratch != nil || len(invalidated.Facts.Resources.OperationAdmissibilities) != 0 ||
+		len(invalidated.CandidateRequestSessions) != 0 || len(invalidated.CandidateAttempts) != 0 || invalidated.ActiveDispatch != nil ||
+		len(invalidated.GovernanceRequests) != 0 || len(invalidated.OperationReceipts) != 0 {
+		t.Fatalf("local stale contaminated the external receipt path: %+v", invalidated)
+	}
+	if !sameFreshnessStrings([]string{invalidated.Facts.Prerequisites.Pending[0].ID, invalidated.Facts.Prerequisites.Pending[1].ID}, []string{filePrerequisite.ID, scratchPrerequisite.ID}) {
+		t.Fatalf("mixed owner pending prerequisites = %+v", invalidated.Facts.Prerequisites.Pending)
+	}
+	revision := invalidated.StateRevision
+	duplicate, err := controller.InvalidatePrerequisitesForReadOnlyStale(ctx, "ws-1", "run-1", stale)
+	if err != nil || duplicate.StateRevision != revision || duplicate.Facts.Recovery.PrerequisiteRefreshes != 1 ||
+		duplicate.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 {
+		t.Fatalf("duplicate local stale retried mixed-owner refresh: aggregate=%+v err=%v", duplicate, err)
+	}
+
+	// An unrelated external change is not an excuse to consume either ledger or
+	// to ask either owner again.
+	unchanged, err := applyReceiptResourceChangeInvalidation(&duplicate, "dispatch-file", "write-other", runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: "exec/ws-1/run-1/dispatch-file/write-other", Fence: 1, OperationID: "write-other",
+		ResourceChanges: []runtimecontract.RuntimeResourceChange{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "unrelated.go", BeforeRevision: "v1", AfterRevision: "v2",
+		}},
+	})
+	if err != nil || unchanged || duplicate.Facts.Recovery.PrerequisiteRefreshes != 1 || duplicate.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 {
+		t.Fatalf("unrelated external change mutated mixed-owner ledger: changed=%t aggregate=%+v err=%v", unchanged, duplicate, err)
+	}
+}
+
+// Exhausting either ledger is a terminal SM-2 fact, not permission to borrow
+// the other ledger or to start another prerequisite/provider loop.  The setup
+// deliberately crosses owner boundaries before the terminal transition: File
+// first reports durable workspace progress, then the orchestrator observes its
+// local validation resource as stale, and both prerequisites are reacquired.
+func TestMixedOwnerPrerequisiteRefreshExhaustionKeepsOtherLedgerStable(t *testing.T) {
+	for _, test := range []struct {
+		name            string
+		maxReadOnly     int
+		maxReceipt      int
+		exhaust         string
+		wantFailureCode string
+		wantReadOnly    int
+		wantReceipt     int
+	}{
+		{name: "receipt_resource_change", maxReadOnly: 2, maxReceipt: 1, exhaust: "receipt", wantFailureCode: "prerequisite_receipt_refresh_exhausted", wantReadOnly: 1, wantReceipt: 1},
+		{name: "local_read_only_stale", maxReadOnly: 1, maxReceipt: 2, exhaust: "stale", wantFailureCode: "prerequisite_refresh_exhausted", wantReadOnly: 1, wantReceipt: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			aggregate := stateChangeAggregate(t)
+			aggregate.Facts.ConvergencePolicy.MaxCandidateContextItems = 4
+			filePrerequisite, fileObservation := addFreshFileAdmissibilityObservation(t, &aggregate)
+			fileInventory := aggregate.Facts.Resources.OperationAdmissibilities[0]
+			scratchPrerequisite, scratchObservation := addFreshValidationScratchObservation(t, &aggregate, "scratch-v1")
+			aggregate.Facts.RecoveryPolicy.MaxPrerequisiteRefreshes = test.maxReadOnly
+			aggregate.Facts.RecoveryPolicy.MaxPrerequisiteResourceChangeRefreshes = test.maxReceipt
+			facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			aggregate.Facts = facts
+			aggregate.Decision = decision
+
+			changed, err := applyReceiptResourceChangeInvalidation(&aggregate, "dispatch-file", "write-main", runtimecontract.RuntimeOperationReceipt{
+				ExecutionKey: "exec/ws-1/run-1/dispatch-file/write-main", Fence: 1, OperationID: "write-main",
+				ResourceChanges: []runtimecontract.RuntimeResourceChange{{
+					Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+					SubjectRef: "workspace_deliverable", BeforeRevision: "tree-v1", AfterRevision: "tree-v2",
+				}},
+			})
+			if err != nil || !changed {
+				t.Fatalf("first File receipt invalidation = changed:%t err:%v", changed, err)
+			}
+			commitFreshnessInvalidationForTest(t, &aggregate)
+			repository := &durableRuntimeStateRepository{aggregate: aggregate}
+			controller, err := NewRuntimeController(repository)
+			if err != nil {
+				t.Fatal(err)
+			}
+			firstStale := runtimecontract.RuntimePrerequisiteStale{
+				PrerequisiteID: scratchPrerequisite.ID, ObservationID: scratchObservation.ObservationID,
+				Domain: runtimecontract.RuntimeResourceLocalResource, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
+				SubjectRef: "validation-scratch/ws-1/run-1/cwi-1", ExpectedRevision: "scratch-v1", ObservedRevision: "scratch-v2", Reason: "local scratch disappeared",
+			}
+			if _, err := controller.InvalidatePrerequisitesForReadOnlyStale(ctx, "ws-1", "run-1", firstStale); err != nil {
+				t.Fatal(err)
+			}
+
+			freshFileInventory := fileInventory
+			freshFileInventory.ObservedRevision = "tree-v2"
+			freshFileInventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(freshFileInventory)
+			freshFileObservation := fileObservation
+			freshFileObservation.ContentHash = freshFileInventory.SnapshotID
+			freshFileObservation.Dependencies[0].Revision = "tree-v2"
+			freshFileObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(freshFileObservation)
+			if _, err := controller.CommitPrerequisite(ctx, "ws-1", "run-1", PrerequisiteResult{
+				PrerequisiteID: filePrerequisite.ID, OperationAdmissibility: &freshFileInventory, Observation: &freshFileObservation,
+			}); err != nil {
+				t.Fatalf("reacquire File owner prerequisite: %v", err)
+			}
+			freshScratch := runtimecontract.ValidationScratch{Reference: ".workorch-internal/validation-scratch/ws-1/run-1/cwi-1", Revision: "scratch-v2"}
+			freshScratchObservation := scratchObservation
+			freshScratchObservation.ContentHash = freshScratch.Revision
+			freshScratchObservation.Dependencies[0].Revision = freshScratch.Revision
+			freshScratchObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(freshScratchObservation)
+			reacquired, err := controller.CommitPrerequisite(ctx, "ws-1", "run-1", PrerequisiteResult{
+				PrerequisiteID: scratchPrerequisite.ID, ValidationScratch: &freshScratch, Observation: &freshScratchObservation,
+			})
+			if err != nil {
+				t.Fatalf("reacquire local validation scratch: %v", err)
+			}
+			if reacquired.Facts.Recovery.PrerequisiteRefreshes != 1 || reacquired.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 ||
+				len(reacquired.Facts.Prerequisites.Pending) != 0 || len(reacquired.CandidateRequestSessions) != 0 || len(reacquired.CandidateAttempts) != 0 ||
+				reacquired.ActiveDispatch != nil || len(reacquired.GovernanceRequests) != 0 || len(reacquired.OperationReceipts) != 0 {
+				t.Fatalf("mixed prerequisites did not reacquire cleanly: %+v", reacquired)
+			}
+
+			var terminal RuntimeAggregate
+			if test.exhaust == "receipt" {
+				changed, err = applyReceiptResourceChangeInvalidation(&reacquired, "dispatch-file-2", "write-main-2", runtimecontract.RuntimeOperationReceipt{
+					ExecutionKey: "exec/ws-1/run-1/dispatch-file-2/write-main-2", Fence: 1, OperationID: "write-main-2",
+					ResourceChanges: []runtimecontract.RuntimeResourceChange{{
+						Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+						SubjectRef: "workspace_deliverable", BeforeRevision: "tree-v2", AfterRevision: "tree-v3",
+					}},
+				})
+				if err != nil || !changed {
+					t.Fatalf("exhausting File receipt invalidation = changed:%t err:%v", changed, err)
+				}
+				commitFreshnessInvalidationForTest(t, &reacquired)
+				terminal = reacquired
+				duplicate, err := applyReceiptResourceChangeInvalidation(&terminal, "dispatch-file-2", "write-main-2", runtimecontract.RuntimeOperationReceipt{
+					ExecutionKey: "exec/ws-1/run-1/dispatch-file-2/write-main-2", Fence: 1, OperationID: "write-main-2",
+					ResourceChanges: []runtimecontract.RuntimeResourceChange{{
+						Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+						SubjectRef: "workspace_deliverable", BeforeRevision: "tree-v2", AfterRevision: "tree-v3",
+					}},
+				})
+				if err != nil || duplicate {
+					t.Fatalf("duplicate exhausted receipt invalidation = changed:%t err:%v", duplicate, err)
+				}
+			} else {
+				repository.aggregate = reacquired
+				secondStale := firstStale
+				secondStale.ObservationID = freshScratchObservation.ObservationID
+				secondStale.ExpectedRevision = "scratch-v2"
+				secondStale.ObservedRevision = "scratch-v3"
+				secondStale.Reason = "local scratch disappeared again"
+				terminal, err = controller.InvalidatePrerequisitesForReadOnlyStale(ctx, "ws-1", "run-1", secondStale)
+				if err != nil {
+					t.Fatal(err)
+				}
+				revision := terminal.StateRevision
+				duplicate, err := controller.InvalidatePrerequisitesForReadOnlyStale(ctx, "ws-1", "run-1", secondStale)
+				if err != nil || duplicate.StateRevision != revision {
+					t.Fatalf("duplicate exhausted read-only stale looped: aggregate=%+v err=%v", duplicate, err)
+				}
+			}
+			if terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Facts.Failure == nil || terminal.Facts.Failure.Code != test.wantFailureCode ||
+				terminal.Facts.Recovery.PrerequisiteRefreshes != test.wantReadOnly || terminal.Facts.Recovery.PrerequisiteResourceChangeRefreshes != test.wantReceipt ||
+				len(terminal.CandidateRequestSessions) != 0 || len(terminal.CandidateAttempts) != 0 || terminal.ActiveDispatch != nil ||
+				len(terminal.GovernanceRequests) != 0 || len(terminal.OperationReceipts) != 0 {
+				t.Fatalf("mixed-owner exhaustion contaminated a different state machine: %+v", terminal)
+			}
+		})
+	}
+}
+
+func TestRuntimeAggregateCurrentCandidateWorkIgnoresRetiredAuthorityLineage(t *testing.T) {
+	aggregate := stateChangeAggregate(t)
+	current := aggregate.Decision.AuthorityTransaction()
+	historical := current
+	historical.AuthoritySnapshotID = "authority-historical"
+	aggregate.CandidateRequestSessions = []runtimecontract.RuntimeCandidateRequestSession{{
+		LogicalRequestID: "historical-request", Transaction: historical,
+		State: runtimecontract.RuntimeCandidateRequestSessionDocumentComplete,
+	}}
+	aggregate.CandidateAttempts = []runtimecontract.RuntimeCandidateAttemptRecord{{
+		AuthorityContractID: "historical-contract", Transaction: historical, Attempt: 0,
+		State: runtimecontract.RuntimeCandidateAttemptStateAccepted,
+	}}
+	if runtimeAggregateHasCurrentCandidateWork(aggregate) {
+		t.Fatalf("historical candidate lineage was treated as current work: %+v", aggregate)
+	}
+	aggregate.CandidateRequestSessions = append(aggregate.CandidateRequestSessions, runtimecontract.RuntimeCandidateRequestSession{
+		LogicalRequestID: "current-request", Transaction: current,
+		State: runtimecontract.RuntimeCandidateRequestSessionPrepared,
+	})
+	if !runtimeAggregateHasCurrentCandidateWork(aggregate) {
+		t.Fatalf("current candidate session was not fenced: %+v", aggregate)
+	}
+	aggregate.CandidateRequestSessions[1].State = runtimecontract.RuntimeCandidateRequestSessionTerminal
+	aggregate.CandidateAttempts = append(aggregate.CandidateAttempts, runtimecontract.RuntimeCandidateAttemptRecord{
+		AuthorityContractID: "current-contract", Transaction: current, Attempt: 0,
+		State: runtimecontract.RuntimeCandidateAttemptStatePending,
+	})
+	if !runtimeAggregateHasCurrentCandidateWork(aggregate) {
+		t.Fatalf("current pending candidate attempt was not fenced: %+v", aggregate)
+	}
+}
+
+func addFreshValidationScratchObservation(t *testing.T, aggregate *RuntimeAggregate, revision string) (runtimecontract.RuntimePrerequisite, runtimecontract.RuntimePrerequisiteObservation) {
+	t.Helper()
+	prerequisite := runtimecontract.RuntimePrerequisite{
+		ID: "validation-scratch:orchestrator", Kind: runtimecontract.PrerequisiteKindValidationScratch,
+		OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
+	}
+	scratch := &runtimecontract.ValidationScratch{Reference: ".workorch-internal/validation-scratch/ws-1/run-1/cwi-1", Revision: revision}
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID, ContentHash: revision,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceLocalResource, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
+			SubjectRef: "validation-scratch/ws-1/run-1/cwi-1", Revision: revision,
+		}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	aggregate.Facts.Resources.ValidationScratch = scratch
+	aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, prerequisite)
+	aggregate.Facts.Resources.PrerequisiteObservations = append(aggregate.Facts.Resources.PrerequisiteObservations, observation)
+	return prerequisite, observation
+}
+
+func commitFreshnessInvalidationForTest(t *testing.T, aggregate *RuntimeAggregate) {
+	t.Helper()
+	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Facts = facts
+	aggregate.Decision = decision
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		t.Fatalf("mixed-owner freshness fixture invalid: %v", err)
+	}
+}
+
 func TestFileTargetChangeInvalidatesShellValidationObservation(t *testing.T) {
 	fileInventory := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "operation_admissibility:file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
@@ -456,6 +864,31 @@ func TestFileTargetChangeInvalidatesShellValidationObservation(t *testing.T) {
 			PrerequisiteObservations: []runtimecontract.RuntimePrerequisiteObservation{fileObservation, shellObservation},
 		},
 	}
+	// Shell observes only its policy and the selected File-owned validation
+	// target. A workspace-tree change elsewhere, or a Git repository-state
+	// change, must not retire Shell's inventory merely because both facts belong
+	// to the same workspace.
+	for _, test := range []struct {
+		change             runtimecontract.RuntimeResourceChange
+		wantFileRetirement bool
+	}{
+		{change: runtimecontract.RuntimeResourceChange{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", BeforeRevision: "tree-v1", AfterRevision: "tree-v2"}, wantFileRetirement: true},
+		{change: runtimecontract.RuntimeResourceChange{Domain: runtimecontract.RuntimeResourceRepositoryState, OwnerModuleID: runtimecontract.RuntimeModuleGit, SubjectRef: "workspace_deliverable", BeforeRevision: "repository-v1", AfterRevision: "repository-v2"}},
+	} {
+		updated, prerequisiteIDs, observationIDs, _, err := invalidatePrerequisiteObservationsForChanges(facts, []runtimecontract.RuntimeResourceChange{test.change})
+		if test.wantFileRetirement {
+			if err != nil || len(updated.Resources.OperationAdmissibilities) != 1 || updated.Resources.OperationAdmissibilities[0].PrerequisiteID != shellPrerequisite.ID ||
+				len(updated.Resources.PrerequisiteObservations) != 1 || updated.Resources.PrerequisiteObservations[0].PrerequisiteID != shellPrerequisite.ID ||
+				len(updated.Prerequisites.Satisfied) != 1 || updated.Prerequisites.Satisfied[0].ID != shellPrerequisite.ID ||
+				len(prerequisiteIDs) != 1 || prerequisiteIDs[0] != filePrerequisite.ID || len(observationIDs) != 1 || observationIDs[0] != fileObservation.ObservationID ||
+				len(updated.Prerequisites.Pending) != 1 || updated.Prerequisites.Pending[0].ID != filePrerequisite.ID {
+				t.Fatalf("workspace tree change did not retire only File inventory: facts=%+v prerequisites=%v observations=%v err=%v", updated, prerequisiteIDs, observationIDs, err)
+			}
+		} else if err != nil || len(prerequisiteIDs) != 0 || len(observationIDs) != 0 || len(updated.Prerequisites.Pending) != 0 ||
+			len(updated.Prerequisites.Satisfied) != 2 || len(updated.Resources.OperationAdmissibilities) != 2 || len(updated.Resources.PrerequisiteObservations) != 2 {
+			t.Fatalf("Git change unexpectedly retired an admissibility inventory: facts=%+v prerequisites=%v observations=%v err=%v", updated, prerequisiteIDs, observationIDs, err)
+		}
+	}
 	updated, prerequisites, observations, _, err := invalidatePrerequisiteObservationsForChanges(facts, []runtimecontract.RuntimeResourceChange{{
 		Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "main.go", AfterRevision: "main-v1",
 	}})
@@ -469,6 +902,243 @@ func TestFileTargetChangeInvalidatesShellValidationObservation(t *testing.T) {
 		len(updated.Prerequisites.Satisfied) != 1 || updated.Prerequisites.Satisfied[0].ID != filePrerequisite.ID ||
 		len(updated.Resources.OperationAdmissibilities) != 1 || updated.Resources.OperationAdmissibilities[0].PrerequisiteID != filePrerequisite.ID {
 		t.Fatalf("File target change did not precisely invalidate Shell observation: %+v", updated)
+	}
+
+	// The same exact intersection must preserve the separate resource-change
+	// ledger when the File owner's accepted receipt changes the validation
+	// target. This is forward progress, not a read-only stale refresh.
+	aggregate := RuntimeAggregate{Facts: facts}
+	changed, err := applyReceiptResourceChangeInvalidation(&aggregate, "dispatch-file", "write-target", runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: "exec/ws/run/dispatch-file/write-target", Fence: 1, OperationID: "write-target",
+		ResourceChanges: []runtimecontract.RuntimeResourceChange{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "main.go", BeforeRevision: "missing", AfterRevision: "main-v1",
+		}},
+	})
+	if err != nil || !changed || aggregate.Facts.Recovery.PrerequisiteRefreshes != 0 || aggregate.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 ||
+		len(aggregate.Facts.Prerequisites.Pending) != 1 || aggregate.Facts.Prerequisites.Pending[0].ID != shellPrerequisite.ID ||
+		len(aggregate.Facts.Prerequisites.Satisfied) != 1 || aggregate.Facts.Prerequisites.Satisfied[0].ID != filePrerequisite.ID ||
+		len(aggregate.Facts.Resources.OperationAdmissibilities) != 1 || aggregate.Facts.Resources.OperationAdmissibilities[0].PrerequisiteID != filePrerequisite.ID ||
+		len(aggregate.PrerequisiteInvalidations) != 1 || aggregate.PrerequisiteInvalidations[0].DispatchID != "dispatch-file" || aggregate.PrerequisiteInvalidations[0].OperationID != "write-target" {
+		t.Fatalf("accepted File receipt did not retire only Shell validation inventory: aggregate=%+v changed=%t err=%v", aggregate, changed, err)
+	}
+	duplicate, err := applyReceiptResourceChangeInvalidation(&aggregate, "dispatch-file", "write-target", runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: "exec/ws/run/dispatch-file/write-target", Fence: 1, OperationID: "write-target",
+		ResourceChanges: []runtimecontract.RuntimeResourceChange{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "main.go", BeforeRevision: "missing", AfterRevision: "main-v1",
+		}},
+	})
+	if err != nil || duplicate || aggregate.Facts.Recovery.PrerequisiteRefreshes != 0 || aggregate.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 || len(aggregate.PrerequisiteInvalidations) != 1 {
+		t.Fatalf("duplicate File resource change consumed Shell refresh again: aggregate=%+v changed=%t err=%v", aggregate, duplicate, err)
+	}
+}
+
+func TestGitAdmissibilityReadOnlyStaleRetiresOnlyGitInventory(t *testing.T) {
+	ctx := context.Background()
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := controllerFacts()
+	facts.RecoveryPolicy.MaxPrerequisiteRefreshes = 2
+	gitInventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "operation_admissibility:git", OwnerModuleID: runtimecontract.RuntimeModuleGit,
+		OperationKinds: []string{runtimecontract.StepKindGitWrite}, ObservedRevision: "repository-v1",
+		AcquisitionBinding: "capability-state/ws-v2/run-v2/git/0",
+	}
+	gitInventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(gitInventory)
+	fileInventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "operation_admissibility:file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: []string{"target.txt"}, ObservedRevision: "target-v1",
+	}
+	fileInventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(fileInventory)
+	gitPrerequisite := runtimecontract.RuntimePrerequisite{
+		ID: gitInventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID: runtimecontract.RuntimeModuleGit, RequiredCapabilities: []string{runtimecontract.StepKindGitWrite},
+	}
+	filePrerequisite := runtimecontract.RuntimePrerequisite{
+		ID: fileInventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.StepKindFileWrite},
+	}
+	gitObservation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: gitPrerequisite.ID, Kind: gitPrerequisite.Kind, OwnerModuleID: gitPrerequisite.OwnerModuleID,
+		ContentHash: gitInventory.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceRepositoryState, OwnerModuleID: runtimecontract.RuntimeModuleGit,
+			SubjectRef: "workspace_deliverable", Revision: gitInventory.ObservedRevision,
+		}},
+	}
+	gitObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(gitObservation)
+	fileObservation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: filePrerequisite.ID, Kind: filePrerequisite.Kind, OwnerModuleID: filePrerequisite.OwnerModuleID,
+		ContentHash: fileInventory.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "target.txt", Revision: fileInventory.ObservedRevision,
+		}},
+	}
+	fileObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(fileObservation)
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{filePrerequisite, gitPrerequisite}
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{fileInventory, gitInventory}
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{fileObservation, gitObservation}
+	if _, err := controller.Initialize(ctx, facts, controllerDefinition(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "git-admissibility-stale-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	stale := runtimecontract.RuntimePrerequisiteStale{
+		PrerequisiteID: gitPrerequisite.ID, ObservationID: gitObservation.ObservationID,
+		Domain: runtimecontract.RuntimeResourceRepositoryState, OwnerModuleID: runtimecontract.RuntimeModuleGit,
+		SubjectRef: "workspace_deliverable", ExpectedRevision: "repository-v1", ObservedRevision: "repository-v2",
+		Reason: "Git owner observed a newer repository state",
+	}
+	invalidated, err := controller.InvalidateCandidateAttemptForPrerequisiteStale(ctx, "ws-v2", "run-v2", 0, stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invalidated.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite ||
+		len(invalidated.Facts.Resources.OperationAdmissibilities) != 1 || invalidated.Facts.Resources.OperationAdmissibilities[0].PrerequisiteID != filePrerequisite.ID ||
+		len(invalidated.Facts.Resources.PrerequisiteObservations) != 1 || invalidated.Facts.Resources.PrerequisiteObservations[0].PrerequisiteID != filePrerequisite.ID ||
+		len(invalidated.Facts.Prerequisites.Pending) != 1 || invalidated.Facts.Prerequisites.Pending[0].ID != gitPrerequisite.ID ||
+		len(invalidated.Facts.Prerequisites.Satisfied) != 1 || invalidated.Facts.Prerequisites.Satisfied[0].ID != filePrerequisite.ID ||
+		invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 || invalidated.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 ||
+		len(invalidated.CandidateAttempts) != 1 || invalidated.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated ||
+		invalidated.ActiveDispatch != nil || len(invalidated.GovernanceRequests) != 0 {
+		t.Fatalf("Git read-only stale did not isolate Git inventory: %+v", invalidated)
+	}
+	saves := repository.saves
+	duplicate, err := controller.InvalidateCandidateAttemptForPrerequisiteStale(ctx, "ws-v2", "run-v2", 0, stale)
+	if err != nil || duplicate.StateRevision != invalidated.StateRevision || repository.saves != saves || duplicate.Facts.Recovery != invalidated.Facts.Recovery {
+		t.Fatalf("duplicate Git stale was not a no-op: aggregate=%+v saves=%d err=%v", duplicate, repository.saves, err)
+	}
+	if _, err := controller.CommitPrerequisite(ctx, "ws-v2", "run-v2", PrerequisiteResult{
+		PrerequisiteID: gitPrerequisite.ID, OperationAdmissibility: &gitInventory, Observation: &gitObservation,
+	}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("stale Git inventory was accepted for re-acquisition: %v", err)
+	}
+}
+
+func TestFileTargetChangeDoesNotInvalidateGitAdmissibilityObservation(t *testing.T) {
+	fileInventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "operation_admissibility:file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: []string{"main.go"}, ObservedRevision: "target-v1",
+	}
+	fileInventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(fileInventory)
+	gitInventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "operation_admissibility:git", OwnerModuleID: runtimecontract.RuntimeModuleGit,
+		OperationKinds: []string{runtimecontract.StepKindGitWrite}, ObservedRevision: "repository-v1", AcquisitionBinding: "capability-state/ws/run/git/0",
+	}
+	gitInventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(gitInventory)
+	filePrerequisite := runtimecontract.RuntimePrerequisite{ID: fileInventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.StepKindFileWrite}}
+	gitPrerequisite := runtimecontract.RuntimePrerequisite{ID: gitInventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleGit, RequiredCapabilities: []string{runtimecontract.StepKindGitWrite}}
+	fileObservation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: filePrerequisite.ID, Kind: filePrerequisite.Kind, OwnerModuleID: filePrerequisite.OwnerModuleID, ContentHash: fileInventory.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "main.go", Revision: "target-v1"}},
+	}
+	fileObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(fileObservation)
+	gitObservation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: gitPrerequisite.ID, Kind: gitPrerequisite.Kind, OwnerModuleID: gitPrerequisite.OwnerModuleID, ContentHash: gitInventory.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{
+			{Domain: runtimecontract.RuntimeResourceRepositoryState, OwnerModuleID: runtimecontract.RuntimeModuleGit, SubjectRef: "workspace_deliverable", Revision: "repository-v1"},
+			{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: "tree-v1"},
+		},
+	}
+	gitObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(gitObservation)
+	facts := runtimecontract.RuntimeFacts{
+		Prerequisites: runtimecontract.PrerequisiteState{Satisfied: []runtimecontract.RuntimePrerequisite{filePrerequisite, gitPrerequisite}},
+		Resources: runtimecontract.RuntimeResourceFacts{
+			OperationAdmissibilities: []runtimecontract.RuntimeOperationAdmissibility{fileInventory, gitInventory},
+			PrerequisiteObservations: []runtimecontract.RuntimePrerequisiteObservation{fileObservation, gitObservation},
+		},
+	}
+	updated, prerequisiteIDs, observationIDs, _, err := invalidatePrerequisiteObservationsForChanges(facts, []runtimecontract.RuntimeResourceChange{{
+		Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		SubjectRef: "main.go", BeforeRevision: "target-v1", AfterRevision: "target-v2",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prerequisiteIDs) != 1 || prerequisiteIDs[0] != filePrerequisite.ID || len(observationIDs) != 1 || observationIDs[0] != fileObservation.ObservationID ||
+		len(updated.Resources.OperationAdmissibilities) != 1 || updated.Resources.OperationAdmissibilities[0].PrerequisiteID != gitPrerequisite.ID ||
+		len(updated.Resources.PrerequisiteObservations) != 1 || updated.Resources.PrerequisiteObservations[0].PrerequisiteID != gitPrerequisite.ID ||
+		len(updated.Prerequisites.Satisfied) != 1 || updated.Prerequisites.Satisfied[0].ID != gitPrerequisite.ID ||
+		len(updated.Prerequisites.Pending) != 1 || updated.Prerequisites.Pending[0].ID != filePrerequisite.ID {
+		t.Fatalf("File target change overwrote Git admissibility observation: %+v", updated)
+	}
+}
+
+// TestThreeOwnerAdmissibilityStaleIntersection keeps the A-3M merge rule
+// explicit: SM-2 retires observations by exact dependency identity, never by
+// owner name, inventory order, or a workspace-wide string match. Git's bound
+// capability-state observation is deliberately included because it shares the
+// same repository-state dependency as the Git inventory.
+func TestThreeOwnerAdmissibilityStaleIntersection(t *testing.T) {
+	filePrerequisite := runtimecontract.RuntimePrerequisite{ID: "operation_admissibility:file", Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.StepKindFileWrite}}
+	gitStatePrerequisite := runtimecontract.RuntimePrerequisite{ID: "capability_state:git", Kind: runtimecontract.PrerequisiteKindCapabilityState, OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable"}
+	gitPrerequisite := runtimecontract.RuntimePrerequisite{ID: "operation_admissibility:git", Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleGit, RequiredCapabilities: []string{runtimecontract.StepKindGitWrite}}
+	shellPrerequisite := runtimecontract.RuntimePrerequisite{ID: "operation_admissibility:shell", Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.StepKindShellCommand}}
+	fileInventory := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: filePrerequisite.ID, OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: []string{"source.go"}, ObservedRevision: "source-v1"}
+	fileInventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(fileInventory)
+	gitState := runtimecontract.RuntimeCapabilityStateSnapshot{RequirementID: gitStatePrerequisite.ID, OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable", SnapshotID: "git-state-v1", AcquisitionKey: "capability-state/ws/run/git/0", AcquisitionBinding: "capability-state/ws/run/git/0", ObservedRevision: "repository-v1"}
+	gitInventory := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: gitPrerequisite.ID, OwnerModuleID: runtimecontract.RuntimeModuleGit, OperationKinds: []string{runtimecontract.StepKindGitWrite}, ObservedRevision: "repository-v1", AcquisitionBinding: gitState.AcquisitionBinding}
+	gitInventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(gitInventory)
+	shellInventory := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: shellPrerequisite.ID, OwnerModuleID: runtimecontract.RuntimeModuleShell, OperationKinds: []string{runtimecontract.StepKindShellCommand}, ObservedRevision: "shell-policy-v1"}
+	shellInventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(shellInventory)
+	fileObservation := runtimecontract.RuntimePrerequisiteObservation{PrerequisiteID: filePrerequisite.ID, Kind: filePrerequisite.Kind, OwnerModuleID: filePrerequisite.OwnerModuleID, ContentHash: fileInventory.SnapshotID, Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "source.go", Revision: "source-v1"}}}
+	fileObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(fileObservation)
+	gitStateObservation := runtimecontract.RuntimePrerequisiteObservation{PrerequisiteID: gitStatePrerequisite.ID, Kind: gitStatePrerequisite.Kind, OwnerModuleID: gitStatePrerequisite.OwnerModuleID, ContentHash: "git-state-v1", Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceRepositoryState, OwnerModuleID: runtimecontract.RuntimeModuleGit, SubjectRef: "workspace_deliverable", Revision: "repository-v1"}}}
+	gitStateObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(gitStateObservation)
+	gitObservation := runtimecontract.RuntimePrerequisiteObservation{PrerequisiteID: gitPrerequisite.ID, Kind: gitPrerequisite.Kind, OwnerModuleID: gitPrerequisite.OwnerModuleID, ContentHash: gitInventory.SnapshotID, Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceRepositoryState, OwnerModuleID: runtimecontract.RuntimeModuleGit, SubjectRef: "workspace_deliverable", Revision: "repository-v1"}}}
+	gitObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(gitObservation)
+	shellObservation := runtimecontract.RuntimePrerequisiteObservation{PrerequisiteID: shellPrerequisite.ID, Kind: shellPrerequisite.Kind, OwnerModuleID: shellPrerequisite.OwnerModuleID, ContentHash: shellInventory.SnapshotID, Dependencies: []runtimecontract.RuntimeFreshnessDependency{
+		{Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleShell, SubjectRef: "shell_runtime_policy", Revision: "shell-policy-v1"},
+		{Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "validation.go", Revision: "validation-v1"},
+	}}
+	shellObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(shellObservation)
+	base := runtimecontract.RuntimeFacts{Prerequisites: runtimecontract.PrerequisiteState{Satisfied: []runtimecontract.RuntimePrerequisite{filePrerequisite, gitStatePrerequisite, gitPrerequisite, shellPrerequisite}}, Resources: runtimecontract.RuntimeResourceFacts{
+		CapabilityStates:         []runtimecontract.RuntimeCapabilityStateSnapshot{gitState},
+		OperationAdmissibilities: []runtimecontract.RuntimeOperationAdmissibility{fileInventory, gitInventory, shellInventory},
+		PrerequisiteObservations: []runtimecontract.RuntimePrerequisiteObservation{fileObservation, gitStateObservation, gitObservation, shellObservation},
+	}}
+
+	unchanged, prerequisiteIDs, observationIDs, _, err := invalidatePrerequisiteObservationsForChanges(base, []runtimecontract.RuntimeResourceChange{{
+		Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "unrelated.go", BeforeRevision: "other-v1", AfterRevision: "other-v2",
+	}})
+	if err != nil || len(prerequisiteIDs) != 0 || len(observationIDs) != 0 || len(unchanged.Prerequisites.Satisfied) != 4 ||
+		len(unchanged.Resources.OperationAdmissibilities) != 3 || len(unchanged.Resources.CapabilityStates) != 1 {
+		t.Fatalf("unrelated three-owner change was not a no-op: facts=%+v prerequisites=%v observations=%v err=%v", unchanged, prerequisiteIDs, observationIDs, err)
+	}
+
+	for _, test := range []struct {
+		name              string
+		stale             runtimecontract.RuntimePrerequisiteStale
+		wantPending       []string
+		wantInventories   []string
+		wantCapabilityGit bool
+	}{
+		{name: "file_target", stale: runtimecontract.RuntimePrerequisiteStale{PrerequisiteID: filePrerequisite.ID, ObservationID: fileObservation.ObservationID, Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "source.go", ExpectedRevision: "source-v1", ObservedRevision: "source-v2", Reason: "File target changed"}, wantPending: []string{filePrerequisite.ID}, wantInventories: []string{gitPrerequisite.ID, shellPrerequisite.ID}, wantCapabilityGit: true},
+		{name: "git_repository", stale: runtimecontract.RuntimePrerequisiteStale{PrerequisiteID: gitPrerequisite.ID, ObservationID: gitObservation.ObservationID, Domain: runtimecontract.RuntimeResourceRepositoryState, OwnerModuleID: runtimecontract.RuntimeModuleGit, SubjectRef: "workspace_deliverable", ExpectedRevision: "repository-v1", ObservedRevision: "repository-v2", Reason: "Git repository changed"}, wantPending: []string{gitStatePrerequisite.ID, gitPrerequisite.ID}, wantInventories: []string{filePrerequisite.ID, shellPrerequisite.ID}, wantCapabilityGit: false},
+		{name: "shell_policy", stale: runtimecontract.RuntimePrerequisiteStale{PrerequisiteID: shellPrerequisite.ID, ObservationID: shellObservation.ObservationID, Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleShell, SubjectRef: "shell_runtime_policy", ExpectedRevision: "shell-policy-v1", ObservedRevision: "shell-policy-v2", Reason: "Shell policy changed"}, wantPending: []string{shellPrerequisite.ID}, wantInventories: []string{filePrerequisite.ID, gitPrerequisite.ID}, wantCapabilityGit: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			updated, pending, _, _, err := invalidatePrerequisiteObservationsForStale(base, test.stale)
+			if err != nil || !sameFreshnessStrings(pending, test.wantPending) || len(updated.Resources.OperationAdmissibilities) != len(test.wantInventories) ||
+				(len(updated.Resources.CapabilityStates) == 1) != test.wantCapabilityGit {
+				t.Fatalf("three-owner stale intersection mismatch: updated=%+v pending=%v err=%v", updated, pending, err)
+			}
+			for _, want := range test.wantInventories {
+				found := false
+				for _, inventory := range updated.Resources.OperationAdmissibilities {
+					found = found || inventory.PrerequisiteID == want
+				}
+				if !found {
+					t.Fatalf("three-owner stale removed unrelated inventory %q: %+v", want, updated.Resources.OperationAdmissibilities)
+				}
+			}
+		})
 	}
 }
 

@@ -46,7 +46,7 @@ type runtimeCandidateActivationProjection struct {
 	MCPCapabilities  []runtimecontract.RuntimeMCPCapabilityContext `json:"mcpCapabilities,omitempty"`
 	Memories         []runtimecontract.RuntimeMemoryContext        `json:"memories,omitempty"`
 	EvidencePolicies []runtimecontract.RuntimeEvidencePolicy       `json:"evidencePolicies,omitempty"`
-	Continuation     runtimecontract.RuntimeContinuationContext    `json:"continuation"`
+	Continuation     *runtimecontract.RuntimeContinuationContext   `json:"continuation,omitempty"`
 }
 
 type runtimeCandidateContextProjection struct {
@@ -79,21 +79,27 @@ type runtimeCandidateContextProjection struct {
 }
 
 type runtimeCandidateOutputContractProjection struct {
-	Action                  runtimecontract.RuntimeAction                 `json:"action"`
-	Schema                  json.RawMessage                               `json:"schema"`
-	RequiredTopLevelExample string                                        `json:"requiredTopLevelExample"`
-	ForbiddenTopLevelFields []string                                      `json:"forbiddenTopLevelFields"`
-	OperationContracts      []runtimeCandidateOperationContractProjection `json:"operationContracts,omitempty"`
+	Action                      runtimecontract.RuntimeAction                 `json:"action"`
+	ManifestHash                string                                        `json:"manifestHash,omitempty"`
+	Schema                      json.RawMessage                               `json:"schema"`
+	StructuredOutputInstruction string                                        `json:"structuredOutputInstruction"`
+	ForbiddenTopLevelFields     []string                                      `json:"forbiddenTopLevelFields"`
+	OperationContracts          []runtimeCandidateOperationContractProjection `json:"operationContracts,omitempty"`
 }
 
 type runtimeCandidateOperationContractProjection struct {
-	Kind                   string                                         `json:"kind"`
-	Parameters             []runtimeCandidateOperationParameterProjection `json:"parameters"`
-	RequireOneOfParameters []string                                       `json:"requireOneOfParameters,omitempty"`
-	RequireTargetRefs      bool                                           `json:"requireTargetRefs,omitempty"`
-	ForbiddenParameters    []string                                       `json:"forbiddenParameters,omitempty"`
-	Variants               []runtimeCandidateOperationVariantProjection   `json:"variants,omitempty"`
-	Rules                  []string                                       `json:"rules,omitempty"`
+	Kind                        string                                         `json:"kind"`
+	AllowedOperationFields      []string                                       `json:"allowedOperationFields,omitempty"`
+	AllowedVariantIDs           []string                                       `json:"allowedVariantIds,omitempty"`
+	Parameters                  []runtimeCandidateOperationParameterProjection `json:"parameters"`
+	RequireOneOfParameters      []string                                       `json:"requireOneOfParameters,omitempty"`
+	RequireTargetRefs           bool                                           `json:"requireTargetRefs,omitempty"`
+	ForbiddenParameters         []string                                       `json:"forbiddenParameters,omitempty"`
+	Variants                    []runtimeCandidateOperationVariantProjection   `json:"variants,omitempty"`
+	Rules                       []string                                       `json:"rules,omitempty"`
+	AllowsDynamicParameters     bool                                           `json:"allowsDynamicParameters,omitempty"`
+	DynamicParameterPrefixes    []string                                       `json:"dynamicParameterPrefixes,omitempty"`
+	RequiredOperationReferences []string                                       `json:"requiredOperationReferences,omitempty"`
 }
 
 type runtimeCandidateOperationParameterProjection struct {
@@ -114,8 +120,71 @@ type runtimeCandidateOperationVariantProjection struct {
 }
 
 type runtimeCandidateRetryProjection struct {
-	PreviousFailure runtimecontract.RuntimeCandidateFailure `json:"previousFailure"`
-	Instruction     string                                  `json:"instruction"`
+	PreviousFailure runtimeCandidateCorrectionFailureProjection `json:"previousFailure"`
+	Instruction     string                                      `json:"instruction"`
+}
+
+// runtimeCandidateCorrectionFailureProjection is the only representation of
+// an earlier rejection allowed into C4. It intentionally has no Reason field:
+// raw provider/parser/owner text remains in persisted audit, never in the next
+// model prompt.
+type runtimeCandidateCorrectionFailureProjection struct {
+	Class      runtimecontract.RuntimeCandidateFailureClass       `json:"class"`
+	Code       string                                             `json:"code,omitempty"`
+	Signature  string                                             `json:"signature,omitempty"`
+	TargetRefs []string                                           `json:"targetRefs,omitempty"`
+	Diagnostic *runtimecontract.RuntimeCandidateFailureDiagnostic `json:"diagnostic,omitempty"`
+}
+
+// runtimeCandidateAuthorityProjection is C3: the current sealed authority
+// needed to choose one legal candidate. Historical evidence and retry
+// correction intentionally live in C4 so they cannot pollute the stable
+// prefix or obscure the current focus.
+type runtimeCandidateAuthorityProjection struct {
+	WorkspaceID                common.WorkspaceID                      `json:"workspaceId"`
+	RunID                      common.RunID                            `json:"runId"`
+	DefinitionRevision         string                                  `json:"definitionRevision"`
+	EvidenceRevision           string                                  `json:"evidenceRevision"`
+	Focus                      runtimecontract.CoverageFocus           `json:"focus"`
+	RequiredAction             runtimecontract.RuntimeAction           `json:"requiredAction"`
+	RequiredEffectScopes       []runtimecontract.RuntimeEffectScope    `json:"requiredEffectScopes,omitempty"`
+	RequiredEvidenceKinds      []string                                `json:"requiredEvidenceKinds,omitempty"`
+	RepairDirective            *runtimecontract.RuntimeRepairDirective `json:"repairDirective,omitempty"`
+	AllowedEvidenceRefs        []string                                `json:"allowedAcceptedEvidenceRefs,omitempty"`
+	AdmissibleOperationKinds   []string                                `json:"admissibleOperationKinds,omitempty"`
+	Capabilities               runtimecontract.RuntimeCapabilities     `json:"capabilities"`
+	Resources                  runtimeCandidateResourceProjection      `json:"resources"`
+	TargetSelectionInstruction string                                  `json:"targetSelectionInstruction,omitempty"`
+	Activation                 runtimeCandidateActivationProjection    `json:"activation"`
+}
+
+// runtimeCandidateExecutionTailProjection is C4: bounded current failure,
+// evidence and retry context. It never changes C0-C2 and never carries raw
+// provider payloads.
+type runtimeCandidateExecutionTailProjection struct {
+	Attempt                   int                                                        `json:"candidateAttempt"`
+	Retry                     *runtimeCandidateRetryProjection                           `json:"retry,omitempty"`
+	Failure                   *runtimecontract.FailureFact                               `json:"failure,omitempty"`
+	AcceptedEvidence          []runtimecontract.EvidenceFact                             `json:"latestAcceptedEvidence,omitempty"`
+	RejectedEvidence          []runtimecontract.EvidenceFact                             `json:"latestRejectedEvidence,omitempty"`
+	Assessments               []runtimecontract.RuntimeAssessmentFact                    `json:"recentAssessments,omitempty"`
+	RepairHints               []runtimecontract.RuntimeRepairHint                        `json:"repairHints,omitempty"`
+	RejectedOperationShapes   []runtimecontract.RuntimeRejectedOperationShape            `json:"rejectedOperationShapes,omitempty"`
+	NoProgressOperationShapes []runtimecontract.RuntimeRejectedOperationShape            `json:"noProgressOperationShapes,omitempty"`
+	Continuation              *runtimecontract.RuntimeContinuationContext                `json:"continuation,omitempty"`
+	OutputContinuation        *runtimecontract.RuntimeCandidateOutputContinuationRequest `json:"outputContinuation,omitempty"`
+}
+
+// runtimeCandidateLargeRefsProjection is C5. Large/history material remains
+// reference-only: the LLM gets identities and counts, never raw snapshot or
+// evidence content through this section.
+type runtimeCandidateLargeRefsProjection struct {
+	RemainingFocuses []runtimeCandidateFocusReference `json:"remainingFocuses,omitempty"`
+}
+
+type runtimeCandidateFocusReference struct {
+	ID      string `json:"id"`
+	SliceID string `json:"sliceId,omitempty"`
 }
 
 func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
@@ -128,7 +197,8 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 	requestID := newProviderRequestID(request)
 	providerRequest, err := runtimeV2ProviderRequest(request)
 	if err != nil {
-		audit := sealedAuditFromRequest(request, requestID, nil, startedAt, time.Now().UTC(), false, llmmodels.RuntimeCandidateStatusFailed, "internal", 0)
+		budget := providerRequest.ContextBudget
+		audit := sealedAuditFromRequest(request, requestID, budget, startedAt, time.Now().UTC(), false, llmmodels.RuntimeCandidateStatusFailed, "internal", 0)
 		return llmmodels.RuntimeCandidateGenerationResult{
 			RequestID: requestID, Audit: audit, Status: llmmodels.RuntimeCandidateStatusFailed,
 			FailureClass: "internal", FailureReason: err.Error(),
@@ -290,6 +360,9 @@ func runtimeCandidateProviderFailureClass(err error, submitted bool) runtimecont
 }
 
 func newProviderRequestID(request llmmodels.RuntimeCandidateRequest) string {
+	if physicalCallID := strings.TrimSpace(request.PhysicalCallID); physicalCallID != "" {
+		return physicalCallID
+	}
 	workspaceID := string(request.CandidateContext.WorkspaceID)
 	runID := string(request.CandidateContext.RunID)
 	stepID := request.Transaction.AuthoritySnapshotID
@@ -420,6 +493,13 @@ func isProviderDispatchAttempted(err error) bool {
 func runtimeV2ProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmodels.ProviderRequest, error) {
 	definitionContext := request.DefinitionContext.Normalized()
 	candidateContext := request.CandidateContext.Normalized()
+	// The Orchestrator compiles this sealed manifest before request-session
+	// persistence. The renderer consumes that exact value; it must not rebuild
+	// field/parameter rules from a parallel descriptor path.
+	manifest := request.CandidateManifest
+	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, request.Decision, candidateContext.Resources.TargetSelection); err != nil {
+		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate contract manifest: %w", err)
+	}
 	wantPrefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definitionContext, candidateContext.Activation.ExecutionContract)
 	if strings.TrimSpace(request.StablePrefixHash) != wantPrefix {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate stable prefix mismatch")
@@ -446,35 +526,39 @@ func runtimeV2ProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmod
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
 	}
-	dynamicJSON, err := json.Marshal(struct {
-		Decision           runtimecontract.RuntimeDecision                            `json:"decision"`
-		Transaction        runtimecontract.AuthorityTransaction                       `json:"transaction"`
-		Attempt            int                                                        `json:"candidateAttempt"`
-		OutputContract     runtimeCandidateOutputContractProjection                   `json:"outputContract"`
-		Retry              *runtimeCandidateRetryProjection                           `json:"retry,omitempty"`
-		Context            runtimeCandidateContextProjection                          `json:"context"`
-		OutputContinuation *runtimecontract.RuntimeCandidateOutputContinuationRequest `json:"outputContinuation,omitempty"`
+	authorityJSON, err := json.Marshal(struct {
+		Decision       runtimecontract.RuntimeDecision          `json:"decision"`
+		Transaction    runtimecontract.AuthorityTransaction     `json:"transaction"`
+		OutputContract runtimeCandidateOutputContractProjection `json:"outputContract"`
+		Context        runtimeCandidateAuthorityProjection      `json:"context"`
 	}{
 		request.Decision,
 		request.Transaction,
-		request.CandidateAttempt,
-		runtimeV2CandidateOutputContract(request.Decision, candidateContext.Resources.TargetSelection),
-		runtimeV2CandidateRetry(request.CandidateAttempt, request.PreviousFailure),
-		runtimeV2CandidateContextProjection(candidateContext, request.Decision.Action),
-		request.OutputContinuation,
+		runtimeV2CandidateOutputContractForManifest(manifest),
+		runtimeV2CandidateAuthorityContextProjection(candidateContext, manifest),
 	})
+	if err != nil {
+		return llmmodels.ProviderRequest{}, err
+	}
+	executionTailJSON, err := json.Marshal(runtimeV2CandidateExecutionTailProjection(candidateContext, request.CandidateAttempt, request.PreviousFailure, request.OutputContinuation, manifest))
+	if err != nil {
+		return llmmodels.ProviderRequest{}, err
+	}
+	largeRefsJSON, err := json.Marshal(runtimeV2CandidateLargeRefsProjection(candidateContext))
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
 	}
 	providerRequest := llmmodels.ProviderRequest{
 		WorkspaceID: string(candidateContext.WorkspaceID), RunID: string(candidateContext.RunID),
 		StepID: request.Transaction.AuthoritySnapshotID, Kind: "runtime_v2_candidate",
-		Schema: runtimeV2CandidateSchemaForDecisionWithTargetSelection(request.Decision, candidateContext.Resources.TargetSelection),
-		PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.runtime_candidate_prompt.v2", Sections: []llmmodels.PromptSection{
-			{ID: "C0.runtime-candidate-contract", Name: "Runtime candidate contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, Content: runtimeV2CandidateContractCatalog()},
-			{ID: "C1.goal-dod", Name: "Goal and DoD", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 1, DefinitionRevision: definitionContext.Revision, Content: string(definitionJSON)},
-			{ID: "C2.capability-contract", Name: "Capability contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 2, Content: string(capabilityJSON)},
-			{ID: "C3.runtime-authority", Name: "Current runtime authority", Role: "user", Cacheability: "volatile", Protected: true, DisplayOrder: 3, Content: string(dynamicJSON)},
+		Schema: runtimeV2CandidateSchemaForManifest(manifest),
+		PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.runtime_candidate_prompt.v3", Sections: []llmmodels.PromptSection{
+			{ID: "C0.runtime-candidate-contract", Name: "Runtime candidate contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, SourceRefs: []string{"runtime://candidate-contract/v2"}, Content: runtimeV2CandidateContractCatalog()},
+			{ID: "C1.goal-dod", Name: "Goal and DoD", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 1, DefinitionRevision: definitionContext.Revision, SourceRefs: []string{"runtime://definition/" + definitionContext.Revision}, Content: string(definitionJSON)},
+			{ID: "C2.capability-contract", Name: "Capability contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 2, SourceRefs: []string{"runtime://execution-contract/" + definitionContext.Revision}, Content: string(capabilityJSON)},
+			{ID: "C3.runtime-authority", Name: "Current runtime authority", Role: "user", Cacheability: "volatile", Protected: true, DisplayOrder: 3, SourceRefs: []string{"runtime://authority/" + request.Transaction.AuthoritySnapshotID}, Content: string(authorityJSON)},
+			{ID: "C4.execution-tail", Name: "Current failure and evidence", Role: "user", Cacheability: "volatile", Protected: true, DisplayOrder: 4, SourceRefs: []string{"runtime://evidence/" + candidateContext.EvidenceRevision}, Content: string(executionTailJSON)},
+			{ID: "C5.large-refs", Name: "Large and historical references", Role: "user", Cacheability: "volatile", DisplayOrder: 5, SourceRefs: []string{"runtime://remaining-focuses"}, Content: string(largeRefsJSON)},
 		}},
 		ContextBudget: &llmmodels.ProviderContextBudget{
 			ProviderID: ceiling.Target.ProviderID, ModelID: ceiling.Target.ModelID,
@@ -494,7 +578,21 @@ func runtimeV2ProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmod
 		providerRequest.Kind = "runtime_v2_candidate_output_continuation"
 		providerRequest.Schema = ""
 		providerRequest.RawTextOutput = true
-		providerRequest.PromptContext.Sections[3].Content = string(dynamicJSON) + "\n\nReturn only the exact next bytes of the candidate JSON document after outputContinuation.previousChunkTail. Do not repeat the tail, do not start a new JSON object, and do not use markdown."
+		providerRequest.PromptContext.Sections[4].Content = string(executionTailJSON) + "\n\nReturn only the exact next bytes of the candidate JSON document after outputContinuation.previousChunkTail. Do not repeat the tail, do not start a new JSON object, and do not use markdown."
+	}
+	attachProviderCachePlan(&providerRequest)
+	if providerRequest.ContextBudget.CachePlan != nil {
+		// The persisted Runtime prefix is the authority contract. The provider
+		// cache plan independently records the exact rendered prefix so audit can
+		// detect a rendering mismatch without replacing the sealed identity.
+		providerRequest.ContextBudget.CachePlan.StablePrefixHash = wantPrefix
+	}
+	populateRuntimeCandidateContextBudget(providerRequest.ContextBudget, providerRequest.PromptContext)
+	if err := validateRuntimeCandidateContextIntegrity(definitionContext, candidateContext, request.CandidateAttempt, request.PreviousFailure, providerRequest.ContextBudget, providerRequest.PromptContext); err != nil {
+		providerRequest.ContextBudget.ContextGateAction = "fail_fast"
+		providerRequest.ContextBudget.ContextGateReason = "runtime_context_integrity_failed"
+		providerRequest.ContextBudget.BudgetFailureClass = "context_integrity"
+		return providerRequest, err
 	}
 	payload, err := json.Marshal(providerRequest)
 	if err != nil {
@@ -506,15 +604,67 @@ func runtimeV2ProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmod
 		providerRequest.ContextBudget.ContextGateAction = "fail_fast"
 		providerRequest.ContextBudget.ContextGateReason = "runtime_v2_provider_ceiling_exceeded"
 		providerRequest.ContextBudget.BudgetFailureClass = "provider_ceiling_exceeded"
-		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate request exceeds provider ceiling: %d > %d", len(payload), ceiling.MaxBytes)
+		// The rendered request itself remains owner-private, but its bounded
+		// context budget is the only evidence that explains a preflight refusal.
+		// Returning an empty request here made the not-ready path lose section
+		// hashes, source refs and the gate disposition before it could be audited.
+		return providerRequest, fmt.Errorf("runtime candidate request exceeds provider ceiling: %d > %d", len(payload), ceiling.MaxBytes)
 	}
 	return providerRequest, nil
 }
 
-func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidateContext, action runtimecontract.RuntimeAction) runtimeCandidateContextProjection {
+func validateRuntimeCandidateContextIntegrity(
+	definition runtimecontract.RuntimeDefinitionContext,
+	context runtimecontract.RuntimeCandidateContext,
+	attempt int,
+	previousFailure *runtimecontract.RuntimeCandidateFailure,
+	budget *llmmodels.ProviderContextBudget,
+	prompt *llmmodels.PromptContext,
+) error {
+	if budget == nil || prompt == nil {
+		return fmt.Errorf("runtime candidate context integrity requires prompt and budget metadata")
+	}
+	missing := make([]string, 0, 5)
+	contents := make(map[string]string, len(prompt.Sections))
+	for _, section := range prompt.Sections {
+		contents[promptSectionGroup(section.ID)] += strings.TrimSpace(section.Content)
+	}
+	for _, group := range []string{"C0", "C1", "C2", "C3", "C4"} {
+		if strings.TrimSpace(contents[group]) == "" {
+			missing = append(missing, group)
+		}
+	}
+	definition = definition.Normalized()
 	context = context.Normalized()
+	if definition.GoalDefinition == "" || definition.DoDDefinition == "" || context.RequiredAction == "" {
+		missing = append(missing, "P0.contract")
+	}
+	if context.Focus.ID == "" || len(context.Focus.CoverageWorkItemIDs) == 0 {
+		missing = append(missing, "P2.coverage_scope")
+	}
+	if context.Resources.ProviderCeiling == nil {
+		missing = append(missing, "P4.current_snapshots")
+	}
+	if attempt > 0 && context.Failure == nil && previousFailure == nil {
+		// The retry failure itself is supplied separately in C4, but an absent
+		// current failure would make the repair authority inconsistent.
+		missing = append(missing, "P1.current_failure")
+	}
+	if len(budget.RedactedPaths) > 0 && budget.RedactionApplied {
+		missing = append(missing, "protected_context_redacted")
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	budget.IntegrityWarnings = uniqueStrings(append(budget.IntegrityWarnings, missing...))
+	return fmt.Errorf("runtime candidate context integrity missing or conflicted: %s", strings.Join(missing, ", "))
+}
+
+func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidateContext, manifest runtimecontract.RuntimeCandidateContractManifest) runtimeCandidateContextProjection {
+	context = context.Normalized()
+	manifest = manifest.Normalized()
 	activation := context.Activation
-	stage := runtimeV2CandidateStage(action)
+	stage := runtimeV2CandidateStage(manifest.Action)
 	facts := runtimecontract.RuntimeFacts{
 		WorkspaceID: context.WorkspaceID, RunID: context.RunID, DefinitionRevision: context.DefinitionRevision,
 		EvidenceRevision: context.EvidenceRevision, Focus: context.Focus, RemainingFocuses: context.RemainingFocuses,
@@ -531,7 +681,7 @@ func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidat
 		MissingEvidenceKinds: runtimecontract.MissingRequiredEvidenceKinds(facts),
 		AllowedEvidenceRefs:  runtimecontract.AcceptedEvidenceRefsForFocus(facts), Evidence: context.Evidence,
 		Assessments: context.Assessments, Failure: context.Failure, RepairHints: runtimecontract.DeriveRuntimeRepairHints(facts),
-		AdmissibleOperationKinds:  runtimeV2CandidateAllowedOperationKinds(action, context.AdmissibleOperationKinds, nil, context.Resources.TargetSelection),
+		AdmissibleOperationKinds:  runtimeV2CandidateManifestOperationKinds(manifest),
 		RejectedOperationShapes:   context.RejectedOperationShapes,
 		NoProgressOperationShapes: context.NoProgressOperationShapes,
 		Capabilities:              context.Capabilities,
@@ -542,14 +692,147 @@ func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidat
 			CapabilityStates: context.Resources.CapabilityStates, OperationAdmissibilities: context.Resources.OperationAdmissibilities,
 			PrerequisiteObservations: context.Resources.PrerequisiteObservations,
 		},
-		TargetSelectionInstruction: runtimeV2TargetSelectionInstruction(context.Resources.TargetSelection, action),
+		TargetSelectionInstruction: runtimeV2TargetSelectionInstruction(context.Resources.TargetSelection, manifest.Action),
 		Activation: runtimeCandidateActivationProjection{
 			DialogLanguage: activation.DialogLanguage, CurrentStage: stage, Soul: runtimeV2CandidateSoul(activation, stage),
 			Skills: activation.Skills, MCPServerIDs: activation.MCPServerIDs,
-			MCPCapabilities: runtimecontract.RuntimeMCPCapabilitiesForAction(activation.MCPCapabilities, action),
-			Memories:        activation.Memories, EvidencePolicies: activation.EvidencePolicies, Continuation: activation.Continuation,
+			MCPCapabilities: runtimecontract.RuntimeMCPCapabilitiesForAction(activation.MCPCapabilities, manifest.Action),
+			Memories:        activation.Memories, EvidencePolicies: activation.EvidencePolicies, Continuation: runtimeV2CandidateContinuationProjection(activation.Continuation),
 		},
 	}
+}
+
+func runtimeV2CandidateAuthorityContextProjection(context runtimecontract.RuntimeCandidateContext, manifest runtimecontract.RuntimeCandidateContractManifest) runtimeCandidateAuthorityProjection {
+	full := runtimeV2CandidateContextProjection(context, manifest)
+	activation := full.Activation
+	// Continuation is retry/history information and belongs exclusively to C4.
+	activation.Continuation = nil
+	return runtimeCandidateAuthorityProjection{
+		WorkspaceID:                full.WorkspaceID,
+		RunID:                      full.RunID,
+		DefinitionRevision:         full.DefinitionRevision,
+		EvidenceRevision:           full.EvidenceRevision,
+		Focus:                      full.Focus,
+		RequiredAction:             full.RequiredAction,
+		RequiredEffectScopes:       append([]runtimecontract.RuntimeEffectScope(nil), full.RequiredEffectScopes...),
+		RequiredEvidenceKinds:      append([]string(nil), full.RequiredEvidenceKinds...),
+		RepairDirective:            full.RepairDirective,
+		AllowedEvidenceRefs:        append([]string(nil), full.AllowedEvidenceRefs...),
+		AdmissibleOperationKinds:   append([]string(nil), full.AdmissibleOperationKinds...),
+		Capabilities:               full.Capabilities,
+		Resources:                  full.Resources,
+		TargetSelectionInstruction: full.TargetSelectionInstruction,
+		Activation:                 activation,
+	}
+}
+
+func runtimeV2CandidateExecutionTailProjection(
+	context runtimecontract.RuntimeCandidateContext,
+	attempt int,
+	previousFailure *runtimecontract.RuntimeCandidateFailure,
+	outputContinuation *runtimecontract.RuntimeCandidateOutputContinuationRequest,
+	manifest runtimecontract.RuntimeCandidateContractManifest,
+) runtimeCandidateExecutionTailProjection {
+	full := runtimeV2CandidateContextProjection(context, manifest)
+	return runtimeCandidateExecutionTailProjection{
+		Attempt:                   attempt,
+		Retry:                     runtimeV2CandidateRetryForManifest(attempt, previousFailure, manifest),
+		Failure:                   full.Failure,
+		AcceptedEvidence:          latestRuntimeEvidence(full.Evidence.Accepted),
+		RejectedEvidence:          latestRuntimeEvidence(full.Evidence.Rejected),
+		Assessments:               latestRuntimeAssessments(full.Assessments),
+		RepairHints:               append([]runtimecontract.RuntimeRepairHint(nil), full.RepairHints...),
+		RejectedOperationShapes:   append([]runtimecontract.RuntimeRejectedOperationShape(nil), full.RejectedOperationShapes...),
+		NoProgressOperationShapes: append([]runtimecontract.RuntimeRejectedOperationShape(nil), full.NoProgressOperationShapes...),
+		Continuation:              runtimeV2CandidateContinuationProjection(context.Normalized().Activation.Continuation),
+		OutputContinuation:        outputContinuation,
+	}
+}
+
+func runtimeV2CandidateManifestOperationKinds(manifest runtimecontract.RuntimeCandidateContractManifest) []string {
+	manifest = manifest.Normalized()
+	ret := make([]string, 0, len(manifest.Operations))
+	for _, operation := range manifest.Operations {
+		ret = append(ret, operation.Kind)
+	}
+	return ret
+}
+
+func runtimeV2CandidateContinuationProjection(value runtimecontract.RuntimeContinuationContext) *runtimecontract.RuntimeContinuationContext {
+	value = value.Normalized()
+	if !value.DefinitionChangeSupersedesPrior && len(value.GovernanceHistory) == 0 && value.Replan == nil && value.RejectedResult == nil {
+		return nil
+	}
+	return &value
+}
+
+const runtimeCandidateExecutionTailLimit = 4
+
+func latestRuntimeEvidence(values []runtimecontract.EvidenceFact) []runtimecontract.EvidenceFact {
+	if len(values) == 0 {
+		return nil
+	}
+	start := len(values) - runtimeCandidateExecutionTailLimit
+	if start < 0 {
+		start = 0
+	}
+	return append([]runtimecontract.EvidenceFact(nil), values[start:]...)
+}
+
+func latestRuntimeAssessments(values []runtimecontract.RuntimeAssessmentFact) []runtimecontract.RuntimeAssessmentFact {
+	if len(values) == 0 {
+		return nil
+	}
+	start := len(values) - runtimeCandidateExecutionTailLimit
+	if start < 0 {
+		start = 0
+	}
+	return append([]runtimecontract.RuntimeAssessmentFact(nil), values[start:]...)
+}
+
+func runtimeV2CandidateLargeRefsProjection(context runtimecontract.RuntimeCandidateContext) runtimeCandidateLargeRefsProjection {
+	context = context.Normalized()
+	ret := runtimeCandidateLargeRefsProjection{RemainingFocuses: make([]runtimeCandidateFocusReference, 0, len(context.RemainingFocuses))}
+	for _, focus := range context.RemainingFocuses {
+		focus = focus.Normalized()
+		if focus.ID == "" {
+			continue
+		}
+		ret.RemainingFocuses = append(ret.RemainingFocuses, runtimeCandidateFocusReference{ID: focus.ID, SliceID: focus.SliceID})
+	}
+	if len(ret.RemainingFocuses) == 0 {
+		ret.RemainingFocuses = nil
+	}
+	return ret
+}
+
+func populateRuntimeCandidateContextBudget(budget *llmmodels.ProviderContextBudget, prompt *llmmodels.PromptContext) {
+	if budget == nil || prompt == nil {
+		return
+	}
+	budget.IncludedSections = nil
+	budget.SourceRefs = nil
+	budget.ProtectedFields = nil
+	for _, section := range prompt.Sections {
+		if strings.TrimSpace(section.ID) == "" || strings.TrimSpace(section.Content) == "" {
+			continue
+		}
+		budget.IncludedSections = append(budget.IncludedSections, section.ID)
+		budget.SourceRefs = append(budget.SourceRefs, section.SourceRefs...)
+		if section.Protected {
+			switch promptSectionGroup(section.ID) {
+			case "C0", "C1":
+				budget.ProtectedFields = append(budget.ProtectedFields, "P0.contract")
+			case "C3":
+				budget.ProtectedFields = append(budget.ProtectedFields, "P2.coverage_scope", "P4.current_snapshots")
+			case "C4":
+				budget.ProtectedFields = append(budget.ProtectedFields, "P1.current_failure", "P3.current_evidence")
+			}
+		}
+	}
+	budget.IncludedSections = uniqueStrings(budget.IncludedSections)
+	budget.SourceRefs = uniqueStrings(budget.SourceRefs)
+	budget.ProtectedFields = uniqueStrings(budget.ProtectedFields)
 }
 
 // runtimeV2TargetSelectionInstruction converts the persisted File-owner
@@ -621,22 +904,13 @@ func runtimeV2CandidateSchema(action runtimecontract.RuntimeAction) string {
 	}
 }
 
-// runtimeV2CandidateSchemaForDecision refines only the volatile provider
-// output schema from the sealed operation contracts. The stable C0-C2 prompt
-// prefix remains unchanged; admissible operation kinds belong to C3 authority.
-func runtimeV2CandidateSchemaForDecision(decision runtimecontract.RuntimeDecision) string {
-	return runtimeV2CandidateSchemaForDecisionWithTargetSelection(decision, nil)
-}
-
-// runtimeV2CandidateSchemaForDecisionWithTargetSelection narrows the volatile
-// provider schema when the persisted File-owner selection is a creation/scope
-// observation. That observation is not a generic durable-side-effect grant:
-// until a concrete File target has been proposed and owner-validated, only a
-// durable File operation is a legal candidate shape. This is request rendering
-// only; Runtime V2 admission remains the final SM-3 authority.
-func runtimeV2CandidateSchemaForDecisionWithTargetSelection(decision runtimecontract.RuntimeDecision, selection *runtimecontract.RuntimeTargetSelection) string {
-	base := runtimeV2CandidateSchema(decision.Action)
-	if decision.Action != runtimecontract.RuntimeActionProduceStateChange && decision.Action != runtimecontract.RuntimeActionProduceValidation {
+// runtimeV2CandidateSchemaForManifest renders the volatile operation schema
+// exclusively from the pure candidate manifest. It is the production path;
+// descriptor/parameter/dependency rules must not be reconstructed here.
+func runtimeV2CandidateSchemaForManifest(manifest runtimecontract.RuntimeCandidateContractManifest) string {
+	manifest = manifest.Normalized()
+	base := runtimeV2CandidateSchema(manifest.Action)
+	if manifest.Action != runtimecontract.RuntimeActionProduceStateChange && manifest.Action != runtimecontract.RuntimeActionProduceValidation {
 		return base
 	}
 	var schema map[string]any
@@ -655,29 +929,30 @@ func runtimeV2CandidateSchemaForDecisionWithTargetSelection(decision runtimecont
 	if !ok {
 		return base
 	}
-	allowedKinds := runtimeV2CandidateAllowedOperationKinds(decision.Action, decision.RequiredOutput.AcceptedKinds, decision.RequiredOutput.RequiredOperationSequence, selection)
-	conditions := runtimeV2OperationSchemaConditions(
-		allowedKinds,
-		decision.RequiredOutput.AcceptedOperationVariants,
-		decision.RequiredOutput.RequiredOperationSequence,
-	)
+	allowedKinds := make([]string, 0, len(manifest.Operations))
+	allowsRequiredOperationRef := false
+	for _, operation := range manifest.Operations {
+		allowedKinds = append(allowedKinds, operation.Kind)
+		if runtimeV2StringIn(operation.AllowedOperationFields, "requiredOperationRef") {
+			allowsRequiredOperationRef = true
+		}
+	}
+	conditions := runtimeV2OperationSchemaConditionsForManifest(manifest.Operations)
 	if itemProperties, ok := items["properties"].(map[string]any); ok {
 		itemProperties["kind"] = map[string]any{"type": "string", "enum": allowedKinds}
-		// An operation dependency is meaningful only for a sealed sequence that
-		// actually declares one.  Advertising this optional field for ordinary
-		// single-operation candidates invites providers to manufacture a graph
-		// (and, in practice, to put it at the candidate root).  The boundary
-		// remains strict; this only narrows C3 to the current authority.
-		if !runtimeV2RequiredOperationSequenceHasDependency(decision.RequiredOutput.RequiredOperationSequence) {
+		if !manifest.DependenciesAllowed {
 			delete(itemProperties, "dependsOn")
+		}
+		if !allowsRequiredOperationRef {
+			delete(itemProperties, "requiredOperationRef")
 		}
 	}
 	if len(conditions) > 0 {
 		items["allOf"] = conditions
 	}
-	if len(decision.RequiredOutput.RequiredOperationSequence) > 0 {
-		requirements := make([]any, 0, len(decision.RequiredOutput.RequiredOperationSequence))
-		for _, requirement := range decision.RequiredOutput.RequiredOperationSequence {
+	if len(manifest.RequiredOperationSequence) > 0 {
+		requirements := make([]any, 0, len(manifest.RequiredOperationSequence))
+		for _, requirement := range manifest.RequiredOperationSequence {
 			requirements = append(requirements, map[string]any{"contains": map[string]any{
 				"type": "object", "properties": map[string]any{
 					"requiredOperationRef": map[string]any{"const": requirement.RequirementID},
@@ -694,167 +969,80 @@ func runtimeV2CandidateSchemaForDecisionWithTargetSelection(decision runtimecont
 	return string(encoded)
 }
 
-func runtimeV2RequiredOperationSequenceHasDependency(values []runtimecontract.RuntimeRequiredOperationVariant) bool {
+func runtimeV2StringIn(values []string, wanted string) bool {
 	for _, value := range values {
-		if len(value.DependsOnRequirementIDs) > 0 {
+		if value == wanted {
 			return true
 		}
 	}
 	return false
 }
 
-// runtimeV2CandidateAllowedOperationKinds projects a persisted File-owner
-// creation/scope fact into the C3 provider contract. It does not discover a
-// target, choose an action, or modify the sealed decision. The File owner and
-// Orchestrator admission still validate the concrete target and operation.
-func runtimeV2CandidateAllowedOperationKinds(action runtimecontract.RuntimeAction, kinds []string, requiredSequence []runtimecontract.RuntimeRequiredOperationVariant, selection *runtimecontract.RuntimeTargetSelection) []string {
-	if action != runtimecontract.RuntimeActionProduceStateChange || selection == nil {
-		return append([]string(nil), kinds...)
-	}
-	value := selection.Normalized()
-	if value.OwnerModuleID != runtimecontract.RuntimeModuleFile ||
-		(value.Disposition != runtimecontract.RuntimeTargetSelectionCreate && value.Disposition != runtimecontract.RuntimeTargetSelectionScope) {
-		return append([]string(nil), kinds...)
-	}
-	seen := make(map[string]struct{}, len(kinds))
-	ret := make([]string, 0, len(kinds))
-	for _, raw := range kinds {
-		descriptor, ok := runtimecontract.RuntimeOperationDescriptorForKind(raw)
-		if !ok || descriptor.OwnerModuleID != runtimecontract.RuntimeModuleFile || !runtimecontract.RuntimeEffectIsDurable(descriptor.DefaultEffectScope) {
+// runtimeV2OperationSchemaConditionsForManifest is the production schema
+// projection. Its input is already descriptor-derived by
+// BuildRuntimeCandidateContractManifest; it must not call the operation
+// contract inventory again or maintain a parallel field whitelist.
+func runtimeV2OperationSchemaConditionsForManifest(operations []runtimecontract.RuntimeCandidateOperationManifest) []any {
+	ret := make([]any, 0, len(operations))
+	for _, operation := range operations {
+		operation = operation.Normalized()
+		if operation.Kind == "" {
 			continue
 		}
-		if _, duplicate := seen[descriptor.Kind]; duplicate {
-			continue
-		}
-		seen[descriptor.Kind] = struct{}{}
-		ret = append(ret, descriptor.Kind)
-	}
-	// A required sequence is an explicit sealed authority of its own. Keep its
-	// kinds so that File-scope narrowing cannot make a valid multi-owner
-	// sequence schema self-contradictory; the scope still does not authorize any
-	// arbitrary operation outside that sequence.
-	for _, requirement := range requiredSequence {
-		descriptor, ok := runtimecontract.RuntimeOperationDescriptorForKind(requirement.Kind)
-		if !ok {
-			continue
-		}
-		if _, duplicate := seen[descriptor.Kind]; duplicate {
-			continue
-		}
-		seen[descriptor.Kind] = struct{}{}
-		ret = append(ret, descriptor.Kind)
-	}
-	return ret
-}
-
-func runtimeV2OperationSchemaConditions(
-	kinds []string,
-	acceptedVariants []runtimecontract.RuntimeOperationVariantRef,
-	requiredSequence []runtimecontract.RuntimeRequiredOperationVariant,
-) []any {
-	allowedVariants := make(map[string]map[string]struct{}, len(acceptedVariants)+len(requiredSequence))
-	for _, ref := range runtimecontract.NormalizeRuntimeOperationVariantRefs(acceptedVariants) {
-		if allowedVariants[ref.Kind] == nil {
-			allowedVariants[ref.Kind] = map[string]struct{}{}
-		}
-		allowedVariants[ref.Kind][ref.VariantID] = struct{}{}
-	}
-	for _, requirement := range requiredSequence {
-		kind := runtimecontract.CanonicalRuntimeBlockKind(requirement.Kind)
-		variantID := strings.TrimSpace(requirement.VariantID)
-		if kind == "" || variantID == "" {
-			continue
-		}
-		if allowedVariants[kind] == nil {
-			allowedVariants[kind] = map[string]struct{}{}
-		}
-		allowedVariants[kind][variantID] = struct{}{}
-	}
-	seen := map[string]struct{}{}
-	ret := make([]any, 0, len(kinds))
-	for _, requestedKind := range kinds {
-		contract, ok := runtimecontract.RuntimeOperationContractForKind(requestedKind)
-		if !ok {
-			continue
-		}
-		if _, duplicate := seen[contract.Kind]; duplicate {
-			continue
-		}
-		seen[contract.Kind] = struct{}{}
-		parameterTypes := make(map[string]runtimecontract.RuntimeOperationParameterType, len(contract.Parameters))
-		parameterRequirements := make([]any, 0, len(contract.Parameters)+1)
-		for _, parameter := range contract.Parameters {
+		parameterTypes := make(map[string]runtimecontract.RuntimeOperationParameterType, len(operation.Parameters))
+		parameterRequirements := make([]any, 0, len(operation.Parameters)+1)
+		for _, parameter := range operation.Parameters {
 			parameterTypes[parameter.Name] = parameter.Type
 			if parameter.Required {
 				parameterRequirements = append(parameterRequirements, runtimeV2ParameterContainsSchema(parameter.Name))
 			}
 		}
-		if len(contract.RequireOneOfParameters) > 0 {
-			oneOf := make([]any, 0, len(contract.RequireOneOfParameters))
-			for _, name := range contract.RequireOneOfParameters {
-				// A one-of target must have a value. Presence-only validation
-				// admitted targetRef="", which then failed only after generation.
-				// This is provider-facing schema rendering; DTO admission remains
-				// the authoritative Runtime V2 contract gate.
+		if len(operation.RequireOneOfParameters) > 0 {
+			oneOf := make([]any, 0, len(operation.RequireOneOfParameters))
+			for _, name := range operation.RequireOneOfParameters {
 				oneOf = append(oneOf, runtimeV2NonEmptyParameterContainsSchema(name, parameterTypes[name]))
 			}
 			parameterRequirements = append(parameterRequirements, map[string]any{"anyOf": oneOf})
 		}
 		parameterSchema := map[string]any{
 			"type":  "array",
-			"items": runtimeV2OperationParameterItemSchema(contract),
+			"items": runtimeV2OperationParameterItemSchemaForManifest(operation),
 		}
 		if len(parameterRequirements) > 0 {
 			parameterSchema["allOf"] = parameterRequirements
 		}
-		if len(contract.Variants) > 0 {
-			variantSchemas := make([]any, 0, len(contract.Variants))
-			constrained := allowedVariants[contract.Kind]
-			for _, variant := range contract.Variants {
-				if len(constrained) > 0 {
-					if _, allowed := constrained[variant.ID]; !allowed {
-						continue
-					}
-				}
-				variantSchemas = append(variantSchemas, runtimeV2OperationVariantParameterSchema(contract.Kind, variant))
+		if len(operation.Variants) > 0 {
+			variantSchemas := make([]any, 0, len(operation.Variants))
+			for _, variant := range operation.Variants {
+				variantSchemas = append(variantSchemas, runtimeV2OperationVariantParameterSchema(operation.Kind, variant))
 			}
-			// A sealed ref unknown to the descriptor must fail closed at the
-			// provider boundary too. Omitting oneOf here would silently widen the
-			// schema back to every descriptor variant.
-			if len(constrained) > 0 || len(variantSchemas) > 0 {
-				parameterSchema["oneOf"] = variantSchemas
-			}
+			parameterSchema["oneOf"] = variantSchemas
 		}
 		thenProperties := map[string]any{"parameters": parameterSchema}
 		then := map[string]any{"properties": thenProperties}
-		if len(parameterRequirements) > 0 || len(contract.Variants) > 0 {
+		if len(parameterRequirements) > 0 || len(operation.Variants) > 0 {
 			then["required"] = []string{"parameters"}
 		}
-		if contract.RequireTargetRefs {
+		if operation.RequireTargetRefs {
 			required, _ := then["required"].([]string)
 			then["required"] = append(required, "targetRefs")
 			thenProperties["targetRefs"] = map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}}
 		}
 		ret = append(ret, map[string]any{
-			"if":   map[string]any{"properties": map[string]any{"kind": map[string]any{"const": contract.Kind}}, "required": []string{"kind"}},
+			"if":   map[string]any{"properties": map[string]any{"kind": map[string]any{"const": operation.Kind}}, "required": []string{"kind"}},
 			"then": then,
 		})
 	}
 	return ret
 }
 
-// runtimeV2OperationParameterItemSchema renders the parameter union for one
-// sealed operation descriptor. Each named parameter has exactly one legal
-// typed value field and is a closed JSON object. Keeping this provider-facing
-// renderer next to the LLM adapter prevents a broad generic parameter DTO from
-// becoming a second operation-contract authority.
-func runtimeV2OperationParameterItemSchema(contract runtimecontract.RuntimeOperationContract) map[string]any {
-	branches := make([]any, 0, len(contract.Parameters)+3)
-	for _, parameter := range contract.Parameters {
+func runtimeV2OperationParameterItemSchemaForManifest(operation runtimecontract.RuntimeCandidateOperationManifest) map[string]any {
+	branches := make([]any, 0, len(operation.Parameters)+3)
+	for _, parameter := range operation.Parameters {
 		branches = append(branches, runtimeV2NamedOperationParameterSchema(parameter.Name, parameter.Type))
 	}
-	if runtimeV2AllowsMCPDynamicParameters(contract.Kind) {
-		branches = append(branches, runtimeV2MCPDynamicParameterSchemas(contract.Kind)...)
+	if operation.AllowsDynamicParameters {
+		branches = append(branches, runtimeV2MCPDynamicParameterSchemas(operation.Kind)...)
 	}
 	return map[string]any{"type": "object", "oneOf": branches}
 }
@@ -881,15 +1069,6 @@ func runtimeV2OperationParameterValueSchema(parameterType runtimecontract.Runtim
 		return "stringList", map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}}
 	default:
 		return "string", map[string]any{"type": "string"}
-	}
-}
-
-func runtimeV2AllowsMCPDynamicParameters(kind string) bool {
-	switch runtimecontract.CanonicalRuntimeBlockKind(kind) {
-	case runtimecontract.StepKindMCPToolCall, runtimecontract.StepKindMCPPromptGet:
-		return true
-	default:
-		return false
 	}
 }
 
@@ -1040,74 +1219,55 @@ func runtimeV2OperationCandidateSchema(id, title, description string) string {
 func runtimeV2CandidateContractCatalog() string {
 	return strings.Join([]string{
 		"Return exactly one JSON object for the requested Runtime V2 action. The JSON object itself is the candidate; never wrap it in another object.",
-		"The only legal top-level shapes are:",
-		"produce_state_change: " + runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceStateChange),
-		"produce_validation: " + runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceValidation),
-		"produce_assessment: " + runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceAssessment),
-		"request_governance: " + runtimeV2CandidateSchema(runtimecontract.RuntimeActionRequestGovernance),
-		"Forbidden top-level fields include candidate, candidates, executionGraph, convergenceState, focus, authority, transaction, outputMode, result, runtimeState, id, kind, requiredOperationRef, dependsOn, coverageWorkItemIds, targetRefs, and parameters.",
-		"For operation candidates, the top level contains only operations. dependsOn is never a top-level field: use it only inside an operation when the sealed required operation sequence explicitly declares a dependency; otherwise omit it.",
-		"Use the requested action, required output kinds, coverage work item IDs, and available capabilities from the current runtime authority. Do not invent or modify convergence state, focus, authority, transaction, or output mode. Do not use markdown fences or explanatory text.",
-		"context.requiredAction is the sole next-action authority. When context.repairDirective is present, obey its requiredAction, requiredEffectScopes, requiredEvidenceKinds, allowedOperationKinds, targetRefs, and rejectedOperationShapes.",
+		"The current runtime authority's context.outputContract is the sole structured-output contract. Its manifestHash, schema, structuredOutputInstruction, and operationContracts define the complete allowed fields, kinds, variants, parameters, targets, coverage and dependencies for this request.",
+		"Do not infer a field, operation kind, parameter, target, coverage item, dependency, or operation variant from this stable instruction. If it is not in context.outputContract, omit it. Do not use markdown fences or explanatory text.",
+		"context.requiredAction is the sole next-action authority. Do not invent or modify convergence state, focus, authority, transaction, or output mode.",
+		"When context.repairDirective is present, obey its sealed action, effect, evidence and operation constraints. The exact fields and values remain in context.outputContract and current runtime authority.",
 		"context.missingEvidenceKinds is completion-audit information only and must never override context.requiredAction or context.repairDirective.",
-		"Use operationContracts for allowed parameters of each kind. Dynamic fields are only valid where the contract permits them.",
-		"Operation parameters are a closed typed whitelist: omit every field that is not listed by the selected operationContract. Do not add narrative, summary, explanation, metadata, or convenience parameters unless that exact parameter is explicitly listed by the selected operationContract.",
-		"For an operation expected to produce a durable effect, targetRefs must name concrete declared targets that the operation itself will actually change. Do not label a read, check, preparation, or no-op action as state-changing, and do not cite unrelated targets as durable-effect witnesses.",
-		"When an operation has a canonical targetRef or path parameter, copy that exact value into its top-level targetRefs. targetRefs may declare a concrete new workspace-relative file before it exists; the owning capability validates creation at execution time.",
 		"When context.repairHints is present, follow those domain-neutral hints and do not repeat an active rejected operation shape.",
 		"When context.rejectedOperationShapes is present, every listed operation hash and exact structural operation is forbidden until later accepted evidence supersedes it. Choose an admissible kind and change kind, targets, or execution-semantic parameters.",
-		"For a satisfied assessment, evidenceRefs is mandatory and every value must be copied exactly from context.allowedAcceptedEvidenceRefs. Satisfied item evidenceRefs must use the same allowed set.",
 	}, "\n")
 }
 
-func runtimeV2CandidateOutputContract(decision runtimecontract.RuntimeDecision, selection *runtimecontract.RuntimeTargetSelection) runtimeCandidateOutputContractProjection {
-	allowedKinds := runtimeV2CandidateAllowedOperationKinds(decision.Action, decision.RequiredOutput.AcceptedKinds, decision.RequiredOutput.RequiredOperationSequence, selection)
+func runtimeV2CandidateOutputContractForManifest(manifest runtimecontract.RuntimeCandidateContractManifest) runtimeCandidateOutputContractProjection {
+	manifest = manifest.Normalized()
 	return runtimeCandidateOutputContractProjection{
-		Action:                  decision.Action,
-		Schema:                  json.RawMessage(runtimeV2CandidateSchemaForDecisionWithTargetSelection(decision, selection)),
-		RequiredTopLevelExample: runtimeV2CandidateTopLevelExample(decision.Action),
-		ForbiddenTopLevelFields: runtimeV2CandidateForbiddenTopLevelFields(decision.Action),
-		OperationContracts:      runtimeV2CandidateOperationContracts(allowedKinds),
+		Action:                      manifest.Action,
+		ManifestHash:                manifest.Hash,
+		Schema:                      json.RawMessage(runtimeV2CandidateSchemaForManifest(manifest)),
+		StructuredOutputInstruction: runtimeV2CandidateStructuredOutputInstruction(manifest),
+		ForbiddenTopLevelFields:     append([]string(nil), manifest.ForbiddenTopLevelFields...),
+		OperationContracts:          runtimeV2CandidateOperationContractsForManifest(manifest.Operations),
 	}
 }
 
-func runtimeV2CandidateForbiddenTopLevelFields(action runtimecontract.RuntimeAction) []string {
-	fields := []string{"candidate", "candidates", "executionGraph", "convergenceState", "focus", "authority", "transaction", "outputMode", "result", "runtimeState"}
-	switch action {
-	case runtimecontract.RuntimeActionProduceStateChange, runtimecontract.RuntimeActionProduceValidation:
-		return append(fields, "id", "kind", "requiredOperationRef", "dependsOn", "coverageWorkItemIds", "targetRefs", "parameters")
-	case runtimecontract.RuntimeActionRequestGovernance:
-		return append(fields, "kind", "subjectRef", "reason")
-	default:
-		return fields
-	}
-}
-
-func runtimeV2CandidateOperationContracts(kinds []string) []runtimeCandidateOperationContractProjection {
-	ret := make([]runtimeCandidateOperationContractProjection, 0, len(kinds))
-	for _, kind := range kinds {
-		contract, ok := runtimecontract.RuntimeOperationContractForKind(kind)
-		if !ok {
-			continue
-		}
+func runtimeV2CandidateOperationContractsForManifest(values []runtimecontract.RuntimeCandidateOperationManifest) []runtimeCandidateOperationContractProjection {
+	ret := make([]runtimeCandidateOperationContractProjection, 0, len(values))
+	for _, operation := range values {
+		operation = operation.Normalized()
 		projection := runtimeCandidateOperationContractProjection{
-			Kind: contract.Kind, RequireOneOfParameters: append([]string(nil), contract.RequireOneOfParameters...), RequireTargetRefs: contract.RequireTargetRefs,
-			ForbiddenParameters: append([]string(nil), contract.ForbiddenParameters...), Rules: append([]string(nil), contract.Rules...),
-			Parameters: make([]runtimeCandidateOperationParameterProjection, 0, len(contract.Parameters)),
+			Kind:                        operation.Kind,
+			AllowedOperationFields:      append([]string(nil), operation.AllowedOperationFields...),
+			AllowedVariantIDs:           append([]string(nil), operation.AllowedVariantIDs...),
+			RequireOneOfParameters:      append([]string(nil), operation.RequireOneOfParameters...),
+			RequireTargetRefs:           operation.RequireTargetRefs,
+			ForbiddenParameters:         append([]string(nil), operation.ForbiddenParameters...),
+			Rules:                       append([]string(nil), operation.Rules...),
+			AllowsDynamicParameters:     operation.AllowsDynamicParameters,
+			DynamicParameterPrefixes:    append([]string(nil), operation.DynamicParameterPrefixes...),
+			RequiredOperationReferences: append([]string(nil), operation.RequiredOperationReferences...),
+			Parameters:                  make([]runtimeCandidateOperationParameterProjection, 0, len(operation.Parameters)),
 		}
-		if len(contract.Variants) > 0 {
-			projection.Variants = make([]runtimeCandidateOperationVariantProjection, 0, len(contract.Variants))
-			for _, variant := range contract.Variants {
-				projection.Variants = append(projection.Variants, runtimeCandidateOperationVariantProjection{
-					ID: variant.ID, Discriminators: append([]runtimecontract.RuntimeOperationParameterPredicate(nil), variant.Discriminators...),
-					RequiredParameters: append([]string(nil), variant.RequiredParameters...), RequiredNonEmpty: append([]string(nil), variant.RequiredNonEmpty...),
-					ForbiddenParameters: append([]string(nil), variant.ForbiddenParameters...), EffectScope: variant.EffectScope, IdempotencyClass: variant.IdempotencyClass,
-				})
-			}
-		}
-		for _, parameter := range contract.Parameters {
+		for _, parameter := range operation.Parameters {
 			projection.Parameters = append(projection.Parameters, runtimeCandidateOperationParameterProjection{
 				Name: parameter.Name, Type: string(parameter.Type), Required: parameter.Required, Description: parameter.Description,
+			})
+		}
+		for _, variant := range operation.Variants {
+			projection.Variants = append(projection.Variants, runtimeCandidateOperationVariantProjection{
+				ID: variant.ID, Discriminators: append([]runtimecontract.RuntimeOperationParameterPredicate(nil), variant.Discriminators...),
+				RequiredParameters: append([]string(nil), variant.RequiredParameters...), RequiredNonEmpty: append([]string(nil), variant.RequiredNonEmpty...),
+				ForbiddenParameters: append([]string(nil), variant.ForbiddenParameters...), EffectScope: variant.EffectScope, IdempotencyClass: variant.IdempotencyClass,
 			})
 		}
 		ret = append(ret, projection)
@@ -1115,36 +1275,115 @@ func runtimeV2CandidateOperationContracts(kinds []string) []runtimeCandidateOper
 	return ret
 }
 
-func runtimeV2CandidateTopLevelExample(action runtimecontract.RuntimeAction) string {
-	switch action {
-	case runtimecontract.RuntimeActionProduceStateChange, runtimecontract.RuntimeActionProduceValidation:
-		return `{"operations":[...]}`
-	case runtimecontract.RuntimeActionProduceAssessment:
-		return `{"focusId":"...","coverageWorkItemIds":["..."],"disposition":"repairable_gap","gap":{"coverageWorkItemIds":["..."],"missingEvidenceKinds":["validation"],"reason":"..."},"summary":"..."}`
-	case runtimecontract.RuntimeActionRequestGovernance:
-		return `{"externalDependency":{"kind":"...","reason":"..."}}`
-	default:
-		return `{}`
+// runtimeV2CandidateStructuredOutputInstruction renders the request-specific
+// instruction only from the sealed manifest. It deliberately does not inspect
+// operation descriptors, candidate context, rejected shapes or error strings:
+// those inputs have already been normalized into the manifest or belong to
+// C4 retry context. Keeping this projection adjacent to the provider renderer
+// makes the LLM-facing wording a consumer rather than a second contract owner.
+func runtimeV2CandidateStructuredOutputInstruction(manifest runtimecontract.RuntimeCandidateContractManifest) string {
+	manifest = manifest.Normalized()
+	lines := []string{
+		"Sealed candidate manifest hash: " + manifest.Hash + ".",
+		"Return action " + string(manifest.Action) + " with required top-level fields: " + runtimeV2CandidateContractFieldList(manifest.RequiredTopLevelFields) + ".",
+		"The only allowed top-level fields are: " + runtimeV2CandidateContractFieldList(manifest.AllowedTopLevelFields) + ".",
 	}
+	if len(manifest.ForbiddenTopLevelFields) > 0 {
+		lines = append(lines, "Forbidden top-level fields: "+runtimeV2CandidateContractFieldList(manifest.ForbiddenTopLevelFields)+".")
+	}
+	if manifest.RequireCoverageWorkItemIDs {
+		lines = append(lines, "Every operation must bind its sealed coverageWorkItemIds.")
+	}
+	if len(manifest.RequiredOperationSequence) > 0 {
+		refs := make([]string, 0, len(manifest.RequiredOperationSequence))
+		for _, requirement := range manifest.RequiredOperationSequence {
+			refs = append(refs, requirement.RequirementID+"="+requirement.Kind+"/"+requirement.VariantID)
+		}
+		lines = append(lines, "Required operation sequence references: "+strings.Join(refs, ", ")+".")
+	}
+	for _, operation := range manifest.Operations {
+		operation = operation.Normalized()
+		line := "Operation kind " + operation.Kind + " allows fields: " + runtimeV2CandidateContractFieldList(operation.AllowedOperationFields) + "."
+		if len(operation.AllowedVariantIDs) > 0 {
+			line += " Allowed variants: " + runtimeV2CandidateContractFieldList(operation.AllowedVariantIDs) + "."
+		}
+		if len(operation.Parameters) > 0 {
+			parameters := make([]string, 0, len(operation.Parameters))
+			for _, parameter := range operation.Parameters {
+				name := parameter.Name + ":" + string(parameter.Type)
+				if parameter.Required {
+					name += "(required)"
+				}
+				parameters = append(parameters, name)
+			}
+			line += " Parameters: " + strings.Join(parameters, ", ") + "."
+		}
+		if len(operation.RequireOneOfParameters) > 0 {
+			line += " Require one non-empty parameter from: " + runtimeV2CandidateContractFieldList(operation.RequireOneOfParameters) + "."
+		}
+		if operation.RequireTargetRefs {
+			line += " targetRefs is required and must name the concrete target changed by this operation."
+		}
+		if len(operation.RequiredOperationReferences) > 0 {
+			line += " requiredOperationRef must be one of: " + runtimeV2CandidateContractFieldList(operation.RequiredOperationReferences) + "."
+		}
+		if len(operation.ForbiddenParameters) > 0 {
+			line += " Forbidden parameters: " + runtimeV2CandidateContractFieldList(operation.ForbiddenParameters) + "."
+		}
+		if operation.AllowsDynamicParameters {
+			line += " Dynamic parameters are allowed only by this operation contract."
+		}
+		lines = append(lines, line)
+	}
+	if !manifest.DependenciesAllowed {
+		lines = append(lines, "dependsOn is not an allowed operation field for this sealed contract.")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func runtimeV2CandidateContractFieldList(values []string) string {
+	if len(values) == 0 {
+		return "(none)"
+	}
+	return strings.Join(values, ", ")
 }
 
 func runtimeV2CandidateRetry(attempt int, failure *runtimecontract.RuntimeCandidateFailure) *runtimeCandidateRetryProjection {
+	return runtimeV2CandidateRetryForManifest(attempt, failure, runtimecontract.RuntimeCandidateContractManifest{})
+}
+
+func runtimeV2CandidateRetryForManifest(attempt int, failure *runtimecontract.RuntimeCandidateFailure, manifest runtimecontract.RuntimeCandidateContractManifest) *runtimeCandidateRetryProjection {
 	if attempt != 1 || failure == nil {
 		return nil
 	}
-	previous := *failure
-	previous.Reason = boundedRuntimeCandidateFailureReason(previous.Reason)
+	previous := runtimeCandidateCorrectionFailureProjection{
+		Class:      failure.Class,
+		Code:       strings.TrimSpace(failure.Code),
+		Signature:  strings.TrimSpace(failure.Signature),
+		TargetRefs: append([]string(nil), failure.TargetRefs...),
+	}
+	if diagnostic := failure.Diagnostic.Clone(); diagnostic != nil {
+		// P3-B2a has already sealed the complete diagnostic. C4 only projects
+		// that immutable, manifest-bound delta; it must not infer a missing hash,
+		// rejected shape, or correction objective from the failure text/signature.
+		// Attempt-1 eligibility belongs to SM-3 and is fenced before this LLM
+		// renderer is called.
+		previous.Diagnostic = diagnostic.Clone()
+	}
 	instruction := "Retry the exact same sealed authority contract. Return only the legal top-level object for the requested action."
+	manifest = manifest.Normalized()
+	if manifest.Hash != "" {
+		instruction += " Re-read context.outputContract.structuredOutputInstruction and schema for sealed manifest hash " + manifest.Hash + "; they are the only source of allowed fields, kinds, variants, parameters, targets, coverage and dependencies."
+	}
 	if previous.Class == runtimecontract.RuntimeCandidateFailureClassSchema || previous.Class == runtimecontract.RuntimeCandidateFailureClassContract {
-		instruction += " The previous candidate shape was rejected; do not repeat any wrapper or field named candidate, candidates, or executionGraph."
+		instruction += " The previous candidate shape was rejected. Remove every field or value not permitted by that sealed manifest instead of adding a wrapper, narrative, summary, explanation or convenience parameter."
 	}
 	if previous.Class == runtimecontract.RuntimeCandidateFailureClassInfeasible {
-		instruction += " The previous operation was owner-infeasible before dispatch seal. Choose only targets, selectors, and parameters in the current operationAdmissibilities inventory; do not repeat its failure signature."
+		instruction += " The previous operation was owner-infeasible before dispatch seal. Choose only manifest-permitted targets, selectors and parameters compatible with the current operationAdmissibilities inventory; do not repeat its failure signature."
 	}
 	if runtimeV2CandidateFailureIsOperationShapeReplay(previous.Code) {
 		instruction += " The previous candidate replayed a rejected or no-progress operation shape. Inspect context.rejectedOperationShapes and context.noProgressOperationShapes, then choose a materially different operation shape that changes its declared durable targets. Changing only an operation ID, narrative, dependency list, or cosmetic parameter is not sufficient."
 	}
-	instruction += runtimeV2CandidateRetryParameterHint(previous.Reason)
 	return &runtimeCandidateRetryProjection{PreviousFailure: previous, Instruction: instruction}
 }
 
@@ -1155,37 +1394,4 @@ func runtimeV2CandidateFailureIsOperationShapeReplay(code string) bool {
 	default:
 		return false
 	}
-}
-
-func runtimeV2CandidateRetryParameterHint(reason string) string {
-	reason = strings.TrimSpace(reason)
-	if reason == "" {
-		return ""
-	}
-	lower := strings.ToLower(reason)
-	if strings.Contains(lower, "targetrefs must contain targetref") || strings.Contains(lower, "targetrefs must contain path") || strings.Contains(lower, "targetrefs must contain target ") {
-		return " Declare exactly one non-empty canonical targetRef or path parameter, then copy that exact value into the operation's top-level targetRefs. A concrete new workspace-relative target is valid even when the file does not yet exist."
-	}
-	if strings.Contains(lower, "does not target the sealed focus, failure, or repair target set") {
-		return " The authority already has a sealed concrete target set. Return a durable operation that actually changes one of the target refs in context.focus, context.resources.failureTarget, or context.repairDirective, and copy that exact target into top-level targetRefs. A build, test, read, or command without that durable target effect cannot satisfy this state-change action."
-	}
-	if strings.Contains(lower, "owner-grounded workspace scope permits only a durable file operation") || strings.Contains(lower, "creation scope requires a durable file operation") {
-		return " The current target-selection scope permits only a durable File-owner operation. Use one of the File operation contracts, declare a concrete workspace-relative targetRefs value that the operation changes, and do not use Shell, Git, MCP, Web, or SSH until File owner evidence establishes a concrete target."
-	}
-	if strings.Contains(lower, "does not accept parameter") || strings.Contains(lower, "requires parameter") {
-		return " Remove every rejected parameter entirely and rebuild the operation from only the exact parameter names listed by its operationContract. Do not replace a rejected parameter with summary, narrative, explanation, metadata, or another invented field; operation-level commentary is never a legal substitute for a typed parameter."
-	}
-	if strings.Contains(lower, "conflict") || strings.Contains(lower, "not found") || strings.Contains(lower, "mismatch") {
-		return " Re-read current target content and realign operation inputs before retrying a conflicting state-changing operation."
-	}
-	return ""
-}
-
-func boundedRuntimeCandidateFailureReason(reason string) string {
-	const maxBytes = 1024
-	reason = strings.TrimSpace(reason)
-	if len(reason) <= maxBytes {
-		return reason
-	}
-	return reason[:maxBytes] + "...[truncated]"
 }

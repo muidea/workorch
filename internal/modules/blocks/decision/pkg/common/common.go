@@ -5,9 +5,15 @@ import (
 	"strings"
 
 	basecommon "github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const ModuleID = "blocks/decision"
+
+// RuntimeCapabilityKinds is the Decision owner's complete Runtime V2 capability inventory.
+func RuntimeCapabilityKinds() []string {
+	return []string{runtimecontract.RuntimeBlockKindDecisionRequest}
+}
 
 const (
 	ResolutionTypeReplan             = "replan"

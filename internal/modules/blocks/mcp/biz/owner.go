@@ -166,7 +166,7 @@ func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magiceven
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	response, err := orchestratorevents.ResolveRuntimeCapabilities(command, ModuleID, StepKindToolCall, StepKindResourceRead, StepKindPromptGet)
+	response, err := orchestratorevents.ResolveRuntimeCapabilities(command, ModuleID, modulecommon.RuntimeCapabilityKinds()...)
 	if err != nil {
 		setCapabilityError(result, err)
 		return

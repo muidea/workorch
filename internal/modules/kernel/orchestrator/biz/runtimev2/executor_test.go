@@ -386,10 +386,10 @@ func TestRuntimeControllerRecoversClaimedAtMostOnceOperationOnlyWithSealedReplay
 		ID: "patch-1", Kind: runtimecontract.RuntimeBlockKindPatchApply, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
 		Parameters: []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "content", String: &content}},
 	}}}}}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.AdmitCandidateProposal(context.Background(), "ws-v2", "run-v2", 0, candidate); err != nil {
+	if _, err := controller.AdmitCandidateProposalForTest(context.Background(), "ws-v2", "run-v2", 0, candidate); err != nil {
 		t.Fatal(err)
 	}
 	proof := runtimecontract.RuntimeOperationReplayProof{
@@ -401,7 +401,7 @@ func TestRuntimeControllerRecoversClaimedAtMostOnceOperationOnlyWithSealedReplay
 	}); err != nil {
 		t.Fatal(err)
 	}
-	sealed, err := controller.AdmitAndSealCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, candidate)
+	sealed, err := controller.AdmitAndSealCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, candidate)
 	if err != nil || sealed.Aggregate.ActiveDispatch == nil {
 		t.Fatalf("seal replay-proof candidate aggregate=%+v err=%v", sealed.Aggregate, err)
 	}
@@ -524,7 +524,7 @@ func TestRuntimeControllerRestartRejectsPersistedInconclusiveValidationReceiptWi
 
 func beginAndAcceptCandidate(t *testing.T, controller *RuntimeController, aggregate RuntimeAggregate, candidate runtimecontract.RuntimeCandidate) (RuntimeAggregate, error) {
 	t.Helper()
-	if _, err := controller.BeginCandidateAttempt(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "stable-prefix"); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return controller.AcceptCandidateAttempt(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, candidate)

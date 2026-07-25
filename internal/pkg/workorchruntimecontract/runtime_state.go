@@ -78,7 +78,13 @@ type RuntimeCandidateAttemptRecord struct {
 	Transaction         AuthorityTransaction
 	Attempt             int
 	StablePrefixHash    string
-	State               RuntimeCandidateAttemptState
+	// ManifestHash and LogicalRequestID bind an admission attempt to the one
+	// complete provider document that produced it.  They are SM-3 identity,
+	// not a second authority source: the Orchestrator still validates the
+	// manifest against the sealed decision before it can admit or seal.
+	ManifestHash     string
+	LogicalRequestID string
+	State            RuntimeCandidateAttemptState
 	// Proposal is the schema-valid, unsealed candidate persisted after provider
 	// generation. It is replayed after restart into the read-only feasibility
 	// gate, never treated as a dispatch or execution record.
@@ -95,16 +101,19 @@ type RuntimeCandidateAttemptRecord struct {
 type RuntimeStateRecord struct {
 	// SchemaVersion is the persisted Runtime V2 aggregate schema. Production
 	// persistence accepts only SchemaVersionCurrent.
-	SchemaVersion               uint32
-	StateRevision               uint64
-	EvidenceSequence            uint64
-	Definition                  RuntimeDefinitionContext
-	Facts                       RuntimeFacts
-	Decision                    RuntimeDecision
-	ActiveDispatch              *RuntimeDispatchRecord
-	CompletedDispatches         []RuntimeDispatchRecord
-	ProcessedEventIDs           []string
-	Diagnostics                 []RuntimeDiagnosticRecord
+	SchemaVersion       uint32
+	StateRevision       uint64
+	EvidenceSequence    uint64
+	Definition          RuntimeDefinitionContext
+	Facts               RuntimeFacts
+	Decision            RuntimeDecision
+	ActiveDispatch      *RuntimeDispatchRecord
+	CompletedDispatches []RuntimeDispatchRecord
+	ProcessedEventIDs   []string
+	Diagnostics         []RuntimeDiagnosticRecord
+	// CandidateRequestSessions record provider I/O before a complete candidate
+	// exists. They are not candidate attempts and cannot authorize a dispatch.
+	CandidateRequestSessions    []RuntimeCandidateRequestSession
 	CandidateAttempts           []RuntimeCandidateAttemptRecord
 	GovernanceRequests          []RuntimeGovernanceRequestRecord
 	GovernanceResolutions       []RuntimeGovernanceResolutionRecord
@@ -155,6 +164,9 @@ func (r RuntimeStateRecord) Validate() error {
 		}
 	}
 	if err := ValidateRuntimeCandidateAttemptRecordsForScope(r.Facts.WorkspaceID, r.Facts.RunID, r.CandidateAttempts); err != nil {
+		return err
+	}
+	if err := ValidateRuntimeCandidateRequestSessions(r.CandidateRequestSessions); err != nil {
 		return err
 	}
 	if isTerminalRuntimeDecision(r.Decision) && hasPendingRuntimeCandidateAttempt(r.CandidateAttempts) {
@@ -340,8 +352,8 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 	seen := map[string]struct{}{}
 	bySnapshot := map[string][]RuntimeCandidateAttemptRecord{}
 	for _, value := range values {
-		if value.Attempt < 0 || value.Attempt > 1 || strings.TrimSpace(value.Transaction.AuthoritySnapshotID) == "" || strings.TrimSpace(value.StablePrefixHash) == "" {
-			return fmt.Errorf("runtime candidate attempt requires sealed transaction, stable prefix and attempt 0 or 1")
+		if value.Attempt < 0 || value.Attempt > 1 || strings.TrimSpace(value.Transaction.AuthoritySnapshotID) == "" || strings.TrimSpace(value.StablePrefixHash) == "" || strings.TrimSpace(value.ManifestHash) == "" || strings.TrimSpace(value.LogicalRequestID) == "" {
+			return fmt.Errorf("runtime candidate attempt requires sealed transaction, stable prefix, manifest, request session and attempt 0 or 1")
 		}
 		key := value.Transaction.AuthoritySnapshotID + "|" + fmt.Sprintf("%d", value.Attempt)
 		if _, ok := seen[key]; ok {
@@ -391,7 +403,7 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 	for snapshotID, attempts := range bySnapshot {
 		first, hasFirst := runtimeCandidateAttemptByNumber(attempts, 0)
 		second, hasSecond := runtimeCandidateAttemptByNumber(attempts, 1)
-		if hasSecond && hasFirst && (first.State != RuntimeCandidateAttemptStateFailed || first.Transaction != second.Transaction || first.StablePrefixHash != second.StablePrefixHash) {
+		if hasSecond && hasFirst && (first.State != RuntimeCandidateAttemptStateFailed || first.Transaction != second.Transaction || first.StablePrefixHash != second.StablePrefixHash || first.ManifestHash != second.ManifestHash) {
 			return fmt.Errorf("runtime candidate snapshot %s attempt 1 is not a same-contract retry", snapshotID)
 		}
 		if hasFirst && first.State == RuntimeCandidateAttemptStateAccepted && hasSecond {
@@ -486,7 +498,7 @@ func ValidateRuntimeCandidateAttemptRecordsForScope(workspaceID common.Workspace
 		}
 		first, hasFirst := runtimeCandidateAttemptByNumber(attempts, 0)
 		second, hasSecond := runtimeCandidateAttemptByNumber(attempts, 1)
-		if len(attempts) > 2 || attemptCounts[0] > 1 || attemptCounts[1] > 1 || (hasSecond && (!hasFirst || first.State != RuntimeCandidateAttemptStateFailed || !SameAuthorityContract(first.Transaction, second.Transaction) || first.StablePrefixHash != second.StablePrefixHash)) {
+		if len(attempts) > 2 || attemptCounts[0] > 1 || attemptCounts[1] > 1 || (hasSecond && (!hasFirst || first.State != RuntimeCandidateAttemptStateFailed || !SameAuthorityContract(first.Transaction, second.Transaction) || first.StablePrefixHash != second.StablePrefixHash || first.ManifestHash != second.ManifestHash)) {
 			return fmt.Errorf("runtime candidate authority contract %s exceeds the sealed attempt 0/1 transaction", contractID)
 		}
 		if hasFirst && first.State == RuntimeCandidateAttemptStateAccepted && hasSecond {
@@ -554,6 +566,10 @@ func (r RuntimeStateRecord) Clone() RuntimeStateRecord {
 	}
 	ret.ProcessedEventIDs = append([]string(nil), r.ProcessedEventIDs...)
 	ret.Diagnostics = append([]RuntimeDiagnosticRecord(nil), r.Diagnostics...)
+	ret.CandidateRequestSessions = make([]RuntimeCandidateRequestSession, len(r.CandidateRequestSessions))
+	for idx := range r.CandidateRequestSessions {
+		ret.CandidateRequestSessions[idx] = r.CandidateRequestSessions[idx].Clone()
+	}
 	ret.CandidateAttempts = make([]RuntimeCandidateAttemptRecord, len(r.CandidateAttempts))
 	for idx, attempt := range r.CandidateAttempts {
 		ret.CandidateAttempts[idx] = attempt
@@ -565,6 +581,7 @@ func (r RuntimeStateRecord) Clone() RuntimeStateRecord {
 		if attempt.Failure != nil {
 			failure := *attempt.Failure
 			failure.TargetRefs = append([]string(nil), attempt.Failure.TargetRefs...)
+			failure.Diagnostic = attempt.Failure.Diagnostic.Clone()
 			if attempt.Failure.ValidationDiagnostic != nil {
 				diagnostic := attempt.Failure.ValidationDiagnostic.Clone()
 				failure.ValidationDiagnostic = &diagnostic

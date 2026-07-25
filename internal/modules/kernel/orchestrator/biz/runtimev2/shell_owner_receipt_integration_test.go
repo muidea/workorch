@@ -191,7 +191,7 @@ func TestShellOwnerCatalogStaleRestartDoesNotReuseFailureTarget(t *testing.T) {
 	if _, err := controller.Initialize(ctx, facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttempt(ctx, "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	stale := runtimecontract.RuntimePrerequisiteStale{

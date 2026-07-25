@@ -180,7 +180,14 @@ const (
 	FailureClassExecutionFailure             FailureClass = "execution_failure"
 	FailureClassNoProgressExhausted          FailureClass = "no_progress_exhausted"
 	FailureClassCandidateExhausted           FailureClass = "candidate_retry_exhausted"
+	// FailureClassCandidateCorrectionUndefined marks a complete candidate
+	// rejection whose persisted typed diagnostic cannot define a safe,
+	// manifest-bound second request. It is a terminal SM-3 contract route, not
+	// a governance dependency or a repair directive.
+	FailureClassCandidateCorrectionUndefined FailureClass = "candidate_correction_undefined"
 	FailureClassCandidateOutputExhausted     FailureClass = "candidate_output_continuation_exhausted"
+	FailureClassProviderProtocol             FailureClass = "provider_protocol_failure"
+	FailureClassProviderSubmissionUnknown    FailureClass = "provider_submission_unknown"
 	FailureClassPrerequisiteRefreshExhausted FailureClass = "prerequisite_refresh_exhausted"
 	FailureClassGovernanceRejected           FailureClass = "governance_rejected"
 )
@@ -200,6 +207,11 @@ type FailureFact struct {
 	TargetRefs           []string
 	TargetObservation    *RuntimeFailureTargetObservation
 	ValidationDiagnostic *ValidationFailureDiagnostic
+	// GovernanceDependency is present only when an owner, prerequisite, or
+	// activation fact has already identified a concrete external dependency.
+	// Its presence is not a request to open a ticket; the Orchestrator reducer
+	// and controller separately decide and bind the governance route.
+	GovernanceDependency *ExternalDependency
 }
 
 func (f FailureFact) Normalized() FailureFact {
@@ -216,6 +228,10 @@ func (f FailureFact) Normalized() FailureFact {
 		diagnostic := f.ValidationDiagnostic.Normalized()
 		f.ValidationDiagnostic = &diagnostic
 	}
+	if f.GovernanceDependency != nil {
+		dependency := f.GovernanceDependency.Normalized()
+		f.GovernanceDependency = &dependency
+	}
 	return f
 }
 
@@ -230,7 +246,26 @@ func (f FailureFact) Clone() FailureFact {
 		diagnostic := f.ValidationDiagnostic.Clone()
 		f.ValidationDiagnostic = &diagnostic
 	}
+	if f.GovernanceDependency != nil {
+		dependency := f.GovernanceDependency.Clone()
+		f.GovernanceDependency = &dependency
+	}
 	return f
+}
+
+// ValidateRuntimeFailureGovernanceDependency validates an explicitly supplied
+// dependency without selecting a governance action. A missing dependency is
+// intentionally valid at this DTO layer: the reducer must turn a governance
+// request without a source into a typed terminal instead of inventing a
+// default decision ticket.
+func ValidateRuntimeFailureGovernanceDependency(failure FailureFact) error {
+	if failure.GovernanceDependency == nil {
+		return nil
+	}
+	if err := failure.GovernanceDependency.Validate(); err != nil {
+		return fmt.Errorf("failure governance dependency: %w", err)
+	}
+	return nil
 }
 
 // RuntimeFailureTargetObservation is a bounded, owner-authored observation of
@@ -308,6 +343,9 @@ func ValidateRuntimeFailureTargetObservationBinding(failure FailureFact) error {
 type PrerequisiteState struct {
 	Pending   []RuntimePrerequisite
 	Satisfied []RuntimePrerequisite
+	// Retired keeps completed Focus-scoped prerequisite identities for audit.
+	// It is excluded from reducer, freshness and authority inputs.
+	Retired []RuntimePrerequisite
 }
 
 type PrerequisiteKind string
@@ -330,6 +368,8 @@ const (
 type RuntimePrerequisite struct {
 	ID                          string
 	Kind                        PrerequisiteKind
+	Scope                       RuntimePrerequisiteScope
+	FocusID                     string
 	OwnerModuleID               string
 	SubjectRef                  string
 	TargetSelectorRef           string
@@ -343,6 +383,15 @@ type RuntimePrerequisite struct {
 	MinimumBytes                int
 	Reason                      string
 }
+
+// RuntimePrerequisiteScope identifies whether a prerequisite may be reused
+// across Focuses or is authority for one sealed Focus only.
+type RuntimePrerequisiteScope string
+
+const (
+	RuntimePrerequisiteScopeGlobal RuntimePrerequisiteScope = "global"
+	RuntimePrerequisiteScopeFocus  RuntimePrerequisiteScope = "focus"
+)
 
 // RuntimeOperationPrerequisiteRequest is an owner-authored, read-only
 // feasibility outcome. It names the missing owner fact needed to make a
@@ -392,6 +441,8 @@ func (r RuntimeOperationPrerequisiteRequest) Same(other RuntimeOperationPrerequi
 
 type RuntimeRequirement struct {
 	Kind                        PrerequisiteKind
+	Scope                       RuntimePrerequisiteScope
+	FocusID                     string
 	OwnerModuleID               string
 	SubjectRef                  string
 	TargetSelectorRef           string
@@ -482,6 +533,9 @@ type RuntimeResourceFacts struct {
 	// revisions they observed. They are additional freshness metadata, not a
 	// replacement for the typed facts above.
 	PrerequisiteObservations []RuntimePrerequisiteObservation
+	// RetiredPrerequisiteObservations are lineage only and must never be
+	// invalidated, reacquired or used to build current authority.
+	RetiredPrerequisiteObservations []RuntimePrerequisiteObservation
 }
 
 // RuntimeOperationAdmissibility is a bounded, owner-authored parameter
@@ -914,6 +968,7 @@ func (f RuntimeFacts) Normalized() RuntimeFacts {
 	f.Assessments = normalizeRuntimeAssessmentFacts(f.Assessments)
 	f.Prerequisites.Pending = normalizeRuntimePrerequisites(f.Prerequisites.Pending)
 	f.Prerequisites.Satisfied = normalizeRuntimePrerequisites(f.Prerequisites.Satisfied)
+	f.Prerequisites.Retired = normalizeRuntimePrerequisites(f.Prerequisites.Retired)
 	f.Capabilities.StateChangeKinds = normalizeStrings(f.Capabilities.StateChangeKinds)
 	f.Capabilities.ValidationKinds = normalizeStrings(f.Capabilities.ValidationKinds)
 	f.Capabilities.GovernanceKinds = normalizeStrings(f.Capabilities.GovernanceKinds)
@@ -972,10 +1027,28 @@ func (f RuntimeFacts) Validate() error {
 		if err := f.Resources.TargetSelection.Validate(); err != nil {
 			return fmt.Errorf("runtime facts target selection: %w", err)
 		}
+		selection := f.Resources.TargetSelection.Normalized()
+		bound := false
+		for _, prerequisite := range f.Prerequisites.Satisfied {
+			if prerequisite.ID == selection.PrerequisiteID &&
+				prerequisite.Kind == PrerequisiteKindTargetSelection &&
+				prerequisite.Scope == RuntimePrerequisiteScopeFocus &&
+				prerequisite.FocusID == f.Focus.ID &&
+				prerequisite.OwnerModuleID == selection.OwnerModuleID {
+				bound = true
+				break
+			}
+		}
+		if !bound {
+			return fmt.Errorf("runtime facts target selection %q is not bound to an active current-focus prerequisite", selection.PrerequisiteID)
+		}
 	}
 	if f.Failure != nil {
 		if err := ValidateRuntimeFailureTargetObservationBinding(*f.Failure); err != nil {
 			return fmt.Errorf("runtime facts failure target observation: %w", err)
+		}
+		if err := ValidateRuntimeFailureGovernanceDependency(*f.Failure); err != nil {
+			return fmt.Errorf("runtime facts governance dependency: %w", err)
 		}
 	}
 	if f.Resources.FailureTarget != nil && f.Resources.FailureTarget.TargetObservation != nil {
@@ -1023,6 +1096,33 @@ func (f RuntimeFacts) Validate() error {
 		}
 		if !matched {
 			return fmt.Errorf("runtime prerequisite observation %q has no matching satisfied prerequisite", observation.PrerequisiteID)
+		}
+	}
+	activePrerequisites := append(append([]RuntimePrerequisite(nil), f.Prerequisites.Pending...), f.Prerequisites.Satisfied...)
+	activeIDs := make(map[string]struct{}, len(activePrerequisites))
+	for _, prerequisite := range activePrerequisites {
+		if prerequisite.Scope == RuntimePrerequisiteScopeFocus && prerequisite.FocusID != f.Focus.ID {
+			return fmt.Errorf("runtime active focus-scoped prerequisite %q is bound to focus %q instead of current focus %q", prerequisite.ID, prerequisite.FocusID, f.Focus.ID)
+		}
+		activeIDs[prerequisite.ID] = struct{}{}
+	}
+	retiredIDs := make(map[string]RuntimePrerequisite, len(f.Prerequisites.Retired))
+	for _, prerequisite := range f.Prerequisites.Retired {
+		if _, active := activeIDs[prerequisite.ID]; active {
+			return fmt.Errorf("runtime prerequisite %q cannot be both active and retired", prerequisite.ID)
+		}
+		if prerequisite.Scope != RuntimePrerequisiteScopeFocus || prerequisite.FocusID == "" {
+			return fmt.Errorf("runtime retired prerequisite %q must be focus-scoped", prerequisite.ID)
+		}
+		retiredIDs[prerequisite.ID] = prerequisite
+	}
+	for _, observation := range f.Resources.RetiredPrerequisiteObservations {
+		if err := observation.Validate(); err != nil {
+			return fmt.Errorf("runtime retired prerequisite observation: %w", err)
+		}
+		prerequisite, found := retiredIDs[observation.PrerequisiteID]
+		if !found || prerequisite.Kind != observation.Kind || prerequisite.OwnerModuleID != observation.OwnerModuleID {
+			return fmt.Errorf("runtime retired prerequisite observation %q has no matching retired prerequisite", observation.PrerequisiteID)
 		}
 	}
 	seenFocus := map[string]struct{}{f.Focus.ID: {}}
@@ -1183,6 +1283,7 @@ func (r RuntimeResourceFacts) Normalized() RuntimeResourceFacts {
 	r.CapabilityStates = NormalizeRuntimeCapabilityStateSnapshots(r.CapabilityStates)
 	r.OperationAdmissibilities = NormalizeRuntimeOperationAdmissibilities(r.OperationAdmissibilities)
 	r.PrerequisiteObservations = NormalizeRuntimePrerequisiteObservations(r.PrerequisiteObservations)
+	r.RetiredPrerequisiteObservations = NormalizeRuntimePrerequisiteObservations(r.RetiredPrerequisiteObservations)
 	return r
 }
 
@@ -1638,6 +1739,15 @@ func normalizeRuntimePrerequisites(values []RuntimePrerequisite) []RuntimePrereq
 	for _, value := range values {
 		value.ID = strings.TrimSpace(value.ID)
 		value.Kind = PrerequisiteKind(strings.TrimSpace(string(value.Kind)))
+		value.Scope = RuntimePrerequisiteScope(strings.TrimSpace(string(value.Scope)))
+		if value.Scope == "" {
+			value.Scope = RuntimePrerequisiteScopeGlobal
+		}
+		value.FocusID = strings.TrimSpace(value.FocusID)
+		if value.Scope != RuntimePrerequisiteScopeFocus {
+			value.Scope = RuntimePrerequisiteScopeGlobal
+			value.FocusID = ""
+		}
 		value.OwnerModuleID = strings.TrimSpace(value.OwnerModuleID)
 		value.SubjectRef = strings.TrimSpace(value.SubjectRef)
 		value.TargetSelectorRef = strings.TrimSpace(value.TargetSelectorRef)

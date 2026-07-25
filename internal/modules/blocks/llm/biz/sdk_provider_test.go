@@ -62,6 +62,9 @@ func TestOpenAIProviderCompleteUsesOfficialSDKChatCompletions(t *testing.T) {
 	if gotPayload["max_completion_tokens"] != float64(65536) || gotPayload["reasoning_effort"] != "high" {
 		t.Fatalf("payload = %+v, want configured OpenAI inference profile", gotPayload)
 	}
+	if _, ok := gotPayload["response_format"]; ok {
+		t.Fatalf("payload = %+v, undeclared provider capability must omit response_format", gotPayload)
+	}
 	messages, ok := gotPayload["messages"].([]any)
 	if !ok || len(messages) < 2 {
 		t.Fatalf("messages = %#v, want stable prefix plus dynamic tail", gotPayload["messages"])

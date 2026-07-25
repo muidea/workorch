@@ -118,7 +118,7 @@ func TestCommitAssessmentPersistsClaimEvidenceGapAndKeepsRunRepairable(t *testin
 	if err != nil || evidence.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
 		t.Fatalf("validation evidence did not reach assessment: %+v err=%v", evidence.Aggregate.Decision, err)
 	}
-	if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "assessment-prefix"); err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "assessment-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{

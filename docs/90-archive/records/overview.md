@@ -4,7 +4,7 @@ Status: active
 
 Type: archive
 
-Last Updated: 2026-07-16
+Last Updated: 2026-07-25
 
 ## Purpose
 
@@ -33,6 +33,10 @@ Last Updated: 2026-07-16
 - [tui-display-closure-tracking.md](tui-display-closure-tracking.md)
 
 说明：对应 `60-verification/artifacts/**` live 运行产物已从仓库移除；结论以本目录 markdown 为准。
+
+### 2026-07-25 迁入：已完成 framework 整改过程
+
+- [go-multi-module-22-component-boundary-remediation-2026-07-25.md](go-multi-module-22-component-boundary-remediation-2026-07-25.md)：22 组件 framework boundary 迁移过程与已完成证据；当前可执行的组件合同仅见 `70-roadmap/active/component-contract-and-regression-closure-matrix.md`。
 
 ### 2026-07-14 迁入：文档迁移 / 对齐 audit（历史过程，非当前入口）
 

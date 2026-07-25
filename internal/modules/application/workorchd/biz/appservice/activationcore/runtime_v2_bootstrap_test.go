@@ -61,6 +61,15 @@ func TestRuntimeV2BootstrapBuildsOrderedDoDFocuses(t *testing.T) {
 		bootstrap.RecoveryPolicy.MaxPrerequisiteResourceChangeRefreshes != runtimecontract.DefaultMaxPrerequisiteResourceChangeRefreshes {
 		t.Fatalf("activation did not seal separate freshness budgets: %+v", bootstrap.RecoveryPolicy)
 	}
+	for _, requirement := range bootstrap.Requirements {
+		if requirement.Kind == runtimecontract.PrerequisiteKindValidationScratch {
+			if requirement.Scope != runtimecontract.RuntimePrerequisiteScopeGlobal || requirement.FocusID != "" {
+				t.Fatalf("activation validation scratch must be run-global: %+v", requirement)
+			}
+			return
+		}
+	}
+	t.Fatal("activation bootstrap has no validation scratch prerequisite")
 }
 
 func containsBootstrapOperationAdmissibility(requirements []runtimecontract.RuntimeRequirement, owner string, kinds ...string) bool {

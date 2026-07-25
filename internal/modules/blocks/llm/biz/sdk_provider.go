@@ -168,23 +168,17 @@ func (p *OpenAIProvider) chatParams(request llmmodels.ProviderRequest) openai.Ch
 		Model:       shared.ChatModel(p.config.Model),
 		Temperature: openai.Float(providerTemperature(p.config)),
 	}
-	if !request.RawTextOutput {
-		if p.config.Capabilities.JSONSchemaResponse && strings.TrimSpace(request.Schema) != "" {
-			var schema any
-			if err := json.Unmarshal([]byte(request.Schema), &schema); err == nil {
-				params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{
-					OfJSONSchema: &shared.ResponseFormatJSONSchemaParam{
-						JSONSchema: shared.ResponseFormatJSONSchemaJSONSchemaParam{
-							Name:   "workorch_runtime_v2_candidate",
-							Schema: schema,
-						},
+	if !request.RawTextOutput && p.config.Capabilities.JSONSchemaResponse && strings.TrimSpace(request.Schema) != "" {
+		var schema any
+		if err := json.Unmarshal([]byte(request.Schema), &schema); err == nil {
+			params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{
+				OfJSONSchema: &shared.ResponseFormatJSONSchemaParam{
+					JSONSchema: shared.ResponseFormatJSONSchemaJSONSchemaParam{
+						Name:   "workorch_runtime_v2_candidate",
+						Schema: schema,
 					},
-				}
-				return params
+				},
 			}
-		}
-		params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{
-			OfJSONObject: &shared.ResponseFormatJSONObjectParam{Type: "json_object"},
 		}
 	}
 	if maxTokens := maxOutputTokens(p.config); maxTokens > 0 {

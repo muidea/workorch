@@ -13,6 +13,76 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+// PreflightRuntimeCandidate asks the LLM owner to render the sealed request
+// and validate C0-C5/P0-P4 before a candidate attempt is persisted. It is a
+// typed read-only EventHub exchange: no provider call and no candidate can be
+// produced by this path.
+func PreflightRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command orchestratorevents.PreflightRuntimeCandidateCommand) (orchestratorevents.PreflightRuntimeCandidateResult, error) {
+	if hub == nil || command.WorkspaceID == "" || command.RunID == "" {
+		return orchestratorevents.PreflightRuntimeCandidateResult{}, common.ErrInvalidArgument
+	}
+	if command.Decision.AuthoritySnapshot.WorkspaceID != command.WorkspaceID || command.Decision.AuthoritySnapshot.RunID != command.RunID {
+		return orchestratorevents.PreflightRuntimeCandidateResult{}, fmt.Errorf("runtime candidate preflight scope does not match authority snapshot")
+	}
+	if err := runtimecontract.ValidateAuthorityTransaction(command.Decision, command.Transaction); err != nil {
+		return orchestratorevents.PreflightRuntimeCandidateResult{}, err
+	}
+	if err := command.DefinitionContext.Validate(); err != nil {
+		return orchestratorevents.PreflightRuntimeCandidateResult{}, err
+	}
+	if command.DefinitionContext.Normalized().Revision != command.Transaction.DefinitionRevision {
+		return orchestratorevents.PreflightRuntimeCandidateResult{}, fmt.Errorf("runtime candidate preflight definition revision does not match authority transaction")
+	}
+	if err := command.CandidateContext.Validate(command.Decision); err != nil {
+		return orchestratorevents.PreflightRuntimeCandidateResult{}, err
+	}
+	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(command.CandidateManifest, command.Decision, command.CandidateContext.Resources.TargetSelection); err != nil {
+		return orchestratorevents.PreflightRuntimeCandidateResult{}, err
+	}
+	if err := validateRuntimeCandidateRetryContract(command.CandidateAttempt, command.PreviousFailure); err != nil {
+		return orchestratorevents.PreflightRuntimeCandidateResult{}, err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	result := hub.Send(magicevent.NewEventWithContext(
+		orchestratorevents.TopicOrchestratorPreflightRuntimeCandidate,
+		ModuleID,
+		runtimecontract.RuntimeModuleLLM,
+		magicevent.NewHeader(),
+		ctx,
+		command,
+	))
+	if result == nil {
+		return orchestratorevents.PreflightRuntimeCandidateResult{}, common.ErrInvalidArgument
+	}
+	if err := prerequisiteResultError(result); err != nil {
+		return orchestratorevents.PreflightRuntimeCandidateResult{}, err
+	}
+	data, magicErr := result.Get()
+	if magicErr != nil {
+		return orchestratorevents.PreflightRuntimeCandidateResult{}, prerequisiteMagicError(magicErr)
+	}
+	response, ok := data.(orchestratorevents.PreflightRuntimeCandidateResult)
+	if !ok {
+		return orchestratorevents.PreflightRuntimeCandidateResult{}, fmt.Errorf("LLM block returned an invalid runtime candidate preflight result")
+	}
+	if err := runtimecontract.ValidateAuthorityTransaction(command.Decision, response.Transaction); err != nil {
+		return orchestratorevents.PreflightRuntimeCandidateResult{}, err
+	}
+	if response.Ready {
+		if strings.TrimSpace(response.Reason) != "" {
+			return orchestratorevents.PreflightRuntimeCandidateResult{}, fmt.Errorf("ready runtime candidate preflight returned a failure reason")
+		}
+	} else if strings.TrimSpace(response.Reason) == "" {
+		return orchestratorevents.PreflightRuntimeCandidateResult{}, fmt.Errorf("runtime candidate preflight was not ready without a reason")
+	}
+	if response.Audit != nil && response.Audit.ProviderSubmitted {
+		return orchestratorevents.PreflightRuntimeCandidateResult{}, fmt.Errorf("runtime candidate preflight must not submit a provider request")
+	}
+	return response, nil
+}
+
 func RequestRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command orchestratorevents.RequestRuntimeCandidateCommand) (orchestratorevents.RequestRuntimeCandidateResult, error) {
 	if hub == nil || command.WorkspaceID == "" || command.RunID == "" {
 		return orchestratorevents.RequestRuntimeCandidateResult{}, common.ErrInvalidArgument
@@ -32,12 +102,18 @@ func RequestRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command or
 	if err := command.CandidateContext.Validate(command.Decision); err != nil {
 		return orchestratorevents.RequestRuntimeCandidateResult{}, err
 	}
+	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(command.CandidateManifest, command.Decision, command.CandidateContext.Resources.TargetSelection); err != nil {
+		return orchestratorevents.RequestRuntimeCandidateResult{}, err
+	}
 	if command.OutputContinuation != nil {
 		if err := command.OutputContinuation.Validate(); err != nil {
 			return orchestratorevents.RequestRuntimeCandidateResult{}, err
 		}
 	}
 	if err := validateRuntimeCandidateRetryContract(command.CandidateAttempt, command.PreviousFailure); err != nil {
+		return orchestratorevents.RequestRuntimeCandidateResult{}, err
+	}
+	if err := validateRuntimeCandidateRequestIdentity(command.LogicalRequestID, command.RequestSequence, command.PhysicalCallID); err != nil {
 		return orchestratorevents.RequestRuntimeCandidateResult{}, err
 	}
 	if ctx == nil {
@@ -68,7 +144,13 @@ func RequestRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command or
 	if err := runtimecontract.ValidateAuthorityTransaction(command.Decision, response.Transaction); err != nil {
 		return orchestratorevents.RequestRuntimeCandidateResult{}, err
 	}
+	if response.LogicalRequestID != command.LogicalRequestID || response.RequestSequence != command.RequestSequence || response.PhysicalCallID != command.PhysicalCallID {
+		return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("runtime candidate result identity does not match request")
+	}
 	if response.Stale != nil {
+		if len(response.DocumentContent) != 0 {
+			return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned stale together with a complete candidate document")
+		}
 		if response.Failure != nil {
 			return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned stale together with a candidate failure")
 		}
@@ -86,22 +168,41 @@ func RequestRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command or
 		if response.Failure.Class == "" || response.Failure.Reason == "" {
 			return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned an invalid runtime candidate failure")
 		}
+		if len(response.DocumentContent) != 0 {
+			switch response.Failure.Class {
+			case runtimecontract.RuntimeCandidateFailureClassSchema, runtimecontract.RuntimeCandidateFailureClassContract:
+			default:
+				return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned a complete candidate document for non-candidate failure %s", response.Failure.Class)
+			}
+		}
 		return response, nil
 	}
 	if response.OutputFragment != nil {
+		if len(response.DocumentContent) != 0 {
+			return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned an output fragment together with a complete candidate document")
+		}
 		if err := response.OutputFragment.Validate(); err != nil {
 			return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned an invalid runtime candidate output fragment: %w", err)
 		}
 		if response.Candidate != (runtimecontract.RuntimeCandidate{}) {
 			return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned an output fragment together with a candidate")
 		}
-		if command.OutputContinuation == nil && !response.OutputFragment.ReachedProviderLimit {
-			return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("initial runtime candidate output fragment must reach the provider output limit")
-		}
+		// An initial fragment is selected by the typed decoder's structural
+		// incomplete-document outcome. ReachedProviderLimit is audit telemetry,
+		// not a state-machine gate: a mid-token EOF must continue exactly like a
+		// token-limit EOF.
 		return response, nil
 	}
 	if command.OutputContinuation != nil {
 		return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("runtime candidate output continuation returned neither a fragment nor a failure")
+	}
+	// A complete document is the authoritative C4 handoff. C5 reloads and
+	// strictly decodes it after document_complete has been CAS-persisted, so a
+	// provider response may intentionally omit the convenience decoded
+	// Candidate value. When it is present it remains a boundary sanity check,
+	// not the source used for admission.
+	if len(response.DocumentContent) != 0 && response.Candidate == (runtimecontract.RuntimeCandidate{}) {
+		return response, nil
 	}
 	// Revalidate at the EventHub boundary with the same activation-sealed MCP
 	// metadata that the LLM boundary used.  Calling Validate without activation
@@ -111,6 +212,14 @@ func RequestRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command or
 		return orchestratorevents.RequestRuntimeCandidateResult{}, err
 	}
 	return response, nil
+}
+
+// validateRuntimeCandidateRequestIdentity keeps the EventHub boundary on the
+// same pure value contract as the LLM owner. Every physical provider request
+// must carry its persisted-session identity; empty compatibility triples are
+// not a Runtime V2 contract.
+func validateRuntimeCandidateRequestIdentity(logicalRequestID string, sequence int, physicalCallID string) error {
+	return runtimecontract.ValidateRuntimeCandidateRequestIdentity(logicalRequestID, sequence, physicalCallID)
 }
 
 func validateRuntimeCandidateRetryContract(attempt int, previousFailure *runtimecontract.RuntimeCandidateFailure) error {

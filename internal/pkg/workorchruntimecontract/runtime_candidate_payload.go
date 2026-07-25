@@ -3,11 +3,71 @@ package workorchruntimecontract
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
+
+// RuntimeCandidateDocumentDisposition classifies the provider response before
+// any candidate attempt is allocated.  It is deliberately a pure payload
+// boundary type: deciding whether to continue, retry transport or create an
+// attempt remains the Orchestrator's responsibility.
+type RuntimeCandidateDocumentDisposition string
+
+const (
+	RuntimeCandidateDocumentComplete   RuntimeCandidateDocumentDisposition = "complete_document"
+	RuntimeCandidateDocumentIncomplete RuntimeCandidateDocumentDisposition = "incomplete_document"
+	RuntimeCandidateDocumentEmpty      RuntimeCandidateDocumentDisposition = "empty_document"
+)
+
+// RuntimeCandidatePayloadIncompleteError means the JSON decoder reached the
+// end of the provider stream while decoding the first candidate document.  It
+// is distinct from a complete-but-invalid document (including trailing JSON).
+// Callers must not use error strings or provider usage to infer this state.
+type RuntimeCandidatePayloadIncompleteError struct {
+	Cause error
+}
+
+func (e *RuntimeCandidatePayloadIncompleteError) Error() string {
+	if e == nil || e.Cause == nil {
+		return "runtime candidate document is incomplete"
+	}
+	return "runtime candidate document is incomplete: " + e.Cause.Error()
+}
+
+func (e *RuntimeCandidatePayloadIncompleteError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+// RuntimeCandidatePayloadEmptyError is a successful provider response with no
+// candidate document. It is a provider/session outcome, never a schema retry.
+type RuntimeCandidatePayloadEmptyError struct{}
+
+func (*RuntimeCandidatePayloadEmptyError) Error() string {
+	return "runtime candidate document is empty"
+}
+
+// RuntimeCandidateDocumentDispositionForError exposes the structural decoder
+// classification without letting callers parse implementation-specific text.
+func RuntimeCandidateDocumentDispositionForError(err error) RuntimeCandidateDocumentDisposition {
+	if err == nil {
+		return RuntimeCandidateDocumentComplete
+	}
+	var empty *RuntimeCandidatePayloadEmptyError
+	if errors.As(err, &empty) {
+		return RuntimeCandidateDocumentEmpty
+	}
+	var incomplete *RuntimeCandidatePayloadIncompleteError
+	if errors.As(err, &incomplete) {
+		return RuntimeCandidateDocumentIncomplete
+	}
+	return RuntimeCandidateDocumentComplete
+}
 
 // DecodeRuntimeCandidatePayload is the owner-neutral, strict DTO decoder for
 // a completed provider candidate document. It performs no state transition or
@@ -64,10 +124,107 @@ func DecodeRuntimeCandidatePayload(action RuntimeAction, payload []byte) (Runtim
 	}
 }
 
+// EncodeRuntimeCandidatePayloadWithManifest is the pure canonical wire encoder
+// used by deterministic fixtures. It deliberately accepts the sealed manifest
+// rather than a RuntimeAction so a fixture cannot produce JSON that the active
+// renderer/decoder contract would reject. Production never uses this helper to
+// reinterpret provider output.
+func EncodeRuntimeCandidatePayloadWithManifest(manifest RuntimeCandidateContractManifest, candidate RuntimeCandidate) ([]byte, error) {
+	manifest = manifest.Normalized()
+	if manifest.Revision != RuntimeCandidateContractManifestRevision || manifest.Hash == "" ||
+		manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) {
+		return nil, fmt.Errorf("runtime candidate contract manifest is invalid")
+	}
+	if err := ValidateRuntimeCandidateAgainstManifest(manifest, candidate); err != nil {
+		return nil, err
+	}
+	var payload any
+	switch manifest.Action {
+	case RuntimeActionProduceStateChange:
+		if candidate.StateChange == nil {
+			return nil, fmt.Errorf("state-change candidate is missing its wire payload")
+		}
+		payload = runtimeCandidateOperationPayloadForCandidate(candidate.StateChange.Operations, nil)
+	case RuntimeActionProduceValidation:
+		if candidate.Validation == nil {
+			return nil, fmt.Errorf("validation candidate is missing its wire payload")
+		}
+		payload = runtimeCandidateOperationPayloadForCandidate(nil, candidate.Validation.Operations)
+	case RuntimeActionProduceAssessment:
+		if candidate.Assessment == nil {
+			return nil, fmt.Errorf("assessment candidate is missing its wire payload")
+		}
+		payload = runtimeCandidateAssessmentPayloadForCandidate(*candidate.Assessment)
+	case RuntimeActionRequestGovernance:
+		if candidate.Governance == nil {
+			return nil, fmt.Errorf("governance candidate is missing its wire payload")
+		}
+		payload = runtimeCandidateGovernancePayload{ExternalDependency: runtimeCandidateExternalDependency{
+			Kind: candidate.Governance.ExternalDependency.Kind, SubjectRef: candidate.Governance.ExternalDependency.SubjectRef,
+			Reason: candidate.Governance.ExternalDependency.Reason,
+		}}
+	default:
+		return nil, fmt.Errorf("runtime action %s does not accept an LLM candidate", manifest.Action)
+	}
+	document, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	decoded, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, document)
+	if err != nil {
+		return nil, err
+	}
+	if StableRuntimeCandidateHash(decoded) != StableRuntimeCandidateHash(candidate) {
+		return nil, fmt.Errorf("canonical candidate payload changed candidate semantics")
+	}
+	return document, nil
+}
+
+func runtimeCandidateOperationPayloadForCandidate(stateChanges []StateChangingOperation, validations []ValidationOperation) runtimeCandidateOperationPayload {
+	operations := make([]RuntimeOperation, 0, len(stateChanges)+len(validations))
+	for _, operation := range stateChanges {
+		operations = append(operations, operation.Operation)
+	}
+	for _, operation := range validations {
+		operations = append(operations, operation.Operation)
+	}
+	payload := runtimeCandidateOperationPayload{Operations: make([]runtimeCandidateOperation, 0, len(operations))}
+	for _, operation := range operations {
+		value := runtimeCandidateOperation{ID: operation.ID, Kind: operation.Kind, RequiredOperationRef: operation.RequiredOperationRef,
+			DependsOn: append([]string(nil), operation.DependsOn...), CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), operation.CoverageWorkItemIDs...),
+			TargetRefs: append([]string(nil), operation.TargetRefs...), Parameters: make([]runtimeCandidateParameter, 0, len(operation.Parameters))}
+		for _, parameter := range operation.Parameters {
+			value.Parameters = append(value.Parameters, runtimeCandidateParameter{Name: parameter.Name, String: parameter.String, Integer: parameter.Integer, Boolean: parameter.Boolean, StringList: append([]string(nil), parameter.StringList...)})
+		}
+		payload.Operations = append(payload.Operations, value)
+	}
+	return payload
+}
+
+func runtimeCandidateAssessmentPayloadForCandidate(assessment AssessmentCandidate) runtimeCandidateAssessmentPayload {
+	value := runtimeCandidateAssessmentPayload{FocusID: assessment.FocusID, SliceID: assessment.SliceID,
+		CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), assessment.CoverageWorkItemIDs...), Disposition: string(assessment.Disposition),
+		Summary: assessment.Summary, EvidenceRefs: append([]string(nil), assessment.EvidenceRefs...), ArtifactRefs: append([]string(nil), assessment.ArtifactRefs...)}
+	for _, item := range assessment.Items {
+		value.Items = append(value.Items, runtimeCandidateAssessmentItem{CoverageWorkItemID: item.CoverageWorkItemID, Satisfied: item.Satisfied, Reason: item.Reason, EvidenceRefs: append([]string(nil), item.EvidenceRefs...)})
+	}
+	if assessment.Gap != nil {
+		gap := assessment.Gap
+		value.Gap = &runtimeCandidateAssessmentGap{CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), gap.CoverageWorkItemIDs...), MissingEvidenceKinds: append([]string(nil), gap.MissingEvidenceKinds...), TargetRefs: append([]string(nil), gap.TargetRefs...), EvidenceRefs: append([]string(nil), gap.EvidenceRefs...), Reason: gap.Reason, FailureClass: string(gap.FailureClass), FailureCode: gap.FailureCode, FailureSignature: gap.FailureSignature}
+	}
+	return value
+}
+
 func strictDecodeRuntimeCandidatePayload(payload []byte, target any) error {
+	if len(bytes.TrimSpace(payload)) == 0 {
+		return &RuntimeCandidatePayloadEmptyError{}
+	}
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			return &RuntimeCandidatePayloadIncompleteError{Cause: err}
+		}
 		return err
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
