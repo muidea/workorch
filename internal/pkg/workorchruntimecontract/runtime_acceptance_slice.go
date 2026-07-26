@@ -19,7 +19,14 @@ const (
 	RuntimeAcceptanceSliceMaxWorkItemsMax = 32
 	RuntimeAcceptanceSliceDefaultMaxItems = 1
 	RuntimeAcceptanceFocusMaxCount        = 64
-	RuntimeCandidateContextItemsMaxCount  = 32
+	// RuntimeOwnerInventoryItemsMaxCount bounds a complete capability-owner
+	// feasibility inventory, including File target selection and operation
+	// admissibility. It is deliberately independent from
+	// MaxCandidateContextItems: owner inventory establishes an SM-2 fact,
+	// whereas the latter bounds one candidate request's contextual work-item
+	// projection.
+	RuntimeOwnerInventoryItemsMaxCount   = 32
+	RuntimeCandidateContextItemsMaxCount = 32
 )
 
 // RuntimeAcceptanceSlicePolicy is the typed activation policy for grouping coverage

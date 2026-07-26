@@ -201,6 +201,7 @@ const (
 	RuntimeCandidateCorrectionRemoveForbiddenField RuntimeCandidateCorrectionObjective = "remove_forbidden_field"
 	RuntimeCandidateCorrectionSupplyRequiredField  RuntimeCandidateCorrectionObjective = "supply_required_field"
 	RuntimeCandidateCorrectionReplaceTarget        RuntimeCandidateCorrectionObjective = "replace_target_with_allowed_target"
+	RuntimeCandidateCorrectionSelectOperationKind  RuntimeCandidateCorrectionObjective = "select_allowed_operation_kind"
 	RuntimeCandidateCorrectionSelectDurableEffect  RuntimeCandidateCorrectionObjective = "select_durable_effect"
 	RuntimeCandidateCorrectionChangeReplayedShape  RuntimeCandidateCorrectionObjective = "change_replayed_shape"
 	RuntimeCandidateCorrectionSatisfyCoverage      RuntimeCandidateCorrectionObjective = "satisfy_required_coverage"
@@ -263,6 +264,9 @@ func RuntimeCandidateCorrectionObjectivesForFailure(failure *RuntimeCandidateFai
 	}
 	if (strings.Contains(diagnostic.Path, "targetRefs") || strings.Contains(diagnostic.Path, "targetRef")) && len(diagnostic.Allowed) != 0 {
 		objectives = append(objectives, RuntimeCandidateCorrectionReplaceTarget)
+	}
+	if strings.HasSuffix(diagnostic.Path, ".kind") && len(diagnostic.Allowed) != 0 {
+		objectives = append(objectives, RuntimeCandidateCorrectionSelectOperationKind)
 	}
 	if strings.Contains(diagnostic.Path, "coverage") {
 		objectives = append(objectives, RuntimeCandidateCorrectionSatisfyCoverage)

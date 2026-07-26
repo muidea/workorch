@@ -353,6 +353,75 @@ func TestEvaluateCandidateAdmissionWorkspaceScopeDoesNotAuthorizeOtherDurableOwn
 	}
 }
 
+func TestEvaluateCandidateAdmissionWorkspaceScopeAllowsExplicitFileGroundedTechnicalOperation(t *testing.T) {
+	aggregate := stateChangeAggregate(t)
+	aggregate.Facts.Focus.RequireTargetGrounding = true
+	aggregate.Facts.Focus.TargetRole = "deliverable"
+	aggregate.Facts.Focus.TargetRefs = nil
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "target-selection-scope", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: "deliverable",
+		SelectorRef: "file/workspace_deliverable", Disposition: runtimecontract.RuntimeTargetSelectionScope,
+		TargetRefs: []string{"go.mod", "go.sum"}, CandidateTargetRefs: []string{"go.mod", "go.sum"}, CandidateCount: 2, ObservedRevision: "workspace-tree-v1",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	aggregate.Facts.Resources.TargetSelection = &selection
+	bindCurrentFocusTargetSelection(&aggregate.Facts)
+
+	shell := runtimecontract.RuntimeOperation{ID: "tidy-modules", Kind: runtimecontract.StepKindShellCommand, TargetRefs: []string{"go.sum"}}
+	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: shell}}}}
+	if result := rejectCandidateOutsideGroundedTargets(aggregate.Facts, aggregate.Decision, candidate); !result.Accepted() {
+		t.Fatalf("File-grounded shell operation rejected: %+v", result)
+	}
+}
+
+func TestEvaluateCandidateAdmissionWorkspaceScopeRejectsTechnicalOperationOutsideFileInventoryOrMixedOwnerBypass(t *testing.T) {
+	aggregate := stateChangeAggregate(t)
+	aggregate.Facts.Focus.RequireTargetGrounding = true
+	aggregate.Facts.Focus.TargetRole = "deliverable"
+	aggregate.Facts.Focus.TargetRefs = nil
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "target-selection-scope", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: "deliverable",
+		SelectorRef: "file/workspace_deliverable", Disposition: runtimecontract.RuntimeTargetSelectionScope,
+		TargetRefs: []string{"go.mod", "go.sum"}, CandidateTargetRefs: []string{"go.mod", "go.sum"}, CandidateCount: 2, ObservedRevision: "workspace-tree-v1",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	aggregate.Facts.Resources.TargetSelection = &selection
+	bindCurrentFocusTargetSelection(&aggregate.Facts)
+
+	tests := []struct {
+		name      string
+		candidate runtimecontract.RuntimeCandidate
+	}{
+		{
+			name: "shell outside inventory",
+			candidate: runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{
+				Operation: runtimecontract.RuntimeOperation{ID: "tidy-outside", Kind: runtimecontract.StepKindShellCommand, TargetRefs: []string{"outside.go"}},
+			}}}},
+		},
+		{
+			name: "shell missing target",
+			candidate: runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{
+				Operation: runtimecontract.RuntimeOperation{ID: "tidy-no-target", Kind: runtimecontract.StepKindShellCommand},
+			}}}},
+		},
+		{
+			name: "mixed file and git durable operations",
+			candidate: runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{
+				{Operation: patchApplyTestOperation("write-go-sum", "go.sum")},
+				{Operation: runtimecontract.RuntimeOperation{ID: "git-bypass", Kind: runtimecontract.StepKindGitWrite, TargetRefs: []string{"go.sum"}}},
+			}}},
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			result := rejectCandidateOutsideGroundedTargets(aggregate.Facts, aggregate.Decision, testCase.candidate)
+			if result.Disposition != CandidateAdmissionRejectedContract || result.Failure == nil || result.Failure.Code != candidateAdmissionCodeTargetOutsideGrounding {
+				t.Fatalf("workspace scope bypass result = %+v", result)
+			}
+		})
+	}
+}
+
 func TestEvaluateCandidateAdmissionCreationScopeRequiresConcreteDurableFileTarget(t *testing.T) {
 	aggregate := stateChangeAggregate(t)
 	aggregate.Facts.Focus.RequireTargetGrounding = true
@@ -384,6 +453,12 @@ func TestEvaluateCandidateAdmissionCreationScopeRequiresConcreteDurableFileTarge
 	fileCandidate.StateChange.Operations[0].Operation.Parameters = patchApplyTestParameters(newTarget)
 	if result := rejectCandidateOutsideGroundedTargets(aggregate.Facts, aggregate.Decision, fileCandidate); !result.Accepted() {
 		t.Fatalf("concrete File creation candidate rejected before File owner feasibility: %+v", result)
+	}
+	shellCandidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{
+		Operation: runtimecontract.RuntimeOperation{ID: "shell-create-bypass", Kind: runtimecontract.StepKindShellCommand, TargetRefs: []string{newTarget}},
+	}}}}
+	if result := rejectCandidateOutsideGroundedTargets(aggregate.Facts, aggregate.Decision, shellCandidate); result.Disposition != CandidateAdmissionRejectedContract || result.Failure == nil || result.Failure.Code != candidateAdmissionCodeTargetOutsideGrounding {
+		t.Fatalf("shell creation-scope candidate admission = %+v", result)
 	}
 }
 

@@ -902,7 +902,16 @@ func closeCandidateAttempt(aggregate *RuntimeAggregate, idx, attempt int, failur
 		failure.ValidationDiagnostic = &diagnostic
 		diagnosticClass = diagnostic.Class
 	}
-	failure.Diagnostic = failure.Diagnostic.Clone()
+	if failure.Diagnostic != nil {
+		diagnostic := failure.Diagnostic.Normalized()
+		if diagnostic.ManifestHash == "" {
+			diagnostic.ManifestHash = aggregate.CandidateAttempts[idx].ManifestHash
+		}
+		failure.Diagnostic = &diagnostic
+		if len(failure.Diagnostic.Objectives) == 0 {
+			failure.Diagnostic.Objectives = runtimecontract.RuntimeCandidateCorrectionObjectivesForFailure(&failure)
+		}
+	}
 	needsInfeasibleRepair := failure.Class == runtimecontract.RuntimeCandidateFailureClassInfeasible &&
 		aggregate.Decision.Action == runtimecontract.RuntimeActionProduceValidation &&
 		runtimecontract.RuntimeValidationFailureRequiresStateChange(aggregate.Facts.Activation.ExecutionContract.ValidationPolicies, runtimecontract.EvidenceKindValidation, diagnosticClass)

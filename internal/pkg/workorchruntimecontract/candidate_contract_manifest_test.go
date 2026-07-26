@@ -41,6 +41,42 @@ func TestBuildRuntimeCandidateContractManifestNarrowsCreationScopeWithoutSecondF
 	}
 }
 
+func TestBuildRuntimeCandidateContractManifestScopeAllowsOnlyDescriptorDeclaredGroundedKind(t *testing.T) {
+	decision := RuntimeDecision{
+		Action: RuntimeActionProduceStateChange,
+		RequiredOutput: RequiredOutputContract{
+			Kind:                  RequiredOutputKindStateChange,
+			AcceptedKinds:         []string{StepKindGitWrite, StepKindShellCommand, RuntimeBlockKindPatchApply},
+			AcceptedEffectScopes:  []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			RequiredEffectScopes:  []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			RequiredEvidenceKinds: []string{EvidenceKindStateChange},
+			CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-1"},
+		},
+	}
+	selection := &RuntimeTargetSelection{
+		OwnerModuleID: RuntimeModuleFile, Disposition: RuntimeTargetSelectionScope,
+		CandidateTargetRefs: []string{"go.sum", "go.mod"},
+	}
+	manifest, err := BuildRuntimeCandidateContractManifest(decision, selection)
+	if err != nil {
+		t.Fatalf("BuildRuntimeCandidateContractManifest: %v", err)
+	}
+	kinds := make([]string, 0, len(manifest.Operations))
+	for _, operation := range manifest.Operations {
+		kinds = append(kinds, operation.Kind)
+	}
+	if want := []string{RuntimeBlockKindPatchApply, StepKindShellCommand}; !reflect.DeepEqual(kinds, want) {
+		t.Fatalf("scope manifest kinds = %v, want %v", kinds, want)
+	}
+	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"id":"tidy","kind":"shell/command","coverageWorkItemIds":["cwi-1"],"targetRefs":["go.sum"],"parameters":[{"name":"command","string":"go"},{"name":"args","stringList":["mod","tidy"]},{"name":"stateChanging","boolean":true},{"name":"targetRef","string":"go.sum"}]}]}`))
+	if err != nil {
+		t.Fatalf("decode File-grounded shell candidate: %v", err)
+	}
+	if err := ValidateRuntimeCandidateAgainstManifest(manifest, candidate); err != nil {
+		t.Fatalf("validate File-grounded shell candidate: %v", err)
+	}
+}
+
 func TestBuildRuntimeCandidateContractManifestProjectsDescriptorParametersAndVariants(t *testing.T) {
 	decision := RuntimeDecision{
 		Action: RuntimeActionProduceStateChange,

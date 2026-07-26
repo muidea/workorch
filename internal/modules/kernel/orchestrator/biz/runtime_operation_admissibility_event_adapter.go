@@ -15,7 +15,7 @@ import (
 
 func AcquireRuntimeOperationAdmissibilityPrerequisite(ctx context.Context, hub magicevent.Hub, command orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand) (orchestratorevents.AcquireRuntimeOperationAdmissibilityResult, error) {
 	if hub == nil || command.WorkspaceID == "" || command.RunID == "" || strings.TrimSpace(command.AuthoritySnapshotID) == "" ||
-		strings.TrimSpace(command.PrerequisiteID) == "" || strings.TrimSpace(command.OwnerModuleID) == "" || strings.TrimSpace(command.WorkspaceDeliverableDirectory) == "" || len(command.RequiredKinds) == 0 || command.MaxItems < 1 || command.MaxItems > runtimecontract.RuntimeCandidateContextItemsMaxCount {
+		strings.TrimSpace(command.PrerequisiteID) == "" || strings.TrimSpace(command.OwnerModuleID) == "" || strings.TrimSpace(command.WorkspaceDeliverableDirectory) == "" || len(command.RequiredKinds) == 0 || command.MaxItems < 1 || command.MaxItems > runtimecontract.RuntimeOwnerInventoryItemsMaxCount {
 		return orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{}, common.ErrInvalidArgument
 	}
 	if err := validateAdmissibilityOwnerKinds(command.OwnerModuleID, command.RequiredKinds); err != nil {

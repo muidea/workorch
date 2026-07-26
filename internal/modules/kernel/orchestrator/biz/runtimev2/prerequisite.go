@@ -327,9 +327,13 @@ func applyPrerequisiteResult(facts *runtimecontract.RuntimeFacts, prerequisite r
 		if inventory.AcquisitionBinding != "" && !runtimeCapabilityStateBindingExists(facts.Resources.CapabilityStates, inventory.OwnerModuleID, inventory.AcquisitionBinding) {
 			return fmt.Errorf("operation admissibility inventory references an unknown owner capability-state acquisition binding")
 		}
-		maxItems := facts.ConvergencePolicy.MaxCandidateContextItems
+		// Owner inventories establish admissibility facts for SM-2 and must
+		// remain complete enough to cover a target produced by an accepted
+		// earlier operation.  They are not the per-request candidate-context
+		// projection controlled by MaxCandidateContextItems.
+		maxItems := runtimecontract.RuntimeOwnerInventoryItemsMaxCount
 		if maxItems < 1 || len(inventory.TargetRefs) > maxItems || len(inventory.SelectorRefs) > maxItems {
-			return fmt.Errorf("operation admissibility inventory exceeds sealed candidate context bound")
+			return fmt.Errorf("operation admissibility inventory exceeds owner inventory bound")
 		}
 		required := make([]string, 0, len(prerequisite.RequiredCapabilities))
 		for _, kind := range prerequisite.RequiredCapabilities {

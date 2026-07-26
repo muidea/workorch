@@ -31,7 +31,7 @@ func NewRuntimeOperationAdmissibilityWithBinding(prerequisiteID, ownerModuleID s
 func ValidateRuntimeOperationAdmissibilityCommand(command AcquireRuntimeOperationAdmissibilityCommand, ownerModuleID string) error {
 	if command.WorkspaceID == "" || command.RunID == "" || strings.TrimSpace(command.AuthoritySnapshotID) == "" ||
 		strings.TrimSpace(command.PrerequisiteID) == "" || strings.TrimSpace(command.WorkspaceDeliverableDirectory) == "" ||
-		strings.TrimSpace(command.OwnerModuleID) == "" || command.OwnerModuleID != ownerModuleID || len(command.RequiredKinds) == 0 || command.MaxItems < 1 || command.MaxItems > runtimecontract.RuntimeCandidateContextItemsMaxCount {
+		strings.TrimSpace(command.OwnerModuleID) == "" || command.OwnerModuleID != ownerModuleID || len(command.RequiredKinds) == 0 || command.MaxItems < 1 || command.MaxItems > runtimecontract.RuntimeOwnerInventoryItemsMaxCount {
 		return common.ErrInvalidArgument
 	}
 	for _, kind := range command.RequiredKinds {

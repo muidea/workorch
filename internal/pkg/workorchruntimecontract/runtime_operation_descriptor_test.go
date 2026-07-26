@@ -82,6 +82,14 @@ func TestRuntimeOperationDescriptorForKindCanonicalAndUnknown(t *testing.T) {
 	if !ok || patch.AllowsNewTarget {
 		t.Fatalf("patch/apply descriptor must not claim absent-target create semantics: %+v", patch)
 	}
+	shell, ok := RuntimeOperationDescriptorForKind(StepKindShellCommand)
+	if !ok || !shell.AllowsGroundedWorkspaceTarget {
+		t.Fatalf("shell/command descriptor must explicitly allow File-grounded existing targets: %+v", shell)
+	}
+	git, ok := RuntimeOperationDescriptorForKind(StepKindGitWrite)
+	if !ok || git.AllowsGroundedWorkspaceTarget {
+		t.Fatalf("git/write must not inherit File-grounded target authority: %+v", git)
+	}
 }
 
 func TestOperationSideEffectsDeriveFromDescriptor(t *testing.T) {

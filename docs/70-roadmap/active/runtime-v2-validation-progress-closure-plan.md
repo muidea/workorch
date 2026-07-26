@@ -4,7 +4,7 @@ Status: active
 
 Type: implementation closure plan
 
-Last Updated: 2026-07-25
+Last Updated: 2026-07-26
 
 Execution Revision: R4 — single-source contract, reachable-owner closure, then convergence gates
 
@@ -704,6 +704,96 @@ SM-3 sealed dispatch、scheduler、TUI 或 Web 的恢复语义。
 recipe 和 profile deliverable 必须成功编译为 14 个 focus，且任一 focus 不得超过 4 个 coverage work item。
 `defaults_test.go` 同时固定 production 默认模板使用 64，而非在测试或 UI 侧覆盖 workspace contract。
 
+#### P6 complete schema rejection 的 correction 闭环
+
+2026-07-26 的 fresh live 在完成容量对齐后成功创建 Run，并依次落盘 bootstrap 产物、执行 validation、
+进入同一 focus 的 repair。随后 provider 返回一个 complete JSON candidate，其
+`$.operations[0].kind=shell/command` 不属于该 sealed state-change manifest 允许的
+`file/write,patch/apply`。严格 decoder 按当时的 manifest 正确拒绝该输出；不得因模型违反合同而放宽 decoder、
+创建 governance ticket 或由 TUI/Web Resume 补偿。后续若要让技术 operation 进入该候选空间，必须先由
+descriptor 与 SM-3 admission 同时声明、测试并封存其精确 target 权限，不能仅修改 prompt 或 allow-list。
+
+该样本暴露的是 P3 correction projection 缺口：typed payload diagnostic 已拥有 `path`、`actual` 与
+`allowed`，但 `.kind` 不会派生 correction objective，failed attempt 也未统一固化 `manifestHash` 与派生
+objective，导致 attempt 1 前的 guard 错误终止为 `candidate_correction_undefined`。收口后，SM-3 在同一
+CAS 中把该 diagnostic 固化为 `select_allowed_operation_kind`，并绑定原 manifest hash；只允许同一 authority
+contract 的一次 correction request。C4 仅渲染这一 provider-safe typed delta，原始 decoder/provider 文本仍只
+留在 audit。attempt 1 若仍失败，既有 `candidate_retry_exhausted` 终态保持不变。
+
+回归至少覆盖：`.kind` 的 allowed operation kinds 必须生成唯一 objective；retry 收到同一 transaction、
+manifest hash、path/actual/allowed/objective；无 objective 的失败仍不得请求模型；attempt 1 失败仍零第三次
+provider call。该修复只影响 SM-3 candidate/admission/request-session，不改变 SM-1 Run lifecycle、SM-2
+authority/focus 或 SM-4 recovery/projection 的职责。
+
+#### P6 owner inventory 与 candidate-context 预算隔离
+
+2026-07-26 的 fresh live `ws-025ecc6a936133bb/run-002` 已证明 activation、Run 建立、候选请求和 File
+receipt 均可达；在同一 focus 产生 `go.mod`、`go.sum`、`internal/lsp/manager.go`、
+`internal/lsp/manager_test.go` 与 `internal/lsp/tools.go` 后，最终以
+`target_grounding_unresolved` 终止。持久化 target-selection receipt 的实际事实为：workspace 有 5 个文件，
+但 `MaxCandidateContextItems=4` 被错误透传到 File `AcquireRuntimeTargetSelectionCommand.MaxItems`，使 File
+只能投影前 4 个候选并正确报告 `ambiguous`。这不是 LLM、TUI、scheduler、decision/approval 或目标校验过严：
+是把 SM-3 的单请求上下文预算误用于 SM-2 的 owner inventory。
+
+同一根因还存在于 operation-admissibility 链：state-changing receipt 新建目标后，下一轮 validation 仍以 4
+项预算取得 File inventory，目标可能不在 `TargetRefs`，从而被 File 正确拒绝为
+`operation_target_not_admissible`。只修 selection 会把终止从第一跳推迟到 validation，不能构成收口。
+
+收口合同如下：
+
+1. `RuntimeOwnerInventoryItemsMaxCount=32` 是 File target-selection 与各 owner operation-admissibility
+   完整、有界 feasibility inventory 的唯一上限；该纯合同常量不表达 action、状态迁移或 provider 行为。
+2. `MaxCandidateContextItems` 继续只约束每个 focus/slice 的 candidate-context work-item 规模，production
+   software-dev 值保持 4；它不得参与 owner inventory command、owner adapter 参数校验或
+   `CommitPrerequisiteResult` 的完整性校验。
+3. File 在 inventory 不超过 32 时必须返回完整 `scope`；SM-2 可以据此继续但仍不选文件。SM-3 仍必须提交
+   具体 workspace-relative File target；File feasibility/receipt 仍是最终授权方。超过 32 或不完整 inventory
+   继续返回 typed `ambiguous`，并保持零 provider/ticket/effect 的负向边界。
+4. receipt 导致 workspace tree 改变后，重新取得的 operation-admissibility 必须包含新目标，以允许下一张
+   sealed validation 使用它；这不是把先前 scope 升格为 repair target，也不允许历史 selection 越 focus
+   复用。
+
+影响范围仅为 SM-2 prerequisite acquisition/commit 与 File owner producer：
+`workorchruntimecontract` 只新增纯上限合同，`orchestrator/biz` 只传递该上限，
+`orchestrator/biz/runtimev2` 只校验 owner receipt，File owner 只产生其自身 inventory。TargetSelection 与
+OperationAdmissibility 的 typed EventHub command/receiver 也必须在投递前及 owner 接收边界使用同一 owner
+上限，不能仅因当前两个常量都为 32 而继续引用 candidate-context 常量。SM-1 lifecycle、SM-3 candidate
+action/correction、SM-4 drive/recovery、TUI/Web 均不得修改。
+
+`TestRuntimeV2FileBackedBoundedWorkspaceScopeAllowsNewDeliverable` 固定回归：候选上下文预算为 4、初始
+workspace 文件为 5 时，File 必须提交完整 scope，后续新文件必须出现在重取的 admissibility inventory，且
+state change → validation → assessment 正常完成。`TestRuntimeAdapterAcquireRuntimeTargetSelectionIsCardinalityBounded`
+与 target-selection / operation-admissibility event contract test 继续守护 32 以上的 typed 拒绝边界和零 owner
+投递边界。
+
+#### P6 File scope 内的技术 operation 收口
+
+同一 fresh Run 的后续 validation failure 已提供明确的 owner-bound 修复路径：`go.sum` 位于 File selection 的
+existing scope，Shell 也已通过 capability/admissibility receipt 封存 `shell/command`。但旧 manifest compiler
+将任何 File `scope` 一律缩窄为 durable File kinds，SM-3 也只接受 File owner，因此 provider 提出的
+`shell/command` 在 strict decode 阶段被排除，迫使模型伪造 checksum 文件内容。这是 manifest/admission 对
+已封存 technical owner 的不一致，不是扩大 workspace authority 的理由。
+
+收口合同如下：
+
+1. `RuntimeOperationDescriptor.AllowsGroundedWorkspaceTarget` 是纯技术合同属性。它仅表示 operation 可作用于
+   File owner 已明确列出的**既有** workspace-relative target；它不允许 discovery、猜测、新建目标或跨 owner
+   authority。当前只由 `shell/command` 声明；`git/write`、`mcp/tool_call`、SSH、Web 等均不得继承。
+2. File `create` 继续只编译 durable File kind，Shell 不能作用于 prospective/new target。File `scope` 才可在
+   原有 durable File kind 之外编译该显式声明的 kind；sealed capability、operation-admissibility 和 owner receipt
+   仍逐层必需。
+3. SM-3 对 scope 中每一个 durable operation 分别校验：File operation 必须有 concrete target；声明该属性的
+   technical operation 必须有非空 targetRefs，且每个 target 都属于 `CandidateTargetRefs`（旧持久化 receipt 才
+   可回退 `TargetRefs`）。任何 Git/MCP/SSH/Web operation，或 File + 越权 operation 的混合 candidate，均整体拒绝。
+4. descriptor 属性进入 `RuntimeOperationContractRevision`。新 binary 必须以 fresh activation/run 执行；不为
+   已持久化 run 添加兼容或隐式 Resume。
+
+回归至少覆盖：scope manifest 的 File + Shell 正向编译和 strict decode；Shell 的 scope 内、scope 外、无 target；
+Git 及 File+Git mixed candidate；create scope 下 Shell 拒绝；descriptor/revision 的负向 owner 边界。
+`TestRuntimeV2FileBackedWorkspaceScopeExecutesTargetBoundShellOperation` 进一步通过真实 File + Shell owner 证明：
+Shell 只修改 scope 中的 `go.sum`，其 receipt 引起 File-dependent prerequisite 刷新，但 state-changing Shell dispatch
+仍恰好一次。P5 的 owner receipt/restart 基线继续守护已封存 Shell execution 不重放。
+
 #### P6 当前证据（2026-07-25）
 
 2026-07-25 的 real-provider isolated artifact
@@ -761,6 +851,20 @@ HTTP、template/soul、mock LLM workspace 和 MCP stdio workspace 样本全部�
 `/tmp/workorch-p6-scripted-contract-20260725T134228Z` 完整执行同一 gate；`artifactContractVersion=1` 的
 摘要确认 config/data/server log 均为该 artifact 内的临时路径、managed server 已停止，并确认全部六项
 scripted gate 为 true。该次结果验证 verifier 自身没有将旧 artifact 或仓库运行目录误作为正向证据。
+2026-07-26 以新的隔离根目录
+`/tmp/workorch-e2e/runtime-v2-p6-scripted-20260726T0727Z` 再次执行 `make verify-runtime-v2-p6-scripted`；
+`p6-scripted-summary.json` 仍为 `artifactContractVersion=1`、`status=passed`，六项 gate 均为 true。其
+`verify-ci-mvp-file` 日志记录 MCP stdio workspace 的 `runState=completed`、`completedDispatches=4` 与
+`evidenceSequence=4`，并确认 managed server 已停止。该轮使用当前收口工作树，只补 scripted/mock 证据，
+不得替代 fresh real-provider 或 deployed-recovery artifact。
+2026-07-26 又以全新隔离根目录
+`/tmp/workorch-e2e/runtime-v2-p6-scripted-serial-20260726T004734Z` 执行同一 gate；为排除宿主机并行
+package 测试的短暂 EventHub 夹具时序干扰，调用方仅设置 `GOFLAGS=-p=1`，测试集合、`-count=1`、临时
+config/data/workspace root 与 verifier 合同均未改变。`p6-scripted-summary.json` 为
+`artifactContractVersion=1`、`status=passed`，并再次确认 fmt、console build、vet、全仓 Go test、binary
+build 与 `verify-ci-mvp-file` 六项 gate 全部通过；后者记录 `runState=completed`、
+`completedDispatches=4`、`evidenceSequence=4`。该 artifact 仍只证明 scripted/mock 路径，不替代 fresh
+real-provider 或 deployed-recovery 证据。
 最新部署的首个真实 provider 样本返回 `400 This response_format type is unavailable now`；其 catalog 仅声明
 `chat_completions` 和容量，未声明 `response_format`。因此将该问题归类为 F0 provider capability/request
 失真：adapter 不得由 OpenAI-compatible surface 或 catalog operation 虚构 JSON Schema/JSON object 支持，

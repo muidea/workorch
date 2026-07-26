@@ -72,7 +72,7 @@ func AcquireAndCommitTargetSnapshotPrerequisite(ctx context.Context, hub magicev
 }
 
 func AcquireRuntimeTargetSelectionPrerequisite(ctx context.Context, hub magicevent.Hub, command orchestratorevents.AcquireRuntimeTargetSelectionCommand) (orchestratorevents.AcquireRuntimeTargetSelectionResult, error) {
-	if hub == nil || command.WorkspaceID == "" || command.RunID == "" || command.AuthoritySnapshotID == "" || command.PrerequisiteID == "" || command.TargetRole == "" || command.TargetSelectorRef == "" || command.MaxItems < 1 {
+	if hub == nil || command.WorkspaceID == "" || command.RunID == "" || command.AuthoritySnapshotID == "" || command.PrerequisiteID == "" || command.TargetRole == "" || command.TargetSelectorRef == "" || command.MaxItems < 1 || command.MaxItems > runtimecontract.RuntimeOwnerInventoryItemsMaxCount {
 		return orchestratorevents.AcquireRuntimeTargetSelectionResult{}, common.ErrInvalidArgument
 	}
 	if ctx == nil {

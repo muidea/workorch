@@ -17,6 +17,7 @@ import (
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
 	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -111,6 +112,14 @@ func TestAcquireRuntimeTargetSelectionPrerequisiteUsesTypedEventHubContract(t *t
 	}
 	if result.Selection.Disposition != runtimecontract.RuntimeTargetSelectionSelected || result.Selection.SelectorRef != "file/unique_workspace_entry" || len(result.Selection.TargetRefs) != 1 || result.Selection.TargetRefs[0] != "implementation.txt" || result.Observation == nil {
 		t.Fatalf("target selection result = %+v", result)
+	}
+	_, err = AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, orchestratorevents.AcquireRuntimeTargetSelectionCommand{
+		WorkspaceID: "ws-selection", RunID: "run-selection", AuthoritySnapshotID: "authority-1",
+		PrerequisiteID: "target_selection:blocks/file:deliverable:file/unique_workspace_entry:::overflow", WorkspaceDeliverableDirectory: workspace,
+		TargetRole: "deliverable", TargetSelectorRef: "file/unique_workspace_entry", MaxItems: runtimecontract.RuntimeOwnerInventoryItemsMaxCount + 1,
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("target selection accepted an out-of-bound owner inventory size: %v", err)
 	}
 	emptyWorkspace := t.TempDir()
 	creation, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, orchestratorevents.AcquireRuntimeTargetSelectionCommand{

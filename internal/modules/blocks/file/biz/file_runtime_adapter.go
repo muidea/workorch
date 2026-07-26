@@ -111,7 +111,7 @@ type runtimeTargetSelectionBinding struct {
 func (a *RuntimeAdapter) AcquireRuntimeTargetSelection(workspaceDirectory, prerequisiteID, targetRole, selectorRef, prospectiveTargetRef string, maxItems int, bindings ...runtimeTargetSelectionBinding) (runtimemodel.RuntimeTargetSelection, error) {
 	selectorRef = strings.TrimSpace(selectorRef)
 	prospectiveTargetRef = strings.TrimSpace(prospectiveTargetRef)
-	if strings.TrimSpace(prerequisiteID) == "" || strings.TrimSpace(targetRole) == "" || selectorRef == "" || maxItems < 1 || maxItems > runtimemodel.RuntimeCandidateContextItemsMaxCount {
+	if strings.TrimSpace(prerequisiteID) == "" || strings.TrimSpace(targetRole) == "" || selectorRef == "" || maxItems < 1 || maxItems > runtimemodel.RuntimeOwnerInventoryItemsMaxCount {
 		return runtimemodel.RuntimeTargetSelection{}, common.ErrInvalidArgument
 	}
 	binding := runtimeTargetSelectionBinding{}
@@ -289,7 +289,7 @@ func (a *RuntimeAdapter) AcquireRuntimeOperationAdmissibility(workspaceDirectory
 	if err != nil {
 		return runtimemodel.RuntimeOperationAdmissibility{}, err
 	}
-	if maxItems < 1 || maxItems > runtimemodel.RuntimeCandidateContextItemsMaxCount {
+	if maxItems < 1 || maxItems > runtimemodel.RuntimeOwnerInventoryItemsMaxCount {
 		return runtimemodel.RuntimeOperationAdmissibility{}, common.ErrInvalidArgument
 	}
 	inventory := runtimemodel.RuntimeOperationAdmissibility{

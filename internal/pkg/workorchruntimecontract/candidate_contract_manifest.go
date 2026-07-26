@@ -119,9 +119,10 @@ func ValidateRuntimeCandidateContractManifestForDecision(manifest RuntimeCandida
 }
 
 // RuntimeCandidateAllowedOperationKinds is the owner-neutral C3 narrowing
-// shared by every candidate-contract consumer. A File creation/scope
-// observation only admits durable File kinds plus an explicitly sealed
-// required sequence; it never grants a target or chooses an action.
+// shared by every candidate-contract consumer. A File creation observation
+// only admits durable File kinds. A File scope additionally admits a kind
+// whose descriptor explicitly declares that it can act on an existing,
+// File-owner-grounded target. It never grants a target or chooses an action.
 func RuntimeCandidateAllowedOperationKinds(decision RuntimeDecision, selection *RuntimeTargetSelection) []string {
 	required := decision.RequiredOutput.Normalized()
 	kinds := append([]string(nil), required.AcceptedKinds...)
@@ -137,7 +138,11 @@ func RuntimeCandidateAllowedOperationKinds(decision RuntimeDecision, selection *
 	ret := make([]string, 0, len(kinds)+len(required.RequiredOperationSequence))
 	for _, raw := range kinds {
 		descriptor, ok := RuntimeOperationDescriptorForKind(raw)
-		if !ok || descriptor.OwnerModuleID != RuntimeModuleFile || !RuntimeEffectIsDurable(descriptor.DefaultEffectScope) {
+		if !ok || !RuntimeEffectIsDurable(descriptor.DefaultEffectScope) {
+			continue
+		}
+		allowsScopeKind := value.Disposition == RuntimeTargetSelectionScope && descriptor.AllowsGroundedWorkspaceTarget
+		if descriptor.OwnerModuleID != RuntimeModuleFile && !allowsScopeKind {
 			continue
 		}
 		if _, duplicate := seen[descriptor.Kind]; duplicate {

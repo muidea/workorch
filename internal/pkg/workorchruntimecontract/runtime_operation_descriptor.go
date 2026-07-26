@@ -22,6 +22,16 @@ type RuntimeOperationDescriptor struct {
 	// target that is absent at observation time. It does not grant a path: the
 	// capability owner must still publish a matching admissibility selector.
 	AllowsNewTarget bool
+	// AllowsGroundedWorkspaceTarget declares that this technical operation may
+	// mutate an already-existing workspace-relative target when File has sealed
+	// that target in a bounded workspace scope. It never authorizes target
+	// discovery, creation, or a target outside the File owner inventory.
+	//
+	// This is intentionally narrower than AllowsNewTarget: only File-owned
+	// operations can create a target; a non-File owner with this flag still
+	// requires its own sealed capability, admissibility receipt, and operation
+	// receipt.
+	AllowsGroundedWorkspaceTarget bool
 }
 
 // RuntimeOperationDescriptors returns the complete normalized, stably sorted descriptor inventory.
@@ -256,6 +266,7 @@ func init() {
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyUnknown,
 			AllowedActions:  []RuntimeAction{RuntimeActionProduceStateChange, RuntimeActionProduceValidation},
 			CapabilityClass: RuntimeCapabilityClassStateChange, RequiresOwnerReceipt: true,
+			AllowsGroundedWorkspaceTarget: true,
 		},
 		{
 			// Managed validation is Shell-owned non-mutating validation. Candidate kind stays

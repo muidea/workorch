@@ -932,12 +932,23 @@ func TestRuntimeV2FileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing
 	if err := os.MkdirAll(internalDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for target, content := range map[string]string{"implementation.txt": "before\n", "support.txt": "support\n"} {
+	// Keep the candidate-context budget at four items while the File owner
+	// observes five workspace entries.  Target selection is an owner-grounded
+	// feasibility fact, so it must retain the complete bounded scope rather
+	// than be downgraded to ambiguous by the candidate context budget.
+	for target, content := range map[string]string{
+		"implementation.txt": "before\n", "support.txt": "support\n", "go.mod": "module fixture\n",
+		"internal/bridge.go": "package fixture\n", "internal/bridge_test.go": "package fixture\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(deliverable, target)), 0o755); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.WriteFile(filepath.Join(deliverable, target), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 	bootstrap := runtimeV2GroundedTargetSequenceBootstrap()
+	bootstrap.ConvergencePolicy.MaxCandidateContextItems = 4
 	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}
 	bootstrap.Focuses[0].TargetSelectorRef = "file/workspace_deliverable"
 	bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}
@@ -975,6 +986,7 @@ func TestRuntimeV2FileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing
 	candidateCalls := 0
 	stateChangeCalls := 0
 	initialSelection := runtimecontract.RuntimeTargetSelectionDisposition("")
+	initialSelectionCount := 0
 	initialSnapshots := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
@@ -982,6 +994,7 @@ func TestRuntimeV2FileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing
 		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
 		if candidateCalls == 1 && command.CandidateContext.Resources.TargetSelection != nil {
 			initialSelection = command.CandidateContext.Resources.TargetSelection.Disposition
+			initialSelectionCount = command.CandidateContext.Resources.TargetSelection.CandidateCount
 			initialSnapshots = len(command.CandidateContext.Resources.TargetSnapshots)
 		}
 		if command.Decision.Action == runtimecontract.RuntimeActionProduceStateChange {
@@ -1012,12 +1025,152 @@ func TestRuntimeV2FileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing
 		t.Fatalf("bounded scope new-deliverable content=%q err=%v", string(content), err)
 	}
 	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
-	if err != nil || persisted.RuntimeState == nil || initialSelection != runtimecontract.RuntimeTargetSelectionScope || initialSnapshots != 0 ||
+	if err != nil || persisted.RuntimeState == nil || initialSelection != runtimecontract.RuntimeTargetSelectionScope || initialSelectionCount != 5 || initialSnapshots != 0 ||
 		persisted.RuntimeState.Facts.Resources.TargetSelection == nil || persisted.RuntimeState.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionScope ||
-		persisted.RuntimeState.Facts.Resources.TargetSelection.CandidateCount != 3 || len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 0 ||
+		persisted.RuntimeState.Facts.Resources.TargetSelection.CandidateCount != 6 || len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 0 ||
 		len(persisted.RuntimeState.OperationReceipts) != 3 || len(persisted.RuntimeState.Facts.Evidence.Accepted) != 2 || len(persisted.RuntimeState.Facts.Evidence.Rejected) != 1 ||
 		persisted.RuntimeState.Facts.Resources.FailureTarget != nil || (persisted.RuntimeState.Facts.RepairDirective != nil && len(persisted.RuntimeState.Facts.RepairDirective.TargetRefs) != 0) {
 		t.Fatalf("bounded scope new-deliverable authority=%+v err=%v", persisted, err)
+	}
+}
+
+// TestRuntimeV2FileBackedWorkspaceScopeExecutesTargetBoundShellOperation
+// proves the P6 scope exception through the actual File and Shell owners. The
+// shell command may modify go.sum because File observed it in the sealed scope;
+// it does not receive authority to create a new path or to operate outside that
+// inventory. P5's Shell receipt crash/restart matrix remains the replay proof
+// for the resulting sealed operation.
+func TestRuntimeV2FileBackedWorkspaceScopeExecutesTargetBoundShellOperation(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	root := t.TempDir()
+	deliverable, internalDir := filepath.Join(root, "workspace"), filepath.Join(root, "internal")
+	if err := os.MkdirAll(deliverable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(internalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for target, content := range map[string]string{"go.mod": "module fixture\n", "go.sum": "before\n"} {
+		if err := os.WriteFile(filepath.Join(deliverable, target), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bootstrap := runtimeV2GroundedTargetSequenceBootstrap()
+	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindShellCommand, runtimecontract.StepKindFileRead}
+	bootstrap.Focuses[0].TargetSelectorRef = "file/workspace_deliverable"
+	bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.StepKindShellCommand, runtimecontract.StepKindFileRead}
+	bootstrap.Requirements = []runtimecontract.RuntimeRequirement{
+		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleShell, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.StepKindShellCommand}, Reason: "Shell state-change capability"},
+		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.StepKindFileRead}, Reason: "File validation capability"},
+		{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.StepKindShellCommand}, Reason: "Shell owner inventory"},
+		{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.StepKindFileRead}, Reason: "File validation inventory"},
+	}
+	runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
+	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID, DefinitionRevision: bootstrap.Definition.Revision, RuntimeBootstrap: &bootstrap, State: common.RunStateActive}); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+	startRuntimeV2ReceiptTestOwner(t, hub)
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+	fileOwner := filemodule.New()
+	if err := fileOwner.Configure(filemodule.Dependencies{EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
+	shellOwner := shellmodule.New()
+	if err := shellOwner.Configure(shellmodule.Dependencies{EventHub: hub, RuntimeAdapter: shellbiz.NewRuntimeAdapter()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := shellOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = shellOwner.Stop(ctx) })
+	candidateCalls := 0
+	candidateActions := make([]runtimecontract.RuntimeAction, 0, 4)
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		candidateCalls++
+		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		candidateActions = append(candidateActions, command.Decision.Action)
+		switch command.Decision.Action {
+		case runtimecontract.RuntimeActionProduceStateChange:
+			commandName, target, script := "sh", "go.sum", "printf 'updated\\n' > go.sum"
+			stateChanging := true
+			candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+				ID: "tidy-go-sum", Kind: runtimecontract.StepKindShellCommand, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
+				Parameters: []runtimecontract.OperationParameter{{Name: "command", String: &commandName}, {Name: "args", StringList: []string{"-c", script}}, {Name: "stateChanging", Boolean: &stateChanging}, {Name: "targetRef", String: &target}},
+			}}}}}
+			result.Set(runtimeV2CandidateResultForTest(t, command, candidate), nil)
+		case runtimecontract.RuntimeActionProduceValidation:
+			target := "go.sum"
+			candidate := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
+				ID: "read-go-sum", Kind: runtimecontract.StepKindFileRead, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target}, Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &target}},
+			}}}}}
+			result.Set(runtimeV2CandidateResultForTest(t, command, candidate), nil)
+		case runtimecontract.RuntimeActionProduceAssessment:
+			refs := make([]string, 0, len(command.CandidateContext.Evidence.Accepted))
+			for _, evidence := range command.CandidateContext.Evidence.Accepted {
+				refs = append(refs, string(evidence.ID))
+			}
+			candidate := runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "target-bound shell mutation validated", Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-v2", Satisfied: true, EvidenceRefs: refs}}, EvidenceRefs: refs}}
+			result.Set(runtimeV2CandidateResultForTest(t, command, candidate), nil)
+		default:
+			t.Fatalf("unexpected action %q", command.Decision.Action)
+		}
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	module := newRuntimeV2GroundedTargetSequenceModule(t, hub, runtimeV2StateRepository{hub: hub})
+	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
+	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, module.handleRuntimeV2Drive)
+	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
+
+	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
+	// The Shell receipt changes a File-observed target. SM-2 therefore retires
+	// the dependent File validation inventory before assessment; it must not
+	// replay the Shell operation. One pre-refresh validation request may be
+	// invalidated without an owner receipt, so the proof counts receipts rather
+	// than treating request count as a side-effect count.
+	if err != nil || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 4 {
+		t.Fatalf("target-bound Shell completion=%+v candidateCalls=%d actions=%v err=%v", completed, candidateCalls, candidateActions, err)
+	}
+	content, err := os.ReadFile(filepath.Join(deliverable, "go.sum"))
+	if err != nil || string(content) != "updated\n" {
+		t.Fatalf("target-bound Shell content=%q err=%v", string(content), err)
+	}
+	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil || persisted.RuntimeState == nil || persisted.RuntimeState.Decision.Action != runtimecontract.RuntimeActionComplete ||
+		persisted.RuntimeState.Facts.Resources.TargetSelection == nil || persisted.RuntimeState.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionScope ||
+		len(persisted.RuntimeState.OperationReceipts) != 2 || len(persisted.RuntimeState.Facts.Evidence.Accepted) != 2 {
+		state := persisted.RuntimeState
+		if state == nil {
+			t.Fatalf("target-bound Shell runtime state=%+v err=%v", persisted, err)
+		}
+		t.Fatalf("target-bound Shell state=%s selection=%+v receipts=%d accepted=%d err=%v", state.Decision.Action, state.Facts.Resources.TargetSelection, len(state.OperationReceipts), len(state.Facts.Evidence.Accepted), err)
+	}
+	stateChangeCalls := 0
+	for _, action := range candidateActions {
+		if action == runtimecontract.RuntimeActionProduceStateChange {
+			stateChangeCalls++
+		}
+	}
+	if stateChangeCalls != 1 {
+		t.Fatalf("target-bound Shell mutation was replayed: candidate actions=%v", candidateActions)
 	}
 }
 

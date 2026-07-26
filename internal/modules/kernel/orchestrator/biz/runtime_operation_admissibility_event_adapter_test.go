@@ -71,8 +71,8 @@ func TestProbeRuntimeOperationFeasibilityRejectsMalformedResult(t *testing.T) {
 	if err := orchestratorevents.ValidateRuntimeOperationAdmissibilityCommand(orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand{
 		WorkspaceID: "ws-v2", RunID: "run-v2", AuthoritySnapshotID: "snapshot-v2", PrerequisiteID: "admissibility-file",
 		OwnerModuleID: runtimecontract.RuntimeModuleFile, WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
-		RequiredKinds: []string{runtimecontract.StepKindFileEdit}, MaxItems: runtimecontract.RuntimeCandidateContextItemsMaxCount + 1,
+		RequiredKinds: []string{runtimecontract.StepKindFileEdit}, MaxItems: runtimecontract.RuntimeOwnerInventoryItemsMaxCount + 1,
 	}, runtimecontract.RuntimeModuleFile); err == nil {
-		t.Fatal("inventory command accepted an out-of-bound candidate context size")
+		t.Fatal("inventory command accepted an out-of-bound owner inventory size")
 	}
 }

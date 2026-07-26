@@ -144,20 +144,39 @@ func rejectCandidateOutsideGroundedTargets(facts workorchruntimecontract.Runtime
 	}
 	requiredTargets := GroundedRepairTargets(facts)
 	if ownerGroundedTargetScopeMaySelectNewFileTarget(facts) {
+		selection := currentFocusTargetSelection(facts).Normalized()
+		durableEffect := false
 		for _, operation := range candidateRuntimeOperations(candidate) {
 			descriptor, known := workorchruntimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
-			if known && descriptor.OwnerModuleID == workorchruntimecontract.RuntimeModuleFile &&
-				workorchruntimecontract.RuntimeEffectIsDurable(workorchruntimecontract.ResolveExpectedEffectScope(operation, facts.Activation.MCPCapabilities)) && len(operation.TargetRefs) != 0 {
+			if !known || !workorchruntimecontract.RuntimeEffectIsDurable(workorchruntimecontract.ResolveExpectedEffectScope(operation, facts.Activation.MCPCapabilities)) {
+				continue
+			}
+			durableEffect = true
+			if descriptor.OwnerModuleID == workorchruntimecontract.RuntimeModuleFile && len(operation.TargetRefs) != 0 {
 				// A scope authorizes the File owner to adjudicate a concrete
 				// workspace-relative target. It does not authorize an operation
 				// without a target or bypass the later owner feasibility check.
-				return acceptedCandidateAdmission()
+				continue
 			}
+			if descriptor.AllowsGroundedWorkspaceTarget && runtimeTargetRefsAllWithin(operation.TargetRefs, groundedWorkspaceScopeTargets(&selection)) {
+				// This is a deliberately narrow exception for a technical owner
+				// whose descriptor is explicit. The target must already be in the
+				// File owner's sealed scope; File retains new-target authority.
+				continue
+			}
+			return rejectedCandidateAdmission(
+				candidateAdmissionCodeTargetOutsideGrounding,
+				candidateAdmissionSignatureTargetOutsideGrounding,
+				"owner-grounded workspace scope permits only a durable File operation or an explicitly target-bound operation within the sealed File inventory",
+			)
+		}
+		if durableEffect {
+			return acceptedCandidateAdmission()
 		}
 		return rejectedCandidateAdmission(
 			candidateAdmissionCodeTargetOutsideGrounding,
 			candidateAdmissionSignatureTargetOutsideGrounding,
-			"owner-grounded workspace scope permits only a durable File operation with a concrete target",
+			"owner-grounded workspace scope requires a durable File operation or an explicitly target-bound operation within the sealed File inventory",
 		)
 	}
 	if len(requiredTargets) == 0 {
@@ -179,6 +198,51 @@ func rejectCandidateOutsideGroundedTargets(facts workorchruntimecontract.Runtime
 		candidateAdmissionSignatureTargetOutsideGrounding,
 		"runtime state-changing candidate does not target the sealed focus, failure, or repair target set",
 	)
+}
+
+// groundedWorkspaceScopeTargets returns the existing, File-owner-observed
+// targets for the current scope. CandidateTargetRefs is the canonical bounded
+// inventory; TargetRefs is retained as a defensive fallback for a persisted
+// scope produced before the inventory field was populated. This helper never
+// discovers a target and is only used by SM-3 to verify a descriptor-declared
+// technical operation.
+func groundedWorkspaceScopeTargets(selection *workorchruntimecontract.RuntimeTargetSelection) []string {
+	if selection == nil {
+		return nil
+	}
+	value := selection.Normalized()
+	if len(value.CandidateTargetRefs) != 0 {
+		return value.CandidateTargetRefs
+	}
+	return value.TargetRefs
+}
+
+// runtimeTargetRefsAllWithin requires every submitted target to be a member
+// of the sealed File scope. Unlike intersection, an empty or partially
+// outside target set must not be able to piggyback on one admissible target.
+func runtimeTargetRefsAllWithin(targetRefs, allowedTargets []string) bool {
+	if len(targetRefs) == 0 || len(allowedTargets) == 0 {
+		return false
+	}
+	allowed := make(map[string]struct{}, len(allowedTargets))
+	for _, target := range allowedTargets {
+		if target = strings.TrimSpace(target); target != "" {
+			allowed[target] = struct{}{}
+		}
+	}
+	if len(allowed) == 0 {
+		return false
+	}
+	for _, target := range targetRefs {
+		target = strings.TrimSpace(target)
+		if target == "" {
+			return false
+		}
+		if _, found := allowed[target]; !found {
+			return false
+		}
+	}
+	return true
 }
 
 // ownerGroundedTargetScopeMaySelectNewFileTarget preserves the File owner's

@@ -936,7 +936,7 @@ func TestRuntimeV2CandidateSchemaRequiresNonEmptyCanonicalPatchTarget(t *testing
 	}
 }
 
-func TestRuntimeV2CandidateSchemaNarrowsFileOwnerScopeToDurableFileKinds(t *testing.T) {
+func TestRuntimeV2CandidateSchemaNarrowsFileOwnerScopeToDurableFileAndDeclaredGroundedKinds(t *testing.T) {
 	selection := &runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: "target-selection-scope", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable",
@@ -952,21 +952,21 @@ func TestRuntimeV2CandidateSchemaNarrowsFileOwnerScopeToDurableFileKinds(t *test
 	}
 	manifest := runtimeCandidateManifestForSchema(t, decision, selection)
 	schema := runtimeV2CandidateSchemaForManifest(manifest)
-	if !strings.Contains(schema, `"enum":["patch/apply"]`) {
-		t.Fatalf("scope schema = %s, want only durable File kind", schema)
+	if !strings.Contains(schema, `"enum":["patch/apply","shell/command"]`) {
+		t.Fatalf("scope schema = %s, want durable File and descriptor-declared grounded kind", schema)
 	}
-	for _, forbidden := range []string{`"shell/command"`, `"git/write"`} {
+	for _, forbidden := range []string{`"git/write"`} {
 		if strings.Contains(schema, forbidden) {
-			t.Fatalf("scope schema admitted non-File kind %s: %s", forbidden, schema)
+			t.Fatalf("scope schema admitted undeclared grounded kind %s: %s", forbidden, schema)
 		}
 	}
 	output := runtimeV2CandidateOutputContractForManifest(manifest)
-	if len(output.OperationContracts) != 1 || output.OperationContracts[0].Kind != runtimecontract.RuntimeBlockKindPatchApply {
-		t.Fatalf("scope operation contracts = %#v, want patch/apply only", output.OperationContracts)
+	if len(output.OperationContracts) != 2 || output.OperationContracts[0].Kind != runtimecontract.RuntimeBlockKindPatchApply || output.OperationContracts[1].Kind != runtimecontract.StepKindShellCommand {
+		t.Fatalf("scope operation contracts = %#v, want patch/apply and shell/command", output.OperationContracts)
 	}
 	kinds := runtimeV2CandidateManifestOperationKinds(manifest)
-	if len(kinds) != 1 || kinds[0] != runtimecontract.RuntimeBlockKindPatchApply {
-		t.Fatalf("scope admissible kinds = %v, want patch/apply only", kinds)
+	if got, want := kinds, []string{runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.StepKindShellCommand}; !slices.Equal(got, want) {
+		t.Fatalf("scope admissible kinds = %v, want %v", got, want)
 	}
 }
 
@@ -1060,11 +1060,11 @@ func TestRuntimeV2CandidateSchemaKeepsExplicitSequenceDuringFileScopeNarrowing(t
 	}
 	manifest := runtimeCandidateManifestForSchema(t, decision, selection)
 	kinds := runtimeV2CandidateManifestOperationKinds(manifest)
-	if got, want := kinds, []string{runtimecontract.StepKindGitWrite, runtimecontract.RuntimeBlockKindPatchApply}; !slices.Equal(got, want) {
+	if got, want := kinds, []string{runtimecontract.StepKindGitWrite, runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.StepKindShellCommand}; !slices.Equal(got, want) {
 		t.Fatalf("scope kinds = %v, want %v", got, want)
 	}
 	schema := runtimeV2CandidateSchemaForManifest(manifest)
-	if strings.Contains(schema, `"shell/command"`) || !strings.Contains(schema, `"patch/apply"`) || !strings.Contains(schema, `"git/write"`) {
+	if !strings.Contains(schema, `"shell/command"`) || !strings.Contains(schema, `"patch/apply"`) || !strings.Contains(schema, `"git/write"`) {
 		t.Fatalf("scope sequence schema = %s", schema)
 	}
 }
@@ -1117,21 +1117,21 @@ func TestRuntimeV2ProviderRequestNarrowsFileScopeAcrossSchemaContextAndRetry(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{`"shell/command"`, `"git/write"`} {
+	for _, forbidden := range []string{`"git/write"`} {
 		if strings.Contains(request.Schema, forbidden) {
 			t.Fatalf("scope provider schema widened to %s: %s", forbidden, request.Schema)
 		}
 	}
-	if !strings.Contains(request.Schema, `"enum":["patch/apply"]`) {
-		t.Fatalf("scope provider schema did not retain durable File operation: %s", request.Schema)
+	if !strings.Contains(request.Schema, `"enum":["patch/apply","shell/command"]`) {
+		t.Fatalf("scope provider schema did not retain durable File and declared target-bound operation: %s", request.Schema)
 	}
 	dynamic := request.PromptContext.Sections[3].Content
-	for _, required := range []string{`"admissibleOperationKinds":["patch/apply"]`, `"operationContracts":[{"kind":"patch/apply"`, "bounded workspace feasibility scope"} {
+	for _, required := range []string{`"admissibleOperationKinds":["patch/apply","shell/command"]`, `"operationContracts":[{"kind":"patch/apply"`, `"kind":"shell/command"`, "bounded workspace feasibility scope"} {
 		if !strings.Contains(dynamic, required) {
 			t.Fatalf("scope provider C3 lost %q: %s", required, dynamic)
 		}
 	}
-	for _, forbidden := range []string{`"kind":"shell/command"`, `"kind":"git/write"`} {
+	for _, forbidden := range []string{`"kind":"git/write"`} {
 		if strings.Contains(dynamic, forbidden) {
 			t.Fatalf("scope provider C3 widened operation contracts to %s: %s", forbidden, dynamic)
 		}
@@ -1146,7 +1146,7 @@ func TestRuntimeV2ProviderRequestNarrowsFileScopeAcrossSchemaContextAndRetry(t *
 	}
 	retryTail := retryRequest.PromptContext.Sections[4].Content
 	if !strings.Contains(retryTail, "context.outputContract.structuredOutputInstruction") ||
-		!strings.Contains(retryTail, "sealed manifest hash") || strings.Contains(retryTail, "do not use Shell, Git, MCP, Web, or SSH") {
+		!strings.Contains(retryTail, "sealed manifest hash") || strings.Contains(retryTail, "do not use Git, MCP, Web, or SSH") {
 		t.Fatalf("scope provider retry did not use manifest-bound correction: %s", retryTail)
 	}
 }

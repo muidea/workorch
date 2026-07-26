@@ -4,6 +4,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -112,7 +113,11 @@ func (m *Biz) resolveRuntimeV2Prerequisite(
 		result, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, m.EventHub(), events.AcquireRuntimeTargetSelectionCommand{
 			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
 			PrerequisiteID: prerequisite.ID, WorkspaceDeliverableDirectory: deliverableDirectory, TargetRole: prerequisite.SubjectRef, TargetSelectorRef: prerequisite.TargetSelectorRef, TargetSelectorOwnerRef: prerequisite.TargetSelectorOwnerRef, TargetSelectorSubjectRef: prerequisite.TargetSelectorSubjectRef, TargetSelectorCandidateRefs: prerequisite.TargetSelectorCandidateRefs, ProspectiveTargetRef: prerequisite.ProspectiveTargetRef,
-			MaxItems: aggregate.Facts.ConvergencePolicy.MaxCandidateContextItems,
+			// Target selection seals a complete File-owner feasibility fact for
+			// SM-2.  It must not inherit the much smaller per-request candidate
+			// context budget, otherwise a normal workspace with more files than
+			// coverage items is incorrectly reported as ambiguous.
+			MaxItems: runtimecontract.RuntimeOwnerInventoryItemsMaxCount,
 		})
 		if err != nil {
 			return runtimev2.PrerequisiteResult{}, err
@@ -176,7 +181,11 @@ func (m *Biz) resolveRuntimeV2Prerequisite(
 			PrerequisiteID: prerequisite.ID, OwnerModuleID: prerequisite.OwnerModuleID,
 			WorkspaceDeliverableDirectory: deliverableDirectory, RequiredKinds: append([]string(nil), prerequisite.RequiredCapabilities...),
 			RequiredTargetRefs: runtimev2.GroundedRepairTargets(aggregate.Facts), CapabilityStateBinding: binding,
-			MaxItems: aggregate.Facts.ConvergencePolicy.MaxCandidateContextItems,
+			// Operation admissibility is another owner-grounded SM-2 inventory.
+			// In particular, it must include a file created by a prior accepted
+			// operation so the next sealed validation can read it. Candidate
+			// context compression must not remove that owner authority.
+			MaxItems: runtimecontract.RuntimeOwnerInventoryItemsMaxCount,
 		})
 		if err != nil {
 			return runtimev2.PrerequisiteResult{}, err
@@ -500,9 +509,7 @@ func (m *Biz) requestRuntimeV2CandidateDocument(
 			return runtimev2.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, completeErr
 		}
 		if decodeErr != nil {
-			return m.admitRuntimeV2CompletedCandidateDocument(ctx, completed, manifest, session.LogicalRequestID, candidateAttempt, &runtimecontract.RuntimeCandidateFailure{
-				Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid", Reason: decodeErr.Error(),
-			})
+			return m.admitRuntimeV2CompletedCandidateDocument(ctx, completed, manifest, session.LogicalRequestID, candidateAttempt, runtimeV2CandidateSchemaFailure(decodeErr))
 		}
 		return m.admitRuntimeV2CompletedCandidateDocument(ctx, completed, manifest, session.LogicalRequestID, candidateAttempt, nil)
 	}
@@ -592,9 +599,7 @@ func (m *Biz) admitRuntimeV2CompletedCandidateDocument(ctx context.Context, aggr
 	}
 	candidate, decodeErr := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, document)
 	if decodeErr != nil {
-		failed, failureErr := m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, pending.Facts.WorkspaceID, pending.Facts.RunID, candidateAttempt, runtimecontract.RuntimeCandidateFailure{
-			Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid", Reason: decodeErr.Error(),
-		})
+		failed, failureErr := m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, pending.Facts.WorkspaceID, pending.Facts.RunID, candidateAttempt, *runtimeV2CandidateSchemaFailure(decodeErr))
 		return failed, runtimecontract.RuntimeCandidate{}, false, failureErr
 	}
 	if validateErr := candidate.ValidateWithActivation(pending.Decision, candidateContext.Activation); validateErr != nil {
@@ -923,6 +928,27 @@ func runtimeV2PreviousCandidateFailure(aggregate runtimev2.RuntimeAggregate, can
 		return &failure, nil
 	}
 	return nil, fmt.Errorf("runtime candidate retry has no first attempt failure")
+}
+
+// runtimeV2CandidateSchemaFailure preserves the decoder's provider-safe,
+// manifest-derived diagnostic for the persisted SM-3 attempt. The retry
+// policy remains in requestAndSealRuntimeV2CandidateWithRetry; this helper
+// only translates typed contract diagnostics into the candidate failure DTO.
+func runtimeV2CandidateSchemaFailure(decodeErr error) *runtimecontract.RuntimeCandidateFailure {
+	failure := &runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid",
+		Signature: "candidate-schema-invalid", Reason: decodeErr.Error(),
+	}
+	var payloadDiagnostic *runtimecontract.RuntimeCandidatePayloadDiagnostic
+	if errors.As(decodeErr, &payloadDiagnostic) {
+		failure.Diagnostic = runtimecontract.RuntimeCandidateFailureDiagnosticFromPayloadDiagnostic(payloadDiagnostic)
+		return failure
+	}
+	var contractDiagnostic *runtimecontract.RuntimeCandidateContractDiagnostic
+	if errors.As(decodeErr, &contractDiagnostic) {
+		failure.Diagnostic = runtimecontract.RuntimeCandidateFailureDiagnosticFromContractDiagnostic(contractDiagnostic)
+	}
+	return failure
 }
 
 func (m *Biz) requestAndSealRuntimeV2CandidateWithRetry(

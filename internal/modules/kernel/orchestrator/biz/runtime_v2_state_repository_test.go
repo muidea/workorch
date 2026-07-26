@@ -2936,7 +2936,7 @@ func TestRuntimeV2MainlineRetriesSameCandidateContractOnce(t *testing.T) {
 			failure := runtimecontract.RuntimeCandidateFailure{
 				Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
 				Reason: "raw schema failure is persisted but never rendered", Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
-					Path: "$.unexpected", Actual: "unexpected", Allowed: []string{"operations"}, Forbidden: []string{"unexpected"},
+					Path: "$.operations[0].kind", Actual: runtimecontract.StepKindShellCommand, Allowed: []string{runtimecontract.StepKindFileEdit},
 				},
 			}
 			result.Set(orchestratorevents.RequestRuntimeCandidateResult{
@@ -2966,7 +2966,7 @@ func TestRuntimeV2MainlineRetriesSameCandidateContractOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sealed.ActiveDispatch == nil || len(attempts) != 2 || attempts[0].CandidateAttempt != 0 || attempts[1].CandidateAttempt != 1 || attempts[0].PreviousFailure != nil || attempts[1].PreviousFailure == nil || attempts[1].PreviousFailure.Diagnostic == nil || attempts[1].PreviousFailure.Diagnostic.Path != "$.unexpected" ||
+	if sealed.ActiveDispatch == nil || len(attempts) != 2 || attempts[0].CandidateAttempt != 0 || attempts[1].CandidateAttempt != 1 || attempts[0].PreviousFailure != nil || attempts[1].PreviousFailure == nil || attempts[1].PreviousFailure.Diagnostic == nil || attempts[1].PreviousFailure.Diagnostic.Path != "$.operations[0].kind" || attempts[1].PreviousFailure.Diagnostic.ManifestHash != attempts[1].CandidateManifest.Hash || !reflect.DeepEqual(attempts[1].PreviousFailure.Diagnostic.Objectives, []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSelectOperationKind}) ||
 		attempts[0].Transaction != attempts[1].Transaction || attempts[0].StablePrefixHash != attempts[1].StablePrefixHash {
 		t.Fatalf("attempts=%+v sealed=%+v", attempts, sealed)
 	}
