@@ -8,7 +8,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -32,13 +32,13 @@ func (s *recordingWorkspaceRunScheduler) DispatchRuntimeRun(_ context.Context, w
 func TestWorkorchDSchedulerConsumesTypedWorkspaceRunCommand(t *testing.T) {
 	rawHub := magicevent.NewHub(16)
 	t.Cleanup(func() { rawHub.Terminate(context.Background()) })
-	var captured orchestratorevents.ResumeRunCommand
-	owner := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, rawHub)
-	owner.Subscribe(orchestratorevents.TopicOrchestratorCommandResumeRun, func(event magicevent.Event, result magicevent.Result) {
-		captured, _ = event.Data().(orchestratorevents.ResumeRunCommand)
-		result.Set(orchestratorevents.OrchestratorCommandResult{}, nil)
+	var captured runevents.ContinueRunCommand
+	owner := magicevent.NewSimpleObserver(runevents.CommandDestination, rawHub)
+	owner.Subscribe(runevents.TopicRunCommandContinue, func(event magicevent.Event, result magicevent.Result) {
+		captured, _ = event.Data().(runevents.ContinueRunCommand)
+		result.Set(runevents.RunLifecycleCommandResult{}, nil)
 	})
-	t.Cleanup(func() { owner.Unsubscribe(orchestratorevents.TopicOrchestratorCommandResumeRun) })
+	t.Cleanup(func() { owner.Unsubscribe(runevents.TopicRunCommandContinue) })
 	state := newTestServerStateWithCommandHubAndBackground(normalizeConfig(Config{Backend: "memory"}), rawHub, &recordingBackgroundRoutine{})
 	scheduler := directWorkspaceRunScheduler{state: state}
 	state.workspaceRunScheduler = scheduler

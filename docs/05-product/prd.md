@@ -150,7 +150,7 @@ HTTP、Web Console、TUI、CLI/agent 必须看到一致的 workspace/run 状态�
 
 验收：
 
-- Start/Resume 只进入 Runtime V2；缺少 typed bootstrap 必须失败并投影 terminal。
+- Start/Resume 只向 Run owner提交 typed intent；缺少 typed bootstrap 必须经 Result/Workspace/Run owner-local terminal delivery 收敛。
 - 任何 candidate 输出在 seal / 执行前必须通过 requiredOutput / authority / execution contract gate。
 - sealed operation 与 evidence commit 必须先完成合同/治理/evidence 判定，再推进 reducer。
 - run 不得出现 `active` 且无进展、无 blocker、无合法 drive disposition 的撕裂状态（无 V1 `NextAction` / graph dispatch 兜底）。

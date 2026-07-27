@@ -127,7 +127,7 @@ func (m *Biz) handleRuntimeV2GovernanceResolutionLocked(event magicevent.Event, 
 		Terminal:            commit.Aggregate.Decision.Terminal,
 	}
 	if commit.Disposition == runtimev2.CommitDispositionCommitted || commit.Disposition == runtimev2.CommitDispositionDuplicate {
-		if err := m.continueRuntimeV2Governance(event.Context(), response, command.Resolution.WorkspaceID, command.Resolution.RunID); err != nil {
+		if err := m.continueRuntimeV2Governance(event.Context(), response, command.Resolution); err != nil {
 			setRuntimeV2GovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err)
 			return
 		}
@@ -135,7 +135,9 @@ func (m *Biz) handleRuntimeV2GovernanceResolutionLocked(event magicevent.Event, 
 	setRuntimeV2GovernanceResult(result, response, nil)
 }
 
-func (m *Biz) continueRuntimeV2Governance(ctx context.Context, response orchestratorevents.CommitRuntimeGovernanceResolutionResult, workspaceID common.WorkspaceID, runID common.RunID) error {
+func (m *Biz) continueRuntimeV2Governance(ctx context.Context, response orchestratorevents.CommitRuntimeGovernanceResolutionResult, resolution runtimecontract.RuntimeGovernanceResolution) error {
+	workspaceID := resolution.WorkspaceID
+	runID := resolution.RunID
 	if response.Action == runtimecontract.RuntimeActionComplete || response.Action == runtimecontract.RuntimeActionFail {
 		aggregate, err := m.bizPtr.LoadRuntimeV2(ctx, workspaceID, runID)
 		if err != nil {
@@ -143,10 +145,18 @@ func (m *Biz) continueRuntimeV2Governance(ctx context.Context, response orchestr
 		}
 		return m.deliverRuntimeV2Terminal(ctx, aggregate)
 	}
-	if err := m.bizPtr.ActivateRuntimeV2Run(ctx, workspaceID, runID); err != nil {
+	// RUNTIME-SMO: persist the governance resolution first, then submit the
+	// immutable continuation fact to Run. The subsequent RunStateChanged(active)
+	// notification is the only trigger for the next SM-4 drive.
+	aggregate, err := m.bizPtr.LoadRuntimeV2(ctx, workspaceID, runID)
+	if err != nil {
 		return err
 	}
-	return m.scheduleRuntimeV2Drive(ctx, workspaceID, runID, "governance_resolution")
+	authID, defRev, evidRev, dispatchID, resolutionID, ticketID, approvalID, stateRevision := continuationFromGovernanceCommit(resolution, response, aggregate)
+	if err := m.applyRunContinuationEligible(ctx, workspaceID, runID, authID, defRev, evidRev, dispatchID, resolutionID, ticketID, approvalID, stateRevision); err != nil {
+		return err
+	}
+	return nil
 }
 
 func runtimeGovernanceDisposition(value runtimev2.CommitDisposition) orchestratorevents.RuntimeGovernanceResolutionDisposition {

@@ -6,7 +6,6 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
@@ -75,14 +74,14 @@ func TestResumeRunPublishesCommandPayload(t *testing.T) {
 	ctx := context.Background()
 	testHub := newRunportsMagicTestHub(t)
 	hub := testHub.rawHub
-	var captured orchestratorevents.ResumeRunCommand
-	testHub.subscribeOrchestrator(orchestratorevents.TopicOrchestratorCommandResumeRun, func(data any) orchestratorevents.OrchestratorCommandResult {
-		cmd, ok := data.(orchestratorevents.ResumeRunCommand)
+	var captured runevents.ContinueRunCommand
+	testHub.subscribeRunLifecycle(runevents.TopicRunCommandContinue, func(data any) runevents.RunLifecycleCommandResult {
+		cmd, ok := data.(runevents.ContinueRunCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want ResumeRunCommand", data)
+			t.Fatalf("command payload type = %T, want ContinueRunCommand", data)
 		}
 		captured = cmd
-		return orchestratorevents.OrchestratorCommandResult{}
+		return runevents.RunLifecycleCommandResult{}
 	})
 	run := &runmodel.Run{ID: "run-resume-command", WorkspaceID: "ws-resume-command"}
 
@@ -119,16 +118,16 @@ func TestValidateRunDefinitionsReadsDefinitionsWithWorkspaceScope(t *testing.T) 
 }
 
 type runportsMagicTestHub struct {
-	rawHub               magicevent.Hub
-	orchestratorObserver magicevent.SimpleObserver
+	rawHub      magicevent.Hub
+	runObserver magicevent.SimpleObserver
 }
 
 func newRunportsMagicTestHub(t *testing.T) *runportsMagicTestHub {
 	t.Helper()
 	rawHub := magicevent.NewHub(16)
 	ret := &runportsMagicTestHub{
-		rawHub:               rawHub,
-		orchestratorObserver: magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, rawHub),
+		rawHub:      rawHub,
+		runObserver: magicevent.NewSimpleObserver(runevents.CommandDestination, rawHub),
 	}
 	t.Cleanup(func() {
 		rawHub.Terminate(context.Background())
@@ -136,8 +135,8 @@ func newRunportsMagicTestHub(t *testing.T) *runportsMagicTestHub {
 	return ret
 }
 
-func (h *runportsMagicTestHub) subscribeOrchestrator(topic string, handler func(any) orchestratorevents.OrchestratorCommandResult) {
-	h.orchestratorObserver.Subscribe(topic, func(ev magicevent.Event, result magicevent.Result) {
+func (h *runportsMagicTestHub) subscribeRunLifecycle(topic string, handler func(any) runevents.RunLifecycleCommandResult) {
+	h.runObserver.Subscribe(topic, func(ev magicevent.Event, result magicevent.Result) {
 		result.Set(handler(ev.Data()), nil)
 	})
 }

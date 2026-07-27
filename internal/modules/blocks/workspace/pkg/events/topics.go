@@ -33,4 +33,8 @@ const (
 	TopicWorkspaceTemplateCommandList   = "/workspace-template/command/list"
 	TopicWorkspaceTemplateCommandUpdate = "/workspace-template/command/update"
 	TopicWorkspaceTemplateCommandDelete = "/workspace-template/command/delete"
+
+	// RUNTIME-SMO owner-local projection / terminal delivery.
+	TopicWorkspaceCommandApplyRunProjectionFact = "/workspace/command/apply-run-projection-fact"
+	TopicWorkspaceCommandApplyTerminalDelivery  = "/workspace/command/apply-terminal-delivery"
 )

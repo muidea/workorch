@@ -4,7 +4,7 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-07-16
+Last Updated: 2026-07-27
 
 ## Purpose
 
@@ -35,7 +35,8 @@ Workspace / Goal / DoD / Soul / Skill / MCP / Memory selection
        Focuses: CoverageFocus queue
        Requirements: RuntimeRequirement[]
   -> Run creation (persist typed bootstrap on Run owner)
-  -> Start: project pending -> active, then DriveRuntimeV2
+  -> Run owner accepts activation intent and internally transitions pending -> active
+  -> RunStateChanged fact -> Orchestrator DriveRuntimeV2
   -> InitializeRuntimeV2FromRun
        load persisted typed bootstrap only
        InitialFacts (focus[0] + remaining queue)
@@ -110,14 +111,14 @@ template / draft / Soul guidance 只能影响 activation 输入基线，不能�
 
 | 入口 | 行为 |
 | --- | --- |
-| Start | 原子投影 pending Run 为 active，再由 Orchestrator 后台执行唯一 `DriveRuntimeV2` |
-| Resume | 只携带 workspace/run scope；只允许 active 或已解决 blocker 的 Run；进入同一 drive |
+| Start | Application 向 Run owner 提交 activation intent；Run owner内部 `pending -> active` 后发布 `RunStateChanged`，再触发唯一 `DriveRuntimeV2` |
+| Resume | 只携带 workspace/run scope；Run owner校验已解决 blocker 后内部恢复并发布事实；Orchestrator 消费事实进入同一 drive |
 
 约束：
 
 - application **不再**拥有 Start/Resume continuation queue
 - Orchestrator service **不**暴露 execution-context-patch resume facade、`StartRun`、
-  `DispatchNextStep`、`ResumeRun` 或自动 replan lifecycle
+  `DispatchNextStep`、`ResumeRun`、SM-1 lifecycle facade 或自动 replan lifecycle
 - `ResumeRunCommand` **不得**重新注入 loaded Run、`ExecutionContextPatch` 或其他 V1 continuation payload
 - 上下文变化只能通过**新的** Runtime V2 activation/bootstrap 表达（新 Run）
 

@@ -17,8 +17,8 @@ Last Updated: 2026-07-27
 | 组件 | Runtime V2 边界 |
 | --- | --- |
 | `blocks/workspace` | 拥有 Workspace / Goal / DoD / Template definition 聚合与 revision；不启动 Run、不判定 Result、不执行治理恢复 |
-| `blocks/run` | 拥有 Run lifecycle 与 **Runtime V2 aggregate**（`RuntimeBootstrap`、`RuntimeStateRecord`、facts/authority/dispatch/candidate、governance binding）的 CAS 持久化；不编排跨组件收敛 |
-| `blocks/result` | 持久化 Result / Artifact 正式 outcome；**不判断** evidence quality、DoD coverage 或 accepted/rejected 策略；裁决由 Orchestrator 完成后写 owner |
+| `blocks/run` | 拥有 Run lifecycle 与 **Runtime V2 aggregate**（`RuntimeBootstrap`、`RuntimeStateRecord`、facts/authority/dispatch/candidate、governance binding）的 CAS 持久化；只由自身 reducer 迁移 lifecycle，不编排跨组件收敛 |
+| `blocks/result` | 持久化 Result / Artifact 正式 outcome，并只由自身 reducer 迁移 Result lifecycle；**不判断** evidence quality、DoD coverage 或 accepted/rejected 策略 |
 | `blocks/eventstream` | EventHub 订阅 → 规范化 EventRecord；投影/审计只读，不是业务 owner 修复入口 |
 
 显式非目标（不得再写成生产主链）：
@@ -79,7 +79,8 @@ Canonical `StepState` values:
 
 Step 与部分过程证据对象可继续作为 **非权威投影 / legacy 过程面** 存在（观测、分页、历史关联），但不是 V2 drive 调度权威。
 
-Run supersede / terminal / blocker 的状态变更由 Orchestrator 经 Run owner EventHub command + CAS 投影；调用方不得绕过 Orchestrator 直接 Validate/Complete active Run。
+Run supersede / terminal / blocker 的状态变更只由 Run owner 的内部 reducer 完成。Orchestrator 仅发布 immutable
+governance/terminal fact，调用方不得指定 Run target state 或绕过 evidence gate 直接 Validate/Complete active Run。
 
 对象拆分：
 
@@ -98,7 +99,8 @@ Run supersede / terminal / blocker 的状态变更由 Orchestrator 经 Run owner
 
 对象拆分：
 
-- `Result`：正式 DoD-backed accepted / rejected business outcome 的 **持久化**；accepted/rejected 由 Orchestrator 在 assessment ledger 完成后构造并写本 block
+- `Result`：正式 DoD-backed accepted / rejected business outcome 的 **持久化**；Orchestrator 只密封 terminal payload，
+  Result owner 消费 delivery fact 后在自身 reducer 中构造并写入本 block
 - `Artifact`：deliverable artifact 与 process evidence artifact 的正式归属对象
 - closeout 输入：只消费 Orchestrator 已裁决所需的 evidence refs、artifact refs、result policy 字段；本 block 不重新跑 gate
 
@@ -136,7 +138,7 @@ Run supersede / terminal / blocker 的状态变更由 Orchestrator 经 Run owner
 
 - activation -> workspace definition 读取 + Run 创建（可携带 `RuntimeBootstrap`）
 - execution -> Orchestrator drive；Run owner CAS 持久化 V2 aggregate；过程证据投影
-- acceptance -> Orchestrator 裁决后 Result/Artifact 创建
+- acceptance -> Orchestrator 密封 terminal；Result/Workspace/Run 各自 owner-local delivery
 - observability -> EventRecord persistence and replay（只读投影）
 
 ## Responsibility Split Summary

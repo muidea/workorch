@@ -233,6 +233,49 @@ EOF
   exit 1
 fi
 
+# RUNTIME-SMO: generic owner updates are not lifecycle reducers. Keep the
+# check structural (rather than relying on a field use-site grep) so a new
+# mapper cannot silently reintroduce a second state-write path.
+struct_body() {
+  local file="$1" name="$2"
+  awk -v name="$name" '
+    $0 ~ "type " name " struct[[:space:]]*\\{" { inside=1; next }
+    inside && /^}/ { exit }
+    inside { print }
+  ' "$file"
+}
+
+forbidden_workspace_update_fields='(^|[[:space:]])(State|ActiveRunID)([[:space:]]|$)'
+workspace_update_body="$(struct_body internal/modules/blocks/workspace/pkg/contracts/commands.go UpdateWorkspaceCommand)"
+if grep -q -E -- "$forbidden_workspace_update_fields" <<<"$workspace_update_body"; then
+  echo "boundary contract violation: generic Workspace update exposes lifecycle fields" >&2
+  exit 1
+fi
+
+forbidden_run_update_fields='(^|[[:space:]])(State|BlockingTicketID|BlockingApprovalID|FailureReason|StartedAt|EndedAt|Lineage|Priority)([[:space:]]|$)'
+run_update_body="$(struct_body internal/modules/blocks/run/pkg/contracts/commands.go UpdateRunCommand)"
+if grep -q -E -- "$forbidden_run_update_fields" <<<"$run_update_body"; then
+  echo "boundary contract violation: generic Run update exposes SM-1 lifecycle fields" >&2
+  exit 1
+fi
+
+result_terminal_body="$(struct_body internal/modules/blocks/result/pkg/events/lifecycle_messages.go ApplyRuntimeTerminalDeliveryCommand)"
+if grep -q -E -- '(^|[[:space:]])Result[[:space:]]+\*' <<<"$result_terminal_body"; then
+  echo "boundary contract violation: Result terminal command carries a mutable Result model" >&2
+  exit 1
+fi
+
+matches="$(source_matches 'TopicRunCommand(Cancel|Supersede)|CancelRunCommand|SupersedeRunCommand|reduce(Cancel|Supersede)Run' internal/modules)"
+if [[ -n "$matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: administrative Run termination bypasses the
+Orchestrator-persisted RuntimeTerminationRecord and SM-4 delivery saga.
+
+$matches
+EOF
+  exit 1
+fi
+
 # The LLM Block is a transport/schema owner. It may decode a typed candidate,
 # but it must not decide candidate acceptance, retry or terminal disposition.
 llm_candidate_authority_pattern='ValidateWithActivation\(|CandidateDisposition|CandidateAttemptOutcome|RetrySameContract|CandidateFailureOutcome'

@@ -20,7 +20,9 @@
 - RuntimeBootstrap 的 typed definition context 保存 definition change impact，包括累积 Goal/DoD identity、原位修订记录、pre-execution assessment 要求与中立 strategy requirements；该快照直接进入 LLM C1。
 - 服务启动只启动 workspace projection 与 HTTP 生命周期；不再运行 V1 inactive-running workspace recovery，也不注册 stale-Step watchdog timer。
 - Decision/Approval HTTP resolve 只提交对应 owner command 并刷新投影，不发布 Run Resume；Runtime V2 Decision resolution 由 Decision owner 通过 typed EventHub command 直接提交 Orchestrator。
-- run-scoped Start/Resume scheduler command 直接发送 Orchestrator 定义的 typed owner command；Resume 只携带 workspace/run scope，不再通过 CLI、session 或 Run port 发送 execution context patch。application 不维护 run pending/started queue，也不执行 Run 状态机或 runtime drive。
+- run-scoped Start/Resume scheduler command 直接发送 Run owner 定义的 typed activation / continuation intent；Resume 只携带
+  workspace/run scope，不再通过 CLI、session 或 Run port 发送 execution context patch。application 不维护 run
+  pending/started queue，也不执行 Run 状态机或 runtime drive。
 - workspace-scoped resume/restart command 同步执行同一 activation 用例；TUI 只暴露 `resume`，由 application 判定继续原 Run 或创建新 Run：非终态且 Goal/DoD 与封存 provider/model 未漂移时保留原聚合，终态或执行基线漂移时创建新的 typed Runtime V2 activation。Resume 不注入 provider/model 或 definition patch。该分流只影响 SM-1 activation/lineage 与 SM-4 re-drive 入口，不让 application 选择 SM-2 next action，也不绕过 SM-3 sealed dispatch。
 - WorkspaceTemplate 中的 capability / version-control 声明只作为定义与 activation 输入；application 不直接执行 Git、Shell、File 或其他 capability 副作用。
 - Runtime V1 retirement planner 依据 Run owner 的 typed bootstrap/state 识别 V1 对象，确定性生成 Run、Workspace、Decision 和 Approval 的退役动作及 dry-run 报告；planner 本身不直接访问 owner repository。
@@ -46,7 +48,8 @@
 - application bootstrap/session 构造器不接收或缓存 Runtime V1 repair/output policy；Runtime V2 按需读取 canonical configuration，配置投影只用于管理接口展示。
 - `Run.ExecutionContext`、activation execution-context population、resume patch 和对应 API/read-model fallback 已物理删除；activation 只允许构造 typed `RuntimeBootstrap`，治理、rejected-result 与 continuation 只允许进入具体 Runtime V2 合同。
 - application 不保留 `scheduleWatchdog`、stale dispatched recovery、startup inactive Run recovery 或 stuck Run recovery helper；watchdog interval audit 为 `0`。
-- application 不提供 orphan Step、stale dispatched Run 或 runtime-gap 的恢复 API；Runtime V2 重启推进只能重新发送 Orchestrator drive command，并从 Run owner 持久化 aggregate 幂等恢复。
+- application 不提供 orphan Step、stale dispatched Run 或 runtime-gap 的恢复 API；Runtime V2 重启推进由 Run owner
+  inventory/state notification 触发 Orchestrator internal drive，并从 Run owner 持久化 aggregate 幂等恢复。
 - retirement planner 必须排除任何带 typed Runtime V2 bootstrap/state 的 Run；正式 apply 只能通过各 owner 的 EventHub command 执行动作，重复规划不得再次生成已完成的 supersede/clear 动作。
 - 任一 Runtime V1 resource release command 失败时，正式 migration 必须停止 owner apply 和 projection rebuild；不得把计划数量当作真实释放数量。
 - dry-run 不创建备份、不写 owner 状态或 projection；restore 不得在 framework 或 owner repository 已打开后执行，data/config 恢复必须在替换目标前完成全部快照校验。

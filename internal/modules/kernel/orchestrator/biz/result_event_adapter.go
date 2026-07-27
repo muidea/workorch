@@ -84,6 +84,13 @@ func (r resultEventResultRepository) Update(ctx context.Context, item *resultmod
 	return err
 }
 
+func (r resultEventResultRepository) CompareAndSwap(ctx context.Context, item *resultmodel.Result, expectedRevision uint64) error {
+	if item == nil || item.Revision != expectedRevision {
+		return common.ErrInvalidArgument
+	}
+	return r.Update(ctx, item)
+}
+
 func (r resultEventResultRepository) Delete(ctx context.Context, id common.ResultID) error {
 	if r.hub == nil {
 		return common.ErrInvalidArgument

@@ -2,17 +2,58 @@ package activationports
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/testkit"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestSupersedeRunRequiresPersistedWorkspaceRelease(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name    string
+		receipt orchestratorevents.RequestRuntimeTerminationResult
+		wantErr error
+	}{
+		{
+			name:    "release acknowledgement missing",
+			receipt: orchestratorevents.RequestRuntimeTerminationResult{TerminalDeliveryID: "delivery-1", WorkspaceReleased: false},
+			wantErr: common.ErrConflict,
+		},
+		{
+			name:    "release acknowledgement persisted",
+			receipt: orchestratorevents.RequestRuntimeTerminationResult{TerminalDeliveryID: "delivery-1", WorkspaceReleased: true, StateRevision: 9},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hub := magicevent.NewHub(8)
+			t.Cleanup(func() { hub.Terminate(ctx) })
+			observer := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
+			observer.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeTermination, func(event magicevent.Event, result magicevent.Result) {
+				cmd, ok := event.Data().(orchestratorevents.RequestRuntimeTerminationCommand)
+				if !ok || cmd.WorkspaceID != "ws-replacement" || cmd.RunID != "run-old" || cmd.Kind != runtimecontract.RuntimeTerminationSuperseded {
+					t.Fatalf("termination command = %+v", event.Data())
+				}
+				result.Set(tc.receipt, nil)
+			})
+			t.Cleanup(func() { observer.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeTermination) })
+
+			err := SupersedeRun(ctx, hub, "ws-replacement", "run-old")
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("SupersedeRun err = %v, want %v", err, tc.wantErr)
+			}
+		})
+	}
+}
 
 func TestCreateAndStartWorkspaceExecutionRunUsesEventHubOwnerCommands(t *testing.T) {
 	ctx := context.Background()

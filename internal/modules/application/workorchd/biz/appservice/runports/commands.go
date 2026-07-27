@@ -6,7 +6,6 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
@@ -47,11 +46,12 @@ func StartRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) error
 	if hub == nil {
 		return common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandStartRun, "application/workorchd/appservice", orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.StartRunCommand{
-		RunID: item.ID,
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandActivate, "application/workorchd/appservice", runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.ActivateRunCommand{
+		WorkspaceID: item.WorkspaceID,
+		RunID:       item.ID,
 	})
-	ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorCommandStartRun, "run", string(item.ID), item.WorkspaceID, item.ID, "")
-	_, err := ownerevent.Orchestrator(hub.Send(event), orchestratorevents.TopicOrchestratorCommandStartRun)
+	ownerevent.BindLane(event, runevents.TopicRunCommandActivate, "run", string(item.ID), item.WorkspaceID, item.ID, "")
+	_, err := ownerevent.RunLifecycle(hub.Send(event), runevents.TopicRunCommandActivate)
 	return err
 }
 
@@ -62,11 +62,11 @@ func ResumeRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) erro
 	if hub == nil {
 		return common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandResumeRun, "application/workorchd/appservice", orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.ResumeRunCommand{
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandContinue, "application/workorchd/appservice", runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.ContinueRunCommand{
 		WorkspaceID: item.WorkspaceID,
 		RunID:       item.ID,
 	})
-	ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorCommandResumeRun, "run", string(item.ID), item.WorkspaceID, item.ID, "")
-	_, err := ownerevent.Orchestrator(hub.Send(event), orchestratorevents.TopicOrchestratorCommandResumeRun)
+	ownerevent.BindLane(event, runevents.TopicRunCommandContinue, "run", string(item.ID), item.WorkspaceID, item.ID, "")
+	_, err := ownerevent.RunLifecycle(hub.Send(event), runevents.TopicRunCommandContinue)
 	return err
 }

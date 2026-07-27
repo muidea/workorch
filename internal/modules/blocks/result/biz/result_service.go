@@ -49,7 +49,7 @@ func (s *Service) UpdateResult(ctx context.Context, item *resultmodel.Result) er
 	if err := validateResult(item); err != nil {
 		return err
 	}
-	return s.results.Update(ctx, item)
+	return s.results.CompareAndSwap(ctx, item, item.Revision)
 }
 
 func (s *Service) DeleteResult(ctx context.Context, id common.ResultID) error {

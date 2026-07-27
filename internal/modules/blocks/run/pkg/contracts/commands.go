@@ -35,25 +35,16 @@ type ResumeRunCommand struct {
 }
 
 type UpdateRunCommand struct {
+	// UpdateRunCommand is the sole generic persistence command for the
+	// Runtime V2 aggregate. It intentionally excludes SM-1 lifecycle and
+	// immutable definition fields; those are owned by dedicated Run reducers.
 	RunID                        common.RunID
 	WorkspaceID                  common.WorkspaceID
-	GoalID                       common.GoalID
-	DoDID                        common.DoDID
-	Lineage                      runmodel.RunLineage
-	DefinitionRevision           string
-	InitialStepKind              string
-	RuntimeBootstrap             *runtimemodel.RuntimeBootstrap
-	RuntimeContractVersion       string
 	RuntimeState                 *runtimemodel.RuntimeStateRecord
 	ExpectedRuntimeStateRevision *uint64
-	State                        common.RunState
-	Priority                     int
-	BlockingTicketID             common.TicketID
-	BlockingApprovalID           common.ApprovalID
-	FailureReason                string
-	CreatedAt                    string
-	StartedAt                    string
-	EndedAt                      string
+	// ExpectedModelRevision fences the complete Run record, including SM-1
+	// lifecycle fields that are deliberately absent from this generic command.
+	ExpectedModelRevision *uint64
 }
 
 type BlockOnDecisionCommand struct {
@@ -66,8 +57,6 @@ type BlockOnApprovalCommand struct {
 	ApprovalID common.ApprovalID
 }
 
-type CancelRunCommand struct{ RunID common.RunID }
-type SupersedeRunCommand struct{ RunID common.RunID }
 type DeleteRunCommand struct{ RunID common.RunID }
 
 type FailRunCommand struct {

@@ -24,6 +24,7 @@ func Contracts() []eventcontract.Contract {
 		TopicResultCommandCreate,
 		TopicResultCommandUpdate,
 		TopicResultCommandDelete,
+		TopicResultCommandApplyTerminalDelivery,
 		TopicArtifactCommandCreate,
 		TopicArtifactCommandUpdate,
 		TopicArtifactCommandDelete,

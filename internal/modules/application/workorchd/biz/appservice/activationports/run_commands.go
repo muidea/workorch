@@ -19,12 +19,24 @@ func SupersedeRun(ctx context.Context, hub magicevent.Hub, workspaceID common.Wo
 	if hub == nil {
 		return common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandSupersedeRun, activationRunCommandSource, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.SupersedeRunCommand{
-		RunID: runID,
-	})
-	ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorCommandSupersedeRun, "run", string(runID), workspaceID, runID, "")
-	_, err := ownerevent.Orchestrator(hub.Send(event), orchestratorevents.TopicOrchestratorCommandSupersedeRun)
-	return err
+	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorRequestRuntimeTermination, activationRunCommandSource, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.RequestRuntimeTerminationCommand{WorkspaceID: workspaceID, RunID: runID, Kind: runtimecontract.RuntimeTerminationSuperseded, RequestedBy: activationRunCommandSource, Reason: "workspace execution superseded"})
+	ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorRequestRuntimeTermination, "run", string(runID), workspaceID, runID, "")
+	response := hub.Send(event)
+	if response == nil {
+		return common.ErrInvalidArgument
+	}
+	if err := response.Error(); err != nil {
+		return err
+	}
+	data, err := response.Get()
+	if err != nil {
+		return err
+	}
+	receipt, ok := data.(orchestratorevents.RequestRuntimeTerminationResult)
+	if !ok || !receipt.WorkspaceReleased {
+		return common.ErrConflict
+	}
+	return nil
 }
 
 func CreateWorkspaceExecutionRun(ctx context.Context, hub magicevent.Hub, runID common.RunID, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, definitionRevision string, runtimeBootstrap *runtimecontract.RuntimeBootstrap, priority int, lineage runmodel.RunLineage) error {
@@ -66,23 +78,24 @@ func StartRun(ctx context.Context, hub magicevent.Hub, workspaceID common.Worksp
 	if hub == nil {
 		return common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandStartRun, activationRunCommandSource, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.StartRunCommand{
-		RunID: runID,
-	})
-	ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorCommandStartRun, "run", string(runID), workspaceID, runID, "")
-	_, err := ownerevent.Orchestrator(hub.Send(event), orchestratorevents.TopicOrchestratorCommandStartRun)
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandActivate, activationRunCommandSource, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.ActivateRunCommand{WorkspaceID: workspaceID, RunID: runID})
+	ownerevent.BindLane(event, runevents.TopicRunCommandActivate, "run", string(runID), workspaceID, runID, "")
+	_, err := ownerevent.RunLifecycle(hub.Send(event), runevents.TopicRunCommandActivate)
 	return err
 }
 
-func FailRun(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, runID common.RunID, failureReason string) error {
+// CancelRun records an activation-side administrative abort. Runtime failure
+// terminals are produced only by the sealed SM-2/SM-4 path, never by an
+// application-side direct Run failure command.
+func CancelRun(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, runID common.RunID, reason string) error {
 	if hub == nil {
 		return common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandFailRun, activationRunCommandSource, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.FailRunCommand{
-		RunID:  runID,
-		Reason: failureReason,
-	})
-	ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorCommandFailRun, "run", string(runID), workspaceID, runID, "")
-	_, err := ownerevent.Orchestrator(hub.Send(event), orchestratorevents.TopicOrchestratorCommandFailRun)
-	return err
+	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorRequestRuntimeTermination, activationRunCommandSource, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.RequestRuntimeTerminationCommand{WorkspaceID: workspaceID, RunID: runID, Kind: runtimecontract.RuntimeTerminationCancelled, RequestedBy: activationRunCommandSource, Reason: reason})
+	ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorRequestRuntimeTermination, "run", string(runID), workspaceID, runID, "")
+	response := hub.Send(event)
+	if response == nil {
+		return common.ErrInvalidArgument
+	}
+	return response.Error()
 }

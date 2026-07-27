@@ -25,7 +25,6 @@ import (
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
 	magictask "github.com/muidea/magicCommon/task"
 	engine "github.com/muidea/magicEngine/http"
@@ -250,13 +249,13 @@ func (p directWorkspaceRunScheduler) DispatchRuntimeRun(ctx context.Context, wor
 	var command any
 	switch action {
 	case "start":
-		topic, command = orchestratorevents.TopicOrchestratorCommandStartRun, orchestratorevents.StartRunCommand{RunID: run}
+		topic, command = runevents.TopicRunCommandActivate, runevents.ActivateRunCommand{WorkspaceID: workspace, RunID: run}
 	case "resume":
-		topic, command = orchestratorevents.TopicOrchestratorCommandResumeRun, orchestratorevents.ResumeRunCommand{WorkspaceID: workspace, RunID: run}
+		topic, command = runevents.TopicRunCommandContinue, runevents.ContinueRunCommand{WorkspaceID: workspace, RunID: run}
 	default:
 		return common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(topic, "test/workorchd", orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	event := magicevent.NewEventWithContext(topic, "test/workorchd", runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	event.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{SubjectType: "run", SubjectID: string(run), WorkspaceID: string(workspace), RunID: string(run)}))
 	result := testStateCommandHub(p.state).Send(event)
 	if result == nil {

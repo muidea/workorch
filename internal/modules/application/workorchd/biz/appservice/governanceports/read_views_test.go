@@ -5,7 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
@@ -15,7 +14,6 @@ import (
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
@@ -150,14 +148,6 @@ func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 			},
 		}
 	})
-	resumePublished := false
-	resumeObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
-	resumeObserver.Subscribe(orchestratorevents.TopicOrchestratorCommandResumeRun, func(_ magicevent.Event, result magicevent.Result) {
-		resumePublished = true
-		result.Set(orchestratorevents.OrchestratorCommandResult{}, nil)
-	})
-	defer resumeObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommandResumeRun)
-
 	item, err := ResolveDecisionView(ctx, hub, nil, "ticket-001", appmodelcore.ResolveDecisionCommand{
 		ResolutionType:    "provide_missing_info",
 		ResolutionPayload: mustGovernancePayload(t, map[string]any{"answer": "resume"}),
@@ -167,9 +157,6 @@ func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 	}
 	if item.ID != "ticket-001" || item.State != string(common.DecisionTicketStateResolved) || item.ResolutionID != "resolution-001" {
 		t.Fatalf("item = %+v, want resolved ticket with resolution", item)
-	}
-	if resumePublished {
-		t.Fatal("governance port published direct orchestrator resume; continuation must be owned by workorchd scheduler")
 	}
 }
 
@@ -418,7 +405,6 @@ func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
 		}
 	})
 	resolvedCount := 0
-	resumeCount := 0
 	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) decisionevents.DecisionCommandResult {
 		resolvedCount++
 		cmd, ok := data.(decisionevents.EnsureResolvedCommand)
@@ -432,13 +418,6 @@ func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
 		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: workorcheventpayload.New(cmd.Payload...)}
 		return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}
 	})
-	resumeObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
-	resumeObserver.Subscribe(orchestratorevents.TopicOrchestratorCommandResumeRun, func(_ magicevent.Event, result magicevent.Result) {
-		resumeCount++
-		result.Set(orchestratorevents.OrchestratorCommandResult{}, nil)
-	})
-	defer resumeObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommandResumeRun)
-
 	items, err := BatchResolveDecisionViews(ctx, hub, nil, appmodelcore.BatchResolveDecisionCommand{
 		TicketIDs:         ticketIDs,
 		ResolutionType:    "provide_missing_info",
@@ -452,9 +431,6 @@ func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
 	}
 	if resolvedCount != 2 {
 		t.Fatalf("resolved count = %d, want 2", resolvedCount)
-	}
-	if resumeCount != 0 {
-		t.Fatalf("direct orchestrator resume count = %d, want 0; continuation must be owned by workorchd scheduler", resumeCount)
 	}
 	for idx, item := range items {
 		if item.ID != ticketIDs[idx] || item.WorkspaceID != string(workspaceID) || item.State != string(common.DecisionTicketStateResolved) {

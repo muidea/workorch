@@ -131,7 +131,7 @@ Capability block 不再依赖“注册到 Orchestrator RuntimeAdapter registry�
 
 - `main.go` 尽量薄：解析参数 + lifecycle
 - bootstrap：application-owned infrastructure only（无 owner repository export）
-- appservice：activation、Start/Resume 转发、read-model、retirement migration
+- appservice：activation、向 Run owner 提交 Start/Resume intent、read-model、retirement migration
 - observed / presenter：与 HTTP 渲染分离
 
 ## Current Mapping Direction

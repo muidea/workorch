@@ -47,14 +47,15 @@ WorkOrch 按稳定责任划分为：
 
 ```text
 Application: RuntimeBootstrap → Run create
-Start / Resume (Orchestrator EventHub handlers)
+Start / Resume intent (Run owner EventHub handlers)
+  → Run owner-local lifecycle transition → RunStateChanged
   → DriveRuntimeV2（唯一同步推进）
     → InitializeRuntimeV2FromRun（幂等 load/init）
     → reducer(RuntimeFacts) → RuntimeDecision + AuthorityTransaction
     → prerequisite | candidate → SealedDispatch
     → ExecuteRuntimeOperation（typed EventHub → capability blocks）
     → evidence / assessment / governance commit
-    → governed_wait | typed terminal projection
+    → governed_wait fact | typed terminal delivery fact / acknowledgement
 ```
 
 双层语义：
@@ -80,13 +81,13 @@ Start / Resume (Orchestrator EventHub handlers)
 | --- | --- | --- |
 | Entry | `application/workorch` | 主可执行入口（TUI / `--server`） |
 | Initiator | `internal/initiators/workorchruntime` | owner repository provider |
-| Module | `internal/modules/application/workorchd` | bootstrap、appservice、HTTP、projection、scheduler Start/Resume 转发 |
+| Module | `internal/modules/application/workorchd` | bootstrap、appservice、HTTP、projection、scheduler Start/Resume intent 提交 |
 
 ### Kernel
 
 | 类型 | 单元 | 职责 |
 | --- | --- | --- |
-| Module | `kernel/orchestrator` | Runtime V2 convergence authority：drive、reducer、sealed dispatch、evidence、governance wait、terminal projection |
+| Module | `kernel/orchestrator` | Runtime V2 convergence authority：drive、reducer、sealed dispatch、evidence、governance wait、sealed terminal、delivery acknowledgement ledger |
 | Module | `kernel/governance` | 自动治理评估 / 升级 / AutoGovernanceTrace 协调（不替代 Orchestrator contract gate） |
 | Module | `kernel/system` | 默认 Soul / Template / MCP 等 ensure |
 
@@ -110,15 +111,16 @@ Start / Resume (Orchestrator EventHub handlers)
 
 | 层 | 负责 | 不负责 |
 | --- | --- | --- |
-| Application | 入口、用例组合、projection、Start/Resume 转发 | owner 状态机、drive loop、Decision resolve 后 Resume |
-| Orchestrator | 收敛权威、evidence quality、coverage、Result 裁决、Run/Workspace 窄投影 | provider 调用细节、领域 profile 硬编码 |
-| Run owner | 持久化与 CAS、状态准入核对 | 编排、coverage 裁决 |
+| Application | 入口、用例组合、projection、Start/Resume intent 提交 | owner 状态机、drive loop、Decision resolve 后 Resume |
+| Orchestrator | 收敛权威、evidence quality、coverage、Result 裁决、sealed terminal/delivery ledger | provider 调用细节、领域 profile 硬编码、外部 owner 状态迁移 |
+| Run owner | 持久化与 CAS、owner-local lifecycle transition | 编排、coverage 裁决 |
 | Capability blocks | 同步执行并返回 typed result/evidence 摘要 | Run 终态、accepted Result、自动 retry 策略 |
 | Shared packages | 中立 contract 与基础设施 | 业务状态机 |
 
 ## Key Rules
 
-1. **business state transitions** 留在 kernel / Orchestrator；**side effects** 留在 capability blocks。
+1. **business state transitions** 留在各自唯一 owner reducer：SM-2/3/4 在 Orchestrator，Run 在 Run owner，
+   Workspace 在 Workspace owner，Result 在 Result owner；**side effects** 留在 capability blocks。
 2. 跨组件交互只走 **EventHub + 具体 command/data/result**；禁止跨 owner service/repository、Envelope、通用 map payload。
 3. product/UI 不得绕过 read model 直接定义业务状态。
 4. template / Soul / profile 特化不得下沉到 kernel reducer。

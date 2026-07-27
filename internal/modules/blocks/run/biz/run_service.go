@@ -8,8 +8,6 @@ import (
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	magictask "github.com/muidea/magicCommon/task"
-	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/run/pkg/common"
 	runcontracts "github.com/muidea/workorch/internal/modules/blocks/run/pkg/contracts"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
@@ -26,7 +24,6 @@ type workspaceReader interface {
 }
 
 type Service struct {
-	basebiz.Base
 	runs       repository.RunRepository
 	workspaces workspaceReader
 	notifier   runStateNotifier
@@ -38,14 +35,6 @@ type runStateNotifier interface {
 
 type eventRunStateNotifier struct {
 	post func(magicevent.Event)
-}
-
-func NewServiceWithEventHub(runs repository.RunRepository, hub magicevent.Hub, background magictask.BackgroundRoutine) *Service {
-	service := newServiceWithPorts(runs, nil, nil)
-	service.Base = basebiz.New(modulecommon.ModuleID, hub, background)
-	service.workspaces = workspaceEventReader{send: service.SendEvent}
-	service.notifier = eventRunStateNotifier{post: service.PostEvent}
-	return service
 }
 
 func newServiceWithPorts(runs repository.RunRepository, workspaces workspaceReader, notifier runStateNotifier) *Service {
@@ -81,6 +70,12 @@ func (s *Service) CreateRun(ctx context.Context, cmd runcontracts.CreateRunComma
 		Priority:           cmd.Priority,
 		FailureReason:      "",
 		CreatedAt:          now,
+	}
+	if run.RuntimeBootstrap != nil {
+		// Runtime V2 bootstrap is immutable Run-owned definition data. Persist the
+		// contract version at creation so generic aggregate CAS never needs to
+		// rewrite lifecycle or identity fields to establish V2 ownership.
+		run.RuntimeContractVersion = runtimemodel.RuntimeContractVersionV2
 	}
 	if err := s.runs.Create(ctx, run); err != nil {
 		return err
@@ -177,7 +172,7 @@ func (s *Service) LinkRunSuccessor(ctx context.Context, cmd runcontracts.LinkRun
 	if strings.TrimSpace(predecessor.Lineage.LineageState) == "" {
 		predecessor.Lineage.LineageState = "active"
 	}
-	if err := s.runs.Update(ctx, predecessor); err != nil {
+	if err := s.runs.CompareAndSwap(ctx, predecessor, predecessor.Revision); err != nil {
 		return err
 	}
 	return s.publishRunEvent(ctx, runevents.TopicRunStateChanged, predecessor)

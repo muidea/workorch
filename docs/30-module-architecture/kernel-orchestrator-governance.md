@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-27
 
 ## Purpose
 
@@ -20,9 +20,9 @@ Last Updated: 2026-07-14
 
 - typed facts、authority transaction、prerequisite、candidate、sealed dispatch
 - operation evidence、assessment ledger、governance wait
-- terminal projection（Run / Workspace / Result）
+- sealed terminal、terminal delivery fact 与 SM-4 acknowledgement ledger（不写 Run / Workspace / Result state）
 - `DriveRuntimeV2Command/Result` 唯一同步推进合同
-- Start/Resume EventHub 准入：`AcceptRunStart` / `CanResumeRun` 后进入同一 drive
+- 消费 Run owner notification 触发同一 drive；不准入 Start/Resume lifecycle
 
 **不是：**
 
@@ -37,7 +37,7 @@ Last Updated: 2026-07-14
 | --- | --- |
 | `internal/modules/kernel/orchestrator/biz/runtimev2/` | controller、reducer、prerequisite、dispatch commit、executor、governance |
 | `internal/modules/kernel/orchestrator/pkg/events/` | drive / operation / candidate / governance typed 合同 |
-| `runtime_v2_*.go`（service 层） | drive 入口、state repository、operation executor、result projection |
+| `runtime_v2_*.go`（service 层） | drive 入口、aggregate CAS、operation executor、terminal delivery ledger |
 
 #### Drive 闭环
 
@@ -52,8 +52,8 @@ for transition < guard:
                           → candidate (attempt 0, 同 transaction 可 1)
                           → SealDispatch → ExecuteRuntimeOperation
                           → evidence / assessment / governance open
-    complete | fail       → terminal projection
-  governed_wait → 投影 blocked 并返回
+    complete | fail       → terminal delivery fact / acknowledgement
+  governed_wait → governance wait fact；Run owner-local blocked transition
   非等待非终态 transition 必须递增 StateRevision
 ```
 
@@ -63,7 +63,7 @@ for transition < guard:
 - **写 Run aggregate**：Run owner update + expected revision CAS
 - **capability 执行**：`ExecuteRuntimeOperationCommand/Result` → File / Git / Shell / MCP / Web / SSH
 - **LLM candidate**：`RequestRuntimeCandidateCommand/Result`；请求携带 typed `RuntimeCandidateContext`，不得从 V1 map 重建
-- **Result / Decision / Approval / Memory**：各 owner 具体 command；Decision/Approval evidence 由各自 `pkg/events` 定义，Orchestrator 幂等写 EvidenceRecord
+- **Decision / Approval / Memory**：各 owner 具体 command；Decision/Approval evidence 由各自 `pkg/events` 定义，Orchestrator 幂等写 EvidenceRecord；Result/Workspace/Run 只消费 terminal delivery fact 并回执
 - **governance**：`OpenRuntimeGovernanceRequestCommand` 创建 ticket；`CommitRuntimeGovernanceResolutionCommand` / ticket-resolution 提交；同一 resolution ID + authority snapshot 最多消费一次
 - **prerequisite**：target snapshot 等按 requirement owner 调用 EventHub；多 capability 结果合并，不得互相覆盖
 
@@ -71,13 +71,13 @@ for transition < guard:
 
 | 入口 | 行为 |
 | --- | --- |
-| Start | 原子 pending→active，后台唯一 `DriveRuntimeV2` |
-| Resume | 仅 workspace/run scope；允许 active 或已解决 blocker；进入同一 drive |
+| Start | Run owner接受 activation intent，内部 `pending→active` 后通知 Orchestrator drive |
+| Resume | Run owner接受仅 workspace/run scope 的 continuation intent，校验 blocker 后内部恢复并通知 Orchestrator drive |
 
 约束：
 
 - 无 execution-context patch、无 loaded Run 重放、无 application continuation queue
-- `runtime_v2_governance` resolution committed 后由 Orchestrator 自行投影或 drive continuation；**application resolved watcher 不得再发 Resume**
+- `runtime_v2_governance` resolution committed 后 Orchestrator 发布 continuation/terminal fact；Run owner内部恢复或终态；**application resolved watcher 不得再发 Resume**
 - 服务重启只加载 persisted aggregate；重复 Start/Resume 不得重复 reduce 或增加 attempt
 
 ### `kernel/governance`
@@ -110,8 +110,8 @@ for transition < guard:
 | `RequiredOutputContract` | focus 与 capability 中立交集 |
 | `SealedDispatch` | 执行前持久化；execution evidence 唯一合法入口 |
 | `RuntimeStateRecord` | Run owner CAS；正式 V2 状态 |
-| Result accepted/rejected | Orchestrator 裁决后写 Result owner |
-| Run / Workspace terminal / blocker | Orchestrator 窄投影 |
+| Result accepted/rejected | Result owner消费 Orchestrator sealed terminal delivery fact 后内部记录 |
+| Run / Workspace terminal / blocker | 对应 owner消费 immutable governance/terminal fact 后内部迁移 |
 
 ## Dual-Layer Stage Semantic
 
@@ -132,12 +132,12 @@ Orchestrator / Governance 负责如何治理与收敛，不直接负责：
 
 | 关注点 | 主要责任 |
 | --- | --- |
-| drive / reducer / sealed dispatch / evidence / terminal | `kernel/orchestrator` |
+| drive / reducer / sealed dispatch / evidence / sealed terminal / delivery ledger | `kernel/orchestrator` |
 | RuntimeStateRecord 持久化 CAS | `blocks/run` |
 | decision ticket / resolution 本体 | `blocks/decision` |
 | approval 正式状态 | `blocks/approval` |
 | auto-governance 协调 / trace | `kernel/governance` |
-| formal Result / Artifact 持久化 | `blocks/result`（不裁决 acceptance） |
+| formal Result / Artifact 持久化与 result lifecycle | `blocks/result`（不裁决 acceptance） |
 | capability operation 执行 | 各 capability block |
 
 ## Explicit Non-Goals（已删除 V1）

@@ -8,11 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
-	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
@@ -109,49 +106,6 @@ func TestRuntimeStartsSystemDefaultsModule(t *testing.T) {
 	}
 	if _, err := exports.Repositories.WorkspaceTemplates.Get(ctx, "software-dev"); err != nil {
 		t.Fatalf("software-dev template err = %v, want system default", err)
-	}
-}
-
-func TestRuntimeRegistersOrchestratorCommandHandlers(t *testing.T) {
-	rt := newRuntimeWithBackend("file", t.TempDir())
-	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := rt.Shutdown(ctx); err != nil {
-			t.Fatalf("Shutdown: %v", err)
-		}
-	}()
-	exports := RuntimeExports(rt)
-	if err := createTestWorkspace(context.Background(), exports, "ws-command", "command", ""); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	if err := createTestRun(context.Background(), exports, "ws-command", "run-command"); err != nil {
-		t.Fatalf("CreateRun: %v", err)
-	}
-	if err := exports.Repositories.Steps.Create(context.Background(), &runmodel.Step{
-		ID:     "run-command/approval",
-		RunID:  "run-command",
-		Kind:   "llm/workspace_execution",
-		State:  common.StepStateSucceeded,
-		Output: mustTestkitStepPayload(t, map[string]any{"stage": "blocked_on_approval"}),
-	}); err != nil {
-		t.Fatalf("CreateStep: %v", err)
-	}
-	if err := createTestApproval(context.Background(), exports, "ws-command", "run-command", "run-command/approval", "approval-command"); err != nil {
-		t.Fatalf("CreateApproval: %v", err)
-	}
-	command := orchestratorevents.BlockApprovalCommand{RunID: "run-command", ApprovalID: "approval-command"}
-	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandBlockApproval, "bootstrap/test", orchestratorevents.CommandDestination, magicevent.NewHeader(), context.Background(), command)
-	response := exports.Infrastructure.CommandHub.Send(event)
-	if response == nil || response.Error() != nil {
-		t.Fatalf("command response = %+v, want testkit owner handler success", response)
-	}
-	run, err := exports.Repositories.Runs.Get(common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-command"), "run-command")
-	if err != nil {
-		t.Fatalf("GetRun: %v", err)
-	}
-	if run.State != common.RunStateBlockedOnApproval {
-		t.Fatalf("run state = %s, want blocked_on_approval", run.State)
 	}
 }
 

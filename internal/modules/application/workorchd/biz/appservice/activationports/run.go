@@ -69,7 +69,7 @@ func CreateAndStartWorkspaceExecutionRun(ctx context.Context, commandHub magicev
 					return runID, nil
 				}
 			}
-			_ = FailRun(ctx, commandHub, request.WorkspaceID, runID, fmt.Sprintf("activation start failed: %v", err))
+			_ = CancelRun(ctx, commandHub, request.WorkspaceID, runID, fmt.Sprintf("activation start failed: %v", err))
 			return "", err
 		}
 		return runID, nil

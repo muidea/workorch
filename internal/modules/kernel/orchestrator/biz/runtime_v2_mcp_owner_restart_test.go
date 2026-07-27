@@ -394,7 +394,7 @@ func TestRuntimeV2FileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing
 					result.Set(runtimeV2CandidateResultForTest(t, command, fileCandidate), nil)
 				})
 				t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
-				patchOwner := NewRuntimeOrchestrator(nil, nil, nil, nil)
+				patchOwner := NewRuntimeOrchestrator(nil, nil)
 				if err := patchOwner.ConfigureRuntimeV2Repository(repository); err != nil {
 					t.Fatal(err)
 				}

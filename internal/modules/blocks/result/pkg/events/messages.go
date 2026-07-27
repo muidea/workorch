@@ -170,5 +170,6 @@ func MessageContracts() []eventcontract.MessageContract {
 		ret = append(ret, eventcontract.DataTopic[ResultChangedData]("result", definitionPackage, eventcontract.LanePolicyState, topic).MessageContract())
 	}
 	ret = append(ret, eventcontract.DataTopic[ArtifactCreatedData]("result", definitionPackage, eventcontract.LanePolicyState, TopicArtifactCreated).MessageContract())
+	ret = append(ret, eventcontract.CommandTopic[ApplyRuntimeTerminalDeliveryCommand, ResultLifecycleCommandResult]("result", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicResultCommandApplyTerminalDelivery).MessageContract())
 	return ret
 }

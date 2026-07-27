@@ -13,5 +13,6 @@ type ResultRepository interface {
 	ListByWorkspace(context.Context, common.WorkspaceID) ([]*result.Result, error)
 	ListByRun(context.Context, common.RunID) ([]*result.Result, error)
 	Update(context.Context, *result.Result) error
+	CompareAndSwap(context.Context, *result.Result, uint64) error
 	Delete(context.Context, common.ResultID) error
 }

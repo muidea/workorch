@@ -17,8 +17,6 @@ type ResumeRunCommand = runcontracts.ResumeRunCommand
 type UpdateRunCommand = runcontracts.UpdateRunCommand
 type BlockOnDecisionCommand = runcontracts.BlockOnDecisionCommand
 type BlockOnApprovalCommand = runcontracts.BlockOnApprovalCommand
-type CancelRunCommand = runcontracts.CancelRunCommand
-type SupersedeRunCommand = runcontracts.SupersedeRunCommand
 type FailRunCommand = runcontracts.FailRunCommand
 
 // Dependencies is owned by the Run Biz. This alias preserves the module's

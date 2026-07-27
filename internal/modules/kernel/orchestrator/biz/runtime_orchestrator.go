@@ -10,13 +10,10 @@ import (
 )
 
 type RuntimeOrchestrator struct {
-	runs                repository.RunRepository
-	workspaces          repository.WorkspaceRepository
 	tickets             repository.DecisionTicketRepository
 	resolutions         repository.DecisionResolutionRepository
 	approvals           repository.ApprovalRepository
 	evidence            RuntimeEvidenceRepositories
-	runState            *runStateSubsystem
 	runtimeV2Controller *runtimev2.RuntimeController
 }
 
@@ -90,6 +87,20 @@ func (o *RuntimeOrchestrator) ConsumeRuntimeV2RecoveryBudget(ctx context.Context
 		return runtimev2.RuntimeAggregate{}, false, common.ErrInvalidArgument
 	}
 	return o.runtimeV2Controller.ConsumeRecoveryBudget(ctx, workspaceID, runID, kind)
+}
+
+func (o *RuntimeOrchestrator) RecordRuntimeV2DeliveryAcknowledgement(ctx context.Context, acknowledgement runtimemodel.RuntimeDeliveryAcknowledgement) (runtimev2.RuntimeAggregate, bool, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, false, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.RecordDeliveryAcknowledgement(ctx, acknowledgement)
+}
+
+func (o *RuntimeOrchestrator) RequestTermination(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, kind runtimemodel.RuntimeTerminationKind, requestedBy, reason string) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.RequestTermination(ctx, workspaceID, runID, kind, requestedBy, reason)
 }
 
 // The following narrow facade methods expose the Orchestrator-owned
@@ -271,42 +282,22 @@ func (o *RuntimeOrchestrator) EvidenceRepositories() RuntimeEvidenceRepositories
 }
 
 func NewRuntimeOrchestrator(
-	runRepo repository.RunRepository,
-	workspaceRepo repository.WorkspaceRepository,
 	ticketRepo repository.DecisionTicketRepository,
 	approvalRepo repository.ApprovalRepository,
 ) *RuntimeOrchestrator {
-	return NewRuntimeOrchestratorWithResolutionsAndEvidence(runRepo, workspaceRepo, ticketRepo, nil, approvalRepo, RuntimeEvidenceRepositories{})
+	return NewRuntimeOrchestratorWithResolutionsAndEvidence(ticketRepo, nil, approvalRepo, RuntimeEvidenceRepositories{})
 }
 
 func NewRuntimeOrchestratorWithResolutionsAndEvidence(
-	runRepo repository.RunRepository,
-	workspaceRepo repository.WorkspaceRepository,
 	ticketRepo repository.DecisionTicketRepository,
 	resolutionRepo repository.DecisionResolutionRepository,
 	approvalRepo repository.ApprovalRepository,
 	evidence RuntimeEvidenceRepositories,
 ) *RuntimeOrchestrator {
 	return &RuntimeOrchestrator{
-		runs:        runRepo,
-		workspaces:  workspaceRepo,
 		tickets:     ticketRepo,
 		resolutions: resolutionRepo,
 		approvals:   approvalRepo,
 		evidence:    evidence,
-		runState:    newRunStateSubsystem(runRepo, workspaceRepo),
 	}
-}
-
-func (o *RuntimeOrchestrator) runStateManager() *runStateSubsystem {
-	if o == nil {
-		return newRunStateSubsystem(nil, nil)
-	}
-	if o.runState == nil {
-		o.runState = newRunStateSubsystem(o.runs, o.workspaces)
-	} else {
-		o.runState.runs = o.runs
-		o.runState.workspaces = o.workspaces
-	}
-	return o.runState
 }

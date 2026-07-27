@@ -121,6 +121,9 @@ type RuntimeStateRecord struct {
 	// OperationReceipts are owner-authored terminal receipts persisted before
 	// capability owners return execution results (schema v2 / INV-03/INV-04).
 	OperationReceipts []RuntimeOperationReceipt
+	// DeliveryAcknowledgements are SM-4-only durable receipts for the terminal
+	// Result -> Workspace -> Run saga. They never alter the sealed SM-2 decision.
+	DeliveryAcknowledgements []RuntimeDeliveryAcknowledgement
 	// PrerequisiteInvalidations provide a persisted idempotency fence for
 	// freshness refreshes across duplicate events, CAS retries and restart.
 	PrerequisiteInvalidations []RuntimePrerequisiteInvalidationRecord
@@ -604,6 +607,7 @@ func (r RuntimeStateRecord) Clone() RuntimeStateRecord {
 		ret.OperationGovernanceBindings[idx] = r.OperationGovernanceBindings[idx].Clone()
 	}
 	ret.OperationReceipts = NormalizeRuntimeOperationReceipts(r.OperationReceipts)
+	ret.DeliveryAcknowledgements = append([]RuntimeDeliveryAcknowledgement(nil), r.DeliveryAcknowledgements...)
 	ret.PrerequisiteInvalidations = NormalizeRuntimePrerequisiteInvalidations(r.PrerequisiteInvalidations)
 	if r.Termination != nil {
 		term := r.Termination.Clone()

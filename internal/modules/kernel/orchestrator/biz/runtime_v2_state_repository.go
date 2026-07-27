@@ -56,6 +56,8 @@ func (r runtimeV2StateRepository) Save(ctx context.Context, aggregate runtimev2.
 	run.RuntimeState = &record
 	command := updateRunCommandFromModel(run)
 	command.ExpectedRuntimeStateRevision = &expectedRevision
+	modelRevision := run.Revision
+	command.ExpectedModelRevision = &modelRevision
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandUpdate, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	bindOwnerCommandLane(event, runevents.TopicRunCommandUpdate, "run", string(run.ID), run.WorkspaceID, run.ID)
 	_, err = runCommandResponse(r.hub.Send(event), runevents.TopicRunCommandUpdate)
@@ -80,6 +82,7 @@ func runtimeStateRecordFromAggregate(aggregate runtimev2.RuntimeAggregate) runti
 		GovernanceResolutions:       append([]runtimecontract.RuntimeGovernanceResolutionRecord(nil), aggregate.GovernanceResolutions...),
 		OperationGovernanceBindings: cloneRuntimeOperationGovernanceBindings(aggregate.OperationGovernanceBindings),
 		OperationReceipts:           runtimecontract.NormalizeRuntimeOperationReceipts(aggregate.OperationReceipts),
+		DeliveryAcknowledgements:    append([]runtimecontract.RuntimeDeliveryAcknowledgement(nil), aggregate.DeliveryAcknowledgements...),
 		PrerequisiteInvalidations:   runtimecontract.NormalizeRuntimePrerequisiteInvalidations(aggregate.PrerequisiteInvalidations),
 	}
 	if aggregate.Termination != nil {
@@ -118,6 +121,7 @@ func runtimeAggregateFromRecord(record runtimecontract.RuntimeStateRecord) runti
 		GovernanceResolutions:       append([]runtimecontract.RuntimeGovernanceResolutionRecord(nil), record.GovernanceResolutions...),
 		OperationGovernanceBindings: cloneRuntimeOperationGovernanceBindings(record.OperationGovernanceBindings),
 		OperationReceipts:           runtimecontract.NormalizeRuntimeOperationReceipts(record.OperationReceipts),
+		DeliveryAcknowledgements:    append([]runtimecontract.RuntimeDeliveryAcknowledgement(nil), record.DeliveryAcknowledgements...),
 		PrerequisiteInvalidations:   runtimecontract.NormalizeRuntimePrerequisiteInvalidations(record.PrerequisiteInvalidations),
 	}
 	if record.Termination != nil {

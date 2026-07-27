@@ -695,6 +695,9 @@ func (r *ResultRepository) Create(_ context.Context, item *resultmodel.Result) e
 	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	if item.Revision == 0 {
+		item.Revision = 1
+	}
 	return writeJSONFileAtomic(path, cloneResult(item))
 }
 
@@ -751,6 +754,24 @@ func (r *ResultRepository) Update(_ context.Context, item *resultmodel.Result) e
 	} else if err != nil {
 		return err
 	}
+	return writeJSONFileAtomic(path, cloneResult(item))
+}
+
+func (r *ResultRepository) CompareAndSwap(_ context.Context, item *resultmodel.Result, expectedRevision uint64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	path := r.resultPath(item.ID)
+	current, err := readJSONItemFile[resultmodel.Result](path)
+	if err != nil {
+		return err
+	}
+	if current.Revision != expectedRevision {
+		return common.ErrConflict
+	}
+	item.Revision = expectedRevision + 1
 	return writeJSONFileAtomic(path, cloneResult(item))
 }
 
@@ -1618,6 +1639,9 @@ func (r *WorkspaceRepository) Create(_ context.Context, item *workspace.Workspac
 	if _, ok := items[item.ID]; ok {
 		return common.ErrConflict
 	}
+	if item.Revision == 0 {
+		item.Revision = 1
+	}
 	items[item.ID] = *cloneWorkspace(item)
 	return saveMap(r.path, items)
 }
@@ -1671,6 +1695,28 @@ func (r *WorkspaceRepository) Update(_ context.Context, item *workspace.Workspac
 	if _, ok := items[item.ID]; !ok {
 		return common.ErrNotFound
 	}
+	items[item.ID] = *cloneWorkspace(item)
+	return saveMap(r.path, items)
+}
+
+func (r *WorkspaceRepository) CompareAndSwap(_ context.Context, item *workspace.Workspace, expectedRevision uint64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	items, err := loadMap[common.WorkspaceID, workspace.Workspace](r.path)
+	if err != nil {
+		return err
+	}
+	current, ok := items[item.ID]
+	if !ok {
+		return common.ErrNotFound
+	}
+	if current.Revision != expectedRevision {
+		return common.ErrConflict
+	}
+	item.Revision = expectedRevision + 1
 	items[item.ID] = *cloneWorkspace(item)
 	return saveMap(r.path, items)
 }
@@ -1965,6 +2011,9 @@ func (r *RunRepository) Create(_ context.Context, item *run.Run) error {
 	if _, ok := items[item.ID]; ok {
 		return common.ErrConflict
 	}
+	if item.Revision == 0 {
+		item.Revision = 1
+	}
 	items[item.ID] = *cloneRun(item)
 	return saveMap(r.path, items)
 }
@@ -2061,6 +2110,31 @@ func (r *RunRepository) Update(_ context.Context, item *run.Run) error {
 	if _, ok := items[item.ID]; !ok {
 		return common.ErrNotFound
 	}
+	items[item.ID] = *cloneRun(item)
+	return saveMap(r.path, items)
+}
+
+func (r *RunRepository) CompareAndSwap(_ context.Context, item *run.Run, expectedRevision uint64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	items, err := loadMap[common.RunID, run.Run](r.path)
+	if err != nil {
+		return err
+	}
+	current, ok := items[item.ID]
+	if !ok {
+		return common.ErrNotFound
+	}
+	if current.WorkspaceID != item.WorkspaceID {
+		return common.ErrConflict
+	}
+	if current.Revision != expectedRevision {
+		return common.ErrConflict
+	}
+	item.Revision = expectedRevision + 1
 	items[item.ID] = *cloneRun(item)
 	return saveMap(r.path, items)
 }

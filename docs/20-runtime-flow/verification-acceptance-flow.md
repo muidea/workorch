@@ -4,7 +4,7 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-07-16
+Last Updated: 2026-07-27
 
 ## Purpose
 
@@ -23,8 +23,8 @@ Last Updated: 2026-07-16
 
 - SM-2：evidence quality/coverage gate、partial assessment、repairable gap、Run-level completion gate；
 - SM-3：AssessmentCandidate attempt/seal/commit；
-- SM-1：complete/failed terminal 窄投影；
-- SM-4：Result/Run/Workspace projection delivery 与重试。
+- SM-1：Run owner-local complete/failed terminal transition；
+- SM-4：Result → Workspace → Run owner-local delivery acknowledgement 与重试。
 
 `Assessment.Satisfied=false` 不得绕过 SM-2 的 structured disposition/gap 直接由 Result 或 application 终态化。完整规约见 [Runtime V2 四状态机固化规约](../00-core/runtime-stage-contract.md#runtime-v2-四状态机固化规约)。
 
@@ -55,7 +55,7 @@ execution evidence accumulated for current CoverageFocus
             -> pass: Terminal Complete -> accepted Result
             -> repairable gap: same-focus/run-level repair
             -> irrecoverable/budget exhausted: Terminal Fail -> rejected Result
-  -> project Run / Workspace terminal only after terminal authority is persisted
+  -> persisted terminal delivery fact -> Result owner -> Workspace owner -> Run owner
 ```
 
 ## Main Stages
@@ -108,9 +108,9 @@ requirement text，供后续 Result projection 组装 coverage 视图。
 
 最后一个 work item 关闭并通过 Run-level completion gate后，或 bounded terminal 决策已经形成：
 
-1. Orchestrator 通过 Result owner 的具体 EventHub create command 写入 accepted/rejected Result
-2. 再投影 Run / Workspace terminal
-3. Result block **只持久化**正式 outcome，**不参与** acceptance 裁决
+1. Orchestrator 密封 terminal 与 result payload，并发布 terminal delivery fact
+2. Result owner 内部持久化 accepted/rejected Result；成功 notification 驱动 Workspace owner release，随后由 Run owner内部 terminal
+3. Result block **只持久化**正式 outcome，**不参与** acceptance 裁决；SM-4 只记录各步 acknowledgement
 
 投影输入来自：
 
@@ -158,17 +158,17 @@ requirement text，供后续 Result projection 组装 coverage 视图。
 
 - satisfied assessment 必须有 current-run accepted evidence refs
 - repairable assessment 不直接 terminal；partial assessment 不丢失未关闭 item
-- Orchestrator 判定 acceptance；Result 只投影
+- Orchestrator 判定 acceptance；Result owner只持久化自身 outcome lifecycle
 - accepted / rejected Result 都能从 assessment ledger 与 terminal summary 解释来源
 - 历史失败 evidence 可保留在 diagnostic / rejected lineage，但不能覆盖最新 accepted closure
-- 正式 terminal 只能来自 reducer decision + typed owner projection；
-  Orchestrator 不注册 ValidateRun / CompleteRun 作为第二套 completion 入口
+- 正式 terminal 只能来自 reducer decision + Result/Workspace/Run 的 typed owner-local delivery；
+  Orchestrator 不注册 ValidateRun / CompleteRun 或 lifecycle projection 作为第二套 completion 入口
 
 ## Output
 
 - assessment ledger facts
 - accepted / rejected Result（Result owner）
-- Run / Workspace terminal projection
+- Result / Workspace / Run owner-local terminal delivery
 - 可选 Artifact refs（由 Result / evidence 附件路径承载，见 evidence-result-flow）
 
 ## Source Documents
@@ -178,4 +178,5 @@ requirement text，供后续 Result projection 组装 coverage 视图。
 - [evidence-result-flow.md](evidence-result-flow.md)
 - `../00-core/runtime-stage-contract.md`
 - `../../internal/modules/kernel/orchestrator/readme.md`
-- `../../internal/modules/kernel/orchestrator/runtime_v2_result_projection.go`
+- `../../internal/modules/kernel/orchestrator/readme.md` 与
+  `../../internal/modules/blocks/result/readme.md`

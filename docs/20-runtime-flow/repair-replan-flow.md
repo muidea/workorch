@@ -4,7 +4,7 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-07-16
+Last Updated: 2026-07-27
 
 ## Purpose
 
@@ -88,7 +88,7 @@ governed dispatch：
 
 1. `OpenRuntimeGovernanceRequestCommand/Result` 向 Decision owner 创建确定性 ticket
 2. ticket、snapshot、dispatch、dependency 绑定随 aggregate 持久化
-3. 等待 disposition = `governed_wait`（Run 可投影 blocked_on_decision）
+3. Orchestrator 持久化 `governed_wait` 事实；Run owner 消费后在自身 reducer 中进入 `blocked_on_decision`
 4. resolution 通过 `CommitRuntimeGovernanceResolutionCommand/Result` 提交
 5. 同一 resolution ID 与 authority snapshot **最多消费一次**
 6. Decision owner 也可只提交 ticket resolution；Orchestrator 从 persisted binding 补齐后进入同一 commit
@@ -99,7 +99,7 @@ governed dispatch：
 - governance fail：生成 `governance_rejected` terminal
 - stale resolution：只进入 diagnostic lineage
 - 必须匹配已绑定 ticket；无绑定、同 dispatch 绑定不同 ticket、dependency 漂移 → conflict
-- `runtime_v2_governance` resolution committed 后由 Orchestrator 自行投影 terminal 或调度 drive continuation；application resolved watcher **不得**再次发送 Resume 形成双驱动
+- `runtime_v2_governance` resolution committed 后 Orchestrator 发布 immutable continuation/terminal fact；Run owner内部迁移后通知 drive；application resolved watcher **不得**再次发送 Resume 形成双驱动
 
 ### 4. Replan Semantic = New Activation / Run Only
 
@@ -144,7 +144,7 @@ Context 前置失败（缺 snapshot、缺 capability 等）应优先 `AcquirePre
 - failure / diagnostic 分层：stale 只进 diagnostic lineage
 - replan = 新 activation/run，不是同 Run 自动 successor
 - governance resolution 单次消费并回到同一 reducer
-- Start/Resume 生产入口只进入 V2；缺少 bootstrap 失败并投影 terminal
+- Start/Resume 生产入口只向 Run owner 发送 intent；缺少 bootstrap 通过 owner-local terminal delivery 收敛
 
 ## Output
 

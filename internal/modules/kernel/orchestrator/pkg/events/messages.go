@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	runcontracts "github.com/muidea/workorch/internal/modules/blocks/run/pkg/contracts"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
 	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
@@ -19,13 +18,6 @@ import (
 const definitionPackage = "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 const CommandDestination = modulecommon.ModuleID
 
-type StartRunCommand = runcontracts.StartRunCommand
-type BlockDecisionCommand = runcontracts.BlockOnDecisionCommand
-type BlockApprovalCommand = runcontracts.BlockOnApprovalCommand
-type ResumeRunCommand = runcontracts.ResumeRunCommand
-type CancelRunCommand = runcontracts.CancelRunCommand
-type SupersedeRunCommand = runcontracts.SupersedeRunCommand
-type FailRunCommand = runcontracts.FailRunCommand
 type PurgeRunCommand = orchestratorcontracts.PurgeRunCommand
 
 type AcquireTargetSnapshotCommand struct {
@@ -333,7 +325,9 @@ type DriveRuntimeV2Result struct {
 	Disposition         RuntimeV2DriveDisposition
 	StateRevision       uint64
 	EvidenceRevision    string
+	DefinitionRevision  string
 	AuthoritySnapshotID string
+	DispatchID          string
 	Action              runtimecontract.RuntimeAction
 	BlockingTicketID    common.TicketID
 	Terminal            *runtimecontract.TerminalOutcome
@@ -1229,13 +1223,6 @@ type OrchestratorCommandResult struct {
 
 func MessageContracts() []eventcontract.MessageContract {
 	ret := []eventcontract.MessageContract{
-		eventcontract.CommandTopic[StartRunCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommandStartRun).MessageContract(),
-		eventcontract.CommandTopic[BlockDecisionCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommandBlockDecision).MessageContract(),
-		eventcontract.CommandTopic[BlockApprovalCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommandBlockApproval).MessageContract(),
-		eventcontract.CommandTopic[ResumeRunCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommandResumeRun).MessageContract(),
-		eventcontract.CommandTopic[CancelRunCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommandCancelRun).MessageContract(),
-		eventcontract.CommandTopic[SupersedeRunCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommandSupersedeRun).MessageContract(),
-		eventcontract.CommandTopic[FailRunCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommandFailRun).MessageContract(),
 		eventcontract.CommandTopic[PurgeRunCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommandPurgeRun).MessageContract(),
 		eventcontract.CommandTopic[ListToolCallsByRunCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorCommandListToolCallsByRun).MessageContract(),
 		eventcontract.CommandTopic[ListPatchesByRunCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorCommandListPatchesByRun).MessageContract(),
@@ -1254,6 +1241,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[PreflightRuntimeCandidateCommand, PreflightRuntimeCandidateResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorPreflightRuntimeCandidate).MessageContract(),
 		eventcontract.CommandTopic[QueryRuntimeOperationReceiptCommand, QueryRuntimeOperationReceiptResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorQueryRuntimeOperationReceipt).MessageContract(),
 		eventcontract.CommandTopic[CommitRuntimeOperationReceiptCommand, CommitRuntimeOperationReceiptResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommitRuntimeOperationReceipt).MessageContract(),
+		eventcontract.CommandTopic[RequestRuntimeTerminationCommand, RequestRuntimeTerminationResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorRequestRuntimeTermination).MessageContract(),
 		eventcontract.CommandTopic[RequestRuntimeCandidateCommand, RequestRuntimeCandidateResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorRequestRuntimeCandidate).MessageContract(),
 		eventcontract.CommandTopic[ExecuteFileListOperationCommand, ExecuteFileListOperationResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorExecuteFileListOperation).MessageContract(),
 		eventcontract.CommandTopic[ExecuteFileReadOperationCommand, ExecuteFileReadOperationResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorExecuteFileReadOperation).MessageContract(),
@@ -1269,6 +1257,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[CommitRuntimeGovernanceResolutionCommand, CommitRuntimeGovernanceResolutionResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommitRuntimeGovernanceResolution).MessageContract(),
 		eventcontract.CommandTopic[CommitRuntimeGovernanceTicketResolutionCommand, CommitRuntimeGovernanceResolutionResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommitRuntimeGovernanceTicket).MessageContract(),
 		eventcontract.CommandTopic[OpenRuntimeGovernanceRequestCommand, OpenRuntimeGovernanceRequestResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorOpenRuntimeGovernanceRequest).MessageContract(),
+		eventcontract.CommandTopic[RecordRuntimeDeliveryAcknowledgementCommand, RecordRuntimeDeliveryAcknowledgementResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorRecordRuntimeDeliveryAcknowledgement).MessageContract(),
 	}
 	for _, topic := range []string{TopicPatchPreviewed, TopicPatchApplied, TopicPatchFailed, TopicPatchReverted} {
 		ret = append(ret, eventcontract.DataTopic[PatchChangedData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, topic).MessageContract())
@@ -1283,5 +1272,10 @@ func MessageContracts() []eventcontract.MessageContract {
 	} {
 		ret = append(ret, eventcontract.DataTopic[ArtifactContinuationChangedData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, topic).MessageContract())
 	}
+	ret = append(ret,
+		eventcontract.DataTopic[RuntimeGovernanceWaitRecordedData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, TopicOrchestratorRuntimeGovernanceWaitRecorded).MessageContract(),
+		eventcontract.DataTopic[RuntimeContinuationEligibleData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, TopicOrchestratorRuntimeContinuationEligible).MessageContract(),
+		eventcontract.DataTopic[RuntimeTerminalDeliveryRequestData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, TopicOrchestratorRuntimeTerminalDeliveryRequested).MessageContract(),
+	)
 	return ret
 }

@@ -4,13 +4,15 @@ Status: active
 
 Type: domain-model
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-27
 
 ## Purpose
 
 本文件定义 WorkOrch 中的治理对象：Decision、Approval、Resolution 及其边界。
 
-**Runtime V2 边界**：`request_governance` 时 Orchestrator 打开 Decision ticket 并将 ticket↔authority snapshot 绑定写入 V2 aggregate，Run 投影为 blocked。继续路径是 Decision → `CommitRuntimeGovernance*Resolution` → Orchestrator 回 reducer；**application 不得**在 resolve 后自动 Resume。Approval 仍服务高风险能力准入；不能绕过 Orchestrator contract gate。
+**Runtime V2 边界**：`request_governance` 时 Orchestrator 打开 Decision ticket 并将 ticket↔authority snapshot 绑定写入
+V2 aggregate，再发布 immutable governance wait fact；Run owner在自身 reducer 中进入 blocked。继续路径是
+Decision → `CommitRuntimeGovernance*Resolution` → Orchestrator reducer/evidence → immutable continuation fact → Run owner-local transition；**application 不得**在 resolve 后自动 Resume。Approval 仍服务高风险能力准入；不能绕过 Orchestrator contract gate。
 
 ## Core Entities
 

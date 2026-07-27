@@ -4,7 +4,7 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-07-16
+Last Updated: 2026-07-27
 
 ## Purpose
 
@@ -22,7 +22,7 @@ Last Updated: 2026-07-16
 
 生产主线 = **Runtime V2 only**。
 
-- Start / Resume 正式入口只进入 Runtime V2
+- Start / Resume 正式入口只向 Run owner 提交 intent；Run owner notification 才进入 Runtime V2
 - `DriveRuntimeV2Command/Result` 是唯一同步推进合同
 - action 只来自 typed reducer；operation 只经 sealed dispatch 与 `ExecuteRuntimeOperationCommand/Result`
 - 不存在生产主线中的 V1 `StagePacket`、`NextAction`、graph dispatch、`ExecutionContextPatch`、自动 replan successor
@@ -50,7 +50,8 @@ Last Updated: 2026-07-16
 ### V2 Drive Loop
 
 ```text
-Start / Resume
+Start / Resume intent
+  -> Run owner-local lifecycle transition -> RunStateChanged fact
   -> InitializeRuntimeV2FromRun (typed bootstrap -> initial facts / load aggregate; 幂等)
   -> DriveRuntimeV2 (有界循环)
        |
@@ -70,8 +71,8 @@ Start / Resume
        |                       Commit execution evidence (coverage-bound) -> reducer
        |
        +-- Complete | Fail
-             project Result (accepted/rejected) via Result owner
-             project Run / Workspace terminal
+             terminal delivery fact
+             Result owner -> Workspace owner -> Run owner local delivery
 ```
 
 Drive 非等待、非终态的每次 transition 必须增加 persisted `stateRevision`；无进展或超过 transition guard 必须 fail-fast。重复 `Drive` 与进程重启只从 Run owner aggregate 幂等恢复。

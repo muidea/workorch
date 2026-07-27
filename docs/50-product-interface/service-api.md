@@ -4,13 +4,17 @@ Status: active
 
 Type: product-interface
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-27
 
 ## Purpose
 
 本文件作为 WorkOrch HTTP API 的统一入口文档。
 
-生产 runtime 主链为 **Runtime V2 only**。HTTP 面只提交 scoped command 与返回 projection / command accepted 语义；正式推进在服务端经 typed activation / Start / Resume 进入 `DriveRuntimeV2`。接口字段中的 process evidence、step graph、RecoveryPlan.nextAction 等若存在，仅为读模型/诊断，不构成 V1 `StagePacket` / `NextAction` / graph dispatch / `ExecutionContextPatch` 生产路径。replan 语义通过新 activation 或 replacement run 表达，不是同 Run 自动 successor。
+生产 runtime 主链为 **Runtime V2 only**。HTTP 面只向 Run owner 提交 scoped activation / continuation intent 并返回
+projection / command accepted 语义；Run owner成功迁移后的 notification 才进入 `DriveRuntimeV2`。接口字段中的
+process evidence、step graph、RecoveryPlan.nextAction 等若存在，仅为读模型/诊断，不构成 V1 `StagePacket` /
+`NextAction` / graph dispatch / `ExecutionContextPatch` 生产路径。replan 语义通过新 activation 或 replacement run
+表达，不是同 Run 自动 successor。
 
 ## API Shape
 
@@ -1546,11 +1550,11 @@ HTTP 层统一支持：
 - `POST /workspaces/:workspaceId/execution-activations` 返回 `202`
   - 表示 workspace-scoped execution command 已被接受；响应必须携带 `intent`、`requestId`、`source`、`reason` 等 command metadata
   - 该 endpoint 的资源名保留 execution activation，是因为请求体可携带生成 typed RuntimeBootstrap / activation 输入；端侧不得把它当作独立 activation 状态机，也不得当作 V1 execution-context patch 入口
-  - 服务端路径：封存 bootstrap → 创建/选择 Run → Start 进入 `DriveRuntimeV2`（具体以 appservice 实现为准）
+  - 服务端路径：封存 bootstrap → 创建/选择 Run → 向 Run owner提交 Start intent → owner notification 触发 `DriveRuntimeV2`（具体以 appservice 实现为准）
 - `POST /workspaces/:workspaceId/runs/:runId/start` / `POST /workspaces/:workspaceId/runs/:runId/resume` 返回 `202`
   - 表示 run-scoped command 已被接受；后续状态以 workorchd projection / run snapshot 为准
-  - Start：AcceptRunStart（pending→active）后后台 `DriveRuntimeV2`
-  - Resume：仅 workspace/run scope；允许 active 或已解决 blocker；进入同一 drive；**无** ExecutionContextPatch
+  - Start：Run owner消费 activation intent、内部 `pending→active` 后后台 `DriveRuntimeV2`
+  - Resume：仅 workspace/run scope 的 continuation intent；Run owner校验已解决 blocker 并内部恢复后进入同一 drive；**无** ExecutionContextPatch
 - `DELETE /memory/:memoryId` 返回 `200` + `{ "deleted": true }`
   - 不走 `204`
 - `PUT /workspaces/:workspaceId/llm-target` 与 `DELETE /workspaces/:workspaceId/llm-target` 返回 `200` + 更新后的 workspace

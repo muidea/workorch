@@ -19,7 +19,9 @@ CAS/查询合同，不组合多个 owner 选择下一动作。目录、module ID
 - Runtime V2 正式状态使用 typed `RuntimeStateRecord` 随 Run 持久化，其中包含 facts、authority、dispatch、candidate attempt 及初始化时封存的 Goal/DoD definition context；update command 可携带 expected runtime revision，Run owner 在同一 EventHub lane 内执行 CAS 后写入。
 - Run 创建合同可携带 typed `RuntimeBootstrap`，保存 effective Goal/DoD definition、ordered focus queue 与 prerequisite requirements；bootstrap 在 RuntimeState 初始化前保持不可变。
 - 创建或启动 Run 前，通过 EventHub 读取 `blocks/workspace` 的有效 workspace definition 和 revision。
-- 启动和恢复由调用方发送 Orchestrator 定义的具体 command；Orchestrator 通过 Run owner 的 get/update command 执行状态准入、CAS 持久化和终态投影。Runtime V2 Resume 只携带 workspace/run scope，不接受 loaded Run 或上下文 patch。
+- 启动和恢复由 application 向 Run owner发送具体 activation / continuation intent；Run Biz 在自身 reducer 中完成状态准入、
+  CAS 持久化并发布 `RunStateChangedData`。Orchestrator 只能消费该通知触发 drive，不能投影 Run lifecycle。
+  Runtime V2 Resume 只携带 workspace/run scope，不接受 loaded Run 或上下文 patch。
 - governed blocker 必须携带对应 DecisionTicket 或 Approval 的 workspace/run scope。
 - Run 创建及状态变化使用 `RunStateChangedData` typed notification；Governance、Eventstream 和 application 按需订阅该 owner 通知。
 - Governance、Eventstream 和 application 按需导入 `blocks/run/pkg/events` 订阅或发送命令。
@@ -42,7 +44,8 @@ CAS/查询合同，不组合多个 owner 选择下一动作。目录、module ID
 - bootstrap definition identity/revision 必须与 Run 的 GoalID、DoDID 和 DefinitionRevision 一致；不一致的创建或 ensure command 必须返回 conflict。
 - 持久化 definition context 必须完整且 revision 与 RuntimeFacts 一致；Run owner 不接受定义正文、identity 或 capability contract 缺失的 Runtime V2 状态。
 - retirement update 不得修改带 typed Runtime V2 bootstrap/state 的 Run，也不得删除历史 Step、Checkpoint 或 evidence 审计记录。
-- Resume 的状态准入由 Run owner 先核对，随后只发送 Orchestrator 定义的无 patch typed command；不得通过 Run command 传递 `map[string]any` 或调用 Orchestrator service facade。
+- Resume 的状态准入与迁移完全由 Run owner reducer 完成；成功后才发布不可变 Run state fact。不得通过 Run command
+  传递 `map[string]any`、指定外部 owner state 或调用 Orchestrator service facade。
 - Run 不提供 Validate/Complete service command；禁止 application 或其他 module 绕过 Runtime V2 reducer/evidence gate 直接把 active Run 标记为 validated/completed。
 - Run owner handler 直接调用本 owner `biz`；不保留 `Service()` 或 `service/` forwarding facade。Start/Resume/Block/Cancel/Supersede/Fail 等跨组件状态变更必须发送 owner 的具体 EventHub command。
 - Run biz 不再持有或构造 Orchestrator adapter；已删除仅用于 V1 lifecycle 转发的 service DTO alias 和 test-only constructor，Run owner 的生产依赖只包含自身 repository、Workspace typed read port 与状态通知 Hub。

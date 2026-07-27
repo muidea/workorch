@@ -68,12 +68,10 @@ func newTestBiz(owner *RuntimeOrchestrator, hub magicevent.Hub, background magic
 }
 
 func (orchestratorBizTestShim) NewRuntimeOrchestrator(
-	runs repository.RunRepository,
-	workspaces repository.WorkspaceRepository,
 	tickets repository.DecisionTicketRepository,
 	approvals repository.ApprovalRepository,
 ) *RuntimeOrchestrator {
-	return NewRuntimeOrchestrator(runs, workspaces, tickets, approvals)
+	return NewRuntimeOrchestrator(tickets, approvals)
 }
 
 // runtimeV2CandidateResultForTest is the only scripted-provider success

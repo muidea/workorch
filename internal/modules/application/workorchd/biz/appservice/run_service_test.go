@@ -5,8 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
-
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -191,34 +189,6 @@ func TestStartRunWithBackendReturnsBlockedDecisionRun(t *testing.T) {
 	item := prepareDecisionRun(t, dataRoot, "ws-run-start-blocked-decision", "run-start-blocked-decision")
 	if item.State != "blocked_on_decision" || item.BlockingTicketID == "" {
 		t.Fatalf("run = %+v, want blocked decision with ticket", item)
-	}
-}
-
-func TestReadRunWithSessionReturnsFailureReason(t *testing.T) {
-	session, ctx := newTestRuntimeSession(t, "memory", "")
-	exports, err := testSessionExports(session)
-	if err != nil {
-		t.Fatalf("exports: %v", err)
-	}
-	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-run-failure", Title: "run failure workspace", State: common.WorkspaceStateActive}); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: "run-failure", WorkspaceID: "ws-run-failure", State: common.RunStateActive}); err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-	if _, err := sendAppserviceTestCommand[orchestratorevents.FailRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, exports.Infrastructure.CommandHub, orchestratorevents.TopicOrchestratorCommandFailRun, orchestratorevents.CommandDestination, orchestratorevents.FailRunCommand{
-		RunID:  "run-failure",
-		Reason: "manual fail",
-	}); err != nil {
-		t.Fatalf("fail run: %v", err)
-	}
-
-	item, err := ReadRunWithSession(ctx, session, "run-failure")
-	if err != nil {
-		t.Fatalf("ReadRunWithSession: %v", err)
-	}
-	if item.State != "failed" || item.FailureReason != "manual fail" {
-		t.Fatalf("run = %+v, want failed/manual fail", item)
 	}
 }
 

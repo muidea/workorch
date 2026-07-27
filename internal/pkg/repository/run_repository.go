@@ -14,5 +14,6 @@ type RunRepository interface {
 	List(context.Context) ([]*run.Run, error)
 	ListByWorkspaceID(context.Context, common.WorkspaceID) ([]*run.Run, error)
 	Update(context.Context, *run.Run) error
+	CompareAndSwap(context.Context, *run.Run, uint64) error
 	Delete(context.Context, common.RunID) error
 }

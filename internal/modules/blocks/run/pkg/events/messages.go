@@ -1,12 +1,14 @@
 package events
 
 import (
+	"fmt"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/run/pkg/common"
 	runcontracts "github.com/muidea/workorch/internal/modules/blocks/run/pkg/contracts"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+	"strings"
 )
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
@@ -106,14 +108,27 @@ type RunStateChangedData struct {
 	BlockingTicketID        common.TicketID
 	BlockingApprovalID      common.ApprovalID
 	FailureReason           string
+	CausationID             string
+	DefinitionRevision      string
+	EvidenceRevision        string
 	RuntimeStateRevision    uint64
 	RuntimeConvergenceState runtimecontract.ConvergenceState
 	RuntimeAction           runtimecontract.RuntimeAction
 	RuntimeFocusID          string
 	AuthoritySnapshotID     string
+	DispatchID              string
 	// RepairAttempts is a monotonic snapshot of the persisted SM-2 ledger.
 	// Consumers observe deltas only; it does not grant them transition authority.
 	RepairAttempts int
+}
+
+// RunContinuationRequestedData is emitted only by Run owner after it accepts
+// a scoped Continue intent for an already-active Run. It deliberately differs
+// from RunStateChangedData: duplicate resume is not a fresh SM-1 transition.
+type RunContinuationRequestedData struct {
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	CausationID string
 }
 
 func RunStateChangedDataFromModel(run *runmodel.Run) RunStateChangedData {
@@ -129,6 +144,7 @@ func RunStateChangedDataFromModel(run *runmodel.Run) RunStateChangedData {
 		BlockingTicketID:   run.BlockingTicketID,
 		BlockingApprovalID: run.BlockingApprovalID,
 		FailureReason:      run.FailureReason,
+		DefinitionRevision: run.DefinitionRevision,
 	}
 	if run.RuntimeState != nil {
 		ret.RuntimeStateRevision = run.RuntimeState.StateRevision
@@ -136,9 +152,30 @@ func RunStateChangedDataFromModel(run *runmodel.Run) RunStateChangedData {
 		ret.RuntimeAction = run.RuntimeState.Decision.Action
 		ret.RuntimeFocusID = run.RuntimeState.Facts.Focus.ID
 		ret.AuthoritySnapshotID = run.RuntimeState.Decision.AuthoritySnapshot.ID
+		if run.RuntimeState.ActiveDispatch != nil {
+			ret.DispatchID = run.RuntimeState.ActiveDispatch.ID
+		}
 		ret.RepairAttempts = run.RuntimeState.Facts.Repair.Normalized().RepairAttempts
+		ret.DefinitionRevision = run.RuntimeState.Facts.DefinitionRevision
+		ret.EvidenceRevision = run.RuntimeState.Facts.EvidenceRevision
 	}
+	ret.CausationID = "run-state/" + string(run.ID) + "/" + fmt.Sprintf("%d", ret.RuntimeStateRevision)
 	return ret
+}
+
+// Validate verifies the immutable identity carried by a Run owner
+// notification. A zero RuntimeStateRevision is permitted only for the
+// pre-runtime create notification; every Runtime V2 transition carries the
+// persisted authority/facts identity.
+func (d RunStateChangedData) Validate() error {
+	if d.WorkspaceID == "" || d.RunID == "" || d.CausationID == "" {
+		return fmt.Errorf("%w: run state fact requires scope and causation", common.ErrInvalidArgument)
+	}
+	if d.RuntimeStateRevision > 0 && (strings.TrimSpace(d.DefinitionRevision) == "" ||
+		strings.TrimSpace(d.EvidenceRevision) == "" || strings.TrimSpace(d.AuthoritySnapshotID) == "") {
+		return fmt.Errorf("%w: runtime run state fact requires definition, evidence and authority identity", common.ErrInvalidArgument)
+	}
+	return nil
 }
 
 type RunCommandResult struct {
@@ -168,6 +205,11 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[UpdateRunCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandUpdate).MessageContract(),
 		eventcontract.CommandTopic[LinkRunSuccessorCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandLinkSuccessor).MessageContract(),
 		eventcontract.CommandTopic[DeleteRunCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandDelete).MessageContract(),
+		eventcontract.CommandTopic[ActivateRunCommand, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandActivate).MessageContract(),
+		eventcontract.CommandTopic[ContinueRunCommand, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandContinue).MessageContract(),
+		eventcontract.CommandTopic[ApplyRuntimeGovernanceWaitCommand, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandApplyGovernanceWait).MessageContract(),
+		eventcontract.CommandTopic[ApplyRuntimeContinuationEligibleCommand, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandApplyContinuationEligible).MessageContract(),
+		eventcontract.CommandTopic[ApplyRuntimeTerminalDeliveryCommand, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandApplyTerminalDelivery).MessageContract(),
 	}
 	for _, topic := range []string{
 		TopicRunCreated,
@@ -183,5 +225,6 @@ func MessageContracts() []eventcontract.MessageContract {
 	} {
 		ret = append(ret, eventcontract.DataTopic[RunStateChangedData]("run", definitionPackage, eventcontract.LanePolicyState, topic).MessageContract())
 	}
+	ret = append(ret, eventcontract.DataTopic[RunContinuationRequestedData]("run", definitionPackage, eventcontract.LanePolicyState, TopicRunContinuationRequested).MessageContract())
 	return ret
 }

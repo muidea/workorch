@@ -8,6 +8,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
+	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/common"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
@@ -85,6 +86,14 @@ func (m *Biz) Start() error {
 	for _, topic := range m.topics {
 		m.SubscribeFunc(topic, m.handleCommand)
 	}
+	for _, topic := range m.lifecycleTopics() {
+		m.SubscribeFunc(topic, m.handleLifecycleCommand)
+		m.topics = append(m.topics, topic)
+	}
+	// Run owner is the sole publisher of lifecycle facts. Workspace consumes a
+	// fact and posts an owner-local projection command; it never accepts an
+	// Orchestrator-written Workspace model.
+	m.SubscribeMatchedFunc(ModuleID+"/run-projection", runevents.NotificationDestination, runevents.TopicRunStateChanged, m.handleRunStateChanged)
 	m.topics = append(m.topics, systemevents.TopicSystemCommandEnsureWorkspaceTemplateDefaults)
 	m.SubscribeFunc(systemevents.TopicSystemCommandEnsureWorkspaceTemplateDefaults, m.handleSystemDefaultsCommand)
 	m.started = true
@@ -117,6 +126,7 @@ func (m *Biz) Teardown(context.Context) {
 	for idx := len(m.topics) - 1; idx >= 0; idx-- {
 		m.UnsubscribeFunc(m.topics[idx])
 	}
+	m.UnsubscribeMatchedFunc(ModuleID+"/run-projection", runevents.TopicRunStateChanged)
 	m.topics = nil
 	m.manager = nil
 	m.workspaces = nil
@@ -124,6 +134,32 @@ func (m *Biz) Teardown(context.Context) {
 	m.dods = nil
 	m.templates = nil
 	m.started = false
+}
+
+func (m *Biz) handleRunStateChanged(ev magicevent.Event, result magicevent.Result) {
+	data, ok := ev.Data().(runevents.RunStateChangedData)
+	if !ok || ev.Source() != runevents.CommandDestination || data.Validate() != nil || m == nil || m.EventHub() == nil {
+		return
+	}
+	switch data.State {
+	case common.RunStatePending, common.RunStateActive, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
+		cmd := workspaceevents.ApplyRunProjectionFactCommand{
+			WorkspaceID:         data.WorkspaceID,
+			RunID:               data.RunID,
+			SourceOwner:         runevents.CommandDestination,
+			CausationID:         data.CausationID,
+			RunState:            data.State,
+			AuthoritySnapshotID: data.AuthoritySnapshotID,
+			DefinitionRevision:  data.DefinitionRevision,
+			EvidenceRevision:    data.EvidenceRevision,
+			DispatchID:          data.DispatchID,
+		}
+		// This is a Post rather than a re-entrant Send: Run's notification lane
+		// is independent from Workspace's owner-local reducer lane.
+		command := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandApplyRunProjectionFact, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ev.Context(), cmd)
+		command.BindLaneKey(workorchevents.EventHubLaneKeyFor(command.ID(), workorchevents.EventHubLaneScope{SubjectType: "workspace", SubjectID: string(data.WorkspaceID), WorkspaceID: string(data.WorkspaceID), RunID: string(data.RunID)}))
+		m.PostEvent(command)
+	}
 }
 
 func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
@@ -183,11 +219,17 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 		return workspaceevents.WorkspaceCommandResult{Workspaces: items}, nil
 	case workspaceevents.TopicWorkspaceCommandUpdate:
 		cmd, ok := ev.Data().(workspaceevents.UpdateWorkspaceCommand)
-		if !ok || m.workspaces == nil {
+		if !ok || cmd.WorkspaceID == "" || m.workspaces == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		item := workspaceFromUpdateCommand(cmd)
-		if err := m.workspaces.Update(ctx, item); err != nil {
+		current, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
+		if err != nil {
+			return workspaceevents.WorkspaceCommandResult{}, err
+		}
+		// Generic metadata updates deliberately preserve lifecycle-owned fields.
+		// Workspace.State and ActiveRunID may only be changed by lifecycle_reducer.
+		item := workspaceFromUpdateCommand(current, cmd)
+		if err := m.workspaces.CompareAndSwap(ctx, item, item.Revision); err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
 		m.publishWorkspaceUpdated(ctx, item)
@@ -210,7 +252,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 			}
 			item.DefaultLLMTarget = &target
 		}
-		if err := m.workspaces.Update(ctx, item); err != nil {
+		if err := m.workspaces.CompareAndSwap(ctx, item, item.Revision); err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
 		m.publishWorkspaceUpdated(ctx, item)
@@ -507,23 +549,23 @@ func workspaceTemplatesFromRepository(items []*repository.WorkspaceTemplate) []*
 	return ret
 }
 
-func workspaceFromUpdateCommand(cmd workspaceevents.UpdateWorkspaceCommand) *workspacemodel.Workspace {
-	return &workspacemodel.Workspace{
-		ID:                   cmd.WorkspaceID,
-		Title:                cmd.Title,
-		Description:          cmd.Description,
-		DeliverableDirectory: cmd.DeliverableDirectory,
-		InternalDirectory:    cmd.InternalDirectory,
-		State:                cmd.State,
-		ActiveRunID:          cmd.ActiveRunID,
-		TemplateID:           cmd.TemplateID,
-		ProfileID:            cmd.ProfileID,
-		DefaultLLMTarget:     cloneProviderModelTarget(cmd.DefaultLLMTarget),
-		DefaultSoulID:        cmd.DefaultSoulID,
-		SoulBindings:         cloneSoulBindingMap(cmd.SoulBindings),
-		ContextHints:         cmd.ContextHints.Clone(),
-		EvidencePolicies:     workorcheventpayload.CloneSlice(cmd.EvidencePolicies),
+func workspaceFromUpdateCommand(current *workspacemodel.Workspace, cmd workspaceevents.UpdateWorkspaceCommand) *workspacemodel.Workspace {
+	if current == nil {
+		return nil
 	}
+	item := *current
+	item.Title = cmd.Title
+	item.Description = cmd.Description
+	item.DeliverableDirectory = cmd.DeliverableDirectory
+	item.InternalDirectory = cmd.InternalDirectory
+	item.TemplateID = cmd.TemplateID
+	item.ProfileID = cmd.ProfileID
+	item.DefaultLLMTarget = cloneProviderModelTarget(cmd.DefaultLLMTarget)
+	item.DefaultSoulID = cmd.DefaultSoulID
+	item.SoulBindings = cloneSoulBindingMap(cmd.SoulBindings)
+	item.ContextHints = cmd.ContextHints.Clone()
+	item.EvidencePolicies = workorcheventpayload.CloneSlice(cmd.EvidencePolicies)
+	return &item
 }
 
 func cloneProviderModelTarget(input *runtimecontract.ProviderModelTarget) *runtimecontract.ProviderModelTarget {

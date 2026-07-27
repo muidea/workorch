@@ -66,6 +66,10 @@ func (m *Biz) Start() error {
 	for _, topic := range m.topics {
 		m.SubscribeFunc(topic, m.handleCommand)
 	}
+	for _, topic := range m.lifecycleTopics() {
+		m.SubscribeFunc(topic, m.handleLifecycleCommand)
+		m.topics = append(m.topics, topic)
+	}
 	m.started = true
 	return nil
 }

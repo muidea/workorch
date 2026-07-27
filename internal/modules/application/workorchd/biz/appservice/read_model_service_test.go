@@ -146,6 +146,10 @@ func (r *blockingWorkspaceRepository) Update(ctx context.Context, item *workspac
 	return r.base.Update(ctx, item)
 }
 
+func (r *blockingWorkspaceRepository) CompareAndSwap(ctx context.Context, item *workspacemodel.Workspace, expectedRevision uint64) error {
+	return r.base.CompareAndSwap(ctx, item, expectedRevision)
+}
+
 func (r *blockingWorkspaceRepository) Delete(ctx context.Context, id common.WorkspaceID) error {
 	return r.base.Delete(ctx, id)
 }
@@ -230,6 +234,10 @@ func (r *blockingRunListRepository) ListByWorkspaceID(ctx context.Context, works
 
 func (r *blockingRunListRepository) Update(ctx context.Context, item *runmodel.Run) error {
 	return r.base.Update(ctx, item)
+}
+
+func (r *blockingRunListRepository) CompareAndSwap(ctx context.Context, item *runmodel.Run, expectedRevision uint64) error {
+	return r.base.CompareAndSwap(ctx, item, expectedRevision)
 }
 
 func (r *blockingRunListRepository) Delete(ctx context.Context, id common.RunID) error {

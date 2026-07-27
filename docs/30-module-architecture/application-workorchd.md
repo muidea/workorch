@@ -4,13 +4,14 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-27
 
 ## Purpose
 
 本文件说明 `application/workorch` 与 `internal/modules/application/workorchd` 的应用层职责。
 
-生产主链为 **Runtime V2 only**：application 负责入口、用例组合、typed bootstrap 构造与 Start/Resume **转发**；不拥有 drive loop、continuation queue，也不在 Decision resolve 后 Resume。
+生产主链为 **Runtime V2 only**：application 负责入口、用例组合、typed bootstrap 构造与向 Run owner 的
+Start/Resume **intent 提交**；不拥有 drive loop、continuation queue，也不在 Decision resolve 后 Resume。
 
 权威说明：`internal/modules/application/workorchd/readme.md`。
 
@@ -24,7 +25,7 @@ Last Updated: 2026-07-14
 - HTTP / CLI / SSE surface
 - appservice use-case 组合
 - 构造 typed `RuntimeBootstrap` 并经 EventHub 创建 Run
-- 将 Start / Resume scheduler command 转发为 Orchestrator typed owner command
+- 将 Start / Resume scheduler command 转发为 Run owner typed activation / continuation intent
 - workspace ViewModel projection 管理与输出适配
 
 应用层不负责：
@@ -58,7 +59,7 @@ Last Updated: 2026-07-14
 ### `internal/modules/application/workorchd/biz/appservice`
 
 - workspace activation / restart 用例
-- run-scoped Start / Resume 转发
+- run-scoped Start / Resume intent 提交
 - decision / approval HTTP resolve（只提交 owner command + 刷新投影）
 - read-model / ViewModel 装配
 - Runtime V1 retirement planner / migration command（迁移面，非生产执行主链）
@@ -75,7 +76,7 @@ Last Updated: 2026-07-14
 2. bootstrap 随 Run create command 交给 Run owner 持久化；definition / activation 快照在初始化前不可变。
 3. activation 将 DoD item 标记为需要 typed assessment，并按 profile contract 追加稳定 focus；primary state-change 优先于 supplemental evidence。
 4. RuntimeBootstrap 直接保存 dialog language、Soul 内容快照、Skill 指令、MCP 选择、Memory、evidence policy，以及 state-change / capability-usage / profile acceptance / template stage policy 等 execution contract。
-5. Start：Orchestrator `AcceptRunStart` 后后台唯一 drive；Resume：仅 workspace/run scope，进入同一 drive。
+5. Start/Resume：Run owner消费 scoped intent、内部迁移并发布 `RunStateChanged`；Orchestrator 再以该事实触发唯一 drive。
 
 application **不** 维护 background queue；workspace activation/restart 同步执行用例，通过 Workspace / Run / Orchestrator typed EventHub command 完成。
 
@@ -83,8 +84,8 @@ application **不** 维护 background queue；workspace activation/restart 同�
 
 | 入口 | application 行为 |
 | --- | --- |
-| Start scheduler command | 直接发送 Orchestrator typed Start command |
-| Resume scheduler command | 直接发送 Orchestrator typed Resume（仅 scope） |
+| Start scheduler command | 直接发送 Run owner typed activation intent |
+| Resume scheduler command | 直接发送 Run owner typed continuation intent（仅 scope） |
 | Decision / Approval HTTP resolve | 只提交对应 owner command 并刷新投影 |
 | `runtime_v2_governance` ticket resolve | Decision owner 直接提交 Orchestrator resolution；**不** 由 application 发 Resume |
 
@@ -92,7 +93,7 @@ application **不** 维护 background queue；workspace activation/restart 同�
 
 - 请求只有在 typed owner command 成功接收后才返回 accepted
 - 无 execution pending/started map、无 owner readback retry、无 scheduler recovery map
-- 重启后 Runtime V2 推进只能重新发送 Orchestrator drive，并从 Run owner aggregate 幂等恢复
+- 重启后 Runtime V2 推进由 Run owner inventory/state notification 触发 Orchestrator internal drive，并从 aggregate 幂等恢复
 
 ## Lifecycle
 

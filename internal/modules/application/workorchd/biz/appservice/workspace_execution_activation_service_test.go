@@ -207,6 +207,10 @@ func (r staticRunRepository) Update(context.Context, *runmodel.Run) error {
 	return common.ErrInvalidArgument
 }
 
+func (r staticRunRepository) CompareAndSwap(context.Context, *runmodel.Run, uint64) error {
+	return common.ErrInvalidArgument
+}
+
 func (r staticRunRepository) Delete(context.Context, common.RunID) error {
 	return common.ErrInvalidArgument
 }
@@ -354,6 +358,11 @@ func (r *countingRunRepository) Update(ctx context.Context, item *runmodel.Run) 
 	return r.base.Update(ctx, item)
 }
 
+func (r *countingRunRepository) CompareAndSwap(ctx context.Context, item *runmodel.Run, expectedRevision uint64) error {
+	r.updateCalls++
+	return r.base.CompareAndSwap(ctx, item, expectedRevision)
+}
+
 func (r *countingRunRepository) Delete(ctx context.Context, id common.RunID) error {
 	return r.base.Delete(ctx, id)
 }
@@ -378,6 +387,10 @@ func (r *countingWorkspaceRepository) List(ctx context.Context) ([]*workspacemod
 
 func (r *countingWorkspaceRepository) Update(ctx context.Context, item *workspacemodel.Workspace) error {
 	return r.base.Update(ctx, item)
+}
+
+func (r *countingWorkspaceRepository) CompareAndSwap(ctx context.Context, item *workspacemodel.Workspace, expectedRevision uint64) error {
+	return r.base.CompareAndSwap(ctx, item, expectedRevision)
 }
 
 func (r *countingWorkspaceRepository) Delete(ctx context.Context, id common.WorkspaceID) error {
@@ -3340,7 +3353,7 @@ func TestActivateWorkspaceExecutionWithBackendStartsCreatedActiveRun(t *testing.
 	}
 }
 
-func TestActivateWorkspaceExecutionWithBackendRestartReplacesCreatedActiveRun(t *testing.T) {
+func TestActivateWorkspaceExecutionWithBackendRestartRejectsUninitializedActiveRunReplacement(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
 	cleanupSharedBackendSession(t, "file", dataRoot)
@@ -3360,11 +3373,11 @@ func TestActivateWorkspaceExecutionWithBackendRestartReplacesCreatedActiveRun(t 
 	if err != nil {
 		t.Fatalf("CreateRunWithBackend: %v", err)
 	}
-	updatedGoal, err := UpdateGoalWithBackend(context.Background(), "file", dataRoot, goal.ID, "restart created active goal revised")
+	_, err = UpdateGoalWithBackend(context.Background(), "file", dataRoot, goal.ID, "restart created active goal revised")
 	if err != nil {
 		t.Fatalf("UpdateGoalWithBackend: %v", err)
 	}
-	updatedDoD, err := UpdateDoDWithBackend(context.Background(), "file", dataRoot, dod.ID, []string{"restart created active dod revised"})
+	_, err = UpdateDoDWithBackend(context.Background(), "file", dataRoot, dod.ID, []string{"restart created active dod revised"})
 	if err != nil {
 		t.Fatalf("UpdateDoDWithBackend: %v", err)
 	}
@@ -3395,40 +3408,15 @@ func TestActivateWorkspaceExecutionWithBackendRestartReplacesCreatedActiveRun(t 
 		t.Fatalf("update workspace active run: %v", err)
 	}
 
-	item, err := ActivateWorkspaceExecutionWithBackend(context.Background(), "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{Restart: true})
+	if _, err := ActivateWorkspaceExecutionWithBackend(context.Background(), "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{Restart: true}); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("restart replacement of uninitialized active Run err=%v, want Runtime V2 aggregate not found", err)
+	}
+	runs, err := repos.Runs.ListByWorkspaceID(ctx, common.WorkspaceID(workspace.ID))
 	if err != nil {
-		t.Fatalf("ActivateWorkspaceExecutionWithBackend restart: %v", err)
+		t.Fatalf("list runs after rejected restart replacement: %v", err)
 	}
-	if item.Run.ID == created.ID {
-		t.Fatalf("activation run id = %q, want replacement run", item.Run.ID)
-	}
-	if item.Run.GoalID != updatedGoal.ID || item.Run.DoDID != updatedDoD.ID {
-		t.Fatalf("replacement run = %+v, want latest updated goal/dod", item.Run)
-	}
-	if item.Run.DefinitionRevision != "goal:"+updatedGoal.ID+"|dod:"+updatedDoD.ID {
-		t.Fatalf("replacement definitionRevision = %q, want latest revision", item.Run.DefinitionRevision)
-	}
-	ownerRun := runtimeV2OwnerRunWithBackend(t, context.Background(), "file", dataRoot, workspace.ID, item.Run.ID)
-	if ownerRun.RuntimeBootstrap.Definition.Revision == "stale-restart-definition" {
-		t.Fatalf("replacement runtime definition reused stale revision: %+v", ownerRun.RuntimeBootstrap.Definition)
-	}
-	for _, focus := range ownerRun.RuntimeBootstrap.Focuses {
-		if focus.ID == "cwi-stale-restart" || stringSliceContains(focus.TargetRefs, "run-activation-restart-created-active/stale-evidence") {
-			t.Fatalf("replacement runtime focus reused stale old run evidence: %+v", focus)
-		}
-	}
-	if item.Run.State == "created" {
-		t.Fatalf("replacement run = %+v, want started observable run", item.Run)
-	}
-	oldRun, err := repos.Runs.Get(ctx, common.RunID(created.ID))
-	if err != nil {
-		t.Fatalf("get old run: %v", err)
-	}
-	if oldRun.State != common.RunStateSuperseded {
-		t.Fatalf("old run state = %q, want superseded", oldRun.State)
-	}
-	if item.Snapshot.Workspace.ActiveRunID != item.Run.ID {
-		t.Fatalf("snapshot activeRunId = %q, want replacement %q", item.Snapshot.Workspace.ActiveRunID, item.Run.ID)
+	if len(runs) != 1 || runs[0].ID != common.RunID(created.ID) {
+		t.Fatalf("runs after rejected restart replacement = %+v, want only original Run", runs)
 	}
 }
 
@@ -3590,7 +3578,7 @@ func TestActivateWorkspaceExecutionWithBackendContinuesRejectedTerminalResult(t 
 	}
 }
 
-func TestActivateWorkspaceExecutionWithBackendReplacesActiveRunWhenExplicitDefinitionsChange(t *testing.T) {
+func TestActivateWorkspaceExecutionWithBackendRejectsUninitializedActiveRunReplacement(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
 	cleanupSharedBackendSession(t, "file", dataRoot)
@@ -3637,35 +3625,24 @@ func TestActivateWorkspaceExecutionWithBackendReplacesActiveRunWhenExplicitDefin
 	if err := repos.Workspaces.Update(ctx, workspaceItem); err != nil {
 		t.Fatalf("update workspace active run: %v", err)
 	}
-	newGoal, err := UpdateGoalWithBackend(context.Background(), "file", dataRoot, oldGoal.ID, "new activation goal")
+	_, err = UpdateGoalWithBackend(context.Background(), "file", dataRoot, oldGoal.ID, "new activation goal")
 	if err != nil {
 		t.Fatalf("UpdateGoalWithBackend new: %v", err)
 	}
-	newDoD, err := UpdateDoDWithBackend(context.Background(), "file", dataRoot, oldDoD.ID, []string{"new activation dod"})
+	_, err = UpdateDoDWithBackend(context.Background(), "file", dataRoot, oldDoD.ID, []string{"new activation dod"})
 	if err != nil {
 		t.Fatalf("UpdateDoDWithBackend new: %v", err)
 	}
 
-	item, err := ActivateWorkspaceExecutionWithBackend(context.Background(), "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{})
+	if _, err := ActivateWorkspaceExecutionWithBackend(context.Background(), "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{}); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("replacement of uninitialized active Run err=%v, want Runtime V2 aggregate not found", err)
+	}
+	runs, err := repos.Runs.ListByWorkspaceID(ctx, common.WorkspaceID(workspace.ID))
 	if err != nil {
-		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+		t.Fatalf("list runs after rejected replacement: %v", err)
 	}
-	if item.Run.ID == string(oldRunID) || item.Run.GoalID != newGoal.ID || item.Run.DoDID != newDoD.ID {
-		t.Fatalf("activation run = %+v, want replacement run with updated canonical goal/dod", item.Run)
-	}
-	definition := runtimeV2OwnerRunWithBackend(t, context.Background(), "file", dataRoot, workspace.ID, item.Run.ID).RuntimeBootstrap.Definition
-	if definition.GoalDefinition != "- new activation goal" {
-		t.Fatalf("replacement goal text = %q, want updated canonical goal", definition.GoalDefinition)
-	}
-	if !strings.Contains(definition.DoDDefinition, "new activation dod") {
-		t.Fatalf("replacement dod definition = %q, want updated canonical dod", definition.DoDDefinition)
-	}
-	replaced, err := repos.Runs.Get(ctx, oldRunID)
-	if err != nil {
-		t.Fatalf("get replaced run: %v", err)
-	}
-	if replaced.State != common.RunStateSuperseded {
-		t.Fatalf("old run state = %q, want superseded", replaced.State)
+	if len(runs) != 1 || runs[0].ID != oldRunID {
+		t.Fatalf("runs after rejected replacement = %+v, want only original Run", runs)
 	}
 }
 

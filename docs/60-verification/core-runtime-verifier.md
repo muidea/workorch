@@ -4,7 +4,7 @@ Status: active
 
 Type: verification
 
-Last Updated: 2026-07-16
+Last Updated: 2026-07-27
 
 ## Purpose
 
@@ -40,7 +40,7 @@ make verify-boundary-contract
 
 core verifier 需要覆盖：
 
-- SM-1 Run lifecycle：pending/active/blocked/terminal、terminal immutable、lineage、workspace release
+- SM-1 Run lifecycle：Run owner-local pending/active/blocked/terminal、terminal immutable、lineage；Workspace release 由 Workspace owner-local delivery 完成
 - SM-2 authority/focus：prerequisite、feasibility、focus/evidence/assessment/repair/governance/completion
 - SM-3 candidate/dispatch：attempt 0/1、stable transaction/prefix、seal-before-execute、stale/duplicate evidence
 - SM-4 drive/recovery/projection：StateRevision、transition guard、singleflight、restart idempotency、projection one-way delivery
@@ -58,10 +58,10 @@ core verifier 需要覆盖：
 
 | 状态机 | 必须验证的合法迁移 | 必须拒绝的迁移 |
 | --- | --- | --- |
-| SM-1 | pending→active、active↔blocked、active→completed/failed、新 Run lineage | terminal→active、无 resolution blocked→active、projection 直接终态 |
-| SM-2 | prerequisite→reduce、missing evidence→state/validation、partial assessment→remaining、repairable gap→same-focus repair、all gates→terminal | prerequisite→candidate、false assessment 无条件 terminal、跨 focus 弱证据关闭、capability gap 消耗 candidate attempt |
+| SM-1 | Run owner internal pending→active、active↔blocked、active→completed/failed、新 Run lineage | terminal→active、无 resolution blocked→active、非 Run owner 直接终态 |
+| SM-2 | prerequisite→reduce、missing evidence→state/validation、partial assessment→remaining、repairable gap→same-focus repair、all gates→sealed terminal | prerequisite→candidate、false assessment 无条件 terminal、跨 focus 弱证据关闭、capability gap 消耗 candidate attempt、直接写 Run/Workspace/Result |
 | SM-3 | attempt0→attempt1、accepted→seal→execute→evidence→reduce | attempt2、transaction/prefix 漂移、未 seal 执行、executor 选择 next action、stale/duplicate 推进 authority |
-| SM-4 | Start/Resume→singleflight→load/initialize→bounded drive、restart load、projection retry→ready | 重复 Initialize、重复副作用、无 revision 空转、projection/watchdog/application 反向驱动 reducer |
+| SM-4 | Run state fact→singleflight→load/initialize→bounded drive、restart load、delivery acknowledgement retry | 重复 Initialize、重复副作用、无 revision 空转、projection/watchdog/application 反向驱动 reducer、直接 owner state write |
 
 任何涉及四状态机职责的代码变更，都必须在测试说明中标明受影响 SM 编号，并提供：
 

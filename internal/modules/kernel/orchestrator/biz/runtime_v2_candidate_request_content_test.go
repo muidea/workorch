@@ -80,7 +80,7 @@ func TestRuntimeCandidateRequestContentBridgePersistsChunkBeforeSessionCAS(t *te
 	initial := runtimeV2Aggregate(t, 1)
 	state := &inMemoryRuntimeV2StateRepository{aggregate: &initial}
 	crashing := &rejectCandidateRequestFragmentCASRepository{delegate: state, reject: true}
-	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: contents})
+	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: contents})
 	if err := owner.ConfigureRuntimeV2Repository(crashing); err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestRuntimeCandidateRequestContentBridgePersistsChunkBeforeSessionCAS(t *te
 		t.Fatalf("CAS-precrash aggregate = %+v", beforeCAS)
 	}
 
-	restartedOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: contents})
+	restartedOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: contents})
 	if err := restartedOwner.ConfigureRuntimeV2Repository(state); err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestRuntimeCandidateRequestContentBridgeCompletesDocumentWithoutCandidateAt
 	contents := memory.NewArtifactContinuationRepository()
 	initial := runtimeV2Aggregate(t, 1)
 	state := &inMemoryRuntimeV2StateRepository{aggregate: &initial}
-	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: contents})
+	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: contents})
 	if err := owner.ConfigureRuntimeV2Repository(state); err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestRuntimeCandidateRequestContentBridgeEOFDispositionDoesNotChangeSessionT
 			contents := memory.NewArtifactContinuationRepository()
 			initial := runtimeV2Aggregate(t, 1)
 			state := &inMemoryRuntimeV2StateRepository{aggregate: &initial}
-			owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: contents})
+			owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: contents})
 			if err := owner.ConfigureRuntimeV2Repository(state); err != nil {
 				t.Fatal(err)
 			}

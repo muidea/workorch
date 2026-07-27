@@ -21,8 +21,6 @@ type UpdateWorkspaceCommand struct {
 	Description          string
 	DeliverableDirectory string
 	InternalDirectory    string
-	State                common.WorkspaceState
-	ActiveRunID          common.RunID
 	TemplateID           string
 	ProfileID            string
 	DefaultLLMTarget     *runtimecontract.ProviderModelTarget
@@ -157,6 +155,8 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[ListWorkspaceTemplatesCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceTemplateCommandList).MessageContract(),
 		eventcontract.CommandTopic[UpdateWorkspaceTemplateCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceTemplateCommandUpdate).MessageContract(),
 		eventcontract.CommandTopic[DeleteWorkspaceTemplateCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceTemplateCommandDelete).MessageContract(),
+		eventcontract.CommandTopic[ApplyRunProjectionFactCommand, WorkspaceLifecycleCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandApplyRunProjectionFact).MessageContract(),
+		eventcontract.CommandTopic[ApplyRuntimeTerminalDeliveryCommand, WorkspaceLifecycleCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandApplyTerminalDelivery).MessageContract(),
 	}
 	for _, topic := range []string{
 		TopicWorkspaceCreated,

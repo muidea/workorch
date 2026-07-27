@@ -4,13 +4,15 @@ Status: active
 
 Type: product-interface
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-27
 
 ## Purpose
 
 本目录用于承接 WorkOrch 的产品接口面，包括部署入口、HTTP API、TUI 和 Web Console。
 
-生产 runtime 主链为 **Runtime V2 only**。产品接口只提交 scoped command 与展示 projection，不复制 V2 reducer / authority，不推断 next action，不通过 `ExecutionContextPatch` 或 V1 graph/next-action 路径推进。
+生产 runtime 主链为 **Runtime V2 only**。产品接口只向 Run owner 提交 scoped activation / continuation intent，
+并展示 projection；不复制 V2 reducer / authority、不指定任何 owner target state、不推断 next action，也不通过
+`ExecutionContextPatch` 或 V1 graph/next-action 路径推进。
 
 ## Reading Order
 
@@ -83,8 +85,8 @@ Last Updated: 2026-07-14
 ## Runtime-Facing Interface Stance
 
 - activation / create run：封存 typed bootstrap 输入，创建 V2 Run。
-- Start：AcceptRunStart 后进入 `DriveRuntimeV2`。
-- Resume：workspace/run scope；允许 active 或已解决 blocker；**无** execution-context patch。
+- Start：向 Run owner提交 activation intent；owner-local `pending→active` notification 后进入 `DriveRuntimeV2`。
+- Resume：workspace/run scope 的 continuation intent；Run owner校验 blocker 并内部恢复后通知 drive；**无** execution-context patch。
 - Decision / Approval resolve：提交 resolution；**不得**要求 application 再 Resume 才能回到 drive。
 - replan 语义：新 activation / replacement run，不是同 Run 自动 successor。
 - UI 消费 projection；不得本地重建 RuntimeDecision。

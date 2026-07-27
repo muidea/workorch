@@ -198,7 +198,9 @@ func (m *Biz) driveAndProjectRuntimeV2Locked(ctx context.Context, workspaceID co
 		if run.State == common.RunStateBlockedOnDecision && run.BlockingTicketID == result.BlockingTicketID {
 			return nil
 		}
-		return runtimeV2ProjectionFailure(m.bizPtr.BlockOnDecision(ctx, runID, result.BlockingTicketID))
+		// RUNTIME-SMO: publish immutable governance-wait fact; Run owner migrates SM-1.
+		authID, defRev, evidRev, dispatchID, ticketID, approvalID := governanceWaitFromDriveResult(result)
+		return runtimeV2ProjectionFailure(m.applyRunGovernanceWait(ctx, workspaceID, runID, authID, defRev, evidRev, dispatchID, ticketID, approvalID, result.StateRevision))
 	case orchestratorevents.RuntimeV2DriveDispositionTerminal:
 		aggregate, loadErr := m.bizPtr.LoadRuntimeV2(ctx, workspaceID, runID)
 		if loadErr != nil {
@@ -215,6 +217,7 @@ func runtimeV2TerminalDriveResult(aggregate runtimev2.RuntimeAggregate) orchestr
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		Disposition:   orchestratorevents.RuntimeV2DriveDispositionTerminal,
 		StateRevision: aggregate.StateRevision, EvidenceRevision: aggregate.Facts.EvidenceRevision,
+		DefinitionRevision:  aggregate.Facts.DefinitionRevision,
 		AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, Action: aggregate.Decision.Action,
 		Terminal: aggregate.Decision.Terminal,
 	}
@@ -230,8 +233,11 @@ func runtimeV2GovernedWaitDriveResult(aggregate runtimev2.RuntimeAggregate) (orc
 				WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 				Disposition:   orchestratorevents.RuntimeV2DriveDispositionGovernedWait,
 				StateRevision: aggregate.StateRevision, EvidenceRevision: aggregate.Facts.EvidenceRevision,
-				AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, Action: aggregate.Decision.Action,
-				BlockingTicketID: request.TicketID,
+				DefinitionRevision:  aggregate.Facts.DefinitionRevision,
+				AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID,
+				DispatchID:          request.DispatchID,
+				Action:              aggregate.Decision.Action,
+				BlockingTicketID:    request.TicketID,
 			}, nil
 		}
 	}

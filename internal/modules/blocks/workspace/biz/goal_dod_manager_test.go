@@ -418,7 +418,7 @@ func TestGoalDoDManager_DefinitionLineageFields(t *testing.T) {
 	}
 }
 
-func TestGoalDoDManager_EnsureWorkspaceResetsWorkspaceAndPublishesStateChanged(t *testing.T) {
+func TestGoalDoDManager_EnsureWorkspacePreservesLifecycleProjection(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewWorkspaceRepository()
 	hub, recorder := newWorkspaceNotificationRecorder(t)
@@ -442,7 +442,7 @@ func TestGoalDoDManager_EnsureWorkspaceResetsWorkspaceAndPublishesStateChanged(t
 		Description:          "reset description",
 		DeliverableDirectory: "/tmp/workorch/ws-ensure-reset",
 	}); err != nil {
-		t.Fatalf("ensure workspace reset: %v", err)
+		t.Fatalf("ensure workspace metadata: %v", err)
 	}
 
 	ws, err := repo.Get(ctx, workspaceID)
@@ -458,11 +458,11 @@ func TestGoalDoDManager_EnsureWorkspaceResetsWorkspaceAndPublishesStateChanged(t
 	if ws.DeliverableDirectory != "/tmp/workorch/ws-ensure-reset" {
 		t.Fatalf("deliverableDirectory = %q, want /tmp/workorch/ws-ensure-reset", ws.DeliverableDirectory)
 	}
-	if ws.State != common.WorkspaceStateActive {
-		t.Fatalf("state = %q, want active", ws.State)
+	if ws.State != common.WorkspaceStateSuperseded {
+		t.Fatalf("state = %q, want lifecycle state preserved", ws.State)
 	}
-	if ws.ActiveRunID != "" {
-		t.Fatalf("activeRunId = %q, want empty", ws.ActiveRunID)
+	if ws.ActiveRunID != "run-stale" {
+		t.Fatalf("activeRunId = %q, want lifecycle slot preserved", ws.ActiveRunID)
 	}
 
 	published := recorder.wait(t, 1)
@@ -473,12 +473,12 @@ func TestGoalDoDManager_EnsureWorkspaceResetsWorkspaceAndPublishesStateChanged(t
 		t.Fatalf("topic = %s, want %s", published[0].topic, workspaceevents.TopicWorkspaceStateChanged)
 	}
 	data, ok := published[0].data.(workspaceevents.WorkspaceChangedData)
-	if !ok || data.Title != "workorch reset workspace" || data.Description != "reset description" || data.DeliverableDirectory != "/tmp/workorch/ws-ensure-reset" || data.State != common.WorkspaceStateActive || data.ActiveRunID != "" {
+	if !ok || data.Title != "workorch reset workspace" || data.Description != "reset description" || data.DeliverableDirectory != "/tmp/workorch/ws-ensure-reset" || data.State != common.WorkspaceStateSuperseded || data.ActiveRunID != "run-stale" {
 		t.Fatalf("workspace notification = %+v", published[0])
 	}
 }
 
-func TestGoalDoDManager_DefinitionChangeReopensTerminalWorkspace(t *testing.T) {
+func TestGoalDoDManager_DefinitionChangePreservesWorkspaceLifecycleProjection(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name string
@@ -526,21 +526,15 @@ func TestGoalDoDManager_DefinitionChangeReopensTerminalWorkspace(t *testing.T) {
 			if err != nil {
 				t.Fatalf("get workspace: %v", err)
 			}
-			if ws.State != common.WorkspaceStateActive || ws.ActiveRunID != "" {
-				t.Fatalf("workspace = %+v, want active without active run after definition change", ws)
+			if ws.State != common.WorkspaceStateActive || ws.ActiveRunID != "run-terminal" {
+				t.Fatalf("workspace = %+v, want lifecycle projection unchanged after definition change", ws)
 			}
-			published := recorder.wait(t, 2)
-			if len(published) < 2 {
-				t.Fatalf("published = %+v, want state change and definition event", published)
+			published := recorder.wait(t, 1)
+			if len(published) != 1 {
+				t.Fatalf("published = %+v, want only definition event", published)
 			}
-			var stateData workspaceevents.WorkspaceChangedData
-			for _, item := range published {
-				if item.topic == workspaceevents.TopicWorkspaceStateChanged {
-					stateData, _ = item.data.(workspaceevents.WorkspaceChangedData)
-				}
-			}
-			if stateData.WorkspaceID == "" || stateData.State != common.WorkspaceStateActive || stateData.ActiveRunID != "" {
-				t.Fatalf("notifications = %+v, want active state without activeRunId", published)
+			if published[0].topic == workspaceevents.TopicWorkspaceStateChanged {
+				t.Fatalf("notifications = %+v, definition mutation must not publish lifecycle projection", published)
 			}
 		})
 	}

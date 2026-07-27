@@ -52,7 +52,7 @@ R5 的判断标准是：每个 sealed authority transaction 只有一份 operati
 
 | 状态机 | 唯一职责 | 本轮允许修改 | 禁止 |
 | --- | --- | --- | --- |
-| SM-1 Run lifecycle | pending/active/blocked/terminal 与窄投影 | 仅消费既有 terminal/wait 结果 | 选择 action、注入 correction、terminal Resume |
+| SM-1 Run lifecycle | pending/active/blocked/terminal；唯一 owner 为 Run | 本计划不修改；仅以 RUNTIME-SMO 发布的 immutable fact 为输入 | 选择 action、注入 correction、terminal Resume、跨 owner 投影 |
 | SM-2 authority/focus | prerequisite、owner facts、focus/evidence/repair、manifest authority | 编译并封存 canonical authorization | 调 provider、执行 operation、从文本猜 target |
 | SM-3 candidate/dispatch | request session、candidate evaluation、attempt 0/1、seal/receipt | 单 evaluator、统一 rejection/directive/result | 选择下一 Runtime action、改写 owner facts |
 | SM-4 drive/recovery | load、singleflight、有界重驱动、terminal delivery | 消费统一结果并恢复 persisted transaction | 重建 authority、重放已知副作用、UI 补偿 |

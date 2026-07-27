@@ -4,7 +4,7 @@ Status: active
 
 Type: verification
 
-Last Updated: 2026-07-16
+Last Updated: 2026-07-27
 
 ## Purpose
 
@@ -21,15 +21,15 @@ Last Updated: 2026-07-16
 | 维度 | 必须覆盖 |
 | --- | --- |
 | Four-state-machine conformance | SM-1 Run lifecycle、SM-2 authority/focus、SM-3 candidate/dispatch、SM-4 drive/recovery/projection；合法/禁止迁移与协调协议全部有证据 |
-| Activation / Bootstrap | typed `RuntimeBootstrap`（Definition + Activation + Focuses + Requirements）；缺 bootstrap 失败并投影 terminal |
-| Start | AcceptRunStart pending→active 后进入 `DriveRuntimeV2` |
+| Activation / Bootstrap | typed `RuntimeBootstrap`（Definition + Activation + Focuses + Requirements）；缺 bootstrap 失败经 owner-local terminal delivery 收敛 |
+| Start | Run owner接受 activation intent 并内部 `pending→active`，`RunStateChanged` 后进入 `DriveRuntimeV2` |
 | Drive | 有界循环；非等待非终态 transition 递增 StateRevision；无进展 / 超 guard fail-fast |
 | Prerequisite | 缺失资源走 `AcquirePrerequisite` + commit + reduce，不伪装 state-change |
 | Candidate | attempt 0/1、same transaction + stable prefix；漂移不 seal；Accept 后 seal |
 | Dispatch / Operation | `SealedDispatch` + typed `ExecuteRuntimeOperation`；operation evidence 与 snapshot/dispatch 一致；dependency graph 仅作 sealed 操作序，非 V1 graph dispatcher |
 | Focus / EvidenceLedger | required evidence（及可选 assessment）满足后切换 focus；stale→diagnostic，duplicate→幂等 |
 | Assessment / Result | Orchestrator 裁决；Result owner 只持久化 outcome；不裁决 |
-| Governance wait | `request_governance` → ticket → blocked 投影；resolution commit 回 reducer；application **不因** resolve 再 Resume |
+| Governance wait | `request_governance` → ticket → immutable wait fact → Run owner-local blocked；resolution commit 回 reducer/fact；application **不因** resolve 再 Resume |
 | Repair | 同 focus 再收敛；预算耗尽升治理；非自动 replan |
 | Replan semantic | 仅新 activation / 新 V2 Run；无自动 successor lifecycle |
 | Resume / 重启 | 只 load aggregate 幂等再 drive；无 ExecutionContextPatch；不重放 V1 checkpoint 驱动 |

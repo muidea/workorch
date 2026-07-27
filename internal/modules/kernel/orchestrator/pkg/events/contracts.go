@@ -22,18 +22,13 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorQueryRuntimeOperationReceipt,
 	)...)
 	ret = append(ret, eventcontract.Build("orchestrator", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
-		TopicOrchestratorCommandStartRun,
-		TopicOrchestratorCommandBlockDecision,
-		TopicOrchestratorCommandBlockApproval,
-		TopicOrchestratorCommandResumeRun,
-		TopicOrchestratorCommandCancelRun,
-		TopicOrchestratorCommandSupersedeRun,
-		TopicOrchestratorCommandFailRun,
 		TopicOrchestratorCommandPurgeRun,
 		TopicOrchestratorCommitRuntimeGovernanceResolution,
 		TopicOrchestratorCommitRuntimeGovernanceTicket,
 		TopicOrchestratorOpenRuntimeGovernanceRequest,
+		TopicOrchestratorRequestRuntimeTermination,
 		TopicOrchestratorCommitRuntimeOperationReceipt,
+		TopicOrchestratorRecordRuntimeDeliveryAcknowledgement,
 	)...)
 	ret = append(ret, eventcontract.Build("orchestrator", eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute,
 		TopicOrchestratorDriveRuntimeV2,
@@ -61,6 +56,9 @@ func Contracts() []eventcontract.Contract {
 		TopicArtifactContinuationAssembled,
 		TopicArtifactContinuationApplied,
 		TopicArtifactContinuationFailed,
+		TopicOrchestratorRuntimeGovernanceWaitRecorded,
+		TopicOrchestratorRuntimeContinuationEligible,
+		TopicOrchestratorRuntimeTerminalDeliveryRequested,
 	)...)
 	return ret
 }

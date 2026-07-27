@@ -96,6 +96,7 @@ type RuntimeAggregate struct {
 	GovernanceResolutions       []runtimecontract.RuntimeGovernanceResolutionRecord
 	OperationGovernanceBindings []runtimecontract.RuntimeOperationGovernanceBinding
 	OperationReceipts           []runtimecontract.RuntimeOperationReceipt
+	DeliveryAcknowledgements    []runtimecontract.RuntimeDeliveryAcknowledgement
 	PrerequisiteInvalidations   []runtimecontract.RuntimePrerequisiteInvalidationRecord
 	// Termination is the SM-1 administrative cancel/supersede record (INV-08).
 	Termination *runtimecontract.RuntimeTerminationRecord
@@ -934,6 +935,14 @@ func (a RuntimeAggregate) Validate() error {
 	}
 	if err := runtimecontract.ValidateRuntimeOperationReceipts(a.OperationReceipts); err != nil {
 		return err
+	}
+	for _, acknowledgement := range a.DeliveryAcknowledgements {
+		if err := acknowledgement.Validate(); err != nil {
+			return err
+		}
+		if acknowledgement.WorkspaceID != a.Facts.WorkspaceID || acknowledgement.RunID != a.Facts.RunID {
+			return fmt.Errorf("delivery acknowledgement scope mismatch")
+		}
 	}
 	for _, invalidation := range a.PrerequisiteInvalidations {
 		if err := invalidation.Validate(); err != nil {

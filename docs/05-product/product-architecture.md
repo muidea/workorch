@@ -4,7 +4,7 @@ Status: active
 
 Type: product-architecture
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-27
 
 ## 1. Architecture Purpose
 
@@ -16,9 +16,9 @@ Last Updated: 2026-07-14
 
 | Principle | Meaning |
 | --- | --- |
-| Kernel owns business state | Workspace / Run / Result / Decision / Approval 的正式状态只由 kernel / stateful block owner 维护；Runtime V2 aggregate（facts / authority / evidence ledger）由 Orchestrator 维护 |
+| Kernel owns business state | Workspace / Run / Result / Decision / Approval 的正式状态只由各自 stateful block owner 维护；Runtime V2 aggregate（facts / authority / evidence ledger）由 Orchestrator 维护 |
 | Blocks own side effects | LLM、MCP、shell、file、git、web、ssh 等外部动作由 blocks 执行；正式入口为 sealed dispatch 后的 typed operation |
-| Application owns composition | HTTP/TUI/server/bootstrap/appservice 只做请求校验、use-case 组合、read-model 装配；Start/Resume 进入 V2 drive，不持有 execution-context patch 或 continuation queue |
+| Application owns composition | HTTP/TUI/server/bootstrap/appservice 只做请求校验、use-case 组合、read-model 装配；Start/Resume 只向 Run owner提交 intent，不持有 execution-context patch 或 continuation queue |
 | Shared packages own contracts | common types、runtime contract、owner contract、repository、event envelope、port/client DTO 位于 `internal/pkg` |
 | UI consumes projection | Web/TUI 展示服务端 projection，不复制业务状态机，不推断 next action |
 | Profile owns specialization | software-dev、web-search、workspace setup、MCP 策略等属于 template/Soul/profile/capability；kernel 不理解 profile ID |
@@ -58,7 +58,7 @@ Last Updated: 2026-07-14
 - appservice use-case 组合。
 - observed / presenter / read-model projection。
 - TUI embedded backend 和 remote backend 的端口适配。
-- 构造 typed activation / `RuntimeBootstrap` 输入；发出 Start / Resume / governance resolution 命令。
+- 构造 typed activation / `RuntimeBootstrap` 输入；向 Run owner发出 Start / Resume intent，并向治理 owner提交 resolution。
 
 不负责：
 
@@ -94,7 +94,7 @@ Last Updated: 2026-07-14
 - Decision / Approval / Resolution 治理对象；governance ticket 由 `request_governance` 打开，resolution commit 后回 reducer。
 - Soul / Skill / MCP / Memory 上下文与能力对象（作为 activation / candidate 输入，不作为 kernel 状态机）。
 - EventRecord 持久化与 replay 输入。
-- Orchestrator：`DriveRuntimeV2`、reducer、authority transaction、candidate、sealed dispatch、focus/evidence ledger、repair 同 focus 再收敛、terminal projection。
+- Orchestrator：`DriveRuntimeV2`、reducer、authority transaction、candidate、sealed dispatch、focus/evidence ledger、repair 同 focus 再收敛、sealed terminal 与 delivery acknowledgement ledger。
 
 不负责：
 
@@ -238,14 +238,13 @@ User
   -> application/workorchd appservice
   -> EventHub command or repository/read-model query
   -> seal typed RuntimeBootstrap (Definition + Activation + Focuses + Requirements)
-  -> Run created; Start: AcceptRunStart (pending→active) then DriveRuntimeV2
-     Resume: workspace/run scope only; active or resolved blocker; same drive
+  -> Run created; Start/Resume intent -> Run owner-local transition -> RunStateChanged -> DriveRuntimeV2
   -> reducer(RuntimeFacts) → RuntimeDecision + AuthorityTransaction
   -> acquire_prerequisite | produce_* | request_governance | complete | fail
   -> candidate (attempt 0/1) → SealDispatch → ExecuteRuntimeOperation (blocks)
   -> evidence / assessment / governance commit → reducer
   -> governed_wait projects Run blocked (no application auto-Resume)
-  -> Result accepted/rejected via Result owner; Run / Workspace terminal projection
+  -> terminal delivery fact -> Result owner -> Workspace owner -> Run owner local transitions
   -> projection store updates Workspace / Run view
   -> TUI / Web / API display projection
 ```
@@ -260,7 +259,7 @@ User
 | RuntimeDecision / RequiredOutputContract / SealedDispatch | orchestrator reducer / seal | candidate, operation execution, evidence gate |
 | RuntimeStateRecord | Run owner CAS | recovery, projection, audit |
 | Step / process evidence projection | run storage + read-model（观测/legacy 过程面） | observability；**非** V2 调度权威 |
-| ResultState | blocks/result（承接 Orchestrator 裁决） | workspace outcome, run outcome |
+| ResultState | blocks/result（消费 Orchestrator sealed terminal fact 后内部迁移） | workspace outcome, run outcome |
 | Decision/Approval State | decision/approval + governance | Web/TUI governance views |
 | Projection revision/health | workorchd projection | Web/TUI/API |
 
@@ -330,7 +329,7 @@ Deployment requirements:
 - config separates server/runtime/LLM/web-search sections。
 - provider-specific config belongs to adapter/config, not core state machine。
 - metrics/health/ready support operational checks。
-- service restart recovery must load persisted V2 aggregate / refresh inactive `active` run projections；continuation is explicit Start/Resume drive or governance resolution path, not V1 checkpoint replay.
+- service restart recovery must load persisted V2 aggregate / refresh owner-local delivery state；continuation is Run owner intent/state-notification or governance fact path, not V1 checkpoint replay.
 
 ## 8. Architecture Invariants
 
@@ -343,7 +342,7 @@ Deployment requirements:
 - profile-specific logic must not appear in kernel/orchestrator/appservice core paths.
 - read-model projection must not become business state owner.
 - production drive is Runtime V2 only; V1 StagePacket / NextAction / graph dispatch / ExecutionContextPatch / auto replan successor are not production paths.
-- Start: AcceptRunStart then DriveRuntimeV2; Resume: scoped, no execution-context patch; governance wait does not auto-Resume from application.
+- Start/Resume: scoped intent -> Run owner-local transition -> DriveRuntimeV2; no execution-context patch; governance wait does not auto-Resume from application.
 
 ## 9. Source Mapping
 

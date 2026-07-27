@@ -4,7 +4,7 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-07-16
+Last Updated: 2026-07-27
 
 ## Purpose
 
@@ -30,8 +30,8 @@ sealed operation / assessment / governance resolution
   -> stale / duplicate / conflict path:
        DiagnosticRecord only (no ledger closeout)
   -> terminal:
-       project Result (Result owner)
-       project Run / Workspace terminal
+       publish immutable terminal delivery fact
+       Result owner -> Workspace owner -> Run owner local transitions
   -> persist RuntimeStateRecord via Run owner CAS (expected revision)
 ```
 
@@ -101,12 +101,12 @@ Runtime V2 正式状态是 `RuntimeStateRecord`，经 Run owner EventHub update 
 
 ```text
 reducer Terminal (Complete | Fail)
-  -> Orchestrator builds Result projection from:
+  -> Orchestrator seals terminal result payload from:
        Terminal summary
        assessment ledger facts + evidence refs
        GoalID / DoDID from definition
-  -> Result owner create (accepted | rejected)
-  -> Run / Workspace terminal projection
+  -> terminal delivery fact
+  -> Result owner record -> Workspace owner release -> Run owner terminal
 ```
 
 约束：
@@ -114,8 +114,9 @@ reducer Terminal (Complete | Fail)
 - Result **不判断** acceptance；只持久化正式 outcome
 - accepted Result 引用 assessment ledger 中的 current-run evidence refs
 - rejected Result 携带 terminal summary 与未满足 assessment / failure 解释
-- 同一 Result identity 幂等创建；状态冲突 → conflict
-- 不得借 terminal 投影创建 V1 Step 或经过 V1 Result/DoD completion gate
+- 同一 terminal delivery identity 的重复事实由各 owner 幂等消费；状态冲突 → conflict
+- SM-4 只记录 acknowledgement/retry；不得借 terminal delivery 创建 V1 Step、越权改变 owner state，
+  或经过 V1 Result/DoD completion gate
 
 ## Ownership Boundary
 

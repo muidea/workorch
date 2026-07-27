@@ -193,7 +193,7 @@ func TestModuleStopWaitsForInFlightOwnerCommand(t *testing.T) {
 	commandDone := make(chan error, 1)
 	go func() {
 		_, err := sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandUpdate, runevents.UpdateRunCommand{
-			RunID: run.ID, WorkspaceID: run.WorkspaceID, State: run.State, CreatedAt: run.CreatedAt,
+			RunID: run.ID, WorkspaceID: run.WorkspaceID,
 		})
 		commandDone <- err
 	}()
@@ -225,10 +225,10 @@ type blockingRunUpdateRepository struct {
 	release chan struct{}
 }
 
-func (r *blockingRunUpdateRepository) Update(ctx context.Context, run *runmodel.Run) error {
+func (r *blockingRunUpdateRepository) CompareAndSwap(ctx context.Context, run *runmodel.Run, expectedRevision uint64) error {
 	r.once.Do(func() { close(r.started) })
 	<-r.release
-	return r.RunRepository.Update(ctx, run)
+	return r.RunRepository.CompareAndSwap(ctx, run, expectedRevision)
 }
 
 func TestModuleConfigureRequiresRunRepositoryAndEventHub(t *testing.T) {
@@ -440,7 +440,6 @@ func TestRunWriteCommandsRequireWorkspaceScope(t *testing.T) {
 
 	_, err := sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandUpdate, runevents.UpdateRunCommand{
 		RunID: runID,
-		State: common.RunStateActive,
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("unscoped update err = %v, want invalid argument", err)
@@ -499,12 +498,8 @@ func TestValidateRunUpdateProtectsRuntimeV2Identity(t *testing.T) {
 		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2, RuntimeState: &state,
 		State: common.RunStateActive, CreatedAt: "2026-07-16T00:00:00Z",
 	}
-	valid := runevents.UpdateRunCommand{
-		RunID: current.ID, WorkspaceID: current.WorkspaceID, GoalID: current.GoalID, DoDID: current.DoDID,
-		DefinitionRevision: current.DefinitionRevision, InitialStepKind: current.InitialStepKind, RuntimeBootstrap: current.RuntimeBootstrap,
-		RuntimeContractVersion: current.RuntimeContractVersion, RuntimeState: current.RuntimeState,
-		State: current.State, CreatedAt: current.CreatedAt,
-	}
+	revision := current.RuntimeState.StateRevision
+	valid := runevents.UpdateRunCommand{RunID: current.ID, WorkspaceID: current.WorkspaceID, RuntimeState: current.RuntimeState, ExpectedRuntimeStateRevision: &revision}
 	if err := runbiz.ValidateRunUpdate(current, valid); err != nil {
 		t.Fatalf("valid Runtime V2 update rejected: %v", err)
 	}
@@ -513,15 +508,7 @@ func TestValidateRunUpdateProtectsRuntimeV2Identity(t *testing.T) {
 		name   string
 		mutate func(*runevents.UpdateRunCommand)
 	}{
-		{name: "goal drift", mutate: func(cmd *runevents.UpdateRunCommand) { cmd.GoalID = "goal-other" }},
-		{name: "definition revision drift", mutate: func(cmd *runevents.UpdateRunCommand) { cmd.DefinitionRevision = "definition-other" }},
-		{name: "contract downgrade", mutate: func(cmd *runevents.UpdateRunCommand) { cmd.RuntimeContractVersion = "" }},
 		{name: "runtime state removal", mutate: func(cmd *runevents.UpdateRunCommand) { cmd.RuntimeState = nil }},
-		{name: "bootstrap drift", mutate: func(cmd *runevents.UpdateRunCommand) {
-			cloned := cmd.RuntimeBootstrap.Clone()
-			cloned.Activation.ProviderTarget.ModelID = "model-other"
-			cmd.RuntimeBootstrap = &cloned
-		}},
 		{name: "state definition drift", mutate: func(cmd *runevents.UpdateRunCommand) {
 			cloned := cmd.RuntimeState.Clone()
 			cloned.Definition.Revision = "definition-other"

@@ -7,6 +7,9 @@ import (
 )
 
 type Result struct {
+	// Revision is the owner-local persistence revision. Terminal delivery is
+	// created exactly once; later owner updates must compare this revision.
+	Revision        uint64
 	ID              common.ResultID
 	WorkspaceID     common.WorkspaceID
 	RunID           common.RunID
@@ -27,6 +30,10 @@ type Result struct {
 	CreatedAt       string
 	UpdatedAt       string
 	RuntimeCloseout *runtimecontract.RuntimeResultCloseout
+	// TerminalDelivery is the owner-local immutable fence for the Runtime V2
+	// Result delivery. It distinguishes a replay of the same sealed terminal
+	// from a conflicting attempt to reuse the Result identifier.
+	TerminalDelivery *runtimecontract.RuntimeTerminalDeliveryIdentity
 }
 
 type ResultSummary struct {

@@ -14,13 +14,13 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestUpdateWorkspaceCommandFromModelPreservesDefaultLLMTarget(t *testing.T) {
+func TestUpdateWorkspaceCommandFromModelExcludesLifecycleFields(t *testing.T) {
 	target := runtimecontract.ProviderModelTarget{ProviderID: "custom", ModelID: "model-a"}
 	command, err := updateWorkspaceCommandFromModel(&workspacemodel.Workspace{ID: "ws-model", ActiveRunID: "run-current", DefaultLLMTarget: &target})
 	if err != nil {
 		t.Fatalf("updateWorkspaceCommandFromModel: %v", err)
 	}
-	if command.DefaultLLMTarget == nil || !command.DefaultLLMTarget.Same(target) || command.ActiveRunID != "run-current" {
+	if command.DefaultLLMTarget == nil || !command.DefaultLLMTarget.Same(target) {
 		t.Fatalf("command = %+v", command)
 	}
 	target.ModelID = "mutated"

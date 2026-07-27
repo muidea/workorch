@@ -15,6 +15,8 @@ const (
 	TopicResultCommandListByRun       = "/result/command/list-by-run"
 	TopicResultCommandUpdate          = "/result/command/update"
 	TopicResultCommandDelete          = "/result/command/delete"
+	// RUNTIME-SMO terminal delivery: Result owner records sealed outcome.
+	TopicResultCommandApplyTerminalDelivery = "/result/command/apply-terminal-delivery"
 
 	TopicArtifactCommandCreate          = "/artifact/command/create"
 	TopicArtifactCommandGet             = "/artifact/command/get"

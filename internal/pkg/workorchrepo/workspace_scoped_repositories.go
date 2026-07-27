@@ -720,6 +720,20 @@ func (r *workspaceScopedWorkspaceRepository) Update(ctx context.Context, item *w
 	return r.store.upsertWorkspaceIndex(item)
 }
 
+func (r *workspaceScopedWorkspaceRepository) CompareAndSwap(ctx context.Context, item *workspacemodel.Workspace, expectedRevision uint64) error {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	if err := r.store.workspaceRepo(filepath.Join(r.store.workspaceRoot(item.ID), workspaceScopedWorkspaceFile)).CompareAndSwap(ctx, workspaceMetadata(item), expectedRevision); err != nil {
+		return err
+	}
+	item.Revision = expectedRevision + 1
+	if err := r.store.saveWorkspaceSoulBindings(item); err != nil {
+		return err
+	}
+	return r.store.upsertWorkspaceIndex(item)
+}
+
 func (r *workspaceScopedWorkspaceRepository) Delete(ctx context.Context, id common.WorkspaceID) error {
 	if id == "" {
 		return common.ErrInvalidArgument
@@ -1170,6 +1184,27 @@ func (r *workspaceScopedRunRepository) Update(ctx context.Context, item *runmode
 	}
 	item.WorkspaceID = current.WorkspaceID
 	return r.store.runRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.ID), workspaceScopedRunFile)).Update(ctx, item)
+}
+
+func (r *workspaceScopedRunRepository) CompareAndSwap(ctx context.Context, item *runmodel.Run, expectedRevision uint64) error {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	if item.WorkspaceID != "" {
+		err := r.store.runRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.ID), workspaceScopedRunFile)).CompareAndSwap(ctx, item, expectedRevision)
+		if err == nil || err != common.ErrNotFound {
+			return err
+		}
+	}
+	current, err := r.Get(ctx, item.ID)
+	if err != nil {
+		return err
+	}
+	if current.Revision != expectedRevision {
+		return common.ErrConflict
+	}
+	item.WorkspaceID = current.WorkspaceID
+	return r.store.runRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.ID), workspaceScopedRunFile)).CompareAndSwap(ctx, item, expectedRevision)
 }
 
 func (r *workspaceScopedRunRepository) Delete(ctx context.Context, id common.RunID) error {
@@ -2080,6 +2115,28 @@ func (r *workspaceScopedResultRepository) Update(ctx context.Context, item *resu
 	item.WorkspaceID = current.WorkspaceID
 	item.RunID = current.RunID
 	return r.store.resultRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.RunID), workspaceScopedResultFile)).Update(ctx, item)
+}
+
+func (r *workspaceScopedResultRepository) CompareAndSwap(ctx context.Context, item *resultmodel.Result, expectedRevision uint64) error {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	if item.WorkspaceID != "" && item.RunID != "" {
+		err := r.store.resultRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.RunID), workspaceScopedResultFile)).CompareAndSwap(ctx, item, expectedRevision)
+		if err == nil || err != common.ErrNotFound {
+			return err
+		}
+	}
+	current, err := r.Get(ctx, item.ID)
+	if err != nil {
+		return err
+	}
+	if current.Revision != expectedRevision {
+		return common.ErrConflict
+	}
+	item.WorkspaceID = current.WorkspaceID
+	item.RunID = current.RunID
+	return r.store.resultRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.RunID), workspaceScopedResultFile)).CompareAndSwap(ctx, item, expectedRevision)
 }
 
 func (r *workspaceScopedResultRepository) Delete(ctx context.Context, id common.ResultID) error {

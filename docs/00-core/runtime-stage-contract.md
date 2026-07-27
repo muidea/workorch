@@ -4,7 +4,7 @@ Status: active
 
 Type: core-contract
 
-Last Updated: 2026-07-26
+Last Updated: 2026-07-27
 
 本文定义 WorkOrch 唯一的、领域中立的 Runtime V2 设计合同。生产主链仅为
 `DriveRuntimeV2`、reducer 与 sealed dispatch；它治理事实、约束、证据、恢复与终态，
@@ -16,7 +16,8 @@ Last Updated: 2026-07-26
 2. [Runtime request/cache contract](runtime-request-cache-note.md)；
 3. `internal/modules/kernel/orchestrator/readme.md` 与
    `internal/pkg/workorchruntimecontract`；
-4. [RUNTIME-VPC 收口方案](../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md)。
+4. [RUNTIME-VPC 收口方案](../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md)（candidate/receipt）；
+5. [RUNTIME-SMO 收口方案](../70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md)（状态 owner/lifecycle）。
 
 已归档计划、历史 live 记录与过程日志只能帮助定位回归夹具，不能成为新的运行时约束。
 
@@ -43,23 +44,38 @@ clone、hash helper。它不得拥有状态迁移、CAS、EventHub、filesystem/
 
 ```text
 typed RuntimeBootstrap
-  -> SM-1 Start/Resume admission
+  -> Run owner receives activation / continuation intent
+  -> SM-1 owner-local lifecycle transition + RunStateChanged fact
   -> SM-4 load/singleflight drive
   -> SM-2 reducer / authority transaction
   -> acquire prerequisite | request candidate
   -> SM-3 complete candidate / seal / execute / receipt / evidence
   -> SM-2 reduce / focus advance / governance / terminal
-  -> SM-1 narrow Run/Workspace projection
-  -> SM-4 derived delivery retry
+  -> SM-4 terminal delivery ledger
+  -> Result owner -> Workspace owner -> Run owner owner-local delivery transitions
 ```
 
-1. Application 只构造并持久化 typed `RuntimeBootstrap`，再发起 Start 或 Resume。
+1. Application 只构造 typed `RuntimeBootstrap` 并向 Run owner 提交 scoped activation / continuation intent；
+   不指定 Run、Workspace 或 Result 的目标状态。
 2. Run owner 只持久化 Run lifecycle、Runtime V2 aggregate、definition revision 与 lineage。
 3. Orchestrator 是 reducer、prerequisite/freshness、candidate/dispatch、evidence、governance
    resolution 与 terminal decision 的唯一权威。
-4. capability owner 只执行自己的 typed prerequisite/operation 并返回 receipt；Result owner只保存
-   已裁决 outcome；projection/eventstream 仅为派生读模型。
+4. capability owner 只执行自己的 typed prerequisite/operation 并返回 receipt；Result、Workspace、Run
+   owner 各自消费 terminal delivery fact 并只迁移自己的资源状态；projection/eventstream 仅为派生读模型。
 5. 重启只从已持久化 aggregate 继续 drive；不得从进程内缓存、UI 状态或历史文本重建 authority。
+
+### 跨 owner 生命周期规则
+
+任何正式状态只由唯一 owner 的 Biz 内部 reducer 修改并持久化。跨 owner 消息只能携带 immutable intent、
+已持久化 fact 或 delivery acknowledgement；不得携带“把接收方状态设为 X”的命令。接收 owner 必须先校验
+workspace/run scope、causation、definition/evidence revision 与 sealed identity，再转为 owner-local event。
+
+- SM-1 Run lifecycle 只由 `blocks/run` 迁移；Workspace active-run/state projection 只由
+  `blocks/workspace` 迁移；Result lifecycle 只由 `blocks/result` 迁移。
+- Orchestrator 只拥有 SM-2、SM-3、SM-4。SM-4 只记录 delivery request/acknowledgement 与重试，
+  不直接写 Run、Workspace 或 Result。
+- terminal delivery 的稳定顺序是 `Result -> Workspace -> Run`。任一步失败仅为 delivery pending；
+  不得改写已 sealed 的 SM-2 terminal，亦不得以投影失败把 Run 反向置为 failed。
 
 ## 规范化候选合同
 
@@ -150,14 +166,14 @@ pending -> active <-> blocked_on_decision | blocked_on_approval
 active -> completed | failed | cancelled | superseded
 ```
 
-- `StartRunCommand` 仅允许 `pending -> active`；`ResumeRunCommand` 仅携带 workspace/run scope，
-  仅进入同一 V2 drive。
+- activation / resume intent 仅携带 workspace/run scope 与必要 activation identity；Run owner 在自己的
+  reducer 中决定 `pending -> active` 或匹配 blocker 的 `blocked -> active`，成功后才发布 Run state fact。
 - terminal 不可变。继续未完成工作只能由产品层显式创建新的 typed activation / Run，并保存
   predecessor lineage；不允许自动 successor。
 - blocked 回 active 必须有匹配的 persisted governance resolution。
 - complete/fail 只能来自 SM-2 sealed terminal decision；cancel/supersede 必须先持久化
   `RuntimeTerminationRecord`。
-- Run/Workspace terminal projection 是单向派生动作；失败仅可重试交付，不能改写 authority。
+- Run/Workspace/Result terminal delivery 是单向 owner-local saga；失败仅可重试对应 delivery，不能改写 authority。
 
 禁止：SM-1 选择 action、HTTP/TUI/Web 直接写 terminal、Resume 注入 definition/provider/model/repair
 patch、terminal 回到 active、projection 反向驱动 lifecycle。
@@ -221,22 +237,23 @@ sealed authority + preflight ready
 
 ### SM-4：Drive, recovery and projection delivery
 
-- `DriveRuntimeV2Command/Result` 是唯一同步推进合同。Application 不保留 continuation queue。
+- `DriveRuntimeV2Command/Result` 是 Orchestrator 唯一同步推进合同。Application 不保留 continuation queue；
+  Run owner state notification 才能投递 Orchestrator 的内部 drive event。
 - 每个非等待、非终态 transition 必须持久化递增 `StateRevision`；无进展或超过 guard 必须 typed
   fail-fast，不能在进程内空转。
 - singleflight key 必须包含 workspace/run。重复 Start、Resume 和 governance continuation 只合并到
   同一 drive。
 - startup 由 Run owner typed inventory 区分 `active_no_dispatch`、`active_sealed_dispatch`、
   `blocked_governance`、`terminal_delivery_pending`；盘点失败必须 fail-fast，不能由 application 猜测。
-- reducer terminal 已 sealed 后，只允许 Result/Run/Workspace 的幂等 delivery retry。projection health
-  不参与 reducer，也不是 runtime blocker。
+- reducer terminal 已 sealed 后，SM-4 仅重试已持久化 terminal delivery request，等待 Result、Workspace、Run
+  owner acknowledgement。projection health 不参与 reducer，也不是 runtime blocker。
 
 禁止：重启重新 initialize 已有 aggregate、watcher/projection/TUI/Web 驱动 reducer、无 revision 进展的循环、
 projection failure 覆盖既有 terminal、重放已知 provider/durable effect。
 
 ## 跨状态机不变量
 
-1. SM-1 不选择 action；SM-2 不执行 operation；SM-3 不选择下一 action；SM-4 不重建 authority。
+1. SM-1 不选择 action；SM-2 不执行 operation；SM-3 不选择下一 action；SM-4 不重建 authority，亦不修改别的 owner state。
 2. 每次跨状态机交互都携带 workspace/run scope 以及适用的 definition/evidence revision、authority
    snapshot、dispatch/operation identity。
 3. 正式事实必须先持久化，后产生外部可见 projection；projection 可最终一致，authority 不可反推。
@@ -291,9 +308,10 @@ LLM 是不可靠的 protocol client，不是 authority。请求必须由 sealed 
    由测试证明；
 4. 覆盖预算/guard 与零副作用断言：在 prerequisite/authority 失败时不得产生 provider request、attempt、
    dispatch、ticket 或 effect；
-5. 同步更新 RUNTIME-VPC、当前事实/未关索引与对应 module readme；
+5. 同步更新受影响的 RUNTIME-VPC 或 RUNTIME-SMO、当前事实/未关索引与对应 module readme；
 6. 通过 `make verify-boundary-contract`，确认没有将状态迁移放入 `pkg`、没有 V1 回流、没有让
    projection/TUI/Web 成为 authority。
 
-活动实施顺序仅由 RUNTIME-VPC 定义。若发现第二份 Runtime V2 状态机、graph/step continuation、
-自动 successor 或 live 热修计划，必须先删除或迁入 `docs/90-archive/`，不能与本文并列。
+活动实施顺序仅由两个不重叠计划定义：RUNTIME-VPC 负责 candidate/receipt，RUNTIME-SMO 负责状态 owner/
+lifecycle。若发现第三份 Runtime V2 状态迁移、graph/step continuation、自动 successor 或 live 热修计划，
+必须先删除或迁入 `docs/90-archive/`，不能与本文并列。

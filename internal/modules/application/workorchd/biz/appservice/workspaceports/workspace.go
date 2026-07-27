@@ -49,8 +49,6 @@ func UpdateWorkspaceRecord(ctx context.Context, hub magicevent.Hub, item *worksp
 		Description:          item.Description,
 		DeliverableDirectory: item.DeliverableDirectory,
 		InternalDirectory:    item.InternalDirectory,
-		State:                item.State,
-		ActiveRunID:          item.ActiveRunID,
 		TemplateID:           item.TemplateID,
 		ProfileID:            item.ProfileID,
 		DefaultLLMTarget:     cloneProviderModelTarget(item.DefaultLLMTarget),
@@ -59,7 +57,7 @@ func UpdateWorkspaceRecord(ctx context.Context, hub magicevent.Hub, item *worksp
 		ContextHints:         item.ContextHints.Clone(),
 		EvidencePolicies:     workorcheventpayload.CloneSlice(item.EvidencePolicies),
 	})
-	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandUpdate, "workspace", string(item.ID), item.ID, item.ActiveRunID, "")
+	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandUpdate, "workspace", string(item.ID), item.ID, "", "")
 	_, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandUpdate)
 	return err
 }

@@ -6,6 +6,9 @@ import (
 )
 
 type Run struct {
+	// Revision is the owner-local persistence revision. Lifecycle and Runtime
+	// aggregate writes compare it before replacing the record.
+	Revision               uint64
 	ID                     common.RunID
 	WorkspaceID            common.WorkspaceID
 	GoalID                 common.GoalID
@@ -24,6 +27,8 @@ type Run struct {
 	CreatedAt              string
 	StartedAt              string
 	EndedAt                string
+	// TerminalDelivery is the Run owner's immutable SM-1 terminal fence.
+	TerminalDelivery *runtimecontract.RuntimeTerminalDeliveryIdentity
 }
 
 type RunLineage struct {

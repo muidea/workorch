@@ -89,18 +89,10 @@ func (m *GoalDoDManager) EnsureWorkspace(ctx context.Context, cmd workspacecontr
 		workspace.InternalDirectory = cmd.InternalDirectory
 		changed = true
 	}
-	if workspace.State != common.WorkspaceStateActive {
-		workspace.State = common.WorkspaceStateActive
-		changed = true
-	}
-	if workspace.ActiveRunID != "" {
-		workspace.ActiveRunID = ""
-		changed = true
-	}
 	if !changed {
 		return nil
 	}
-	if err := m.workspaces.Update(ctx, workspace); err != nil {
+	if err := m.workspaces.CompareAndSwap(ctx, workspace, workspace.Revision); err != nil {
 		return err
 	}
 	return m.publishWorkspaceEvent(ctx, workspaceevents.TopicWorkspaceStateChanged, workspace)
@@ -148,7 +140,7 @@ func (m *GoalDoDManager) DefineGoal(ctx context.Context, cmd workspacecontracts.
 	if cmd.GoalID == "" || cmd.WorkspaceID == "" || strings.TrimSpace(cmd.Text) == "" {
 		return common.ErrInvalidArgument
 	}
-	workspace, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
+	_, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
 	if err != nil {
 		return err
 	}
@@ -163,9 +155,6 @@ func (m *GoalDoDManager) DefineGoal(ctx context.Context, cmd workspacecontracts.
 	if err := m.goals.Create(ctx, goal); err != nil {
 		return err
 	}
-	if err := m.markWorkspaceDefinitionsChanged(ctx, workspace); err != nil {
-		return err
-	}
 	return m.publishGoalEvent(ctx, goal)
 }
 
@@ -177,7 +166,7 @@ func (m *GoalDoDManager) UpdateGoal(ctx context.Context, cmd workspacecontracts.
 	if err != nil {
 		return err
 	}
-	workspace, err := m.workspaces.Get(ctx, goal.WorkspaceID)
+	_, err = m.workspaces.Get(ctx, goal.WorkspaceID)
 	if err != nil {
 		return err
 	}
@@ -188,9 +177,6 @@ func (m *GoalDoDManager) UpdateGoal(ctx context.Context, cmd workspacecontracts.
 		goal.LineageState = "active"
 	}
 	if err := m.goals.Update(ctx, goal); err != nil {
-		return err
-	}
-	if err := m.markWorkspaceDefinitionsChanged(ctx, workspace); err != nil {
 		return err
 	}
 	return m.publishGoalEvent(ctx, goal)
@@ -205,7 +191,7 @@ func (m *GoalDoDManager) DefineDoD(ctx context.Context, cmd workspacecontracts.D
 			return common.ErrInvalidArgument
 		}
 	}
-	workspace, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
+	_, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
 	if err != nil {
 		return err
 	}
@@ -219,9 +205,6 @@ func (m *GoalDoDManager) DefineDoD(ctx context.Context, cmd workspacecontracts.D
 	}
 	m.attachDoDLineage(ctx, dod)
 	if err := m.dods.Create(ctx, dod); err != nil {
-		return err
-	}
-	if err := m.markWorkspaceDefinitionsChanged(ctx, workspace); err != nil {
 		return err
 	}
 	return m.publishDoDEvent(ctx, dod)
@@ -240,7 +223,7 @@ func (m *GoalDoDManager) UpdateDoD(ctx context.Context, cmd workspacecontracts.U
 	if err != nil {
 		return err
 	}
-	workspace, err := m.workspaces.Get(ctx, dod.WorkspaceID)
+	_, err = m.workspaces.Get(ctx, dod.WorkspaceID)
 	if err != nil {
 		return err
 	}
@@ -254,32 +237,7 @@ func (m *GoalDoDManager) UpdateDoD(ctx context.Context, cmd workspacecontracts.U
 	if err := m.dods.Update(ctx, dod); err != nil {
 		return err
 	}
-	if err := m.markWorkspaceDefinitionsChanged(ctx, workspace); err != nil {
-		return err
-	}
 	return m.publishDoDEvent(ctx, dod)
-}
-
-func (m *GoalDoDManager) markWorkspaceDefinitionsChanged(ctx context.Context, workspace *workspaceModel.Workspace) error {
-	if workspace == nil {
-		return common.ErrInvalidArgument
-	}
-	changed := false
-	if workspace.State != common.WorkspaceStateActive {
-		workspace.State = common.WorkspaceStateActive
-		changed = true
-	}
-	if workspace.ActiveRunID != "" {
-		workspace.ActiveRunID = ""
-		changed = true
-	}
-	if !changed {
-		return nil
-	}
-	if err := m.workspaces.Update(ctx, workspace); err != nil {
-		return err
-	}
-	return m.publishWorkspaceEvent(ctx, workspaceevents.TopicWorkspaceStateChanged, workspace)
 }
 
 func (m *GoalDoDManager) publishWorkspaceEvent(ctx context.Context, topic string, workspace *workspaceModel.Workspace) error {

@@ -4,7 +4,7 @@ Status: active
 
 Type: domain-model
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-27
 
 ## Purpose
 
@@ -93,7 +93,7 @@ Run 是一次围绕当前 Goal / DoD 定义发起的正式执行实例。
 - evidence 必须与 authority snapshot / sealed dispatch / operation 一致。
 - stale → diagnostic lineage；duplicate → 幂等。
 - process evidence 支撑 Result，不等于 accepted business outcome。
-- 最后 assessment 关闭后写 Result，再投影 terminal。
+- 最后 assessment 关闭后 Orchestrator 密封 terminal delivery fact；Result、Workspace、Run 各 owner 顺序完成自身迁移。
 
 ### SealedDispatch / Authority
 
@@ -127,7 +127,8 @@ Step 是 Run 过程执行单元的 **非权威投影 / legacy 过程面**。
 
 Result 是正式业务结果对象，不等于普通 step/operation output 或 DoD summary。
 
-Result 只应在正式 DoD assessment 和 evidence gate 通过后，由 **Orchestrator 裁决** 后写入 Result owner。
+Result 只应在正式 DoD assessment 和 evidence gate 通过后，由 **Orchestrator 裁决并密封 terminal payload**；
+Result owner消费该 immutable fact 后在自身 reducer 中写入。
 
 建议稳定字段：
 
@@ -148,7 +149,7 @@ Result 只应在正式 DoD assessment 和 evidence gate 通过后，由 **Orches
 
 Result 边界：
 
-- Result **不裁决** accepted/rejected；裁决权在 Orchestrator。
+- Result **不裁决** accepted/rejected；裁决权在 Orchestrator，Result lifecycle 迁移权在 Result owner。
 - accepted Result 必须引用 current definition 与 accepted evidence。
 - rejected Result 是正式 outcome 语义，不等于 Run process failure 的全部诊断。
 
@@ -400,7 +401,7 @@ V2 过程权威状态（facts / focus / ledger / sealed dispatch）与 Step 过�
 ## Invariants
 
 - accepted Result 必须有可追踪 evidence refs
-- Result 不裁决；Orchestrator 裁决后写入 Result owner
+- Result 不裁决；Orchestrator 只密封 terminal payload，Result owner消费 immutable delivery fact 后内部写入
 - Artifact 必须通过逻辑 URI 暴露，不得暴露本地绝对路径
 - ToolCall / Patch / ValidationResult / RuntimeCheckpoint 仍保留为过程证据
 - CoverageWorkItem / CoverageFocus 必须保持 run-scoped，不能回写 formal Goal / DoD

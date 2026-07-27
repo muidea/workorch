@@ -5,65 +5,11 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
-	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
-
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
-
-func UpdateRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) error {
-	if item == nil || item.ID == "" {
-		return common.ErrInvalidArgument
-	}
-	if hub == nil {
-		return common.ErrInvalidArgument
-	}
-	command := runevents.UpdateRunCommand{
-		RunID:                  item.ID,
-		WorkspaceID:            item.WorkspaceID,
-		GoalID:                 item.GoalID,
-		DoDID:                  item.DoDID,
-		Lineage:                item.Lineage,
-		DefinitionRevision:     item.DefinitionRevision,
-		InitialStepKind:        item.InitialStepKind,
-		RuntimeBootstrap:       item.RuntimeBootstrap,
-		RuntimeContractVersion: item.RuntimeContractVersion,
-		RuntimeState:           item.RuntimeState,
-		State:                  item.State,
-		Priority:               item.Priority,
-		BlockingTicketID:       item.BlockingTicketID,
-		BlockingApprovalID:     item.BlockingApprovalID,
-		FailureReason:          item.FailureReason,
-		CreatedAt:              item.CreatedAt,
-		StartedAt:              item.StartedAt,
-		EndedAt:                item.EndedAt,
-	}
-	if item.RuntimeState != nil {
-		revision := item.RuntimeState.StateRevision
-		command.ExpectedRuntimeStateRevision = &revision
-	}
-	event := magicevent.NewEventWithContext(runevents.TopicRunCommandUpdate, "application/workorchd/appservice", runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	ownerevent.BindLane(event, runevents.TopicRunCommandUpdate, "run", string(item.ID), item.WorkspaceID, item.ID, "")
-	_, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandUpdate)
-	return err
-}
-
-func FailRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run, reason string) error {
-	if item == nil || item.ID == "" {
-		return common.ErrInvalidArgument
-	}
-	if hub == nil {
-		return common.ErrInvalidArgument
-	}
-	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandFailRun, "application/workorchd/appservice", orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.FailRunCommand{
-		RunID:  item.ID,
-		Reason: reason,
-	})
-	ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorCommandFailRun, "run", string(item.ID), item.WorkspaceID, item.ID, "")
-	_, err := ownerevent.Orchestrator(hub.Send(event), orchestratorevents.TopicOrchestratorCommandFailRun)
-	return err
-}
 
 func CancelRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) error {
 	if item == nil || item.ID == "" {
@@ -72,10 +18,11 @@ func CancelRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) erro
 	if hub == nil {
 		return common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandCancelRun, "application/workorchd/appservice", orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.CancelRunCommand{
-		RunID: item.ID,
-	})
-	ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorCommandCancelRun, "run", string(item.ID), item.WorkspaceID, item.ID, "")
-	_, err := ownerevent.Orchestrator(hub.Send(event), orchestratorevents.TopicOrchestratorCommandCancelRun)
-	return err
+	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorRequestRuntimeTermination, "application/workorchd/appservice", orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.RequestRuntimeTerminationCommand{WorkspaceID: item.WorkspaceID, RunID: item.ID, Kind: runtimecontract.RuntimeTerminationCancelled, RequestedBy: "application/workorchd/appservice", Reason: "application cancellation"})
+	ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorRequestRuntimeTermination, "run", string(item.ID), item.WorkspaceID, item.ID, "")
+	response := hub.Send(event)
+	if response == nil {
+		return common.ErrInvalidArgument
+	}
+	return response.Error()
 }

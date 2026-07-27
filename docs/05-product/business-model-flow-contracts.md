@@ -4,7 +4,7 @@ Status: active
 
 Type: business-model-flow-contracts
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-27
 
 ## 1. Purpose
 
@@ -43,7 +43,7 @@ Last Updated: 2026-07-14
 | Object | Purpose | Owner | Key Relations |
 | --- | --- | --- | --- |
 | Run | 一次围绕当前 definition 的正式执行实例 | blocks/run | has RuntimeBootstrap, V2 aggregate projection, process evidence, Result |
-| RuntimeBootstrap | 创建时封存的 Definition + Activation + Focuses + Requirements | orchestrator + run owner | seals activation; not rebuilt from caller map |
+| RuntimeBootstrap | 创建时封存的 Definition + Activation + Focuses + Requirements | blocks/run（持久化）+ orchestrator（消费） | seals activation; not rebuilt from caller map |
 | RuntimeFacts | drive 权威事实面（focus 队列、evidence ledger、authority 相关状态） | orchestrator aggregate | inputs to reducer |
 | CoverageFocus | 有序 focus 队列元素；携带 coverage work items 与 evidence/assessment 要求 | orchestrator / bootstrap | advances after required evidence (and optional assessment) |
 | EvidenceLedger | accepted/rejected operation evidence 与 lineage | orchestrator aggregate | binds sealed dispatch / operation |
@@ -76,7 +76,7 @@ Last Updated: 2026-07-14
 合同：
 
 - accepted Result 必须引用 current definition 和 accepted evidence。
-- Result 不裁决；Orchestrator 裁决后写入 Result owner。
+- Result 不裁决；Orchestrator 只裁决并密封 terminal payload，Result owner消费 immutable delivery fact 后写入。
 - Artifact 通过 logical URI/ref 暴露，不暴露本地绝对路径。
 - Outcome/TaskProgress 是投影，不反向覆盖 owner state。
 
@@ -92,7 +92,7 @@ Last Updated: 2026-07-14
 合同：
 
 - decision/approval 只能因真实治理缺口产生。
-- `request_governance` → ticket → `governed_wait` 投影 Run blocked。
+- `request_governance` → ticket → Orchestrator persisted governance fact → Run owner-local blocked transition。
 - resolution commit 后 **application 不得** 再 Resume 才能驱动；继续走 runtime resolution commit / reducer。
 - resolution 只能补充治理结果，不能覆盖原 focus / requiredOutput / stage 语义合同。
 - approval 只表达允许/拒绝继续，不表达业务结果 accepted。
@@ -144,7 +144,7 @@ Last Updated: 2026-07-14
 | RunState | pending, active, blocked_on_decision, blocked_on_approval, completed, failed, cancelled, superseded | blocks/run |
 | WorkspaceState | active, blocked_on_approval, superseded | blocks/workspace owner; projection may derive prompt/progress from active run |
 | Focus / requiredOutput / evidence readiness | current focus queue + RequiredOutputContract + EvidenceLedger | orchestrator aggregate |
-| Completion | terminal projection after last assessment / fail path | orchestrator → Result/Run/Workspace |
+| Completion | sealed terminal after last assessment / fail path；owner-local delivery | orchestrator terminal fact → Result → Workspace → Run |
 | StepState（过程/legacy 投影） | pending, executing, succeeded, failed, skipped, cancelled | run storage / observability |
 | ResultState | accepted/rejected/superseded-style outcome state | blocks/result |
 
@@ -153,7 +153,8 @@ Last Updated: 2026-07-14
 Allowed bridge:
 
 ```text
-Start / Resume
+Start / Resume intent
+  -> Run owner-local lifecycle transition -> RunStateChanged
   -> InitializeRuntimeV2FromRun (typed bootstrap → facts / load aggregate)
   -> DriveRuntimeV2
   -> RuntimeFacts → RuntimeDecision + AuthorityTransaction
@@ -203,7 +204,7 @@ User start / activation command
   -> appservice validates workspace + Goal + DoD + bindings
   -> seal typed RuntimeBootstrap (Definition + Activation + Focuses + Requirements)
   -> EventHub / owner creates Run with bootstrap
-  -> Start: AcceptRunStart (pending→active) then DriveRuntimeV2
+  -> Start intent: Run owner internal pending→active then RunStateChanged → DriveRuntimeV2
   -> initial CoverageFocus queue + RuntimeFacts
   -> projection shows active execution or governed wait
 ```
@@ -305,7 +306,7 @@ Contracts:
 ```text
 Runtime detects real governance need
   -> request_governance → Decision Ticket (and/or Approval)
-  -> Run projects blocked_on_decision / blocked_on_approval (governed_wait)
+  -> Orchestrator records governance wait fact; Run owner internally enters blocked_on_decision / blocked_on_approval
   -> projection shows waiting/blocker state
   -> user resolves or approves/rejects
   -> CommitRuntimeGovernanceTicketResolution / resolution commit
@@ -471,7 +472,10 @@ Use this checklist when adding or changing product, flow, or module behavior:
 ## 9. Known Boundary Decisions
 
 - Web Console is not “read-only only”; it is “projection display + controlled operation entry”。It may create/update workspace resources and submit governance/configuration operations through formal API, but it does not own business state.
-- Workspace owner state is intentionally small: `active`, `blocked_on_approval`, `superseded`。Decision blockers do not mutate workspace owner state; they are expressed by `RunState=blocked_on_decision`, open decision ticket, `blockingTicketId`, prompt mode and governance projection. Approval blockers use `WorkspaceState=blocked_on_approval` only when the owner has an active approval blocker.
+- Workspace owner state is intentionally small: `active`, `blocked_on_approval`, `superseded`。`ActiveRunID` 与 Workspace state
+  只由 Workspace owner 消费 immutable Run/terminal fact 后在本地 reducer 中更新。Decision blockers do not mutate
+  workspace owner state; they are expressed by `RunState=blocked_on_decision`, open decision ticket, `blockingTicketId`,
+  prompt mode and governance projection. Approval blockers use `WorkspaceState=blocked_on_approval` only when the owner has an active approval blocker.
 - `validation/managed_session` is a runtime block kind owned by orchestrator/shell-backed managed validation flow and must be declared through central runtime vocabulary.
 - `internal/pkg/events` may aggregate event contracts, but aggregation must stay contract-level and must not become business outcome logic.
 - Step / graph / RecoveryPlan.nextAction 等字段可保留在读模型诊断面，但不得重新声明为生产调度权威。

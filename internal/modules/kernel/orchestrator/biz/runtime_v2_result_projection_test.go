@@ -5,6 +5,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -31,6 +32,33 @@ import (
 type failAfterResultCreateRepository struct {
 	repository.ResultRepository
 	fired bool
+}
+
+func (r *failAfterResultCreateRepository) Get(ctx context.Context, id common.ResultID) (*resultmodel.Result, error) {
+	if r.fired {
+		return nil, common.ErrConflict
+	}
+	return r.ResultRepository.Get(ctx, id)
+}
+
+func startTerminalDeliveryResourceOwners(t *testing.T, ctx context.Context, hub magicevent.Hub, runs repository.RunRepository, workspaces repository.WorkspaceRepository) {
+	t.Helper()
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+	workspaceOwner := workspacemodule.New()
+	if err := workspaceOwner.Configure(workspacemodule.Dependencies{Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := workspaceOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
 }
 
 func (r *failAfterResultCreateRepository) Create(ctx context.Context, item *resultmodel.Result) error {
@@ -68,8 +96,15 @@ type failAfterWorkspaceUpdateRepository struct {
 	fired bool
 }
 
-func (r *failAfterWorkspaceUpdateRepository) Update(ctx context.Context, item *workspacemodel.Workspace) error {
-	if err := r.WorkspaceRepository.Update(ctx, item); err != nil {
+func (r *failAfterWorkspaceUpdateRepository) Get(ctx context.Context, id common.WorkspaceID) (*workspacemodel.Workspace, error) {
+	if r.fired {
+		return nil, common.ErrConflict
+	}
+	return r.WorkspaceRepository.Get(ctx, id)
+}
+
+func (r *failAfterWorkspaceUpdateRepository) CompareAndSwap(ctx context.Context, item *workspacemodel.Workspace, expectedRevision uint64) error {
+	if err := r.WorkspaceRepository.CompareAndSwap(ctx, item, expectedRevision); err != nil {
 		return err
 	}
 	if !r.fired {
@@ -84,11 +119,68 @@ type failAfterRunUpdateRepository struct {
 	fired bool
 }
 
-func (r *failAfterRunUpdateRepository) Update(ctx context.Context, item *runmodel.Run) error {
-	if err := r.RunRepository.Update(ctx, item); err != nil {
+// The following wrappers fail before a CAS write. They model a genuine
+// concurrent owner update (rather than an acknowledgement loss after the
+// write) and let the owner-local reducer prove that it replays the same fact.
+type failBeforeWorkspaceCASRepository struct {
+	repository.WorkspaceRepository
+	fired bool
+}
+
+func (r *failBeforeWorkspaceCASRepository) CompareAndSwap(ctx context.Context, item *workspacemodel.Workspace, expectedRevision uint64) error {
+	if !r.fired {
+		r.fired = true
+		return common.ErrConflict
+	}
+	return r.WorkspaceRepository.CompareAndSwap(ctx, item, expectedRevision)
+}
+
+type failBeforeRunTerminalCASRepository struct {
+	repository.RunRepository
+	fired bool
+}
+
+func (r *failBeforeRunTerminalCASRepository) CompareAndSwap(ctx context.Context, item *runmodel.Run, expectedRevision uint64) error {
+	if !r.fired && item != nil && item.TerminalDelivery != nil {
+		r.fired = true
+		return common.ErrConflict
+	}
+	return r.RunRepository.CompareAndSwap(ctx, item, expectedRevision)
+}
+
+type resultCreateRaceRepository struct {
+	repository.ResultRepository
+	fired bool
+}
+
+func (r *resultCreateRaceRepository) Create(ctx context.Context, item *resultmodel.Result) error {
+	if !r.fired {
+		r.fired = true
+		if err := r.ResultRepository.Create(ctx, item); err != nil {
+			return err
+		}
+		return common.ErrConflict
+	}
+	return r.ResultRepository.Create(ctx, item)
+}
+
+func (r *failAfterRunUpdateRepository) GetByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
+	if r.fired {
+		return nil, common.ErrConflict
+	}
+	return r.RunRepository.GetByWorkspaceID(ctx, workspaceID, id)
+}
+
+func (r *failAfterRunUpdateRepository) CompareAndSwap(ctx context.Context, item *runmodel.Run, expectedRevision uint64) error {
+	if err := r.RunRepository.CompareAndSwap(ctx, item, expectedRevision); err != nil {
 		return err
 	}
-	if !r.fired {
+	// Runtime V2 aggregate acknowledgement persistence is also stored through
+	// the Run owner.  This crash point must model the later SM-1 terminal
+	// projection only, otherwise it fires while recording Result/Workspace
+	// acknowledgement and never exercises the Run owner boundary it claims to
+	// cover.
+	if !r.fired && item != nil && item.TerminalDelivery != nil {
 		r.fired = true
 		return common.ErrConflict
 	}
@@ -132,7 +224,23 @@ func TestDeliverRuntimeV2TerminalCreatesResultAndProjectsOwnersIdempotently(t *t
 	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
 		t.Fatal(err)
 	}
-	biz := orchestratorbiz.NewRuntimeOrchestrator(runs, workspaces, nil, nil)
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+	workspaceOwner := workspacemodule.New()
+	if err := workspaceOwner.Configure(workspacemodule.Dependencies{Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := workspaceOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
+	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 	module := newTestBiz(biz, hub, nil)
 	for attempt := 0; attempt < 2; attempt++ {
 		if err := module.deliverRuntimeV2Terminal(ctx, aggregate); err != nil {
@@ -150,6 +258,21 @@ func TestDeliverRuntimeV2TerminalCreatesResultAndProjectsOwnersIdempotently(t *t
 	workspace, err := workspaces.Get(ctx, "ws-v2")
 	if err != nil || workspace.ActiveRunID != "" {
 		t.Fatalf("workspace = %+v err=%v", workspace, err)
+	}
+}
+
+func TestAdministrativeTerminationDeliveryRequestUsesSealedFailureIdentity(t *testing.T) {
+	aggregate := runtimeV2Aggregate(t, 7)
+	aggregate.Termination = &runtimecontract.RuntimeTerminationRecord{
+		Kind: runtimecontract.RuntimeTerminationSuperseded, RequestedBy: "application/workorchd", Reason: "replacement requested", Revision: 8, RequestedAt: "2026-07-27T00:00:00Z",
+	}
+	request := terminalDeliveryRequest(aggregate)
+	if err := request.Validate(); err != nil {
+		t.Fatalf("administrative request: %v", err)
+	}
+	if request.AdministrativeKind != runtimecontract.RuntimeTerminationSuperseded || request.Action != runtimecontract.RuntimeActionFail ||
+		request.TerminalCode != "administrative_superseded" || request.TerminalSummary != "replacement requested" || request.CausationID == "" {
+		t.Fatalf("administrative request = %+v", request)
 	}
 }
 
@@ -255,8 +378,9 @@ func TestDeliverRuntimeV2TerminalUsesTypedOwnerEventContracts(t *testing.T) {
 func TestDeliverRuntimeV2TerminalRestartsAfterOwnerProjectionAcknowledgementLoss(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
-		name string
-		wrap func(repository.RunRepository, repository.WorkspaceRepository) (repository.RunRepository, repository.WorkspaceRepository, func() bool)
+		name           string
+		administrative bool
+		wrap           func(repository.RunRepository, repository.WorkspaceRepository) (repository.RunRepository, repository.WorkspaceRepository, func() bool)
 	}{
 		{
 			name: "workspace_release_persisted_before_acknowledgement",
@@ -266,7 +390,23 @@ func TestDeliverRuntimeV2TerminalRestartsAfterOwnerProjectionAcknowledgementLoss
 			},
 		},
 		{
+			name:           "administrative_supersede_workspace_release_persisted_before_acknowledgement",
+			administrative: true,
+			wrap: func(runs repository.RunRepository, workspaces repository.WorkspaceRepository) (repository.RunRepository, repository.WorkspaceRepository, func() bool) {
+				interrupted := &failAfterWorkspaceUpdateRepository{WorkspaceRepository: workspaces}
+				return runs, interrupted, func() bool { return interrupted.fired }
+			},
+		},
+		{
 			name: "run_terminal_persisted_before_acknowledgement",
+			wrap: func(runs repository.RunRepository, workspaces repository.WorkspaceRepository) (repository.RunRepository, repository.WorkspaceRepository, func() bool) {
+				interrupted := &failAfterRunUpdateRepository{RunRepository: runs}
+				return interrupted, workspaces, func() bool { return interrupted.fired }
+			},
+		},
+		{
+			name:           "administrative_supersede_run_terminal_persisted_before_acknowledgement",
+			administrative: true,
 			wrap: func(runs repository.RunRepository, workspaces repository.WorkspaceRepository) (repository.RunRepository, repository.WorkspaceRepository, func() bool) {
 				interrupted := &failAfterRunUpdateRepository{RunRepository: runs}
 				return interrupted, workspaces, func() bool { return interrupted.fired }
@@ -280,6 +420,12 @@ func TestDeliverRuntimeV2TerminalRestartsAfterOwnerProjectionAcknowledgementLoss
 			results := filerepository.NewResultRepository(root + "/results.json")
 			firstRuns, firstWorkspaces, fired := tc.wrap(baseRuns, baseWorkspaces)
 			aggregate := runtimeV2OwnerGroundedTerminalAggregate(t)
+			if tc.administrative {
+				// RequestTermination must be the only source of an administrative
+				// terminal record.  Start from a valid, non-terminal aggregate and
+				// let the controller CAS-persist the record below.
+				aggregate = runtimeV2Aggregate(t, 2)
+			}
 			record := runtimeStateRecordFromAggregate(aggregate)
 			runFixture := runtimeV2RunForTest(common.RunStateActive, aggregate.Definition)
 			runFixture.RuntimeContractVersion = runtimecontract.RuntimeContractVersionV2
@@ -327,6 +473,13 @@ func TestDeliverRuntimeV2TerminalRestartsAfterOwnerProjectionAcknowledgementLoss
 			}); err != nil {
 				t.Fatal(err)
 			}
+			if tc.administrative {
+				terminated, err := firstOrchestrator.bizPtr.RequestTermination(ctx, "ws-v2", "run-v2", runtimecontract.RuntimeTerminationSuperseded, "application/workorchd", "replacement requested")
+				if err != nil {
+					t.Fatalf("persist administrative termination: %v", err)
+				}
+				aggregate = terminated
+			}
 			if err := firstOrchestrator.deliverRuntimeV2Terminal(ctx, aggregate); err == nil {
 				t.Fatal("terminal owner acknowledgement loss unexpectedly succeeded")
 			}
@@ -336,8 +489,15 @@ func TestDeliverRuntimeV2TerminalRestartsAfterOwnerProjectionAcknowledgementLoss
 			if items, err := results.ListByRun(ctx, "run-v2"); err != nil || len(items) != 1 {
 				t.Fatalf("partial delivery Result=%+v err=%v", items, err)
 			}
-			if workspace, err := baseWorkspaces.Get(ctx, "ws-v2"); err != nil || workspace.ActiveRunID != "" {
-				t.Fatalf("partial delivery workspace=%+v err=%v", workspace, err)
+			workspace, workspaceErr := baseWorkspaces.Get(ctx, "ws-v2")
+			if workspaceErr != nil {
+				t.Fatalf("partial delivery workspace=%+v err=%v", workspace, workspaceErr)
+			}
+			if strings.Contains(tc.name, "workspace_release") && workspace.ActiveRunID != "" {
+				t.Fatalf("workspace transition was not durable before acknowledgement loss: %+v", workspace)
+			}
+			if strings.Contains(tc.name, "run_terminal") && workspace.ActiveRunID != "" {
+				t.Fatalf("workspace release was not durable before Run acknowledgement loss: %+v", workspace)
 			}
 
 			if err := firstResultOwner.Stop(ctx); err != nil {
@@ -390,7 +550,11 @@ func TestDeliverRuntimeV2TerminalRestartsAfterOwnerProjectionAcknowledgementLoss
 			if err := restartedAggregate.Validate(); err != nil {
 				t.Fatalf("reloaded aggregate: %v", err)
 			}
-			assertOwnerGroundedTerminalAuthority(t, restartedAggregate)
+			if tc.administrative {
+				assertAdministrativeSupersedeAuthority(t, restartedAggregate)
+			} else {
+				assertOwnerGroundedTerminalAuthority(t, restartedAggregate)
+			}
 			terminalRevision := restartedAggregate.StateRevision
 			restartedOrchestrator := New()
 			if err := restartedOrchestrator.Configure(Dependencies{
@@ -411,7 +575,11 @@ func TestDeliverRuntimeV2TerminalRestartsAfterOwnerProjectionAcknowledgementLoss
 			if err := restartedOrchestrator.deliverRuntimeV2Terminal(ctx, restartedAggregate); err != nil {
 				t.Fatalf("duplicate restart terminal delivery: %v", err)
 			}
-			if run, err := baseRuns.Get(ctx, "run-v2"); err != nil || run.State != common.RunStateFailed {
+			expectedRunState := common.RunStateFailed
+			if tc.administrative {
+				expectedRunState = common.RunStateSuperseded
+			}
+			if run, err := baseRuns.Get(ctx, "run-v2"); err != nil || run.State != expectedRunState {
 				t.Fatalf("restart Run=%+v err=%v", run, err)
 			}
 			if workspace, err := baseWorkspaces.Get(ctx, "ws-v2"); err != nil || workspace.ActiveRunID != "" {
@@ -425,10 +593,18 @@ func TestDeliverRuntimeV2TerminalRestartsAfterOwnerProjectionAcknowledgementLoss
 				t.Fatalf("projected Run=%+v err=%v", projectedRun, err)
 			}
 			projectedAggregate := runtimeAggregateFromRecord(*projectedRun.RuntimeState)
-			if err := projectedAggregate.Validate(); err != nil || projectedAggregate.StateRevision != terminalRevision {
-				t.Fatalf("terminal delivery rewrote aggregate authority: aggregate=%+v err=%v", projectedAggregate, err)
+			remainingAcknowledgements := uint64(2)
+			if strings.Contains(tc.name, "run_terminal") {
+				remainingAcknowledgements = 1
 			}
-			assertOwnerGroundedTerminalAuthority(t, projectedAggregate)
+			if err := projectedAggregate.Validate(); err != nil || projectedAggregate.StateRevision != terminalRevision+remainingAcknowledgements || len(projectedAggregate.DeliveryAcknowledgements) != 3 {
+				t.Fatalf("terminal delivery acknowledgement ledger did not converge exactly once: aggregate=%+v err=%v", projectedAggregate, err)
+			}
+			if tc.administrative {
+				assertAdministrativeSupersedeAuthority(t, projectedAggregate)
+			} else {
+				assertOwnerGroundedTerminalAuthority(t, projectedAggregate)
+			}
 
 			// A delayed owner-catalog stale result belongs to the old candidate
 			// transaction. Once terminal authority is persisted there is no
@@ -452,10 +628,121 @@ func TestDeliverRuntimeV2TerminalRestartsAfterOwnerProjectionAcknowledgementLoss
 				t.Fatalf("late stale Run=%+v err=%v", unchangedRun, err)
 			}
 			unchangedAggregate := runtimeAggregateFromRecord(*unchangedRun.RuntimeState)
-			if err := unchangedAggregate.Validate(); err != nil || unchangedAggregate.StateRevision != terminalRevision {
+			if err := unchangedAggregate.Validate(); err != nil || unchangedAggregate.StateRevision != terminalRevision+remainingAcknowledgements {
 				t.Fatalf("late stale result mutated terminal aggregate: aggregate=%+v err=%v", unchangedAggregate, err)
 			}
-			assertOwnerGroundedTerminalAuthority(t, unchangedAggregate)
+			if tc.administrative {
+				assertAdministrativeSupersedeAuthority(t, unchangedAggregate)
+			} else {
+				assertOwnerGroundedTerminalAuthority(t, unchangedAggregate)
+			}
+		})
+	}
+}
+
+func TestDeliverRuntimeV2TerminalReplaysSameIdentityAfterOwnerCASConflict(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name string
+		wrap func(repository.ResultRepository, repository.RunRepository, repository.WorkspaceRepository) (repository.ResultRepository, repository.RunRepository, repository.WorkspaceRepository, func() bool)
+	}{
+		{
+			name: "result_create_race",
+			wrap: func(results repository.ResultRepository, runs repository.RunRepository, workspaces repository.WorkspaceRepository) (repository.ResultRepository, repository.RunRepository, repository.WorkspaceRepository, func() bool) {
+				racing := &resultCreateRaceRepository{ResultRepository: results}
+				return racing, runs, workspaces, func() bool { return racing.fired }
+			},
+		},
+		{
+			name: "workspace_release_cas_conflict",
+			wrap: func(results repository.ResultRepository, runs repository.RunRepository, workspaces repository.WorkspaceRepository) (repository.ResultRepository, repository.RunRepository, repository.WorkspaceRepository, func() bool) {
+				conflicting := &failBeforeWorkspaceCASRepository{WorkspaceRepository: workspaces}
+				return results, runs, conflicting, func() bool { return conflicting.fired }
+			},
+		},
+		{
+			name: "run_terminal_cas_conflict",
+			wrap: func(results repository.ResultRepository, runs repository.RunRepository, workspaces repository.WorkspaceRepository) (repository.ResultRepository, repository.RunRepository, repository.WorkspaceRepository, func() bool) {
+				conflicting := &failBeforeRunTerminalCASRepository{RunRepository: runs}
+				return results, conflicting, workspaces, func() bool { return conflicting.fired }
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hub := magicevent.NewHub(32)
+			t.Cleanup(func() { hub.Terminate(ctx) })
+			baseResults := memory.NewResultRepository()
+			baseRuns := memory.NewRunRepository()
+			baseWorkspaces := memory.NewWorkspaceRepository()
+			results, runs, workspaces, fired := tc.wrap(baseResults, baseRuns, baseWorkspaces)
+			aggregate := runtimeV2OwnerGroundedTerminalAggregate(t)
+			record := runtimeStateRecordFromAggregate(aggregate)
+			runFixture := runtimeV2RunForTest(common.RunStateActive, aggregate.Definition)
+			runFixture.RuntimeContractVersion = runtimecontract.RuntimeContractVersionV2
+			runFixture.RuntimeState = &record
+			if err := baseRuns.Create(ctx, runFixture); err != nil {
+				t.Fatal(err)
+			}
+			if err := baseWorkspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
+				t.Fatal(err)
+			}
+			runOwner := runmodule.New()
+			if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+				t.Fatal(err)
+			}
+			if err := runOwner.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+			workspaceOwner := workspacemodule.New()
+			if err := workspaceOwner.Configure(workspacemodule.Dependencies{Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
+				t.Fatal(err)
+			}
+			if err := workspaceOwner.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
+			resultOwner := resultmodule.New()
+			if err := resultOwner.Configure(resultmodule.Dependencies{Results: results, Artifacts: memory.NewArtifactRepository(), EventHub: hub}); err != nil {
+				t.Fatal(err)
+			}
+			if err := resultOwner.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = resultOwner.Stop(ctx) })
+			orchestratorOwner := New()
+			if err := orchestratorOwner.Configure(Dependencies{
+				ToolCalls: memory.NewToolCallRepository(), Patches: memory.NewPatchRepository(),
+				ValidationResults: memory.NewValidationResultRepository(), EvidenceRecords: memory.NewEvidenceRecordRepository(),
+				CoverageWorkItems: memory.NewCoverageWorkItemRepository(), ArtifactContinuations: memory.NewArtifactContinuationRepository(),
+				CommandHub: hub,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := orchestratorOwner.deliverRuntimeV2Terminal(ctx, aggregate); err != nil {
+				t.Fatalf("terminal delivery after CAS conflict: %v", err)
+			}
+			if !fired() {
+				t.Fatal("injected owner CAS conflict was not reached")
+			}
+			if items, err := baseResults.ListByRun(ctx, "run-v2"); err != nil || len(items) != 1 || items[0].State != common.ResultStateRejected {
+				t.Fatalf("Result after CAS replay=%+v err=%v", items, err)
+			}
+			if run, err := baseRuns.Get(ctx, "run-v2"); err != nil || run.State != common.RunStateFailed {
+				t.Fatalf("Run after CAS replay=%+v err=%v", run, err)
+			}
+			if workspace, err := baseWorkspaces.Get(ctx, "ws-v2"); err != nil || workspace.ActiveRunID != "" {
+				t.Fatalf("Workspace after CAS replay=%+v err=%v", workspace, err)
+			}
+			persisted, err := baseRuns.Get(ctx, "run-v2")
+			if err != nil || persisted.RuntimeState == nil {
+				t.Fatalf("persisted aggregate after CAS replay=%+v err=%v", persisted, err)
+			}
+			projected := runtimeAggregateFromRecord(*persisted.RuntimeState)
+			if err := projected.Validate(); err != nil || len(projected.DeliveryAcknowledgements) != 3 {
+				t.Fatalf("CAS replay changed terminal authority or acknowledgement ledger: aggregate=%+v err=%v", projected, err)
+			}
+			assertOwnerGroundedTerminalAuthority(t, projected)
 		})
 	}
 }
@@ -521,6 +808,15 @@ func assertOwnerGroundedTerminalAuthority(t *testing.T, aggregate runtimev2.Runt
 	}
 }
 
+func assertAdministrativeSupersedeAuthority(t *testing.T, aggregate runtimev2.RuntimeAggregate) {
+	t.Helper()
+	if aggregate.Termination == nil || aggregate.Termination.Kind != runtimecontract.RuntimeTerminationSuperseded ||
+		aggregate.Termination.RequestedBy != "application/workorchd" || aggregate.Termination.Reason != "replacement requested" ||
+		aggregate.Decision.Terminal != nil {
+		t.Fatalf("administrative terminal projection changed sealed termination authority: aggregate=%+v", aggregate)
+	}
+}
+
 // Terminal delivery recovery is scheduling metadata only.  Its bounded ledger
 // must never mutate the already-sealed terminal authority, and a process that
 // restarts after the last local retry must still receive the pending terminal
@@ -562,7 +858,7 @@ func TestRuntimeV2TerminalDeliveryBudgetExhaustionRetainsStartupRecoveryInventor
 	if err := firstRunOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	firstOrchestrator := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	firstOrchestrator := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 	if err := firstOrchestrator.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: firstHub}); err != nil {
 		t.Fatal(err)
 	}
@@ -750,7 +1046,7 @@ func TestDeliverRuntimeV2TerminalRejectsRecoverablePrerequisiteRefresh(t *testin
 		t.Fatal(err)
 	}
 
-	module := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(runs, workspaces, nil, nil), hub, nil)
+	module := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(nil, nil), hub, nil)
 	if err := module.deliverRuntimeV2Terminal(ctx, aggregate); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("recoverable refresh terminal delivery error = %v, want invalid argument", err)
 	}
@@ -800,7 +1096,7 @@ func TestDeliverRuntimeV2TerminalRestartsAfterResultPersistenceBeforeOwnerProjec
 	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
 		t.Fatal(err)
 	}
-	firstModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(runs, workspaces, nil, nil), firstHub, nil)
+	firstModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(nil, nil), firstHub, nil)
 	if err := firstModule.deliverRuntimeV2Terminal(ctx, aggregate); err == nil {
 		t.Fatal("expected Result-persisted delivery interruption")
 	}
@@ -837,6 +1133,7 @@ func TestDeliverRuntimeV2TerminalRestartsAfterResultPersistenceBeforeOwnerProjec
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = restartedOwner.Stop(ctx) })
+	startTerminalDeliveryResourceOwners(t, ctx, restartedHub, runs, workspaces)
 	persistedRun, err := runs.Get(ctx, "run-v2")
 	if err != nil || persistedRun.RuntimeState == nil {
 		t.Fatalf("persisted terminal Run=%+v err=%v", persistedRun, err)
@@ -845,7 +1142,7 @@ func TestDeliverRuntimeV2TerminalRestartsAfterResultPersistenceBeforeOwnerProjec
 	if err := restartedAggregate.Validate(); err != nil {
 		t.Fatalf("reloaded terminal aggregate: %v", err)
 	}
-	restartedModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(runs, workspaces, nil, nil), restartedHub, nil)
+	restartedModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(nil, nil), restartedHub, nil)
 	if err := restartedModule.deliverRuntimeV2Terminal(ctx, restartedAggregate); err != nil {
 		t.Fatal(err)
 	}
@@ -858,6 +1155,116 @@ func TestDeliverRuntimeV2TerminalRestartsAfterResultPersistenceBeforeOwnerProjec
 	items, err := resultRepo.ListByRun(ctx, "run-v2")
 	if err != nil || len(items) != 1 {
 		t.Fatalf("Result restart delivery duplicated item=%+v err=%v", items, err)
+	}
+}
+
+// Administrative termination is a persisted SM-4 authority, not a direct Run
+// state change. If Result reaches durability but its acknowledgement is lost,
+// a new process must reuse that same termination record and complete the
+// ordinary Result -> Workspace -> Run sequence without producing another
+// Result or changing the administrative kind.
+func TestAdministrativeSupersedeRestartsAfterResultPersistenceBeforeOwnerProjection(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	firstHub := magicevent.NewHub(32)
+	resultRepo := filerepository.NewResultRepository(root + "/results.json")
+	interruptedResults := &failAfterResultCreateRepository{ResultRepository: resultRepo}
+	runs := filerepository.NewRunRepository(root + "/runs.json")
+	workspaces := filerepository.NewWorkspaceRepository(root + "/workspaces.json")
+
+	aggregate := runtimeV2Aggregate(t, 2)
+	record := runtimeStateRecordFromAggregate(aggregate)
+	runFixture := runtimeV2RunForTest(common.RunStateActive, aggregate.Definition)
+	runFixture.RuntimeContractVersion = runtimecontract.RuntimeContractVersionV2
+	runFixture.RuntimeState = &record
+	if err := runs.Create(ctx, runFixture); err != nil {
+		t.Fatal(err)
+	}
+	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
+		t.Fatal(err)
+	}
+	firstRunOwner := runmodule.New()
+	if err := firstRunOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: firstHub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := firstRunOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	firstResultOwner := resultmodule.New()
+	if err := firstResultOwner.Configure(resultmodule.Dependencies{Results: interruptedResults, Artifacts: filerepository.NewArtifactRepository(root + "/artifacts.json"), EventHub: firstHub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := firstResultOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	firstOrchestrator := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	if err := firstOrchestrator.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: firstHub}); err != nil {
+		t.Fatal(err)
+	}
+	terminated, err := firstOrchestrator.RequestTermination(ctx, "ws-v2", "run-v2", runtimecontract.RuntimeTerminationSuperseded, "application/workorchd", "replacement requested")
+	if err != nil {
+		t.Fatalf("persist administrative termination: %v", err)
+	}
+	firstModule := newTestBiz(firstOrchestrator, firstHub, nil)
+	if err := firstModule.deliverRuntimeV2Terminal(ctx, terminated); err == nil {
+		t.Fatal("expected Result-persisted administrative delivery interruption")
+	}
+	if !interruptedResults.fired {
+		t.Fatal("administrative Result persistence crash point was not reached")
+	}
+	if item, err := resultRepo.Get(ctx, "ws-v2/run-v2/result/dod-assessment"); err != nil || item.State != common.ResultStateRejected {
+		t.Fatalf("persisted administrative Result=%+v err=%v", item, err)
+	}
+	if run, err := runs.Get(ctx, "run-v2"); err != nil || run.State != common.RunStateActive {
+		t.Fatalf("Run changed before administrative restart projection: %+v err=%v", run, err)
+	}
+	if workspace, err := workspaces.Get(ctx, "ws-v2"); err != nil || workspace.ActiveRunID != "run-v2" {
+		t.Fatalf("Workspace changed before administrative restart projection: %+v err=%v", workspace, err)
+	}
+	if err := firstResultOwner.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := firstRunOwner.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	firstHub.Terminate(ctx)
+
+	restartedHub := magicevent.NewHub(32)
+	t.Cleanup(func() { restartedHub.Terminate(ctx) })
+	restartedResultOwner := resultmodule.New()
+	if err := restartedResultOwner.Configure(resultmodule.Dependencies{Results: resultRepo, Artifacts: filerepository.NewArtifactRepository(root + "/artifacts.json"), EventHub: restartedHub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := restartedResultOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = restartedResultOwner.Stop(ctx) })
+	startTerminalDeliveryResourceOwners(t, ctx, restartedHub, runs, workspaces)
+	persistedRun, err := runs.Get(ctx, "run-v2")
+	if err != nil || persistedRun.RuntimeState == nil {
+		t.Fatalf("persisted administrative Run=%+v err=%v", persistedRun, err)
+	}
+	restartedAggregate := runtimeAggregateFromRecord(*persistedRun.RuntimeState)
+	if err := restartedAggregate.Validate(); err != nil {
+		t.Fatalf("reloaded administrative aggregate: %v", err)
+	}
+	assertAdministrativeSupersedeAuthority(t, restartedAggregate)
+	restartedModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(nil, nil), restartedHub, nil)
+	if err := restartedModule.deliverRuntimeV2Terminal(ctx, restartedAggregate); err != nil {
+		t.Fatalf("restart administrative delivery: %v", err)
+	}
+	if err := restartedModule.deliverRuntimeV2Terminal(ctx, restartedAggregate); err != nil {
+		t.Fatalf("duplicate restart administrative delivery: %v", err)
+	}
+	if run, err := runs.Get(ctx, "run-v2"); err != nil || run.State != common.RunStateSuperseded {
+		t.Fatalf("administrative Run restart projection=%+v err=%v", run, err)
+	}
+	if workspace, err := workspaces.Get(ctx, "ws-v2"); err != nil || workspace.ActiveRunID != "" || workspace.State != common.WorkspaceStateSuperseded {
+		t.Fatalf("administrative Workspace restart projection=%+v err=%v", workspace, err)
+	}
+	items, err := resultRepo.ListByRun(ctx, "run-v2")
+	if err != nil || len(items) != 1 || items[0].State != common.ResultStateRejected {
+		t.Fatalf("administrative Result restart delivery=%+v err=%v", items, err)
 	}
 }
 
@@ -896,7 +1303,7 @@ func TestDeliverRuntimeV2PrerequisiteRefreshExhaustedRestartsAfterTerminalPersis
 	if err := firstOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	firstModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(runs, workspaces, nil, nil), firstHub, nil)
+	firstModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(nil, nil), firstHub, nil)
 	if err := firstModule.deliverRuntimeV2Terminal(ctx, aggregate); err == nil {
 		t.Fatal("expected terminal delivery interruption before Result persistence")
 	}
@@ -931,6 +1338,7 @@ func TestDeliverRuntimeV2PrerequisiteRefreshExhaustedRestartsAfterTerminalPersis
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = restartedOwner.Stop(ctx) })
+	startTerminalDeliveryResourceOwners(t, ctx, restartedHub, runs, workspaces)
 	persistedRun, err := runs.Get(ctx, "run-v2")
 	if err != nil || persistedRun.RuntimeState == nil {
 		t.Fatalf("persisted terminal Run=%+v err=%v", persistedRun, err)
@@ -939,7 +1347,7 @@ func TestDeliverRuntimeV2PrerequisiteRefreshExhaustedRestartsAfterTerminalPersis
 	if err := restartedAggregate.Validate(); err != nil {
 		t.Fatalf("reloaded terminal aggregate: %v", err)
 	}
-	restartedModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(runs, workspaces, nil, nil), restartedHub, nil)
+	restartedModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(nil, nil), restartedHub, nil)
 	if err := restartedModule.deliverRuntimeV2Terminal(ctx, restartedAggregate); err != nil {
 		t.Fatal(err)
 	}
@@ -979,8 +1387,8 @@ func TestRuntimeV2ResultProjectionBuildsAcceptedDoDAssessment(t *testing.T) {
 			Terminal:          &runtimecontract.TerminalOutcome{Code: "coverage_satisfied", Summary: "coverage satisfied"},
 		},
 	}
-	item := runtimeV2ResultFromAggregate(aggregate)
-	if item.ID != "ws-1/run-1/result/dod-assessment" || item.State != common.ResultStateAccepted || !item.DoDAssessment.Satisfied ||
+	item := runtimeV2ResultMaterialFromAggregate(aggregate)
+	if item.ID != "ws-1/run-1/result/dod-assessment" || !item.DoDAssessment.Satisfied ||
 		len(item.DoDAssessment.Items) != 1 || item.DoDAssessment.Items[0].Item != "行为已验证" || len(item.EvidenceRefs) != 1 {
 		t.Fatalf("runtime v2 result = %+v", item)
 	}
@@ -1039,8 +1447,8 @@ func TestRuntimeV2ResultProjectionBuildsStructuredRejectedCloseout(t *testing.T)
 			Terminal:          &runtimecontract.TerminalOutcome{Code: "no_progress_exhausted", Summary: "repair budget exhausted"},
 		},
 	}
-	item := runtimeV2ResultFromAggregate(aggregate)
-	if item.State != common.ResultStateRejected || item.RuntimeCloseout == nil {
+	item := runtimeV2ResultMaterialFromAggregate(aggregate)
+	if item.RuntimeCloseout == nil {
 		t.Fatalf("rejected result = %+v", item)
 	}
 	closeout := item.RuntimeCloseout
@@ -1080,7 +1488,7 @@ func TestRuntimeV2ResultProjectionPackagesLedgerEvidenceBeforeAssessment(t *test
 		},
 		Decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionFail, AuthoritySnapshot: runtimecontract.AuthoritySnapshot{ID: "authority-1"}, Terminal: &runtimecontract.TerminalOutcome{Code: "candidate_retry_exhausted", Summary: "candidate exhausted"}},
 	}
-	item := runtimeV2ResultFromAggregate(aggregate)
+	item := runtimeV2ResultMaterialFromAggregate(aggregate)
 	for _, ref := range []string{"accepted-1", "workorch://accepted", "accepted-detail", "rejected-1", "workorch://rejected", "rejected-detail"} {
 		if !containsResultEvidenceRef(item.EvidenceRefs, ref) {
 			t.Fatalf("result evidence refs = %v, missing %q", item.EvidenceRefs, ref)

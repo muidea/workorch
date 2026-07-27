@@ -372,29 +372,16 @@ func updateRunCommandFromModel(item *runmodel.Run) runcontracts.UpdateRunCommand
 		return runcontracts.UpdateRunCommand{}
 	}
 	ret := runcontracts.UpdateRunCommand{
-		RunID:                  item.ID,
-		WorkspaceID:            item.WorkspaceID,
-		GoalID:                 item.GoalID,
-		DoDID:                  item.DoDID,
-		Lineage:                item.Lineage,
-		DefinitionRevision:     item.DefinitionRevision,
-		InitialStepKind:        item.InitialStepKind,
-		RuntimeBootstrap:       cloneRuntimeBootstrap(item.RuntimeBootstrap),
-		RuntimeContractVersion: item.RuntimeContractVersion,
-		RuntimeState:           cloneRuntimeStateRecord(item.RuntimeState),
-		State:                  item.State,
-		Priority:               item.Priority,
-		BlockingTicketID:       item.BlockingTicketID,
-		BlockingApprovalID:     item.BlockingApprovalID,
-		FailureReason:          item.FailureReason,
-		CreatedAt:              item.CreatedAt,
-		StartedAt:              item.StartedAt,
-		EndedAt:                item.EndedAt,
+		RunID:        item.ID,
+		WorkspaceID:  item.WorkspaceID,
+		RuntimeState: cloneRuntimeStateRecord(item.RuntimeState),
 	}
 	if item.RuntimeState != nil {
 		revision := item.RuntimeState.StateRevision
 		ret.ExpectedRuntimeStateRevision = &revision
 	}
+	modelRevision := item.Revision
+	ret.ExpectedModelRevision = &modelRevision
 	return ret
 }
 
@@ -437,8 +424,6 @@ func updateWorkspaceCommandFromModel(item *workspacemodel.Workspace) (workspacee
 		Description:          item.Description,
 		DeliverableDirectory: item.DeliverableDirectory,
 		InternalDirectory:    item.InternalDirectory,
-		State:                item.State,
-		ActiveRunID:          item.ActiveRunID,
 		TemplateID:           item.TemplateID,
 		ProfileID:            item.ProfileID,
 		DefaultLLMTarget:     cloneProviderModelTarget(item.DefaultLLMTarget),

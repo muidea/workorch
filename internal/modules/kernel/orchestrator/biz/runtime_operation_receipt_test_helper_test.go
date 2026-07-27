@@ -11,7 +11,7 @@ import (
 
 func startRuntimeV2ReceiptTestOwner(t *testing.T, hub magicevent.Hub) {
 	t.Helper()
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}

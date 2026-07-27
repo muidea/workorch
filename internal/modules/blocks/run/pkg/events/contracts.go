@@ -15,6 +15,7 @@ func Contracts() []eventcontract.Contract {
 		TopicRunCancelled,
 		TopicRunSuperseded,
 		TopicRunStateChanged,
+		TopicRunContinuationRequested,
 	)...)
 	ret = append(ret, eventcontract.Build("run", eventcontract.CommandClassRead, eventcontract.LanePolicyQuery,
 		TopicRunCommandGet,
@@ -34,6 +35,11 @@ func Contracts() []eventcontract.Contract {
 		TopicRunCommandUpdate,
 		TopicRunCommandLinkSuccessor,
 		TopicRunCommandDelete,
+		TopicRunCommandActivate,
+		TopicRunCommandContinue,
+		TopicRunCommandApplyGovernanceWait,
+		TopicRunCommandApplyContinuationEligible,
+		TopicRunCommandApplyTerminalDelivery,
 	)...)
 	return ret
 }

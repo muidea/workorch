@@ -1752,7 +1752,7 @@ func TestRuntimeV2FileBackedGitQueryReceiptCrashBeforePrerequisiteCommitReusesSn
 			return len(current.Facts.Resources.CapabilityStates) == 1 && current.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite
 		},
 	}
-	crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 	if err := crashingBiz.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 		t.Fatal(err)
 	}
@@ -1968,7 +1968,7 @@ func runRuntimeV2FileBackedManifestCommitCrashRestart(t *testing.T, crashAfterCA
 			return current.Facts.Resources.Manifest != nil && current.Facts.Resources.Manifest.Revision != ""
 		},
 	}
-	crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 	if err := crashingBiz.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 		t.Fatal(err)
 	}
@@ -2154,7 +2154,7 @@ func TestRuntimeV2FileBackedProviderCeilingCommitCrashRestart(t *testing.T) {
 					return current.Facts.Resources.ProviderCeiling != nil && current.Facts.Resources.ProviderCeiling.ConfigurationRevision != ""
 				},
 			}
-			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 			if err := crashingBiz.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -2352,7 +2352,7 @@ func TestRuntimeV2FileBackedFileCapabilityCommitCrashRestart(t *testing.T) {
 					return len(current.Facts.Capabilities.StateChangeKinds) == 1 && current.Facts.Capabilities.StateChangeKinds[0] == runtimecontract.StepKindFileEdit
 				},
 			}
-			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 			if err := crashingBiz.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -2531,7 +2531,7 @@ func TestRuntimeV2FileBackedGitCapabilityCommitCrashRestart(t *testing.T) {
 			crashRepository := &runtimeV2SaveCrashRepository{delegate: baseRepository, after: crashAfterCAS, marker: marker, match: func(current runtimev2.RuntimeAggregate) bool {
 				return len(current.Facts.Capabilities.StateChangeKinds) == 1 && current.Facts.Capabilities.StateChangeKinds[0] == gitmodule.StepKindWrite
 			}}
-			crashingOwner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+			crashingOwner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 			if err := crashingOwner.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -2703,7 +2703,7 @@ func TestRuntimeV2FileBackedShellCapabilityCommitCrashRestart(t *testing.T) {
 			crashRepository := &runtimeV2SaveCrashRepository{delegate: baseRepository, after: crashAfterCAS, marker: marker, match: func(current runtimev2.RuntimeAggregate) bool {
 				return len(current.Facts.Capabilities.ValidationKinds) == 1 && current.Facts.Capabilities.ValidationKinds[0] == runtimecontract.RuntimeBlockKindManagedValidationSession
 			}}
-			crashingOwner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+			crashingOwner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 			if err := crashingOwner.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -2857,7 +2857,7 @@ func TestRuntimeV2FileBackedValidationScratchCommitCrashRestart(t *testing.T) {
 					return current.Facts.Resources.ValidationScratch != nil && current.Facts.Resources.ValidationScratch.Reference != ""
 				},
 			}
-			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 			if err := crashingBiz.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -3058,7 +3058,7 @@ func runRuntimeV2FileBackedValidationScratchStaleInvalidationCrashRestart(t *tes
 						len(current.Facts.Prerequisites.Pending) == 1 && current.Facts.Prerequisites.Pending[0].Kind == runtimecontract.PrerequisiteKindValidationScratch
 				},
 			}
-			crashingOwner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+			crashingOwner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 			if err := crashingOwner.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -3142,7 +3142,7 @@ func runRuntimeV2FileBackedValidationScratchStaleInvalidationCrashRestart(t *tes
 							current.Facts.Recovery.PrerequisiteRefreshes == maxStaleRefreshes
 					},
 				}
-				crashingOwner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+				crashingOwner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 				if err := crashingOwner.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 					t.Fatal(err)
 				}
@@ -3269,7 +3269,7 @@ func TestRuntimeV2FileBackedFailureTargetCommitCrashRestart(t *testing.T) {
 					return target != nil && target.Signature == "failure-target-v1" && len(target.TargetRefs) == 1 && target.TargetRefs[0] == "implementation.go"
 				},
 			}
-			crashingOwner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+			crashingOwner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 			if err := crashingOwner.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -3452,7 +3452,7 @@ func TestRuntimeV2FileBackedCreationSelectionCommitCrashRestart(t *testing.T) {
 					return selection != nil && selection.Disposition == runtimecontract.RuntimeTargetSelectionCreate && selection.ProspectiveTargetRef == "initial-deliverable.txt"
 				},
 			}
-			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 			if err := crashingBiz.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -3494,7 +3494,7 @@ func TestRuntimeV2FileBackedCreationSelectionCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, workspaceObserver, selectionObserver)
 			hub, processRuns, runOwner, fileOwner, workspaceObserver, selectionObserver, restartedSelectionCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, workspaceObserver, selectionObserver)
-			restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+			restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 			if err := restartedBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
@@ -3622,7 +3622,7 @@ func TestRuntimeV2FileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 					return len(current.Facts.Resources.TargetSnapshots) == 1 && current.Facts.Resources.TargetSnapshots[0].TargetRef == "target.txt"
 				},
 			}
-			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 			if err := crashingBiz.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -3662,7 +3662,7 @@ func TestRuntimeV2FileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, workspaceObserver, snapshotObserver)
 			hub, processRuns, runOwner, fileOwner, workspaceObserver, snapshotObserver, restartedSnapshotCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, workspaceObserver, snapshotObserver)
-			restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+			restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 			if err := restartedBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
@@ -3782,7 +3782,7 @@ func TestRuntimeV2FileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, workspaceObserver, snapshotObserver)
 			hub, processRuns, runOwner, fileOwner, workspaceObserver, snapshotObserver, staleReacquireCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, workspaceObserver, snapshotObserver)
-			thirdBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+			thirdBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 			if err := thirdBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
@@ -3917,7 +3917,7 @@ func TestRuntimeV2FileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 					return len(current.Facts.Resources.OperationAdmissibilities) == 1 && current.Facts.Resources.OperationAdmissibilities[0].OwnerModuleID == runtimecontract.RuntimeModuleFile
 				},
 			}
-			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 			if err := crashingBiz.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -3958,7 +3958,7 @@ func TestRuntimeV2FileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, workspaceObserver, inventoryObserver)
 			hub, processRuns, runOwner, fileOwner, workspaceObserver, inventoryObserver, restartedInventoryCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, workspaceObserver, inventoryObserver)
-			restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+			restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 			if err := restartedBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
@@ -4091,7 +4091,7 @@ func TestRuntimeV2FileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, workspaceObserver, inventoryObserver)
 			hub, processRuns, runOwner, fileOwner, workspaceObserver, inventoryObserver, staleReacquireCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, workspaceObserver, inventoryObserver)
-			thirdBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+			thirdBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 			if err := thirdBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
@@ -4245,7 +4245,7 @@ func TestRuntimeV2FileBackedGitAdmissibilityCommitCrashRestart(t *testing.T) {
 					return len(current.Facts.Resources.OperationAdmissibilities) == 1 && current.Facts.Resources.OperationAdmissibilities[0].OwnerModuleID == runtimecontract.RuntimeModuleGit
 				},
 			}
-			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 			if err := crashingBiz.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -4287,7 +4287,7 @@ func TestRuntimeV2FileBackedGitAdmissibilityCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, gitOwner, workspaceObserver, inventoryObserver)
 			hub, processRuns, runOwner, fileOwner, gitOwner, workspaceObserver, inventoryObserver, restartedInventoryCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, gitOwner, workspaceObserver, inventoryObserver)
-			restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+			restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 			if err := restartedBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
@@ -4426,7 +4426,7 @@ func TestRuntimeV2FileBackedGitAdmissibilityCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, gitOwner, workspaceObserver, inventoryObserver)
 			hub, processRuns, runOwner, fileOwner, gitOwner, workspaceObserver, inventoryObserver, staleReacquireCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, gitOwner, workspaceObserver, inventoryObserver)
-			thirdBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+			thirdBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 			if err := thirdBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
@@ -4589,7 +4589,7 @@ func TestRuntimeV2FileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 					return len(current.Facts.Resources.OperationAdmissibilities) == 1 && current.Facts.Resources.OperationAdmissibilities[0].OwnerModuleID == runtimecontract.RuntimeModuleShell
 				},
 			}
-			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 			if err := crashingBiz.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -4629,7 +4629,7 @@ func TestRuntimeV2FileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver)
 			hub, processRuns, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver, restartedInventoryCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver)
-			restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+			restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 			if err := restartedBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
@@ -4756,7 +4756,7 @@ func TestRuntimeV2FileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver)
 			hub, processRuns, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver, staleReacquireCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver)
-			thirdBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+			thirdBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 			if err := thirdBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
@@ -4824,7 +4824,7 @@ func TestRuntimeV2FileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			shellTimeout = "90s"
 			hub, processRuns, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver, policyReacquireCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver)
-			fourthBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+			fourthBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 			if err := fourthBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
@@ -4994,7 +4994,7 @@ func runRuntimeV2FileBackedAdmissibilityThreeOwnerRestart(t *testing.T, staleCas
 	value := startProcess(t)
 	defer func() { stopProcess(value) }()
 	newBiz := func(hub magicevent.Hub) (*RuntimeOrchestrator, *Biz) {
-		owner := NewRuntimeOrchestrator(nil, nil, nil, nil)
+		owner := NewRuntimeOrchestrator(nil, nil)
 		if err := owner.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 			t.Fatal(err)
 		}
@@ -5363,7 +5363,7 @@ func TestRuntimeV2FileBackedGitSnapshotCommitResponseLossRestartReusesCommittedS
 				len(current.Facts.Resources.CapabilityStates) == 1 && len(current.CandidateAttempts) == 0 && current.ActiveDispatch == nil
 		},
 	}
-	crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 	if err := crashingBiz.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 		t.Fatal(err)
 	}
@@ -5487,7 +5487,7 @@ func TestDriveRuntimeV2FileBackedFreshFileShellGitAcceptance(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
+	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}); err != nil {
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
@@ -5499,13 +5499,14 @@ func TestDriveRuntimeV2FileBackedFreshFileShellGitAcceptance(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 	startRuntimeV2ReceiptTestOwner(t, hub)
-	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
-	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{
-			ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir,
-		}}, nil)
-	})
-	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+	workspaceOwner := workspacemodule.New()
+	if err := workspaceOwner.Configure(workspacemodule.Dependencies{Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := workspaceOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
 	fileOwner := filemodule.New()
 	if err := fileOwner.Configure(filemodule.Dependencies{EventHub: hub}); err != nil {
 		t.Fatal(err)
@@ -5605,7 +5606,7 @@ func TestDriveRuntimeV2FileBackedFreshFileShellGitAcceptance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	delivery := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(runs, workspaces, nil, nil), hub, nil)
+	delivery := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(nil, nil), hub, nil)
 	if err := delivery.deliverRuntimeV2Terminal(ctx, aggregate); err != nil {
 		t.Fatal(err)
 	}
@@ -6151,7 +6152,7 @@ func runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testin
 					current.Facts.Recovery.PrerequisiteResourceChangeRefreshes == maxReceiptRefreshes
 			},
 		}
-		crashingOwner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+		crashingOwner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 		if err := crashingOwner.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 			t.Fatal(err)
 		}
@@ -6464,7 +6465,7 @@ func TestRuntimeV2FileBackedMixedOwnerReceiptThenLocalScratchStaleCrashRestart(t
 						current.Facts.Recovery.PrerequisiteRefreshes == 1 && current.Facts.Recovery.PrerequisiteResourceChangeRefreshes == 1
 				},
 			}
-			crashingOwner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+			crashingOwner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 			if err := crashingOwner.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -6853,7 +6854,7 @@ func testRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(
 			return found && execution.State == runtimecontract.OperationExecutionOwnerCommitted
 		},
 	}
-	crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 	if err := crashingBiz.ConfigureRuntimeV2Repository(failingRepository); err != nil {
 		t.Fatal(err)
 	}
@@ -6994,7 +6995,7 @@ func testRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(
 	})
 	t.Cleanup(func() { restartedLLMObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
 	restartedRepository := runtimeV2StateRepository{hub: restartedHub}
-	restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 	if err := restartedBiz.ConfigureRuntimeV2Repository(restartedRepository); err != nil {
 		t.Fatal(err)
 	}
@@ -7123,7 +7124,7 @@ func testRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
-	deliveryModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(runs, workspaces, nil, nil), restartedHub, nil)
+	deliveryModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(nil, nil), restartedHub, nil)
 	results := filerepository.NewResultRepository(filepath.Join(root, "results.json"))
 	interruptedResults := &failAfterResultCreateRepository{ResultRepository: results}
 	firstResultOwner := resultmodule.New()
@@ -8034,7 +8035,7 @@ func TestRuntimeV2FileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *
 					hub.Terminate(ctx)
 					t.Fatal(err)
 				}
-				owner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+				owner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 				if err := owner.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 					_ = fileOwner.Stop(ctx)
 					workspace.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
@@ -8274,13 +8275,21 @@ func TestDriveRuntimeV2FileBackedTwoFocusStateValidationAssessmentAndRestart(t *
 		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.StepKindFileRead}},
 		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleDecision, CapabilityClass: runtimecontract.RuntimeCapabilityClassGovernance, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindDecisionRequest}},
 	}
+	deliverable := filepath.Join(root, "workspace")
+	internalDir := filepath.Join(root, "internal")
+	if err := os.MkdirAll(deliverable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(internalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := runs.Create(ctx, &runmodel.Run{
 		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2",
 		DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, State: common.RunStateActive,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
+	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir, State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
@@ -8291,6 +8300,17 @@ func TestDriveRuntimeV2FileBackedTwoFocusStateValidationAssessmentAndRestart(t *
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+	workspaceOwner := workspacemodule.New()
+	if err := workspaceOwner.Configure(workspacemodule.Dependencies{
+		Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
+		Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := workspaceOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
 	startRuntimeV2ReceiptTestOwner(t, hub)
 	decisionOwner := decisionmodule.New()
 	if err := decisionOwner.Configure(decisionmodule.Dependencies{Tickets: decisionTickets, Resolutions: decisionResolutions, EventHub: hub}); err != nil {
@@ -8301,24 +8321,9 @@ func TestDriveRuntimeV2FileBackedTwoFocusStateValidationAssessmentAndRestart(t *
 	}
 	t.Cleanup(func() { _ = decisionOwner.Stop(ctx) })
 
-	deliverable := filepath.Join(root, "workspace")
-	internalDir := filepath.Join(root, "internal")
-	if err := os.MkdirAll(deliverable, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(internalDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.WriteFile(filepath.Join(deliverable, "focus-1.txt"), []byte("old\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
-	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{
-			ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir,
-		}}, nil)
-	})
-	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	fileOwner := filemodule.New()
 	if err := fileOwner.Configure(filemodule.Dependencies{EventHub: hub}); err != nil {
 		t.Fatal(err)
@@ -8399,7 +8404,7 @@ func TestDriveRuntimeV2FileBackedTwoFocusStateValidationAssessmentAndRestart(t *
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
 
-	moduleBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	moduleBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 	casRepository := &failOnceCASRuntimeV2Repository{delegate: runtimeV2StateRepository{hub: hub}, remainingFailures: 1}
 	if err := moduleBiz.ConfigureRuntimeV2Repository(casRepository); err != nil {
 		t.Fatal(err)
@@ -8451,7 +8456,7 @@ func TestDriveRuntimeV2FileBackedTwoFocusStateValidationAssessmentAndRestart(t *
 				aggregate.OperationGovernanceBindings[0].State == runtimecontract.RuntimeOperationGovernanceBindingGranted
 		},
 	}
-	grantCrashBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	grantCrashBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 	if err := grantCrashBiz.ConfigureRuntimeV2Repository(grantCrashRepository); err != nil {
 		t.Fatal(err)
 	}
@@ -8528,7 +8533,7 @@ func TestDriveRuntimeV2FileBackedTwoFocusStateValidationAssessmentAndRestart(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	deliveryBiz := orchestratorbiz.NewRuntimeOrchestrator(runs, workspaces, nil, nil)
+	deliveryBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 	deliveryModule := newTestBiz(deliveryBiz, hub, nil)
 	if err := deliveryModule.deliverRuntimeV2Terminal(ctx, aggregate); err == nil {
 		t.Fatal("first terminal delivery must fail before Result persistence")
@@ -8891,7 +8896,7 @@ func TestRequestAndSealRuntimeV2CandidateContinuesProviderLimitedOutput(t *testi
 		t.Fatal(err)
 	}
 	continuations := memory.NewArtifactContinuationRepository()
-	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
+	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
 	if err := owner.ConfigureRuntimeV2Repository(repository); err != nil {
 		t.Fatal(err)
 	}
@@ -8954,7 +8959,7 @@ func TestRequestAndSealRuntimeV2CandidateCommitsSessionBeforeProviderAndAttemptA
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: memory.NewArtifactContinuationRepository()})
+	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: memory.NewArtifactContinuationRepository()})
 	if err := owner.ConfigureRuntimeV2Repository(state); err != nil {
 		t.Fatal(err)
 	}
@@ -9001,7 +9006,7 @@ func TestRequestAndSealRuntimeV2CandidateRetriesTransportWithoutCandidateAttempt
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: memory.NewArtifactContinuationRepository()})
+	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: memory.NewArtifactContinuationRepository()})
 	if err := owner.ConfigureRuntimeV2Repository(state); err != nil {
 		t.Fatal(err)
 	}
@@ -9055,7 +9060,7 @@ func TestRequestAndSealRuntimeV2CandidateRestartsFromPersistedOutputChunk(t *tes
 		t.Fatal(err)
 	}
 	continuations := memory.NewArtifactContinuationRepository()
-	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
+	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
 	if err := owner.ConfigureRuntimeV2Repository(state); err != nil {
 		t.Fatal(err)
 	}
@@ -9127,7 +9132,7 @@ func TestRuntimeV2FileBackedCompleteDocumentRestartAdmitsWithoutProviderReplay(t
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 
 	contentsRoot := filepath.Join(root, "candidate-contents")
-	firstOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, nil, nil, RuntimeEvidenceRepositories{
+	firstOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(contentsRoot),
 	})
 	if err := firstOwner.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
@@ -9181,7 +9186,7 @@ func TestRuntimeV2FileBackedCompleteDocumentRestartAdmitsWithoutProviderReplay(t
 		t.Fatal(err)
 	}
 	restartedContents := filerepository.NewArtifactContinuationRepository(contentsRoot)
-	restartedOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, nil, nil, RuntimeEvidenceRepositories{
+	restartedOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{
 		ArtifactContinuations: restartedContents,
 	})
 	if err := restartedOwner.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
@@ -9239,7 +9244,7 @@ func TestRuntimeV2FileBackedPrepareRestartSubmitsOnce(t *testing.T) {
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 
 	contentsRoot := filepath.Join(root, "candidate-contents")
-	firstOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, nil, nil, RuntimeEvidenceRepositories{
+	firstOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(contentsRoot),
 	})
 	if err := firstOwner.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
@@ -9277,7 +9282,7 @@ func TestRuntimeV2FileBackedPrepareRestartSubmitsOnce(t *testing.T) {
 	if err := runOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	restartedOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, nil, nil, RuntimeEvidenceRepositories{
+	restartedOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(contentsRoot),
 	})
 	if err := restartedOwner.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
@@ -9342,7 +9347,7 @@ func TestRuntimeV2FileBackedSubmittedCandidateRestartDoesNotReplayProvider(t *te
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 
-	firstOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, nil, nil, RuntimeEvidenceRepositories{
+	firstOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(filepath.Join(root, "candidate-contents")),
 	})
 	if err := firstOwner.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
@@ -9379,7 +9384,7 @@ func TestRuntimeV2FileBackedSubmittedCandidateRestartDoesNotReplayProvider(t *te
 	if err := runOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	restartedOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, nil, nil, RuntimeEvidenceRepositories{
+	restartedOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(filepath.Join(root, "candidate-contents")),
 	})
 	if err := restartedOwner.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
@@ -9453,7 +9458,7 @@ func TestRuntimeV2FileBackedStaleCompleteSessionInvalidatesBeforeCandidateReuse(
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
 
 	contentsRoot := filepath.Join(root, "candidate-contents")
-	firstOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, nil, nil, RuntimeEvidenceRepositories{
+	firstOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(contentsRoot),
 	})
 	if err := firstOwner.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
@@ -9518,7 +9523,7 @@ func TestRuntimeV2FileBackedStaleCompleteSessionInvalidatesBeforeCandidateReuse(
 	if err := runOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	restartedOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, nil, nil, RuntimeEvidenceRepositories{
+	restartedOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(contentsRoot),
 	})
 	if err := restartedOwner.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
@@ -9559,7 +9564,7 @@ func TestRequestAndSealRuntimeV2CandidateFailsWhenOutputContinuationBudgetExhaus
 		t.Fatal(err)
 	}
 	continuations := memory.NewArtifactContinuationRepository()
-	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
+	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
 	if err := owner.ConfigureRuntimeV2Repository(state); err != nil {
 		t.Fatal(err)
 	}
@@ -9606,7 +9611,7 @@ func TestRequestAndSealRuntimeV2CandidateFailsWhenOutputContinuationBudgetExhaus
 	if err != nil {
 		t.Fatal(err)
 	}
-	restartedOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
+	restartedOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
 	if err := restartedOwner.ConfigureRuntimeV2Repository(state); err != nil {
 		t.Fatal(err)
 	}
@@ -9633,7 +9638,7 @@ func TestRequestAndSealRuntimeV2CandidateTerminatesUnknownSubmittedRequestWithou
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	owner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 	if err := owner.ConfigureRuntimeV2Repository(state); err != nil {
 		t.Fatal(err)
 	}
@@ -9686,7 +9691,7 @@ func TestRequestAndSealRuntimeV2CandidateFailsCompleteDocumentContentDefectWitho
 		t.Fatal(err)
 	}
 	contents := memory.NewArtifactContinuationRepository()
-	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: contents})
+	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: contents})
 	if err := owner.ConfigureRuntimeV2Repository(state); err != nil {
 		t.Fatal(err)
 	}
@@ -9764,7 +9769,7 @@ func TestRequestAndSealRuntimeV2CandidateReacquiresProviderCeilingAfterTypedStal
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	owner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 	if err := owner.ConfigureRuntimeV2Repository(repository); err != nil {
 		t.Fatal(err)
 	}
@@ -9852,7 +9857,7 @@ func startRuntimeV2FileManifestOwner(t *testing.T, ctx context.Context, hub magi
 
 func newRuntimeV2DriveTestModule(t *testing.T, hub magicevent.Hub) *Biz {
 	t.Helper()
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -9898,7 +9903,7 @@ func TestRuntimeV2DecisionPersistsFeasibilityWithoutCallingProvider(t *testing.T
 		t.Fatal(err)
 	}
 	repository := &runtimeV2DriveRepository{aggregate: runtimev2.RuntimeAggregate{StateRevision: 1, Definition: runtimeV2Definition(), Facts: facts.Normalized(), Decision: decision}}
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 	if err := biz.ConfigureRuntimeV2Repository(repository); err != nil {
 		t.Fatal(err)
 	}
@@ -10005,7 +10010,7 @@ func TestRuntimeV2DecisionReconcilesHistoricalAuthorityBeforeProvider(t *testing
 	repository := &runtimeV2DriveRepository{aggregate: runtimev2.RuntimeAggregate{
 		StateRevision: 7, Definition: runtimeV2Definition(), Facts: preparedFacts, Decision: preparedDecision,
 	}}
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil, nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 	if err := biz.ConfigureRuntimeV2Repository(repository); err != nil {
 		t.Fatal(err)
 	}

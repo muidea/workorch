@@ -17,7 +17,6 @@ import (
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 )
@@ -225,22 +224,22 @@ func (b *Biz) DispatchRuntimeRun(ctx context.Context, workspaceID, runID, action
 	switch action {
 	case "start":
 		event := magicevent.NewEventWithContext(
-			orchestratorevents.TopicOrchestratorCommandStartRun,
+			runevents.TopicRunCommandActivate,
 			ModuleID,
-			orchestratorevents.CommandDestination,
+			runevents.CommandDestination,
 			magicevent.NewHeader(),
 			ctx,
-			orchestratorevents.StartRunCommand{RunID: runScope},
+			runevents.ActivateRunCommand{WorkspaceID: workspaceScope, RunID: runScope},
 		)
 		return b.sendRuntimeRunCommand(event, workspaceScope, runScope)
 	case "resume":
 		event := magicevent.NewEventWithContext(
-			orchestratorevents.TopicOrchestratorCommandResumeRun,
+			runevents.TopicRunCommandContinue,
 			ModuleID,
-			orchestratorevents.CommandDestination,
+			runevents.CommandDestination,
 			magicevent.NewHeader(),
 			ctx,
-			orchestratorevents.ResumeRunCommand{WorkspaceID: workspaceScope, RunID: runScope},
+			runevents.ContinueRunCommand{WorkspaceID: workspaceScope, RunID: runScope},
 		)
 		return b.sendRuntimeRunCommand(event, workspaceScope, runScope)
 	default:
@@ -267,7 +266,7 @@ func (b *Biz) sendRuntimeRunCommand(event magicevent.Event, workspaceID common.W
 	if err != nil {
 		return err
 	}
-	if _, ok := data.(orchestratorevents.OrchestratorCommandResult); !ok {
+	if _, ok := data.(runevents.RunLifecycleCommandResult); !ok {
 		return common.ErrInvalidArgument
 	}
 	return nil

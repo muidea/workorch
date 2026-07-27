@@ -65,9 +65,9 @@ degraded projection。
 若修改触及 Runtime V2，变更说明必须标出 SM-1～SM-4 的影响。本矩阵只定义
 组件边界与独立回归，**不定义** Runtime V2 语义收口的实施顺序或状态迁移。
 `RUNTIME-VPC` 主方案中已明确授权的工作卡可以修改其指定的 SM-2/SM-3 唯一
-owner；矩阵不得以“仅 SM-4”阻断该收口，也不得创建第二套 reducer/dispatch
-任务。反之，ARCH-1 自身的 framework/lifecycle 整改仍只可修改 SM-4 交付，
-不得借机改写 authority、candidate 或 evidence 语义。
+owner；`RUNTIME-SMO` 主方案中已明确授权的工作卡可以修改 SM-1、Workspace/Result lifecycle 与 SM-4
+delivery acknowledgement。矩阵不得以“仅 SM-4”阻断任一收口，也不得创建第三套 reducer/dispatch/lifecycle
+任务。ARCH-1 自身的 framework 整改不得借机改写 authority、candidate、evidence 或 lifecycle 语义。
 
 ## Common Interaction Contract
 
@@ -80,12 +80,12 @@ inbound protocol/UI
   -> workorchd projection / eventstream audit
 
 Runtime V2 only:
-workorchd Start/Resume -> Orchestrator DriveRuntimeV2
+workorchd Start/Resume intent -> Run owner-local transition -> RunStateChanged -> Orchestrator DriveRuntimeV2
   -> SM-2 owner facts -> one persisted candidate manifest
   -> SM-3 request -> strict decode -> one evaluator -> sealed dispatch
   -> owner feasibility/operation receipt
   -> accepted evidence / governance resolution
-  -> Result write -> Run/Workspace terminal projection
+  -> terminal delivery fact -> Result owner -> Workspace owner -> Run owner acknowledgement
 ```
 
 所有行都必须满足下列通用不变量：
@@ -117,11 +117,11 @@ topic、Command、Data、Result 的唯一代码 SoT 均是组件自己的 `pkg/e
 | 组件（状态） | 功能职责与状态权威 | 入站合同 | 出站合同 | 禁止边界 | 独立命令与完成断言 |
 | --- | --- | --- | --- | --- | --- |
 | `initiators/workorchruntime`（Initiator；L） | 单一 repository provider/factory；不拥有业务状态。 | framework 初始化。 | 向本进程提供 repository infrastructure。 | EventHub、runtime policy、bootstrap 聚合、业务订阅。 | `go test ./internal/initiators/workorchruntime/... -count=1`；provider 配置失败 fail-fast，且无 Base/Hub export。 |
-| `application/workorchd`（Module；L/I，D） | HTTP/CLI/SSE/read model、typed bootstrap 与 Start/Resume 发起；projection 是派生状态。 | HTTP/CLI facade、workspace-run request、owner notification。 | workspace/run/decision/approval 等 owner command；Orchestrator Start/Resume；`ServiceStoppedData`。 | drive queue、reducer、owner repository、EventHub channel。 | `go test ./internal/modules/application/workorchd/... -count=1`；request 映射、stopped 通知、删除后迟到投影收敛、Start/Resume concrete type。部署后 `/readyz` ready 是 D。 |
+| `application/workorchd`（Module；L/I，D） | HTTP/CLI/SSE/read model、typed bootstrap 与 Start/Resume intent 发起；projection 是派生状态。 | HTTP/CLI facade、workspace-run request、owner notification。 | workspace/run/decision/approval 等 owner command；Run owner activation/continuation intent；`ServiceStoppedData`。 | drive queue、reducer、owner repository、EventHub channel。 | `go test ./internal/modules/application/workorchd/... -count=1`；request 映射、stopped 通知、删除后迟到投影收敛、Start/Resume concrete type。部署后 `/readyz` ready 是 D。 |
 | `blocks/eventstream`（Block；L/I） | 审计 EventRecord 与投影 high-watermark；不拥有业务恢复。 | 各 owner notification、EventRecord query。 | typed audit/query result，供 projection/readiness 查询。 | action 选择、aggregate 重建、direct owner write。 | `go test ./internal/modules/blocks/eventstream/... -count=1`；notification 持久化、cursor/filter DTO mapping、high-watermark 单调。 |
 | `kernel/governance`（Module；L/I） | auto-governance trace/协调；不替代 Runtime V2 contract gate。 | governance evaluate/trace query。 | decision/approval 的 typed request 或 trace result。 | 把 ticket resolution 直接改为 Run active、发送通用 Resume、默认 decision 替换 source dependency。 | `go test ./internal/modules/kernel/governance/... -count=1`；scope/filter mapping、重复 trace 幂等、无 repository DTO 外泄，且治理只提交证据、不续跑 Run。 |
-| `blocks/run`（Block；L/I，D） | Run/Step/RuntimeStateRecord 的唯一持久化 owner、CAS 与 recovery inventory。SM-1/aggregate persistence，不选 action。 | Run CRUD/CAS、narrow lifecycle projection、typed recovery inventory。 | Run notification；向请求者返回 aggregate/inventory。 | reducer、operation 执行、repository 被其他 owner 直接访问。 | `go test -race ./internal/modules/blocks/run/... -count=1`；CAS stale、Setup 后 inventory 可读、重复 teardown、inventory 分类完整。restart fixture 是 D。 |
-| `kernel/orchestrator`（Module；L/I，D） | Runtime V2 唯一 reducer/drive/evidence/governance-resolution authority；SM-2 编译 sealed manifest，SM-3 只消费单 evaluator 结果。 | Start/Resume/Drive、typed owner facts、candidate/rejection、feasibility observation、governance resolution、own receipt query/commit。 | Run aggregate CAS/inventory；prerequisite acquisition；LLM candidate；capability operation；Decision/Approval ticket；Result terminal write。 | profile/domain hard-code、provider adapter、重复 kind/target/parameter policy、raw reason routing、跨 owner repo、application continuation queue。 | `go test -race ./internal/modules/kernel/orchestrator/... -count=1`；manifest/evaluator first-failure、typed drive、sealed receipt/fence、stale/duplicate、recovery no duplicate effect、terminal delivery。三类 restart fixture 是 D。 |
+| `blocks/run`（Block；L/I，D） | Run/Step/RuntimeStateRecord 的唯一持久化 owner、CAS、recovery inventory 与 SM-1 reducer；不选 action。 | Run CRUD/CAS、activation/continuation/governance/terminal fact、typed recovery inventory。 | Run state notification；向请求者返回 aggregate/inventory。 | reducer、operation 执行、repository 被其他 owner 直接访问。 | `go test -race ./internal/modules/blocks/run/... -count=1`；CAS stale、owner-local transition、Setup 后 inventory 可读、重复 teardown、inventory 分类完整。restart fixture 是 D。 |
+| `kernel/orchestrator`（Module；L/I，D） | Runtime V2 唯一 SM-2/3/4 reducer/drive/evidence/governance-resolution authority；SM-2 编译 sealed manifest，SM-3 只消费单 evaluator 结果，SM-4 只记录 delivery acknowledgement。 | Run state fact、internal Drive、typed owner facts、candidate/rejection、feasibility observation、governance resolution、own receipt query/commit。 | Run aggregate CAS/inventory；prerequisite acquisition；LLM candidate；capability operation；Decision/Approval ticket；immutable governance/terminal fact。 | SM-1/Workspace/Result state write、profile/domain hard-code、provider adapter、重复 kind/target/parameter policy、raw reason routing、跨 owner repo、application continuation queue。 | `go test -race ./internal/modules/kernel/orchestrator/... -count=1`；manifest/evaluator first-failure、typed drive、sealed receipt/fence、stale/duplicate、recovery no duplicate effect、delivery acknowledgement。三类 restart fixture 是 D。 |
 | `kernel/system`（Module；L/I） | 启动默认 Soul/Template/MCP 的 ensure 协调；无 Runtime V2 authority。 | framework startup/default ensure command。 | 对 Soul/Workspace/MCP Registry 的 typed ensure command。 | 默认值直接写对方 repository、业务 action/recovery。 | `go test ./internal/modules/kernel/system/... -count=1`；重复 ensure 幂等、owner error 可见、teardown 不关共享 runtime。 |
 | `blocks/workspace`（L/I，D） | Workspace、Goal/DoD、Template、workspace default LLM target 的正式 owner。 | workspace/template CRUD、definition/snapshot、narrow active-run projection。 | typed Workspace/Template DTO 与 owner notification。 | Run aggregate、candidate/evidence 裁决、repository entity 作为事件 DTO。 | `go test ./internal/modules/blocks/workspace/... -count=1`；scope、template clone、LLM target persistence、delete idempotency。删除-迟到投影 deployed 验证为 D。 |
 | `blocks/result`（L/I） | 已裁决 Result/Artifact 的正式存储；不决定 accepted/rejected。 | Result create/get/list、artifact query。 | typed result DTO/notification。 | 自行验收、推进 Run、直接改 Workspace。 | `go test ./internal/modules/blocks/result/... -count=1`；同一 terminal write 幂等、owner error 保留、EventHub-only write。 |
@@ -172,8 +172,8 @@ consumer-side contract test。
 | `workorchd -> workspace/run/orchestrator` | activation 确定 workspace LLM target；Start/Resume 只携带 typed scope/bootstrap，且 `resume` 不要求用户选择 restart。 | workorchd + workspace + orchestrator |
 | `orchestrator <-> run` | CAS revision、recovery inventory、terminal delivery 幂等；Run 不选 action，Orchestrator 不直访 repository。 | orchestrator + run |
 | `orchestrator -> workspace/llm/capability` | prerequisite owner facts 在 SM-2 编译为唯一 manifest；LLM renderer/decoder 只消费 manifest/rejection/directive；SM-3 单 evaluator 与 capability feasibility/operation 都绑定同一 transaction/authorization/snapshot；owner 只回 observation/receipt。 | orchestrator + workspace + llm + file/git/shell/mcp/ssh/web |
-| `orchestrator <-> decision/approval/governance` | ticket/resolution/dependency binding 一次消费；resolved 后由 Orchestrator 自行 continuation，不由 application Resume。 | orchestrator + decision + approval + governance |
-| `orchestrator -> result -> run/workspace` | reducer terminal 先写 Result，再幂等投影 Run/Workspace；投影失败不改写 authority terminal。 | orchestrator + result + run + workspace |
+| `orchestrator <-> decision/approval/governance` | ticket/resolution/dependency binding 一次消费；Orchestrator 发布 continuation fact，Run owner-local continuation，不由 application Resume。 | orchestrator + decision + approval + governance + run |
+| `orchestrator -> result -> workspace -> run` | reducer terminal 只发布 delivery fact；Result、Workspace、Run 依次 owner-local 幂等迁移并回执；delivery 失败不改写 authority terminal。 | orchestrator + result + run + workspace |
 | `owner notification -> eventstream -> workorchd` | audit high-watermark 与 projection source revision 对齐；删除 owner 后的迟到事件删除 stale view 而不 degraded readiness。 | eventstream + workorchd + workspace |
 | `workorchd -> process service` | stopped event 只传值；本地 wait channel 不经 EventHub；重复/立即 stopped 不丢信号。 | workorchd + internal/services/workorch |
 
@@ -184,9 +184,9 @@ idempotency 或 lifecycle 单测缺失。
 ## SM-4 Deployed Closure (ARCH-1 的 Remaining D Evidence)
 
 本节是 ARCH-1 的**验收索引**，不是独立 Runtime V2 实施计划。前三种 Runtime
-fixture 的构造、crash/restart 序列、唯一状态 owner 与退出条件完全以
-[RUNTIME-VPC 的 N6/N8](runtime-v2-validation-progress-closure-plan.md)
-为准；本矩阵只消费其通过证据来关闭组件的 `D` 标记。`workspace_deleted_late_event`
+fixture 的 candidate/receipt 构造以 [RUNTIME-VPC 的 N6/N8](runtime-v2-validation-progress-closure-plan.md)
+为准；唯一状态 owner、terminal delivery、crash/restart 序列与退出条件以
+[RUNTIME-SMO 的 S1～S4](runtime-v2-single-owner-state-machine-closure-plan.md) 为准；本矩阵只消费其通过证据来关闭组件的 `D` 标记。`workspace_deleted_late_event`
 仍由 EventStream/WorkOrchd 的组件合同单独验证，但不得影响 Runtime authority。
 
 部署验证使用最新构建重启服务后执行，不能调用 Activate/Resume 作为补偿，也不能

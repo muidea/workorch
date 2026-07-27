@@ -7,6 +7,9 @@ import (
 )
 
 type Workspace struct {
+	// Revision is the owner-local persistence revision. Projection reducers use
+	// it as their CAS fence instead of relying on in-process EventHub ordering.
+	Revision             uint64
 	ID                   common.WorkspaceID
 	Title                string
 	Description          string
@@ -21,4 +24,7 @@ type Workspace struct {
 	SoulBindings         map[string]common.SoulID
 	ContextHints         workorcheventpayload.Payload
 	EvidencePolicies     []workorcheventpayload.Payload
+	// TerminalDelivery is the Workspace owner's persisted release fence. It is
+	// written only by the lifecycle reducer and never by generic metadata update.
+	TerminalDelivery *runtimecontract.RuntimeTerminalDeliveryIdentity
 }

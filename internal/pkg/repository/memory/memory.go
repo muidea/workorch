@@ -646,6 +646,9 @@ func (r *ResultRepository) Create(_ context.Context, item *resultmodel.Result) e
 	if _, ok := r.items[key]; ok {
 		return common.ErrConflict
 	}
+	if item.Revision == 0 {
+		item.Revision = 1
+	}
 	r.items[key] = cloneResult(item)
 	return nil
 }
@@ -724,6 +727,30 @@ func (r *ResultRepository) Update(ctx context.Context, item *resultmodel.Result)
 	if _, ok := r.items[key]; !ok {
 		return common.ErrNotFound
 	}
+	r.items[key] = cloneResult(item)
+	return nil
+}
+
+func (r *ResultRepository) CompareAndSwap(ctx context.Context, item *resultmodel.Result, expectedRevision uint64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if item.WorkspaceID == "" {
+		found, err := findScopedMemoryKey(ctx, r.items, string(item.ID), func(current *resultmodel.Result) string { return string(current.ID) })
+		if err != nil {
+			return err
+		}
+		key = found
+		item.WorkspaceID = r.items[key].WorkspaceID
+	}
+	current, ok := r.items[key]
+	if !ok {
+		return common.ErrNotFound
+	}
+	if current.Revision != expectedRevision {
+		return common.ErrConflict
+	}
+	item.Revision = expectedRevision + 1
 	r.items[key] = cloneResult(item)
 	return nil
 }
@@ -922,6 +949,9 @@ func (r *WorkspaceRepository) Create(_ context.Context, item *workspace.Workspac
 	if _, ok := r.items[item.ID]; ok {
 		return common.ErrConflict
 	}
+	if item.Revision == 0 {
+		item.Revision = 1
+	}
 	r.items[item.ID] = cloneWorkspace(item)
 	return nil
 }
@@ -959,6 +989,21 @@ func (r *WorkspaceRepository) Update(_ context.Context, item *workspace.Workspac
 	if _, ok := r.items[item.ID]; !ok {
 		return common.ErrNotFound
 	}
+	r.items[item.ID] = cloneWorkspace(item)
+	return nil
+}
+
+func (r *WorkspaceRepository) CompareAndSwap(_ context.Context, item *workspace.Workspace, expectedRevision uint64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	current, ok := r.items[item.ID]
+	if !ok {
+		return common.ErrNotFound
+	}
+	if current.Revision != expectedRevision {
+		return common.ErrConflict
+	}
+	item.Revision = expectedRevision + 1
 	r.items[item.ID] = cloneWorkspace(item)
 	return nil
 }
@@ -1180,6 +1225,9 @@ func (r *RunRepository) Create(_ context.Context, item *run.Run) error {
 	if _, ok := r.items[key]; ok {
 		return common.ErrConflict
 	}
+	if item.Revision == 0 {
+		item.Revision = 1
+	}
 	r.items[key] = cloneRun(item)
 	return nil
 }
@@ -1287,6 +1335,43 @@ func (r *RunRepository) Update(ctx context.Context, item *run.Run) error {
 	if _, ok := r.items[key]; !ok {
 		return common.ErrNotFound
 	}
+	r.items[key] = cloneRun(item)
+	return nil
+}
+
+func (r *RunRepository) CompareAndSwap(ctx context.Context, item *run.Run, expectedRevision uint64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if item.WorkspaceID == "" {
+		if scopedKey, scoped := runtimeWorkspaceScopedKey(ctx, string(item.ID)); scoped {
+			key = scopedKey
+		} else {
+			var found string
+			for currentKey, current := range r.items {
+				if current.ID != item.ID {
+					continue
+				}
+				if found != "" {
+					return common.ErrConflict
+				}
+				found = currentKey
+			}
+			if found == "" {
+				return common.ErrNotFound
+			}
+			key = found
+			item.WorkspaceID = r.items[key].WorkspaceID
+		}
+	}
+	current, ok := r.items[key]
+	if !ok {
+		return common.ErrNotFound
+	}
+	if current.Revision != expectedRevision {
+		return common.ErrConflict
+	}
+	item.Revision = expectedRevision + 1
 	r.items[key] = cloneRun(item)
 	return nil
 }

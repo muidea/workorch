@@ -37,6 +37,8 @@ func Contracts() []eventcontract.Contract {
 		TopicWorkspaceTemplateCommandCreate,
 		TopicWorkspaceTemplateCommandUpdate,
 		TopicWorkspaceTemplateCommandDelete,
+		TopicWorkspaceCommandApplyRunProjectionFact,
+		TopicWorkspaceCommandApplyTerminalDelivery,
 	)...)
 	return ret
 }

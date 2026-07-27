@@ -19,5 +19,6 @@
 - 只访问 Workspace、Goal、DoD 和 WorkspaceTemplate repository，不得持有 Run、Result 或其他 owner repository/service。
 - 所有对象操作必须携带 WorkspaceID 或可唯一解析的对象 scope。
 - definition revision 必须单调、可比较；激活绑定变化必须使旧定义选择可检测为 stale。
-- Workspace block 不启动 Run、不判定 Result、不执行治理恢复。
+- Workspace block 不启动 Run、不判定 Result、不执行治理恢复；它只消费 scoped Run/terminal delivery fact，
+  并在自身 reducer 中维护 `ActiveRunID` 与 Workspace state projection。
 - retirement 只能清理已由 planner 确认的 V1 Run 指针；不得清理指向 Runtime V2 Run 的 active binding。

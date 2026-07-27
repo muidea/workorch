@@ -9,13 +9,9 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
-	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
-
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -197,46 +193,6 @@ func TestNewRuntimeSessionWithBackendReturnsInvalidArgumentWhenBackendUnsupporte
 	}
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want invalid argument", err)
-	}
-}
-
-func TestRuntimeSessionWithBackendPublishesOrchestratorCommand(t *testing.T) {
-	session, err := NewRuntimeSessionWithBackend("file", t.TempDir())
-	if err != nil {
-		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
-	}
-	t.Cleanup(func() { _ = session.Close(context.Background()) })
-	exports, err := testSessionExports(session)
-	if err != nil {
-		t.Fatalf("Exports: %v", err)
-	}
-	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandCancelRun, "workorchd/appservice/runtime-session-test", orchestratorevents.CommandDestination, magicevent.NewHeader(), context.Background(), orchestratorevents.CancelRunCommand{RunID: "run-missing"})
-	response := exports.Infrastructure.CommandHub.Send(event)
-	if response == nil || response.Error() == nil {
-		t.Fatalf("cancel response = %#v, want owner error", response)
-	}
-}
-
-func TestRuntimeSessionRunServiceBlockOnApprovalRejectsAggregateFreeFixture(t *testing.T) {
-	session, err := NewRuntimeSessionWithBackend("file", t.TempDir())
-	if err != nil {
-		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
-	}
-	t.Cleanup(func() { _ = session.Close(context.Background()) })
-	exports, err := testSessionExports(session)
-	if err != nil {
-		t.Fatalf("Exports: %v", err)
-	}
-	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-session-command")
-	ensureTestWorkspace(t, ctx, session, "ws-session-command")
-	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: "run-session-command", WorkspaceID: "ws-session-command", State: common.RunStateActive}); err != nil {
-		t.Fatalf("CreateRun: %v", err)
-	}
-	if err := exports.Repositories.Approvals.Create(ctx, &approvalmodel.Approval{ID: "approval-session-command", WorkspaceID: "ws-session-command", RunID: "run-session-command", State: common.ApprovalStatePending}); err != nil {
-		t.Fatalf("CreateApproval: %v", err)
-	}
-	if _, err := sendAppserviceTestCommand[orchestratorevents.BlockApprovalCommand, orchestratorevents.OrchestratorCommandResult](ctx, exports.Infrastructure.CommandHub, orchestratorevents.TopicOrchestratorCommandBlockApproval, orchestratorevents.CommandDestination, orchestratorevents.BlockApprovalCommand{RunID: "run-session-command", ApprovalID: "approval-session-command"}); err == nil {
-		t.Fatal("BlockOnApproval succeeded for aggregate-free fixture")
 	}
 }
 

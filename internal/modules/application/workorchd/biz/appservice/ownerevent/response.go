@@ -69,6 +69,27 @@ func Run(response magicevent.Result, topic string) (runevents.RunCommandResult, 
 	return result, nil
 }
 
+// RunLifecycle decodes the Run owner's RUNTIME-SMO lifecycle receipt. The
+// application only submits an intent and never infers or assigns the resulting
+// lifecycle state.
+func RunLifecycle(response magicevent.Result, topic string) (runevents.RunLifecycleCommandResult, error) {
+	if response == nil {
+		return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
+	}
+	if err := response.Error(); err != nil {
+		return runevents.RunLifecycleCommandResult{}, err
+	}
+	data, err := response.Get()
+	if err != nil {
+		return runevents.RunLifecycleCommandResult{}, err
+	}
+	result, ok := data.(runevents.RunLifecycleCommandResult)
+	if !ok {
+		return runevents.RunLifecycleCommandResult{}, fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
+	}
+	return result, nil
+}
+
 func Orchestrator(response magicevent.Result, topic string) (orchestratorevents.OrchestratorCommandResult, error) {
 	if response == nil {
 		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument

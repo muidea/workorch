@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -9,12 +10,12 @@ import (
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
+	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/run/pkg/common"
 	runcontracts "github.com/muidea/workorch/internal/modules/blocks/run/pkg/contracts"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -27,8 +28,7 @@ type ResumeRunCommand = runcontracts.ResumeRunCommand
 type UpdateRunCommand = runcontracts.UpdateRunCommand
 type BlockOnDecisionCommand = runcontracts.BlockOnDecisionCommand
 type BlockOnApprovalCommand = runcontracts.BlockOnApprovalCommand
-type CancelRunCommand = runcontracts.CancelRunCommand
-type SupersedeRunCommand = runcontracts.SupersedeRunCommand
+
 type FailRunCommand = runcontracts.FailRunCommand
 
 type Dependencies struct {
@@ -40,6 +40,7 @@ type Dependencies struct {
 }
 
 type Biz struct {
+	basebiz.Base
 	// commandMu only coordinates in-flight EventHub owner commands with Stop.
 	// Framework serializes Configure/Start/Stop lifecycle calls.
 	commandMu sync.RWMutex
@@ -68,7 +69,12 @@ func (m *Biz) Configure(deps Dependencies) error {
 	m.runs = deps.Runs
 	m.steps = deps.Steps
 	m.checkpoints = deps.Checkpoints
-	m.Service = NewServiceWithEventHub(deps.Runs, deps.EventHub, deps.BackgroundRoutine)
+	m.Base = basebiz.New(modulecommon.ModuleID, deps.EventHub, deps.BackgroundRoutine)
+	m.Service = newServiceWithPorts(
+		deps.Runs,
+		workspaceEventReader{send: m.SendEvent},
+		eventRunStateNotifier{post: m.PostEvent},
+	)
 	// Configure is invoked exclusively from Setup (or explicit test assembly).
 	// Establish the SM-4 downstream read contract before any later module Run.
 	return m.prepareRuntimeV2RecoveryInventory()
@@ -109,6 +115,10 @@ func (m *Biz) Start() error {
 		m.SubscribeFunc(topic, m.handleCommand)
 	}
 	m.topics = append(m.topics, regularTopics...)
+	for _, topic := range m.lifecycleTopics() {
+		m.SubscribeFunc(topic, m.handleLifecycleCommand)
+		m.topics = append(m.topics, topic)
+	}
 	m.started = true
 	return nil
 }
@@ -259,7 +269,6 @@ func (m *Biz) Stop(ctx context.Context) error {
 		return nil
 	}
 	m.commandMu.Lock()
-	owner := m.Service
 	topics := append([]string(nil), m.topics...)
 	m.stopping = true
 	m.topics = nil
@@ -269,10 +278,8 @@ func (m *Biz) Stop(ctx context.Context) error {
 	m.steps = nil
 	m.checkpoints = nil
 	m.commandMu.Unlock()
-	if owner != nil {
-		for idx := len(topics) - 1; idx >= 0; idx-- {
-			owner.UnsubscribeFunc(topics[idx])
-		}
+	for idx := len(topics) - 1; idx >= 0; idx-- {
+		m.UnsubscribeFunc(topics[idx])
 	}
 	m.commandMu.Lock()
 	m.Service = nil
@@ -475,14 +482,15 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 		if err != nil {
 			return runevents.RunCommandResult{}, err
 		}
-		if cmd.RuntimeContractVersion == runtimemodel.RuntimeContractVersionV2 {
-			if cmd.RuntimeState == nil || cmd.ExpectedRuntimeStateRevision == nil || cmd.RuntimeState.Facts.WorkspaceID != cmd.WorkspaceID || cmd.RuntimeState.Facts.RunID != cmd.RunID {
-				return runevents.RunCommandResult{}, common.ErrInvalidArgument
+		if runUsesRuntimeV2(current) {
+			if cmd.RuntimeState == nil || cmd.ExpectedRuntimeStateRevision == nil || cmd.ExpectedModelRevision == nil ||
+				cmd.RuntimeState.Facts.WorkspaceID != cmd.WorkspaceID || cmd.RuntimeState.Facts.RunID != cmd.RunID {
+				return runevents.RunCommandResult{}, fmt.Errorf("%w: Runtime V2 aggregate update requires scoped state and expected revision", common.ErrInvalidArgument)
 			}
 			if err := cmd.RuntimeState.Validate(); err != nil {
-				return runevents.RunCommandResult{}, err
+				return runevents.RunCommandResult{}, fmt.Errorf("%w: invalid Runtime V2 aggregate update: %v", common.ErrInvalidArgument, err)
 			}
-		} else if cmd.RuntimeState != nil {
+		} else if cmd.RuntimeState != nil || cmd.ExpectedRuntimeStateRevision != nil || cmd.ExpectedModelRevision != nil {
 			return runevents.RunCommandResult{}, common.ErrInvalidArgument
 		}
 		if err := validateRunUpdate(current, cmd); err != nil {
@@ -497,11 +505,13 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 				return runevents.RunCommandResult{}, common.ErrConflict
 			}
 		}
-		item := runFromUpdateCommand(cmd)
-		if err := m.runs.Update(ctx, item); err != nil {
+		if cmd.ExpectedModelRevision != nil && current.Revision != *cmd.ExpectedModelRevision {
+			return runevents.RunCommandResult{}, common.ErrConflict
+		}
+		item := runFromUpdateCommand(current, cmd)
+		if err := m.runs.CompareAndSwap(ctx, item, current.Revision); err != nil {
 			return runevents.RunCommandResult{}, err
 		}
-		m.publishRunUpdated(ctx, item)
 		return runevents.RunCommandResult{Run: item}, nil
 	case runevents.TopicRunCommandDelete:
 		cmd, ok := data.(runevents.DeleteRunCommand)
@@ -558,15 +568,6 @@ func purgeRunRuntimeResources(ctx context.Context, steps repository.StepReposito
 	return deleted, nil
 }
 
-func (m *Biz) publishRunUpdated(ctx context.Context, item *runmodel.Run) {
-	if m == nil || m.Service == nil || m.EventHub() == nil || item == nil {
-		return
-	}
-	event := magicevent.NewEventWithContext(runevents.TopicRunStateChanged, modulecommon.ModuleID, runevents.NotificationDestination, magicevent.NewHeader(), ctx, runevents.RunStateChangedDataFromModel(item))
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{SubjectType: "run", SubjectID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.ID)}))
-	m.PostEvent(event)
-}
-
 func runStateFilter(states []common.RunState) map[common.RunState]struct{} {
 	if len(states) == 0 {
 		return nil
@@ -602,63 +603,37 @@ func (m *Biz) validateRunReadScope(ctx context.Context, runID common.RunID, work
 	return err
 }
 
-func runFromUpdateCommand(cmd runcontracts.UpdateRunCommand) *runmodel.Run {
-	return &runmodel.Run{
-		ID:                     cmd.RunID,
-		WorkspaceID:            cmd.WorkspaceID,
-		GoalID:                 cmd.GoalID,
-		DoDID:                  cmd.DoDID,
-		Lineage:                cmd.Lineage,
-		DefinitionRevision:     cmd.DefinitionRevision,
-		InitialStepKind:        cmd.InitialStepKind,
-		RuntimeBootstrap:       cloneRuntimeBootstrap(cmd.RuntimeBootstrap),
-		RuntimeContractVersion: cmd.RuntimeContractVersion,
-		RuntimeState:           cloneRuntimeStateRecord(cmd.RuntimeState),
-		State:                  cmd.State,
-		Priority:               cmd.Priority,
-		BlockingTicketID:       cmd.BlockingTicketID,
-		BlockingApprovalID:     cmd.BlockingApprovalID,
-		FailureReason:          cmd.FailureReason,
-		CreatedAt:              cmd.CreatedAt,
-		StartedAt:              cmd.StartedAt,
-		EndedAt:                cmd.EndedAt,
+func runFromUpdateCommand(current *runmodel.Run, cmd runcontracts.UpdateRunCommand) *runmodel.Run {
+	if current == nil {
+		return nil
 	}
+	item := *current
+	item.RuntimeState = cloneRuntimeStateRecord(cmd.RuntimeState)
+	if item.RuntimeBootstrap != nil {
+		item.RuntimeContractVersion = runtimemodel.RuntimeContractVersionV2
+	}
+	return &item
 }
 
 func validateRunUpdate(current *runmodel.Run, cmd runcontracts.UpdateRunCommand) error {
 	if current == nil || current.ID != cmd.RunID || current.WorkspaceID != cmd.WorkspaceID {
 		return common.ErrConflict
 	}
-	if current.GoalID != cmd.GoalID || current.DoDID != cmd.DoDID ||
-		current.DefinitionRevision != cmd.DefinitionRevision || current.InitialStepKind != cmd.InitialStepKind ||
-		current.CreatedAt != cmd.CreatedAt {
-		return common.ErrConflict
-	}
-	if !sameRunRuntimeBootstrap(current.RuntimeBootstrap, cmd.RuntimeBootstrap) {
-		return common.ErrConflict
-	}
-	if current.RuntimeContractVersion == runtimemodel.RuntimeContractVersionV2 && cmd.RuntimeContractVersion != runtimemodel.RuntimeContractVersionV2 {
-		return common.ErrConflict
-	}
-	if current.RuntimeState != nil && cmd.RuntimeState == nil {
-		return common.ErrConflict
-	}
-	if cmd.State != current.State && !runStateCanTransition(current.State, cmd.State) {
-		return common.ErrConflict
-	}
-	if err := validateRunBlockerState(cmd); err != nil {
-		return err
-	}
-	if cmd.RuntimeContractVersion != runtimemodel.RuntimeContractVersionV2 {
+	if !runUsesRuntimeV2(current) {
 		return nil
 	}
-	if cmd.RuntimeBootstrap == nil || cmd.RuntimeState == nil {
+	if cmd.RuntimeState == nil {
 		return common.ErrConflict
 	}
-	bootstrap := cmd.RuntimeBootstrap.Normalized()
+	if current.RuntimeBootstrap == nil {
+		// RuntimeContractVersion is audit metadata, never a substitute for the
+		// sealed bootstrap needed to validate an aggregate write. Reject a
+		// malformed record instead of letting a generic owner command panic.
+		return common.ErrConflict
+	}
 	state := cmd.RuntimeState.Clone()
-	if bootstrap.Definition.GoalID != cmd.GoalID || bootstrap.Definition.DoDID != cmd.DoDID || bootstrap.Definition.Revision != cmd.DefinitionRevision ||
-		state.Definition.GoalID != cmd.GoalID || state.Definition.DoDID != cmd.DoDID || state.Definition.Revision != cmd.DefinitionRevision ||
+	bootstrap := current.RuntimeBootstrap.Normalized()
+	if state.Definition.GoalID != current.GoalID || state.Definition.DoDID != current.DoDID || state.Definition.Revision != current.DefinitionRevision ||
 		!runtimemodel.SameRuntimeDefinitionContext(bootstrap.Definition, state.Definition) ||
 		!runtimemodel.SameRuntimeActivationContext(bootstrap.Activation, state.Facts.Activation) {
 		return common.ErrConflict
@@ -666,35 +641,14 @@ func validateRunUpdate(current *runmodel.Run, cmd runcontracts.UpdateRunCommand)
 	return nil
 }
 
+func runUsesRuntimeV2(run *runmodel.Run) bool {
+	return run != nil && (run.RuntimeContractVersion == runtimemodel.RuntimeContractVersionV2 || run.RuntimeBootstrap != nil)
+}
+
 // ValidateRunUpdate exposes the Run owner's SM-1 persistence invariant for
 // focused contract tests; it does not alter owner state.
 func ValidateRunUpdate(current *runmodel.Run, cmd runcontracts.UpdateRunCommand) error {
 	return validateRunUpdate(current, cmd)
-}
-
-func validateRunBlockerState(cmd runcontracts.UpdateRunCommand) error {
-	switch cmd.State {
-	case common.RunStateBlockedOnDecision:
-		if cmd.BlockingTicketID == "" || cmd.BlockingApprovalID != "" {
-			return common.ErrConflict
-		}
-	case common.RunStateBlockedOnApproval:
-		if cmd.BlockingApprovalID == "" || cmd.BlockingTicketID != "" {
-			return common.ErrConflict
-		}
-	default:
-		if cmd.BlockingTicketID != "" || cmd.BlockingApprovalID != "" {
-			return common.ErrConflict
-		}
-	}
-	return nil
-}
-
-func sameRunRuntimeBootstrap(left *runtimemodel.RuntimeBootstrap, right *runtimemodel.RuntimeBootstrap) bool {
-	if left == nil || right == nil {
-		return left == nil && right == nil
-	}
-	return runtimemodel.SameRuntimeBootstrap(*left, *right)
 }
 
 func cloneRuntimeStateRecord(value *runtimemodel.RuntimeStateRecord) *runtimemodel.RuntimeStateRecord {

@@ -64,7 +64,7 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 	}
 	t.Cleanup(func() { _ = decisionOwner.Stop(ctx) })
 
-	biz := orchestratorbiz.NewRuntimeOrchestrator(runs, workspaces, nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -159,8 +159,8 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 	if duplicateErr != nil || !duplicateOK || duplicateResponse.Disposition != orchestratorevents.RuntimeGovernanceResolutionDispositionDuplicate {
 		t.Fatalf("duplicate governance continuation = %+v err=%v", duplicateData, duplicateErr)
 	}
-	if background.asyncFunctionCalls != 1 || background.lastAsyncFunction == nil {
-		t.Fatalf("Runtime V2 governance continuation calls=%d fn=%v", background.asyncFunctionCalls, background.lastAsyncFunction != nil)
+	if background.asyncFunctionCalls != 0 {
+		t.Fatalf("governance continuation must wait for RunStateChanged(active), calls=%d", background.asyncFunctionCalls)
 	}
 }
 
@@ -207,7 +207,7 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	if err := decisionOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	biz := orchestratorbiz.NewRuntimeOrchestrator(runs, workspaces, nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -257,8 +257,8 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	if err != nil || len(committed.GovernanceResolutions) != 1 || len(committed.Facts.Evidence.Accepted) != 1 || len(committed.CandidateAttempts) != 0 || committed.ActiveDispatch != nil || candidateCalls != 0 {
 		t.Fatalf("initial persisted governance aggregate=%+v candidateCalls=%d err=%v", committed, candidateCalls, err)
 	}
-	if background.asyncFunctionCalls != 1 || background.lastAsyncFunction == nil {
-		t.Fatalf("initial continuation scheduling calls=%d", background.asyncFunctionCalls)
+	if background.asyncFunctionCalls != 0 {
+		t.Fatalf("initial continuation must wait for RunStateChanged(active), calls=%d", background.asyncFunctionCalls)
 	}
 	if err := decisionOwner.Stop(ctx); err != nil {
 		t.Fatal(err)
@@ -276,7 +276,6 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	// same durable files; no old EventHub observer or controller is reused.
 	restartedHub := magicevent.NewHub(16)
 	restartedRuns := filerepository.NewRunRepository(runsPath)
-	restartedWorkspaces := filerepository.NewWorkspaceRepository(workspacesPath)
 	restartedRunOwner := runmodule.New()
 	if err := restartedRunOwner.Configure(runmodule.Dependencies{Runs: restartedRuns, EventHub: restartedHub}); err != nil {
 		t.Fatal(err)
@@ -295,7 +294,7 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = restartedDecisionOwner.Stop(ctx) })
-	restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(restartedRuns, restartedWorkspaces, nil, nil)
+	restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
 	if err := restartedBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: restartedHub}); err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +334,7 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 		len(reloaded.CandidateAttempts) != len(committed.CandidateAttempts) || len(reloaded.OperationReceipts) != 0 {
 		t.Fatalf("duplicate replay changed persisted authority: before=%+v after=%+v", committed, reloaded)
 	}
-	if candidateCalls != 0 || restartedBackground.asyncFunctionCalls != 1 || restartedBackground.lastAsyncFunction == nil {
+	if candidateCalls != 0 || restartedBackground.asyncFunctionCalls != 0 {
 		t.Fatalf("restart replay candidateCalls=%d continuationCalls=%d", candidateCalls, restartedBackground.asyncFunctionCalls)
 	}
 	if reloaded.Facts.Recovery.ProviderTransportAttempts != committed.Facts.Recovery.ProviderTransportAttempts ||
@@ -387,7 +386,7 @@ func TestRuntimeV2FileBackedBoundGovernanceRestartPreservesBindingWithoutCandida
 		t.Fatal(err)
 	}
 
-	firstBiz := NewRuntimeOrchestrator(runs, workspaces, nil, nil)
+	firstBiz := NewRuntimeOrchestrator(nil, nil)
 	if err := firstBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: firstHub}); err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +446,7 @@ func TestRuntimeV2FileBackedBoundGovernanceRestartPreservesBindingWithoutCandida
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = restartedDecisionOwner.Stop(ctx) })
-	restartedBiz := NewRuntimeOrchestrator(restartedRuns, filerepository.NewWorkspaceRepository(workspacesPath), nil, nil)
+	restartedBiz := NewRuntimeOrchestrator(nil, nil)
 	if err := restartedBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: restartedHub}); err != nil {
 		t.Fatal(err)
 	}

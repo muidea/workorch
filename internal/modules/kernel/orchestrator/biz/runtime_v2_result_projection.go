@@ -4,64 +4,175 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
+	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 // deliverRuntimeV2Terminal is the single SM-4 terminal delivery lane. The
-// persisted aggregate remains authority; Result and Run/Workspace are
-// idempotent derived deliveries and may be retried in this order.
+// persisted aggregate remains authority. Result, Workspace and Run receive
+// typed terminal facts and only mutate their own state, in that order.
 func (m *Biz) deliverRuntimeV2Terminal(ctx context.Context, aggregate runtimev2.RuntimeAggregate) error {
-	if m == nil || m.bizPtr == nil || aggregate.Decision.Terminal == nil ||
-		(aggregate.Decision.Action != runtimecontract.RuntimeActionComplete && aggregate.Decision.Action != runtimecontract.RuntimeActionFail) {
+	if m == nil || m.bizPtr == nil || (aggregate.Decision.Terminal == nil && aggregate.Termination == nil) {
 		return common.ErrInvalidArgument
 	}
 	if err := aggregate.Validate(); err != nil {
 		return fmt.Errorf("persisted Runtime V2 terminal aggregate is invalid: %w", err)
 	}
-	if err := m.projectRuntimeV2Result(ctx, aggregate); err != nil {
+	request := terminalDeliveryRequest(aggregate)
+	if err := request.Validate(); err != nil {
 		return err
 	}
-	return m.bizPtr.ProjectRuntimeV2Terminal(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Decision.Action, aggregate.Decision.Terminal)
+	if !deliveryAcknowledged(aggregate, request.TerminalDeliveryID, runtimecontract.RuntimeDeliveryOwnerResult) {
+		if err := m.deliverRuntimeV2Result(ctx, request, runtimeV2ResultMaterialFromAggregate(aggregate)); err != nil {
+			return err
+		}
+	}
+	if !m.persistedDeliveryAcknowledged(ctx, aggregate, request.TerminalDeliveryID, runtimecontract.RuntimeDeliveryOwnerWorkspace) {
+		if err := m.deliverRuntimeV2Workspace(ctx, request); err != nil {
+			return err
+		}
+	}
+	if !m.persistedDeliveryAcknowledged(ctx, aggregate, request.TerminalDeliveryID, runtimecontract.RuntimeDeliveryOwnerRun) {
+		return m.deliverRuntimeV2Run(ctx, request)
+	}
+	return nil
 }
 
-func (m *Biz) projectRuntimeV2Result(ctx context.Context, aggregate runtimev2.RuntimeAggregate) error {
-	if m == nil || m.EventHub() == nil || aggregate.Decision.Terminal == nil {
+func deliveryAcknowledged(aggregate runtimev2.RuntimeAggregate, deliveryID string, owner runtimecontract.RuntimeDeliveryOwner) bool {
+	for _, acknowledgement := range aggregate.DeliveryAcknowledgements {
+		if acknowledgement.TerminalDeliveryID == deliveryID && acknowledgement.Owner == owner {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Biz) persistedDeliveryAcknowledged(ctx context.Context, aggregate runtimev2.RuntimeAggregate, deliveryID string, owner runtimecontract.RuntimeDeliveryOwner) bool {
+	if m == nil || m.bizPtr == nil || !m.bizPtr.RuntimeV2RepositoryConfigured() {
+		return deliveryAcknowledged(aggregate, deliveryID, owner)
+	}
+	loaded, err := m.bizPtr.LoadRuntimeV2(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	return err == nil && deliveryAcknowledged(loaded, deliveryID, owner)
+}
+
+func terminalDeliveryRequest(aggregate runtimev2.RuntimeAggregate) orchestratorevents.RuntimeTerminalDeliveryRequestData {
+	if aggregate.Termination != nil {
+		kind := aggregate.Termination.Kind
+		code := "administrative_" + string(kind)
+		return orchestratorevents.RuntimeTerminalDeliveryRequestData{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, SourceOwner: ModuleID,
+			CausationID:         "terminal-delivery/" + runtimecontract.StableTerminalDeliveryID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Decision.AuthoritySnapshot.ID, string(runtimecontract.RuntimeActionFail), code),
+			AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, DefinitionRevision: aggregate.Facts.DefinitionRevision, EvidenceRevision: aggregate.Facts.EvidenceRevision, DispatchID: aggregate.Decision.AuthoritySnapshot.ID,
+			Action: runtimecontract.RuntimeActionFail, TerminalCode: code, TerminalSummary: aggregate.Termination.Reason, AdministrativeKind: kind,
+			TerminalDeliveryID: runtimecontract.StableTerminalDeliveryID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Decision.AuthoritySnapshot.ID, string(runtimecontract.RuntimeActionFail), code), StateRevision: aggregate.StateRevision}
+	}
+	terminal := aggregate.Decision.Terminal
+	return orchestratorevents.RuntimeTerminalDeliveryRequestData{
+		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, SourceOwner: ModuleID,
+		CausationID:         "terminal-delivery/" + runtimecontract.StableTerminalDeliveryID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Decision.AuthoritySnapshot.ID, string(aggregate.Decision.Action), terminal.Code),
+		AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, DefinitionRevision: aggregate.Facts.DefinitionRevision,
+		EvidenceRevision: aggregate.Facts.EvidenceRevision, DispatchID: aggregate.Decision.AuthoritySnapshot.ID,
+		Action: aggregate.Decision.Action, TerminalCode: terminal.Code, TerminalSummary: terminal.Summary,
+		TerminalDeliveryID: runtimecontract.StableTerminalDeliveryID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Decision.AuthoritySnapshot.ID, string(aggregate.Decision.Action), terminal.Code), StateRevision: aggregate.StateRevision,
+	}
+}
+
+func (m *Biz) deliverRuntimeV2Result(ctx context.Context, request orchestratorevents.RuntimeTerminalDeliveryRequestData, material resultevents.ResultMaterial) error {
+	if m == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
-	item := runtimeV2ResultFromAggregate(aggregate)
-	repository := resultEventResultRepository{hub: m.EventHub()}
-	existing, err := repository.Get(ctx, item.ID)
-	if err == nil {
-		if existing.State == item.State && existing.WorkspaceID == item.WorkspaceID && existing.RunID == item.RunID {
-			return nil
+	command := resultevents.ApplyRuntimeTerminalDeliveryCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, SourceOwner: ModuleID, CausationID: request.CausationID, TerminalDeliveryID: request.TerminalDeliveryID, AuthoritySnapshotID: request.AuthoritySnapshotID, DefinitionRevision: request.DefinitionRevision, EvidenceRevision: request.EvidenceRevision, DispatchID: request.DispatchID, Action: request.Action, TerminalCode: request.TerminalCode, TerminalSummary: request.TerminalSummary, Material: material}
+	event := magicevent.NewEventWithContext(resultevents.TopicResultCommandApplyTerminalDelivery, ModuleID, resultevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	bindOwnerCommandLane(event, resultevents.TopicResultCommandApplyTerminalDelivery, "result", string(material.ID), request.WorkspaceID, request.RunID)
+	response := m.EventHub().Send(event)
+	if response == nil || response.Error() != nil {
+		if response != nil {
+			return response.Error()
 		}
-		return common.ErrConflict
+		return common.ErrInvalidArgument
 	}
-	if !errors.Is(err, common.ErrNotFound) {
+	data, err := response.Get()
+	if err != nil {
 		return err
 	}
-	return repository.Create(ctx, item)
+	ownerResult, ok := data.(resultevents.ResultLifecycleCommandResult)
+	if !ok {
+		return common.ErrInvalidArgument
+	}
+	return m.recordRuntimeDeliveryAcknowledgement(ctx, ownerResult.DeliveryAck)
 }
 
-func runtimeV2ResultFromAggregate(aggregate runtimev2.RuntimeAggregate) *resultmodel.Result {
-	aggregate.Facts = aggregate.Facts.Normalized()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	accepted := aggregate.Decision.Action == runtimecontract.RuntimeActionComplete
-	state := common.ResultStateRejected
-	if accepted {
-		state = common.ResultStateAccepted
+func (m *Biz) deliverRuntimeV2Workspace(ctx context.Context, request orchestratorevents.RuntimeTerminalDeliveryRequestData) error {
+	command := workspaceevents.ApplyRuntimeTerminalDeliveryCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, SourceOwner: ModuleID, CausationID: request.CausationID, TerminalDeliveryID: request.TerminalDeliveryID, AuthoritySnapshotID: request.AuthoritySnapshotID, DefinitionRevision: request.DefinitionRevision, EvidenceRevision: request.EvidenceRevision, DispatchID: request.DispatchID, Action: request.Action, TerminalCode: request.TerminalCode, TerminalSummary: request.TerminalSummary}
+	command.AdministrativeKind = request.AdministrativeKind
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandApplyTerminalDelivery, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	bindOwnerCommandLane(event, workspaceevents.TopicWorkspaceCommandApplyTerminalDelivery, "workspace", string(request.WorkspaceID), request.WorkspaceID, request.RunID)
+	response := m.EventHub().Send(event)
+	if response == nil || response.Error() != nil {
+		if response != nil {
+			return response.Error()
+		}
+		return common.ErrInvalidArgument
 	}
-	assessment := resultmodel.DoDAssessment{Satisfied: accepted, Summary: aggregate.Decision.Terminal.Summary}
+	data, err := response.Get()
+	if err != nil {
+		return err
+	}
+	ownerResult, ok := data.(workspaceevents.WorkspaceLifecycleCommandResult)
+	if !ok {
+		return common.ErrInvalidArgument
+	}
+	return m.recordRuntimeDeliveryAcknowledgement(ctx, ownerResult.DeliveryAck)
+}
+
+func (m *Biz) deliverRuntimeV2Run(ctx context.Context, request orchestratorevents.RuntimeTerminalDeliveryRequestData) error {
+	command := runevents.ApplyRuntimeTerminalDeliveryCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, SourceOwner: ModuleID, CausationID: request.CausationID, TerminalDeliveryID: request.TerminalDeliveryID, AuthoritySnapshotID: request.AuthoritySnapshotID, DefinitionRevision: request.DefinitionRevision, EvidenceRevision: request.EvidenceRevision, DispatchID: request.DispatchID, Action: request.Action, TerminalCode: request.TerminalCode, TerminalSummary: request.TerminalSummary}
+	command.AdministrativeKind = request.AdministrativeKind
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandApplyTerminalDelivery, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	bindOwnerCommandLane(event, runevents.TopicRunCommandApplyTerminalDelivery, "run", string(request.RunID), request.WorkspaceID, request.RunID)
+	response := m.EventHub().Send(event)
+	ownerResult, err := runLifecycleCommandResponse(response, runevents.TopicRunCommandApplyTerminalDelivery)
+	if err != nil {
+		return err
+	}
+	return m.recordRuntimeDeliveryAcknowledgement(ctx, ownerResult.DeliveryAck)
+}
+
+func (m *Biz) recordRuntimeDeliveryAcknowledgement(ctx context.Context, acknowledgement *runtimecontract.RuntimeDeliveryAcknowledgement) error {
+	if acknowledgement == nil {
+		return common.ErrInvalidArgument
+	}
+	// Focused owner-boundary tests may construct a delivery Biz without the
+	// Runtime V2 repository; production Configure always installs it. The
+	// resource-owner transition remains fully exercised in that narrow fixture.
+	if m.bizPtr == nil || !m.bizPtr.RuntimeV2RepositoryConfigured() {
+		return nil
+	}
+	_, _, err := m.bizPtr.RecordRuntimeV2DeliveryAcknowledgement(ctx, *acknowledgement)
+	return err
+}
+
+func runtimeV2ResultMaterialFromAggregate(aggregate runtimev2.RuntimeAggregate) resultevents.ResultMaterial {
+	aggregate.Facts = aggregate.Facts.Normalized()
+	accepted := aggregate.Termination == nil && aggregate.Decision.Action == runtimecontract.RuntimeActionComplete
+	terminalSummary := ""
+	if aggregate.Termination != nil {
+		terminalSummary = aggregate.Termination.Reason
+	} else {
+		terminalSummary = aggregate.Decision.Terminal.Summary
+	}
+	assessment := resultmodel.DoDAssessment{Satisfied: accepted, Summary: terminalSummary}
 	evidenceRefs := runtimeV2TerminalEvidenceRefs(aggregate.Facts)
 	artifactRefs := runtimeV2TerminalArtifactRefs(aggregate.Facts)
 	goalCoverage := resultmodel.DoDCoverage{Satisfied: true}
@@ -94,20 +205,13 @@ func runtimeV2ResultFromAggregate(aggregate runtimev2.RuntimeAggregate) *resultm
 	if len(deliverableCoverage.Items) > 0 {
 		assessment.DeliverableCoverage = &deliverableCoverage
 	}
-	item := &resultmodel.Result{
+	item := resultevents.ResultMaterial{
 		ID: common.ResultID(string(aggregate.Facts.WorkspaceID) + "/" + string(aggregate.Facts.RunID) + "/result/dod-assessment"), WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		GoalID: aggregate.Definition.GoalID, DoDID: aggregate.Definition.DoDID, State: state,
-		Title: "Runtime V2 acceptance result", Summary: aggregate.Decision.Terminal.Summary,
+		GoalID: aggregate.Definition.GoalID, DoDID: aggregate.Definition.DoDID,
+		Title: "Runtime V2 acceptance result", Summary: terminalSummary,
 		SourceType: resultcommon.SourceTypeDoDAssessment, SourceRef: aggregate.Decision.AuthoritySnapshot.ID,
 		EvidenceRefs: evidenceRefs, ArtifactRefs: artifactRefs, DoDAssessment: assessment,
-		SummaryDetail: resultmodel.ResultSummary{GoalOutcome: aggregate.Decision.Terminal.Summary, EvidenceRefs: append([]string(nil), evidenceRefs...), ArtifactRefs: append([]common.ArtifactID(nil), artifactRefs...)},
-		CreatedAt:     now, UpdatedAt: now,
-	}
-	if accepted {
-		item.AcceptedAt = now
-		item.AcceptedBy = "kernel/orchestrator"
-	} else {
-		item.RejectedAt = now
+		SummaryDetail: resultmodel.ResultSummary{GoalOutcome: terminalSummary, EvidenceRefs: append([]string(nil), evidenceRefs...), ArtifactRefs: append([]common.ArtifactID(nil), artifactRefs...)},
 	}
 	item.RuntimeCloseout = runtimeV2ResultCloseout(aggregate, accepted, evidenceRefs)
 	return item

@@ -12,5 +12,6 @@ type WorkspaceRepository interface {
 	Get(context.Context, common.WorkspaceID) (*workspace.Workspace, error)
 	List(context.Context) ([]*workspace.Workspace, error)
 	Update(context.Context, *workspace.Workspace) error
+	CompareAndSwap(context.Context, *workspace.Workspace, uint64) error
 	Delete(context.Context, common.WorkspaceID) error
 }
