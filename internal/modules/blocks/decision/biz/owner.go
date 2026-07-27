@@ -199,7 +199,11 @@ func (m *Biz) executeCommand(ev magicevent.Event) (decisionevents.DecisionComman
 		workspaceID = cmd.WorkspaceID
 	}
 	if workspaceID != "" {
-		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+		var scopeErr error
+		ctx, scopeErr = common.BindRuntimeWorkspaceContext(ctx, workspaceID)
+		if scopeErr != nil {
+			return decisionevents.DecisionCommandResult{}, scopeErr
+		}
 	}
 	switch topic {
 	case decisionevents.TopicDecisionCommandEnsureResolved:
@@ -215,7 +219,10 @@ func (m *Biz) executeCommand(ev magicevent.Event) (decisionevents.DecisionComman
 			cmd.WorkspaceID = ticket.WorkspaceID
 			cmd.RunID = ticket.RunID
 			cmd.StepID = ticket.StepID
-			ctx = common.ContextWithRuntimeWorkspaceID(ctx, ticket.WorkspaceID)
+			ctx, err = common.BindRuntimeWorkspaceContext(ctx, ticket.WorkspaceID)
+			if err != nil {
+				return decisionevents.DecisionCommandResult{}, err
+			}
 		}
 		resolveCommand := resolveTicketContract(cmd)
 		if cmd.DecisionKind == "runtime_v2_governance" {
@@ -376,7 +383,10 @@ func (m *Biz) executeCommand(ev magicevent.Event) (decisionevents.DecisionComman
 			if err != nil {
 				return decisionevents.DecisionCommandResult{}, err
 			}
-			ctx = common.ContextWithRuntimeWorkspaceID(ctx, ticket.WorkspaceID)
+			ctx, err = common.BindRuntimeWorkspaceContext(ctx, ticket.WorkspaceID)
+			if err != nil {
+				return decisionevents.DecisionCommandResult{}, err
+			}
 		} else if err := m.ensureTicketScopeForCommand(ctx, cmd.TicketID, scope); err != nil {
 			return decisionevents.DecisionCommandResult{}, err
 		}
@@ -679,7 +689,11 @@ func (m *Biz) resolveResolutionTicketContextForCommand(ctx context.Context, tick
 			return ctx, err
 		}
 		if ticket.WorkspaceID != "" {
-			ctx = common.ContextWithRuntimeWorkspaceID(ctx, ticket.WorkspaceID)
+			var bindErr error
+			ctx, bindErr = common.BindRuntimeWorkspaceContext(ctx, ticket.WorkspaceID)
+			if bindErr != nil {
+				return ctx, bindErr
+			}
 		}
 		return ctx, nil
 	}
@@ -691,7 +705,11 @@ func (m *Biz) resolveResolutionTicketContextForCommand(ctx context.Context, tick
 		return ctx, common.ErrNotFound
 	}
 	if item.WorkspaceID != "" {
-		ctx = common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID)
+		var bindErr error
+		ctx, bindErr = common.BindRuntimeWorkspaceContext(ctx, item.WorkspaceID)
+		if bindErr != nil {
+			return ctx, bindErr
+		}
 	}
 	return ctx, nil
 }

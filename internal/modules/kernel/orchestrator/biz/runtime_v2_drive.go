@@ -90,6 +90,11 @@ func (m *Biz) driveRuntimeV2(ctx context.Context, command orchestratorevents.Dri
 	if m == nil || command.WorkspaceID == "" || command.RunID == "" {
 		return orchestratorevents.DriveRuntimeV2Result{}, common.ErrInvalidArgument
 	}
+	var err error
+	ctx, err = common.BindRuntimeWorkspaceContext(ctx, command.WorkspaceID)
+	if err != nil {
+		return orchestratorevents.DriveRuntimeV2Result{}, err
+	}
 	m.lifecycleMu.RLock()
 	defer m.lifecycleMu.RUnlock()
 	return m.driveRuntimeV2Locked(ctx, command)

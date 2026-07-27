@@ -389,7 +389,11 @@ func (m *Biz) executeMagicCommandLocked(ev magicevent.Event) (orchestratorevents
 		if !ok || cmd.WorkspaceID == "" || cmd.RunID == "" {
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
-		ctx = common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
+		var err error
+		ctx, err = common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
+		if err != nil {
+			return orchestratorevents.OrchestratorCommandResult{}, err
+		}
 		runResult, err := m.purgeRunOwnerResources(ctx, cmd.WorkspaceID, cmd.RunID)
 		if err != nil {
 			return orchestratorevents.OrchestratorCommandResult{}, err
@@ -588,9 +592,9 @@ func (m *Biz) endRuntimeV2Drive(key string) {
 func orchestratorBackgroundContext(ctx context.Context, workspaceID common.WorkspaceID) context.Context {
 	bgCtx := context.Background()
 	if workspaceID != "" {
-		bgCtx = common.ContextWithRuntimeWorkspaceID(bgCtx, workspaceID)
+		bgCtx, _ = common.BindRuntimeWorkspaceContext(bgCtx, workspaceID)
 	} else if workspaceID := common.RuntimeWorkspaceIDFromContext(ctx); workspaceID != "" {
-		bgCtx = common.ContextWithRuntimeWorkspaceID(bgCtx, workspaceID)
+		bgCtx, _ = common.BindRuntimeWorkspaceContext(bgCtx, workspaceID)
 	}
 
 	return bgCtx
@@ -606,7 +610,11 @@ func (m *Biz) readEvidenceMagicCommand(ev magicevent.Event) (orchestratorevents.
 	}
 	ctx := ev.Context()
 	if cmd.WorkspaceID != "" {
-		ctx = common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
+		var err error
+		ctx, err = common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
+		if err != nil {
+			return orchestratorevents.OrchestratorCommandResult{}, err
+		}
 	}
 	evidence := m.bizPtr.EvidenceRepositories()
 	switch ev.ID() {

@@ -40,6 +40,14 @@ clone、hash helper。它不得拥有状态迁移、CAS、EventHub、filesystem/
 跨 owner I/O 只能通过 EventHub 的具体 typed command/result。禁止跨 owner service/repository、
 `map[string]any`、无约束 `any`、JSON/reflect bridge 或通用 envelope。
 
+Workspace scope 是每次事件执行上下文的一部分，而不是组件实例的“当前 workspace”状态。任何带
+`WorkspaceID` 的入站 Runtime 命令必须先将该 ID 绑定到 EventHub context；已有 context 只能匹配，
+不得被静默覆盖为另一 workspace。Biz、Service、Module、全局变量、共享 cache 和后台任务不得保存
+未经该 scope 约束的当前 WorkspaceID。持久化模型、sealed contract 与 typed command 中的 ID 仅作为资源
+归属和审计 identity；下游 repository、EventHub 和 background work 必须继承已绑定 context。
+旧的 context 构造 helper 只能为未 scoped 的根 context 首次建立 scope，不能覆盖已有 scope；正式命令入口
+必须使用会返回 conflict 的 checked binder，不能把该 helper 当成跨 workspace 切换机制。
+
 ## Runtime V2 生产主链
 
 ```text

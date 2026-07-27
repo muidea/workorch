@@ -87,6 +87,13 @@ func (m *Biz) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommandRes
 		return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 	}
 	ctx := ev.Context()
+	if workspaceID := memoryCommandWorkspaceID(ev.Data()); workspaceID != "" {
+		var err error
+		ctx, err = common.BindRuntimeWorkspaceContext(ctx, workspaceID)
+		if err != nil {
+			return memoryevents.MemoryCommandResult{}, err
+		}
+	}
 	switch ev.ID() {
 	case memoryevents.TopicMemoryCommandCreate:
 		cmd, ok := ev.Data().(memoryevents.CreateMemoryCommand)
@@ -249,6 +256,32 @@ func (m *Biz) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommandRes
 	}
 }
 
+// memoryCommandWorkspaceID extracts only the durable command scope. It does
+// not inspect component state, so the shared owner can serve concurrent
+// Workspace lanes without a mutable "current workspace" field.
+func memoryCommandWorkspaceID(data any) common.WorkspaceID {
+	switch cmd := data.(type) {
+	case memoryevents.CreateMemoryCommand:
+		return cmd.WorkspaceID
+	case memoryevents.GetMemoryCommand:
+		return cmd.WorkspaceID
+	case memoryevents.ListMemoryByWorkspaceCommand:
+		return cmd.WorkspaceID
+	case memoryevents.SearchMemoryCommand:
+		return cmd.Query.WorkspaceID
+	case memoryevents.DeleteMemoryCommand:
+		return cmd.WorkspaceID
+	case memoryevents.UpsertMemoryRecallTraceCommand:
+		return cmd.WorkspaceID
+	case memoryevents.GetMemoryRecallTraceCommand:
+		return cmd.WorkspaceID
+	case memoryevents.ListMemoryRecallTracesCommand:
+		return cmd.Query.WorkspaceID
+	default:
+		return ""
+	}
+}
+
 func memorySearchQueryFromEvent(query memoryevents.MemorySearchQuery) repository.MemorySearchQuery {
 	return repository.MemorySearchQuery{
 		WorkspaceID: query.WorkspaceID, Query: query.Query, Tags: append([]string(nil), query.Tags...),
@@ -279,7 +312,12 @@ func memoryCommandContext(ctx context.Context, workspaceID common.WorkspaceID) c
 	if workspaceID == "" {
 		return ctx
 	}
-	return common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	// executeCommand checks command scope before this helper is reached.
+	bound, err := common.BindRuntimeWorkspaceContext(ctx, workspaceID)
+	if err != nil {
+		return ctx
+	}
+	return bound
 }
 
 func setMemoryMagicResult(result magicevent.Result, data memoryevents.MemoryCommandResult, err error) {

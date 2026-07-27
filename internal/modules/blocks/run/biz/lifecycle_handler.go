@@ -120,7 +120,11 @@ func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (runevents.RunLifecyc
 	if workspaceID == "" || runID == "" || reduce == nil {
 		return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
 	}
-	ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	var scopeErr error
+	ctx, scopeErr = common.BindRuntimeWorkspaceContext(ctx, workspaceID)
+	if scopeErr != nil {
+		return runevents.RunLifecycleCommandResult{}, scopeErr
+	}
 	response, err := m.applyLifecycleLocked(ctx, workspaceID, runID, reduce, deliveryCmd)
 	if err != nil {
 		return response, err

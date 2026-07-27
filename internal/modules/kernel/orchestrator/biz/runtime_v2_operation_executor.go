@@ -22,6 +22,11 @@ func (e eventRuntimeV2OperationExecutor) ExecuteRuntimeOperation(ctx context.Con
 	if e.hub == nil || request.WorkspaceID == "" || request.RunID == "" || request.DispatchID == "" {
 		return runtimev2.RuntimeOperationExecutionResult{}, common.ErrInvalidArgument
 	}
+	var err error
+	ctx, err = common.BindRuntimeWorkspaceContext(ctx, request.WorkspaceID)
+	if err != nil {
+		return runtimev2.RuntimeOperationExecutionResult{}, err
+	}
 	destination := runtimecontract.RuntimeModuleForOperationKind(request.Operation.Kind)
 	if destination == "" {
 		return runtimev2.RuntimeOperationExecutionResult{}, fmt.Errorf("runtime operation kind %q has no owner module", request.Operation.Kind)

@@ -220,7 +220,11 @@ func (b *Biz) DispatchRuntimeRun(ctx context.Context, workspaceID, runID, action
 	}
 	workspaceScope := common.WorkspaceID(workspaceID)
 	runScope := common.RunID(runID)
-	ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceScope)
+	var err error
+	ctx, err = common.BindRuntimeWorkspaceContext(ctx, workspaceScope)
+	if err != nil {
+		return err
+	}
 	switch action {
 	case "start":
 		event := magicevent.NewEventWithContext(

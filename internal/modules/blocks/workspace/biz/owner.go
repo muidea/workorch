@@ -178,7 +178,10 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 	}
 	ctx := ev.Context()
 	if workspaceID != "" {
-		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+		ctx, err = common.BindRuntimeWorkspaceContext(ctx, workspaceID)
+		if err != nil {
+			return workspaceevents.WorkspaceCommandResult{}, err
+		}
 	}
 	switch ev.ID() {
 	case workspaceevents.TopicWorkspaceCommandCreate:

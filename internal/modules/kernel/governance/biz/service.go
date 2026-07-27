@@ -416,12 +416,15 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 	if err != nil || ticket == nil || ticket.State != common.DecisionTicketStateOpen {
 		return
 	}
+	ctx, err = common.BindRuntimeWorkspaceContext(ctx, ticket.WorkspaceID)
+	if err != nil {
+		return
+	}
 	run, err := s.runs.GetByWorkspaceID(ctx, ticket.WorkspaceID, ticket.RunID)
 	if err != nil || run == nil {
 		return
 	}
-	definitionCtx := common.ContextWithRuntimeWorkspaceID(ctx, run.WorkspaceID)
-	goal, dod := s.loadGoalAndDoD(definitionCtx, run.GoalID, run.DoDID)
+	goal, dod := s.loadGoalAndDoD(ctx, run.GoalID, run.DoDID)
 	memoryItems := s.loadMemoryItems(ctx, ticket.WorkspaceID)
 	eval := s.evaluateTicket(ctx, ticket, run, goal, dod, memoryItems)
 	trace := &governancemodel.AutoGovernanceTrace{
@@ -477,8 +480,7 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 		workorcheventpayload.BoolField("inferred", semantic.Inferred),
 		workorcheventpayload.StringField("version", "v1"),
 	))))
-	scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, ticket.WorkspaceID)
-	if err := s.resolve(scopedCtx, ticket.ID, semantic.ResolutionType, payload); err != nil {
+	if err := s.resolve(ctx, ticket.ID, semantic.ResolutionType, payload); err != nil {
 		trace.Status = "blocked"
 		trace.Action = "escalate"
 		trace.PolicyBlocked = "resolve_failed"
@@ -524,12 +526,15 @@ func (s *Service) processPendingApproval(ctx context.Context, approvalID common.
 	if err != nil || approval == nil || approval.State != common.ApprovalStatePending {
 		return
 	}
+	ctx, err = common.BindRuntimeWorkspaceContext(ctx, approval.WorkspaceID)
+	if err != nil {
+		return
+	}
 	run, err := s.runs.GetByWorkspaceID(ctx, approval.WorkspaceID, approval.RunID)
 	if err != nil || run == nil {
 		return
 	}
-	definitionCtx := common.ContextWithRuntimeWorkspaceID(ctx, run.WorkspaceID)
-	goal, dod := s.loadGoalAndDoD(definitionCtx, run.GoalID, run.DoDID)
+	goal, dod := s.loadGoalAndDoD(ctx, run.GoalID, run.DoDID)
 	eval := s.evaluateApproval(ctx, approval, goal, dod, cfg.Governance)
 	trace := &governancemodel.AutoGovernanceTrace{
 		ID:                 common.AutoGovernanceTraceID(fmt.Sprintf("%s/auto-governance", approval.ID)),
@@ -566,8 +571,7 @@ func (s *Service) processPendingApproval(ctx context.Context, approvalID common.
 		return
 	}
 
-	scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, approval.WorkspaceID)
-	if err := s.resolveApproval(scopedCtx, approval.ID); err != nil {
+	if err := s.resolveApproval(ctx, approval.ID); err != nil {
 		trace.Status = "blocked"
 		trace.Action = "escalate"
 		trace.PolicyBlocked = "resolve_failed"

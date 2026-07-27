@@ -112,7 +112,10 @@ func (s *Service) ResolveTicketAndReturn(ctx context.Context, cmd decisioncontra
 	if !modulecommon.IsSupportedResolutionType(cmd.Type) {
 		return nil, nil, common.ErrInvalidArgument
 	}
-	ctx = resolveCommandContext(ctx, cmd)
+	ctx, err := resolveCommandContext(ctx, cmd)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	ticket, err := s.tickets.Get(ctx, cmd.TicketID)
 	if err != nil {
@@ -187,7 +190,10 @@ func (s *Service) EnsureResolvedTicketAndReturnWithTransition(ctx context.Contex
 	if !modulecommon.IsSupportedResolutionType(cmd.Type) {
 		return nil, nil, false, common.ErrInvalidArgument
 	}
-	ctx = resolveCommandContext(ctx, cmd)
+	ctx, err := resolveCommandContext(ctx, cmd)
+	if err != nil {
+		return nil, nil, false, err
+	}
 
 	ticket, err := s.tickets.Get(ctx, cmd.TicketID)
 	if err != nil {
@@ -269,11 +275,11 @@ func ticketMatchesResolveScope(ticket *decisionModel.Ticket, cmd decisioncontrac
 	return true
 }
 
-func resolveCommandContext(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) context.Context {
+func resolveCommandContext(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) (context.Context, error) {
 	if cmd.WorkspaceID == "" {
-		return ctx
+		return ctx, nil
 	}
-	return common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
+	return common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
 }
 
 func sameResolutionPayload(left workorcheventpayload.Payload, right workorcheventpayload.Payload) bool {
@@ -360,7 +366,10 @@ func (s *Service) EnsureRuntimeGovernanceResolutionProposal(ctx context.Context,
 	if s == nil || cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
 		return nil, nil, common.ErrInvalidArgument
 	}
-	ctx = resolveCommandContext(ctx, cmd)
+	ctx, err := resolveCommandContext(ctx, cmd)
+	if err != nil {
+		return nil, nil, err
+	}
 	ticket, err := s.tickets.Get(ctx, cmd.TicketID)
 	if err != nil {
 		return nil, nil, err
@@ -436,7 +445,10 @@ func (s *Service) FinalizeRuntimeGovernanceResolutionProposalWithTransition(ctx 
 	if s == nil || cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
 		return nil, nil, false, common.ErrInvalidArgument
 	}
-	ctx = resolveCommandContext(ctx, cmd)
+	ctx, err := resolveCommandContext(ctx, cmd)
+	if err != nil {
+		return nil, nil, false, err
+	}
 	ticket, err := s.tickets.Get(ctx, cmd.TicketID)
 	if err != nil {
 		return nil, nil, false, err
@@ -490,7 +502,10 @@ func (s *Service) RejectRuntimeGovernanceResolutionProposal(ctx context.Context,
 	if s == nil || cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
 		return common.ErrInvalidArgument
 	}
-	ctx = resolveCommandContext(ctx, cmd)
+	ctx, err := resolveCommandContext(ctx, cmd)
+	if err != nil {
+		return err
+	}
 	ticket, err := s.tickets.Get(ctx, cmd.TicketID)
 	if err != nil {
 		return err

@@ -96,13 +96,17 @@ func (m *Biz) executeCommand(ev magicevent.Event) (resultevents.ResultCommandRes
 		return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 	}
 	ctx := ev.Context()
+	var err error
 	switch ev.ID() {
 	case resultevents.TopicResultCommandCreate:
 		cmd, ok := ev.Data().(resultevents.CreateResultCommand)
 		if !ok || cmd.Result == nil {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
-		ctx = resultCommandContext(ctx, cmd.Result.WorkspaceID)
+		ctx, err = resultCommandContext(ctx, cmd.Result.WorkspaceID)
+		if err != nil {
+			return resultevents.ResultCommandResult{}, err
+		}
 		if err := m.service.CreateResult(ctx, cmd.Result); err != nil {
 			return resultevents.ResultCommandResult{}, err
 		}
@@ -123,7 +127,10 @@ func (m *Biz) executeCommand(ev magicevent.Event) (resultevents.ResultCommandRes
 		if !ok {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
-		ctx = resultCommandContext(ctx, cmd.WorkspaceID)
+		ctx, err = resultCommandContext(ctx, cmd.WorkspaceID)
+		if err != nil {
+			return resultevents.ResultCommandResult{}, err
+		}
 		items, err := m.service.ListResultsByWorkspace(ctx, cmd.WorkspaceID)
 		if err != nil {
 			return resultevents.ResultCommandResult{}, err
@@ -144,7 +151,10 @@ func (m *Biz) executeCommand(ev magicevent.Event) (resultevents.ResultCommandRes
 		if !ok || cmd.Result == nil {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
-		ctx = resultCommandContext(ctx, cmd.Result.WorkspaceID)
+		ctx, err = resultCommandContext(ctx, cmd.Result.WorkspaceID)
+		if err != nil {
+			return resultevents.ResultCommandResult{}, err
+		}
 		if err := m.service.UpdateResult(ctx, cmd.Result); err != nil {
 			return resultevents.ResultCommandResult{}, err
 		}
@@ -164,7 +174,10 @@ func (m *Biz) executeCommand(ev magicevent.Event) (resultevents.ResultCommandRes
 		if !ok || cmd.Artifact == nil {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
-		ctx = resultCommandContext(ctx, cmd.Artifact.WorkspaceID)
+		ctx, err = resultCommandContext(ctx, cmd.Artifact.WorkspaceID)
+		if err != nil {
+			return resultevents.ResultCommandResult{}, err
+		}
 		if err := m.service.CreateArtifact(ctx, cmd.Artifact); err != nil {
 			return resultevents.ResultCommandResult{}, err
 		}
@@ -185,7 +198,10 @@ func (m *Biz) executeCommand(ev magicevent.Event) (resultevents.ResultCommandRes
 		if !ok {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
-		ctx = resultCommandContext(ctx, cmd.WorkspaceID)
+		ctx, err = resultCommandContext(ctx, cmd.WorkspaceID)
+		if err != nil {
+			return resultevents.ResultCommandResult{}, err
+		}
 		items, err := m.service.ListArtifactsByWorkspace(ctx, cmd.WorkspaceID)
 		if err != nil {
 			return resultevents.ResultCommandResult{}, err
@@ -216,7 +232,10 @@ func (m *Biz) executeCommand(ev magicevent.Event) (resultevents.ResultCommandRes
 		if !ok || cmd.Artifact == nil {
 			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 		}
-		ctx = resultCommandContext(ctx, cmd.Artifact.WorkspaceID)
+		ctx, err = resultCommandContext(ctx, cmd.Artifact.WorkspaceID)
+		if err != nil {
+			return resultevents.ResultCommandResult{}, err
+		}
 		if err := m.service.UpdateArtifact(ctx, cmd.Artifact); err != nil {
 			return resultevents.ResultCommandResult{}, err
 		}
@@ -271,11 +290,8 @@ func (m *Biz) publishArtifactCreated(ctx context.Context, item *resultmodel.Arti
 	m.PostEvent(event)
 }
 
-func resultCommandContext(ctx context.Context, workspaceID common.WorkspaceID) context.Context {
-	if workspaceID == "" {
-		return ctx
-	}
-	return common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+func resultCommandContext(ctx context.Context, workspaceID common.WorkspaceID) (context.Context, error) {
+	return common.BindRuntimeWorkspaceContext(ctx, workspaceID)
 }
 
 func setMagicResult(result magicevent.Result, data resultevents.ResultCommandResult, err error) {

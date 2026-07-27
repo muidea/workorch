@@ -145,7 +145,11 @@ func (s *Service) executeCommand(ev magicevent.Event) (eventstreamevents.EventSt
 		query := eventRecordQueryFromEvent(cmd.Query)
 		ctx := ev.Context()
 		if query.WorkspaceID != "" {
-			ctx = common.ContextWithRuntimeWorkspaceID(ctx, query.WorkspaceID)
+			var err error
+			ctx, err = common.BindRuntimeWorkspaceContext(ctx, query.WorkspaceID)
+			if err != nil {
+				return eventstreamevents.EventStreamCommandResult{}, err
+			}
 		}
 		items, err := s.ListEvents(ctx, query)
 		if err != nil {
@@ -172,7 +176,11 @@ func (s *Service) executeCommand(ev magicevent.Event) (eventstreamevents.EventSt
 		if !ok || cmd.WorkspaceID == "" {
 			return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
 		}
-		deleted, err := s.PurgeWorkspaceEvents(common.ContextWithRuntimeWorkspaceID(ev.Context(), cmd.WorkspaceID), cmd.WorkspaceID)
+		ctx, err := common.BindRuntimeWorkspaceContext(ev.Context(), cmd.WorkspaceID)
+		if err != nil {
+			return eventstreamevents.EventStreamCommandResult{}, err
+		}
+		deleted, err := s.PurgeWorkspaceEvents(ctx, cmd.WorkspaceID)
 		return eventstreamevents.EventStreamCommandResult{DeletedCount: deleted}, err
 	default:
 		return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
@@ -563,7 +571,11 @@ func (s *Service) appendWorkspaceRecord(ctx context.Context, record *eventstream
 	}
 	current, ok := s.revisions[record.WorkspaceID]
 	if !ok {
-		items, err := s.repo.List(common.ContextWithRuntimeWorkspaceID(ctx, record.WorkspaceID), repository.EventRecordQuery{WorkspaceID: record.WorkspaceID})
+		scopedCtx, err := common.BindRuntimeWorkspaceContext(ctx, record.WorkspaceID)
+		if err != nil {
+			return err
+		}
+		items, err := s.repo.List(scopedCtx, repository.EventRecordQuery{WorkspaceID: record.WorkspaceID})
 		if err != nil {
 			return err
 		}

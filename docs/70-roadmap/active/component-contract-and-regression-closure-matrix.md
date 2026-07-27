@@ -102,6 +102,9 @@ workorchd Start/Resume intent -> Run owner-local transition -> RunStateChanged -
   I/O/CAS、调度 retry、选择 terminal/Runtime action 或推进任何状态机。
 - EventHub DTO 是值合同：带 scope、ID、cursor/limit、bounded slice/map 和明确
   result/error code；它不得携带可变实现或 persistence type。
+- 对 workspace-scoped 输入，组件先用 typed `WorkspaceID` 建立或核验 EventHub context；若 context
+  已携带不同 workspace，必须返回 conflict。组件实例、Service、全局状态、共享 cache 和后台 task 不得
+  保存“当前 workspace”标识；持久化记录/封存合同除外，其 ID 仅是资源归属 identity。
 - 每个 Biz 的 `Teardown` 都先停止新输入、解除自身订阅、取消自身 task，再释放
   自身资源；重复调用不能 panic，也不能关闭共享 Hub/BackgroundRoutine。
 - 任何测试产生的 workspace、receipt、repository 或 artifact 都进入 `t.TempDir()`

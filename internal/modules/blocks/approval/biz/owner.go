@@ -109,7 +109,11 @@ func (m *Biz) executeCommand(ev magicevent.Event) (approvalevents.ApprovalComman
 		workspaceID = cmd.WorkspaceID
 	}
 	if workspaceID != "" {
-		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+		var scopeErr error
+		ctx, scopeErr = common.BindRuntimeWorkspaceContext(ctx, workspaceID)
+		if scopeErr != nil {
+			return approvalevents.ApprovalCommandResult{}, scopeErr
+		}
 	}
 	switch topic {
 	case approvalevents.TopicApprovalCommandEnsureApproved:

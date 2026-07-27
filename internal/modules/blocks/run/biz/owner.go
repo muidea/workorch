@@ -324,7 +324,11 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 		workspaceID = cmd.WorkspaceID
 	}
 	if workspaceID != "" {
-		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+		var scopeErr error
+		ctx, scopeErr = common.BindRuntimeWorkspaceContext(ctx, workspaceID)
+		if scopeErr != nil {
+			return runevents.RunCommandResult{}, scopeErr
+		}
 	}
 	switch topic {
 	case runevents.TopicRunCommandEnsure:

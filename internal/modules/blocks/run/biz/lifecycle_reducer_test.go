@@ -245,6 +245,27 @@ drained:
 	}
 }
 
+func TestLifecycleHandlerRejectsConflictingEventWorkspaceScopeWithoutMutation(t *testing.T) {
+	biz, runs, _ := newLifecycleTestBiz(t)
+	seedRun(t, runs, common.RunStatePending)
+
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-other")
+	_, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
+		runevents.TopicRunCommandActivate, "test", runevents.CommandDestination, magicevent.NewHeader(), ctx,
+		runevents.ActivateRunCommand{WorkspaceID: "ws-1", RunID: "run-1"},
+	))
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("err=%v, want workspace scope conflict", err)
+	}
+	item, err := runs.Get(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("get run after rejected command: %v", err)
+	}
+	if item.State != common.RunStatePending {
+		t.Fatalf("run state=%q, want unchanged pending", item.State)
+	}
+}
+
 // An SM-2/3/4 aggregate save is a Run-owned persistence operation, not an
 // SM-1 lifecycle transition. In particular it must not emit an active fact
 // after Workspace has already released a terminal Run.

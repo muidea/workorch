@@ -80,7 +80,10 @@ func (m *Biz) recordDecisionEvidence(ctx context.Context, command decisionevents
 		UpdatedAt:   command.Timestamp,
 		Metadata:    workorcheventpayload.New(metadataFields...),
 	}
-	ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
+	ctx, err = common.BindRuntimeWorkspaceContext(ctx, command.WorkspaceID)
+	if err != nil {
+		return decisionevents.RecordDecisionEvidenceResult{}, err
+	}
 	if err := repository.CreateOrUpdateEvidenceRecord(ctx, m.evidenceRecords, record); err != nil {
 		return decisionevents.RecordDecisionEvidenceResult{}, err
 	}
@@ -159,7 +162,10 @@ func (m *Biz) recordApprovalEvidence(ctx context.Context, command approvalevents
 		UpdatedAt:   command.Timestamp,
 		Metadata:    workorcheventpayload.New(metadataFields...),
 	}
-	ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
+	ctx, err = common.BindRuntimeWorkspaceContext(ctx, command.WorkspaceID)
+	if err != nil {
+		return approvalevents.RecordApprovalEvidenceResult{}, err
+	}
 	if err := repository.CreateOrUpdateEvidenceRecord(ctx, m.evidenceRecords, record); err != nil {
 		return approvalevents.RecordApprovalEvidenceResult{}, err
 	}

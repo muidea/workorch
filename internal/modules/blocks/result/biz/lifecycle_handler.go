@@ -90,7 +90,10 @@ func (m *Biz) applyTerminalDelivery(ctx context.Context, cmd resultevents.ApplyR
 	if !errors.Is(err, common.ErrNotFound) {
 		return resultevents.ResultLifecycleCommandResult{}, err
 	}
-	ctx = resultCommandContext(ctx, item.WorkspaceID)
+	ctx, err = resultCommandContext(ctx, item.WorkspaceID)
+	if err != nil {
+		return resultevents.ResultLifecycleCommandResult{}, err
+	}
 	if err := m.service.CreateResult(ctx, item); err != nil {
 		if errors.Is(err, common.ErrConflict) {
 			// Another Result owner delivery may have won the create race. Re-read

@@ -157,6 +157,33 @@ EOF
   exit 1
 fi
 
+# Workspace scope is per EventHub execution, never component-instance state.
+# The state owners and Runtime V2 drive must use the checked binder rather
+# than silently replacing a pre-existing workspace context from a command.
+workspace_scope_bindings=(
+  "internal/modules/blocks/run/biz/owner.go"
+  "internal/modules/blocks/run/biz/lifecycle_handler.go"
+  "internal/modules/blocks/workspace/biz/owner.go"
+  "internal/modules/blocks/result/biz/owner.go"
+  "internal/modules/blocks/result/biz/lifecycle_handler.go"
+  "internal/modules/blocks/decision/biz/owner.go"
+  "internal/modules/blocks/approval/biz/owner.go"
+  "internal/modules/blocks/memory/biz/owner.go"
+  "internal/modules/blocks/eventstream/biz/event_stream_service.go"
+  "internal/modules/kernel/orchestrator/biz/runtime_v2_drive.go"
+  "internal/modules/kernel/orchestrator/biz/runtime_v2_operation_executor.go"
+  "internal/modules/kernel/orchestrator/biz/governance_evidence_command.go"
+  "internal/modules/kernel/orchestrator/biz/owner.go"
+  "internal/modules/kernel/governance/biz/service.go"
+  "internal/modules/application/workorchd/biz/owner.go"
+)
+for path in "${workspace_scope_bindings[@]}"; do
+  if ! grep -q -E -- 'BindRuntimeWorkspaceContext|resultCommandContext' "$path"; then
+    echo "boundary contract violation: workspace-scoped owner path must validate EventHub context: $path" >&2
+    exit 1
+  fi
+done
+
 matches="$(
   find internal/initiators -type f -name '*.go' ! -name '*_test.go' -print0 |
     xargs -0 -r grep -n -E -- 'basebiz\.Base|NewSimpleObserver|\.Subscribe\(|\.Unsubscribe\(|\.Send\(|\.Post\(' || true
