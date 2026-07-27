@@ -238,7 +238,7 @@ func (p directWorkspaceRunScheduler) SubmitWorkspaceRun(ctx context.Context, com
 	return nil
 }
 
-func (p directWorkspaceRunScheduler) DispatchRuntimeRun(ctx context.Context, workspaceID, runID, action string) error {
+func (p directWorkspaceRunScheduler) DispatchRuntimeRun(ctx context.Context, workspaceID, runID, action, causationID string) error {
 	if p.state == nil || testStateCommandHub(p.state) == nil {
 		return common.ErrInvalidArgument
 	}
@@ -249,9 +249,9 @@ func (p directWorkspaceRunScheduler) DispatchRuntimeRun(ctx context.Context, wor
 	var command any
 	switch action {
 	case "start":
-		topic, command = runevents.TopicRunCommandActivate, runevents.ActivateRunCommand{WorkspaceID: workspace, RunID: run}
+		topic, command = runevents.TopicRunCommandActivate, runevents.ActivateRunCommand{WorkspaceID: workspace, RunID: run, CausationID: causationID}
 	case "resume":
-		topic, command = runevents.TopicRunCommandContinue, runevents.ContinueRunCommand{WorkspaceID: workspace, RunID: run}
+		topic, command = runevents.TopicRunCommandContinue, runevents.ContinueRunCommand{WorkspaceID: workspace, RunID: run, CausationID: causationID}
 	default:
 		return common.ErrInvalidArgument
 	}
@@ -282,7 +282,7 @@ func (p failingWorkspaceRunScheduler) SubmitWorkspaceRun(context.Context, workor
 	return p.err
 }
 
-func (p failingWorkspaceRunScheduler) DispatchRuntimeRun(context.Context, string, string, string) error {
+func (p failingWorkspaceRunScheduler) DispatchRuntimeRun(context.Context, string, string, string, string) error {
 	return common.ErrInvalidArgument
 }
 
@@ -293,7 +293,7 @@ func (p *blockingWorkspaceRunScheduler) SubmitWorkspaceRun(_ context.Context, co
 	return nil
 }
 
-func (p *blockingWorkspaceRunScheduler) DispatchRuntimeRun(context.Context, string, string, string) error {
+func (p *blockingWorkspaceRunScheduler) DispatchRuntimeRun(context.Context, string, string, string, string) error {
 	return common.ErrInvalidArgument
 }
 

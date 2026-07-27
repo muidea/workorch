@@ -65,6 +65,7 @@ func ResumeRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) erro
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandContinue, "application/workorchd/appservice", runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.ContinueRunCommand{
 		WorkspaceID: item.WorkspaceID,
 		RunID:       item.ID,
+		CausationID: "application/workorchd/appservice/resume/" + string(item.WorkspaceID) + "/" + string(item.ID),
 	})
 	ownerevent.BindLane(event, runevents.TopicRunCommandContinue, "run", string(item.ID), item.WorkspaceID, item.ID, "")
 	_, err := ownerevent.RunLifecycle(hub.Send(event), runevents.TopicRunCommandContinue)

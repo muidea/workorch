@@ -19,7 +19,7 @@ import (
 // adapter. The server neither owns nor directly uses EventHub.
 type WorkspaceRunScheduler interface {
 	SubmitWorkspaceRun(context.Context, workorchdevents.WorkspaceRunRequestedCommand) error
-	DispatchRuntimeRun(context.Context, string, string, string) error
+	DispatchRuntimeRun(context.Context, string, string, string, string) error
 }
 
 func (s *serverState) updateWorkspaceLLMTarget(ctx context.Context, workspaceID string, target *runtimecontract.ProviderModelTarget) (appservice.Workspace, error) {
@@ -49,7 +49,7 @@ func (s *serverState) publishWorkorchDSchedulerCommand(ctx context.Context, topi
 	if s == nil || s.workspaceRunScheduler == nil || strings.TrimSpace(topic) == "" {
 		return common.ErrInvalidArgument
 	}
-	command = prepareHTTPSchedulerCommand(topic, command)
+	command = prepareWorkspaceRunSchedulerCommand(topic, command)
 	if err := s.workspaceRunScheduler.SubmitWorkspaceRun(ctx, command); err != nil {
 		s.recordSchedulerCommandResult(topic, "failed")
 		return err
@@ -67,7 +67,7 @@ func (s *serverState) enqueueWorkorchDSchedulerCommand(topic string, command wor
 	if s == nil || s.workspaceRunScheduler == nil || strings.TrimSpace(topic) == "" {
 		return common.ErrInvalidArgument
 	}
-	command = prepareHTTPSchedulerCommand(topic, command)
+	command = prepareWorkspaceRunSchedulerCommand(topic, command)
 	workspaceID := strings.TrimSpace(string(command.WorkspaceID))
 	s.projectQueuedSchedulerCommand(command)
 	if !s.scheduleBackground("workspace_execution_activation", func(ctx context.Context) {
@@ -106,7 +106,9 @@ func firstNonEmptySchedulerString(values ...string) string {
 	return ""
 }
 
-func prepareHTTPSchedulerCommand(topic string, command workorchdevents.WorkspaceRunRequestedCommand) workorchdevents.WorkspaceRunRequestedCommand {
+// prepareWorkspaceRunSchedulerCommand establishes one immutable request
+// correlation for HTTP, TUI and local EventHub scheduler entries.
+func prepareWorkspaceRunSchedulerCommand(topic string, command workorchdevents.WorkspaceRunRequestedCommand) workorchdevents.WorkspaceRunRequestedCommand {
 	if strings.TrimSpace(command.RequestID) == "" {
 		parts := []string{
 			"workorchd",
@@ -334,6 +336,7 @@ func schedulerCommandIdempotencyKey(command workorchdevents.WorkspaceRunRequeste
 }
 
 func (s *serverState) handleWorkorchDSchedulerCommand(ctx context.Context, command workorchdevents.WorkspaceRunRequestedCommand) error {
+	command = prepareWorkspaceRunSchedulerCommand(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, command)
 	req := workspaceRunRequestFromCommand(command)
 	if strings.TrimSpace(req.WorkspaceID) == "" || strings.TrimSpace(req.Intent) == "" {
 		return common.ErrInvalidArgument
@@ -345,7 +348,7 @@ func (s *serverState) handleWorkorchDSchedulerCommand(ctx context.Context, comma
 			if action == "" {
 				action = "resume"
 			}
-			err := s.sendRuntimeV2RunOwnerCommand(ctx, req.WorkspaceID, req.RunID, action)
+			err := s.sendRuntimeV2RunOwnerCommand(ctx, req.WorkspaceID, req.RunID, action, req.RequestID)
 			if err != nil {
 				s.recordWorkspaceRunFailure(req, schedulerKindRunContinuation, schedulerReasonOwnerCommandFailed, err)
 			}
@@ -396,7 +399,7 @@ func (s *serverState) executeWorkspaceRuntimeV2Activation(ctx context.Context, r
 	// intentionally harmless: the Orchestrator owns admission and run-scoped
 	// singleflight, so a newly-created Run reuses its already-scheduled drive.
 	if strings.TrimSpace(activation.Run.ID) != "" && activation.Run.State == string(common.RunStateActive) {
-		if err := s.sendRuntimeV2RunOwnerCommand(runCtx, workspaceID, activation.Run.ID, "resume"); err != nil {
+		if err := s.sendRuntimeV2RunOwnerCommand(runCtx, workspaceID, activation.Run.ID, "resume", req.RequestID); err != nil {
 			s.recordWorkspaceRunFailure(req, schedulerKindWorkspaceActivation, schedulerReasonOwnerCommandFailed, err)
 			s.notifyRunStatusChangedForRun(activation.Run)
 			return err
@@ -406,11 +409,15 @@ func (s *serverState) executeWorkspaceRuntimeV2Activation(ctx context.Context, r
 	return nil
 }
 
-func (s *serverState) sendRuntimeV2RunOwnerCommand(ctx context.Context, workspaceID string, runID string, action string) error {
+func (s *serverState) sendRuntimeV2RunOwnerCommand(ctx context.Context, workspaceID string, runID string, action string, requestID string) error {
 	if s == nil || s.workspaceRunScheduler == nil || strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(runID) == "" {
 		return common.ErrInvalidArgument
 	}
-	return s.workspaceRunScheduler.DispatchRuntimeRun(ctx, workspaceID, runID, action)
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return common.ErrInvalidArgument
+	}
+	return s.workspaceRunScheduler.DispatchRuntimeRun(ctx, workspaceID, runID, action, "workspace-run/"+strings.TrimSpace(action)+"/"+requestID)
 }
 
 func workspaceRunRequestFromCommand(command workorchdevents.WorkspaceRunRequestedCommand) workspaceRunRequest {

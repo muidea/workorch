@@ -16,6 +16,7 @@ type recordedRuntimeDispatch struct {
 	workspaceID string
 	runID       string
 	action      string
+	causationID string
 }
 
 type recordingWorkspaceRunScheduler struct{ dispatches []recordedRuntimeDispatch }
@@ -24,8 +25,8 @@ func (s *recordingWorkspaceRunScheduler) SubmitWorkspaceRun(context.Context, wor
 	return nil
 }
 
-func (s *recordingWorkspaceRunScheduler) DispatchRuntimeRun(_ context.Context, workspaceID, runID, action string) error {
-	s.dispatches = append(s.dispatches, recordedRuntimeDispatch{workspaceID: workspaceID, runID: runID, action: action})
+func (s *recordingWorkspaceRunScheduler) DispatchRuntimeRun(_ context.Context, workspaceID, runID, action, causationID string) error {
+	s.dispatches = append(s.dispatches, recordedRuntimeDispatch{workspaceID: workspaceID, runID: runID, action: action, causationID: causationID})
 	return nil
 }
 
@@ -68,7 +69,7 @@ func TestWorkorchDSchedulerConsumesTypedWorkspaceRunCommand(t *testing.T) {
 		t.Fatalf("scheduler result = %#v, want accepted typed result", data)
 	}
 
-	if captured.WorkspaceID != command.WorkspaceID || captured.RunID != command.RunID {
+	if captured.WorkspaceID != command.WorkspaceID || captured.RunID != command.RunID || captured.CausationID == "" {
 		t.Fatalf("orchestrator resume command = %+v, want direct typed Runtime V2 owner command", captured)
 	}
 }
@@ -107,6 +108,7 @@ func TestWorkspaceExecutionActivationDispatchesRuntimeV2ResumeForActiveRun(t *te
 	err := state.executeWorkspaceRuntimeV2Activation(context.Background(), workspaceRunRequest{
 		WorkspaceID: "ws-active",
 		Intent:      "resume",
+		RequestID:   "request-active",
 	})
 	if err != nil {
 		t.Fatalf("executeWorkspaceRuntimeV2Activation: %v", err)
@@ -115,7 +117,7 @@ func TestWorkspaceExecutionActivationDispatchesRuntimeV2ResumeForActiveRun(t *te
 		t.Fatalf("runtime dispatches = %+v, want one resume", scheduler.dispatches)
 	}
 	got := scheduler.dispatches[0]
-	if got.workspaceID != "ws-active" || got.runID != "run-active" || got.action != "resume" {
+	if got.workspaceID != "ws-active" || got.runID != "run-active" || got.action != "resume" || got.causationID != "workspace-run/resume/request-active" {
 		t.Fatalf("runtime dispatch = %+v, want ws-active/run-active/resume", got)
 	}
 }

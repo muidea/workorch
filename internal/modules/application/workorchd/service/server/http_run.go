@@ -296,7 +296,7 @@ func (s *serverState) handleWorkspaceScopedRunPost(w http.ResponseWriter, r *htt
 			return
 		}
 		priority := runPriorityFromRequest(r, 0)
-		command := prepareHTTPSchedulerCommand(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
+		command := prepareWorkspaceRunSchedulerCommand(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
 			WorkspaceID: common.WorkspaceID(workspaceID), RunID: common.RunID(runID), Intent: "resume", Action: "start",
 			Reason: req.Reason, Source: req.Source, RequestID: req.RequestID, DefinitionRevision: req.DefinitionRevision,
 			DecisionID: req.DecisionID, Priority: priority,
@@ -329,7 +329,7 @@ func (s *serverState) handleWorkspaceScopedRunPost(w http.ResponseWriter, r *htt
 			return
 		}
 		priority := runPriorityFromRequest(r, 0)
-		command := prepareHTTPSchedulerCommand(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
+		command := prepareWorkspaceRunSchedulerCommand(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
 			WorkspaceID: common.WorkspaceID(workspaceID), RunID: common.RunID(runID), Intent: intent, Action: "resume",
 			Reason: req.Reason, Source: req.Source, RequestID: req.RequestID, DefinitionRevision: req.DefinitionRevision,
 			DecisionID: req.DecisionID, Priority: priority,

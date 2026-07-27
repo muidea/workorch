@@ -214,8 +214,8 @@ func (b *Biz) handleWorkspaceRunRequested(event magicevent.Event, result magicev
 
 // DispatchRuntimeRun is the typed cross-owner command bridge used by the
 // server's scheduler use case. It does not reconstruct Runtime V2 authority.
-func (b *Biz) DispatchRuntimeRun(ctx context.Context, workspaceID, runID, action string) error {
-	if b == nil || b.EventHub() == nil || workspaceID == "" || runID == "" {
+func (b *Biz) DispatchRuntimeRun(ctx context.Context, workspaceID, runID, action, causationID string) error {
+	if b == nil || b.EventHub() == nil || workspaceID == "" || runID == "" || causationID == "" {
 		return common.ErrInvalidArgument
 	}
 	workspaceScope := common.WorkspaceID(workspaceID)
@@ -233,7 +233,7 @@ func (b *Biz) DispatchRuntimeRun(ctx context.Context, workspaceID, runID, action
 			runevents.CommandDestination,
 			magicevent.NewHeader(),
 			ctx,
-			runevents.ActivateRunCommand{WorkspaceID: workspaceScope, RunID: runScope},
+			runevents.ActivateRunCommand{WorkspaceID: workspaceScope, RunID: runScope, CausationID: causationID},
 		)
 		return b.sendRuntimeRunCommand(event, workspaceScope, runScope)
 	case "resume":
@@ -243,7 +243,7 @@ func (b *Biz) DispatchRuntimeRun(ctx context.Context, workspaceID, runID, action
 			runevents.CommandDestination,
 			magicevent.NewHeader(),
 			ctx,
-			runevents.ContinueRunCommand{WorkspaceID: workspaceScope, RunID: runScope},
+			runevents.ContinueRunCommand{WorkspaceID: workspaceScope, RunID: runScope, CausationID: causationID},
 		)
 		return b.sendRuntimeRunCommand(event, workspaceScope, runScope)
 	default:

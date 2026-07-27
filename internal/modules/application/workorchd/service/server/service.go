@@ -80,6 +80,10 @@ func (s *Service) HandleWorkspaceRunRequest(ctx context.Context, command workorc
 	if s == nil || s.http == nil || s.http.state == nil {
 		return errors.New("workorch http server is not configured")
 	}
+	// This is also the local TUI/EventHub ingress, not only the HTTP path.
+	// Normalize once before both execution and projection so request correlation
+	// cannot disappear between the accepted command and its Run continuation.
+	command = prepareWorkspaceRunSchedulerCommand(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, command)
 	if err := s.http.state.handleWorkorchDSchedulerCommand(ctx, command); err != nil {
 		s.http.state.projectRejectedSchedulerCommand(command, err)
 		return err

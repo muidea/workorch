@@ -18,6 +18,16 @@ func TestActivateRunCommandValidate(t *testing.T) {
 	}
 }
 
+func TestContinueRunCommandRequiresCausation(t *testing.T) {
+	valid := ContinueRunCommand{WorkspaceID: "ws-1", RunID: "run-1", CausationID: "workspace-run/resume/request-1"}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid continue: %v", err)
+	}
+	if err := (ContinueRunCommand{WorkspaceID: "ws-1", RunID: "run-1"}).Validate(); err == nil || !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("continue without causation err = %v, want invalid argument", err)
+	}
+}
+
 func TestApplyRuntimeGovernanceWaitCommandValidate(t *testing.T) {
 	cmd := ApplyRuntimeGovernanceWaitCommand{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",

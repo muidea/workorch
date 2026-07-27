@@ -295,6 +295,30 @@ func TestEventHubRunResumeForExistingRunOmitsActivationOverrides(t *testing.T) {
 	}
 }
 
+func TestEventHubRunResumeGeneratesRequestCorrelation(t *testing.T) {
+	ctx := context.Background()
+	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
+	var captured workorchdevents.WorkspaceRunRequestedCommand
+	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, commandHub)
+	observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(event magicevent.Event, result magicevent.Result) {
+		captured, _ = event.Data().(workorchdevents.WorkspaceRunRequestedCommand)
+		result.Set(workorchdevents.WorkspaceRunRequestedResult{Accepted: true}, nil)
+	})
+	t.Cleanup(func() { observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested) })
+
+	if _, err := be.Run().Command(ctx, WorkspaceRunCommand{
+		WorkspaceID:   "ws-resume-correlation",
+		ExpectedRunID: "run-resume-correlation",
+		Intent:        RunCommandIntentResume,
+		Source:        "tui",
+	}); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if captured.RequestID == "" || captured.Source != "tui" {
+		t.Fatalf("resume correlation = %+v, want generated request id and tui source", captured)
+	}
+}
+
 func TestEventHubRunCommandRequiresSchedulerAcceptedResponse(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {

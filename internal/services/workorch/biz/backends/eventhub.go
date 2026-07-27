@@ -505,6 +505,10 @@ func (b *eventHubRunBackend) Command(ctx context.Context, req WorkspaceRunComman
 		activation = ActivateRunRequest{}
 	}
 	source := normalizedRunCommandSource(firstNonEmptyBackendString(req.Source, activation.Source))
+	requestID := strings.TrimSpace(req.RequestID)
+	if requestID == "" {
+		requestID = newCLIRequestID()
+	}
 	if b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -513,7 +517,7 @@ func (b *eventHubRunBackend) Command(ctx context.Context, req WorkspaceRunComman
 		RunID:              req.ExpectedRunID,
 		Intent:             string(intent),
 		Reason:             req.Reason,
-		RequestID:          req.RequestID,
+		RequestID:          requestID,
 		Source:             source,
 		DefinitionRevision: firstNonEmptyBackendString(req.DefinitionRevision, activation.DefinitionRevision),
 		DecisionID:         firstNonEmptyBackendString(string(req.DecisionID), string(activation.DecisionID)),

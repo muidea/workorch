@@ -2,6 +2,7 @@ package biz
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"github.com/muidea/magicCommon/event"
@@ -42,6 +43,38 @@ func TestBaseOwnsOnlyInjectedRuntimeAndSubscriptions(t *testing.T) {
 	result = base.SendEvent(event.NewEvent("/unit/query", "test", "unit/base", event.NewHeader(), struct{}{}))
 	if result == nil || called != 1 {
 		t.Fatalf("unsubscribe result=%#v called=%d", result, called)
+	}
+}
+
+func TestBaseKeepsIndependentObserversForSharedDestinationMatcher(t *testing.T) {
+	ctx := context.Background()
+	hub := event.NewHub(16)
+	background := task.NewBackgroundRoutine(4)
+	t.Cleanup(func() {
+		background.Shutdown(ctx)
+		hub.Terminate(ctx)
+	})
+
+	first := New("unit/first", hub, background)
+	second := New("unit/second", hub, background)
+	var firstCalls atomic.Int32
+	var secondCalls atomic.Int32
+	first.SubscribeMatchedFunc("unit/first/consumer", "/run/consumers/#", "/run/state/changed", func(_ event.Event, _ event.Result) {
+		firstCalls.Add(1)
+	})
+	second.SubscribeMatchedFunc("unit/second/consumer", "/run/consumers/#", "/run/state/changed", func(_ event.Event, _ event.Result) {
+		secondCalls.Add(1)
+	})
+
+	hub.Send(event.NewEvent("/run/state/changed", "run", "/run/consumers/#", event.NewHeader(), struct{}{}))
+	if firstCalls.Load() != 1 || secondCalls.Load() != 1 {
+		t.Fatalf("shared matcher calls = %d/%d, want 1/1", firstCalls.Load(), secondCalls.Load())
+	}
+
+	first.UnsubscribeMatchedFunc("unit/first/consumer", "/run/state/changed")
+	hub.Send(event.NewEvent("/run/state/changed", "run", "/run/consumers/#", event.NewHeader(), struct{}{}))
+	if firstCalls.Load() != 1 || secondCalls.Load() != 2 {
+		t.Fatalf("after first unsubscribe calls = %d/%d, want 1/2", firstCalls.Load(), secondCalls.Load())
 	}
 }
 

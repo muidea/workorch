@@ -85,6 +85,14 @@ type Observer interface {
 	Notify(event Event, result Result)
 }
 
+// destinationMatcher is intentionally internal to the EventHub. Observer.ID
+// is its subscription identity; a matcher, when present, only controls
+// destination routing. Keeping those concerns separate lets independent
+// consumers share a destination pattern without replacing one another.
+type destinationMatcher interface {
+	MatchID() string
+}
+
 type SimpleObserver interface {
 	Observer
 	Subscribe(eventID string, observerFunc ObserverFunc)
@@ -1003,7 +1011,7 @@ func (s *hubImpl) findMatchingObservers(ev Event) ObserverList {
 	for key, value := range s.event2Observer {
 		if MatchValue(key, ev.ID()) {
 			for _, sv := range value {
-				if matchDestination(ev.Destination(), sv.ID()) {
+				if matchDestination(ev.Destination(), observerMatchID(sv)) {
 					matchList = append(matchList, sv)
 				}
 			}
@@ -1011,6 +1019,15 @@ func (s *hubImpl) findMatchingObservers(ev Event) ObserverList {
 	}
 
 	return matchList
+}
+
+func observerMatchID(observer Observer) string {
+	if matcher, ok := observer.(destinationMatcher); ok {
+		if matchID := matcher.MatchID(); matchID != "" {
+			return matchID
+		}
+	}
+	return observer.ID()
 }
 
 func matchDestination(destination, observerID string) bool {
@@ -1026,10 +1043,13 @@ type simpleObserver struct {
 }
 
 func (s *simpleObserver) ID() string {
+	return s.id
+}
+
+func (s *simpleObserver) MatchID() string {
 	if s.matchID != "" {
 		return s.matchID
 	}
-
 	return s.id
 }
 

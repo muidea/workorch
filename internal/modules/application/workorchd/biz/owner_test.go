@@ -31,19 +31,19 @@ func TestDispatchRuntimeRunPublishesConcreteCommandForEachAction(t *testing.T) {
 	})
 	observer.Subscribe(runevents.TopicRunCommandContinue, func(event magicevent.Event, result magicevent.Result) {
 		command, ok := event.Data().(runevents.ContinueRunCommand)
-		if !ok || command.WorkspaceID != "ws-runtime" || command.RunID != "run-resume" || common.RuntimeWorkspaceIDFromContext(event.Context()) != "ws-runtime" {
+		if !ok || command.WorkspaceID != "ws-runtime" || command.RunID != "run-resume" || command.CausationID != "resume-cause" || common.RuntimeWorkspaceIDFromContext(event.Context()) != "ws-runtime" {
 			t.Fatalf("resume command = %#v, workspace = %q", event.Data(), common.RuntimeWorkspaceIDFromContext(event.Context()))
 		}
 		result.Set(runevents.RunLifecycleCommandResult{}, nil)
 	})
 
-	if err := biz.DispatchRuntimeRun(context.Background(), "ws-runtime", "run-start", "start"); err != nil {
+	if err := biz.DispatchRuntimeRun(context.Background(), "ws-runtime", "run-start", "start", "start-cause"); err != nil {
 		t.Fatalf("DispatchRuntimeRun start: %v", err)
 	}
-	if err := biz.DispatchRuntimeRun(context.Background(), "ws-runtime", "run-resume", "resume"); err != nil {
+	if err := biz.DispatchRuntimeRun(context.Background(), "ws-runtime", "run-resume", "resume", "resume-cause"); err != nil {
 		t.Fatalf("DispatchRuntimeRun resume: %v", err)
 	}
-	if err := biz.DispatchRuntimeRun(context.Background(), "ws-runtime", "run-invalid", "invalid"); !errors.Is(err, common.ErrInvalidArgument) {
+	if err := biz.DispatchRuntimeRun(context.Background(), "ws-runtime", "run-invalid", "invalid", "invalid-cause"); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("DispatchRuntimeRun invalid action err = %v, want invalid argument", err)
 	}
 }

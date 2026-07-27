@@ -60,8 +60,8 @@ func (c ContinueRunCommand) Normalized() ContinueRunCommand {
 
 func (c ContinueRunCommand) Validate() error {
 	c = c.Normalized()
-	if c.WorkspaceID == "" || c.RunID == "" {
-		return fmt.Errorf("%w: continue run requires workspace and run", common.ErrInvalidArgument)
+	if c.WorkspaceID == "" || c.RunID == "" || c.CausationID == "" {
+		return fmt.Errorf("%w: continue run requires workspace, run and causation", common.ErrInvalidArgument)
 	}
 	return nil
 }

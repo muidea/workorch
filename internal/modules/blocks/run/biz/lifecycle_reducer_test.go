@@ -102,7 +102,7 @@ func TestReduceContinueWithoutGovernanceFactRejected(t *testing.T) {
 		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateBlockedOnDecision,
 		BlockingTicketID: "ticket-1",
 	}
-	_, err := reduceContinueRun(current, runevents.ContinueRunCommand{WorkspaceID: "ws-1", RunID: "run-1"})
+	_, err := reduceContinueRun(current, runevents.ContinueRunCommand{WorkspaceID: "ws-1", RunID: "run-1", CausationID: "resume-test"})
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("err=%v", err)
 	}

@@ -516,7 +516,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			return
 		}
 		command.Intent = intent
-		command = prepareHTTPSchedulerCommand(topic, command)
+		command = prepareWorkspaceRunSchedulerCommand(topic, command)
 		if err := state.enqueueWorkorchDSchedulerCommand(topic, command); err != nil {
 			writeBusinessError(w, err)
 			return
