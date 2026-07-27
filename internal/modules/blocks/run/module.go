@@ -12,12 +12,7 @@ import (
 const ModuleID = modulecommon.ModuleID
 
 type CreateRunCommand = runcontracts.CreateRunCommand
-type StartRunCommand = runcontracts.StartRunCommand
-type ResumeRunCommand = runcontracts.ResumeRunCommand
 type UpdateRunCommand = runcontracts.UpdateRunCommand
-type BlockOnDecisionCommand = runcontracts.BlockOnDecisionCommand
-type BlockOnApprovalCommand = runcontracts.BlockOnApprovalCommand
-type FailRunCommand = runcontracts.FailRunCommand
 
 // Dependencies is owned by the Run Biz. This alias preserves the module's
 // construction surface without retaining framework infrastructure types in

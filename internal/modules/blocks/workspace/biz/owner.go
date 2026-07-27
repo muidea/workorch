@@ -144,15 +144,16 @@ func (m *Biz) handleRunStateChanged(ev magicevent.Event, result magicevent.Resul
 	switch data.State {
 	case common.RunStatePending, common.RunStateActive, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
 		cmd := workspaceevents.ApplyRunProjectionFactCommand{
-			WorkspaceID:         data.WorkspaceID,
-			RunID:               data.RunID,
-			SourceOwner:         runevents.CommandDestination,
-			CausationID:         data.CausationID,
-			RunState:            data.State,
-			AuthoritySnapshotID: data.AuthoritySnapshotID,
-			DefinitionRevision:  data.DefinitionRevision,
-			EvidenceRevision:    data.EvidenceRevision,
-			DispatchID:          data.DispatchID,
+			WorkspaceID:          data.WorkspaceID,
+			RunID:                data.RunID,
+			SourceOwner:          runevents.CommandDestination,
+			CausationID:          data.CausationID,
+			RunState:             data.State,
+			RuntimeStateRevision: data.RuntimeStateRevision,
+			AuthoritySnapshotID:  data.AuthoritySnapshotID,
+			DefinitionRevision:   data.DefinitionRevision,
+			EvidenceRevision:     data.EvidenceRevision,
+			DispatchID:           data.DispatchID,
 		}
 		// This is a Post rather than a re-entrant Send: Run's notification lane
 		// is independent from Workspace's owner-local reducer lane.

@@ -135,6 +135,8 @@ func consumeRecoveryBudget(ledger runtimecontract.RuntimeRecoveryLedger, kind ru
 		ledger.CASReloadAttempts++
 	case runtimecontract.RuntimeRecoveryBudgetTerminalDelivery:
 		ledger.TerminalDeliveryAttempts++
+	case runtimecontract.RuntimeRecoveryBudgetDriveSchedule:
+		ledger.DriveScheduleAttempts++
 	case runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh:
 		ledger.PrerequisiteRefreshes++
 	case runtimecontract.RuntimeRecoveryBudgetPrerequisiteResourceChangeRefresh:

@@ -344,6 +344,13 @@ projection。
 **退出测试。** 并发执行 metadata update 与 Run/Workspace lifecycle projection；验证 lifecycle 字段不会回退。
 错误字段必须在合同校验阶段拒绝，fresh-process 重放也不得恢复旧快照。
 
+**2026-07-27 实施进度。** Workspace generic update 已只接受 definition/metadata allow-list，Run generic
+update 已只接受 Runtime V2 aggregate 与双 revision fence。首次 `pending -> active` 发生在 SM-2 aggregate
+初始化之前，现以显式 `RuntimeStateRevision=0` 的 Run owner pre-runtime projection fact 收敛 Workspace slot；
+该例外只允许 `pending|active`、必须带 scope/causation/definition revision，且不得混入 authority/evidence/
+dispatch identity。任何已有 Runtime state 的事实仍必须带 sealed authority/evidence identity。R1 的本地合同
+测试已落地，fresh deployed activation 仍属 S7。
+
 ### R2：让 Workspace terminal projection 覆盖行政终态与 replacement
 
 **问题。** `cancel/supersede` 通知不会触发 Workspace release；replacement 路径会先 supersede 旧 Run，再启动
@@ -375,6 +382,11 @@ binding。Run owner从自身持久化 Runtime V2 aggregate/terminal binding 验�
 **退出测试。** 覆盖 ticket/approval 相同但 authority、dispatch、revision 或 causation 不同；覆盖伪造 source 和
 过期 active notification。所有反例均零 Run/Workspace/Orchestrator 状态变化。
 
+**2026-07-27 实施进度。** Run governance/terminal handler、Workspace lifecycle handler 与 Orchestrator
+continuation scheduler 都校验实际 EventHub source，不能只信任 payload 的 `SourceOwner`。Workspace 的 Run
+notification bridge 必须由 Workspace Biz 自身发布，且 payload 仍须声明 `blocks/run`；terminal command 必须
+由 `kernel/orchestrator` 实际发出。伪造 source 的 reducer regression 已落地。
+
 ### R4：Result owner 自行构造终态并为三个 owner 建立 delivery fence
 
 **问题。** Orchestrator 仍传入带 `Result.State` 的完整 model；Run/Workspace/Result 没有持久化 delivery
@@ -393,6 +405,10 @@ identity/fence，无法区分合法重放与不同 sealed terminal 的冲突投�
 
 **退出测试。** owner 级 duplicate、不同 delivery ID、不同 authority、不同 terminal code/summary/evidence、
 ack 丢失和 fresh-process 重放矩阵；仅相同 identity 可以幂等成功。
+
+**2026-07-27 实施进度。** shared `RuntimeTerminalDeliveryIdentity` 已强制 delivery/workspace/run/
+authority/definition/evidence/dispatch/action/code/summary 的完整 identity；Result、Workspace、Run 和
+Orchestrator delivery request 均委托同一 validator。caller 不能再以 partial identity 取得 owner delivery ack。
 
 ### R5：完成 SM-4 terminal saga、顺序和 CAS
 
@@ -437,6 +453,10 @@ Result 外部 state、缺 source/lane/identity 或 Biz 间接嵌入 Base。
 **退出测试。** 为每条 gate 规则提供最小 fixture/negative regression，避免简单 `rg` 误报或漏报；历史 archive
 显式排除。
 
+**2026-07-27 实施进度。** 已删除 Run contract/module/Biz 中无生产消费者的 `StartRunCommand`、
+`ResumeRunCommand`、`BlockOnDecisionCommand`、`BlockOnApprovalCommand`、`FailRunCommand` 旧表面；生产继续
+只使用 scoped Activate/Continue 与 immutable governance/terminal facts。
+
 ### R7：SM-4 startup/recovery 失败必须可观察、可恢复
 
 **问题。** inventory 之后单个 schedule 或 blocked-governance aggregate load 失败只记录 warning，调用方可能
@@ -449,6 +469,11 @@ BackgroundRoutine 重试；不得吞掉。Run notification 触发 drive 前先�
 
 **退出测试。** 注入单 workspace schedule failure、aggregate load failure、重启后的 retry；验证没有“已 active
 但无人 drive”的静默状态，且 retry 不重复投递既有 dispatch。
+
+**2026-07-27 实施进度。** 新增独立的 persisted `drive_schedule` recovery budget。Run active 或 continuation
+notification 的 BackgroundRoutine 拒绝不再仅写 warn：Orchestrator CAS 记录该预算后发出自身 typed retry event；
+retry 同样受 run-scoped singleflight 与预算约束。预算耗尽会以 error log 和 aggregate ledger 保留可枚举状态，
+下次 startup inventory 仍可重新 schedule 同一 active Run，且不重建 authority 或重放 dispatch。
 
 ### R8：完成文档、组件结构与 live 判定
 
@@ -469,10 +494,10 @@ ledger 与 owner notification 证据。
 
 | 范围 | 判定 | 依据 |
 | --- | --- | --- |
-| SM-1 Run lifecycle | 不合规 | R1、R3、R4、R5 未完成。 |
-| Workspace projection | 不合规 | R1、R2、R4、R5 未完成。 |
+| SM-1 Run lifecycle | 本地合同符合；live 待验证 | generic 写入口已封死，治理/terminal source 与完整 identity 已收紧；仍需 S7 deployed matrix。 |
+| Workspace projection | 本地合同符合；live 待验证 | 首次 activation pre-runtime projection、slot fence、terminal release 与 source 校验已覆盖；仍需 S7 deployed matrix。 |
 | SM-2 authority/focus | 主体符合 | 本次未发现重新引入跨 owner action selection；仍依赖 R3/R5 的事实和终态边界。 |
 | SM-3 candidate/dispatch | 主体符合 | 本次未发现新的跨 owner operation execution 或 next-action 写入。 |
-| SM-4 delivery/recovery | 不合规 | R4、R5、R7 未完成。 |
+| SM-4 delivery/recovery | 本地合同符合；live 待验证 | delivery identity/顺序/CAS 已 owner-local；schedule rejection 已写入独立 recovery ledger 并有有界 retry。 |
 | `pkg` 边界 | 部分符合 | `workorchruntimecontract` 可保留纯值；状态迁移/I/O 必须按 R1～R7 留在 owner Biz。 |
 | S7 live | 未验证 | 不得以本地测试替代 deployed/restart matrix。 |

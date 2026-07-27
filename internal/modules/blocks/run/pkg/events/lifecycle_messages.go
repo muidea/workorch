@@ -194,31 +194,16 @@ func (c ApplyRuntimeTerminalDeliveryCommand) Normalized() ApplyRuntimeTerminalDe
 
 func (c ApplyRuntimeTerminalDeliveryCommand) Validate() error {
 	c = c.Normalized()
-	if c.WorkspaceID == "" || c.RunID == "" || c.SourceOwner != runtimeLifecycleSourceOwner {
-		return fmt.Errorf("%w: terminal delivery requires workspace, run and source owner", common.ErrInvalidArgument)
+	if c.WorkspaceID == "" || c.RunID == "" || c.SourceOwner != runtimeLifecycleSourceOwner || c.CausationID == "" {
+		return fmt.Errorf("%w: terminal delivery requires workspace, run, source owner and causation", common.ErrInvalidArgument)
 	}
-	if c.TerminalDeliveryID == "" || c.AuthoritySnapshotID == "" {
-		return fmt.Errorf("%w: terminal delivery requires delivery id and authority snapshot", common.ErrInvalidArgument)
-	}
-	switch c.AdministrativeKind {
-	case "":
-		switch c.Action {
-		case runtimecontract.RuntimeActionComplete, runtimecontract.RuntimeActionFail:
-			if c.TerminalCode == "" || c.TerminalSummary == "" {
-				return fmt.Errorf("%w: terminal delivery requires terminal code and summary", common.ErrInvalidArgument)
-			}
-			return nil
-		default:
-			return fmt.Errorf("%w: terminal delivery has invalid action %q", common.ErrInvalidArgument, c.Action)
-		}
-	case runtimecontract.RuntimeTerminationCancelled, runtimecontract.RuntimeTerminationSuperseded:
-		if c.Action != runtimecontract.RuntimeActionFail || c.TerminalCode == "" || c.TerminalSummary == "" || c.CausationID == "" {
-			return fmt.Errorf("%w: administrative terminal delivery requires sealed failure identity", common.ErrInvalidArgument)
-		}
-		return nil
-	default:
+	if c.AdministrativeKind != "" && c.AdministrativeKind != runtimecontract.RuntimeTerminationCancelled && c.AdministrativeKind != runtimecontract.RuntimeTerminationSuperseded {
 		return fmt.Errorf("%w: terminal delivery has invalid administrative kind %q", common.ErrInvalidArgument, c.AdministrativeKind)
 	}
+	if err := c.Identity().Validate(); err != nil {
+		return fmt.Errorf("%w: terminal delivery identity: %v", common.ErrInvalidArgument, err)
+	}
+	return nil
 }
 
 func (c ApplyRuntimeTerminalDeliveryCommand) Identity() runtimecontract.RuntimeTerminalDeliveryIdentity {

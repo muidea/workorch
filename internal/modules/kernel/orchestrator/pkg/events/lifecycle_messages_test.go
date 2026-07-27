@@ -35,7 +35,7 @@ func TestRuntimeContinuationEligibleDataValidate(t *testing.T) {
 func TestRuntimeTerminalDeliveryRequestDataValidate(t *testing.T) {
 	data := RuntimeTerminalDeliveryRequestData{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
-		TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1",
+		TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1",
 		Action: runtimecontract.RuntimeActionComplete, TerminalCode: "completed", TerminalSummary: "done",
 	}
 	if err := data.Validate(); err != nil {

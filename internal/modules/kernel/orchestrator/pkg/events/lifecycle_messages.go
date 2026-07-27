@@ -147,11 +147,10 @@ func (d RuntimeTerminalDeliveryRequestData) Validate() error {
 	case "":
 		return identity.Validate()
 	case runtimecontract.RuntimeTerminationCancelled, runtimecontract.RuntimeTerminationSuperseded:
-		if d.TerminalDeliveryID == "" || d.WorkspaceID == "" || d.RunID == "" || d.AuthoritySnapshotID == "" || d.CausationID == "" ||
-			d.Action != runtimecontract.RuntimeActionFail || d.TerminalCode == "" || d.TerminalSummary == "" {
+		if d.CausationID == "" || d.Action != runtimecontract.RuntimeActionFail {
 			return fmt.Errorf("%w: administrative terminal delivery requires identity fields", common.ErrInvalidArgument)
 		}
-		return nil
+		return identity.Validate()
 	default:
 		return fmt.Errorf("%w: terminal delivery request has invalid administrative kind %q", common.ErrInvalidArgument, d.AdministrativeKind)
 	}

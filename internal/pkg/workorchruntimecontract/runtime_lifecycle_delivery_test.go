@@ -12,6 +12,9 @@ func TestRuntimeTerminalDeliveryIdentityValidate(t *testing.T) {
 		WorkspaceID:         "ws-1",
 		RunID:               "run-1",
 		AuthoritySnapshotID: "auth-1",
+		DefinitionRevision:  "def-1",
+		EvidenceRevision:    "evidence-1",
+		DispatchID:          "dispatch-1",
 		Action:              RuntimeActionComplete,
 		TerminalCode:        "completed",
 		TerminalSummary:     "done",
@@ -27,15 +30,15 @@ func TestRuntimeTerminalDeliveryIdentityValidate(t *testing.T) {
 
 func TestRuntimeDeliveryAcknowledgementValidate(t *testing.T) {
 	ack := RuntimeDeliveryAcknowledgement{
-		WorkspaceID:        "ws-1",
-		RunID:              "run-1",
-		TerminalDeliveryID: "td-1",
+		WorkspaceID:         "ws-1",
+		RunID:               "run-1",
+		TerminalDeliveryID:  "td-1",
 		AuthoritySnapshotID: "auth-1",
-		CausationID:        "terminal-delivery/td-1",
-		Action:             RuntimeActionComplete,
-		TerminalCode:       "completed",
-		Owner:              RuntimeDeliveryOwnerResult,
-		AcknowledgedState:  RuntimeDeliveryAcknowledgedResultRecorded,
+		CausationID:         "terminal-delivery/td-1",
+		Action:              RuntimeActionComplete,
+		TerminalCode:        "completed",
+		Owner:               RuntimeDeliveryOwnerResult,
+		AcknowledgedState:   RuntimeDeliveryAcknowledgedResultRecorded,
 	}
 	if err := ack.Validate(); err != nil {
 		t.Fatalf("valid ack: %v", err)

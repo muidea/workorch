@@ -26,6 +26,10 @@ func TestRuntimeControllerPersistsIndependentRecoveryBudget(t *testing.T) {
 	if err != nil || !consumed || second.Facts.Recovery.OperationRecoveryAttempts != 1 || second.Facts.Recovery.CASReloadAttempts != 1 {
 		t.Fatalf("operation budget = %+v consumed=%v err=%v", second.Facts.Recovery, consumed, err)
 	}
+	scheduled, consumed, err := controller.ConsumeRecoveryBudget(context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeRecoveryBudgetDriveSchedule)
+	if err != nil || !consumed || scheduled.Facts.Recovery.DriveScheduleAttempts != 1 || scheduled.Facts.Recovery.CASReloadAttempts != 1 {
+		t.Fatalf("schedule budget = %+v consumed=%v err=%v", scheduled.Facts.Recovery, consumed, err)
+	}
 }
 
 func TestReduceRuntimeStateRoutesExhaustedProviderTransportToTerminal(t *testing.T) {

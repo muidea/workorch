@@ -1273,6 +1273,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		ret = append(ret, eventcontract.DataTopic[ArtifactContinuationChangedData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, topic).MessageContract())
 	}
 	ret = append(ret,
+		eventcontract.DataTopic[RetryRuntimeV2DriveCommand]("orchestrator", definitionPackage, eventcontract.LanePolicyState, TopicOrchestratorRetryRuntimeV2Drive).MessageContract(),
 		eventcontract.DataTopic[RuntimeGovernanceWaitRecordedData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, TopicOrchestratorRuntimeGovernanceWaitRecorded).MessageContract(),
 		eventcontract.DataTopic[RuntimeContinuationEligibleData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, TopicOrchestratorRuntimeContinuationEligible).MessageContract(),
 		eventcontract.DataTopic[RuntimeTerminalDeliveryRequestData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, TopicOrchestratorRuntimeTerminalDeliveryRequested).MessageContract(),

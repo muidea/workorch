@@ -114,6 +114,7 @@ func (m *Biz) Start() error {
 		}
 		m.rawTopics = append(m.rawTopics,
 			orchestratorevents.TopicOrchestratorDriveRuntimeV2,
+			orchestratorevents.TopicOrchestratorRetryRuntimeV2Drive,
 			orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt,
 			orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt,
 			orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution,
@@ -124,6 +125,7 @@ func (m *Biz) Start() error {
 			approvalevents.TopicApprovalCommandRecordEvidence,
 		)
 		m.SubscribeFunc(orchestratorevents.TopicOrchestratorDriveRuntimeV2, m.handleRuntimeV2Drive)
+		m.SubscribeFunc(orchestratorevents.TopicOrchestratorRetryRuntimeV2Drive, m.handleRuntimeV2DriveRetry)
 		m.SubscribeFunc(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, m.handleRuntimeV2OperationReceipt)
 		m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, m.handleRuntimeV2OperationReceipt)
 		m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution, m.handleRuntimeV2GovernanceResolution)
@@ -289,18 +291,73 @@ func (m *Biz) handleRunStateChanged(ev magicevent.Event, result magicevent.Resul
 	data, ok := ev.Data().(runevents.RunStateChangedData)
 	if ok && ev.Source() == runevents.CommandDestination && data.Validate() == nil && data.State == common.RunStateActive {
 		if err := m.scheduleRuntimeV2Drive(ev.Context(), data.WorkspaceID, data.RunID, "run_state_active"); err != nil && !errors.Is(err, context.Canceled) {
-			slog.Warn("workorch Runtime V2 run-state schedule failed", "workspaceID", data.WorkspaceID, "runID", data.RunID, "err", err)
+			m.recordRuntimeV2DriveScheduleFailure(ev.Context(), data.WorkspaceID, data.RunID, "run_state_active", err)
 		}
 	}
 }
 
 func (m *Biz) handleRunContinuationRequested(ev magicevent.Event, result magicevent.Result) {
 	data, ok := ev.Data().(runevents.RunContinuationRequestedData)
-	if !ok || data.WorkspaceID == "" || data.RunID == "" {
+	if !ok || ev.Source() != runevents.CommandDestination || data.Validate() != nil {
 		return
 	}
 	if err := m.scheduleRuntimeV2Drive(ev.Context(), data.WorkspaceID, data.RunID, "run_continuation_requested"); err != nil && !errors.Is(err, context.Canceled) {
-		slog.Warn("workorch Runtime V2 continuation schedule failed", "workspaceID", data.WorkspaceID, "runID", data.RunID, "err", err)
+		m.recordRuntimeV2DriveScheduleFailure(ev.Context(), data.WorkspaceID, data.RunID, "run_continuation_requested", err)
+	}
+}
+
+func (m *Biz) handleRuntimeV2DriveRetry(ev magicevent.Event, result magicevent.Result) {
+	cmd, ok := ev.Data().(orchestratorevents.RetryRuntimeV2DriveCommand)
+	if !ok || ev.Source() != ModuleID || cmd.Validate() != nil {
+		return
+	}
+	if err := m.scheduleRuntimeV2Drive(ev.Context(), cmd.WorkspaceID, cmd.RunID, "persisted_schedule_retry"); err != nil && !errors.Is(err, context.Canceled) {
+		m.recordRuntimeV2DriveScheduleFailure(ev.Context(), cmd.WorkspaceID, cmd.RunID, "persisted_schedule_retry", err)
+	}
+}
+
+// recordRuntimeV2DriveScheduleFailure makes a rejected BackgroundRoutine task
+// visible in the persisted SM-4 recovery ledger. Each successful ledger CAS
+// posts one bounded private retry; a restart inventory may still re-drive the
+// same active Run after the local scheduling allowance is exhausted.
+func (m *Biz) recordRuntimeV2DriveScheduleFailure(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source string, scheduleErr error) {
+	if m == nil || m.bizPtr == nil || workspaceID == "" || runID == "" {
+		return
+	}
+	background := m.BackgroundRoutine()
+	if background == nil {
+		slog.Error("workorch Runtime V2 drive scheduling rejected with no recovery routine", "source", source, "workspaceID", workspaceID, "runID", runID, "scheduleErr", scheduleErr)
+		return
+	}
+	recoveryCtx := orchestratorBackgroundContext(ctx, workspaceID)
+	// This path is called by a Run notification observer. Persisting through
+	// the Run owner synchronously from that callback can deadlock its EventHub
+	// lane, so recovery accounting is explicitly moved to a framework task.
+	if err := background.AsyncFunction(func() {
+		m.lifecycleMu.RLock()
+		defer m.lifecycleMu.RUnlock()
+		if m.bizPtr == nil {
+			return
+		}
+		_, consumed, commitErr := m.bizPtr.ConsumeRuntimeV2RecoveryBudget(recoveryCtx, workspaceID, runID, runtimecontract.RuntimeRecoveryBudgetDriveSchedule)
+		if commitErr != nil {
+			slog.Warn("workorch Runtime V2 schedule recovery commit failed", "source", source, "workspaceID", workspaceID, "runID", runID, "scheduleErr", scheduleErr, "err", commitErr)
+			return
+		}
+		if !consumed {
+			slog.Error("workorch Runtime V2 drive scheduling recovery exhausted; restart inventory will retry", "source", source, "workspaceID", workspaceID, "runID", runID, "scheduleErr", scheduleErr)
+			return
+		}
+		slog.Warn("workorch Runtime V2 drive scheduling rejected; persisted retry posted", "source", source, "workspaceID", workspaceID, "runID", runID, "scheduleErr", scheduleErr)
+		if m.EventHub() == nil {
+			return
+		}
+		cmd := orchestratorevents.RetryRuntimeV2DriveCommand{WorkspaceID: workspaceID, RunID: runID, CausationID: "drive-schedule-retry/" + string(workspaceID) + "/" + string(runID)}
+		event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorRetryRuntimeV2Drive, ModuleID, ModuleID, magicevent.NewHeader(), recoveryCtx, cmd)
+		bindOwnerCommandLane(event, orchestratorevents.TopicOrchestratorRetryRuntimeV2Drive, "run", string(runID), workspaceID, runID)
+		m.PostEvent(event)
+	}); err != nil {
+		slog.Error("workorch Runtime V2 schedule recovery task was not accepted", "source", source, "workspaceID", workspaceID, "runID", runID, "scheduleErr", scheduleErr, "err", err)
 	}
 }
 

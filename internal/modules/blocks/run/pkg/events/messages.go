@@ -131,6 +131,13 @@ type RunContinuationRequestedData struct {
 	CausationID string
 }
 
+func (d RunContinuationRequestedData) Validate() error {
+	if d.WorkspaceID == "" || d.RunID == "" || strings.TrimSpace(d.CausationID) == "" {
+		return fmt.Errorf("%w: run continuation fact requires scope and causation", common.ErrInvalidArgument)
+	}
+	return nil
+}
+
 func RunStateChangedDataFromModel(run *runmodel.Run) RunStateChangedData {
 	if run == nil {
 		return RunStateChangedData{}

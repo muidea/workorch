@@ -91,16 +91,8 @@ func (c ApplyRuntimeTerminalDeliveryCommand) Validate() error {
 	if c.WorkspaceID == "" || c.RunID == "" || c.SourceOwner != "kernel/orchestrator" || c.CausationID == "" {
 		return fmt.Errorf("%w: result terminal delivery requires workspace, run and source", common.ErrInvalidArgument)
 	}
-	if c.TerminalDeliveryID == "" || c.AuthoritySnapshotID == "" {
-		return fmt.Errorf("%w: result terminal delivery requires delivery id and authority snapshot", common.ErrInvalidArgument)
-	}
-	switch c.Action {
-	case runtimecontract.RuntimeActionComplete, runtimecontract.RuntimeActionFail:
-	default:
-		return fmt.Errorf("%w: result terminal delivery has invalid action %q", common.ErrInvalidArgument, c.Action)
-	}
-	if c.TerminalCode == "" || c.TerminalSummary == "" {
-		return fmt.Errorf("%w: result terminal delivery requires terminal code and summary", common.ErrInvalidArgument)
+	if err := c.Identity().Validate(); err != nil {
+		return fmt.Errorf("%w: result terminal delivery identity: %v", common.ErrInvalidArgument, err)
 	}
 	if err := c.Material.Validate(); err != nil {
 		return err

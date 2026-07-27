@@ -23,10 +23,10 @@ const (
 type RuntimeDeliveryAcknowledgedState string
 
 const (
-	RuntimeDeliveryAcknowledgedResultRecorded   RuntimeDeliveryAcknowledgedState = "result_recorded"
+	RuntimeDeliveryAcknowledgedResultRecorded    RuntimeDeliveryAcknowledgedState = "result_recorded"
 	RuntimeDeliveryAcknowledgedWorkspaceReleased RuntimeDeliveryAcknowledgedState = "workspace_released"
-	RuntimeDeliveryAcknowledgedRunTerminal      RuntimeDeliveryAcknowledgedState = "run_terminal"
-	RuntimeDeliveryAcknowledgedNoop             RuntimeDeliveryAcknowledgedState = "noop"
+	RuntimeDeliveryAcknowledgedRunTerminal       RuntimeDeliveryAcknowledgedState = "run_terminal"
+	RuntimeDeliveryAcknowledgedNoop              RuntimeDeliveryAcknowledgedState = "noop"
 )
 
 // RuntimeTerminalDeliveryIdentity is the sealed identity of one SM-4 terminal
@@ -64,6 +64,9 @@ func (id RuntimeTerminalDeliveryIdentity) Validate() error {
 	}
 	if id.AuthoritySnapshotID == "" {
 		return fmt.Errorf("terminal delivery identity requires authority snapshot")
+	}
+	if id.DefinitionRevision == "" || id.EvidenceRevision == "" || id.DispatchID == "" {
+		return fmt.Errorf("terminal delivery identity requires definition, evidence and dispatch identity")
 	}
 	switch id.Action {
 	case RuntimeActionComplete, RuntimeActionFail:

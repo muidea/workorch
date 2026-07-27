@@ -43,13 +43,16 @@ func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (workspaceevents.Work
 	switch ev.ID() {
 	case workspaceevents.TopicWorkspaceCommandApplyRunProjectionFact:
 		cmd, ok := ev.Data().(workspaceevents.ApplyRunProjectionFactCommand)
-		if !ok {
+		// The Run fact is observed by this owner and converted into an
+		// owner-local command.  Payload SourceOwner alone is not a trust
+		// boundary; require the actual EventHub source of that local bridge.
+		if !ok || ev.Source() != ModuleID {
 			return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrInvalidArgument
 		}
 		return m.applyRunProjection(ctx, cmd)
 	case workspaceevents.TopicWorkspaceCommandApplyTerminalDelivery:
 		cmd, ok := ev.Data().(workspaceevents.ApplyRuntimeTerminalDeliveryCommand)
-		if !ok {
+		if !ok || ev.Source() != "kernel/orchestrator" {
 			return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrInvalidArgument
 		}
 		return m.applyTerminalDelivery(ctx, cmd)

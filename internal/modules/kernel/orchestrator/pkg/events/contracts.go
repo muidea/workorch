@@ -46,6 +46,7 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorExecuteWebOperation,
 	)...)
 	ret = append(ret, eventcontract.Build("orchestrator", eventcontract.CommandClassNotify, eventcontract.LanePolicyState,
+		TopicOrchestratorRetryRuntimeV2Drive,
 		TopicPatchPreviewed,
 		TopicPatchApplied,
 		TopicPatchFailed,

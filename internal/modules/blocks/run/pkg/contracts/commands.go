@@ -27,13 +27,6 @@ type LinkRunSuccessorCommand struct {
 	ExpectedSuccessorRunID common.RunID
 }
 
-type StartRunCommand struct{ RunID common.RunID }
-
-type ResumeRunCommand struct {
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-}
-
 type UpdateRunCommand struct {
 	// UpdateRunCommand is the sole generic persistence command for the
 	// Runtime V2 aggregate. It intentionally excludes SM-1 lifecycle and
@@ -47,19 +40,4 @@ type UpdateRunCommand struct {
 	ExpectedModelRevision *uint64
 }
 
-type BlockOnDecisionCommand struct {
-	RunID    common.RunID
-	TicketID common.TicketID
-}
-
-type BlockOnApprovalCommand struct {
-	RunID      common.RunID
-	ApprovalID common.ApprovalID
-}
-
 type DeleteRunCommand struct{ RunID common.RunID }
-
-type FailRunCommand struct {
-	RunID  common.RunID
-	Reason string
-}

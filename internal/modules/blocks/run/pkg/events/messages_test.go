@@ -30,3 +30,12 @@ func TestRunStateChangedDataFromModelIncludesRuntimeV2Progress(t *testing.T) {
 		t.Fatalf("runtime progress data = %+v", data)
 	}
 }
+
+func TestRunContinuationRequestedDataValidate(t *testing.T) {
+	if err := (RunContinuationRequestedData{WorkspaceID: "ws-1", RunID: "run-1", CausationID: "resume-1"}).Validate(); err != nil {
+		t.Fatalf("valid continuation fact: %v", err)
+	}
+	if err := (RunContinuationRequestedData{WorkspaceID: "ws-1", RunID: "run-1"}).Validate(); err == nil {
+		t.Fatal("continuation without causation must be rejected")
+	}
+}
