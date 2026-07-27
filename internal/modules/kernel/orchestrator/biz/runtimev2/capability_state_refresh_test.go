@@ -64,7 +64,7 @@ func TestStaleCapabilityStateReceiptRefreshesPrerequisiteWithoutRepairDebt(t *te
 	}
 	if refreshed.ActiveDispatch != nil || refreshed.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(refreshed.Facts.Resources.CapabilityStates) != 0 ||
 		len(refreshed.Facts.Prerequisites.Pending) != 1 || refreshed.Facts.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindCapabilityState ||
-		refreshed.Facts.Recovery.CapabilityStateRefreshes != 1 {
+		refreshed.Facts.Recovery.PrerequisiteRefreshes != 1 {
 		t.Fatalf("stale refresh did not atomically return to prerequisite: %+v", refreshed)
 	}
 	if refreshed.Facts.Repair.RepairAttempts != 0 || len(refreshed.Facts.Repair.SignatureCounts) != 0 || len(refreshed.Facts.Evidence.Rejected) != 0 {
@@ -72,7 +72,7 @@ func TestStaleCapabilityStateReceiptRefreshesPrerequisiteWithoutRepairDebt(t *te
 	}
 	saves := repository.saves
 	duplicate, err := controller.RefreshCapabilityStateAfterStaleReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, receipt)
-	if err != nil || duplicate.StateRevision != refreshed.StateRevision || duplicate.Facts.Recovery.CapabilityStateRefreshes != 1 || repository.saves != saves {
+	if err != nil || duplicate.StateRevision != refreshed.StateRevision || duplicate.Facts.Recovery.PrerequisiteRefreshes != 1 || repository.saves != saves {
 		t.Fatalf("duplicate stale receipt was not idempotent: aggregate=%+v saves=%d want=%d err=%v", duplicate, repository.saves, saves, err)
 	}
 	newSnapshot := runtimecontract.RuntimeCapabilityStateSnapshot{
@@ -108,7 +108,7 @@ func TestStaleCapabilityStateReceiptRefreshesPrerequisiteWithoutRepairDebt(t *te
 		t.Fatalf("mismatched stale receipt err=%v, want conflict", err)
 	}
 	final, err := controller.Load(context.Background(), "ws-v2", "run-v2")
-	if err != nil || final.StateRevision != newDispatch.StateRevision || final.ActiveDispatch == nil || final.ActiveDispatch.ID != newDispatch.ActiveDispatch.ID || final.Facts.Recovery.CapabilityStateRefreshes != 1 || repository.saves != saves {
+	if err != nil || final.StateRevision != newDispatch.StateRevision || final.ActiveDispatch == nil || final.ActiveDispatch.ID != newDispatch.ActiveDispatch.ID || final.Facts.Recovery.PrerequisiteRefreshes != 1 || repository.saves != saves {
 		t.Fatalf("mismatched stale receipt changed authority: aggregate=%+v saves=%d want=%d err=%v", final, repository.saves, saves, err)
 	}
 }

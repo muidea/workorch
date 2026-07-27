@@ -252,7 +252,6 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		setCapabilityError(result, err)
 		return
 	}
-	operation := command.Operation.Normalized()
 	failure := m.runtimeOperationFeasibility(event.Context(), command)
 	var stale *runtimecontract.RuntimePrerequisiteStale
 	if failure != nil && failure.Code == "operation_admissibility_stale" && command.Observation != nil {
@@ -263,11 +262,12 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 			}
 		}
 	}
-	result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{
-		OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID,
-		CapabilityStateBinding: command.Admissibility.AcquisitionBinding,
-		Feasible:               failure == nil && stale == nil, Failure: failure, Stale: stale,
-	}, nil)
+	observation, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, failure == nil && stale == nil, failure, stale, nil, nil)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	result.Set(observation, nil)
 }
 
 func gitCapabilityStateObservation(prerequisiteID string, snapshot runtimecontract.RuntimeCapabilityStateSnapshot) runtimecontract.RuntimePrerequisiteObservation {

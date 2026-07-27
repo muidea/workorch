@@ -16,10 +16,7 @@ const (
 	// It is still bounded by RuntimeRecoveryBudgetLimit and does not relax stale
 	// or duplicate receipt handling.
 	DefaultMaxPrerequisiteResourceChangeRefreshes = 8
-	// DefaultMaxCapabilityStateRefreshes is retained while existing persisted
-	// v2 records and focused tests migrate to the unified prerequisite budget.
-	DefaultMaxCapabilityStateRefreshes = DefaultMaxPrerequisiteRefreshes
-	RuntimeRecoveryBudgetLimit         = 100
+	RuntimeRecoveryBudgetLimit                    = 100
 )
 
 type RuntimeRecoveryBudgetKind string
@@ -31,10 +28,6 @@ const (
 	RuntimeRecoveryBudgetTerminalDelivery                  RuntimeRecoveryBudgetKind = "terminal_delivery"
 	RuntimeRecoveryBudgetPrerequisiteRefresh               RuntimeRecoveryBudgetKind = "prerequisite_refresh"
 	RuntimeRecoveryBudgetPrerequisiteResourceChangeRefresh RuntimeRecoveryBudgetKind = "prerequisite_receipt_refresh"
-	// RuntimeRecoveryBudgetCapabilityStateRefresh is a source-compatible alias
-	// for the unified budget. It deliberately has the new persisted value so a
-	// stale capability-state receipt cannot take a separate budget path.
-	RuntimeRecoveryBudgetCapabilityStateRefresh RuntimeRecoveryBudgetKind = RuntimeRecoveryBudgetPrerequisiteRefresh
 )
 
 type RuntimeRecoveryPolicy struct {
@@ -48,9 +41,6 @@ type RuntimeRecoveryPolicy struct {
 	// receipts whose resource revisions invalidate a prerequisite observation.
 	// It is sealed at activation and is not a live orchestrator configuration.
 	MaxPrerequisiteResourceChangeRefreshes int
-	// Deprecated: retained only to decode/reconcile existing aggregates during
-	// rollout. New activation code must set MaxPrerequisiteRefreshes.
-	MaxCapabilityStateRefreshes int
 }
 
 type RuntimeRecoveryLedger struct {
@@ -63,8 +53,6 @@ type RuntimeRecoveryLedger struct {
 	// PrerequisiteResourceChangeRefreshes tracks normal progressing owner
 	// receipts separately from stale/no-progress recovery.
 	PrerequisiteResourceChangeRefreshes int
-	// Deprecated mirror of PrerequisiteRefreshes for existing v2 records.
-	CapabilityStateRefreshes int
 }
 
 func DefaultRuntimeRecoveryPolicy() RuntimeRecoveryPolicy {
@@ -93,17 +81,10 @@ func (p RuntimeRecoveryPolicy) Normalized() RuntimeRecoveryPolicy {
 		p.MaxTerminalDeliveryAttempts = defaults.MaxTerminalDeliveryAttempts
 	}
 	if p.MaxPrerequisiteRefreshes <= 0 {
-		if p.MaxCapabilityStateRefreshes > 0 {
-			p.MaxPrerequisiteRefreshes = p.MaxCapabilityStateRefreshes
-		} else {
-			p.MaxPrerequisiteRefreshes = defaults.MaxPrerequisiteRefreshes
-		}
+		p.MaxPrerequisiteRefreshes = defaults.MaxPrerequisiteRefreshes
 	}
 	if p.MaxPrerequisiteResourceChangeRefreshes <= 0 {
 		p.MaxPrerequisiteResourceChangeRefreshes = defaults.MaxPrerequisiteResourceChangeRefreshes
-	}
-	if p.MaxCapabilityStateRefreshes <= 0 {
-		p.MaxCapabilityStateRefreshes = p.MaxPrerequisiteRefreshes
 	}
 	return p
 }
@@ -146,17 +127,7 @@ func (l RuntimeRecoveryLedger) Validate(policy RuntimeRecoveryPolicy) error {
 	return nil
 }
 
-// Normalized reconciles the legacy capability-state counter into the unified
-// prerequisite counter at the persistence boundary. New writers always keep
-// both fields equal during the rollout, so duplicate delivery cannot reopen a
-// second budget.
 func (l RuntimeRecoveryLedger) Normalized() RuntimeRecoveryLedger {
-	if l.PrerequisiteRefreshes == 0 && l.CapabilityStateRefreshes > 0 {
-		l.PrerequisiteRefreshes = l.CapabilityStateRefreshes
-	}
-	if l.CapabilityStateRefreshes == 0 && l.PrerequisiteRefreshes > 0 {
-		l.CapabilityStateRefreshes = l.PrerequisiteRefreshes
-	}
 	return l
 }
 
@@ -172,10 +143,7 @@ func (l RuntimeRecoveryLedger) Used(kind RuntimeRecoveryBudgetKind) int {
 	case RuntimeRecoveryBudgetTerminalDelivery:
 		return l.TerminalDeliveryAttempts
 	case RuntimeRecoveryBudgetPrerequisiteRefresh:
-		if l.PrerequisiteRefreshes != 0 {
-			return l.PrerequisiteRefreshes
-		}
-		return l.CapabilityStateRefreshes
+		return l.PrerequisiteRefreshes
 	case RuntimeRecoveryBudgetPrerequisiteResourceChangeRefresh:
 		return l.PrerequisiteResourceChangeRefreshes
 	default:
@@ -221,7 +189,6 @@ func (l RuntimeRecoveryLedger) Consume(kind RuntimeRecoveryBudgetKind, policy Ru
 		l.TerminalDeliveryAttempts++
 	case RuntimeRecoveryBudgetPrerequisiteRefresh:
 		l.PrerequisiteRefreshes++
-		l.CapabilityStateRefreshes = l.PrerequisiteRefreshes
 	case RuntimeRecoveryBudgetPrerequisiteResourceChangeRefresh:
 		l.PrerequisiteResourceChangeRefreshes++
 	}

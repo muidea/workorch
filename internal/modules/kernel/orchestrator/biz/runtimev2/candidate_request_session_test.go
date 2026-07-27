@@ -77,7 +77,7 @@ func TestBeginCandidateAttemptRequiresCompletedSessionAndPersistsManifestBinding
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, currentFocusTargetSelection(aggregate.Facts))
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources((aggregate.Facts).Resources))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestBeginCandidateAttemptRejectsSessionManifestDriftWithoutProposalOrDispat
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, currentFocusTargetSelection(aggregate.Facts))
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources((aggregate.Facts).Resources))
 	if err != nil {
 		t.Fatal(err)
 	}

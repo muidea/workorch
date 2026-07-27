@@ -331,7 +331,7 @@ func applyPrerequisiteResult(facts *runtimecontract.RuntimeFacts, prerequisite r
 		// remain complete enough to cover a target produced by an accepted
 		// earlier operation.  They are not the per-request candidate-context
 		// projection controlled by MaxCandidateContextItems.
-		maxItems := runtimecontract.RuntimeOwnerInventoryItemsMaxCount
+		maxItems := runtimecontract.DefaultRuntimeOwnerInventoryBudget().MaxItems
 		if maxItems < 1 || len(inventory.TargetRefs) > maxItems || len(inventory.SelectorRefs) > maxItems {
 			return fmt.Errorf("operation admissibility inventory exceeds owner inventory bound")
 		}

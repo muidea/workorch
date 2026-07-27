@@ -4,7 +4,7 @@ Status: active
 
 Type: core-contract
 
-Last Updated: 2026-07-25
+Last Updated: 2026-07-26
 
 本文定义 WorkOrch 唯一的、领域中立的 Runtime V2 设计合同。生产主链仅为
 `DriveRuntimeV2`、reducer 与 sealed dispatch；它治理事实、约束、证据、恢复与终态，
@@ -60,6 +60,86 @@ typed RuntimeBootstrap
 4. capability owner 只执行自己的 typed prerequisite/operation 并返回 receipt；Result owner只保存
    已裁决 outcome；projection/eventstream 仅为派生读模型。
 5. 重启只从已持久化 aggregate 继续 drive；不得从进程内缓存、UI 状态或历史文本重建 authority。
+
+## 规范化候选合同
+
+Runtime V2 不要求穷举所有模型输出组合。它要求把动态 owner 事实先编译成一份有限、可验证的
+`RuntimeCandidateContractManifest`，此后 renderer、decoder、candidate evaluator、owner feasibility 和
+fixture 都只能消费这份封存合同，不能再次解释原始 profile、目录、错误文本或临时上下文。
+
+每个 manifest 由零到多个 `SealedOperationAuthorization` 组成。该名称表示 manifest 内的一条纯值授权记录，
+不是新的状态机或 owner；实现可在现有 manifest DTO 内表达。每条授权至少包含：
+
+- canonical operation kind、owner module、parameter/variant contract；
+- accepted/required effect scope、coverage 与 dependency 约束；
+- 唯一 `TargetPolicy` 以及该策略所需的 exact refs、bounded owner scope 或 owner selector；
+- 来源 prerequisite/owner receipt 的 snapshot/revision 引用；
+- manifest hash 与 operation-contract revision。
+
+目标策略只允许三种，禁止为 live 症状增加第四种临时分支：
+
+| TargetPolicy | 含义 | 必须拒绝 |
+| --- | --- | --- |
+| `exact_target` | operation 的全部 target 必须属于封存的精确 target set | 空 target、越界 target、运行时猜测 target |
+| `existing_owner_scope` | operation 必须提供 concrete target，且每个 target 属于 owner 封存的既有资源 scope | 新建 target、截断/不完整 inventory、只命中部分 target |
+| `prospective_owner_target` | candidate 必须提交 concrete target，并命中 owner 封存的 create selector/prospective constraint | 非 owner 允许的新建、无 target、绕过 owner feasibility |
+
+`TargetPolicy` 是 owner-neutral 的纯合同词汇。File、Git、Shell、MCP 或业务 profile 的具体语义仍由对应
+owner/profile 提供；Orchestrator 只编译和验证 typed receipt，不按文件名、命令或领域文本推断策略。
+
+owner inventory 与 provider context 是两个不同合同：
+
+- owner inventory 必须是完整的有界授权事实，或是能被 owner 独立验证的封闭 selector；截断列表不得封存为
+  scope；
+- candidate context 可以从 manifest 生成有损展示，但不得删除执行所需的 kind、parameter、target policy、
+  coverage 或 effect 约束；
+- `OwnerInventoryBudget`、`CandidateContextBudget`、`RequestRecoveryBudget` 必须使用不同 DTO/字段和校验入口，
+  禁止因数值相同而互用；
+- inventory 超限且 owner 无法提供封闭 selector 时，在 provider 前形成 typed prerequisite failure。提高固定
+  常量不能替代该产品语义。
+
+### 单一 candidate evaluator
+
+完整 candidate document 只允许进入一个纯 `CandidateEvaluator`。它的输入是 persisted manifest、decoded
+candidate、同一 authority contract 的 prior attempt fact 和 typed owner feasibility observations；输出只能是 `accepted` 或一个完整的
+`CandidateRejection`。decoder、admission 与 owner-feasibility adapter 可以提供 typed observation，但不能各自
+选择 retry、terminal、governance 或下一 action。
+
+为取得 feasibility observation，Orchestrator 只可先用 operation kind 解析 manifest 中的 owner 和
+authorization identity；该步骤不做 candidate admission。无法解析的 kind 不调 owner，由 evaluator 在
+kind 层拒绝；可解析的 operation 可调用无副作用 owner probe，owner 只返回
+`feasible | stale | infeasible` observation。即使 owner 已返回 infeasible，evaluator 仍按固定顺序优先返回更早的
+wire/parameter/target 违例，保证同一 document 只有一个 first-failure。
+
+`CandidateRejection` 至少包含：class/code、operation ID（若适用）、field path、actual、allowed/required/
+forbidden、manifest hash、rejected shape hash，以及显式 `CorrectionDisposition`：
+
+| CorrectionDisposition | 语义 | SM-3 唯一行为 |
+| --- | --- | --- |
+| `correctable_once` | 同一 manifest 内存在唯一、有界的结构修正 | 生成一个 `CorrectionDirective`，只允许 attempt 1 |
+| `rejected_final` | 没有安全的同合同修正空间 | 直接形成 typed candidate terminal，零额外 provider call |
+
+`CorrectionDirective` 只描述 candidate delta，例如删除 forbidden field、补 required field、选择 allowed kind、
+替换为 allowed target、改变 rejected semantic shape；它不选择 Runtime action、不修改 authority，也不包含 raw
+provider/decoder/owner 错误文本。
+
+若 complete rejection 无法归入上述两类，属于 `runtime_contract_defect`，必须 fail-fast 且零额外 provider、
+ticket、dispatch 或 effect。`candidate_correction_undefined` 不得继续作为正常模型输出的兜底路径。
+
+### 五类统一处理结果
+
+provider dependency/governance 在进入 candidate pipeline 前单独处理。进入候选处理后，所有结果只允许归入：
+
+| 结果 | 来源 | 状态机行为 |
+| --- | --- | --- |
+| `request_recoverable` | fragment、EOF、timeout、429/5xx、未完成 document | request-session 有界恢复；不创建 attempt |
+| `candidate_correctable` | complete rejection + 完整 `CorrectionDirective` | 同 transaction/stable prefix 的唯一 attempt 1 |
+| `candidate_rejected_final` | complete rejection + `rejected_final` | typed terminal；不请求 correction |
+| `prerequisite_stale` | owner revision/receipt 与封存授权不一致 | SM-2 精确退休并重取；旧 document/attempt 不复活 |
+| `accepted` | evaluator 与 owner feasibility 均接受 | persist sealed dispatch 后才可执行 |
+
+以上分类是候选处理的唯一分流表。错误字符串、TUI/Web、projection、repair hint、owner adapter 或测试 fixture
+不得定义额外分流。
 
 ## 四个协调状态机
 

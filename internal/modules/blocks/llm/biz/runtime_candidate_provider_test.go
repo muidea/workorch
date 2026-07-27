@@ -44,7 +44,7 @@ func TestRuntimeV2ProviderRequestRejectsUnsealedManifestBeforeProviderConfigurat
 
 func runtimeCandidateManifestForRequest(t *testing.T, decision runtimecontract.RuntimeDecision, context runtimecontract.RuntimeCandidateContext) runtimecontract.RuntimeCandidateContractManifest {
 	t.Helper()
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, context.Resources.TargetSelection)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(context.Resources))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func runtimeCandidateManifestForSchema(t *testing.T, decision runtimecontract.Ru
 			decision.RequiredOutput.Kind = runtimecontract.RequiredOutputKindGovernance
 		}
 	}
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, selection)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, runtimecontract.RuntimeCandidateManifestOwnerFacts{TargetSelection: selection})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -970,6 +970,48 @@ func TestRuntimeV2CandidateSchemaNarrowsFileOwnerScopeToDurableFileAndDeclaredGr
 	}
 }
 
+func TestRuntimeV2CandidateRendererProjectsSealedTargetPolicy(t *testing.T) {
+	decision := runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceStateChange, RequiredOutput: runtimecontract.RequiredOutputContract{
+		Kind: runtimecontract.RequiredOutputKindStateChange, AcceptedKinds: []string{runtimecontract.StepKindFileEdit},
+		AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+		RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+		CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
+	}}
+	inventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "operation_admissibility:file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{"a.go", "b.go"},
+		SelectorRefs: []string{"file/workspace_deliverable"}, ObservedRevision: "tree-v1",
+	}
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, runtimecontract.RuntimeCandidateManifestOwnerFacts{
+		OperationAdmissibilities: []runtimecontract.RuntimeOperationAdmissibility{inventory},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := runtimeV2CandidateOutputContractForManifest(manifest)
+	if len(output.OperationContracts) != 1 {
+		t.Fatalf("operation contracts = %#v", output.OperationContracts)
+	}
+	contract := output.OperationContracts[0]
+	if contract.OwnerModuleID != runtimecontract.RuntimeModuleFile ||
+		contract.Target.Policy != runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope ||
+		!slices.Equal(contract.Target.OwnerScopeTargetRefs, []string{"a.go", "b.go"}) ||
+		!slices.Equal(contract.Target.AllowedTargetRefs, []string{"a.go", "b.go"}) ||
+		!slices.Equal(contract.AdmissibilitySnapshotRefs, []string{inventory.SnapshotID}) ||
+		!contract.RequireTargetRefs {
+		t.Fatalf("sealed target policy projection = %#v", contract)
+	}
+	schema := string(output.Schema)
+	if !strings.Contains(schema, `"enum":["a.go","b.go"]`) {
+		t.Fatalf("schema must constrain targetRefs to sealed allowed set: %s", schema)
+	}
+	if !strings.Contains(output.StructuredOutputInstruction, "TargetPolicy=existing_owner_scope") ||
+		!strings.Contains(output.StructuredOutputInstruction, "Allowed targets: a.go, b.go") {
+		t.Fatalf("instruction lost sealed target policy: %s", output.StructuredOutputInstruction)
+	}
+}
+
 func TestRuntimeV2CandidateManifestDrivesSchemaInstructionAndRetryCorrection(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -985,7 +1027,7 @@ func TestRuntimeV2CandidateManifestDrivesSchemaInstructionAndRetryCorrection(t *
 				AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
 			}},
-			contains: []string{"patch/apply", "targetRefs is required", "targetRef:string", "Forbidden parameters"},
+			contains: []string{"patch/apply", "targetRefs is required", "TargetPolicy=exact_target", "Allowed targets: main.go", "targetRef:string", "Forbidden parameters"},
 		},
 		{
 			name: "shell summary remains forbidden",
@@ -1013,7 +1055,7 @@ func TestRuntimeV2CandidateManifestDrivesSchemaInstructionAndRetryCorrection(t *
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(testCase.decision, nil)
+			manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(testCase.decision, runtimecontract.RuntimeCandidateManifestOwnerFacts{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1224,7 +1266,7 @@ func TestRuntimeV2CandidateSchemaRestrictsVariantsToSealedAuthority(t *testing.T
 			}},
 		},
 	}
-	if _, err := runtimecontract.BuildRuntimeCandidateContractManifest(unknownVariantDecision, nil); err == nil {
+	if _, err := runtimecontract.BuildRuntimeCandidateContractManifest(unknownVariantDecision, runtimecontract.RuntimeCandidateManifestOwnerFacts{}); err == nil {
 		t.Fatal("unknown sealed variant must fail manifest compilation instead of producing a widened schema")
 	}
 }

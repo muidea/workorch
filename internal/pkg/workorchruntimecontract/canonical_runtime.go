@@ -180,11 +180,6 @@ const (
 	FailureClassExecutionFailure             FailureClass = "execution_failure"
 	FailureClassNoProgressExhausted          FailureClass = "no_progress_exhausted"
 	FailureClassCandidateExhausted           FailureClass = "candidate_retry_exhausted"
-	// FailureClassCandidateCorrectionUndefined marks a complete candidate
-	// rejection whose persisted typed diagnostic cannot define a safe,
-	// manifest-bound second request. It is a terminal SM-3 contract route, not
-	// a governance dependency or a repair directive.
-	FailureClassCandidateCorrectionUndefined FailureClass = "candidate_correction_undefined"
 	FailureClassCandidateOutputExhausted     FailureClass = "candidate_output_continuation_exhausted"
 	FailureClassProviderProtocol             FailureClass = "provider_protocol_failure"
 	FailureClassProviderSubmissionUnknown    FailureClass = "provider_submission_unknown"

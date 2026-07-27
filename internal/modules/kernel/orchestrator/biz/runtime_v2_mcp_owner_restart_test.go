@@ -195,6 +195,7 @@ func TestRuntimeV2FileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing
 						WorkspaceID: "ws-v2", RunID: "run-v2", Transaction: controllerMustLoadRuntimeV2Aggregate(t, controller).Decision.AuthorityTransaction(),
 						WorkspaceDeliverableDirectory: deliverable, Operation: candidate.Validation.Operations[0].Operation, Admissibility: inventory,
 						CapabilityStateBinding: inventory.AcquisitionBinding, Observation: &observation,
+						CandidateManifestHash: "manifest-mcp-restart", OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, candidate.Validation.Operations[0].Operation.Kind),
 					},
 				))
 				if probeResult == nil {

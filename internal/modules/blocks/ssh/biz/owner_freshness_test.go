@@ -11,6 +11,15 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func mustRuntimeOperationAuthorizationIdentity(t *testing.T, kind string) runtimecontract.RuntimeCandidateOperationManifest {
+	t.Helper()
+	authorization, err := orchestratorevents.RuntimeOperationAuthorizationIdentity(kind)
+	if err != nil {
+		t.Fatalf("runtime operation authorization identity for %q: %v", kind, err)
+	}
+	return authorization
+}
+
 func TestSSHAdmissibilityObservationReturnsTypedPolicyStale(t *testing.T) {
 	inventory := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "admissibility-ssh", OwnerModuleID: ModuleID, OperationKinds: []string{StepKindCommand}, ObservedRevision: "policy-v1"}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
@@ -61,6 +70,7 @@ func sendSSHFeasibilityProbe(t *testing.T, ctx context.Context, hub magicevent.H
 			WorkspaceID: "ws-ssh-freshness", RunID: "run-ssh-freshness",
 			Transaction:                   runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-ssh-freshness"},
 			WorkspaceDeliverableDirectory: t.TempDir(), Admissibility: inventory, Observation: &observation,
+			CandidateManifestHash: "manifest-ssh-freshness", OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, StepKindCommand),
 			Operation: runtimecontract.RuntimeOperation{ID: "ssh-command", Kind: StepKindCommand, Parameters: []runtimecontract.OperationParameter{
 				{Name: "host", String: &host}, {Name: "username", String: &username}, {Name: "password", String: &password}, {Name: "command", String: &command},
 			}},

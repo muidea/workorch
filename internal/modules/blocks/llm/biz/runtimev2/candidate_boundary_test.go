@@ -431,7 +431,7 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 		t.Fatal(err)
 	}
 	context := runtimecontract.RuntimeCandidateContextForDecision(facts, sealed, nil)
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(sealed, context.Resources.TargetSelection)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(sealed, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(context.Resources))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,15 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func mustRuntimeOperationAuthorizationIdentity(t *testing.T, kind string) runtimecontract.RuntimeCandidateOperationManifest {
+	t.Helper()
+	authorization, err := orchestratorevents.RuntimeOperationAuthorizationIdentity(kind)
+	if err != nil {
+		t.Fatalf("runtime operation authorization identity for %q: %v", kind, err)
+	}
+	return authorization
+}
+
 func TestAcquireRuntimeOperationAdmissibilityPrerequisiteRejectsInvalidScopeAndOwnerResult(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(4)
@@ -50,6 +59,7 @@ func TestProbeRuntimeOperationFeasibilityRejectsMalformedResult(t *testing.T) {
 	command := orchestratorevents.ProbeRuntimeOperationFeasibilityCommand{
 		WorkspaceID: "ws-v2", RunID: "run-v2", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "snapshot-v2"},
 		WorkspaceDeliverableDirectory: t.TempDir(), Admissibility: inventory,
+		CandidateManifestHash: "manifest-test", OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, runtimecontract.StepKindFileEdit),
 		Operation: runtimecontract.RuntimeOperation{ID: "edit-1", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{"target.txt"}, Parameters: []runtimecontract.OperationParameter{
 			{Name: "path", String: &path}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText},
 		}},

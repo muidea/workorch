@@ -39,9 +39,15 @@ const (
 
 // CandidateAdmissionResult is a typed, expected candidate outcome. Error is
 // reserved for aggregate corruption, CAS, repository, or other internal faults.
+// Every rejected result carries a sealed CorrectionDisposition via
+// workorchruntimecontract.SealRuntimeCandidateRejection so SM-3 never re-derives
+// retry/terminal from raw reason text.
 type CandidateAdmissionResult struct {
 	Disposition CandidateAdmissionDisposition
 	Failure     *workorchruntimecontract.RuntimeCandidateFailure
+	// Correction is the pure same-manifest correction or final terminal seal for
+	// a complete rejection. Accepted results leave it nil.
+	Correction *workorchruntimecontract.RuntimeCandidateCorrectionDirective
 }
 
 func (r CandidateAdmissionResult) Accepted() bool {
@@ -71,37 +77,88 @@ func rejectedCandidateAdmissionDiagnostic(code, signature string, err error) Can
 	return result
 }
 
-// EvaluateCandidateAdmissionWithManifest is the manifest-bound SM-3
-// admission policy. The caller supplies the exact manifest carried by the
-// request session; this function only verifies it against the current sealed
-// authority and evaluates the decoded candidate. It does not mutate the
-// aggregate, choose a RuntimeAction, call EventHub, or invoke the reducer.
+func rejectedCandidateAdmissionWithAllowedTargets(code, signature, reason string, actual, allowed []string, candidate workorchruntimecontract.RuntimeCandidate) CandidateAdmissionResult {
+	result := rejectedCandidateAdmission(code, signature, reason)
+	result.Failure.Diagnostic = &workorchruntimecontract.RuntimeCandidateFailureDiagnostic{
+		Path:              "$.operations.targetRefs",
+		Actual:            strings.Join(actual, ","),
+		Allowed:           append([]string(nil), allowed...),
+		RejectedShapeHash: workorchruntimecontract.StableRuntimeCandidateSemanticShape(candidate),
+	}
+	return result
+}
+
+func sealCandidateAdmissionRejection(result CandidateAdmissionResult, manifest workorchruntimecontract.RuntimeCandidateContractManifest, candidate workorchruntimecontract.RuntimeCandidate) CandidateAdmissionResult {
+	if result.Accepted() || result.Failure == nil {
+		return result
+	}
+	if result.Failure.Diagnostic != nil && result.Failure.Diagnostic.RejectedShapeHash == "" {
+		result.Failure.Diagnostic.RejectedShapeHash = workorchruntimecontract.StableRuntimeCandidateSemanticShape(candidate)
+	}
+	if result.Failure.Diagnostic != nil && result.Failure.Diagnostic.ManifestHash == "" {
+		result.Failure.Diagnostic.ManifestHash = manifest.Hash
+	}
+	sealed, directive, err := workorchruntimecontract.SealRuntimeCandidateRejection(result.Failure, manifest)
+	if err != nil {
+		// SealRuntimeCandidateRejection is pure and currently infallible for a
+		// non-nil failure; treat any error as a contract defect rather than an
+		// ordinary undefined correction.
+		defect := &workorchruntimecontract.RuntimeCandidateFailure{
+			Class:     workorchruntimecontract.RuntimeCandidateFailureClassInternal,
+			Code:      "runtime_contract_defect",
+			Signature: "runtime-contract-defect",
+			Reason:    err.Error(),
+		}
+		result.Failure = defect
+		result.Correction = &workorchruntimecontract.RuntimeCandidateCorrectionDirective{
+			Disposition:  workorchruntimecontract.RuntimeCandidateCorrectionRejectedFinal,
+			ManifestHash: manifest.Hash,
+			TerminalCode: "runtime_contract_defect",
+		}
+		return result
+	}
+	result.Failure = sealed
+	result.Correction = directive
+	return result
+}
+
+// EvaluateCandidateAdmissionWithManifest is the manifest-bound SM-3 single
+// candidate evaluator entry. The caller supplies the exact manifest carried by
+// the request session; this function only verifies it against the current sealed
+// authority and evaluates the decoded candidate in a fixed first-failure order.
+// It does not mutate the aggregate, choose a RuntimeAction, call EventHub, or
+// invoke the reducer. Every complete rejection is sealed with
+// correctable_once or rejected_final.
 func EvaluateCandidateAdmissionWithManifest(aggregate RuntimeAggregate, manifest workorchruntimecontract.RuntimeCandidateContractManifest, candidate workorchruntimecontract.RuntimeCandidate) CandidateAdmissionResult {
-	if err := workorchruntimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, currentFocusTargetSelection(aggregate.Facts)); err != nil {
-		return rejectedCandidateAdmission(candidateAdmissionCodeInvalid, candidateAdmissionInvalidSignature(candidate), fmt.Sprintf("runtime candidate manifest contract: %v", err))
+	// Fixed evaluator order (plan §7 first-failure):
+	// 1. manifest identity / authority match
+	// 2. wire/shape, required/forbidden field (ValidateRuntimeCandidateAgainstManifest)
+	// 3. operation kind/variant/parameter (same pure validator + ValidateWithActivation)
+	// 4-5. effect/coverage/dependency (ValidateWithActivation)
+	// 6. semantic replay / prior attempt
+	// 7. action/evidence and target-policy grounding (owner feasibility stays N5)
+	// 8. accepted
+	var result CandidateAdmissionResult
+	if err := workorchruntimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, workorchruntimecontract.RuntimeCandidateManifestOwnerFactsFromResources((aggregate.Facts).Resources)); err != nil {
+		result = rejectedCandidateAdmission(candidateAdmissionCodeInvalid, candidateAdmissionInvalidSignature(candidate), fmt.Sprintf("runtime candidate manifest contract: %v", err))
+	} else if err := workorchruntimecontract.ValidateRuntimeCandidateAgainstManifest(manifest, candidate); err != nil {
+		result = rejectedCandidateAdmissionDiagnostic(candidateAdmissionCodeInvalid, candidateAdmissionInvalidSignature(candidate), err)
+	} else if err := candidate.ValidateWithActivation(aggregate.Decision, aggregate.Facts.Activation); err != nil {
+		result = rejectedCandidateAdmission(candidateAdmissionCodeInvalid, candidateAdmissionInvalidSignature(candidate), err.Error())
+	} else if result = rejectCandidateReplay(aggregate, candidate); !result.Accepted() {
+		// first-failure already selected
+	} else if result = rejectCandidateAttemptSemanticReplay(aggregate, candidate); !result.Accepted() {
+		// first-failure already selected
+	} else if result = rejectCandidateNoProgressReplay(aggregate, candidate); !result.Accepted() {
+		// first-failure already selected
+	} else if result = rejectCandidateMissingValidationGap(aggregate.Facts, aggregate.Decision, candidate); !result.Accepted() {
+		// first-failure already selected
+	} else if result = rejectCandidateOutsideGroundedTargets(aggregate.Facts, aggregate.Decision, candidate); !result.Accepted() {
+		// first-failure already selected
+	} else {
+		return acceptedCandidateAdmission()
 	}
-	if err := workorchruntimecontract.ValidateRuntimeCandidateAgainstManifest(manifest, candidate); err != nil {
-		return rejectedCandidateAdmissionDiagnostic(candidateAdmissionCodeInvalid, candidateAdmissionInvalidSignature(candidate), err)
-	}
-	if err := candidate.ValidateWithActivation(aggregate.Decision, aggregate.Facts.Activation); err != nil {
-		return rejectedCandidateAdmission(candidateAdmissionCodeInvalid, candidateAdmissionInvalidSignature(candidate), err.Error())
-	}
-	if result := rejectCandidateReplay(aggregate, candidate); !result.Accepted() {
-		return result
-	}
-	if result := rejectCandidateAttemptSemanticReplay(aggregate, candidate); !result.Accepted() {
-		return result
-	}
-	if result := rejectCandidateNoProgressReplay(aggregate, candidate); !result.Accepted() {
-		return result
-	}
-	if result := rejectCandidateMissingValidationGap(aggregate.Facts, aggregate.Decision, candidate); !result.Accepted() {
-		return result
-	}
-	if result := rejectCandidateOutsideGroundedTargets(aggregate.Facts, aggregate.Decision, candidate); !result.Accepted() {
-		return result
-	}
-	return acceptedCandidateAdmission()
+	return sealCandidateAdmissionRejection(result, manifest, candidate)
 }
 
 // rejectCandidateOutsideGroundedTargets is the SM-3 fence for a focus whose
@@ -123,10 +180,13 @@ func rejectCandidateOutsideGroundedTargets(facts workorchruntimecontract.Runtime
 				continue
 			}
 			if descriptor.OwnerModuleID != workorchruntimecontract.RuntimeModuleFile || len(operation.TargetRefs) != 1 || operation.TargetRefs[0] != selection.ProspectiveTargetRef {
-				return rejectedCandidateAdmission(
+				return rejectedCandidateAdmissionWithAllowedTargets(
 					candidateAdmissionCodeTargetOutsideGrounding,
 					candidateAdmissionSignatureTargetOutsideGrounding,
 					"empty workspace creation scope permits durable effects only on the sealed prospective File target",
+					operation.TargetRefs,
+					[]string{selection.ProspectiveTargetRef},
+					candidate,
 				)
 			}
 			// The sealed prospective target is profile-declared and File-owner
@@ -136,10 +196,13 @@ func rejectCandidateOutsideGroundedTargets(facts workorchruntimecontract.Runtime
 		if durableFileEffect {
 			return acceptedCandidateAdmission()
 		}
-		return rejectedCandidateAdmission(
+		return rejectedCandidateAdmissionWithAllowedTargets(
 			candidateAdmissionCodeCreationScopeMissingTarget,
 			candidateAdmissionSignatureCreationScopeTarget,
 			"empty workspace creation scope requires a durable File operation targeting the sealed prospective workspace-relative path",
+			nil,
+			[]string{selection.ProspectiveTargetRef},
+			candidate,
 		)
 	}
 	requiredTargets := GroundedRepairTargets(facts)
@@ -164,19 +227,25 @@ func rejectCandidateOutsideGroundedTargets(facts workorchruntimecontract.Runtime
 				// File owner's sealed scope; File retains new-target authority.
 				continue
 			}
-			return rejectedCandidateAdmission(
+			return rejectedCandidateAdmissionWithAllowedTargets(
 				candidateAdmissionCodeTargetOutsideGrounding,
 				candidateAdmissionSignatureTargetOutsideGrounding,
 				"owner-grounded workspace scope permits only a durable File operation or an explicitly target-bound operation within the sealed File inventory",
+				operation.TargetRefs,
+				groundedWorkspaceScopeTargets(&selection),
+				candidate,
 			)
 		}
 		if durableEffect {
 			return acceptedCandidateAdmission()
 		}
-		return rejectedCandidateAdmission(
+		return rejectedCandidateAdmissionWithAllowedTargets(
 			candidateAdmissionCodeTargetOutsideGrounding,
 			candidateAdmissionSignatureTargetOutsideGrounding,
 			"owner-grounded workspace scope requires a durable File operation or an explicitly target-bound operation within the sealed File inventory",
+			nil,
+			groundedWorkspaceScopeTargets(&selection),
+			candidate,
 		)
 	}
 	if len(requiredTargets) == 0 {
@@ -193,10 +262,13 @@ func rejectCandidateOutsideGroundedTargets(facts workorchruntimecontract.Runtime
 			return acceptedCandidateAdmission()
 		}
 	}
-	return rejectedCandidateAdmission(
+	return rejectedCandidateAdmissionWithAllowedTargets(
 		candidateAdmissionCodeTargetOutsideGrounding,
 		candidateAdmissionSignatureTargetOutsideGrounding,
 		"runtime state-changing candidate does not target the sealed focus, failure, or repair target set",
+		actualTargetsFromCandidate(candidate),
+		requiredTargets,
+		candidate,
 	)
 }
 
@@ -206,6 +278,14 @@ func rejectCandidateOutsideGroundedTargets(facts workorchruntimecontract.Runtime
 // scope produced before the inventory field was populated. This helper never
 // discovers a target and is only used by SM-3 to verify a descriptor-declared
 // technical operation.
+func actualTargetsFromCandidate(candidate workorchruntimecontract.RuntimeCandidate) []string {
+	actual := make([]string, 0)
+	for _, operation := range candidateRuntimeOperations(candidate) {
+		actual = append(actual, operation.TargetRefs...)
+	}
+	return actual
+}
+
 func groundedWorkspaceScopeTargets(selection *workorchruntimecontract.RuntimeTargetSelection) []string {
 	if selection == nil {
 		return nil

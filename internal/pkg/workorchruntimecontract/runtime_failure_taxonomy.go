@@ -48,8 +48,6 @@ func FailureClassDisposition(class FailureClass) RuntimeFailureDisposition {
 	case FailureClassCandidateSchemaFailure, FailureClassCandidateContractFailure,
 		FailureClassCandidateExhausted:
 		return RuntimeFailureDispositionSameContractRetry
-	case FailureClassCandidateCorrectionUndefined:
-		return RuntimeFailureDispositionBoundedFail
 	case FailureClassProviderTransient:
 		return RuntimeFailureDispositionProviderRetry
 	case FailureClassProviderAuthentication, FailureClassProviderConfiguration:

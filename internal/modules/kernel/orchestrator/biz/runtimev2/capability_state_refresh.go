@@ -58,7 +58,7 @@ func (c *RuntimeController) RefreshCapabilityStateAfterStaleReceipt(ctx context.
 		return RuntimeAggregate{}, fmt.Errorf("%w: stale receipt does not match an active capability snapshot", common.ErrConflict)
 	}
 	expectedRevision := aggregate.StateRevision
-	ledger, consumed, err := aggregate.Facts.Recovery.Consume(runtimecontract.RuntimeRecoveryBudgetCapabilityStateRefresh, aggregate.Facts.RecoveryPolicy)
+	ledger, consumed, err := aggregate.Facts.Recovery.Consume(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh, aggregate.Facts.RecoveryPolicy)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}

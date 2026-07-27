@@ -14,6 +14,15 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func mustRuntimeOperationAuthorizationIdentity(t *testing.T, kind string) runtimecontract.RuntimeCandidateOperationManifest {
+	t.Helper()
+	authorization, err := orchestratorevents.RuntimeOperationAuthorizationIdentity(kind)
+	if err != nil {
+		t.Fatalf("runtime operation authorization identity for %q: %v", kind, err)
+	}
+	return authorization
+}
+
 func TestGitOwnerStateChangingReceiptReplaysWithoutSecondOperationAfterOwnerRecreation(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
@@ -244,6 +253,7 @@ func TestGitOwnerCapabilityBoundAdmissibilityRejectsMismatchedProbeBindingAsStal
 	probe := orchestratorevents.ProbeRuntimeOperationFeasibilityCommand{
 		WorkspaceID: "ws-binding", RunID: "run-binding", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-binding"},
 		WorkspaceDeliverableDirectory: workspace, Admissibility: admissibility.Admissibility, Observation: &observation,
+		CandidateManifestHash: "manifest-git-binding", OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, StepKindRead),
 		// This simulates a stale aggregate combining an old capability binding
 		// with a newer admissibility inventory. It is stale, never infeasible.
 		CapabilityStateBinding: "capability-state/ws-binding/run-binding/git/old",
@@ -298,9 +308,10 @@ func TestRuntimeOperationAdmissibilityProbeUsesCurrentRepositorySnapshot(t *test
 	operationName := "status"
 	command := orchestratorevents.ProbeRuntimeOperationFeasibilityCommand{
 		WorkspaceID: "ws-git", RunID: "run-git", WorkspaceDeliverableDirectory: workspace,
-		Transaction:   runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "snapshot-git"},
-		Admissibility: inventory,
-		Operation:     runtimecontract.RuntimeOperation{ID: "status", Kind: StepKindRead, Parameters: []runtimecontract.OperationParameter{{Name: "operation", String: &operationName}}},
+		Transaction:           runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "snapshot-git"},
+		Admissibility:         inventory,
+		CandidateManifestHash: "manifest-git-status", OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, StepKindRead),
+		Operation: runtimecontract.RuntimeOperation{ID: "status", Kind: StepKindRead, Parameters: []runtimecontract.OperationParameter{{Name: "operation", String: &operationName}}},
 	}
 	if failure := module.runtimeOperationFeasibility(context.Background(), command); failure != nil {
 		t.Fatalf("current repository snapshot rejected admissible status: %+v", failure)

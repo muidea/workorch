@@ -42,7 +42,7 @@ func (o *RuntimeOrchestrator) BeginRuntimeV2CandidateAttemptForTest(ctx context.
 	if err != nil {
 		return runtimev2.RuntimeAggregate{}, err
 	}
-	manifest, err := runtimemodel.BuildRuntimeCandidateContractManifest(aggregate.Decision, candidateTargetSelection(aggregate))
+	manifest, err := runtimemodel.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimemodel.RuntimeCandidateManifestOwnerFactsFromResources((aggregate).Facts.Resources))
 	if err != nil {
 		return runtimev2.RuntimeAggregate{}, err
 	}
@@ -93,7 +93,7 @@ func runtimeV2CandidateAttemptTestBinding(ctx context.Context, o *RuntimeOrchest
 			continue
 		}
 		if record.Transaction == aggregate.Decision.AuthorityTransaction() {
-			manifest, manifestErr := runtimemodel.BuildRuntimeCandidateContractManifest(aggregate.Decision, candidateTargetSelection(aggregate))
+			manifest, manifestErr := runtimemodel.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimemodel.RuntimeCandidateManifestOwnerFactsFromResources((aggregate).Facts.Resources))
 			if manifestErr != nil {
 				return runtimemodel.RuntimeCandidateContractManifest{Hash: record.ManifestHash}, record.LogicalRequestID, nil
 			}
@@ -121,7 +121,7 @@ func beginRuntimeV2CandidateAttemptForTest(ctx context.Context, controller *runt
 	if err != nil {
 		return runtimev2.RuntimeAggregate{}, err
 	}
-	manifest, err := runtimemodel.BuildRuntimeCandidateContractManifest(aggregate.Decision, candidateTargetSelection(aggregate))
+	manifest, err := runtimemodel.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimemodel.RuntimeCandidateManifestOwnerFactsFromResources((aggregate).Facts.Resources))
 	if err != nil {
 		return runtimev2.RuntimeAggregate{}, err
 	}
@@ -172,7 +172,7 @@ func directRuntimeV2CandidateAttemptTestBinding(ctx context.Context, controller 
 			continue
 		}
 		if record.Transaction == aggregate.Decision.AuthorityTransaction() {
-			manifest, manifestErr := runtimemodel.BuildRuntimeCandidateContractManifest(aggregate.Decision, candidateTargetSelection(aggregate))
+			manifest, manifestErr := runtimemodel.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimemodel.RuntimeCandidateManifestOwnerFactsFromResources((aggregate).Facts.Resources))
 			if manifestErr != nil {
 				return runtimemodel.RuntimeCandidateContractManifest{Hash: record.ManifestHash}, record.LogicalRequestID, nil
 			}
@@ -188,7 +188,7 @@ func directRuntimeV2CandidateAttemptTestBinding(ctx context.Context, controller 
 }
 
 func evaluateRuntimeV2CandidateAdmissionForTest(aggregate runtimev2.RuntimeAggregate, candidate runtimemodel.RuntimeCandidate) runtimev2.CandidateAdmissionResult {
-	manifest, err := runtimemodel.BuildRuntimeCandidateContractManifest(aggregate.Decision, candidateTargetSelection(aggregate))
+	manifest, err := runtimemodel.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimemodel.RuntimeCandidateManifestOwnerFactsFromResources((aggregate).Facts.Resources))
 	if err != nil {
 		return runtimev2.CandidateAdmissionResult{Disposition: runtimev2.CandidateAdmissionRejectedContract}
 	}

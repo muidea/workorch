@@ -24,7 +24,7 @@ func (c *RuntimeController) BeginCandidateAttemptForTest(ctx context.Context, wo
 	default:
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action does not request a candidate", common.ErrConflict)
 	}
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, currentFocusTargetSelection(aggregate.Facts))
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources((aggregate.Facts).Resources))
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -80,7 +80,7 @@ func candidateAttemptTestBinding(ctx context.Context, c *RuntimeController, work
 			continue
 		}
 		if record.Transaction == aggregate.Decision.AuthorityTransaction() {
-			manifest, manifestErr := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, currentFocusTargetSelection(aggregate.Facts))
+			manifest, manifestErr := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources((aggregate.Facts).Resources))
 			if manifestErr != nil {
 				// Terminal duplicate delivery does not recompile authority: the
 				// persisted record/session hash is its complete identity.
@@ -98,11 +98,37 @@ func candidateAttemptTestBinding(ctx context.Context, c *RuntimeController, work
 }
 
 func EvaluateCandidateAdmission(aggregate RuntimeAggregate, candidate runtimecontract.RuntimeCandidate) CandidateAdmissionResult {
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, currentFocusTargetSelection(aggregate.Facts))
+	// Test fixtures sometimes mutate Facts (FailureTarget, TargetSelection, focus
+	// TargetRefs) after the initial Reduce. Production always builds the Decision
+	// from current Facts before compiling the manifest. Realign only when grounded
+	// targets diverge; do not re-reduce merely because evidence/repair ledgers
+	// changed, or admission tests that intentionally keep a candidate Decision
+	// would flip to validation/assessment and obscure the policy under test.
+	if candidateDecisionNeedsGroundingRealign(aggregate) {
+		if decision, err := ReduceRuntimeState(aggregate.Facts, nil); err == nil &&
+			(decision.Action == runtimecontract.RuntimeActionProduceStateChange ||
+				decision.Action == runtimecontract.RuntimeActionProduceValidation ||
+				decision.Action == runtimecontract.RuntimeActionProduceAssessment ||
+				decision.Action == runtimecontract.RuntimeActionRequestGovernance) {
+			aggregate.Decision = decision
+		}
+	}
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(aggregate.Facts.Resources))
 	if err != nil {
 		return rejectedCandidateAdmission(candidateAdmissionCodeInvalid, candidateAdmissionInvalidSignature(candidate), fmt.Sprintf("runtime candidate manifest contract: %v", err))
 	}
 	return EvaluateCandidateAdmissionWithManifest(aggregate, manifest, candidate)
+}
+
+func candidateDecisionNeedsGroundingRealign(aggregate RuntimeAggregate) bool {
+	grounded := GroundedRepairTargets(aggregate.Facts)
+	current := aggregate.Decision.RequiredOutput.Normalized().TargetRefs
+	if sameRuntimeTargetRefs(grounded, current) {
+		return false
+	}
+	// An empty grounded set with non-empty decision targets still needs realign
+	// when focus TargetRefs were cleared in favor of selection/failure authority.
+	return true
 }
 
 func bindRuntimeCandidateAttemptForTest(t interface {
@@ -113,7 +139,7 @@ func bindRuntimeCandidateAttemptForTest(t interface {
 	if aggregate == nil || index < 0 || index >= len(aggregate.CandidateAttempts) {
 		t.Fatal("candidate attempt test binding index is invalid")
 	}
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, currentFocusTargetSelection(aggregate.Facts))
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources((aggregate.Facts).Resources))
 	if err != nil {
 		t.Fatal(err)
 	}

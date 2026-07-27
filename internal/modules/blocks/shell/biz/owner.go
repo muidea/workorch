@@ -230,21 +230,22 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 
 func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {
 	command, ok := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
-	if !ok || m.runtimeAdapter == nil || command.WorkspaceID == "" || command.RunID == "" || command.Transaction.AuthoritySnapshotID == "" || command.WorkspaceDeliverableDirectory == "" {
+	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
+		return
+	}
+	if err := orchestratorevents.ValidateRuntimeOperationFeasibilityCommand(command, ModuleID); err != nil {
+		setCapabilityError(result, err)
 		return
 	}
 	operation := command.Operation.Normalized()
-	descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
-	if !known || descriptor.OwnerModuleID != ModuleID || command.Admissibility.OwnerModuleID != ModuleID {
-		setCapabilityError(result, common.ErrInvalidArgument)
+	failure, stale := m.runtimeAdapter.ProbeRuntimeOperationFeasibilityWithObservation(command.WorkspaceDeliverableDirectory, command.Admissibility, operation, command.Observation)
+	observation, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, failure == nil && stale == nil, failure, stale, nil, nil)
+	if err != nil {
+		setCapabilityError(result, err)
 		return
 	}
-	failure, stale := m.runtimeAdapter.ProbeRuntimeOperationFeasibilityWithObservation(command.WorkspaceDeliverableDirectory, command.Admissibility, operation, command.Observation)
-	result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{
-		OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID,
-		Feasible: failure == nil && stale == nil, Failure: failure, Stale: stale,
-	}, nil)
+	result.Set(observation, nil)
 }
 
 func setCapabilityError(result magicevent.Result, err error) {

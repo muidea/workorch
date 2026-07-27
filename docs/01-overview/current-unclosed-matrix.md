@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-07-25
+Last Updated: 2026-07-26
 
 ## Purpose
 
@@ -23,7 +23,7 @@ matrix as separately actionable work and cannot override a newer persisted aggre
 
 | ID | 项 | 说明 | 当前方案 |
 | --- | --- | --- | --- |
-| RUNTIME-VPC | live contract convergence | R4 已清除 core 中与 V2-only 冲突的 V1 graph/continuation 叙述；LLM 仍按不可靠 protocol client 治理，严格合同不放宽。C4～C6、P0～P5 均为回归基线。当前唯一活动卡是 Q7/P6：隔离部署已通过 HTTP、template/soul、mock LLM 与 MCP stdio execution；继续记录新的临时 artifact、全仓门禁和真实 provider 可达性，禁止 production fallback、预算调整或 live 热修跳卡。 | [唯一收口方案](../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md) |
+| RUNTIME-VPC | contract normalization and live convergence | R5 将 owner facts 先编译为唯一 sealed manifest，renderer/decoder/evaluator/owner feasibility 只消费该授权；complete rejection 必须是可修正一次或明确终态。N1～N8 代码/本地门禁已完成；剩余 real-provider 双 activation 与三态 deployed restart 依赖外部 fixture，不阻塞代码收口。旧 R4/P0～P6/A-4 仅是 archive 回归基线，不得定义当前顺序。 | [唯一收口方案](../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md) |
 
 ### B. 运行单元架构 / 生命周期
 
@@ -60,7 +60,7 @@ matrix as separately actionable work and cannot override a newer persisted aggre
 ## Judgment
 
 - **代码主链**：Runtime V2 only；V1 authority 不再是问题来源。
-- **正向收敛基础**：既有 bootstrap/evidence/progress/diagnostic/strict-admission/request-session/C5 admission/C6 semantic replay 基座继续作为回归基线；RUNTIME-VPC 已关闭 P0～P3（含 B3 file-backed restart matrix）以及 P4-A 的 File/Git/Shell prerequisite/restart 证明；当前唯一执行 Q1/A-4 可达 owner inventory，之后严格 A-5 → P4-B/C/D → P5 → fresh live。
+- **正向收敛基础**：既有 bootstrap、CAS、sealed dispatch、receipt/evidence 与 terminal delivery 继续是回归基线；N1～N8 代码收口已完成：sealed authorization、三种 TargetPolicy、admissibility 编译、独立预算、manifest-only renderer/decoder、correctable_once/rejected_final、统一 owner feasibility、五类结果 persistence/recovery、legacy 清零，以及 selector-only MCP inventory 不强制 targetRefs。本地 L1～L5、`make release-check`、`verify-runtime-v2-positive-convergence-file`、managed `verify-ci-mvp-file`、`verify-runtime-v2-p6-scripted` 已通过。剩余 real-provider 双 activation 与三态 deployed restart 需外部部署 fixture（与 ARCH-1 同类 observation residual）。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；不得再从已归档 plan 推导实现约束。
 - **Active roadmap**：RUNTIME-VPC、ARCH-1、OPS-1（+ 可选 OPT-1）；RCA-1、RPF 和 RPA-1 的历史 completion record 均归 archive，但不得覆盖新的 deployed 反证。
 - **清理原则**：失效主链叙述、重复 audit、过程日记、live 产物一律归档或出库，不在 active 保留“假活跃”项。

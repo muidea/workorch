@@ -3737,7 +3737,7 @@ func TestRuntimeV2FileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 				t.Fatal(err)
 			}
 			candidateContext := runtimecontract.RuntimeCandidateContextForDecision(final.Facts, final.Decision, nil)
-			manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(final.Decision, candidateContext.Resources.TargetSelection)
+			manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(final.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3773,7 +3773,6 @@ func TestRuntimeV2FileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 			if invalidated.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(invalidated.Facts.Resources.TargetSnapshots) != 0 ||
 				len(invalidated.Facts.Resources.PrerequisiteObservations) != 1 || len(invalidated.Facts.Prerequisites.Pending) != 1 ||
 				invalidated.Facts.Prerequisites.Pending[0].ID != committedPrerequisite.ID || invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 ||
-				invalidated.Facts.Recovery.CapabilityStateRefreshes != invalidated.Facts.Recovery.PrerequisiteRefreshes ||
 				invalidated.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 || len(invalidated.CandidateAttempts) != 0 || invalidated.ActiveDispatch != nil ||
 				len(invalidated.CandidateRequestSessions) != 1 || invalidated.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||
 				invalidated.CandidateRequestSessions[0].LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale {
@@ -3798,7 +3797,7 @@ func TestRuntimeV2FileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 			}
 			if *staleReacquireCalls != 1 || len(reacquired.Facts.Resources.TargetSnapshots) != 1 ||
 				reacquired.Facts.Resources.TargetSnapshots[0].Content != "after\n" || len(reacquired.Facts.Resources.PrerequisiteObservations) != 2 ||
-				reacquired.Facts.Recovery.PrerequisiteRefreshes != 1 || reacquired.Facts.Recovery.CapabilityStateRefreshes != reacquired.Facts.Recovery.PrerequisiteRefreshes ||
+				reacquired.Facts.Recovery.PrerequisiteRefreshes != 1 ||
 				reacquired.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 ||
 				len(reacquired.CandidateAttempts) != 0 || reacquired.ActiveDispatch != nil {
 				t.Fatalf("fresh-process target snapshot stale reacquisition=%+v calls=%d", reacquired, *staleReacquireCalls)
@@ -4021,7 +4020,7 @@ func TestRuntimeV2FileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 				WorkspaceID: "ws-v2", RunID: "run-v2", AuthoritySnapshotID: resumed.Decision.AuthoritySnapshot.ID,
 				PrerequisiteID: committedPrerequisite.ID, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 				WorkspaceDeliverableDirectory: deliverable, RequiredKinds: committedPrerequisite.RequiredCapabilities,
-				RequiredTargetRefs: runtimev2.GroundedRepairTargets(resumed.Facts), MaxItems: resumed.Facts.ConvergencePolicy.MaxCandidateContextItems,
+				RequiredTargetRefs: runtimev2.GroundedRepairTargets(resumed.Facts), MaxItems: runtimecontract.DefaultRuntimeOwnerInventoryBudget().MaxItems,
 			})
 			if err != nil {
 				t.Fatalf("delayed duplicate File inventory query: %v", err)
@@ -4053,7 +4052,7 @@ func TestRuntimeV2FileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 				t.Fatal(err)
 			}
 			candidateContext := runtimecontract.RuntimeCandidateContextForDecision(final.Facts, final.Decision, nil)
-			manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(final.Decision, candidateContext.Resources.TargetSelection)
+			manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(final.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -4083,7 +4082,6 @@ func TestRuntimeV2FileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 			if invalidated.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(invalidated.Facts.Resources.OperationAdmissibilities) != 0 ||
 				len(invalidated.Facts.Resources.PrerequisiteObservations) != 1 || len(invalidated.Facts.Prerequisites.Pending) != 1 ||
 				invalidated.Facts.Prerequisites.Pending[0].ID != inventory.PrerequisiteID || invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 ||
-				invalidated.Facts.Recovery.CapabilityStateRefreshes != invalidated.Facts.Recovery.PrerequisiteRefreshes ||
 				invalidated.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 || len(invalidated.CandidateAttempts) != 0 || invalidated.ActiveDispatch != nil ||
 				len(invalidated.CandidateRequestSessions) != 1 || invalidated.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||
 				invalidated.CandidateRequestSessions[0].LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale {
@@ -4109,7 +4107,6 @@ func TestRuntimeV2FileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 			if *staleReacquireCalls != 1 || len(reacquired.Facts.Resources.OperationAdmissibilities) != 1 ||
 				reacquired.Facts.Resources.OperationAdmissibilities[0].ObservedRevision == inventory.ObservedRevision ||
 				len(reacquired.Facts.Resources.PrerequisiteObservations) != 2 || reacquired.Facts.Recovery.PrerequisiteRefreshes != 1 ||
-				reacquired.Facts.Recovery.CapabilityStateRefreshes != reacquired.Facts.Recovery.PrerequisiteRefreshes ||
 				reacquired.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 || len(reacquired.CandidateAttempts) != 0 || reacquired.ActiveDispatch != nil {
 				t.Fatalf("fresh-process File inventory stale reacquisition=%+v calls=%d", reacquired, *staleReacquireCalls)
 			}
@@ -4348,7 +4345,7 @@ func TestRuntimeV2FileBackedGitAdmissibilityCommitCrashRestart(t *testing.T) {
 				WorkspaceID: "ws-v2", RunID: "run-v2", AuthoritySnapshotID: resumed.Decision.AuthoritySnapshot.ID,
 				PrerequisiteID: committedPrerequisite.ID, OwnerModuleID: runtimecontract.RuntimeModuleGit,
 				WorkspaceDeliverableDirectory: deliverable, RequiredKinds: committedPrerequisite.RequiredCapabilities,
-				CapabilityStateBinding: inventory.AcquisitionBinding, MaxItems: resumed.Facts.ConvergencePolicy.MaxCandidateContextItems,
+				CapabilityStateBinding: inventory.AcquisitionBinding, MaxItems: runtimecontract.DefaultRuntimeOwnerInventoryBudget().MaxItems,
 			})
 			if err != nil {
 				t.Fatalf("delayed duplicate Git inventory query: %v", err)
@@ -4373,7 +4370,7 @@ func TestRuntimeV2FileBackedGitAdmissibilityCommitCrashRestart(t *testing.T) {
 			}
 
 			candidateContext := runtimecontract.RuntimeCandidateContextForDecision(final.Facts, final.Decision, nil)
-			manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(final.Decision, candidateContext.Resources.TargetSelection)
+			manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(final.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -4687,7 +4684,7 @@ func TestRuntimeV2FileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 				WorkspaceID: "ws-v2", RunID: "run-v2", AuthoritySnapshotID: resumed.Decision.AuthoritySnapshot.ID,
 				PrerequisiteID: committedPrerequisite.ID, OwnerModuleID: runtimecontract.RuntimeModuleShell,
 				WorkspaceDeliverableDirectory: deliverable, RequiredKinds: committedPrerequisite.RequiredCapabilities,
-				RequiredTargetRefs: runtimev2.GroundedRepairTargets(resumed.Facts), MaxItems: resumed.Facts.ConvergencePolicy.MaxCandidateContextItems,
+				RequiredTargetRefs: runtimev2.GroundedRepairTargets(resumed.Facts), MaxItems: runtimecontract.DefaultRuntimeOwnerInventoryBudget().MaxItems,
 			})
 			if err != nil {
 				t.Fatalf("delayed duplicate Shell inventory query: %v", err)
@@ -4725,7 +4722,7 @@ func TestRuntimeV2FileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 				t.Fatal(err)
 			}
 			candidateContext := runtimecontract.RuntimeCandidateContextForDecision(final.Facts, final.Decision, nil)
-			manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(final.Decision, candidateContext.Resources.TargetSelection)
+			manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(final.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -4791,7 +4788,7 @@ func TestRuntimeV2FileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 				t.Fatalf("Shell inventory observation has no Shell policy dependency: %+v", reacquiredObservation)
 			}
 			candidateContext = runtimecontract.RuntimeCandidateContextForDecision(reacquired.Facts, reacquired.Decision, nil)
-			manifest, err = runtimecontract.BuildRuntimeCandidateContractManifest(reacquired.Decision, candidateContext.Resources.TargetSelection)
+			manifest, err = runtimecontract.BuildRuntimeCandidateContractManifest(reacquired.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -5106,7 +5103,7 @@ func runRuntimeV2FileBackedAdmissibilityThreeOwnerRestart(t *testing.T, staleCas
 			WorkspaceID: "ws-v2", RunID: "run-v2", AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID,
 			PrerequisiteID: prerequisite.ID, OwnerModuleID: owner, WorkspaceDeliverableDirectory: deliverable,
 			RequiredKinds: prerequisite.RequiredCapabilities, RequiredTargetRefs: runtimev2.GroundedRepairTargets(aggregate.Facts),
-			CapabilityStateBinding: inventory.AcquisitionBinding, MaxItems: aggregate.Facts.ConvergencePolicy.MaxCandidateContextItems,
+			CapabilityStateBinding: inventory.AcquisitionBinding, MaxItems: runtimecontract.DefaultRuntimeOwnerInventoryBudget().MaxItems,
 		})
 		if err != nil {
 			t.Fatalf("delayed duplicate %s inventory query: %v", owner, err)
@@ -8113,7 +8110,7 @@ func TestRuntimeV2FileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *
 				stopProcess(first)
 				t.Fatalf("suspended governance binding=%+v", binding)
 			}
-			manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(waiting.Decision, nil)
+			manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(waiting.Decision, runtimecontract.RuntimeCandidateManifestOwnerFacts{})
 			if err != nil {
 				stopProcess(first)
 				t.Fatal(err)
@@ -9064,7 +9061,7 @@ func TestRequestAndSealRuntimeV2CandidateRestartsFromPersistedOutputChunk(t *tes
 	}
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
 	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(initialized.Facts, initialized.Decision, nil)
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(initialized.Decision, candidateContext.Resources.TargetSelection)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(initialized.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -9142,7 +9139,7 @@ func TestRuntimeV2FileBackedCompleteDocumentRestartAdmitsWithoutProviderReplay(t
 	}
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
 	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(initialized.Facts, initialized.Decision, nil)
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(initialized.Decision, candidateContext.Resources.TargetSelection)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(initialized.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -9254,7 +9251,7 @@ func TestRuntimeV2FileBackedPrepareRestartSubmitsOnce(t *testing.T) {
 	}
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
 	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(initialized.Facts, initialized.Decision, nil)
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(initialized.Decision, candidateContext.Resources.TargetSelection)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(initialized.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -9357,7 +9354,7 @@ func TestRuntimeV2FileBackedSubmittedCandidateRestartDoesNotReplayProvider(t *te
 	}
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
 	context := runtimecontract.RuntimeCandidateContextForDecision(initialized.Facts, initialized.Decision, nil)
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(initialized.Decision, context.Resources.TargetSelection)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(initialized.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(context.Resources))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -9468,7 +9465,7 @@ func TestRuntimeV2FileBackedStaleCompleteSessionInvalidatesBeforeCandidateReuse(
 	}
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
 	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(initialized.Facts, initialized.Decision, nil)
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(initialized.Decision, candidateContext.Resources.TargetSelection)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(initialized.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -9642,7 +9639,7 @@ func TestRequestAndSealRuntimeV2CandidateTerminatesUnknownSubmittedRequestWithou
 	}
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
 	context := runtimecontract.RuntimeCandidateContextForDecision(initialized.Facts, initialized.Decision, nil)
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(initialized.Decision, context.Resources.TargetSelection)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(initialized.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(context.Resources))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -9695,7 +9692,7 @@ func TestRequestAndSealRuntimeV2CandidateFailsCompleteDocumentContentDefectWitho
 	}
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
 	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(initialized.Facts, initialized.Decision, nil)
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(initialized.Decision, candidateContext.Resources.TargetSelection)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(initialized.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
 	if err != nil {
 		t.Fatal(err)
 	}

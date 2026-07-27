@@ -36,7 +36,7 @@ func PreflightRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command 
 	if err := command.CandidateContext.Validate(command.Decision); err != nil {
 		return orchestratorevents.PreflightRuntimeCandidateResult{}, err
 	}
-	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(command.CandidateManifest, command.Decision, command.CandidateContext.Resources.TargetSelection); err != nil {
+	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(command.CandidateManifest, command.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(command.CandidateContext.Resources)); err != nil {
 		return orchestratorevents.PreflightRuntimeCandidateResult{}, err
 	}
 	if err := validateRuntimeCandidateRetryContract(command.CandidateAttempt, command.PreviousFailure); err != nil {
@@ -102,7 +102,7 @@ func RequestRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command or
 	if err := command.CandidateContext.Validate(command.Decision); err != nil {
 		return orchestratorevents.RequestRuntimeCandidateResult{}, err
 	}
-	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(command.CandidateManifest, command.Decision, command.CandidateContext.Resources.TargetSelection); err != nil {
+	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(command.CandidateManifest, command.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(command.CandidateContext.Resources)); err != nil {
 		return orchestratorevents.RequestRuntimeCandidateResult{}, err
 	}
 	if command.OutputContinuation != nil {

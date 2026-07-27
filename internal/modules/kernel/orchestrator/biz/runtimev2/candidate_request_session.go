@@ -284,8 +284,7 @@ func candidateRequestSessionActionAllowed(aggregate RuntimeAggregate) error {
 // pure authority projection; this function only proves that the caller is
 // using the persisted document/session that carried that exact projection.
 func validateCandidateAttemptSessionBinding(aggregate RuntimeAggregate, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string) error {
-	selection := currentFocusTargetSelection(aggregate.Facts)
-	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, selection); err != nil {
+	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(aggregate.Facts.Resources)); err != nil {
 		return fmt.Errorf("%w: candidate manifest does not match current sealed authority: %v", common.ErrConflict, err)
 	}
 	_, session, found := runtimeCandidateRequestSessionByID(aggregate.CandidateRequestSessions, logicalRequestID)

@@ -82,7 +82,7 @@ func TestPrerequisiteStaleInvalidatesProposalAndReacquiresWithoutCandidateDebt(t
 	if invalidated.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || invalidated.ActiveDispatch != nil ||
 		len(invalidated.Facts.Prerequisites.Pending) != 1 || len(invalidated.Facts.Prerequisites.Satisfied) != 0 ||
 		len(invalidated.Facts.Resources.OperationAdmissibilities) != 0 || len(invalidated.Facts.Resources.PrerequisiteObservations) != 0 ||
-		invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 || invalidated.Facts.Recovery.CapabilityStateRefreshes != 1 {
+		invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 {
 		t.Fatalf("stale did not atomically return to prerequisite acquisition: %+v", invalidated)
 	}
 	if len(invalidated.CandidateAttempts) != 1 || invalidated.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated ||

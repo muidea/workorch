@@ -944,7 +944,7 @@ func TestRuntimeControllerReopensInvalidatedAttemptZeroWithoutCandidateDebt(t *t
 	}
 
 	beforeRevision := aggregate.StateRevision
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, currentFocusTargetSelection(aggregate.Facts))
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources((aggregate.Facts).Resources))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1059,18 +1059,24 @@ func TestRuntimeControllerCandidateExhaustionWithGovernanceCapabilityIsTerminal(
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProvider, Reason: "provider unavailable"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err != nil {
-		t.Fatal(err)
-	}
-	terminal, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProvider, Reason: "provider still unavailable"})
+	// N6: provider-class complete rejection is rejected_final. Attempt 0 must
+	// seal terminal in the same CAS; governance capability must not open a
+	// correction attempt or governance ticket for it. Reducer maps the
+	// misalignment FailureFact class to terminal code runtime_contract_defect
+	// while preserving the sealed provider code on the attempt/fact.
+	terminal, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProvider, Reason: "provider unavailable"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "candidate_retry_exhausted" {
-		t.Fatalf("terminal decision = %+v", terminal.Decision)
+	if terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "runtime_contract_defect" ||
+		terminal.Facts.Failure == nil || terminal.Facts.Failure.Code != "provider" ||
+		len(terminal.CandidateAttempts) != 1 || terminal.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed ||
+		terminal.CandidateAttempts[0].Failure == nil || terminal.CandidateAttempts[0].Failure.Code != "provider" ||
+		len(terminal.GovernanceRequests) != 0 || terminal.ActiveDispatch != nil {
+		t.Fatalf("rejected_final provider failure = action=%s terminal=%+v fact=%+v attempt=%+v gov=%d", terminal.Decision.Action, terminal.Decision.Terminal, terminal.Facts.Failure, terminal.CandidateAttempts, len(terminal.GovernanceRequests))
+	}
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("attempt 1 after rejected_final err=%v, want conflict", err)
 	}
 }
 

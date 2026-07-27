@@ -813,7 +813,7 @@ func sealCandidateForTest(t *testing.T, repository *durableRuntimeStateRepositor
 		t.Fatal(err)
 	}
 	transaction := aggregate.Decision.AuthorityTransaction()
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, currentFocusTargetSelection(aggregate.Facts))
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources((aggregate.Facts).Resources))
 	if err != nil {
 		t.Fatal(err)
 	}

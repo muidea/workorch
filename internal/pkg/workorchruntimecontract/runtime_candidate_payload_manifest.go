@@ -365,6 +365,16 @@ func validateRuntimeCandidatePayloadOperation(manifest RuntimeCandidateContractM
 	if operationManifest.RequireTargetRefs && len(operation.TargetRefs) == 0 {
 		return &RuntimeCandidatePayloadDiagnostic{Path: path + ".targetRefs", Actual: "missing_targetRefs", Required: []string{"targetRefs"}, Allowed: operationManifest.AllowedOperationFields}
 	}
+	switch operationManifest.Target.Normalized().Policy {
+	case RuntimeOperationTargetPolicyExactTarget, RuntimeOperationTargetPolicyProspectiveOwnerTarget:
+		if allowedTargets := operationManifest.Target.AllowedTargetRefs(); len(allowedTargets) != 0 {
+			for _, targetRef := range operation.TargetRefs {
+				if !runtimeCandidatePayloadContains(allowedTargets, targetRef) {
+					return &RuntimeCandidatePayloadDiagnostic{Path: path + ".targetRefs", Actual: targetRef, Allowed: allowedTargets}
+				}
+			}
+		}
+	}
 	if !runtimeCandidatePayloadContains(operationManifest.AllowedOperationFields, "dependsOn") {
 		if _, found := raw["dependsOn"]; found {
 			return &RuntimeCandidatePayloadDiagnostic{Path: path + ".dependsOn", Actual: "dependsOn", Allowed: operationManifest.AllowedOperationFields}

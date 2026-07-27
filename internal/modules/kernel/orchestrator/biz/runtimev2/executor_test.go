@@ -177,6 +177,9 @@ func TestRuntimeControllerExecutesDependencyOrderedOperationsAndCommitsEvidence(
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
 	facts := controllerFacts()
+	// multiOperationCandidate writes a.txt/b.txt; do not seal an unrelated exact
+	// target from the default controller fixture into the candidate manifest.
+	facts.Focus.TargetRefs = nil
 	facts.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{{ID: "policy-1", AppliesTo: runtimecontract.StepKindFileEdit}}
 	aggregate, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
@@ -208,7 +211,9 @@ func TestRuntimeControllerExecutesDependencyOrderedOperationsAndCommitsEvidence(
 func TestRuntimeControllerStopsDispatchAfterRejectedOperation(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	aggregate, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	facts := controllerFacts()
+	facts.Focus.TargetRefs = nil
+	aggregate, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

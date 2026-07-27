@@ -14,6 +14,15 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func mustRuntimeOperationAuthorizationIdentity(t *testing.T, kind string) runtimecontract.RuntimeCandidateOperationManifest {
+	t.Helper()
+	authorization, err := orchestratorevents.RuntimeOperationAuthorizationIdentity(kind)
+	if err != nil {
+		t.Fatalf("runtime operation authorization identity for %q: %v", kind, err)
+	}
+	return authorization
+}
+
 func TestWebAdmissibilityObservationReturnsTypedConfigurationStale(t *testing.T) {
 	inventory := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "admissibility-web", OwnerModuleID: ModuleID, OperationKinds: []string{StepKindSearch}, SelectorRefs: []string{"provider-a"}, ObservedRevision: "providers-v1"}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
@@ -81,6 +90,7 @@ func sendWebFeasibilityProbe(t *testing.T, ctx context.Context, hub magicevent.H
 			WorkspaceID: "ws-web-freshness", RunID: "run-web-freshness",
 			Transaction:                   runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-web-freshness"},
 			WorkspaceDeliverableDirectory: t.TempDir(), Admissibility: inventory, Observation: &observation,
+			CandidateManifestHash: "manifest-web-freshness", OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, StepKindSearch),
 			Operation: runtimecontract.RuntimeOperation{ID: "web-search", Kind: StepKindSearch, Parameters: []runtimecontract.OperationParameter{{Name: "query", String: &query}}},
 		},
 	))

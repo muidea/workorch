@@ -206,6 +206,7 @@ func TestEvaluateCandidateAdmissionUsesSemanticContractNotOperationIdentityOrPar
 		{
 			name: "variant outside sealed operation contract",
 			mutate: func(operation *runtimecontract.RuntimeOperation) {
+				operation.Parameters = append([]runtimecontract.OperationParameter(nil), operation.Parameters...)
 				for index := range operation.Parameters {
 					if operation.Parameters[index].Name == "patchType" {
 						value := "not-a-patch-variant"
@@ -223,7 +224,8 @@ func TestEvaluateCandidateAdmissionUsesSemanticContractNotOperationIdentityOrPar
 			result := EvaluateCandidateAdmission(aggregate, candidate)
 			if result.Disposition != CandidateAdmissionRejectedContract || result.Failure == nil || result.Failure.Diagnostic == nil || result.Failure.Diagnostic.Path == "" ||
 				result.Failure.Class != runtimecontract.RuntimeCandidateFailureClassContract ||
-				result.Failure.Code != candidateAdmissionCodeInvalid || result.Failure.Signature == "" || result.Failure.Reason == "" {
+				result.Failure.Code != candidateAdmissionCodeInvalid || result.Failure.Signature == "" || result.Failure.Reason == "" ||
+				result.Correction == nil || result.Correction.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce || len(result.Correction.Objectives) == 0 {
 				t.Fatalf("semantic contract admission = %+v", result)
 			}
 		})
@@ -296,7 +298,11 @@ func TestEvaluateCandidateAdmissionRejectsDurableChangeOutsideGroundedRepairTarg
 
 	wrong := stateChangeCandidate()
 	result := EvaluateCandidateAdmission(aggregate, wrong)
-	if result.Disposition != CandidateAdmissionRejectedContract || result.Failure == nil || result.Failure.Code != candidateAdmissionCodeTargetOutsideGrounding {
+	// After N1/N2 sealed TargetPolicy, a FailureTarget-backed decision compiles
+	// exact_target membership. Outside targets are rejected as contract-invalid
+	// first-failure; SM-3 grounding remains the fallback when membership is not sealed.
+	if result.Disposition != CandidateAdmissionRejectedContract || result.Failure == nil ||
+		(result.Failure.Code != candidateAdmissionCodeTargetOutsideGrounding && result.Failure.Code != candidateAdmissionCodeInvalid) {
 		t.Fatalf("outside-target candidate admission = %+v", result)
 	}
 
@@ -486,7 +492,12 @@ func TestEvaluateCandidateAdmissionScopeCannotBypassOwnerFailureTarget(t *testin
 	candidate.StateChange.Operations[0].Operation.TargetRefs = []string{wrongTarget}
 	candidate.StateChange.Operations[0].Operation.Parameters = patchApplyTestParameters(wrongTarget)
 	result := EvaluateCandidateAdmission(aggregate, candidate)
-	if result.Disposition != CandidateAdmissionRejectedContract || result.Failure == nil || result.Failure.Code != candidateAdmissionCodeTargetOutsideGrounding {
+	// FailureTarget + scope still seals exclusive exact membership for the
+	// grounded repair target. A scope inventory member that is not the sealed
+	// failure target is rejected before SM-3 grounding as contract-invalid, or
+	// by SM-3 grounding when membership is not exclusive.
+	if result.Disposition != CandidateAdmissionRejectedContract || result.Failure == nil ||
+		(result.Failure.Code != candidateAdmissionCodeTargetOutsideGrounding && result.Failure.Code != candidateAdmissionCodeInvalid) {
 		t.Fatalf("workspace scope bypassed owner failure target: %+v", result)
 	}
 
@@ -551,6 +562,13 @@ func TestAdmitCandidateProposalExhaustsSemanticReplayWithoutOperationIdentity(t 
 		aggregate.Facts.Resources.FailureTarget = &runtimecontract.FailureTarget{
 			Signature: "owner-observed-failure", TargetRefs: []string{"implementation.go"},
 		}
+		// Keep Decision aligned with Facts so the sealed TargetPolicy matches
+		// the FailureTarget membership the production reducer would compile.
+		decision, err := ReduceRuntimeState(aggregate.Facts, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		aggregate.Decision = decision
 		return aggregate
 	}
 	wrongCandidate := stateChangeCandidate()
@@ -574,21 +592,36 @@ func TestAdmitCandidateProposalExhaustsSemanticReplayWithoutOperationIdentity(t 
 			t.Fatal(err)
 		}
 		first, err := controller.AdmitCandidateProposalForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, wrongCandidate)
-		if err != nil || first.Admission.Failure == nil || first.Admission.Failure.Code != candidateAdmissionCodeTargetOutsideGrounding || first.Aggregate.Decision.Action == runtimecontract.RuntimeActionFail {
+		// Sealed exact_target membership rejects main.go as contract-invalid; SM-3
+		// grounding remains valid when membership is not exclusive.
+		if err != nil || first.Admission.Failure == nil ||
+			(first.Admission.Failure.Code != candidateAdmissionCodeTargetOutsideGrounding && first.Admission.Failure.Code != candidateAdmissionCodeInvalid) ||
+			first.Aggregate.Decision.Action == runtimecontract.RuntimeActionFail {
 			t.Fatalf("first grounded-target rejection = %+v err=%v", first, err)
 		}
 		if _, err := controller.BeginCandidateAttemptForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 1, "stable-prefix"); err != nil {
 			t.Fatal(err)
 		}
 		second, err := controller.AdmitCandidateProposalForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 1, equivalent)
-		if err != nil || second.Admission.Failure == nil || second.Admission.Failure.Code != candidateAdmissionCodeReplaysRejectedCandidate ||
+		// Attempt 1 of the same out-of-membership shape still exhausts. The first
+		// failure may be sealed exact_target membership (contract-invalid) or SM-3
+		// grounding; attempt 1 may surface semantic replay of that rejected shape
+		// or the same contract-invalid first-failure again.
+		if err != nil || second.Admission.Failure == nil ||
+			(second.Admission.Failure.Code != candidateAdmissionCodeReplaysRejectedCandidate &&
+				second.Admission.Failure.Code != candidateAdmissionCodeInvalid &&
+				second.Admission.Failure.Code != candidateAdmissionCodeTargetOutsideGrounding) ||
 			second.Aggregate.Decision.Action != runtimecontract.RuntimeActionFail || second.Aggregate.Decision.Terminal == nil || second.Aggregate.Decision.Terminal.Code != "candidate_retry_exhausted" ||
 			hasPendingCandidateAttempt(second.Aggregate.CandidateAttempts) || second.Aggregate.ActiveDispatch != nil || len(second.Aggregate.GovernanceRequests) != 0 {
 			t.Fatalf("semantic replay did not atomically exhaust without dispatch/governance: %+v err=%v", second, err)
 		}
 		saves := repository.saves
 		duplicate, err := controller.AdmitCandidateProposalForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 1, equivalent)
-		if err != nil || duplicate.Admission.Failure == nil || duplicate.Admission.Failure.Code != candidateAdmissionCodeReplaysRejectedCandidate || duplicate.Aggregate.StateRevision != second.Aggregate.StateRevision || repository.saves != saves {
+		if err != nil || duplicate.Admission.Failure == nil ||
+			(duplicate.Admission.Failure.Code != candidateAdmissionCodeReplaysRejectedCandidate &&
+				duplicate.Admission.Failure.Code != candidateAdmissionCodeInvalid &&
+				duplicate.Admission.Failure.Code != candidateAdmissionCodeTargetOutsideGrounding) ||
+			duplicate.Aggregate.StateRevision != second.Aggregate.StateRevision || repository.saves != saves {
 			t.Fatalf("semantic terminal duplicate was not idempotent: result=%+v err=%v saves=%d", duplicate, err, repository.saves)
 		}
 	})

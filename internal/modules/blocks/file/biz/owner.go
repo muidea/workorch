@@ -450,23 +450,23 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 
 func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {
 	command, ok := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
-	if !ok || m.runtimeAdapter == nil || command.WorkspaceID == "" || command.RunID == "" || command.Transaction.AuthoritySnapshotID == "" || command.WorkspaceDeliverableDirectory == "" {
+	if !ok || m.runtimeAdapter == nil {
 		setPrerequisiteError(result, common.ErrInvalidArgument)
+		return
+	}
+	if err := orchestratorevents.ValidateRuntimeOperationFeasibilityCommand(command, ModuleID); err != nil {
+		setPrerequisiteError(result, err)
 		return
 	}
 	operation := command.Operation.Normalized()
-	descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
-	if !known || descriptor.OwnerModuleID != ModuleID || command.Admissibility.OwnerModuleID != ModuleID {
-		setPrerequisiteError(result, common.ErrInvalidArgument)
-		return
-	}
 	failure, stale, replayProof := m.runtimeAdapter.ProbeRuntimeOperationFeasibilityWithReplayProof(command.WorkspaceDeliverableDirectory, command.Admissibility, operation, command.Observation)
 	prerequisiteRequest := fileOperationSnapshotPrerequisiteRequest(operation, failure, command.CurrentTargetSnapshot)
-	result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{
-		OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID,
-		CapabilityStateBinding: command.Admissibility.AcquisitionBinding,
-		Feasible:               failure == nil && stale == nil, ReplayProof: replayProof, Failure: failure, Stale: stale, PrerequisiteRequest: prerequisiteRequest,
-	}, nil)
+	observation, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, failure == nil && stale == nil && prerequisiteRequest == nil, failure, stale, prerequisiteRequest, replayProof)
+	if err != nil {
+		setPrerequisiteError(result, err)
+		return
+	}
+	result.Set(observation, nil)
 }
 
 func (m *Biz) handleAcquireWorkspaceManifest(event magicevent.Event, result magicevent.Result) {

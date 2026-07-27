@@ -260,8 +260,6 @@ func reduceDeterminedFailure(base runtimecontract.RuntimeDecision, facts runtime
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "provider_submission_unknown", failure.Message), true, nil
 	case runtimecontract.FailureClassCandidateExhausted:
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "candidate_retry_exhausted", failure.Message), true, nil
-	case runtimecontract.FailureClassCandidateCorrectionUndefined:
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "candidate_correction_undefined", failure.Message), true, nil
 	case runtimecontract.FailureClassCandidateOutputExhausted:
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "candidate_output_continuation_exhausted", failure.Message), true, nil
 	case runtimecontract.FailureClassPrerequisiteRefreshExhausted:

@@ -89,11 +89,23 @@ func ProbeRuntimeOperationFeasibility(ctx context.Context, hub magicevent.Hub, c
 	if err := inventory.Validate(); err != nil {
 		return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, err
 	}
+	// N5: sealed candidate identity is required on the wire before any owner
+	// private probe. Owners re-validate the same fields and never rebuild them.
+	if err := orchestratorevents.ValidateRuntimeOperationFeasibilityCommand(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand{
+		WorkspaceID: command.WorkspaceID, RunID: command.RunID, Transaction: command.Transaction,
+		WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory, Operation: operation, Admissibility: inventory,
+		CapabilityStateBinding: command.CapabilityStateBinding, CandidateManifestHash: command.CandidateManifestHash,
+		OperationAuthorization: command.OperationAuthorization,
+	}, descriptor.OwnerModuleID); err != nil {
+		return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	command.Operation = operation
 	command.Admissibility = inventory
+	command.CandidateManifestHash = strings.TrimSpace(command.CandidateManifestHash)
+	command.OperationAuthorization = command.OperationAuthorization.Normalized()
 	if command.Observation != nil {
 		observation := command.Observation.Normalized()
 		if observation.PrerequisiteID != inventory.PrerequisiteID || observation.Kind != runtimecontract.PrerequisiteKindOperationAdmissibility || observation.OwnerModuleID != inventory.OwnerModuleID {
@@ -134,6 +146,14 @@ func ProbeRuntimeOperationFeasibility(ctx context.Context, hub magicevent.Hub, c
 	response, ok := data.(orchestratorevents.ProbeRuntimeOperationFeasibilityResult)
 	if !ok || response.OperationID != operation.ID || response.AdmissibilitySnapshotID != inventory.SnapshotID || response.CapabilityStateBinding != inventory.AcquisitionBinding {
 		return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("runtime operation feasibility probe returned an invalid result")
+	}
+	if response.CandidateManifestHash != "" && response.CandidateManifestHash != command.CandidateManifestHash {
+		return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("runtime operation feasibility probe returned mismatched candidate manifest hash")
+	}
+	if normalized, err := orchestratorevents.NormalizeProbeRuntimeOperationFeasibilityResult(response); err != nil {
+		return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, err
+	} else {
+		response = normalized
 	}
 	if response.Feasible {
 		if response.Failure != nil || response.Stale != nil || response.PrerequisiteRequest != nil {

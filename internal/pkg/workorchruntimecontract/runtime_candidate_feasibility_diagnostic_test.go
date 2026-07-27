@@ -17,7 +17,7 @@ func TestRuntimeCandidateFailureDiagnosticForFeasibilityUsesOnlySealedFacts(t *t
 	decision := RuntimeDecision{Action: RuntimeActionProduceStateChange, RequiredOutput: RequiredOutputContract{
 		Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{StepKindFileEdit}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"coverage"},
 	}}
-	manifest, err := BuildRuntimeCandidateContractManifest(decision, nil)
+	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestRuntimeCandidateFailureDiagnosticForFeasibilityHasNoTargetObjectiveWith
 	target := "directory"
 	candidate := RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{Operation: RuntimeOperation{ID: "edit-directory", Kind: StepKindFileEdit, TargetRefs: []string{target}}}}}}
 	decision := RuntimeDecision{Action: RuntimeActionProduceStateChange, RequiredOutput: RequiredOutputContract{Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{StepKindFileEdit}}}
-	manifest, err := BuildRuntimeCandidateContractManifest(decision, nil)
+	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestRuntimeCandidateFeasibilityCorrectionRoundTripsSameManifest(t *testing.
 	decision := RuntimeDecision{Action: RuntimeActionProduceStateChange, RequiredOutput: RequiredOutputContract{
 		Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{StepKindFileEdit}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"coverage"},
 	}}
-	manifest, err := BuildRuntimeCandidateContractManifest(decision, nil)
+	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{})
 	if err != nil {
 		t.Fatal(err)
 	}

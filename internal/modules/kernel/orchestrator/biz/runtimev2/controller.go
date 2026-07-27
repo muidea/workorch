@@ -415,6 +415,12 @@ func (c *RuntimeController) BeginCandidateAttempt(ctx context.Context, workspace
 		if !ok || first.State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.StablePrefixHash != stablePrefixHash || first.ManifestHash != manifest.Hash || !runtimecontract.SameAuthorityContract(first.Transaction, transaction) {
 			return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt 1 requires a failed same-contract attempt 0", common.ErrConflict)
 		}
+		// N6: the attempt-1 CAS entry itself is the correction budget fence.
+		// rejected_final / non-correctable attempt 0 must not open a second
+		// provider session even when callers bypass mainline routing.
+		if first.Failure == nil || !runtimecontract.RuntimeCandidateFailureIsCorrectableOnce(first.Failure) {
+			return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt 1 requires a sealed correctable_once attempt 0 failure", common.ErrConflict)
+		}
 	}
 	expectedRevision := aggregate.StateRevision
 	aggregate.CandidateAttempts = append(aggregate.CandidateAttempts, runtimecontract.RuntimeCandidateAttemptRecord{
@@ -674,7 +680,7 @@ func (c *RuntimeController) SealGovernanceDispatch(ctx context.Context, workspac
 	if aggregate.Decision.Action != runtimecontract.RuntimeActionRequestGovernance || aggregate.ActiveDispatch != nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime authority cannot seal governance", common.ErrConflict)
 	}
-	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, currentFocusTargetSelection(aggregate.Facts)); err != nil {
+	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources((aggregate.Facts).Resources)); err != nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: governance manifest does not match sealed authority: %v", common.ErrConflict, err)
 	}
 	if candidate.Governance == nil || candidate.ValidateWithActivation(aggregate.Decision, aggregate.Facts.Activation) != nil {
@@ -908,8 +914,49 @@ func closeCandidateAttempt(aggregate *RuntimeAggregate, idx, attempt int, failur
 			diagnostic.ManifestHash = aggregate.CandidateAttempts[idx].ManifestHash
 		}
 		failure.Diagnostic = &diagnostic
-		if len(failure.Diagnostic.Objectives) == 0 {
-			failure.Diagnostic.Objectives = runtimecontract.RuntimeCandidateCorrectionObjectivesForFailure(&failure)
+	}
+	// N4: every complete rejection is sealed as correctable_once or rejected_final
+	// before it is persisted on the attempt record. Bare Class/Reason fixtures are
+	// normalized to a matrix code first so attempt 0 schema/contract failures stay
+	// correctable instead of becoming an internal terminal defect.
+	if strings.TrimSpace(failure.Code) == "" {
+		switch failure.Class {
+		case runtimecontract.RuntimeCandidateFailureClassSchema:
+			failure.Code = "candidate_schema_invalid"
+		case runtimecontract.RuntimeCandidateFailureClassContract:
+			failure.Code = "candidate_contract_invalid"
+		case runtimecontract.RuntimeCandidateFailureClassInfeasible:
+			failure.Code = "operation_target_not_regular"
+		case runtimecontract.RuntimeCandidateFailureClassInternal:
+			failure.Code = "runtime_contract_defect"
+		default:
+			// provider/transient classes remain non-correctable finals below.
+			failure.Code = strings.TrimSpace(string(failure.Class))
+		}
+	}
+	if strings.TrimSpace(failure.Signature) == "" {
+		failure.Signature = failure.Code
+	}
+	manifest := runtimecontract.RuntimeCandidateContractManifest{Hash: aggregate.CandidateAttempts[idx].ManifestHash}
+	originalCode := strings.TrimSpace(failure.Code)
+	originalClass := failure.Class
+	if sealed, directive, sealErr := runtimecontract.SealRuntimeCandidateRejection(&failure, manifest); sealErr == nil && sealed != nil {
+		// Attempt 0 must keep the first-failure code stable for diagnostics and
+		// attempt-1 gating. Seal may rewrite an incomplete correctable into
+		// runtime_contract_defect; that rewrite is only forced onto the attempt
+		// record for attempt 1 / already-final codes. Attempt 0 still persists
+		// objectives (or the lack of them) so IsCorrectableOnce can refuse retry.
+		if attempt == 1 || sealed.Code == originalCode || originalCode == "runtime_contract_defect" ||
+			runtimecontract.RuntimeCandidateFailureIsRejectedFinal(&runtimecontract.RuntimeCandidateFailure{Code: originalCode}) {
+			failure = *sealed
+		} else {
+			failure.Diagnostic = sealed.Diagnostic
+			if failure.Diagnostic == nil && sealed.Diagnostic != nil {
+				failure.Diagnostic = sealed.Diagnostic.Clone()
+			}
+			// Preserve original class/code; empty objectives make attempt 1 refuse.
+			_ = directive
+			_ = originalClass
 		}
 	}
 	needsInfeasibleRepair := failure.Class == runtimecontract.RuntimeCandidateFailureClassInfeasible &&
@@ -964,6 +1011,28 @@ func closeCandidateAttempt(aggregate *RuntimeAggregate, idx, attempt int, failur
 		aggregate.Facts.Failure = &runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassCandidateExhausted, Code: "candidate_retry_exhausted",
 			Signature: "candidate-retry-exhausted", Message: failure.Reason,
+		}
+		needsReduce = true
+	} else if attempt == 0 && runtimecontract.RuntimeCandidateFailureIsRejectedFinal(&failure) {
+		// N6: explicit rejected_final attempt 0 seals terminal in the same CAS.
+		// Non-matrix / incomplete-correctable failures still rely on the attempt-1
+		// BeginCandidateAttempt + mainline fences so same-contract repair paths
+		// (for example validation infeasible without state-change policy) are not
+		// collapsed into an immediate terminal here.
+		code := runtimecontract.RuntimeCandidateRejectionTerminalCode(failure.Code)
+		if code == "" {
+			code = "runtime_contract_defect"
+		}
+		message := strings.TrimSpace(failure.Reason)
+		if message == "" {
+			message = "complete candidate rejection is rejected_final under the sealed manifest"
+		}
+		class := runtimecontract.FailureClassRuntimeContractMisalignment
+		if code == "candidate_retry_exhausted" {
+			class = runtimecontract.FailureClassCandidateExhausted
+		}
+		aggregate.Facts.Failure = &runtimecontract.FailureFact{
+			Class: class, Code: code, Signature: code, Message: message,
 		}
 		needsReduce = true
 	}

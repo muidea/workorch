@@ -117,7 +117,7 @@ func (m *Biz) resolveRuntimeV2Prerequisite(
 			// SM-2.  It must not inherit the much smaller per-request candidate
 			// context budget, otherwise a normal workspace with more files than
 			// coverage items is incorrectly reported as ambiguous.
-			MaxItems: runtimecontract.RuntimeOwnerInventoryItemsMaxCount,
+			MaxItems: runtimecontract.DefaultRuntimeOwnerInventoryBudget().MaxItems,
 		})
 		if err != nil {
 			return runtimev2.PrerequisiteResult{}, err
@@ -185,7 +185,7 @@ func (m *Biz) resolveRuntimeV2Prerequisite(
 			// In particular, it must include a file created by a prior accepted
 			// operation so the next sealed validation can read it. Candidate
 			// context compression must not remove that owner authority.
-			MaxItems: runtimecontract.RuntimeOwnerInventoryItemsMaxCount,
+			MaxItems: runtimecontract.DefaultRuntimeOwnerInventoryBudget().MaxItems,
 		})
 		if err != nil {
 			return runtimev2.PrerequisiteResult{}, err
@@ -287,7 +287,7 @@ func (m *Biz) requestAndSealRuntimeV2Candidate(
 		aggregate.Decision,
 		runtimev2.ActiveRejectedOperationShapes(aggregate),
 	)
-	manifest, manifestErr := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, candidateContext.Resources.TargetSelection)
+	manifest, manifestErr := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
 	if manifestErr != nil {
 		return m.bizPtr.RecordRuntimeV2FailureFact(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_candidate_manifest_invalid",
@@ -405,7 +405,7 @@ func (m *Biz) requestRuntimeV2CandidateDocument(
 	if err != nil {
 		return runtimev2.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
-	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, candidateContext.Resources.TargetSelection); err != nil {
+	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources)); err != nil {
 		return runtimev2.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
 	correctionHash := runtimecontract.StableRuntimeCandidateRequestCorrectionHash(previousFailure)
@@ -594,7 +594,7 @@ func (m *Biz) admitRuntimeV2CompletedCandidateDocument(ctx context.Context, aggr
 		return failed, runtimecontract.RuntimeCandidate{}, false, failureErr
 	}
 	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(pending.Facts, pending.Decision, runtimev2.ActiveRejectedOperationShapes(pending))
-	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, pending.Decision, candidateContext.Resources.TargetSelection); err != nil {
+	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, pending.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources)); err != nil {
 		return runtimev2.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
 	candidate, decodeErr := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, document)
@@ -744,10 +744,15 @@ func (m *Biz) probeRuntimeV2CandidateFeasibility(ctx context.Context, aggregate 
 		if !observed {
 			return nil, nil, nil, fmt.Errorf("candidate operation %q has no freshness observation for owner admissibility", operation.Kind)
 		}
+		authorization, authorized := runtimeV2OperationAuthorizationForKind(manifest, operation.Kind)
+		if !authorized {
+			return nil, nil, nil, fmt.Errorf("candidate operation %q has no sealed operation authorization", operation.Kind)
+		}
 		response, probeErr := ProbeRuntimeOperationFeasibility(ctx, m.EventHub(), events.ProbeRuntimeOperationFeasibilityCommand{
 			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, Transaction: aggregate.Decision.AuthorityTransaction(),
 			WorkspaceDeliverableDirectory: workspaceDirectory, Operation: operation, Admissibility: inventory,
-			CapabilityStateBinding: inventory.AcquisitionBinding, Observation: &observation,
+			CapabilityStateBinding: inventory.AcquisitionBinding, CandidateManifestHash: manifest.Hash,
+			OperationAuthorization: authorization, Observation: &observation,
 			CurrentTargetSnapshot: runtimeV2CurrentTargetSnapshot(aggregate.Facts, operation),
 		})
 		if probeErr != nil {
@@ -836,6 +841,17 @@ func runtimeV2RequiresOperationAdmissibility(state runtimecontract.PrerequisiteS
 		}
 	}
 	return false
+}
+
+func runtimeV2OperationAuthorizationForKind(manifest runtimecontract.RuntimeCandidateContractManifest, kind string) (runtimecontract.RuntimeCandidateOperationManifest, bool) {
+	manifest = manifest.Normalized()
+	kind = runtimecontract.CanonicalRuntimeBlockKind(kind)
+	for _, operation := range manifest.Operations {
+		if operation.Kind == kind {
+			return operation, true
+		}
+	}
+	return runtimecontract.RuntimeCandidateOperationManifest{}, false
 }
 
 func runtimeV2OperationAdmissibilityForKind(values []runtimecontract.RuntimeOperationAdmissibility, owner, kind string) (runtimecontract.RuntimeOperationAdmissibility, bool) {
@@ -996,10 +1012,28 @@ func (m *Biz) requestAndSealRuntimeV2CandidateWithRetry(
 			if failureErr != nil {
 				return runtimev2.RuntimeAggregate{}, failureErr
 			}
-			if len(runtimecontract.RuntimeCandidateCorrectionObjectivesForFailure(failure)) == 0 {
+			// N4: complete rejections are sealed as correctable_once or
+			// rejected_final. Missing objectives are runtime_contract_defect,
+			// never candidate_correction_undefined.
+			if !runtimecontract.RuntimeCandidateFailureIsCorrectableOnce(failure) {
+				sealed, directive, sealErr := runtimecontract.SealRuntimeCandidateRejection(failure, runtimecontract.RuntimeCandidateContractManifest{})
+				if sealErr != nil {
+					return runtimev2.RuntimeAggregate{}, sealErr
+				}
+				code := "runtime_contract_defect"
+				message := "complete candidate rejection is not correctable under the sealed manifest"
+				if directive != nil && directive.TerminalCode != "" {
+					code = directive.TerminalCode
+				}
+				if sealed != nil && strings.TrimSpace(sealed.Reason) != "" {
+					message = sealed.Reason
+				}
+				class := runtimecontract.FailureClassRuntimeContractMisalignment
+				if code == "candidate_retry_exhausted" {
+					class = runtimecontract.FailureClassCandidateExhausted
+				}
 				return m.bizPtr.RecordRuntimeV2FailureFact(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.FailureFact{
-					Class: runtimecontract.FailureClassCandidateCorrectionUndefined, Code: "candidate_correction_undefined",
-					Signature: "candidate-correction-undefined", Message: "complete candidate rejection has no manifest-bound correction objective",
+					Class: class, Code: code, Signature: code, Message: message,
 				})
 			}
 		}
@@ -1041,7 +1075,7 @@ func (m *Biz) sealRuntimeV2GovernanceCandidate(ctx context.Context, aggregate ru
 			Signature: "governance-dependency-missing", Message: "runtime governance requires a sealed external dependency",
 		})
 	}
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil).Resources.TargetSelection)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil).Resources))
 	if err != nil {
 		return runtimev2.RuntimeAggregate{}, err
 	}

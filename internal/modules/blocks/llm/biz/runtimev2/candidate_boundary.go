@@ -69,7 +69,7 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 		return llmmodels.RuntimeCandidateResponse{Transaction: request.Transaction, OutputFragment: &fragment, Audit: generation.Audit, Usage: generation.Usage, RequestID: generation.RequestID, Status: firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted)}, nil
 	}
 	manifest := request.CandidateManifest
-	if manifestErr := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, request.Decision, request.CandidateContext.Resources.TargetSelection); manifestErr != nil {
+	if manifestErr := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, request.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(request.CandidateContext.Resources)); manifestErr != nil {
 		return llmmodels.RuntimeCandidateResponse{
 			Transaction: request.Transaction,
 			Audit:       generation.Audit,

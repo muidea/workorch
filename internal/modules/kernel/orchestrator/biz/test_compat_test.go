@@ -84,7 +84,19 @@ func (orchestratorBizTestShim) NewRuntimeOrchestrator(
 // only as an optional assertion aid for legacy test bodies.
 func runtimeV2CandidateResultForTest(t *testing.T, command orchestratorevents.RequestRuntimeCandidateCommand, candidate runtimecontract.RuntimeCandidate) orchestratorevents.RequestRuntimeCandidateResult {
 	t.Helper()
-	document := runtimeV2CandidateDocumentForTest(t, command.CandidateManifest, candidate)
+	document, err := runtimecontract.EncodeRuntimeCandidatePayloadWithManifest(command.CandidateManifest, candidate)
+	if err != nil {
+		// Never Fatal inside an EventHub observer: that leaves hub.Send blocked.
+		// Surface the encode/membership failure as a typed complete rejection.
+		return orchestratorevents.RequestRuntimeCandidateResult{
+			Transaction: command.Transaction, LogicalRequestID: command.LogicalRequestID,
+			RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
+			Failure: &runtimecontract.RuntimeCandidateFailure{
+				Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid",
+				Signature: "candidate-contract-invalid", Reason: err.Error(),
+			},
+		}
+	}
 	return orchestratorevents.RequestRuntimeCandidateResult{
 		Transaction: command.Transaction, LogicalRequestID: command.LogicalRequestID,
 		RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,

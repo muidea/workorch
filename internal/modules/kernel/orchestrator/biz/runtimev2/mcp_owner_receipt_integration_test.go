@@ -23,6 +23,15 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func mustRuntimeOperationAuthorizationIdentity(t *testing.T, kind string) runtimecontract.RuntimeCandidateOperationManifest {
+	t.Helper()
+	authorization, err := orchestratorevents.RuntimeOperationAuthorizationIdentity(kind)
+	if err != nil {
+		t.Fatalf("runtime operation authorization identity for %q: %v", kind, err)
+	}
+	return authorization
+}
+
 // runtimeV2MCPIntegrationRoundTripper keeps the MCP owner on its real HTTP
 // adapter path while avoiding a listener. This makes the owner/receipt/C3-C5
 // integration fixture runnable in sandboxed CI where loopback bind is denied.
@@ -250,7 +259,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		t.Fatal(err)
 	}
 	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(persisted.Facts, persisted.Decision, ActiveRejectedOperationShapes(persisted))
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(persisted.Decision, candidateContext.Resources.TargetSelection)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(persisted.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,6 +306,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 			WorkspaceID: persisted.Facts.WorkspaceID, RunID: persisted.Facts.RunID, Transaction: persisted.Decision.AuthorityTransaction(),
 			WorkspaceDeliverableDirectory: workspaceDirectory, Operation: response.Candidate.StateChange.Operations[0].Operation,
 			Admissibility: inventory, CapabilityStateBinding: inventory.AcquisitionBinding, Observation: &observation,
+			CandidateManifestHash: "manifest-mcp-file-integration", OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, response.Candidate.StateChange.Operations[0].Operation.Kind),
 		},
 	))
 	if probeResult == nil {
@@ -717,7 +727,16 @@ func runtimeV2ObservedCandidatePayload(request llmmodels.RuntimeCandidateRequest
 		}
 		return []byte(fmt.Sprintf(`{"operations":[{"id":"repair-implementation","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["implementation.go"],"parameters":[{"name":"targetRef","string":"implementation.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package fixture\n// repaired\n"},{"name":"baseHash","string":%q}]}]}`, baseHash))
 	case runtimecontract.RuntimeActionProduceValidation:
-		return []byte(`{"operations":[{"id":"revalidate-implementation","kind":"mcp/tool_call","coverageWorkItemIds":["cwi-1"],"targetRefs":["validation-entry.go"],"parameters":[{"name":"serverId","string":"mcp-observed-target"},{"name":"tool","string":"lookup.references"},{"name":"input.path","string":"validation-entry.go"}]}]}`)
+		// After an owner-observed FailureTarget is sealed, N1/N2 compile
+		// exact_target membership from that grounded set. Revalidation must
+		// target the sealed failure/repair target, not a second free path.
+		target := "validation-entry.go"
+		if refs := request.Decision.RequiredOutput.Normalized().TargetRefs; len(refs) == 1 {
+			target = refs[0]
+		} else if request.CandidateContext.Resources.FailureTarget != nil && len(request.CandidateContext.Resources.FailureTarget.TargetRefs) == 1 {
+			target = request.CandidateContext.Resources.FailureTarget.TargetRefs[0]
+		}
+		return []byte(fmt.Sprintf(`{"operations":[{"id":"revalidate-implementation","kind":"mcp/tool_call","coverageWorkItemIds":["cwi-1"],"targetRefs":[%q],"parameters":[{"name":"serverId","string":"mcp-observed-target"},{"name":"tool","string":"lookup.references"},{"name":"input.path","string":%q}]}]}`, target, target))
 	case runtimecontract.RuntimeActionProduceAssessment:
 		ref := ""
 		if accepted := request.CandidateContext.Evidence.Accepted; len(accepted) > 0 {
@@ -738,7 +757,7 @@ func requestAndSealObservedCandidate(t *testing.T, ctx context.Context, hub magi
 		t.Fatal(err)
 	}
 	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, ActiveRejectedOperationShapes(aggregate))
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, candidateContext.Resources.TargetSelection)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -769,7 +788,7 @@ func requestAndSealObservedCandidate(t *testing.T, ctx context.Context, hub magi
 		if !found {
 			t.Fatalf("candidate owner observation missing: %+v", inventory)
 		}
-		probe := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, runtimecontract.RuntimeModuleOrchestrator, descriptor.OwnerModuleID, magicevent.NewHeader(), ctx, orchestratorevents.ProbeRuntimeOperationFeasibilityCommand{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, Transaction: aggregate.Decision.AuthorityTransaction(), WorkspaceDeliverableDirectory: directory, Operation: operation, Admissibility: inventory, CapabilityStateBinding: inventory.AcquisitionBinding, Observation: &observation}))
+		probe := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, runtimecontract.RuntimeModuleOrchestrator, descriptor.OwnerModuleID, magicevent.NewHeader(), ctx, orchestratorevents.ProbeRuntimeOperationFeasibilityCommand{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, Transaction: aggregate.Decision.AuthorityTransaction(), WorkspaceDeliverableDirectory: directory, Operation: operation, Admissibility: inventory, CapabilityStateBinding: inventory.AcquisitionBinding, Observation: &observation, CandidateManifestHash: "manifest-mcp-integration", OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, operation.Kind)}))
 		probeData, probeErr := probe.Get()
 		if probeErr != nil {
 			t.Fatal(probeErr)

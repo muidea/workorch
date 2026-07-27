@@ -146,6 +146,15 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 	result.Set(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{PrerequisiteID: command.PrerequisiteID, Admissibility: inventory, Observation: &observation}, nil)
 }
 
+func setRuntimeOperationFeasibilityResult(result magicevent.Result, command orchestratorevents.ProbeRuntimeOperationFeasibilityCommand, failure *runtimecontract.FailureFact, stale *runtimecontract.RuntimePrerequisiteStale) {
+	observation, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, failure == nil && stale == nil, failure, stale, nil, nil)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	result.Set(observation, nil)
+}
+
 func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {
 	command, ok := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
 	if !ok || m.runtimeAdapter == nil {
@@ -159,17 +168,17 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 	operation := command.Operation.Normalized()
 	if command.Admissibility.ObservedRevision != m.runtimeAdapter.admissibilityRevision() {
 		if stale := sshAdmissibilityStale(command.Observation, command.Admissibility, m.runtimeAdapter.admissibilityRevision()); stale != nil {
-			result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: false, Stale: stale}, nil)
+			setRuntimeOperationFeasibilityResult(result, command, nil, stale)
 			return
 		}
 		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "operation_admissibility_stale", "runtime ssh operation admissibility policy is stale")
-		result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: false, Failure: failure}, nil)
+		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
 		return
 	}
 	data, err := orchestratorevents.SSHOperationDataFromRuntimeOperation(operation)
 	if err != nil {
 		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "ssh_operation_invalid", err.Error())
-		result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: false, Failure: failure}, nil)
+		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
 		return
 	}
 	err = m.runtimeAdapter.ProbeOperation(RuntimeCommandRequest{
@@ -180,10 +189,10 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 	})
 	if err != nil {
 		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "ssh_prerequisite_unavailable", err.Error())
-		result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: false, Failure: failure}, nil)
+		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
 		return
 	}
-	result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: true}, nil)
+	setRuntimeOperationFeasibilityResult(result, command, nil, nil)
 }
 
 func sshAdmissibilityObservation(prerequisiteID string, inventory runtimecontract.RuntimeOperationAdmissibility) runtimecontract.RuntimePrerequisiteObservation {

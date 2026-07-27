@@ -41,8 +41,8 @@ func TestRuntimeV2CapabilityStateAcquisitionGenerationTracksFreshnessOnly(t *tes
 		t.Fatalf("unrelated recovery changed generation to %d", got)
 	}
 
-	legacy := runtimecontract.RuntimeRecoveryLedger{CapabilityStateRefreshes: 2}
-	if got := runtimeV2CapabilityStateAcquisitionGeneration(legacy); got != 2 {
-		t.Fatalf("legacy normalized generation=%d, want 2", got)
+	ledger := runtimecontract.RuntimeRecoveryLedger{PrerequisiteRefreshes: 2}
+	if got := runtimeV2CapabilityStateAcquisitionGeneration(ledger); got != 2 {
+		t.Fatalf("prerequisite refresh generation=%d, want 2", got)
 	}
 }

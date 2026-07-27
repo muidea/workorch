@@ -48,7 +48,7 @@ func TestRuntimeControllerRejectsGovernanceSealWithoutSealedDependencySource(t *
 	repository.aggregate.ActiveDispatch = nil
 	repository.aggregate.GovernanceRequests = nil
 	repository.aggregate.Facts.Failure.GovernanceDependency = nil
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(repository.aggregate.Decision, currentFocusTargetSelection(repository.aggregate.Facts))
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(repository.aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources((repository.aggregate.Facts).Resources))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func sealGovernanceDispatch(t *testing.T, controller *RuntimeController) Runtime
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, currentFocusTargetSelection(aggregate.Facts))
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources((aggregate.Facts).Resources))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(governanceAggregate.Decision, currentFocusTargetSelection(governanceAggregate.Facts))
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(governanceAggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources((governanceAggregate.Facts).Resources))
 	if err != nil {
 		t.Fatal(err)
 	}

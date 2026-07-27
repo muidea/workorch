@@ -17,15 +17,56 @@ import (
 // while RuntimeOperationContractRevision tracks executable owner semantics.
 const RuntimeCandidateContractManifestRevision = "candidate-contract-manifest-v1"
 
+// RuntimeOperationTargetPolicy is the only owner-neutral target authorization
+// vocabulary sealed into a candidate manifest. Concrete File/Git/Shell/MCP
+// semantics enter only as typed owner facts already compiled into one of these
+// three policies; evaluators must not invent a fourth policy branch.
+type RuntimeOperationTargetPolicy string
+
+const (
+	// RuntimeOperationTargetPolicyExactTarget requires every candidate target to
+	// belong to a sealed exact set. An empty set with RequireTargetRefs=false is
+	// the no-target-obligation form for kinds that do not accept targets.
+	RuntimeOperationTargetPolicyExactTarget RuntimeOperationTargetPolicy = "exact_target"
+	// RuntimeOperationTargetPolicyExistingOwnerScope requires every candidate
+	// target to belong to a complete bounded owner scope, or to be independently
+	// verifiable through a closed owner selector.
+	RuntimeOperationTargetPolicyExistingOwnerScope RuntimeOperationTargetPolicy = "existing_owner_scope"
+	// RuntimeOperationTargetPolicyProspectiveOwnerTarget requires a concrete new
+	// target that satisfies the sealed owner create selector/prospective
+	// constraint. Only the resource owner judges create feasibility.
+	RuntimeOperationTargetPolicyProspectiveOwnerTarget RuntimeOperationTargetPolicy = "prospective_owner_target"
+)
+
+// RuntimeOperationTargetAuthorization is the pure target half of one sealed
+// operation authorization. Exactly one Policy is active; unused ref slices must
+// be empty after normalize.
+type RuntimeOperationTargetAuthorization struct {
+	Policy                    RuntimeOperationTargetPolicy
+	ExactTargetRefs           []string
+	OwnerScopeTargetRefs      []string
+	OwnerSelectorRefs         []string
+	ProspectiveConstraintRefs []string
+	ProspectiveTargetRef      string
+}
+
 // RuntimeCandidateContractManifest is an immutable-value projection of one
 // sealed RuntimeDecision. It contains no provider request, prompt content,
 // aggregate mutation or action selection. Consumers must derive their schema,
 // output instruction and typed diagnostics from this value rather than keep a
 // second operation-field or parameter whitelist.
+//
+// Operations holds one SealedOperationAuthorization per allowed kind: the only
+// operation-level authorization input for renderer, decoder, evaluator and
+// owner feasibility.
 type RuntimeCandidateContractManifest struct {
-	Revision                   string
-	Hash                       string
-	Action                     RuntimeAction
+	Revision string
+	Hash     string
+	Action   RuntimeAction
+	// OperationContractRevision is the executable catalog fence compiled into
+	// this binary. It is also stored on every operation authorization so a
+	// consumer can verify one kind without re-deriving the whole inventory.
+	OperationContractRevision  string
 	RequiredTopLevelFields     []string
 	AllowedTopLevelFields      []string
 	ForbiddenTopLevelFields    []string
@@ -37,14 +78,22 @@ type RuntimeCandidateContractManifest struct {
 	Operations                 []RuntimeCandidateOperationManifest
 }
 
-// RuntimeCandidateOperationManifest is the canonical operation-level contract
-// for an allowed kind in the current sealed decision.
+// RuntimeCandidateOperationManifest is the sealed operation authorization for
+// one allowed kind in the current candidate transaction. Conceptually this is
+// the single SealedOperationAuthorization pure-value record: kind, owner,
+// parameter/variant contract, effect/coverage/dependency constraints, one
+// TargetPolicy, and snapshot/revision identity. It is not a second state object.
 type RuntimeCandidateOperationManifest struct {
-	Kind                        string
-	AllowedOperationFields      []string
-	AllowedVariantIDs           []string
-	Parameters                  []RuntimeOperationParameterContract
-	RequireOneOfParameters      []string
+	Kind                   string
+	OwnerModuleID          string
+	AllowedOperationFields []string
+	AllowedVariantIDs      []string
+	Parameters             []RuntimeOperationParameterContract
+	RequireOneOfParameters []string
+	// RequireTargetRefs is the wire-level obligation derived from the sealed
+	// TargetPolicy and the executable operation contract. It is not an
+	// independent policy source: consumers that need membership rules must read
+	// Target, not invent a second allow-list.
 	RequireTargetRefs           bool
 	ForbiddenParameters         []string
 	Variants                    []RuntimeOperationVariantContract
@@ -52,17 +101,66 @@ type RuntimeCandidateOperationManifest struct {
 	AllowsDynamicParameters     bool
 	DynamicParameterPrefixes    []string
 	RequiredOperationReferences []string
+	AcceptedEffectScopes        []RuntimeEffectScope
+	RequiredEffectScopes        []RuntimeEffectScope
+	Target                      RuntimeOperationTargetAuthorization
+	// PrerequisiteSnapshotRefs bind this authorization to owner observations
+	// already sealed into the authority transaction (target selection, etc.).
+	// N1 may seal selection identity; full admissibility compilation is N2.
+	PrerequisiteSnapshotRefs []string
+	// AdmissibilitySnapshotRefs bind this authorization to owner-authored
+	// operation admissibility inventories. Empty until N2 compiles them.
+	AdmissibilitySnapshotRefs []string
+	OperationContractRevision string
+}
+
+// SealedOperationAuthorization is the canonical name for one operation-kind
+// authorization sealed inside RuntimeCandidateContractManifest.
+type SealedOperationAuthorization = RuntimeCandidateOperationManifest
+
+// RuntimeCandidateManifestOwnerFacts are the already-persisted SM-2 owner
+// observations compiled into one sealed candidate authorization. They are pure
+// values: the compiler never reacquires inventory, never expands truncated
+// lists, and never invents domain paths.
+type RuntimeCandidateManifestOwnerFacts struct {
+	TargetSelection          *RuntimeTargetSelection
+	OperationAdmissibilities []RuntimeOperationAdmissibility
+}
+
+// RuntimeCandidateManifestOwnerFactsFromResources projects the sealed resource
+// facts used by the single manifest compiler. Callers must pass the same facts
+// for Build and Validate so hash identity stays stable across owner boundaries.
+func RuntimeCandidateManifestOwnerFactsFromResources(resources RuntimeResourceFacts) RuntimeCandidateManifestOwnerFacts {
+	resources = resources.Normalized()
+	return RuntimeCandidateManifestOwnerFacts{
+		TargetSelection:          resources.TargetSelection,
+		OperationAdmissibilities: append([]RuntimeOperationAdmissibility(nil), resources.OperationAdmissibilities...),
+	}
+}
+
+func (f RuntimeCandidateManifestOwnerFacts) Normalized() RuntimeCandidateManifestOwnerFacts {
+	if f.TargetSelection != nil {
+		selection := f.TargetSelection.Normalized()
+		f.TargetSelection = &selection
+	}
+	f.OperationAdmissibilities = NormalizeRuntimeOperationAdmissibilities(f.OperationAdmissibilities)
+	return f
 }
 
 // BuildRuntimeCandidateContractManifest creates the single pure contract
-// projection for a sealed decision. TargetSelection can only narrow operation
-// kinds for a File owner creation/scope observation; it cannot create a target
-// or change the decision.
-func BuildRuntimeCandidateContractManifest(decision RuntimeDecision, selection *RuntimeTargetSelection) (RuntimeCandidateContractManifest, error) {
+// projection for a sealed decision and its owner facts. TargetSelection may
+// narrow operation kinds and seal TargetPolicy; OperationAdmissibilities seal
+// admissibility snapshot identity and may complete existing_owner_scope /
+// prospective_owner_target membership. Incomplete/truncated inventory cannot
+// be sealed as scope.
+func BuildRuntimeCandidateContractManifest(decision RuntimeDecision, ownerFacts RuntimeCandidateManifestOwnerFacts) (RuntimeCandidateContractManifest, error) {
+	ownerFacts = ownerFacts.Normalized()
 	required := decision.RequiredOutput.Normalized()
+	contractRevision := RuntimeOperationContractRevision()
 	manifest := RuntimeCandidateContractManifest{
 		Revision:                  RuntimeCandidateContractManifestRevision,
 		Action:                    decision.Action,
+		OperationContractRevision: contractRevision,
 		CoverageWorkItemIDs:       append([]common.CoverageWorkItemID(nil), required.CoverageWorkItemIDs...),
 		TargetRefs:                append([]string(nil), required.TargetRefs...),
 		RequiredOperationSequence: cloneRuntimeRequiredOperationVariants(required.RequiredOperationSequence),
@@ -75,12 +173,12 @@ func BuildRuntimeCandidateContractManifest(decision RuntimeDecision, selection *
 		}
 		manifest.RequireCoverageWorkItemIDs = true
 		manifest.DependenciesAllowed = runtimeRequiredOperationSequenceHasDependency(required.RequiredOperationSequence)
-		kinds := RuntimeCandidateAllowedOperationKinds(decision, selection)
+		kinds := RuntimeCandidateAllowedOperationKinds(decision, ownerFacts.TargetSelection)
 		if len(kinds) == 0 {
 			return RuntimeCandidateContractManifest{}, fmt.Errorf("candidate manifest action %q has no allowed operation kinds", decision.Action)
 		}
 		for _, kind := range kinds {
-			operation, err := runtimeCandidateOperationManifestForKind(kind, required)
+			operation, err := runtimeCandidateOperationManifestForKind(kind, required, ownerFacts, contractRevision)
 			if err != nil {
 				return RuntimeCandidateContractManifest{}, err
 			}
@@ -99,16 +197,16 @@ func BuildRuntimeCandidateContractManifest(decision RuntimeDecision, selection *
 
 // ValidateRuntimeCandidateContractManifestForDecision verifies that a manifest
 // carried across an owner boundary is the exact pure projection of the sealed
-// decision and its persisted target-selection fact. It is an integrity check,
-// not a second schema compiler: renderer, decoder and admission consume the
-// supplied manifest after this check succeeds.
-func ValidateRuntimeCandidateContractManifestForDecision(manifest RuntimeCandidateContractManifest, decision RuntimeDecision, selection *RuntimeTargetSelection) error {
+// decision and its owner facts. It is an integrity check, not a second schema
+// compiler: renderer, decoder and admission consume the supplied manifest after
+// this check succeeds.
+func ValidateRuntimeCandidateContractManifestForDecision(manifest RuntimeCandidateContractManifest, decision RuntimeDecision, ownerFacts RuntimeCandidateManifestOwnerFacts) error {
 	manifest = manifest.Normalized()
 	if manifest.Revision != RuntimeCandidateContractManifestRevision || manifest.Hash == "" ||
 		manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) {
 		return fmt.Errorf("runtime candidate contract manifest is invalid")
 	}
-	expected, err := BuildRuntimeCandidateContractManifest(decision, selection)
+	expected, err := BuildRuntimeCandidateContractManifest(decision, ownerFacts)
 	if err != nil {
 		return err
 	}
@@ -170,6 +268,7 @@ func (m RuntimeCandidateContractManifest) Normalized() RuntimeCandidateContractM
 	m.Revision = strings.TrimSpace(m.Revision)
 	m.Hash = strings.TrimSpace(m.Hash)
 	m.Action = RuntimeAction(strings.TrimSpace(string(m.Action)))
+	m.OperationContractRevision = strings.TrimSpace(m.OperationContractRevision)
 	m.RequiredTopLevelFields = normalizeStrings(m.RequiredTopLevelFields)
 	m.AllowedTopLevelFields = normalizeStrings(m.AllowedTopLevelFields)
 	m.ForbiddenTopLevelFields = normalizeStrings(m.ForbiddenTopLevelFields)
@@ -196,6 +295,7 @@ func (m RuntimeCandidateContractManifest) Normalized() RuntimeCandidateContractM
 
 func (m RuntimeCandidateOperationManifest) Normalized() RuntimeCandidateOperationManifest {
 	m.Kind = CanonicalRuntimeBlockKind(m.Kind)
+	m.OwnerModuleID = strings.TrimSpace(m.OwnerModuleID)
 	m.AllowedOperationFields = normalizeStrings(m.AllowedOperationFields)
 	m.AllowedVariantIDs = normalizeStrings(m.AllowedVariantIDs)
 	m.Parameters = cloneRuntimeOperationParameterContracts(m.Parameters)
@@ -205,7 +305,81 @@ func (m RuntimeCandidateOperationManifest) Normalized() RuntimeCandidateOperatio
 	m.Rules = cloneRuntimeCandidateContractStrings(m.Rules)
 	m.DynamicParameterPrefixes = normalizeStrings(m.DynamicParameterPrefixes)
 	m.RequiredOperationReferences = normalizeStrings(m.RequiredOperationReferences)
+	m.AcceptedEffectScopes = NormalizeRuntimeEffectScopes(m.AcceptedEffectScopes)
+	m.RequiredEffectScopes = NormalizeRuntimeEffectScopes(m.RequiredEffectScopes)
+	m.Target = m.Target.Normalized()
+	m.PrerequisiteSnapshotRefs = normalizeStrings(m.PrerequisiteSnapshotRefs)
+	m.AdmissibilitySnapshotRefs = normalizeStrings(m.AdmissibilitySnapshotRefs)
+	m.OperationContractRevision = strings.TrimSpace(m.OperationContractRevision)
 	return m
+}
+
+func (t RuntimeOperationTargetAuthorization) Normalized() RuntimeOperationTargetAuthorization {
+	t.Policy = RuntimeOperationTargetPolicy(strings.TrimSpace(string(t.Policy)))
+	t.ExactTargetRefs = normalizeStrings(t.ExactTargetRefs)
+	t.OwnerScopeTargetRefs = normalizeStrings(t.OwnerScopeTargetRefs)
+	t.OwnerSelectorRefs = normalizeStrings(t.OwnerSelectorRefs)
+	t.ProspectiveConstraintRefs = normalizeStrings(t.ProspectiveConstraintRefs)
+	t.ProspectiveTargetRef = strings.TrimSpace(t.ProspectiveTargetRef)
+	switch t.Policy {
+	case RuntimeOperationTargetPolicyExactTarget:
+		t.OwnerScopeTargetRefs = nil
+		t.OwnerSelectorRefs = nil
+		t.ProspectiveConstraintRefs = nil
+		t.ProspectiveTargetRef = ""
+	case RuntimeOperationTargetPolicyExistingOwnerScope:
+		t.ExactTargetRefs = nil
+		t.ProspectiveConstraintRefs = nil
+		t.ProspectiveTargetRef = ""
+	case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
+		t.ExactTargetRefs = nil
+		t.OwnerScopeTargetRefs = nil
+	default:
+		t.Policy = ""
+		t.ExactTargetRefs = nil
+		t.OwnerScopeTargetRefs = nil
+		t.OwnerSelectorRefs = nil
+		t.ProspectiveConstraintRefs = nil
+		t.ProspectiveTargetRef = ""
+	}
+	return t
+}
+
+// RequireTargets reports whether the sealed TargetPolicy obligates a non-empty
+// candidate targetRefs field. It is the pure membership of RequireTargetRefs.
+func (t RuntimeOperationTargetAuthorization) RequireTargets() bool {
+	t = t.Normalized()
+	switch t.Policy {
+	case RuntimeOperationTargetPolicyExactTarget:
+		return len(t.ExactTargetRefs) > 0
+	case RuntimeOperationTargetPolicyExistingOwnerScope, RuntimeOperationTargetPolicyProspectiveOwnerTarget:
+		return true
+	default:
+		return false
+	}
+}
+
+// AllowedTargetRefs returns the bounded membership set a pure evaluator may use
+// for target membership checks under the sealed TargetPolicy. Prospective
+// create only returns the profile-declared prospective target when sealed.
+func (t RuntimeOperationTargetAuthorization) AllowedTargetRefs() []string {
+	t = t.Normalized()
+	switch t.Policy {
+	case RuntimeOperationTargetPolicyExactTarget:
+		return append([]string(nil), t.ExactTargetRefs...)
+	case RuntimeOperationTargetPolicyExistingOwnerScope:
+		if len(t.OwnerScopeTargetRefs) != 0 {
+			return append([]string(nil), t.OwnerScopeTargetRefs...)
+		}
+		return nil
+	case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
+		if t.ProspectiveTargetRef == "" {
+			return nil
+		}
+		return []string{t.ProspectiveTargetRef}
+	default:
+		return nil
+	}
 }
 
 func (m RuntimeCandidateContractManifest) Clone() RuntimeCandidateContractManifest {
@@ -221,6 +395,7 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 	h := sha256.New()
 	writeHashString(h, manifest.Revision)
 	writeHashString(h, string(manifest.Action))
+	writeHashString(h, manifest.OperationContractRevision)
 	writeHashStrings(h, manifest.RequiredTopLevelFields)
 	writeHashStrings(h, manifest.AllowedTopLevelFields)
 	writeHashStrings(h, manifest.ForbiddenTopLevelFields)
@@ -241,6 +416,7 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 	}
 	for _, operation := range manifest.Operations {
 		writeHashString(h, operation.Kind)
+		writeHashString(h, operation.OwnerModuleID)
 		writeHashStrings(h, operation.AllowedOperationFields)
 		writeHashStrings(h, operation.AllowedVariantIDs)
 		for _, parameter := range operation.Parameters {
@@ -272,6 +448,21 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 		writeHashString(h, fmt.Sprintf("%t", operation.AllowsDynamicParameters))
 		writeHashStrings(h, operation.DynamicParameterPrefixes)
 		writeHashStrings(h, operation.RequiredOperationReferences)
+		for _, scope := range operation.AcceptedEffectScopes {
+			writeHashString(h, string(scope))
+		}
+		for _, scope := range operation.RequiredEffectScopes {
+			writeHashString(h, string(scope))
+		}
+		writeHashString(h, string(operation.Target.Policy))
+		writeHashStrings(h, operation.Target.ExactTargetRefs)
+		writeHashStrings(h, operation.Target.OwnerScopeTargetRefs)
+		writeHashStrings(h, operation.Target.OwnerSelectorRefs)
+		writeHashStrings(h, operation.Target.ProspectiveConstraintRefs)
+		writeHashString(h, operation.Target.ProspectiveTargetRef)
+		writeHashStrings(h, operation.PrerequisiteSnapshotRefs)
+		writeHashStrings(h, operation.AdmissibilitySnapshotRefs)
+		writeHashString(h, operation.OperationContractRevision)
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -290,10 +481,15 @@ func runtimeCandidateEnvelopeFields(action RuntimeAction) (required, allowed, fo
 	}
 }
 
-func runtimeCandidateOperationManifestForKind(kind string, required RequiredOutputContract) (RuntimeCandidateOperationManifest, error) {
+func runtimeCandidateOperationManifestForKind(kind string, required RequiredOutputContract, ownerFacts RuntimeCandidateManifestOwnerFacts, contractRevision string) (RuntimeCandidateOperationManifest, error) {
+	ownerFacts = ownerFacts.Normalized()
 	contract, ok := RuntimeOperationContractForKind(kind)
 	if !ok {
 		return RuntimeCandidateOperationManifest{}, fmt.Errorf("candidate manifest operation kind %q has no operation contract", kind)
+	}
+	descriptor, ok := RuntimeOperationDescriptorForKind(kind)
+	if !ok {
+		return RuntimeCandidateOperationManifest{}, fmt.Errorf("candidate manifest operation kind %q has no operation descriptor", kind)
 	}
 	variants, allowedVariantIDs, err := runtimeCandidateManifestVariants(contract, required)
 	if err != nil {
@@ -312,20 +508,291 @@ func runtimeCandidateOperationManifestForKind(kind string, required RequiredOutp
 	if runtimeRequiredOperationSequenceHasDependency(required.RequiredOperationSequence) {
 		fields = append(fields, "dependsOn")
 	}
+	target, prerequisiteRefs, admissibilityRefs, err := runtimeCandidateTargetAuthorizationForKind(descriptor, contract, required, ownerFacts)
+	if err != nil {
+		return RuntimeCandidateOperationManifest{}, err
+	}
+	// Wire-level RequireTargetRefs stays contract-driven for exact_target so
+	// kinds without a target field (git init, shell read-only, MCP tool call, …)
+	// remain legal even when the focus seals an exact membership set.
+	// prospective_owner_target always obligates a concrete candidate target.
+	// existing_owner_scope only obligates a target when the sealed scope actually
+	// carries membership TargetRefs; selector-only catalog bindings do not.
+	requireTargetRefs := contract.RequireTargetRefs
+	switch target.Normalized().Policy {
+	case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
+		requireTargetRefs = true
+	case RuntimeOperationTargetPolicyExistingOwnerScope:
+		if len(target.OwnerScopeTargetRefs) != 0 {
+			requireTargetRefs = true
+		}
+	}
 	return RuntimeCandidateOperationManifest{
 		Kind:                        contract.Kind,
+		OwnerModuleID:               descriptor.OwnerModuleID,
 		AllowedOperationFields:      fields,
 		AllowedVariantIDs:           allowedVariantIDs,
 		Parameters:                  cloneRuntimeOperationParameterContracts(contract.Parameters),
 		RequireOneOfParameters:      append([]string(nil), contract.RequireOneOfParameters...),
-		RequireTargetRefs:           contract.RequireTargetRefs,
+		RequireTargetRefs:           requireTargetRefs,
 		ForbiddenParameters:         append([]string(nil), contract.ForbiddenParameters...),
 		Variants:                    variants,
 		Rules:                       append([]string(nil), contract.Rules...),
 		AllowsDynamicParameters:     runtimeCandidateManifestAllowsDynamicParameters(contract.Kind),
 		DynamicParameterPrefixes:    runtimeCandidateManifestDynamicParameterPrefixes(contract.Kind),
 		RequiredOperationReferences: references,
+		AcceptedEffectScopes:        append([]RuntimeEffectScope(nil), required.AcceptedEffectScopes...),
+		RequiredEffectScopes:        append([]RuntimeEffectScope(nil), required.RequiredEffectScopes...),
+		Target:                      target,
+		PrerequisiteSnapshotRefs:    prerequisiteRefs,
+		AdmissibilitySnapshotRefs:   admissibilityRefs,
+		OperationContractRevision:   contractRevision,
 	}.Normalized(), nil
+}
+
+// runtimeCandidateTargetAuthorizationForKind compiles one of the three sealed
+// TargetPolicy values from already-typed decision/selection/admissibility
+// facts. It does not invent domain paths, does not call owners, and does not
+// expand incomplete inventory into a scope.
+//
+// Compilation priority:
+//  1. decision-level exact TargetRefs when no create/scope owner fact applies;
+//  2. TargetSelection Create / Scope / Selected dispositions;
+//  3. matching OperationAdmissibility inventory for the kind's owner;
+//  4. exact_target with empty membership for kinds without target obligation.
+func runtimeCandidateTargetAuthorizationForKind(
+	descriptor RuntimeOperationDescriptor,
+	contract RuntimeOperationContract,
+	required RequiredOutputContract,
+	ownerFacts RuntimeCandidateManifestOwnerFacts,
+) (RuntimeOperationTargetAuthorization, []string, []string, error) {
+	ownerFacts = ownerFacts.Normalized()
+	exactRefs := normalizeStrings(required.TargetRefs)
+	admissibility, hasAdmissibility := runtimeCandidateAdmissibilityForKind(ownerFacts.OperationAdmissibilities, descriptor.OwnerModuleID, descriptor.Kind)
+	var admissibilityRefs []string
+	if hasAdmissibility {
+		if err := runtimeCandidateValidateAdmissibilityInventory(admissibility); err != nil {
+			return RuntimeOperationTargetAuthorization{}, nil, nil, err
+		}
+		if admissibility.SnapshotID != "" {
+			admissibilityRefs = []string{admissibility.SnapshotID}
+		}
+	}
+
+	if ownerFacts.TargetSelection == nil {
+		if target, ok := runtimeCandidateTargetAuthorizationFromAdmissibility(descriptor, contract, admissibility, hasAdmissibility, exactRefs); ok {
+			return target, nil, admissibilityRefs, nil
+		}
+		return RuntimeOperationTargetAuthorization{
+			Policy:          RuntimeOperationTargetPolicyExactTarget,
+			ExactTargetRefs: exactRefs,
+		}, nil, admissibilityRefs, nil
+	}
+	value := ownerFacts.TargetSelection.Normalized()
+	var prerequisiteRefs []string
+	if value.SnapshotID != "" {
+		prerequisiteRefs = []string{value.SnapshotID}
+	}
+	switch value.Disposition {
+	case RuntimeTargetSelectionCreate:
+		// Create kind-narrowing already admits only durable File kinds (or
+		// AllowsNewTarget owners). A sealed ProspectiveTargetRef turns that into
+		// prospective_owner_target; without it the authorization stays exact and
+		// only kind narrowing applies.
+		allowsProspective := descriptor.AllowsNewTarget ||
+			(descriptor.OwnerModuleID == value.OwnerModuleID && RuntimeEffectIsDurable(descriptor.DefaultEffectScope))
+		prospectiveRef := value.ProspectiveTargetRef
+		if prospectiveRef == "" && len(exactRefs) == 1 {
+			// Required output may already seal the single create path while the
+			// selection disposition still marks create. Prefer prospective so the
+			// authorization carries create semantics rather than a second exact set.
+			prospectiveRef = exactRefs[0]
+		}
+		if !allowsProspective || prospectiveRef == "" {
+			if target, ok := runtimeCandidateTargetAuthorizationFromAdmissibility(descriptor, contract, admissibility, hasAdmissibility, exactRefs); ok {
+				return target, prerequisiteRefs, admissibilityRefs, nil
+			}
+			return RuntimeOperationTargetAuthorization{
+				Policy:          RuntimeOperationTargetPolicyExactTarget,
+				ExactTargetRefs: exactRefs,
+			}, prerequisiteRefs, admissibilityRefs, nil
+		}
+		selectorRefs := make([]string, 0, 2)
+		if value.SelectorRef != "" {
+			selectorRefs = append(selectorRefs, value.SelectorRef)
+		}
+		constraintRefs := append([]string(nil), value.SelectorCandidateRefs...)
+		if hasAdmissibility {
+			selectorRefs = normalizeStrings(append(selectorRefs, admissibility.SelectorRefs...))
+			constraintRefs = normalizeStrings(append(constraintRefs, admissibility.ConstraintRefs...))
+		}
+		return RuntimeOperationTargetAuthorization{
+			Policy:                    RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+			OwnerSelectorRefs:         selectorRefs,
+			ProspectiveConstraintRefs: constraintRefs,
+			ProspectiveTargetRef:      prospectiveRef,
+		}, prerequisiteRefs, admissibilityRefs, nil
+	case RuntimeTargetSelectionScope:
+		if len(exactRefs) != 0 {
+			// Decision-level exact refs still win over a broader owner scope.
+			return RuntimeOperationTargetAuthorization{
+				Policy:          RuntimeOperationTargetPolicyExactTarget,
+				ExactTargetRefs: exactRefs,
+			}, prerequisiteRefs, admissibilityRefs, nil
+		}
+		scopeRefs := append([]string(nil), value.TargetRefs...)
+		if len(scopeRefs) == 0 {
+			scopeRefs = append([]string(nil), value.CandidateTargetRefs...)
+		}
+		if len(scopeRefs) == 0 && hasAdmissibility && len(admissibility.TargetRefs) != 0 {
+			scopeRefs = append([]string(nil), admissibility.TargetRefs...)
+		}
+		if len(scopeRefs) == 0 {
+			// Empty-workspace scope without targets is not a membership set.
+			// Closed selector-only inventories stay prospective/selector facts,
+			// not truncated scopes.
+			if hasAdmissibility && len(admissibility.SelectorRefs) != 0 && len(admissibility.TargetRefs) == 0 {
+				return RuntimeOperationTargetAuthorization{
+					Policy:            RuntimeOperationTargetPolicyExistingOwnerScope,
+					OwnerSelectorRefs: append([]string(nil), admissibility.SelectorRefs...),
+				}, prerequisiteRefs, admissibilityRefs, nil
+			}
+			return RuntimeOperationTargetAuthorization{
+				Policy: RuntimeOperationTargetPolicyExactTarget,
+			}, prerequisiteRefs, admissibilityRefs, nil
+		}
+		if value.CandidateCount != 0 && value.CandidateCount != len(scopeRefs) {
+			return RuntimeOperationTargetAuthorization{}, nil, nil, fmt.Errorf("candidate manifest existing owner scope requires a complete bounded target set")
+		}
+		if !descriptor.AllowsGroundedWorkspaceTarget && descriptor.OwnerModuleID != value.OwnerModuleID && !contract.RequireTargetRefs {
+			// Non-target kinds outside the scope owner stay exact/empty.
+			return RuntimeOperationTargetAuthorization{
+				Policy: RuntimeOperationTargetPolicyExactTarget,
+			}, prerequisiteRefs, admissibilityRefs, nil
+		}
+		selectorRefs := make([]string, 0, 2)
+		if value.SelectorRef != "" {
+			selectorRefs = append(selectorRefs, value.SelectorRef)
+		}
+		if hasAdmissibility {
+			selectorRefs = normalizeStrings(append(selectorRefs, admissibility.SelectorRefs...))
+		}
+		return RuntimeOperationTargetAuthorization{
+			Policy:               RuntimeOperationTargetPolicyExistingOwnerScope,
+			OwnerScopeTargetRefs: scopeRefs,
+			OwnerSelectorRefs:    selectorRefs,
+		}, prerequisiteRefs, admissibilityRefs, nil
+	case RuntimeTargetSelectionSelected:
+		if len(exactRefs) != 0 {
+			return RuntimeOperationTargetAuthorization{
+				Policy:          RuntimeOperationTargetPolicyExactTarget,
+				ExactTargetRefs: exactRefs,
+			}, prerequisiteRefs, admissibilityRefs, nil
+		}
+		if len(value.TargetRefs) == 0 {
+			if target, ok := runtimeCandidateTargetAuthorizationFromAdmissibility(descriptor, contract, admissibility, hasAdmissibility, exactRefs); ok {
+				return target, prerequisiteRefs, admissibilityRefs, nil
+			}
+			return RuntimeOperationTargetAuthorization{
+				Policy: RuntimeOperationTargetPolicyExactTarget,
+			}, prerequisiteRefs, admissibilityRefs, nil
+		}
+		if len(value.TargetRefs) != 1 {
+			return RuntimeOperationTargetAuthorization{}, nil, nil, fmt.Errorf("candidate manifest exact target selection requires exactly one sealed target")
+		}
+		return RuntimeOperationTargetAuthorization{
+			Policy:          RuntimeOperationTargetPolicyExactTarget,
+			ExactTargetRefs: append([]string(nil), value.TargetRefs...),
+		}, prerequisiteRefs, admissibilityRefs, nil
+	default:
+		if target, ok := runtimeCandidateTargetAuthorizationFromAdmissibility(descriptor, contract, admissibility, hasAdmissibility, exactRefs); ok {
+			return target, prerequisiteRefs, admissibilityRefs, nil
+		}
+		return RuntimeOperationTargetAuthorization{
+			Policy:          RuntimeOperationTargetPolicyExactTarget,
+			ExactTargetRefs: exactRefs,
+		}, prerequisiteRefs, admissibilityRefs, nil
+	}
+}
+
+func runtimeCandidateAdmissibilityForKind(values []RuntimeOperationAdmissibility, ownerModuleID, kind string) (RuntimeOperationAdmissibility, bool) {
+	kind = CanonicalRuntimeBlockKind(kind)
+	ownerModuleID = strings.TrimSpace(ownerModuleID)
+	for _, value := range values {
+		value = value.Normalized()
+		if value.OwnerModuleID != ownerModuleID {
+			continue
+		}
+		for _, operationKind := range value.OperationKinds {
+			if operationKind == kind {
+				return value, true
+			}
+		}
+	}
+	return RuntimeOperationAdmissibility{}, false
+}
+
+func runtimeCandidateValidateAdmissibilityInventory(value RuntimeOperationAdmissibility) error {
+	value = value.Normalized()
+	if err := value.Validate(); err != nil {
+		return fmt.Errorf("candidate manifest operation admissibility is invalid: %w", err)
+	}
+	itemCount := len(value.TargetRefs) + len(value.SelectorRefs) + len(value.ConstraintRefs)
+	if !RuntimeOwnerInventoryWithinBudget(DefaultRuntimeOwnerInventoryBudget(), itemCount) {
+		return fmt.Errorf("candidate manifest operation admissibility exceeds owner inventory budget")
+	}
+	// A non-empty TargetRefs set is a complete bounded inventory. Selector-only
+	// inventories are closed owner selectors and may seal without TargetRefs.
+	// Mixing a non-empty TargetRefs set with a CandidateCount-style incompleteness
+	// is rejected earlier by Validate; here we only refuse oversized inventories.
+	return nil
+}
+
+// runtimeCandidateTargetAuthorizationFromAdmissibility seals TargetPolicy from a
+// matching owner admissibility inventory when TargetSelection does not already
+// provide create/scope/selected membership. Incomplete inventories never seal.
+func runtimeCandidateTargetAuthorizationFromAdmissibility(
+	descriptor RuntimeOperationDescriptor,
+	contract RuntimeOperationContract,
+	admissibility RuntimeOperationAdmissibility,
+	hasAdmissibility bool,
+	exactRefs []string,
+) (RuntimeOperationTargetAuthorization, bool) {
+	if !hasAdmissibility {
+		return RuntimeOperationTargetAuthorization{}, false
+	}
+	if len(exactRefs) != 0 {
+		return RuntimeOperationTargetAuthorization{
+			Policy:          RuntimeOperationTargetPolicyExactTarget,
+			ExactTargetRefs: exactRefs,
+		}, true
+	}
+	if len(admissibility.TargetRefs) != 0 {
+		if !descriptor.AllowsGroundedWorkspaceTarget && descriptor.OwnerModuleID != admissibility.OwnerModuleID && !contract.RequireTargetRefs {
+			return RuntimeOperationTargetAuthorization{
+				Policy: RuntimeOperationTargetPolicyExactTarget,
+			}, true
+		}
+		return RuntimeOperationTargetAuthorization{
+			Policy:               RuntimeOperationTargetPolicyExistingOwnerScope,
+			OwnerScopeTargetRefs: append([]string(nil), admissibility.TargetRefs...),
+			OwnerSelectorRefs:    append([]string(nil), admissibility.SelectorRefs...),
+		}, true
+	}
+	if len(admissibility.SelectorRefs) != 0 || len(admissibility.ConstraintRefs) != 0 {
+		if descriptor.AllowsNewTarget || (descriptor.OwnerModuleID == admissibility.OwnerModuleID && RuntimeEffectIsDurable(descriptor.DefaultEffectScope)) {
+			return RuntimeOperationTargetAuthorization{
+				Policy:                    RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+				OwnerSelectorRefs:         append([]string(nil), admissibility.SelectorRefs...),
+				ProspectiveConstraintRefs: append([]string(nil), admissibility.ConstraintRefs...),
+			}, true
+		}
+		return RuntimeOperationTargetAuthorization{
+			Policy:            RuntimeOperationTargetPolicyExistingOwnerScope,
+			OwnerSelectorRefs: append([]string(nil), admissibility.SelectorRefs...),
+		}, true
+	}
+	return RuntimeOperationTargetAuthorization{}, false
 }
 
 func runtimeCandidateManifestVariants(contract RuntimeOperationContract, required RequiredOutputContract) ([]RuntimeOperationVariantContract, []string, error) {

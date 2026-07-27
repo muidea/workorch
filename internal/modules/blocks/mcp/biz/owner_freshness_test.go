@@ -13,6 +13,15 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func mustRuntimeOperationAuthorizationIdentity(t *testing.T, kind string) runtimecontract.RuntimeCandidateOperationManifest {
+	t.Helper()
+	authorization, err := orchestratorevents.RuntimeOperationAuthorizationIdentity(kind)
+	if err != nil {
+		t.Fatalf("runtime operation authorization identity for %q: %v", kind, err)
+	}
+	return authorization
+}
+
 func TestMCPAdmissibilityObservationReturnsTypedCatalogStale(t *testing.T) {
 	inventory := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "admissibility-mcp", OwnerModuleID: ModuleID, OperationKinds: []string{StepKindToolCall}, SelectorRefs: []string{"server-a"}, ObservedRevision: "catalog-v1"}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
@@ -96,6 +105,7 @@ func sendMCPFeasibilityProbe(t *testing.T, ctx context.Context, hub magicevent.H
 			WorkspaceID: "ws-mcp-freshness", RunID: "run-mcp-freshness",
 			Transaction:                   runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-mcp-freshness"},
 			WorkspaceDeliverableDirectory: t.TempDir(), Admissibility: inventory, Observation: &observation,
+			CandidateManifestHash: "manifest-mcp-freshness", OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, StepKindToolCall),
 			Operation: runtimecontract.RuntimeOperation{ID: "mcp-tool", Kind: StepKindToolCall, Parameters: []runtimecontract.OperationParameter{{Name: "serverId", String: &serverID}, {Name: "tool", String: &tool}}},
 		},
 	))

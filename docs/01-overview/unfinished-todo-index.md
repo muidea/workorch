@@ -4,7 +4,7 @@ Status: active
 
 Type: index
 
-Last Updated: 2026-07-25
+Last Updated: 2026-07-26
 
 ## Purpose
 
@@ -25,7 +25,7 @@ Runtime V2-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **�
 
 | # | 主题 | 待办 | 当前方案 |
 | --- | --- | --- | --- |
-| A1 | Runtime V2 live 合同正向收敛 | R4 已将 core 文档归一为 V2 四状态机；LLM 不稳定输出按 request session、strict candidate protocol 与 sealed receipt 分流，不回退 strict admission。C4～C6、P0～P5 均为回归基线。唯一活动卡为 Q7/P6 隔离 scripted/live；已完成 mock HTTP/LLM/MCP 样本，继续记录独立 artifact、全仓门禁和真实 provider 可达性。不得加入 compatibility fallback | [唯一收口方案](../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md) |
+| A1 | Runtime V2 合同归一与 live 正向收敛 | R5 收口为一份 sealed manifest、一个 candidate evaluator 和五类处理结果。旧 R4/P0～P6/A-4 不再是当前队列。N1～N8 代码/本地门禁已完成；real-provider 双 activation 与三态 restart 仍为外部 fixture residual，不得加入 compatibility fallback 或 live 热修跳卡 | [唯一收口方案](../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md) |
 
 ## B. 运行单元架构 / 生命周期
 

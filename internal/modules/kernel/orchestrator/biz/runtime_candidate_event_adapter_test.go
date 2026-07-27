@@ -54,7 +54,7 @@ func eventGenerationResult(payload []byte, err error) (llmmodels.RuntimeCandidat
 
 func candidateManifestForEventRequest(t *testing.T, decision runtimecontract.RuntimeDecision, context runtimecontract.RuntimeCandidateContext) runtimecontract.RuntimeCandidateContractManifest {
 	t.Helper()
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, context.Resources.TargetSelection)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(context.Resources))
 	if err != nil {
 		t.Fatal(err)
 	}

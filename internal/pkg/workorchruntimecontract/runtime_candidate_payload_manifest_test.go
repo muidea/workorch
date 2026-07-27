@@ -162,7 +162,7 @@ func fuzzRuntimeCandidatePayloadManifest(f *testing.F) RuntimeCandidateContractM
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
 		},
 	}
-	manifest, err := BuildRuntimeCandidateContractManifest(decision, nil)
+	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{})
 	if err != nil {
 		f.Fatal(err)
 	}
@@ -310,7 +310,7 @@ func stringPtr(value string) *string { return &value }
 
 func mustRuntimeCandidatePayloadManifest(t *testing.T, decision RuntimeDecision) RuntimeCandidateContractManifest {
 	t.Helper()
-	manifest, err := BuildRuntimeCandidateContractManifest(decision, nil)
+	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -89,6 +89,7 @@ type runtimeCandidateOutputContractProjection struct {
 
 type runtimeCandidateOperationContractProjection struct {
 	Kind                        string                                         `json:"kind"`
+	OwnerModuleID               string                                         `json:"ownerModuleId,omitempty"`
 	AllowedOperationFields      []string                                       `json:"allowedOperationFields,omitempty"`
 	AllowedVariantIDs           []string                                       `json:"allowedVariantIds,omitempty"`
 	Parameters                  []runtimeCandidateOperationParameterProjection `json:"parameters"`
@@ -100,6 +101,28 @@ type runtimeCandidateOperationContractProjection struct {
 	AllowsDynamicParameters     bool                                           `json:"allowsDynamicParameters,omitempty"`
 	DynamicParameterPrefixes    []string                                       `json:"dynamicParameterPrefixes,omitempty"`
 	RequiredOperationReferences []string                                       `json:"requiredOperationReferences,omitempty"`
+	AcceptedEffectScopes        []runtimecontract.RuntimeEffectScope           `json:"acceptedEffectScopes,omitempty"`
+	RequiredEffectScopes        []runtimecontract.RuntimeEffectScope           `json:"requiredEffectScopes,omitempty"`
+	// Target is the sealed TargetPolicy authorization compiled by the single
+	// manifest compiler. Renderer/schema/instruction must consume it instead of
+	// re-deriving owner inventory or inventing a second allow-list.
+	Target                    runtimeCandidateOperationTargetProjection `json:"target"`
+	PrerequisiteSnapshotRefs  []string                                  `json:"prerequisiteSnapshotRefs,omitempty"`
+	AdmissibilitySnapshotRefs []string                                  `json:"admissibilitySnapshotRefs,omitempty"`
+	OperationContractRevision string                                    `json:"operationContractRevision,omitempty"`
+}
+
+// runtimeCandidateOperationTargetProjection is the provider-facing pure view of
+// one sealed TargetPolicy. It carries membership facts only; no raw owner
+// error text and no domain heuristics.
+type runtimeCandidateOperationTargetProjection struct {
+	Policy                    runtimecontract.RuntimeOperationTargetPolicy `json:"policy"`
+	ExactTargetRefs           []string                                     `json:"exactTargetRefs,omitempty"`
+	OwnerScopeTargetRefs      []string                                     `json:"ownerScopeTargetRefs,omitempty"`
+	OwnerSelectorRefs         []string                                     `json:"ownerSelectorRefs,omitempty"`
+	ProspectiveConstraintRefs []string                                     `json:"prospectiveConstraintRefs,omitempty"`
+	ProspectiveTargetRef      string                                       `json:"prospectiveTargetRef,omitempty"`
+	AllowedTargetRefs         []string                                     `json:"allowedTargetRefs,omitempty"`
 }
 
 type runtimeCandidateOperationParameterProjection struct {
@@ -497,7 +520,7 @@ func runtimeV2ProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmod
 	// persistence. The renderer consumes that exact value; it must not rebuild
 	// field/parameter rules from a parallel descriptor path.
 	manifest := request.CandidateManifest
-	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, request.Decision, candidateContext.Resources.TargetSelection); err != nil {
+	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, request.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources)); err != nil {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate contract manifest: %w", err)
 	}
 	wantPrefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definitionContext, candidateContext.Activation.ExecutionContract)
@@ -1023,10 +1046,21 @@ func runtimeV2OperationSchemaConditionsForManifest(operations []runtimecontract.
 		if len(parameterRequirements) > 0 || len(operation.Variants) > 0 {
 			then["required"] = []string{"parameters"}
 		}
-		if operation.RequireTargetRefs {
-			required, _ := then["required"].([]string)
-			then["required"] = append(required, "targetRefs")
-			thenProperties["targetRefs"] = map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}}
+		allowedTargets := operation.Target.Normalized().AllowedTargetRefs()
+		if operation.RequireTargetRefs || len(allowedTargets) > 0 {
+			if operation.RequireTargetRefs {
+				required, _ := then["required"].([]string)
+				then["required"] = append(required, "targetRefs")
+			}
+			targetItems := map[string]any{"type": "string"}
+			if len(allowedTargets) > 0 {
+				targetItems["enum"] = append([]string(nil), allowedTargets...)
+			}
+			targetSchema := map[string]any{"type": "array", "items": targetItems}
+			if operation.RequireTargetRefs {
+				targetSchema["minItems"] = 1
+			}
+			thenProperties["targetRefs"] = targetSchema
 		}
 		ret = append(ret, map[string]any{
 			"if":   map[string]any{"properties": map[string]any{"kind": map[string]any{"const": operation.Kind}}, "required": []string{"kind"}},
@@ -1245,8 +1279,10 @@ func runtimeV2CandidateOperationContractsForManifest(values []runtimecontract.Ru
 	ret := make([]runtimeCandidateOperationContractProjection, 0, len(values))
 	for _, operation := range values {
 		operation = operation.Normalized()
+		target := operation.Target.Normalized()
 		projection := runtimeCandidateOperationContractProjection{
 			Kind:                        operation.Kind,
+			OwnerModuleID:               operation.OwnerModuleID,
 			AllowedOperationFields:      append([]string(nil), operation.AllowedOperationFields...),
 			AllowedVariantIDs:           append([]string(nil), operation.AllowedVariantIDs...),
 			RequireOneOfParameters:      append([]string(nil), operation.RequireOneOfParameters...),
@@ -1256,7 +1292,21 @@ func runtimeV2CandidateOperationContractsForManifest(values []runtimecontract.Ru
 			AllowsDynamicParameters:     operation.AllowsDynamicParameters,
 			DynamicParameterPrefixes:    append([]string(nil), operation.DynamicParameterPrefixes...),
 			RequiredOperationReferences: append([]string(nil), operation.RequiredOperationReferences...),
-			Parameters:                  make([]runtimeCandidateOperationParameterProjection, 0, len(operation.Parameters)),
+			AcceptedEffectScopes:        append([]runtimecontract.RuntimeEffectScope(nil), operation.AcceptedEffectScopes...),
+			RequiredEffectScopes:        append([]runtimecontract.RuntimeEffectScope(nil), operation.RequiredEffectScopes...),
+			Target: runtimeCandidateOperationTargetProjection{
+				Policy:                    target.Policy,
+				ExactTargetRefs:           append([]string(nil), target.ExactTargetRefs...),
+				OwnerScopeTargetRefs:      append([]string(nil), target.OwnerScopeTargetRefs...),
+				OwnerSelectorRefs:         append([]string(nil), target.OwnerSelectorRefs...),
+				ProspectiveConstraintRefs: append([]string(nil), target.ProspectiveConstraintRefs...),
+				ProspectiveTargetRef:      target.ProspectiveTargetRef,
+				AllowedTargetRefs:         target.AllowedTargetRefs(),
+			},
+			PrerequisiteSnapshotRefs:  append([]string(nil), operation.PrerequisiteSnapshotRefs...),
+			AdmissibilitySnapshotRefs: append([]string(nil), operation.AdmissibilitySnapshotRefs...),
+			OperationContractRevision: operation.OperationContractRevision,
+			Parameters:                make([]runtimeCandidateOperationParameterProjection, 0, len(operation.Parameters)),
 		}
 		for _, parameter := range operation.Parameters {
 			projection.Parameters = append(projection.Parameters, runtimeCandidateOperationParameterProjection{
@@ -1323,6 +1373,19 @@ func runtimeV2CandidateStructuredOutputInstruction(manifest runtimecontract.Runt
 		}
 		if operation.RequireTargetRefs {
 			line += " targetRefs is required and must name the concrete target changed by this operation."
+		}
+		target := operation.Target.Normalized()
+		if target.Policy != "" {
+			line += " TargetPolicy=" + string(target.Policy) + "."
+			if allowed := target.AllowedTargetRefs(); len(allowed) > 0 {
+				line += " Allowed targets: " + runtimeV2CandidateContractFieldList(allowed) + "."
+			}
+			if target.ProspectiveTargetRef != "" {
+				line += " Prospective target: " + target.ProspectiveTargetRef + "."
+			}
+			if len(target.OwnerSelectorRefs) > 0 {
+				line += " Owner selectors: " + runtimeV2CandidateContractFieldList(target.OwnerSelectorRefs) + "."
+			}
 		}
 		if len(operation.RequiredOperationReferences) > 0 {
 			line += " requiredOperationRef must be one of: " + runtimeV2CandidateContractFieldList(operation.RequiredOperationReferences) + "."

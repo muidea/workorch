@@ -1998,8 +1998,14 @@ func TestRuntimeV2FileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *test
 		resumed.Decision.AuthoritySnapshot.ID == sealed.Aggregate.Decision.AuthoritySnapshot.ID || resumed.Decision.AuthoritySnapshot.Attempt != 0 {
 		t.Fatalf("restart did not create fresh retarget authority: aggregate=%+v err=%v", resumed, err)
 	}
+	// After owner retarget, Decision seals exact_target to implementation.go.
+	// Plan §7 first-failure therefore rejects main.go at target policy before
+	// semantic replay. The old rejected shape remains retained for same-target
+	// replays; either rejection proves the old candidate is still inadmissible.
 	if admission := evaluateRuntimeV2CandidateAdmissionForTest(resumed, oldCandidate); admission.Accepted() || admission.Failure == nil ||
-		admission.Failure.Code != "candidate_replays_rejected_shape" {
+		(admission.Failure.Code != "candidate_replays_rejected_shape" &&
+			admission.Failure.Code != "candidate_contract_invalid" &&
+			admission.Failure.Code != "candidate_target_outside_grounding") {
 		t.Fatalf("old same-gap shape became admissible after retarget restart: %+v", admission)
 	}
 	implementationTarget := "implementation.go"
@@ -3189,6 +3195,10 @@ func TestRuntimeV2MainlineRecordsInfeasibleCandidateBeforeDispatchSeal(t *testin
 	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
 
 	facts := runtimeV2Aggregate(t, 1).Facts
+	// Infeasibility is an owner feasibility observation, not wire exact_target
+	// membership. Clear focus TargetRefs so Decision does not seal an exclusive
+	// path that rejects the deliberately non-regular inventory target ".".
+	facts.Focus.TargetRefs = nil
 	inventory := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "operation_admissibility:blocks/file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{"."}, ObservedRevision: "test-revision",
@@ -3224,8 +3234,11 @@ func TestRuntimeV2MainlineRecordsInfeasibleCandidateBeforeDispatchSeal(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if candidateCalls != 1 || terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "candidate_correction_undefined" || terminal.Facts.Failure == nil || terminal.Facts.Failure.Class != runtimecontract.FailureClassCandidateCorrectionUndefined || len(terminal.CandidateRequestSessions) != 1 || len(terminal.CandidateAttempts) != 1 || terminal.ActiveDispatch != nil || len(terminal.GovernanceRequests) != 0 {
-		t.Fatalf("undefined correction did not terminalize without attempt 1: calls=%d aggregate=%+v", candidateCalls, terminal)
+	// N4: incomplete/infeasible complete rejection without a same-manifest
+	// correction objective is runtime_contract_defect, not the legacy
+	// candidate_correction_undefined catch-all.
+	if candidateCalls != 1 || terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "runtime_contract_defect" || terminal.Facts.Failure == nil || terminal.Facts.Failure.Code != "runtime_contract_defect" || len(terminal.CandidateRequestSessions) != 1 || len(terminal.CandidateAttempts) != 1 || terminal.ActiveDispatch != nil || len(terminal.GovernanceRequests) != 0 {
+		t.Fatalf("uncorrectable complete rejection did not terminalize without attempt 1: calls=%d aggregate=%+v", candidateCalls, terminal)
 	}
 }
 
@@ -3301,6 +3314,7 @@ func TestRuntimeV2FileBackedCorrectionRestartSealsOwnerAdmissibleCandidate(t *te
 	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
 
 	facts := runtimeV2Aggregate(t, 1).Facts
+	facts.Focus.TargetRefs = nil
 	inventory := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "operation_admissibility:blocks/file", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{".", "target.txt"}, ObservedRevision: "test-revision"}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
@@ -3432,6 +3446,7 @@ func TestRuntimeV2FileBackedCorrectionCompleteRestartExhaustsWithoutProviderRepl
 	})
 
 	facts := runtimeV2Aggregate(t, 1).Facts
+	facts.Focus.TargetRefs = nil
 	inventory := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "operation_admissibility:blocks/file", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{".", "target.txt"}, ObservedRevision: "test-revision"}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
@@ -3477,7 +3492,7 @@ func TestRuntimeV2FileBackedCorrectionCompleteRestartExhaustsWithoutProviderRepl
 	}
 
 	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(failed.Facts, failed.Decision, runtimev2.ActiveRejectedOperationShapes(failed))
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(failed.Decision, candidateContext.Resources.TargetSelection)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(failed.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4027,7 +4042,7 @@ func runtimeV2Aggregate(t *testing.T, revision uint64) runtimev2.RuntimeAggregat
 func runtimeV2CandidateRequestContentID(t *testing.T, aggregate runtimev2.RuntimeAggregate, stablePrefixHash string, attempt int) common.ArtifactContinuationID {
 	t.Helper()
 	context := runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, runtimev2.ActiveRejectedOperationShapes(aggregate))
-	manifest, manifestErr := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, context.Resources.TargetSelection)
+	manifest, manifestErr := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(context.Resources))
 	if manifestErr != nil {
 		t.Fatal(manifestErr)
 	}

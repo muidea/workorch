@@ -170,6 +170,11 @@ type AcquireRuntimeOperationAdmissibilityResult struct {
 // ProbeRuntimeOperationFeasibilityCommand is an SM-3 admission check for one
 // schema-valid operation. It is intentionally separate from execute commands:
 // Feasible=false cannot create a dispatch, receipt, evidence, or side effect.
+//
+// N5: the owner receives the sealed operation authorization identity from the
+// candidate manifest plus the original owner snapshot identity. Owners only
+// report feasible | stale | infeasible; they do not choose correction, action,
+// or terminal.
 type ProbeRuntimeOperationFeasibilityCommand struct {
 	WorkspaceID                   common.WorkspaceID
 	RunID                         common.RunID
@@ -180,6 +185,15 @@ type ProbeRuntimeOperationFeasibilityCommand struct {
 	// CapabilityStateBinding must equal Admissibility.AcquisitionBinding when
 	// the inventory was derived from a capability-state acquisition.
 	CapabilityStateBinding string
+	// CandidateManifestHash is the sealed candidate contract hash for this
+	// authority transaction. Owners validate identity only; they never rebuild
+	// the manifest.
+	CandidateManifestHash string
+	// OperationAuthorization is the sealed pure authorization for this
+	// operation kind from the candidate manifest. Owners verify kind/owner/
+	// target-policy identity against it and must not re-derive policy from
+	// focus/profile text.
+	OperationAuthorization runtimecontract.RuntimeCandidateOperationManifest
 	// Observation is the persisted freshness metadata for Admissibility. It is
 	// supplied by Orchestrator so an owner can return an exact typed stale
 	// detail without reconstructing authority from local process state.
@@ -190,10 +204,15 @@ type ProbeRuntimeOperationFeasibilityCommand struct {
 	CurrentTargetSnapshot *runtimecontract.TargetSnapshot
 }
 
+// ProbeRuntimeOperationFeasibilityResult is the unified outer observation for
+// every capability owner. Exactly one of Feasible / Stale / Failure (infeasible)
+// is active after normalize. PrerequisiteRequest is an optional SM-2 reacquire
+// hint that still implies non-feasible.
 type ProbeRuntimeOperationFeasibilityResult struct {
 	OperationID             string
 	AdmissibilitySnapshotID string
 	CapabilityStateBinding  string
+	CandidateManifestHash   string
 	Feasible                bool
 	ReplayProof             *runtimecontract.RuntimeOperationReplayProof
 	Failure                 *runtimecontract.FailureFact

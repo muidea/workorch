@@ -274,6 +274,35 @@ func RuntimeCandidateCorrectionObjectivesForFailure(failure *RuntimeCandidateFai
 	if strings.Contains(diagnostic.Path, "dependsOn") {
 		objectives = append(objectives, RuntimeCandidateCorrectionSatisfyDependency)
 	}
+	// Parameter/variant shape failures are same-manifest structural corrections:
+	// the sealed operation contract already lists allowed variants and fields.
+	if strings.Contains(diagnostic.Path, ".parameters") {
+		switch {
+		case diagnostic.Actual == "unmatched_variant" && len(diagnostic.Allowed) != 0:
+			objectives = append(objectives, RuntimeCandidateCorrectionChangeReplayedShape)
+		case strings.HasPrefix(diagnostic.Actual, "missing_") || strings.HasPrefix(diagnostic.Actual, "empty_"):
+			objectives = append(objectives, RuntimeCandidateCorrectionSupplyRequiredField)
+		case len(diagnostic.Forbidden) != 0 || strings.HasPrefix(diagnostic.Actual, "duplicate_"):
+			objectives = append(objectives, RuntimeCandidateCorrectionRemoveForbiddenField)
+		case len(diagnostic.Allowed) != 0:
+			objectives = append(objectives, RuntimeCandidateCorrectionChangeReplayedShape)
+		}
+	}
+	// Empty/unshaped candidates and bare schema rejections still have a
+	// same-manifest structural fix: supply the sealed required top-level fields.
+	switch strings.TrimSpace(failure.Code) {
+	case "candidate_contract_invalid", "candidate_schema_invalid":
+		switch {
+		case diagnostic.Path == "",
+			diagnostic.Path == "$",
+			diagnostic.Path == "$.operations",
+			diagnostic.Actual == "candidate_shape",
+			diagnostic.Actual == "missing_id",
+			diagnostic.Actual == "",
+			strings.HasPrefix(diagnostic.Actual, "duplicate_"):
+			objectives = append(objectives, RuntimeCandidateCorrectionSupplyRequiredField)
+		}
+	}
 	switch strings.TrimSpace(failure.Code) {
 	case "candidate_replays_rejected_shape", "candidate_partially_replays_rejected_shape", "candidate_replays_no_progress_shape":
 		objectives = append(objectives, RuntimeCandidateCorrectionChangeReplayedShape)
