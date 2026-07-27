@@ -269,6 +269,59 @@ func TestNormalStateChangeDoesNotCreateRepairDirective(t *testing.T) {
 	}
 }
 
+func TestAssessmentGapRepairClosureBindsGroundedTargetsAndFollowupValidation(t *testing.T) {
+	facts := validationFacts()
+	facts.Resources.Manifest = &runtimecontract.WorkspaceManifest{Revision: "tree-v1", TargetRefs: []string{"implementation.go", "implementation_test.go"}}
+	facts.Repair = runtimecontract.RuntimeRepairLedger{
+		FocusID: facts.Focus.ID,
+		ActiveGap: &runtimecontract.RuntimeAssessmentGap{
+			CoverageWorkItemIDs:  facts.Focus.CoverageWorkItemIDs,
+			MissingEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+			TargetRefs:           []string{"implementation.go", "implementation_test.go"},
+			FailureClass:         runtimecontract.FailureClassCoverageAssessmentIncomplete,
+			FailureCode:          "validation_evidence_insufficient",
+			FailureSignature:     "assessment-gap-v1",
+			Reason:               "direct validation remains missing",
+		},
+	}
+	base := runtimecontract.RuntimeDecision{Focus: facts.Focus}
+	initial := runtimecontract.RuntimeDecision{
+		State: runtimecontract.ConvergenceStateNeedStateChange, Action: runtimecontract.RuntimeActionProduceStateChange,
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			Kind: runtimecontract.RequiredOutputKindStateChange, AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+			AcceptedEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+			RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+		},
+	}
+	directive := buildRepairDirective(facts, initial)
+	if directive.Closure == nil || directive.Closure.ID == "" || !directive.Closure.RequireValidationAfterStateChange ||
+		!sameRuntimeTargetRefs(directive.Closure.GroundedTargetRefs, []string{"implementation.go", "implementation_test.go"}) {
+		t.Fatalf("assessment gap did not become a grounded repair closure: %+v", directive)
+	}
+
+	decision, err := repairStateChangeDecision(base, facts, directive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.RequiredOutput.RepairClosureID != directive.Closure.ID ||
+		!sameRuntimeTargetRefs(decision.RequiredOutput.TargetRefs, directive.Closure.GroundedTargetRefs) {
+		t.Fatalf("state-change decision did not seal repair closure: %+v", decision)
+	}
+
+	facts.RepairDirective = &directive
+	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
+		ID: "changed", Kind: runtimecontract.EvidenceKindStateChange,
+		Revision: "evidence-v2-00000000000000000002", TargetRefs: []string{"implementation.go"},
+		CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+	}}
+	next := syncRepairDirective(facts, decision)
+	if next.RepairDirective == nil || next.RepairDirective.RequiredAction != runtimecontract.RuntimeActionProduceValidation ||
+		next.RepairDirective.Closure == nil || next.RepairDirective.Closure.ID != directive.Closure.ID {
+		t.Fatalf("accepted repair state change did not preserve closure into validation: %+v", next.RepairDirective)
+	}
+}
+
 func TestRejectedValidationSupersedesPersistedValidationDirectiveAndFeasibility(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}

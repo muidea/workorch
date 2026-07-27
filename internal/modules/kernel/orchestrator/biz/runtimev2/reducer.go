@@ -60,6 +60,19 @@ func ReduceRuntimeStateWithDirective(facts runtimecontract.RuntimeFacts, previou
 		return facts, runtimecontract.RuntimeDecision{}, err
 	}
 	facts = syncRepairDirective(facts, decision)
+	// Creating a repair closure changes the action-level candidate authority
+	// (closure ID and grounded targets). Re-seal once from the persisted
+	// directive so the first repair dispatch cannot retain the weaker ordinary
+	// state-change output that selected the repair branch.
+	if facts.RepairDirective != nil && facts.RepairDirective.Closure != nil &&
+		(decision.Action == runtimecontract.RuntimeActionProduceStateChange || decision.Action == runtimecontract.RuntimeActionProduceValidation) &&
+		decision.RequiredOutput.RepairClosureID != facts.RepairDirective.Closure.ID {
+		decision, err = ReduceRuntimeState(facts, previous)
+		if err != nil {
+			return facts, runtimecontract.RuntimeDecision{}, err
+		}
+		facts = syncRepairDirective(facts, decision)
+	}
 	return facts, decision, nil
 }
 
@@ -337,6 +350,7 @@ func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecont
 		RequiredEvidenceKinds:     []string{runtimecontract.EvidenceKindStateChange},
 		CoverageWorkItemIDs:       facts.Focus.CoverageWorkItemIDs,
 		TargetRefs:                GroundedRepairTargets(facts),
+		RepairClosureID:           currentRepairClosureID(facts),
 		RequiredOperationSequence: requiredCapabilityStateSequence(facts, acceptedKinds),
 	}
 	return base, nil
@@ -429,8 +443,16 @@ func validationDecision(base runtimecontract.RuntimeDecision, facts runtimecontr
 		RequiredEvidenceKinds:     []string{runtimecontract.EvidenceKindValidation},
 		CoverageWorkItemIDs:       facts.Focus.CoverageWorkItemIDs,
 		TargetRefs:                GroundedRepairTargets(facts),
+		RepairClosureID:           currentRepairClosureID(facts),
 	}
 	return base, nil
+}
+
+func currentRepairClosureID(facts runtimecontract.RuntimeFacts) string {
+	if facts.RepairDirective == nil || facts.RepairDirective.FocusID != facts.Focus.ID || facts.RepairDirective.Closure == nil {
+		return ""
+	}
+	return facts.RepairDirective.Closure.ID
 }
 
 // targetGroundingDecision is the common SM-2 pre-provider fence for executable

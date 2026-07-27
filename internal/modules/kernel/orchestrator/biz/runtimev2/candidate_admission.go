@@ -26,6 +26,7 @@ const (
 	candidateAdmissionCodeReplaysNoProgressShape      = "candidate_replays_no_progress_shape"
 	candidateAdmissionCodeActionEvidenceMismatch      = "candidate_action_evidence_mismatch"
 	candidateAdmissionCodeTargetOutsideGrounding      = "candidate_target_outside_grounding"
+	candidateAdmissionCodeRepairClosureMismatch       = "candidate_repair_closure_mismatch"
 	candidateAdmissionCodeCreationScopeMissingTarget  = "candidate_creation_scope_missing_file_target"
 	candidateAdmissionSignatureInvalid                = "candidate-contract-invalid"
 	candidateAdmissionSignatureReplaysRejectedShape   = "candidate-replays-rejected-shape"
@@ -34,6 +35,7 @@ const (
 	candidateAdmissionSignatureNoProgressReplay       = "candidate-replays-no-progress-shape"
 	candidateAdmissionSignatureActionEvidenceMismatch = "candidate-action-evidence-mismatch"
 	candidateAdmissionSignatureTargetOutsideGrounding = "candidate-target-outside-grounding"
+	candidateAdmissionSignatureRepairClosureMismatch  = "candidate-repair-closure-mismatch"
 	candidateAdmissionSignatureCreationScopeTarget    = "candidate-creation-scope-missing-file-target"
 )
 
@@ -151,6 +153,8 @@ func EvaluateCandidateAdmissionWithManifest(aggregate RuntimeAggregate, manifest
 		// first-failure already selected
 	} else if result = rejectCandidateNoProgressReplay(aggregate, candidate); !result.Accepted() {
 		// first-failure already selected
+	} else if result = rejectCandidateRepairClosure(aggregate, candidate); !result.Accepted() {
+		// first-failure already selected
 	} else if result = rejectCandidateMissingValidationGap(aggregate.Facts, aggregate.Decision, candidate); !result.Accepted() {
 		// first-failure already selected
 	} else if result = rejectCandidateOutsideGroundedTargets(aggregate.Facts, aggregate.Decision, candidate); !result.Accepted() {
@@ -159,6 +163,46 @@ func EvaluateCandidateAdmissionWithManifest(aggregate RuntimeAggregate, manifest
 		return acceptedCandidateAdmission()
 	}
 	return sealCandidateAdmissionRejection(result, manifest, candidate)
+}
+
+// rejectCandidateRepairClosure is the SM-3 counterpart to the SM-2 repair
+// directive.  A repair may contain multiple candidate dispatches, but each
+// executable operation must contribute to the same sealed gap closure.  This
+// does not infer domain semantics: it checks only persisted coverage and
+// owner-grounded target references.
+func rejectCandidateRepairClosure(aggregate RuntimeAggregate, candidate workorchruntimecontract.RuntimeCandidate) CandidateAdmissionResult {
+	directive := aggregate.Facts.RepairDirective
+	if directive == nil || directive.Closure == nil || directive.FocusID != aggregate.Facts.Focus.ID {
+		return acceptedCandidateAdmission()
+	}
+	closure := directive.Closure.Normalized()
+	if aggregate.Decision.RequiredOutput.RepairClosureID != closure.ID {
+		return rejectedCandidateAdmission(
+			candidateAdmissionCodeRepairClosureMismatch,
+			candidateAdmissionSignatureRepairClosureMismatch,
+			"sealed repair decision is not bound to the active repair closure",
+		)
+	}
+	for _, operation := range candidateRuntimeOperations(candidate) {
+		if !coverageIDsIntersect(closure.CoverageWorkItemIDs, operation.CoverageWorkItemIDs) {
+			return rejectedCandidateAdmission(
+				candidateAdmissionCodeRepairClosureMismatch,
+				candidateAdmissionSignatureRepairClosureMismatch,
+				"runtime repair candidate operation is outside the sealed repair coverage",
+			)
+		}
+		if len(closure.GroundedTargetRefs) > 0 && !runtimeTargetRefsIntersect(closure.GroundedTargetRefs, operation.TargetRefs) {
+			return rejectedCandidateAdmissionWithAllowedTargets(
+				candidateAdmissionCodeRepairClosureMismatch,
+				candidateAdmissionSignatureRepairClosureMismatch,
+				"runtime repair candidate operation does not target the sealed repair closure",
+				operation.TargetRefs,
+				closure.GroundedTargetRefs,
+				candidate,
+			)
+		}
+	}
+	return acceptedCandidateAdmission()
 }
 
 // rejectCandidateOutsideGroundedTargets is the SM-3 fence for a focus whose
@@ -365,6 +409,9 @@ func GroundedRepairTargets(facts workorchruntimecontract.RuntimeFacts) []string 
 	}
 	if facts.Failure != nil && len(facts.Failure.TargetRefs) > 0 {
 		return append([]string(nil), facts.Failure.TargetRefs...)
+	}
+	if targets := ownerGroundedAssessmentGapTargets(facts); len(targets) > 0 {
+		return targets
 	}
 	if selection := currentFocusTargetSelection(facts); selection != nil && targetSelectionHasConcreteTarget(*selection) {
 		return append([]string(nil), selection.TargetRefs...)

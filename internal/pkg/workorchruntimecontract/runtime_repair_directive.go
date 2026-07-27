@@ -1,11 +1,90 @@
 package workorchruntimecontract
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
+
+// RuntimeRepairClosure is the immutable, focus-scoped repair objective derived
+// by SM-2 from an assessed gap.  It deliberately carries only neutral facts:
+// the gap identity, evidence baseline, coverage, evidence family and already
+// grounded targets.  It does not select an action or infer an operation.
+//
+// A state-change and its mandatory follow-up validation retain the same
+// closure ID.  This prevents a validation-gap repair from degrading into an
+// unrelated durable change between sealed dispatches.
+type RuntimeRepairClosure struct {
+	ID                                string
+	GapSignature                      string
+	BaselineEvidenceRevision          string
+	CoverageWorkItemIDs               []common.CoverageWorkItemID
+	MissingEvidenceKinds              []string
+	GroundedTargetRefs                []string
+	RequireValidationAfterStateChange bool
+}
+
+func (c RuntimeRepairClosure) Normalized() RuntimeRepairClosure {
+	c.ID = strings.TrimSpace(c.ID)
+	c.GapSignature = strings.TrimSpace(c.GapSignature)
+	c.BaselineEvidenceRevision = strings.TrimSpace(c.BaselineEvidenceRevision)
+	c.CoverageWorkItemIDs = normalizeCoverageWorkItemIDs(c.CoverageWorkItemIDs)
+	c.MissingEvidenceKinds = normalizeStrings(c.MissingEvidenceKinds)
+	c.GroundedTargetRefs = normalizeStrings(c.GroundedTargetRefs)
+	return c
+}
+
+func (c RuntimeRepairClosure) Validate() error {
+	c = c.Normalized()
+	if c.ID == "" || c.GapSignature == "" || c.BaselineEvidenceRevision == "" {
+		return fmt.Errorf("repair closure requires id, gap signature and baseline evidence revision")
+	}
+	if len(c.CoverageWorkItemIDs) == 0 {
+		return fmt.Errorf("repair closure requires coverage work items")
+	}
+	if want := StableRuntimeRepairClosureID(c); c.ID != want {
+		return fmt.Errorf("repair closure identity mismatch")
+	}
+	return nil
+}
+
+func (c RuntimeRepairClosure) Clone() RuntimeRepairClosure { return c.Normalized() }
+
+// StableRuntimeRepairClosureID is a pure value identity.  The Orchestrator is
+// the only component allowed to decide when a new closure is created.
+func StableRuntimeRepairClosureID(value RuntimeRepairClosure) string {
+	value = value.Normalized()
+	h := sha256.New()
+	writeHashString(h, value.GapSignature)
+	writeHashString(h, value.BaselineEvidenceRevision)
+	coverage := make([]string, 0, len(value.CoverageWorkItemIDs))
+	for _, id := range value.CoverageWorkItemIDs {
+		coverage = append(coverage, string(id))
+	}
+	writeHashStrings(h, coverage)
+	writeHashStrings(h, value.MissingEvidenceKinds)
+	writeHashStrings(h, value.GroundedTargetRefs)
+	if value.RequireValidationAfterStateChange {
+		writeHashString(h, "require-validation")
+	}
+	return "repair-closure-" + hex.EncodeToString(h.Sum(nil))[:20]
+}
+
+func SameRuntimeRepairClosure(left, right *RuntimeRepairClosure) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	l, r := left.Normalized(), right.Normalized()
+	return l.ID == r.ID && l.GapSignature == r.GapSignature &&
+		l.BaselineEvidenceRevision == r.BaselineEvidenceRevision &&
+		l.RequireValidationAfterStateChange == r.RequireValidationAfterStateChange &&
+		sameCoverageWorkItemIDs(l.CoverageWorkItemIDs, r.CoverageWorkItemIDs) &&
+		sameStrings(l.MissingEvidenceKinds, r.MissingEvidenceKinds) &&
+		sameStrings(l.GroundedTargetRefs, r.GroundedTargetRefs)
+}
 
 // RuntimeGovernanceKind unifies decision/approval/configuration/external dependency (RVC-R11 prep).
 type RuntimeGovernanceKind string
@@ -136,18 +215,21 @@ const (
 // RuntimeRepairDirective is the single persisted next-action authority for a focus (INV-05).
 // Candidate renderer, anti-replay, and owners must obey RequiredAction; they cannot switch it.
 type RuntimeRepairDirective struct {
-	ID                         string
-	FocusID                    string
-	Trigger                    RuntimeRepairTrigger
-	CurrentFailure             *FailureFact
-	RequiredAction             RuntimeAction
-	RequiredEffectScopes       []RuntimeEffectScope
-	RequiredEvidenceKinds      []string
-	AllowedOperationKinds      []string
-	RejectedOperationShapes    []RuntimeRejectedOperationShape
-	NoProgressOperationShapes  []RuntimeRejectedOperationShape
-	CoverageWorkItemIDs        []common.CoverageWorkItemID
-	TargetRefs                 []string
+	ID                        string
+	FocusID                   string
+	Trigger                   RuntimeRepairTrigger
+	CurrentFailure            *FailureFact
+	RequiredAction            RuntimeAction
+	RequiredEffectScopes      []RuntimeEffectScope
+	RequiredEvidenceKinds     []string
+	AllowedOperationKinds     []string
+	RejectedOperationShapes   []RuntimeRejectedOperationShape
+	NoProgressOperationShapes []RuntimeRejectedOperationShape
+	CoverageWorkItemIDs       []common.CoverageWorkItemID
+	TargetRefs                []string
+	// Closure is optional only for persisted directives created before repair
+	// closure support. New SM-2 repair directives must carry it.
+	Closure                    *RuntimeRepairClosure
 	SupersedesEvidenceRevision string
 	RepairAttempt              int
 }
@@ -183,6 +265,10 @@ func (d RuntimeRepairDirective) Normalized() RuntimeRepairDirective {
 	d.NoProgressOperationShapes = NormalizeRuntimeRejectedOperationShapes(d.NoProgressOperationShapes)
 	d.CoverageWorkItemIDs = normalizeCoverageWorkItemIDs(d.CoverageWorkItemIDs)
 	d.TargetRefs = normalizeStrings(d.TargetRefs)
+	if d.Closure != nil {
+		closure := d.Closure.Normalized()
+		d.Closure = &closure
+	}
 	d.SupersedesEvidenceRevision = strings.TrimSpace(d.SupersedesEvidenceRevision)
 	return d
 }
@@ -215,6 +301,17 @@ func (d RuntimeRepairDirective) Validate() error {
 			return fmt.Errorf("repair directive current failure target observation: %w", err)
 		}
 	}
+	if d.Closure != nil {
+		if err := d.Closure.Validate(); err != nil {
+			return fmt.Errorf("repair directive closure: %w", err)
+		}
+		if !sameCoverageWorkItemIDs(d.CoverageWorkItemIDs, d.Closure.CoverageWorkItemIDs) {
+			return fmt.Errorf("repair directive coverage does not match repair closure")
+		}
+		if len(d.TargetRefs) > 0 && !sameStrings(d.TargetRefs, d.Closure.GroundedTargetRefs) {
+			return fmt.Errorf("repair directive targets do not match repair closure")
+		}
+	}
 	return nil
 }
 
@@ -223,6 +320,10 @@ func (d RuntimeRepairDirective) Clone() RuntimeRepairDirective {
 	if d.CurrentFailure != nil {
 		failure := ret.CurrentFailure.Clone()
 		ret.CurrentFailure = &failure
+	}
+	if d.Closure != nil {
+		closure := d.Closure.Clone()
+		ret.Closure = &closure
 	}
 	if len(ret.RejectedOperationShapes) > 0 {
 		shapes := make([]RuntimeRejectedOperationShape, len(ret.RejectedOperationShapes))
@@ -248,6 +349,9 @@ func SameRuntimeRepairDirective(left *RuntimeRepairDirective, right *RuntimeRepa
 	r := right.Normalized()
 	if l.ID != r.ID || l.FocusID != r.FocusID || l.Trigger != r.Trigger || l.RequiredAction != r.RequiredAction ||
 		l.SupersedesEvidenceRevision != r.SupersedesEvidenceRevision || l.RepairAttempt != r.RepairAttempt {
+		return false
+	}
+	if !SameRuntimeRepairClosure(l.Closure, r.Closure) {
 		return false
 	}
 	if !SameRuntimeEffectScopes(l.RequiredEffectScopes, r.RequiredEffectScopes) ||

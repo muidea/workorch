@@ -902,11 +902,14 @@ type RequiredOutputContract struct {
 	AcceptedOperationVariants []RuntimeOperationVariantRef
 	// AcceptedEffectScopes are the effect scopes that may appear in a sealed candidate.
 	// RequiredEffectScopes must be satisfied by at least one operation for state-change.
-	AcceptedEffectScopes      []RuntimeEffectScope
-	RequiredEffectScopes      []RuntimeEffectScope
-	RequiredEvidenceKinds     []string
-	CoverageWorkItemIDs       []common.CoverageWorkItemID
-	TargetRefs                []string
+	AcceptedEffectScopes  []RuntimeEffectScope
+	RequiredEffectScopes  []RuntimeEffectScope
+	RequiredEvidenceKinds []string
+	CoverageWorkItemIDs   []common.CoverageWorkItemID
+	TargetRefs            []string
+	// RepairClosureID binds this action-level output to the persisted SM-2
+	// repair objective. It is empty for ordinary, non-repair decisions.
+	RepairClosureID           string
 	PrerequisiteIDs           []string
 	RequiredOperationSequence []RuntimeRequiredOperationVariant
 }
@@ -1412,6 +1415,7 @@ func (c RequiredOutputContract) Normalized() RequiredOutputContract {
 	c.RequiredEvidenceKinds = normalizeStrings(c.RequiredEvidenceKinds)
 	c.CoverageWorkItemIDs = normalizeCoverageWorkItemIDs(c.CoverageWorkItemIDs)
 	c.TargetRefs = normalizeStrings(c.TargetRefs)
+	c.RepairClosureID = strings.TrimSpace(c.RepairClosureID)
 	c.PrerequisiteIDs = normalizeStrings(c.PrerequisiteIDs)
 	c.RequiredOperationSequence = normalizeRequiredOperationVariants(c.RequiredOperationSequence)
 	return c
@@ -1420,7 +1424,7 @@ func (c RequiredOutputContract) Validate() error {
 	c = c.Normalized()
 	switch c.Kind {
 	case RequiredOutputKindNone:
-		if len(c.AcceptedKinds)+len(c.AcceptedOperationVariants)+len(c.RequiredEvidenceKinds)+len(c.CoverageWorkItemIDs)+len(c.TargetRefs)+len(c.PrerequisiteIDs)+len(c.RequiredOperationSequence)+len(c.AcceptedEffectScopes)+len(c.RequiredEffectScopes) != 0 {
+		if len(c.AcceptedKinds)+len(c.AcceptedOperationVariants)+len(c.RequiredEvidenceKinds)+len(c.CoverageWorkItemIDs)+len(c.TargetRefs)+len(c.PrerequisiteIDs)+len(c.RequiredOperationSequence)+len(c.AcceptedEffectScopes)+len(c.RequiredEffectScopes) != 0 || c.RepairClosureID != "" {
 			return fmt.Errorf("empty required output kind cannot carry output requirements")
 		}
 	case RequiredOutputKindPrerequisite:
@@ -1479,6 +1483,11 @@ func StableRequiredOutputHash(contract RequiredOutputContract) string {
 	}
 	writeHashStrings(h, coverageIDs)
 	writeHashStrings(h, contract.TargetRefs)
+	// Keep the legacy empty-contract hash stable. A non-repair decision has no
+	// closure authority and therefore contributes no additional hash segment.
+	if contract.RepairClosureID != "" {
+		writeHashString(h, contract.RepairClosureID)
+	}
 	writeHashStrings(h, contract.PrerequisiteIDs)
 	for _, requirement := range contract.RequiredOperationSequence {
 		writeHashString(h, requirement.RequirementID)

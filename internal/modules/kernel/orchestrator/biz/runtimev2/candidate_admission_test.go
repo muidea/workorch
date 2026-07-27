@@ -44,6 +44,35 @@ func TestEvaluateCandidateAdmissionClassifiesFullAndPartialReplay(t *testing.T) 
 	}
 }
 
+func TestRepairClosureAdmissionRejectsOperationOutsideSealedRepairTarget(t *testing.T) {
+	aggregate := stateChangeAggregate(t)
+	closure := runtimecontract.RuntimeRepairClosure{
+		GapSignature:                      "assessment-gap-v1",
+		BaselineEvidenceRevision:          aggregate.Facts.EvidenceRevision,
+		CoverageWorkItemIDs:               aggregate.Facts.Focus.CoverageWorkItemIDs,
+		MissingEvidenceKinds:              []string{runtimecontract.EvidenceKindValidation},
+		GroundedTargetRefs:                []string{"main.go"},
+		RequireValidationAfterStateChange: true,
+	}
+	closure.ID = runtimecontract.StableRuntimeRepairClosureID(closure)
+	aggregate.Facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{
+		ID: "repair-1", FocusID: aggregate.Facts.Focus.ID,
+		Trigger: runtimecontract.RuntimeRepairTriggerAssessmentGap, RequiredAction: runtimecontract.RuntimeActionProduceStateChange,
+		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+		CoverageWorkItemIDs:   aggregate.Facts.Focus.CoverageWorkItemIDs, TargetRefs: []string{"main.go"},
+		Closure: &closure,
+	}
+	aggregate.Decision.RequiredOutput.RepairClosureID = closure.ID
+	candidate := stateChangeCandidate()
+	candidate.StateChange.Operations[0].Operation = patchApplyTestOperation("repair-other", "other.go")
+	result := rejectCandidateRepairClosure(aggregate, candidate)
+	if result.Disposition != CandidateAdmissionRejectedContract || result.Failure == nil || result.Failure.Code != candidateAdmissionCodeRepairClosureMismatch {
+		t.Fatalf("outside repair closure admission = %+v", result)
+	}
+}
+
 func TestActiveRejectedOperationShapesRetainsOnlyCurrentLineageAndInfeasibleProposalFacts(t *testing.T) {
 	aggregate, replayedCandidate := aggregateWithActiveRejectedCandidate(t)
 	fresh := replayedCandidate.StateChange.Operations[0].Operation

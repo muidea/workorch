@@ -46,6 +46,9 @@ func syncRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimecon
 		directive.RequiredAction = runtimecontract.RuntimeActionProduceValidation
 		directive.RequiredEffectScopes = []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}
 		directive.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+		// The state-change and validation dispatches are two SM-3 transactions,
+		// but remain one SM-2 repair closure. Do not rebuild its target or gap
+		// objective from the newly changed workspace.
 		directive.RepairAttempt++
 		facts.RepairDirective = &directive
 		return facts
@@ -174,6 +177,30 @@ func buildRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimeco
 	if directive.SupersedesEvidenceRevision == "" {
 		directive.SupersedesEvidenceRevision = facts.EvidenceRevision
 	}
+	if facts.Repair.ActiveGap != nil {
+		gap := facts.Repair.ActiveGap.Normalized()
+		closure := runtimecontract.RuntimeRepairClosure{
+			GapSignature:                      firstNonEmpty(gap.FailureSignature, runtimecontract.StableAssessmentFailureSignature(facts.Focus.ID, runtimecontract.AssessmentDispositionRepairableGap, &gap)),
+			BaselineEvidenceRevision:          directive.SupersedesEvidenceRevision,
+			CoverageWorkItemIDs:               firstRepairCoverage(gap.CoverageWorkItemIDs, directive.CoverageWorkItemIDs),
+			MissingEvidenceKinds:              gap.MissingEvidenceKinds,
+			GroundedTargetRefs:                directive.TargetRefs,
+			RequireValidationAfterStateChange: contains(gap.MissingEvidenceKinds, runtimecontract.EvidenceKindValidation),
+		}
+		closure.ID = runtimecontract.StableRuntimeRepairClosureID(closure)
+		directive.Closure = &closure
+		// The closure is the same-focus repair authority. Its remaining coverage
+		// replaces the broad focus fallback so a partially satisfied assessment
+		// cannot dispatch another repair for items that already converged.
+		directive.CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), closure.CoverageWorkItemIDs...)
+	} else if facts.RepairDirective != nil && facts.RepairDirective.Closure != nil {
+		// Execution rejection and prerequisite reacquisition retain the last
+		// sealed repair objective rather than deriving a weaker replacement.
+		closure := facts.RepairDirective.Closure.Clone()
+		directive.Closure = &closure
+		directive.TargetRefs = append([]string(nil), closure.GroundedTargetRefs...)
+		directive.CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), closure.CoverageWorkItemIDs...)
+	}
 	return directive.Normalized()
 }
 
@@ -185,6 +212,9 @@ func buildRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimeco
 // propose one concrete File target. The runtime core does not infer
 // source/test roles from path names or provider text.
 func repairDirectiveTargets(facts runtimecontract.RuntimeFacts, fallback []string) []string {
+	if facts.RepairDirective != nil && facts.RepairDirective.Closure != nil && len(facts.RepairDirective.Closure.GroundedTargetRefs) > 0 {
+		return append([]string(nil), facts.RepairDirective.Closure.GroundedTargetRefs...)
+	}
 	if facts.Resources.FailureTarget != nil && len(facts.Resources.FailureTarget.TargetRefs) > 0 {
 		return append([]string(nil), facts.Resources.FailureTarget.TargetRefs...)
 	}
@@ -193,6 +223,9 @@ func repairDirectiveTargets(facts runtimecontract.RuntimeFacts, fallback []strin
 	}
 	if facts.Failure != nil && len(facts.Failure.TargetRefs) > 0 {
 		return append([]string(nil), facts.Failure.TargetRefs...)
+	}
+	if targets := ownerGroundedAssessmentGapTargets(facts); len(targets) > 0 {
+		return targets
 	}
 	if selection := currentFocusTargetSelection(facts); selection != nil && selection.Disposition == runtimecontract.RuntimeTargetSelectionSelected && len(selection.TargetRefs) > 0 {
 		return append([]string(nil), selection.TargetRefs...)
@@ -205,6 +238,55 @@ func repairDirectiveTargets(facts runtimecontract.RuntimeFacts, fallback []strin
 		return nil
 	}
 	return append([]string(nil), fallback...)
+}
+
+// ownerGroundedAssessmentGapTargets keeps the assessment gap descriptive but
+// does not let it grant new write authority. A gap target becomes a repair
+// target only when the same current facts already contain it in an owner
+// observation, manifest, snapshot, admissibility inventory, or accepted
+// receipt. This is an SM-2 projection; pkg only validates its value shape.
+func ownerGroundedAssessmentGapTargets(facts runtimecontract.RuntimeFacts) []string {
+	if facts.Repair.ActiveGap == nil || len(facts.Repair.ActiveGap.TargetRefs) == 0 {
+		return nil
+	}
+	// An execution failure's target set is handled by FailureTarget/failure
+	// precedence above. In particular, a failed validation entry must not turn
+	// one member of a File-owner scope into a repair target merely because that
+	// command named it. Assessment-created gaps have no active owner failure and
+	// may reuse already owner-observed evidence/snapshot targets below.
+	if facts.Failure != nil {
+		return nil
+	}
+	allowed := make(map[string]struct{})
+	add := func(values []string) {
+		for _, value := range values {
+			if value = strings.TrimSpace(value); value != "" {
+				allowed[value] = struct{}{}
+			}
+		}
+	}
+	if facts.Resources.Manifest != nil {
+		add(facts.Resources.Manifest.TargetRefs)
+	}
+	for _, snapshot := range facts.Resources.TargetSnapshots {
+		add([]string{snapshot.TargetRef})
+	}
+	for _, admissibility := range facts.Resources.OperationAdmissibilities {
+		add(admissibility.TargetRefs)
+	}
+	for _, evidence := range facts.Evidence.Accepted {
+		if runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) {
+			add(evidence.TargetRefs)
+		}
+	}
+	ret := make([]string, 0, len(facts.Repair.ActiveGap.TargetRefs))
+	for _, target := range facts.Repair.ActiveGap.TargetRefs {
+		target = strings.TrimSpace(target)
+		if _, ok := allowed[target]; ok {
+			ret = append(ret, target)
+		}
+	}
+	return ret
 }
 
 func acceptedStateChangeAfterRepairDirective(facts runtimecontract.RuntimeFacts, directive *runtimecontract.RuntimeRepairDirective) bool {
@@ -249,6 +331,7 @@ func repairStateChangeDecision(base runtimecontract.RuntimeDecision, facts runti
 		RequiredEvidenceKinds:     []string{runtimecontract.EvidenceKindStateChange},
 		CoverageWorkItemIDs:       firstRepairCoverage(directive.CoverageWorkItemIDs, facts.Focus.CoverageWorkItemIDs),
 		TargetRefs:                firstRepairTargets(directive.TargetRefs, facts.Focus.TargetRefs),
+		RepairClosureID:           repairClosureID(directive),
 		RequiredOperationSequence: requiredCapabilityStateSequence(facts, acceptedKinds),
 	}
 	return base, nil
@@ -271,8 +354,16 @@ func repairValidationDecision(base runtimecontract.RuntimeDecision, facts runtim
 		RequiredEffectScopes:      directive.RequiredEffectScopes, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
 		CoverageWorkItemIDs: firstRepairCoverage(directive.CoverageWorkItemIDs, facts.Focus.CoverageWorkItemIDs),
 		TargetRefs:          firstRepairTargets(directive.TargetRefs, facts.Focus.TargetRefs),
+		RepairClosureID:     repairClosureID(directive),
 	}
 	return base, nil
+}
+
+func repairClosureID(directive runtimecontract.RuntimeRepairDirective) string {
+	if directive.Closure == nil {
+		return ""
+	}
+	return directive.Closure.ID
 }
 
 func firstRepairCoverage(primary, fallback []common.CoverageWorkItemID) []common.CoverageWorkItemID {
