@@ -44,7 +44,7 @@ Last Updated: 2026-07-14
 2. [repository-structure.md](repository-structure.md)
 3. [application-workorchd.md](application-workorchd.md)
 4. [kernel-orchestrator-governance.md](kernel-orchestrator-governance.md)
-5. [kernel-workspace-run-result.md](kernel-workspace-run-result.md)
+5. [blocks-workspace-run-result.md](blocks-workspace-run-result.md)
 6. [blocks-runtime-adapters.md](blocks-runtime-adapters.md)
 7. [mvvp-workspace-viewmodel-architecture.md](mvvp-workspace-viewmodel-architecture.md)
 8. [llm-provider-assembly.md](llm-provider-assembly.md)

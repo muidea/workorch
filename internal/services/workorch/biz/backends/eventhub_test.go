@@ -12,10 +12,10 @@ import (
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
-	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
-	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -185,7 +185,7 @@ func TestEventHubEventsBackendReceivesTypedEventStreamRecord(t *testing.T) {
 	}
 	event := magicevent.NewEventWithContext(
 		eventstreamevents.TopicEventStreamRecordAppended,
-		"kernel/eventstream",
+		"blocks/eventstream",
 		eventstreamevents.NotificationDestination,
 		magicevent.NewHeader(),
 		ctx,

@@ -170,27 +170,3 @@ func (p RuntimeRecoveryPolicy) Limit(kind RuntimeRecoveryBudgetKind) int {
 		return 0
 	}
 }
-
-func (l RuntimeRecoveryLedger) Consume(kind RuntimeRecoveryBudgetKind, policy RuntimeRecoveryPolicy) (RuntimeRecoveryLedger, bool, error) {
-	if policy.Limit(kind) == 0 {
-		return l, false, fmt.Errorf("unknown runtime recovery budget %q", kind)
-	}
-	if l.Used(kind) >= policy.Limit(kind) {
-		return l, false, nil
-	}
-	switch kind {
-	case RuntimeRecoveryBudgetProviderTransport:
-		l.ProviderTransportAttempts++
-	case RuntimeRecoveryBudgetOperationRecovery:
-		l.OperationRecoveryAttempts++
-	case RuntimeRecoveryBudgetCASReload:
-		l.CASReloadAttempts++
-	case RuntimeRecoveryBudgetTerminalDelivery:
-		l.TerminalDeliveryAttempts++
-	case RuntimeRecoveryBudgetPrerequisiteRefresh:
-		l.PrerequisiteRefreshes++
-	case RuntimeRecoveryBudgetPrerequisiteResourceChangeRefresh:
-		l.PrerequisiteResourceChangeRefreshes++
-	}
-	return l, true, nil
-}

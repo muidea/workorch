@@ -789,7 +789,7 @@ Last Updated: 2026-05-30
 
 已对齐：
 
-- `30-module-architecture/kernel-workspace-run-result.md` 已补：
+- `30-module-architecture/blocks-workspace-run-result.md` 已补：
   - run evidence / result / eventstream 的更细责任拆分
 - `30-module-architecture/kernel-orchestrator-governance.md` 已补：
   - decision / approval / auto-governance 相关的实现边界与责任分工

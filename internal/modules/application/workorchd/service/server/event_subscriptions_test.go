@@ -11,10 +11,10 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
+	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
-	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
-	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -58,7 +58,7 @@ func publishServerTestEventRecord(ctx context.Context, hub magicevent.Hub, envel
 	if err != nil {
 		return err
 	}
-	event := magicevent.NewEventWithContext(eventstreamevents.TopicEventStreamRecordAppended, "kernel/eventstream", eventstreamevents.NotificationDestination, magicevent.NewHeader(), ctx, eventstreamevents.EventRecordAppendedData{Record: data})
+	event := magicevent.NewEventWithContext(eventstreamevents.TopicEventStreamRecordAppended, "blocks/eventstream", eventstreamevents.NotificationDestination, magicevent.NewHeader(), ctx, eventstreamevents.EventRecordAppendedData{Record: data})
 	result := hub.Send(event)
 	if result == nil {
 		return fmt.Errorf("record appended event returned no result")

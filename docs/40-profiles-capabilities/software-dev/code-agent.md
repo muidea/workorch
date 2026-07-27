@@ -106,7 +106,7 @@ code-agent profile 的稳定验证入口包括：
 - block 分发：
   `../../30-module-architecture/blocks-runtime-adapters.md`
 - 运行结果与证据：
-  `../../30-module-architecture/kernel-workspace-run-result.md`
+  `../../30-module-architecture/blocks-workspace-run-result.md`
 - TUI 产品约束：
   `../../50-product-interface/tui/requirements.md`
 - profile verifier：

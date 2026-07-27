@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync/atomic"
 
-	eventstream "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
+	eventstream "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

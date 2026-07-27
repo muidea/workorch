@@ -5,9 +5,9 @@ import (
 
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
-	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
 	workorchdcommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"

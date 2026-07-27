@@ -187,7 +187,7 @@ WorkOrch 的 owner notification topic 分为两层：
 ## Source Documents
 
 - `../30-module-architecture/storage-readmodel.md`
-- `../30-module-architecture/kernel-workspace-run-result.md`
+- `../30-module-architecture/blocks-workspace-run-result.md`
 - `../50-product-interface/service-api.md`
 - `../00-core/runtime-stage-contract.md`
 - `run-step-result-artifact.md`

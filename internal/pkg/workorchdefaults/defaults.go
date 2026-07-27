@@ -1,17 +1,12 @@
 package workorchdefaults
 
 import (
-	"context"
 	"embed"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
-	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
-	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
@@ -80,6 +75,72 @@ type embeddedMCPCapability struct {
 	Enabled        bool           `json:"enabled"`
 	ApprovalPolicy string         `json:"approvalPolicy,omitempty"`
 	Status         string         `json:"status,omitempty"`
+}
+
+// SoulDefault, WorkspaceTemplateDefault, MCPServerDefault and
+// MCPCapabilityDefault are immutable bootstrap declarations. This package only
+// decodes embedded data; each resource Block owns validation and persistence.
+type SoulDefault struct {
+	ID                          common.SoulID
+	Name                        string
+	Description                 string
+	BusinessDomains             []string
+	SoulMD                      string
+	AllowedSkillRefs            []string
+	AllowedMCPServerRefs        []string
+	AllowedCapabilityRefs       []string
+	AllowedCapabilityCategories []string
+	AllowedToolKinds            []string
+}
+
+type WorkspaceTemplateDefault struct {
+	ID               string
+	Name             string
+	Description      string
+	GoalText         string
+	DoDItems         []string
+	DefaultSoulID    string
+	SoulBindings     map[string]string
+	ContextHints     workorcheventpayload.Payload
+	EvidencePolicies []workorcheventpayload.Payload
+}
+
+type MCPServerDefault struct {
+	ID                    common.MCPServerID
+	Name                  string
+	Transport             string
+	Endpoint              string
+	Command               string
+	Args                  []string
+	Env                   map[string]string
+	Enabled               bool
+	AllowedTools          []string
+	AllowedResources      []string
+	AllowedPrompts        []string
+	DefaultApprovalPolicy string
+	SessionPolicy         string
+	TimeoutMillis         int
+}
+
+type MCPCapabilityDefault struct {
+	ID             common.MCPCapabilityID
+	ServerID       common.MCPServerID
+	Kind           string
+	Name           string
+	DisplayName    string
+	Description    string
+	Category       string
+	Tags           []string
+	UsageHint      string
+	InputSummary   string
+	OutputSummary  string
+	StageHints     []string
+	RiskLevel      string
+	Schema         workorcheventpayload.Payload
+	URI            string
+	Enabled        bool
+	ApprovalPolicy string
+	Status         string
 }
 
 func loadEmbeddedTemplates() ([]embeddedTemplate, error) {
@@ -182,171 +243,84 @@ func loadEmbeddedMCPCapabilities() ([]embeddedMCPCapability, error) {
 	return items, nil
 }
 
-func EnsureBuiltinDefaults(ctx context.Context, soulRepo repository.SoulRepository, templateRepo repository.WorkspaceTemplateRepository, mcpServerRepo repository.MCPServerRepository, mcpCapabilityRepo repository.MCPCapabilityRepository) error {
-	if soulRepo == nil || templateRepo == nil {
-		return nil
-	}
-	if err := EnsureBuiltinSoulDefaults(ctx, soulRepo); err != nil {
-		return err
-	}
-	if err := EnsureBuiltinWorkspaceTemplateDefaults(ctx, templateRepo); err != nil {
-		return err
-	}
-	return EnsureBuiltinMCPDefaults(ctx, mcpServerRepo, mcpCapabilityRepo)
-}
-
-func EnsureBuiltinSoulDefaults(ctx context.Context, soulRepo repository.SoulRepository) error {
-	if soulRepo == nil {
-		return nil
-	}
-	souls, err := loadEmbeddedSouls()
+func BuiltinSoulDefaults() ([]SoulDefault, error) {
+	items, err := loadEmbeddedSouls()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	for _, s := range souls {
-		if s.ID == "" {
+	defaults := make([]SoulDefault, 0, len(items))
+	for _, item := range items {
+		if item.ID == "" {
 			continue
 		}
-		item := &soulmodel.Soul{
-			ID:                          common.SoulID(s.ID),
-			Name:                        s.Name,
-			Description:                 s.Description,
-			BusinessDomains:             s.BusinessDomains,
-			SoulMD:                      s.SoulMD,
-			AllowedSkillRefs:            s.AllowedSkillRefs,
-			AllowedMCPServerRefs:        s.AllowedMCPServerRefs,
-			AllowedCapabilityRefs:       s.AllowedCapabilityRefs,
-			AllowedCapabilityCategories: s.AllowedCapabilityCategories,
-			AllowedToolKinds:            s.AllowedToolKinds,
-		}
-		if err := upsertBuiltinSoul(ctx, soulRepo, item); err != nil {
-			return err
-		}
+		defaults = append(defaults, SoulDefault{ID: common.SoulID(item.ID), Name: item.Name, Description: item.Description, BusinessDomains: append([]string(nil), item.BusinessDomains...), SoulMD: item.SoulMD, AllowedSkillRefs: append([]string(nil), item.AllowedSkillRefs...), AllowedMCPServerRefs: append([]string(nil), item.AllowedMCPServerRefs...), AllowedCapabilityRefs: append([]string(nil), item.AllowedCapabilityRefs...), AllowedCapabilityCategories: append([]string(nil), item.AllowedCapabilityCategories...), AllowedToolKinds: append([]string(nil), item.AllowedToolKinds...)})
 	}
-	return nil
+	return defaults, nil
 }
 
-func EnsureBuiltinWorkspaceTemplateDefaults(ctx context.Context, templateRepo repository.WorkspaceTemplateRepository) error {
-	if templateRepo == nil {
-		return nil
-	}
-	templates, err := loadEmbeddedTemplates()
+func BuiltinWorkspaceTemplateDefaults() ([]WorkspaceTemplateDefault, error) {
+	items, err := loadEmbeddedTemplates()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	for _, t := range templates {
-		if t.ID == "" {
+	defaults := make([]WorkspaceTemplateDefault, 0, len(items))
+	for _, item := range items {
+		if item.ID == "" {
 			continue
 		}
-		item, err := workspaceTemplateFromEmbedded(t)
+		value, err := workspaceTemplateDefaultFromEmbedded(item)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if err := upsertBuiltinWorkspaceTemplate(ctx, templateRepo, item); err != nil {
-			return err
-		}
+		defaults = append(defaults, value)
 	}
-	return nil
+	return defaults, nil
 }
 
-func EnsureBuiltinMCPDefaults(ctx context.Context, mcpServerRepo repository.MCPServerRepository, mcpCapabilityRepo repository.MCPCapabilityRepository) error {
-	if mcpServerRepo != nil {
-		servers, err := loadEmbeddedMCPServers()
+func BuiltinMCPServerDefaults() ([]MCPServerDefault, error) {
+	items, err := loadEmbeddedMCPServers()
+	if err != nil {
+		return nil, err
+	}
+	defaults := make([]MCPServerDefault, 0, len(items))
+	for _, item := range items {
+		if item.ID == "" {
+			continue
+		}
+		defaults = append(defaults, MCPServerDefault{ID: common.MCPServerID(item.ID), Name: strings.TrimSpace(item.Name), Transport: strings.TrimSpace(item.Transport), Endpoint: strings.TrimSpace(item.Endpoint), Command: strings.TrimSpace(item.Command), Args: filterEmptyStrings(item.Args), Env: cloneStringMap(item.Env), Enabled: item.Enabled, AllowedTools: filterEmptyStrings(item.AllowedTools), AllowedResources: filterEmptyStrings(item.AllowedResources), AllowedPrompts: filterEmptyStrings(item.AllowedPrompts), DefaultApprovalPolicy: strings.TrimSpace(item.DefaultApprovalPolicy), SessionPolicy: strings.TrimSpace(item.SessionPolicy), TimeoutMillis: item.TimeoutMillis})
+	}
+	return defaults, nil
+}
+
+func BuiltinMCPCapabilityDefaults() ([]MCPCapabilityDefault, error) {
+	items, err := loadEmbeddedMCPCapabilities()
+	if err != nil {
+		return nil, err
+	}
+	defaults := make([]MCPCapabilityDefault, 0, len(items))
+	for _, item := range items {
+		if item.ID == "" {
+			continue
+		}
+		value, err := mcpCapabilityDefaultFromEmbedded(item)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		for _, server := range servers {
-			if server.ID == "" {
-				continue
-			}
-			if err := upsertBuiltinMCPServer(ctx, mcpServerRepo, mcpServerFromEmbedded(server)); err != nil {
-				return err
-			}
-		}
+		defaults = append(defaults, value)
 	}
-	if mcpCapabilityRepo != nil {
-		capabilities, err := loadEmbeddedMCPCapabilities()
-		if err != nil {
-			return err
-		}
-		for _, capability := range capabilities {
-			if capability.ID == "" {
-				continue
-			}
-			item, err := mcpCapabilityFromEmbedded(capability)
-			if err != nil {
-				return err
-			}
-			if err := upsertBuiltinMCPCapability(ctx, mcpCapabilityRepo, item); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return defaults, nil
 }
 
-func upsertBuiltinSoul(ctx context.Context, repo repository.SoulRepository, item *soulmodel.Soul) error {
-	if item == nil || item.ID == "" {
-		return nil
-	}
-	if err := repo.Update(ctx, item); err != nil {
-		if errors.Is(err, common.ErrNotFound) {
-			return repo.Create(ctx, item)
-		}
-		return err
-	}
-	return nil
-}
-
-func upsertBuiltinWorkspaceTemplate(ctx context.Context, repo repository.WorkspaceTemplateRepository, item *repository.WorkspaceTemplate) error {
-	if item == nil || strings.TrimSpace(item.ID) == "" {
-		return nil
-	}
-	if err := repo.Update(ctx, item); err != nil {
-		if errors.Is(err, common.ErrNotFound) {
-			return repo.Create(ctx, item)
-		}
-		return err
-	}
-	return nil
-}
-
-func upsertBuiltinMCPServer(ctx context.Context, repo repository.MCPServerRepository, item *mcpmodel.Server) error {
-	if item == nil || item.ID == "" {
-		return nil
-	}
-	if err := repo.Update(ctx, item); err != nil {
-		if errors.Is(err, common.ErrNotFound) {
-			return repo.Create(ctx, item)
-		}
-		return err
-	}
-	return nil
-}
-
-func upsertBuiltinMCPCapability(ctx context.Context, repo repository.MCPCapabilityRepository, item *mcpmodel.Capability) error {
-	if item == nil || item.ID == "" {
-		return nil
-	}
-	if err := repo.Update(ctx, item); err != nil {
-		if errors.Is(err, common.ErrNotFound) {
-			return repo.Create(ctx, item)
-		}
-		return err
-	}
-	return nil
-}
-
-func workspaceTemplateFromEmbedded(t embeddedTemplate) (*repository.WorkspaceTemplate, error) {
+func workspaceTemplateDefaultFromEmbedded(t embeddedTemplate) (WorkspaceTemplateDefault, error) {
 	contextHints, err := workorcheventpayload.FromMap(t.ContextHints)
 	if err != nil {
-		return nil, fmt.Errorf("decode embedded workspace template %q context hints: %w", t.ID, err)
+		return WorkspaceTemplateDefault{}, fmt.Errorf("decode embedded workspace template %q context hints: %w", t.ID, err)
 	}
 	evidencePolicies, err := workorcheventpayload.FromMapSlice(t.EvidencePolicies)
 	if err != nil {
-		return nil, fmt.Errorf("decode embedded workspace template %q evidence policies: %w", t.ID, err)
+		return WorkspaceTemplateDefault{}, fmt.Errorf("decode embedded workspace template %q evidence policies: %w", t.ID, err)
 	}
-	return &repository.WorkspaceTemplate{
+	return WorkspaceTemplateDefault{
 		ID:               t.ID,
 		Name:             t.Name,
 		Description:      t.Description,
@@ -359,31 +333,12 @@ func workspaceTemplateFromEmbedded(t embeddedTemplate) (*repository.WorkspaceTem
 	}, nil
 }
 
-func mcpServerFromEmbedded(item embeddedMCPServer) *mcpmodel.Server {
-	return &mcpmodel.Server{
-		ID:                    common.MCPServerID(item.ID),
-		Name:                  strings.TrimSpace(item.Name),
-		Transport:             strings.TrimSpace(item.Transport),
-		Endpoint:              strings.TrimSpace(item.Endpoint),
-		Command:               strings.TrimSpace(item.Command),
-		Args:                  filterEmptyStrings(item.Args),
-		Env:                   cloneStringMap(item.Env),
-		Enabled:               item.Enabled,
-		AllowedTools:          filterEmptyStrings(item.AllowedTools),
-		AllowedResources:      filterEmptyStrings(item.AllowedResources),
-		AllowedPrompts:        filterEmptyStrings(item.AllowedPrompts),
-		DefaultApprovalPolicy: strings.TrimSpace(item.DefaultApprovalPolicy),
-		SessionPolicy:         strings.TrimSpace(item.SessionPolicy),
-		TimeoutMillis:         item.TimeoutMillis,
-	}
-}
-
-func mcpCapabilityFromEmbedded(item embeddedMCPCapability) (*mcpmodel.Capability, error) {
+func mcpCapabilityDefaultFromEmbedded(item embeddedMCPCapability) (MCPCapabilityDefault, error) {
 	schema, err := workorcheventpayload.FromMap(item.Schema)
 	if err != nil {
-		return nil, fmt.Errorf("decode embedded mcp capability %q schema: %w", item.ID, err)
+		return MCPCapabilityDefault{}, fmt.Errorf("decode embedded mcp capability %q schema: %w", item.ID, err)
 	}
-	return &mcpmodel.Capability{
+	return MCPCapabilityDefault{
 		ID:             common.MCPCapabilityID(item.ID),
 		ServerID:       common.MCPServerID(item.ServerID),
 		Kind:           strings.TrimSpace(item.Kind),

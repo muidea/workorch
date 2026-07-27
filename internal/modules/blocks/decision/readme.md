@@ -9,7 +9,7 @@
 - Ticket 与 Resolution command/query 由 `blocks/decision/pkg/events` 定义，并返回 `DecisionCommandResult`。
 - Ticket 状态变化发布 `TicketChangedData`；解决成功发布 `TicketResolvedData`。
 - `kernel/governance` 和 `application/workorchd` 通过 EventHub 创建、查询或解决 ticket。
-- `kernel/run` 与 `kernel/orchestrator` 使用 ticket scope 表达和恢复 `blocked_on_decision`。
+- `blocks/run` 与 `kernel/orchestrator` 使用 ticket scope 表达和恢复 `blocked_on_decision`。
 - Decision 需要记录 Orchestrator evidence 时，发送本 block 定义的 `RecordDecisionEvidenceCommand`；Orchestrator 幂等写入自己的 EvidenceRecord 后返回 `RecordDecisionEvidenceResult`。
 - Runtime V2 governed dispatch 由 Orchestrator 通过其定义的 `OpenRuntimeGovernanceRequestCommand/Result` 投递；本 block 导入该 typed 合同并确保创建确定性 DecisionTicket，不接收跨组件 map context。
 - `runtime_v2_governance` ticket resolved 后，本 block 通过 Orchestrator 定义的 `CommitRuntimeGovernanceTicketResolutionCommand` 直接提交 resolution identity、scope、outcome 与 summary；不由 application scheduler 猜测 authority snapshot 或 dispatch。

@@ -54,7 +54,7 @@ run_pkg ./internal/modules/kernel/orchestrator/biz/runtimev2 \
   -run 'TestAcceptedValidationEvidenceInvalidatesAssessmentWithoutResettingRepairLedger|TestAcceptedDurableStateChangeResetsRepairProgressWindow|TestRuntimeControllerRoutesDurableNoOpReceiptToStructuredSameFocusRepair|TestReduceRuntimeStateWithDirectiveAllowsBoundedOwnerWorkspaceScopeWithoutConcreteSnapshots|TestRejectedValidationScopeMemberDoesNotBecomeFailureTarget|TestEvaluateCandidateAdmissionAllowsOwnerGroundedWorkspaceScopeThroughFileAdmissibility'
 
 # RVC-R14 Run-owner typed startup inventory.
-run_pkg ./internal/modules/kernel/run \
+run_pkg ./internal/modules/blocks/run \
   -run 'TestBuildRuntimeV2RecoveryInventoryClassifiesAuthorityState'
 
 # Concrete File owner consumes only an already validated typed governance grant.

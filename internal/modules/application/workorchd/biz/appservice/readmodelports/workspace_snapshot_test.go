@@ -6,12 +6,12 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
-	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
-	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -361,10 +361,10 @@ func (f fakeWorkspaceSnapshotResultReader) ListByRun(_ context.Context, runID co
 }
 
 type recordingWorkspaceEventReader struct {
-	queries []repository.EventRecordQuery
+	queries []eventstreamevents.EventRecordQuery
 }
 
-func (r *recordingWorkspaceEventReader) List(_ context.Context, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+func (r *recordingWorkspaceEventReader) List(_ context.Context, query eventstreamevents.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
 	r.queries = append(r.queries, query)
 	return nil, nil
 }
@@ -374,7 +374,7 @@ type workspaceEventReaderByQuery struct {
 	runRecords       map[common.RunID][]*eventstreammodel.EventRecord
 }
 
-func (r *workspaceEventReaderByQuery) List(_ context.Context, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+func (r *workspaceEventReaderByQuery) List(_ context.Context, query eventstreamevents.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
 	if query.RunID != "" {
 		return r.runRecords[query.RunID], nil
 	}

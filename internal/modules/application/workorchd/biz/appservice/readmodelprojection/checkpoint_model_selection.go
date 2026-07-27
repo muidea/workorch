@@ -1,6 +1,6 @@
 package readmodelprojection
 
-import runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+import runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 
 func latestRuntimeCheckpointModel(items []*runmodel.RuntimeCheckpoint) *runmodel.RuntimeCheckpoint {
 	var latest *runmodel.RuntimeCheckpoint

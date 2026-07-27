@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-27
 
 ## Purpose
 
@@ -23,9 +23,9 @@ WorkOrch 按稳定责任划分为：
 ### Layer Roles
 
 - **application layer**：进程入口、bootstrap、HTTP/CLI/TUI surface、appservice use-case 组合、workspace projection；不拥有正式业务状态
-- **kernel layer**：Run / Runtime V2 aggregate、Orchestrator 收敛权威、Governance 协调、Eventstream 审计
+- **kernel layer**：Orchestrator / Governance / System 多 owner 协调 Modules
 - **block layer**：
-  - stateful owner：Workspace / Result / Decision / Approval / Memory / Soul / Skill / MCP Registry
+  - stateful owner：Workspace / Run / Result / Decision / Approval / Memory / Soul / Skill / MCP Registry / Eventstream
   - capability execution：LLM / File / Git / Shell / MCP / Web / SSH（只执行，不裁决）
 - **shared internal package layer**：`workorchruntimecontract`、repository、config、EventHub helpers 等
 - **web console layer**：基于 read model / projection 的产品展示与操作入口
@@ -37,8 +37,8 @@ WorkOrch 按稳定责任划分为：
 - `application/workorch` — thin main
 - `internal/initiators/workorchruntime` — repository provider 装配
 - `internal/modules/application/workorchd` — appservice / server / bootstrap / projection
-- `internal/modules/kernel` — orchestrator / run / governance / eventstream / system
-- `internal/modules/blocks` — workspace、result、decision、approval、memory、soul、skill、mcpregistry 与能力 block
+- `internal/modules/kernel` — orchestrator / governance / system
+- `internal/modules/blocks` — workspace、run、result、decision、approval、memory、soul、skill、mcpregistry、eventstream 与能力 block
 - `internal/pkg` — runtime contract、repo、config、ports
 - `internal/services/workorch` — CLI / TUI
 - `web/workorch-console` — Web Console
@@ -69,34 +69,37 @@ Start / Resume (Orchestrator EventHub handlers)
 - 自动 replan successor Run
 - 通用 RuntimeAdapter registry / Step kind registration matrix 作为生产调度
 
-## Key Modules
+## Key Runtime Units
+
+组件类型基线为 1 Initiator / 4 Modules / 17 Blocks。目录与职责类型一致；
+`blocks/run` 与 `blocks/eventstream` 均为单一资源 Block owner。
 
 ### Application
 
-| 模块 | 职责 |
-| --- | --- |
-| `application/workorch` | 主可执行入口（TUI / `--server`） |
-| `internal/initiators/workorchruntime` | owner repository provider |
-| `internal/modules/application/workorchd` | bootstrap、appservice、HTTP、projection、scheduler Start/Resume 转发 |
+| 类型 | 单元 | 职责 |
+| --- | --- | --- |
+| Entry | `application/workorch` | 主可执行入口（TUI / `--server`） |
+| Initiator | `internal/initiators/workorchruntime` | owner repository provider |
+| Module | `internal/modules/application/workorchd` | bootstrap、appservice、HTTP、projection、scheduler Start/Resume 转发 |
 
 ### Kernel
 
-| 模块 | 职责 |
-| --- | --- |
-| `kernel/orchestrator` | Runtime V2 convergence authority：drive、reducer、sealed dispatch、evidence、governance wait、terminal projection |
-| `kernel/run` | Run / Step / Checkpoint / `RuntimeStateRecord` 持久化与 CAS |
-| `kernel/governance` | 自动治理评估 / 升级 / AutoGovernanceTrace 协调（不替代 Orchestrator contract gate） |
-| `kernel/eventstream` | 审计事件持久化 |
-| `kernel/system` | 默认 Soul / Template / MCP 等 ensure |
+| 类型 | 单元 | 职责 |
+| --- | --- | --- |
+| Module | `kernel/orchestrator` | Runtime V2 convergence authority：drive、reducer、sealed dispatch、evidence、governance wait、terminal projection |
+| Module | `kernel/governance` | 自动治理评估 / 升级 / AutoGovernanceTrace 协调（不替代 Orchestrator contract gate） |
+| Module | `kernel/system` | 默认 Soul / Template / MCP 等 ensure |
 
 ### Blocks
 
 **Stateful owners**
 
 - `blocks/workspace` — Workspace / Goal / DoD / Template
+- `blocks/run` — Run / Step / Checkpoint / `RuntimeStateRecord` 持久化与 CAS
 - `blocks/result` — Result / Artifact（formal outcome；不裁决 acceptance）
 - `blocks/decision` / `blocks/approval` — 治理 ticket / 授权
 - `blocks/memory` / `blocks/soul` / `blocks/skill` / `blocks/mcpregistry` — 记忆与能力注册
+- `blocks/eventstream` — 审计事件持久化与 high-watermark 查询
 
 **Capability execution（typed EventHub operation only）**
 
@@ -138,5 +141,5 @@ Start / Resume (Orchestrator EventHub handlers)
 - `blocks-runtime-adapters.md`
 - `../00-core/runtime-stage-contract.md`
 - `internal/modules/kernel/orchestrator/readme.md`
-- `internal/modules/kernel/run/readme.md`
+- `internal/modules/blocks/run/readme.md`
 - `internal/modules/application/workorchd/readme.md`

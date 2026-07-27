@@ -5,14 +5,14 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
-	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
-	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 type workspaceListWorkspaceReaderFunc func(context.Context) ([]*workspacemodel.Workspace, error)
@@ -33,9 +33,9 @@ func (fn workspaceListResultReaderFunc) ListByWorkspace(ctx context.Context, wor
 	return fn(ctx, workspaceID)
 }
 
-type workspaceListEventRecordReaderFunc func(context.Context, repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error)
+type workspaceListEventRecordReaderFunc func(context.Context, eventstreamevents.EventRecordQuery) ([]*eventstreammodel.EventRecord, error)
 
-func (fn workspaceListEventRecordReaderFunc) List(ctx context.Context, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+func (fn workspaceListEventRecordReaderFunc) List(ctx context.Context, query eventstreamevents.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
 	return fn(ctx, query)
 }
 
@@ -70,7 +70,7 @@ func TestListProjectedWorkspacesUsesLatestRunProjection(t *testing.T) {
 		workspaceListResultReaderFunc(func(context.Context, common.WorkspaceID) ([]*resultmodel.Result, error) {
 			return nil, nil
 		}),
-		workspaceListEventRecordReaderFunc(func(_ context.Context, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+		workspaceListEventRecordReaderFunc(func(_ context.Context, query eventstreamevents.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
 			if query.Limit != readmodelcore.DefaultEventRecordLimit {
 				t.Fatalf("event query limit = %d, want %d", query.Limit, readmodelcore.DefaultEventRecordLimit)
 			}

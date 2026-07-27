@@ -387,7 +387,7 @@ workorch://workspaces/<workspace-id>/runs/<run-id>/steps/<run-id>/graph-002/007-
 - `../10-domain-model/workspace-goal-dod.md`
 - `../10-domain-model/event-observability.md`
 - `../10-domain-model/run-step-result-artifact.md`
-- `kernel-workspace-run-result.md`
+- `blocks-workspace-run-result.md`
 - `../90-archive/superseded/projection-first-readmodel-io-closure-design.md`
 - `../50-product-interface/service-api.md`
 - `../60-verification/service-acceptance.md`

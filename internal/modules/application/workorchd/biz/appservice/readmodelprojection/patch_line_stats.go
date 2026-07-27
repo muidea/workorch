@@ -3,7 +3,7 @@ package readmodelprojection
 import (
 	"strings"
 
-	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 )
 
 func patchLineStats(item *runmodel.Patch) (int, int) {

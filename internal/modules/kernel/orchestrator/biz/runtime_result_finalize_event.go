@@ -3,7 +3,7 @@ package orchestrator
 import (
 	"context"
 
-	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	runModel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

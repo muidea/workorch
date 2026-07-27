@@ -15,11 +15,11 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
-	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
-	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
+	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -96,7 +96,7 @@ func publishManagerEventRecord(ctx context.Context, hub magicevent.Hub, record m
 	}
 	event := magicevent.NewEventWithContext(
 		eventstreamevents.TopicEventStreamRecordAppended,
-		"kernel/eventstream",
+		"blocks/eventstream",
 		eventstreamevents.NotificationDestination,
 		magicevent.NewHeader(),
 		ctx,

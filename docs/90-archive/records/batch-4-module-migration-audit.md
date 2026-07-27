@@ -60,7 +60,7 @@ Last Updated: 2026-05-29
 
 当前模块层只建立了：
 
-- `kernel-workspace-run-result.md`
+- `blocks-workspace-run-result.md`
 - `kernel-orchestrator-governance.md`
 - `kernel-context-capability.md`
 
@@ -73,7 +73,7 @@ Last Updated: 2026-05-29
 
 收口范围：
 
-- `docs/30-module-architecture/kernel-workspace-run-result.md`
+- `docs/30-module-architecture/blocks-workspace-run-result.md`
 - `docs/30-module-architecture/kernel-orchestrator-governance.md`
 - `internal/modules/kernel/eventstream`
 - `internal/modules/blocks/result`

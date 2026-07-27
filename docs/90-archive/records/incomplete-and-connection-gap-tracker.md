@@ -108,7 +108,7 @@ Last Updated: 2026-05-30
 
 ### A4. Module Architecture 层
 
-- `../30-module-architecture/kernel-workspace-run-result.md` /
+- `../30-module-architecture/blocks-workspace-run-result.md` /
   `../30-module-architecture/kernel-orchestrator-governance.md` /
   `../30-module-architecture/kernel-context-capability.md` 已补
   `eventstream` / `result` / `run evidence` 与 `decision` / `approval`

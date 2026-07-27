@@ -8,10 +8,11 @@ import (
 	"testing"
 )
 
-func TestModuleBlockInitiatorClosurePlanCoversRegisteredComponents(t *testing.T) {
+func TestComponentContractMatrixCoversRegisteredComponents(t *testing.T) {
 	root := findRepoRoot(t)
-	// Process plan was archived during docs cleanup; inventory coverage still uses it as a historical checklist.
-	planPath := filepath.Join(root, "docs", "90-archive", "completed", "module-block-contract-closure-validation-plan.md")
+	// The active component matrix is the single source of truth. Archived plans
+	// document history only and must not constrain the current component shape.
+	planPath := filepath.Join(root, "docs", "70-roadmap", "active", "component-contract-and-regression-closure-matrix.md")
 	planBytes, err := os.ReadFile(planPath)
 	if err != nil {
 		t.Fatalf("read closure plan: %v", err)

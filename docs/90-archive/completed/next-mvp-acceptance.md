@@ -13,7 +13,7 @@ Last Updated: 2026-05-30
 - `../../10-domain-model/run-step-result-artifact.md`
 - `../../10-domain-model/governance-decision-approval.md`
 - `../../20-runtime-flow/planning-execution-flow.md`
-- `../../30-module-architecture/kernel-workspace-run-result.md`
+- `../../30-module-architecture/blocks-workspace-run-result.md`
 - `../../30-module-architecture/storage-readmodel.md`
 - `../../50-product-interface/service-api.md`
 - `../../50-product-interface/web-console/overview.md`

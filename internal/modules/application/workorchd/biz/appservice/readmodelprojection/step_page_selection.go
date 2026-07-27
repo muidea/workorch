@@ -1,6 +1,6 @@
 package readmodelprojection
 
-import runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+import runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 
 func selectRunStepPageItems(items []*runmodel.Step, limit int, cursorAfterID string) ([]StepView, bool) {
 	started := cursorAfterID == ""

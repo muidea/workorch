@@ -22,17 +22,18 @@ configured.
 - `internal/modules/application/workorchd`: server-side application module (`biz` / `service` / `pkg`); constructs typed bootstrap, projections, HTTP/SSE — does **not** own Runtime V2 drive
 - `web/workorch-console`: React/TypeScript management console source
 - `web/consoleassets`: embedded management console build output served by `workorch --server`
-- `internal/modules/kernel/{orchestrator,run,governance,eventstream,system}`: kernel modules
+- `internal/modules/kernel/{orchestrator,governance,system}`: kernel coordination modules
   - **orchestrator**: Runtime V2 convergence authority
+  - **governance** / **system**: policy coordination and startup defaults
+- `internal/modules/blocks/{workspace,run,result,decision,approval,memory,skill,soul,mcpregistry,eventstream,file,git,llm,mcp,shell,ssh,web}`: stateful owners + capability blocks
   - **run**: Run / Step / Runtime V2 aggregate persistence owner
-  - **governance** / **eventstream** / **system**: policy coordination, audit stream, startup defaults
-- `internal/modules/blocks/{workspace,result,decision,approval,memory,skill,soul,mcpregistry,file,git,llm,mcp,shell,ssh,web}`: stateful owners + capability blocks
+  - **eventstream**: audit EventRecord / high-watermark owner
 - `internal/pkg/{common,events,eventcontract,runtimeevent,repository,workorchclient,workorchport,workorchdeps,workorchrepo,workorchruntimecontract,workorchruntimepolicy,...}`: shared primitives and **Runtime V2 typed contracts**
 - `docs/`: authoritative design docs (`docs/README.md` navigation; `docs/01-overview/current-state.md` fact entry)
 - `.github/workflows/ci.yml`: GitHub Actions CI workflow
 - `Makefile`: local and CI entry targets
 
-Each module follows the go-multi-module-dev minimum shape:
+Each Module/Block follows the go-multi-module-dev minimum shape:
 
 - `module.go` / `plugin.go`: constructor and EventHub registration
 - `biz/`: business logic (orchestrator includes `biz/runtimev2/`)
@@ -53,8 +54,8 @@ Each module follows the go-multi-module-dev minimum shape:
 
 ## Workorch semantics retained
 
-- kernel: `orchestrator`, `run`, `governance`, `eventstream`, `system`
-- blocks (owners): `workspace`, `result`, `decision`, `approval`, `memory`, `skill`, `soul`, `mcpregistry`
+- modules: `application/workorchd`, `kernel/orchestrator`, `kernel/governance`, `kernel/system`
+- blocks (owners): `workspace`, `run`, `result`, `decision`, `approval`, `memory`, `skill`, `soul`, `mcpregistry`, `eventstream`
 - blocks (capabilities): `llm`, `file`, `git`, `shell`, `ssh`, `web`, `mcp`
 - shared contracts under `internal/pkg` (especially `workorchruntimecontract`)
 

@@ -59,7 +59,7 @@ for transition < guard:
 
 #### 跨组件合同
 
-- **读**：EventHub 读取 `blocks/workspace`、`kernel/run` 权威快照；不直接持有其他 owner service/repository
+- **读**：EventHub 读取 `blocks/workspace`、`blocks/run` 权威快照；不直接持有其他 owner service/repository
 - **写 Run aggregate**：Run owner update + expected revision CAS
 - **capability 执行**：`ExecuteRuntimeOperationCommand/Result` → File / Git / Shell / MCP / Web / SSH
 - **LLM candidate**：`RequestRuntimeCandidateCommand/Result`；请求携带 typed `RuntimeCandidateContext`，不得从 V1 map 重建
@@ -91,7 +91,7 @@ for transition < guard:
 
 - 生产依赖仅自身 repository + EventHub
 - 不得绕过 Orchestrator 的 evidence / coverage / requiredOutput / runtime contract gate
-- 不替代 `kernel/run` 生命周期、`blocks/result` closeout、产品交互面
+- 不替代 `blocks/run` 生命周期、`blocks/result` closeout、产品交互面
 
 ### `blocks/decision` / `blocks/approval`（治理相关 owner）
 
@@ -133,7 +133,7 @@ Orchestrator / Governance 负责如何治理与收敛，不直接负责：
 | 关注点 | 主要责任 |
 | --- | --- |
 | drive / reducer / sealed dispatch / evidence / terminal | `kernel/orchestrator` |
-| RuntimeStateRecord 持久化 CAS | `kernel/run` |
+| RuntimeStateRecord 持久化 CAS | `blocks/run` |
 | decision ticket / resolution 本体 | `blocks/decision` |
 | approval 正式状态 | `blocks/approval` |
 | auto-governance 协调 / trace | `kernel/governance` |
@@ -154,5 +154,5 @@ Orchestrator / Governance 负责如何治理与收敛，不直接负责：
 - `architecture-overview.md`
 - `../00-core/runtime-stage-contract.md`
 - `internal/modules/kernel/orchestrator/readme.md`
-- `internal/modules/kernel/run/readme.md`
+- `internal/modules/blocks/run/readme.md`
 - `internal/modules/kernel/governance/readme.md`

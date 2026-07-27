@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 func appendRunSnapshotObservabilityTasks(ctx context.Context, tasks []func() error, readers RunSnapshotReaders, item *runmodel.Run, loadMode runSnapshotLoadMode, models *runSnapshotModels) []func() error {
@@ -20,25 +20,25 @@ func appendRunSnapshotObservabilityTasks(ctx context.Context, tasks []func() err
 	// and topic-scoped; general event timeline remains metadata-only.
 	tasks = append(tasks, namedLoadTask("runSnapshot.llmUsageEventRecords", func() error {
 		var err error
-		models.LLMUsageEventRecords, err = readers.EventRecords.List(ctx, readmodelcore.RunLLMUsageEventRecordRepositoryQuery(item.ID, readmodelcore.DefaultLLMUsageEventRecordLimit))
+		models.LLMUsageEventRecords, err = readers.EventRecords.List(ctx, readmodelcore.RunLLMUsageEventRecordOwnerQuery(item.ID, readmodelcore.DefaultLLMUsageEventRecordLimit))
 		return err
 	}))
 	tasks = append(tasks, namedLoadTask("runSnapshot.memoryRecalls", func() error {
 		var err error
 		if readers.MemoryRecalls != nil {
-			models.MemoryRecallTraces, err = readers.MemoryRecalls.List(ctx, readmodelcore.RunMemoryRecallTraceRepositoryQuery(item.WorkspaceID, item.ID))
+			models.MemoryRecallTraces, err = readers.MemoryRecalls.List(ctx, readmodelcore.RunMemoryRecallTraceOwnerQuery(item.WorkspaceID, item.ID))
 		}
 		return err
 	}))
 	return tasks
 }
 
-func runSnapshotEventRecordQuery(runID common.RunID, loadMode runSnapshotLoadMode) repository.EventRecordQuery {
+func runSnapshotEventRecordQuery(runID common.RunID, loadMode runSnapshotLoadMode) eventstreamevents.EventRecordQuery {
 	switch loadMode {
 	case runSnapshotLoadObservability:
-		return readmodelcore.RunObservabilityEventRecordRepositoryQuery(runID, readmodelcore.DefaultEventRecordLimit)
+		return readmodelcore.RunObservabilityEventRecordOwnerQuery(runID, readmodelcore.DefaultEventRecordLimit)
 	default:
-		return readmodelcore.RunProjectionEventRecordRepositoryQuery(runID, readmodelcore.DefaultEventRecordLimit)
+		return readmodelcore.RunProjectionEventRecordOwnerQuery(runID, readmodelcore.DefaultEventRecordLimit)
 	}
 }
 

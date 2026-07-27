@@ -6,8 +6,8 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
-	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 func semanticMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*memorymodel.MemoryItem, *MemorySelectionEvidence, bool) {
@@ -41,7 +41,7 @@ func semanticMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*m
 		evidence.Reason = err.Error()
 		return nil, evidence, true
 	}
-	items, err := ownerreadports.SearchMemoryByOwnerCommand(ctx, opts.Hub, repository.MemorySearchQuery{
+	items, err := ownerreadports.SearchMemoryByOwnerCommand(ctx, opts.Hub, memoryevents.MemorySearchQuery{
 		WorkspaceID: opts.WorkspaceID,
 		Vector:      embedding.Vector,
 		MinScore:    0.1,

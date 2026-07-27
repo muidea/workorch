@@ -21,7 +21,7 @@ go test ./internal/modules/kernel/orchestrator/biz \
   -count=1
 
 echo "-> FDP-E2E-05/06: patch events and read-model projection"
-go test ./internal/pkg/events ./internal/modules/kernel/eventstream/biz ./internal/modules/application/workorchd/biz/appservice \
+go test ./internal/pkg/events ./internal/modules/blocks/eventstream/biz ./internal/modules/application/workorchd/biz/appservice \
   -run 'Test(DecodeWorkorchEventReturnsTypedPatchEvent|DecodePatchPayloadRoundTrip|ServicePersistsPatchEventsFromHub|MapRunObservabilityProjectsPatchEventsIntoTimeline|ReadRunSnapshotWithBackendReturnsExecutionEvidence|ReadWorkspaceSnapshotWithRunSnapshotReusesProjectionSections)' \
   -count=1
 

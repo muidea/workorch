@@ -4,10 +4,10 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
-	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

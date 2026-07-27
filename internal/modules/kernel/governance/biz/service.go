@@ -22,12 +22,12 @@ import (
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
-	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -43,14 +43,9 @@ const (
 
 type ResolveDecisionFunc func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error
 type ResolveApprovalFunc func(context.Context, common.ApprovalID) error
-type ResumeRunFunc func(context.Context, common.RunID) error
 
 type TicketReader interface {
 	Get(context.Context, common.TicketID) (*decisionmodel.Ticket, error)
-}
-
-type ResolutionReader interface {
-	GetByTicketID(context.Context, common.TicketID) (*decisionmodel.Resolution, error)
 }
 
 type ApprovalReader interface {
@@ -74,7 +69,6 @@ type MemoryReader interface {
 
 type servicePorts struct {
 	Tickets              TicketReader
-	Resolutions          ResolutionReader
 	Approvals            ApprovalReader
 	Runs                 RunReader
 	WorkspaceDefinitions WorkspaceDefinitionReader
@@ -85,7 +79,6 @@ type servicePorts struct {
 	NotificationHub   magicevent.Hub
 	ResolveDecision   ResolveDecisionFunc
 	ResolveApproval   ResolveApprovalFunc
-	ResumeRun         ResumeRunFunc
 	LoadConfig        func() (workorchconfig.Config, error)
 	BackgroundRoutine magictask.BackgroundRoutine
 }
@@ -102,7 +95,6 @@ type EventDependencies struct {
 type Service struct {
 	basebiz.Base
 	tickets         TicketReader
-	resolutions     ResolutionReader
 	approvals       ApprovalReader
 	runs            RunReader
 	workspaceDefs   WorkspaceDefinitionReader
@@ -110,7 +102,6 @@ type Service struct {
 	traces          repository.AutoGovernanceTraceRepository
 	resolve         ResolveDecisionFunc
 	resolveApproval ResolveApprovalFunc
-	resume          ResumeRunFunc
 	loadConfig      func() (workorchconfig.Config, error)
 	background      magictask.BackgroundRoutine
 	mu              sync.Mutex
@@ -135,14 +126,12 @@ func NewEventService(traces repository.AutoGovernanceTraceRepository, commandHub
 	})
 	send := service.SendEvent
 	service.tickets = eventTicketReader{send: send}
-	service.resolutions = eventResolutionReader{send: send}
 	service.approvals = eventApprovalReader{send: send}
 	service.runs = eventRunReader{send: send}
 	service.workspaceDefs = eventWorkspaceReader{send: send}
 	service.memoryItems = eventMemoryReader{send: send}
 	service.resolve = eventResolveDecision(send)
 	service.resolveApproval = eventResolveApproval(send)
-	service.resume = eventResumeRun(send)
 	return service
 }
 
@@ -154,7 +143,6 @@ func newServiceWithPorts(deps servicePorts) *Service {
 	return &Service{
 		Base:            basebiz.New(governancecommon.ModuleID, deps.NotificationHub, deps.BackgroundRoutine),
 		tickets:         deps.Tickets,
-		resolutions:     deps.Resolutions,
 		approvals:       deps.Approvals,
 		runs:            deps.Runs,
 		workspaceDefs:   deps.WorkspaceDefinitions,
@@ -162,14 +150,13 @@ func newServiceWithPorts(deps servicePorts) *Service {
 		traces:          deps.AutoGovernanceTraces,
 		resolve:         deps.ResolveDecision,
 		resolveApproval: deps.ResolveApproval,
-		resume:          deps.ResumeRun,
 		loadConfig:      deps.LoadConfig,
 		background:      deps.BackgroundRoutine,
 	}
 }
 
 func (s *Service) Start() error {
-	if s == nil || s.EventHub() == nil || s.tickets == nil || s.approvals == nil || s.runs == nil || s.workspaceDefs == nil || s.memoryItems == nil || s.traces == nil || s.resolve == nil || s.resolveApproval == nil || s.resume == nil {
+	if s == nil || s.EventHub() == nil || s.tickets == nil || s.approvals == nil || s.runs == nil || s.workspaceDefs == nil || s.memoryItems == nil || s.traces == nil || s.resolve == nil || s.resolveApproval == nil {
 		return common.ErrInvalidArgument
 	}
 	if s.loadConfig == nil {
@@ -511,9 +498,6 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 	_ = s.traces.Upsert(ctx, trace)
 	_ = s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoResolved, trace, "")
 
-	if ticket.DecisionKind != "runtime_v2_governance" {
-		_ = s.resume(scopedCtx, ticket.RunID)
-	}
 }
 
 func (s *Service) processApprovalCreated(ctx context.Context, data approvalevents.ApprovalChangedData) {
@@ -604,7 +588,6 @@ func (s *Service) processPendingApproval(ctx context.Context, approvalID common.
 	_ = s.traces.Upsert(ctx, trace)
 	_ = s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoResolved, trace, "")
 
-	_ = s.resume(scopedCtx, approval.RunID)
 }
 
 func (s *Service) processRunStateChanged(ctx context.Context, data runevents.RunStateChangedData) {
@@ -620,18 +603,8 @@ func (s *Service) processRunStateChanged(ctx context.Context, data runevents.Run
 		if ticket.State != common.DecisionTicketStateResolved {
 			return
 		}
-		if ticket.DecisionKind == "runtime_v2_governance" {
-			return
-		}
-		resolution, err := s.resolutions.GetByTicketID(ctx, ticket.ID)
-		if err != nil || resolution == nil {
-			return
-		}
-		source := strings.TrimSpace(stringFromMap(resolution.Payload, "source"))
-		if !strings.EqualFold(source, "auto_governance") {
-			return
-		}
-		_ = s.resume(common.ContextWithRuntimeWorkspaceID(ctx, ticket.WorkspaceID), ticket.RunID)
+		// A resolved ticket is owner evidence. Runtime V2 continuation is solely
+		// scheduled by the Orchestrator when it consumes that typed evidence.
 		return
 	}
 	if data.State == common.RunStateBlockedOnApproval && data.BlockingApprovalID != "" {
@@ -646,10 +619,7 @@ func (s *Service) processRunStateChanged(ctx context.Context, data runevents.Run
 		if approval.State != common.ApprovalStateApproved {
 			return
 		}
-		if !s.hasAutoResolvedTrace(ctx, approval.RunID, "approval", string(approval.ID)) {
-			return
-		}
-		_ = s.resume(common.ContextWithRuntimeWorkspaceID(ctx, approval.WorkspaceID), approval.RunID)
+		// An approved record is owner evidence. Governance never drives a Run.
 	}
 }
 

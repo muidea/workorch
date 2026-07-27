@@ -15,7 +15,6 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
-	"github.com/muidea/workorch/internal/pkg/workorchdefaults"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -97,7 +96,7 @@ func (m *Biz) handleSystemDefaultsCommand(ev magicevent.Event, result magicevent
 		setSystemWorkspaceTemplateDefaultsResult(result, common.ErrInvalidArgument)
 		return
 	}
-	setSystemWorkspaceTemplateDefaultsResult(result, workorchdefaults.EnsureBuiltinWorkspaceTemplateDefaults(ev.Context(), m.templates))
+	setSystemWorkspaceTemplateDefaultsResult(result, ensureBuiltinWorkspaceTemplateDefaults(ev.Context(), m.templates))
 }
 
 func setSystemWorkspaceTemplateDefaultsResult(result magicevent.Result, err error) {

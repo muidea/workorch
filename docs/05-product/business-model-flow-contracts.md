@@ -42,19 +42,19 @@ Last Updated: 2026-07-14
 
 | Object | Purpose | Owner | Key Relations |
 | --- | --- | --- | --- |
-| Run | 一次围绕当前 definition 的正式执行实例 | kernel/run | has RuntimeBootstrap, V2 aggregate projection, process evidence, Result |
+| Run | 一次围绕当前 definition 的正式执行实例 | blocks/run | has RuntimeBootstrap, V2 aggregate projection, process evidence, Result |
 | RuntimeBootstrap | 创建时封存的 Definition + Activation + Focuses + Requirements | orchestrator + run owner | seals activation; not rebuilt from caller map |
 | RuntimeFacts | drive 权威事实面（focus 队列、evidence ledger、authority 相关状态） | orchestrator aggregate | inputs to reducer |
 | CoverageFocus | 有序 focus 队列元素；携带 coverage work items 与 evidence/assessment 要求 | orchestrator / bootstrap | advances after required evidence (and optional assessment) |
 | EvidenceLedger | accepted/rejected operation evidence 与 lineage | orchestrator aggregate | binds sealed dispatch / operation |
 | SealedDispatch | 执行前持久化的 dispatch 密封 | orchestrator | unique legal entry for operation evidence |
-| Step | 过程执行单元的 **非权威投影 / legacy 过程面** | kernel/run storage + projection | may reference operation/evidence; **not** V2 scheduler authority |
-| ToolCall | 外部动作过程证据 | kernel/run | belongs to Run/operation projection, may support Result |
-| Patch | state-changing 变更证据 | kernel/run | belongs to Run/operation projection, may support Artifact/Result |
-| ValidationResult | 验证证据 | kernel/run | may support DoD assessment |
-| RuntimeCheckpoint | 可恢复 **诊断** 快照（非 V2 驱动源） | kernel/run | observability / audit |
+| Step | 过程执行单元的 **非权威投影 / legacy 过程面** | blocks/run storage + projection | may reference operation/evidence; **not** V2 scheduler authority |
+| ToolCall | 外部动作过程证据 | blocks/run | belongs to Run/operation projection, may support Result |
+| Patch | state-changing 变更证据 | blocks/run | belongs to Run/operation projection, may support Artifact/Result |
+| ValidationResult | 验证证据 | blocks/run | may support DoD assessment |
+| RuntimeCheckpoint | 可恢复 **诊断** 快照（非 V2 驱动源） | blocks/run | observability / audit |
 | CoverageWorkItem | coverage ledger item（可嵌于 CoverageFocus） | run/orchestrator ledger | references Goal/DoD/deliverable requirement and evidence |
-| ArtifactContinuation | incremental artifact 的内部 continuation | kernel/run/orchestrator | references operation/Artifact/targetRef |
+| ArtifactContinuation | incremental artifact 的内部 continuation | blocks/run/orchestrator | references operation/Artifact/targetRef |
 
 合同：
 
@@ -120,7 +120,7 @@ Last Updated: 2026-07-14
 
 | Object | Purpose | Owner | Key Relations |
 | --- | --- | --- | --- |
-| EventRecord | 持久化正式事件 | kernel/eventstream | references workspace/run/subject |
+| EventRecord | 持久化正式事件 | blocks/eventstream | references workspace/run/subject |
 | EventEnvelope | runtime event hub 消息 | internal/pkg/events | command/result/notify carrier |
 | WorkspaceProjection | workspace list/detail ViewModel | workorchd read-model | derived from owner state + events |
 | RunSnapshot | run detail projection | workorchd read-model | derived from run/result/evidence/V2 state/events |
@@ -141,7 +141,7 @@ Last Updated: 2026-07-14
 | --- | --- | --- |
 | Stage semantic | exploration, planning, execution, verification, acceptance, repair, replan（语义意图，非生产状态机枚举） | stage / output policy + profile mapping |
 | RuntimeDecision.Action | acquire_prerequisite, produce_state_change, produce_validation, produce_assessment, request_governance, complete, fail（及 governed_wait 投影） | orchestrator reducer |
-| RunState | pending, active, blocked_on_decision, blocked_on_approval, completed, failed, cancelled, superseded | kernel/run |
+| RunState | pending, active, blocked_on_decision, blocked_on_approval, completed, failed, cancelled, superseded | blocks/run |
 | WorkspaceState | active, blocked_on_approval, superseded | blocks/workspace owner; projection may derive prompt/progress from active run |
 | Focus / requiredOutput / evidence readiness | current focus queue + RequiredOutputContract + EvidenceLedger | orchestrator aggregate |
 | Completion | terminal projection after last assessment / fail path | orchestrator → Result/Run/Workspace |

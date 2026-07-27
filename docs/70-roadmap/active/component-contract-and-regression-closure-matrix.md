@@ -4,7 +4,7 @@ Status: active
 
 Type: implementation closure matrix
 
-Last Updated: 2026-07-26
+Last Updated: 2026-07-27
 
 ## Purpose
 
@@ -27,6 +27,21 @@ Last Updated: 2026-07-26
 这里的“单独回归”是**组件级回归**：允许使用 `t.TempDir()`、in-memory/file
 repository、测试 EventHub，以及相邻 owner 的 typed fake responder；不允许通过
 `Module.Service()`、跨 owner repository 或全局 service registry 绕过生产合同。
+
+## Component Type Baseline
+
+组件类型由职责闭环决定，不由目录名、repository、文件规模或 framework 实现类型
+名称决定。当前 22 个运行单元的唯一类型基线为：
+
+| 类型 | 数量 | 组件 |
+| --- | ---: | --- |
+| Initiator | 1 | `initiators/workorchruntime` |
+| Module | 4 | `application/workorchd`、`kernel/orchestrator`、`kernel/governance`、`kernel/system` |
+| Block | 17 | `blocks/run`、`blocks/eventstream` 及全部 15 个 `blocks/*` owner |
+
+`blocks/run` 与 `blocks/eventstream` 分别只拥有 Run aggregate 与 EventRecord
+审计流，目录与 Block 类型一致。两者的 module ID、EventHub source/destination
+和 import path 均使用 `blocks/*`；不保留旧 `kernel/*` 兼容路径或身份。
 
 ## Current Baseline and Closure Rule
 
@@ -101,13 +116,13 @@ topic、Command、Data、Result 的唯一代码 SoT 均是组件自己的 `pkg/e
 
 | 组件（状态） | 功能职责与状态权威 | 入站合同 | 出站合同 | 禁止边界 | 独立命令与完成断言 |
 | --- | --- | --- | --- | --- | --- |
-| `initiators/workorchruntime`（L） | 单一 repository provider/factory；不拥有业务状态。 | framework 初始化。 | 向本进程提供 repository infrastructure。 | EventHub、runtime policy、bootstrap 聚合、业务订阅。 | `go test ./internal/initiators/workorchruntime/... -count=1`；provider 配置失败 fail-fast，且无 Base/Hub export。 |
-| `application/workorchd`（L/I，D） | HTTP/CLI/SSE/read model、typed bootstrap 与 Start/Resume 发起；projection 是派生状态。 | HTTP/CLI facade、workspace-run request、owner notification。 | workspace/run/decision/approval 等 owner command；Orchestrator Start/Resume；`ServiceStoppedData`。 | drive queue、reducer、owner repository、EventHub channel。 | `go test ./internal/modules/application/workorchd/... -count=1`；request 映射、stopped 通知、删除后迟到投影收敛、Start/Resume concrete type。部署后 `/readyz` ready 是 D。 |
-| `kernel/eventstream`（L/I） | 审计 EventRecord 与投影 high-watermark；不拥有业务恢复。 | 各 owner notification、EventRecord query。 | typed audit/query result，供 projection/readiness 查询。 | action 选择、aggregate 重建、direct owner write。 | `go test ./internal/modules/kernel/eventstream/... -count=1`；notification 持久化、cursor/filter DTO mapping、high-watermark 单调。 |
-| `kernel/governance`（L/I） | auto-governance trace/协调；不替代 Runtime V2 contract gate。 | governance evaluate/trace query。 | decision/approval 的 typed request 或 trace result。 | 把 ticket resolution 直接改为 Run active、默认 decision 替换 source dependency。 | `go test ./internal/modules/kernel/governance/... -count=1`；scope/filter mapping、重复 trace 幂等、无 repository DTO 外泄。 |
-| `kernel/run`（L/I，D） | Run/Step/RuntimeStateRecord 的唯一持久化 owner、CAS 与 recovery inventory。SM-1/aggregate persistence，不选 action。 | Run CRUD/CAS、narrow lifecycle projection、typed recovery inventory。 | Run notification；向请求者返回 aggregate/inventory。 | reducer、operation 执行、repository 被其他 owner 直接访问。 | `go test -race ./internal/modules/kernel/run/... -count=1`；CAS stale、Setup 后 inventory 可读、重复 teardown、inventory 分类完整。restart fixture 是 D。 |
-| `kernel/orchestrator`（L/I，D） | Runtime V2 唯一 reducer/drive/evidence/governance-resolution authority；SM-2 编译 sealed manifest，SM-3 只消费单 evaluator 结果。 | Start/Resume/Drive、typed owner facts、candidate/rejection、feasibility observation、governance resolution、own receipt query/commit。 | Run aggregate CAS/inventory；prerequisite acquisition；LLM candidate；capability operation；Decision/Approval ticket；Result terminal write。 | profile/domain hard-code、provider adapter、重复 kind/target/parameter policy、raw reason routing、跨 owner repo、application continuation queue。 | `go test -race ./internal/modules/kernel/orchestrator/... -count=1`；manifest/evaluator first-failure、typed drive、sealed receipt/fence、stale/duplicate、recovery no duplicate effect、terminal delivery。三类 restart fixture 是 D。 |
-| `kernel/system`（L/I） | 启动默认 Soul/Template/MCP 的 ensure 协调；无 Runtime V2 authority。 | framework startup/default ensure command。 | 对 Soul/Workspace/MCP Registry 的 typed ensure command。 | 默认值直接写对方 repository、业务 action/recovery。 | `go test ./internal/modules/kernel/system/... -count=1`；重复 ensure 幂等、owner error 可见、teardown 不关共享 runtime。 |
+| `initiators/workorchruntime`（Initiator；L） | 单一 repository provider/factory；不拥有业务状态。 | framework 初始化。 | 向本进程提供 repository infrastructure。 | EventHub、runtime policy、bootstrap 聚合、业务订阅。 | `go test ./internal/initiators/workorchruntime/... -count=1`；provider 配置失败 fail-fast，且无 Base/Hub export。 |
+| `application/workorchd`（Module；L/I，D） | HTTP/CLI/SSE/read model、typed bootstrap 与 Start/Resume 发起；projection 是派生状态。 | HTTP/CLI facade、workspace-run request、owner notification。 | workspace/run/decision/approval 等 owner command；Orchestrator Start/Resume；`ServiceStoppedData`。 | drive queue、reducer、owner repository、EventHub channel。 | `go test ./internal/modules/application/workorchd/... -count=1`；request 映射、stopped 通知、删除后迟到投影收敛、Start/Resume concrete type。部署后 `/readyz` ready 是 D。 |
+| `blocks/eventstream`（Block；L/I） | 审计 EventRecord 与投影 high-watermark；不拥有业务恢复。 | 各 owner notification、EventRecord query。 | typed audit/query result，供 projection/readiness 查询。 | action 选择、aggregate 重建、direct owner write。 | `go test ./internal/modules/blocks/eventstream/... -count=1`；notification 持久化、cursor/filter DTO mapping、high-watermark 单调。 |
+| `kernel/governance`（Module；L/I） | auto-governance trace/协调；不替代 Runtime V2 contract gate。 | governance evaluate/trace query。 | decision/approval 的 typed request 或 trace result。 | 把 ticket resolution 直接改为 Run active、发送通用 Resume、默认 decision 替换 source dependency。 | `go test ./internal/modules/kernel/governance/... -count=1`；scope/filter mapping、重复 trace 幂等、无 repository DTO 外泄，且治理只提交证据、不续跑 Run。 |
+| `blocks/run`（Block；L/I，D） | Run/Step/RuntimeStateRecord 的唯一持久化 owner、CAS 与 recovery inventory。SM-1/aggregate persistence，不选 action。 | Run CRUD/CAS、narrow lifecycle projection、typed recovery inventory。 | Run notification；向请求者返回 aggregate/inventory。 | reducer、operation 执行、repository 被其他 owner 直接访问。 | `go test -race ./internal/modules/blocks/run/... -count=1`；CAS stale、Setup 后 inventory 可读、重复 teardown、inventory 分类完整。restart fixture 是 D。 |
+| `kernel/orchestrator`（Module；L/I，D） | Runtime V2 唯一 reducer/drive/evidence/governance-resolution authority；SM-2 编译 sealed manifest，SM-3 只消费单 evaluator 结果。 | Start/Resume/Drive、typed owner facts、candidate/rejection、feasibility observation、governance resolution、own receipt query/commit。 | Run aggregate CAS/inventory；prerequisite acquisition；LLM candidate；capability operation；Decision/Approval ticket；Result terminal write。 | profile/domain hard-code、provider adapter、重复 kind/target/parameter policy、raw reason routing、跨 owner repo、application continuation queue。 | `go test -race ./internal/modules/kernel/orchestrator/... -count=1`；manifest/evaluator first-failure、typed drive、sealed receipt/fence、stale/duplicate、recovery no duplicate effect、terminal delivery。三类 restart fixture 是 D。 |
+| `kernel/system`（Module；L/I） | 启动默认 Soul/Template/MCP 的 ensure 协调；无 Runtime V2 authority。 | framework startup/default ensure command。 | 对 Soul/Workspace/MCP Registry 的 typed ensure command。 | 默认值直接写对方 repository、业务 action/recovery。 | `go test ./internal/modules/kernel/system/... -count=1`；重复 ensure 幂等、owner error 可见、teardown 不关共享 runtime。 |
 | `blocks/workspace`（L/I，D） | Workspace、Goal/DoD、Template、workspace default LLM target 的正式 owner。 | workspace/template CRUD、definition/snapshot、narrow active-run projection。 | typed Workspace/Template DTO 与 owner notification。 | Run aggregate、candidate/evidence 裁决、repository entity 作为事件 DTO。 | `go test ./internal/modules/blocks/workspace/... -count=1`；scope、template clone、LLM target persistence、delete idempotency。删除-迟到投影 deployed 验证为 D。 |
 | `blocks/result`（L/I） | 已裁决 Result/Artifact 的正式存储；不决定 accepted/rejected。 | Result create/get/list、artifact query。 | typed result DTO/notification。 | 自行验收、推进 Run、直接改 Workspace。 | `go test ./internal/modules/blocks/result/... -count=1`；同一 terminal write 幂等、owner error 保留、EventHub-only write。 |
 | `blocks/decision`（L/I） | Decision ticket 与 resolution 的正式 owner。 | create/list/get/resolve；runtime governance ticket resolution。 | typed resolution；将 bound runtime ticket resolution 提交给 Orchestrator。 | application watcher 再 Resume、无 ticket/漂移 binding 的 resolution、直接写 Run。 | `go test ./internal/modules/blocks/decision/... -count=1`；resolution type 校验、重复 resolution、ticket binding 与 Orchestrator command 类型。 |

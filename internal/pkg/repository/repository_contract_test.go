@@ -9,15 +9,15 @@ import (
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	skillmodel "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
-	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
-	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	file "github.com/muidea/workorch/internal/pkg/repository/file"
@@ -862,7 +862,7 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 		Version:        "workorch.event.v1",
 		Topic:          "/run/state/changed",
 		OccurredAt:     "2026-04-28T00:00:00Z",
-		SourceModule:   "kernel/run",
+		SourceModule:   "blocks/run",
 		SubjectType:    "run",
 		SubjectID:      "run-contract",
 		WorkspaceID:    common.WorkspaceID("ws-contract"),
@@ -3323,7 +3323,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		Version:      "workorch.event.v1",
 		Topic:        "/run/state/changed",
 		OccurredAt:   "2026-04-28T00:00:00Z",
-		SourceModule: "kernel/run",
+		SourceModule: "blocks/run",
 		SubjectType:  "run",
 		SubjectID:    string(runID),
 		WorkspaceID:  workspaceID,

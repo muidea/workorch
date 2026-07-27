@@ -91,7 +91,7 @@ docs/
     architecture-overview.md
     repository-structure.md
     application-workorchd.md
-    kernel-workspace-run-result.md
+    blocks-workspace-run-result.md
     kernel-orchestrator-governance.md
     kernel-context-capability.md
     blocks-runtime-adapters.md
@@ -333,7 +333,7 @@ docs/
 - `30-module-architecture/architecture-overview.md`
 - `30-module-architecture/repository-structure.md`
 - `30-module-architecture/application-workorchd.md`
-- `30-module-architecture/kernel-workspace-run-result.md`
+- `30-module-architecture/blocks-workspace-run-result.md`
 - `30-module-architecture/kernel-orchestrator-governance.md`
 - `30-module-architecture/kernel-context-capability.md`
 - `30-module-architecture/blocks-runtime-adapters.md`

@@ -357,7 +357,7 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 			for _, focus := range aggregate.Facts.RemainingFocuses {
 				currentCoverage = append(currentCoverage, focus.CoverageWorkItemIDs...)
 			}
-			aggregate.Facts.StateChange = aggregate.Facts.StateChange.ApplyAcceptedStateChangeEvidence(fact, currentCoverage)
+			aggregate.Facts.StateChange = applyAcceptedStateChangeEvidence(aggregate.Facts.StateChange, fact, currentCoverage)
 		}
 		// A newly admitted receipt may require a fresh assessment, but admission is
 		// not itself convergence progress. In particular, a validation receipt that
@@ -371,9 +371,9 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 			// Otherwise a repair can change an unrelated validation entry and reset
 			// the same-focus budget without shrinking the persisted gap.
 			if runtimeEvidenceIsEffectiveProgress(aggregate.Facts, fact, evidence) {
-				aggregate.Facts.Repair = aggregate.Facts.Repair.NoteProgress(fact.Revision)
+				aggregate.Facts.Repair = noteRepairProgress(aggregate.Facts.Repair, fact.Revision)
 			} else if fact.Kind == runtimecontract.EvidenceKindValidation && aggregate.Facts.Repair.ActiveGap != nil {
-				aggregate.Facts.Repair = aggregate.Facts.Repair.RecordNoProgressOperationShape(runtimecontract.RuntimeRejectedOperationShape{
+				aggregate.Facts.Repair = recordNoProgressOperationShape(aggregate.Facts.Repair, runtimecontract.RuntimeRejectedOperationShape{
 					Operation: committedOperation, EvidenceID: fact.ID,
 					FailureClass:     runtimecontract.FailureClassCoverageAssessmentIncomplete,
 					FailureCode:      "accepted_validation_pending_assessment",
@@ -440,13 +440,13 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 			}
 			previousCount := repairFailureSignatureCount(aggregate.Facts.Repair, signature)
 			cycleID := runtimecontract.StableRepairCycleID(string(aggregate.Facts.RunID), aggregate.Facts.Focus.ID, signature, evidence.EventID)
-			ledger, _, cycleErr := aggregate.Facts.Repair.BeginRepairCycle(aggregate.Facts.Focus.ID, aggregate.Facts.Focus.SliceID, cycleID, signature, aggregate.Facts.ConvergencePolicy)
+			ledger, _, cycleErr := beginRepairCycle(aggregate.Facts.Repair, aggregate.Facts.Focus.ID, aggregate.Facts.Focus.SliceID, cycleID, signature, aggregate.Facts.ConvergencePolicy)
 			if cycleErr != nil {
 				return EvidenceCommitResult{}, cycleErr
 			}
 			ledger.ActiveGap = &gap
 			if previousCount > 0 {
-				ledger = ledger.NoteNoProgress()
+				ledger = noteRepairNoProgress(ledger)
 			}
 			aggregate.Facts.Repair = ledger
 			if fact.Kind == runtimecontract.EvidenceKindStateChange && runtimecontract.RuntimeOperationRequiresCurrentTargetSnapshot(committedOperation) {

@@ -1,7 +1,7 @@
 package readmodelports
 
 import (
-	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 )
 
 type OwnerReaders struct {

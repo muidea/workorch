@@ -32,14 +32,14 @@ func ListMemoryByWorkspaceView(ctx context.Context, hub magicevent.Hub, workspac
 	var err error
 	var items []*memorymodel.MemoryItem
 	if query != "" {
-		repositoryQuery, queryErr := contextregistrycore.MemorySearchRepositoryQuery(contextregistrycore.MemoryQuery{
+		ownerQuery, queryErr := contextregistrycore.MemorySearchOwnerQuery(contextregistrycore.MemoryQuery{
 			WorkspaceID: workspaceID,
 			Query:       query,
 		})
 		if queryErr != nil {
 			return nil, queryErr
 		}
-		items, err = SearchMemory(ctx, hub, repositoryQuery)
+		items, err = SearchMemory(ctx, hub, ownerQuery)
 	} else {
 		items, err = ListMemoryByWorkspace(ctx, hub, workspaceID)
 	}
@@ -53,11 +53,11 @@ func SearchMemoryView(ctx context.Context, hub magicevent.Hub, query contextregi
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	repositoryQuery, err := contextregistrycore.MemorySearchRepositoryQuery(query)
+	ownerQuery, err := contextregistrycore.MemorySearchOwnerQuery(query)
 	if err != nil {
 		return nil, err
 	}
-	items, err := SearchMemory(ctx, hub, repositoryQuery)
+	items, err := SearchMemory(ctx, hub, ownerQuery)
 	if err != nil {
 		return nil, err
 	}

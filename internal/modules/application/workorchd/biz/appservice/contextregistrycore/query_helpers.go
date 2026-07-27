@@ -3,9 +3,9 @@ package contextregistrycore
 import (
 	"strings"
 
+	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
-	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 func FindSkillByRef(items []Skill, id string, sourceSkillID string) (Skill, error) {
@@ -45,12 +45,12 @@ func MCPCapabilityQueryPayload(query MCPCapabilityQuery) map[string]any {
 	return ret
 }
 
-func MemorySearchRepositoryQuery(query MemoryQuery) (repository.MemorySearchQuery, error) {
+func MemorySearchOwnerQuery(query MemoryQuery) (memoryevents.MemorySearchQuery, error) {
 	workspaceID := strings.TrimSpace(query.WorkspaceID)
 	if workspaceID == "" {
-		return repository.MemorySearchQuery{}, common.ErrInvalidArgument
+		return memoryevents.MemorySearchQuery{}, common.ErrInvalidArgument
 	}
-	return repository.MemorySearchQuery{
+	return memoryevents.MemorySearchQuery{
 		WorkspaceID: common.WorkspaceID(workspaceID),
 		Query:       strings.TrimSpace(query.Query),
 		Tags:        CloneStrings(query.Tags),

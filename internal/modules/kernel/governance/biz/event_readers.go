@@ -11,11 +11,11 @@ import (
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
-	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -38,27 +38,6 @@ func (r eventTicketReader) Get(ctx context.Context, id common.TicketID) (*decisi
 		return nil, common.ErrNotFound
 	}
 	return response.Ticket, nil
-}
-
-type eventResolutionReader struct {
-	send func(magicevent.Event) magicevent.Result
-}
-
-func (r eventResolutionReader) GetByTicketID(ctx context.Context, ticketID common.TicketID) (*decisionmodel.Resolution, error) {
-	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	if r.send == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandGetResolution, governancecommon.ModuleID, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.GetResolutionCommand{WorkspaceID: workspaceID, TicketID: ticketID})
-	bindOwnerLane(event, decisionevents.TopicDecisionCommandGetResolution, "decision_ticket", string(ticketID), workspaceID, "", "")
-	response, err := decisionResponse(r.send(event), decisionevents.TopicDecisionCommandGetResolution)
-	if err != nil {
-		return nil, err
-	}
-	if response.Resolution == nil {
-		return nil, common.ErrNotFound
-	}
-	return response.Resolution, nil
 }
 
 type eventApprovalReader struct {

@@ -8,7 +8,7 @@ cd "$ROOT_DIR"
 
 paths=(
   "internal/modules/kernel/orchestrator"
-  "internal/modules/kernel/run"
+  "internal/modules/blocks/run"
   "internal/modules/blocks/llm"
   "internal/modules/blocks/mcp"
   "web/workorch-console/src"
@@ -32,11 +32,66 @@ source_matches() {
     -- "$pattern" "$@" || true
 }
 
+# Component type is determined by responsibility and directory placement.
+# Keep this inventory explicit so a new unit cannot silently bypass
+# type/ownership review.
+initiator_class_roots=(
+  "internal/initiators/workorchruntime"
+)
+module_class_roots=(
+  "internal/modules/application/workorchd"
+  "internal/modules/kernel/governance"
+  "internal/modules/kernel/orchestrator"
+  "internal/modules/kernel/system"
+)
+block_class_roots=(
+  "internal/modules/blocks/eventstream"
+  "internal/modules/blocks/run"
+  "internal/modules/blocks/approval"
+  "internal/modules/blocks/decision"
+  "internal/modules/blocks/file"
+  "internal/modules/blocks/git"
+  "internal/modules/blocks/llm"
+  "internal/modules/blocks/mcp"
+  "internal/modules/blocks/mcpregistry"
+  "internal/modules/blocks/memory"
+  "internal/modules/blocks/result"
+  "internal/modules/blocks/shell"
+  "internal/modules/blocks/skill"
+  "internal/modules/blocks/soul"
+  "internal/modules/blocks/ssh"
+  "internal/modules/blocks/web"
+  "internal/modules/blocks/workspace"
+)
+
+for component_root in "${initiator_class_roots[@]}" "${module_class_roots[@]}" "${block_class_roots[@]}"; do
+  if [[ ! -d "$component_root" ]]; then
+    echo "boundary contract violation: declared component root does not exist: $component_root" >&2
+    exit 1
+  fi
+done
+
 # Every framework Module/Block in this repository currently participates in
 # EventHub lifecycle. Its root is only a lifecycle bridge; the component-local
 # Biz must be the sole holder of the Base/EventHub interaction. The repository
 # provider remains an Initiator, so it is intentionally excluded here.
 mapfile -t component_roots < <(find internal/modules -mindepth 2 -maxdepth 3 -name module.go -printf '%h\n' | sort)
+mapfile -t declared_component_roots < <(printf '%s\n' "${module_class_roots[@]}" "${block_class_roots[@]}" | sort)
+if [[ "$(printf '%s\n' "${component_roots[@]}")" != "$(printf '%s\n' "${declared_component_roots[@]}")" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: framework component inventory differs from the
+declared 4 Module / 17 Block type baseline.
+
+Discovered:
+$(printf '%s\n' "${component_roots[@]}")
+
+Declared:
+$(printf '%s\n' "${declared_component_roots[@]}")
+
+Classify the unit by responsibility before changing this inventory.
+EOF
+  exit 1
+fi
 for component_root in "${component_roots[@]}"; do
   if [[ ! -d "$component_root/biz" ]]; then
     echo "boundary contract violation: component has no local biz directory: $component_root" >&2
@@ -155,6 +210,78 @@ $matches
 
 Move lifecycle, I/O and aggregate transition ownership into the component Biz
 or a focused owner-local adapter. Keep pkg/ values and pure helpers only.
+EOF
+  exit 1
+fi
+
+# Runtime V2 contracts are immutable DTOs and pure value helpers.  Their
+# ledgers are persisted facts, but all mutation belongs to the Orchestrator
+# reducer (SM-2/SM-3), never to the shared contract package.
+runtime_contract_mutator_pattern='BeginRepairCycle|MarkValidationOnlyRetry|NoteProgress|NoteGapProgress|RecordNoProgressOperationShape|ResetForFocus|NoteNoProgress|ApplyAcceptedStateChangeEvidence|func \([^)]*RuntimeRecoveryLedger[^)]*\) Consume'
+matches="$(source_matches "$runtime_contract_mutator_pattern" internal/pkg/workorchruntimecontract)"
+if [[ -n "$matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: Runtime V2 contract pkg contains aggregate state
+transition logic.
+
+$matches
+
+Keep Runtime V2 pkg limited to immutable DTOs, contracts and pure helpers.
+Move ledger mutation and recovery-budget consumption into the Orchestrator
+runtimev2 Biz, the sole SM-2/SM-3 authority owner.
+EOF
+  exit 1
+fi
+
+# The LLM Block is a transport/schema owner. It may decode a typed candidate,
+# but it must not decide candidate acceptance, retry or terminal disposition.
+llm_candidate_authority_pattern='ValidateWithActivation\(|CandidateDisposition|CandidateAttemptOutcome|RetrySameContract|CandidateFailureOutcome'
+matches="$(source_matches "$llm_candidate_authority_pattern" internal/modules/blocks/llm/biz)"
+if [[ -n "$matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: LLM Block contains Runtime V2 candidate authority.
+
+$matches
+
+LLM owns provider transport and strict wire decoding only. Candidate semantic
+validation, retry eligibility, governance and terminal selection belong to the
+Orchestrator reducer.
+EOF
+  exit 1
+fi
+
+# WorkOrchd is an application composition module. Production appservice and
+# HTTP code must use typed owner ports, not reach into another owner's store.
+matches="$(
+  find internal/modules/application/workorchd -type f -name '*.go' ! -name '*_test.go' ! -path '*/biz/testkit/*' -print0 |
+    xargs -0 -r grep -n -E -- 'internal/pkg/repository' || true
+)"
+if [[ -n "$matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: WorkOrchd production code directly imports repository infrastructure.
+
+$matches
+
+Application composition must read or write owner state through typed EventHub
+commands/results or narrow owner read ports. Repository fixtures remain test-only.
+EOF
+  exit 1
+fi
+
+# Governance persists and audits decision/approval evidence. It must never
+# inject a generic Run continuation; the Orchestrator consumes the committed
+# typed resolution and schedules the Runtime V2 drive itself.
+governance_resume_pattern='TopicOrchestratorCommandResumeRun|ResumeRunCommand|ResumeRunFunc|eventResumeRun'
+matches="$(source_matches "$governance_resume_pattern" internal/modules/kernel/governance)"
+if [[ -n "$matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: Governance contains a generic Runtime resume path.
+
+$matches
+
+Governance may resolve a ticket or approve an operation, but must not resume a
+Run. Runtime V2 continuation is owned exclusively by the Orchestrator after it
+consumes committed typed governance evidence.
 EOF
   exit 1
 fi

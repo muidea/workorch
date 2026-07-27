@@ -9,7 +9,7 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/observed"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
-	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 )
 
 const maxCollectedEventRecords = 256

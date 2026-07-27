@@ -6,12 +6,12 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
-	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
-	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 type WorkspaceListWorkspaceReader interface {
@@ -27,7 +27,7 @@ type WorkspaceListResultReader interface {
 }
 
 type WorkspaceListEventRecordReader interface {
-	List(ctx context.Context, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error)
+	List(ctx context.Context, query eventstreamevents.EventRecordQuery) ([]*eventstreammodel.EventRecord, error)
 }
 
 func ListProjectedWorkspaces(
@@ -53,7 +53,7 @@ func ListProjectedWorkspaces(
 		},
 		func() error {
 			var err error
-			eventRecordItems, err = eventRecords.List(ctx, repository.EventRecordQuery{Limit: readmodelcore.DefaultEventRecordLimit})
+			eventRecordItems, err = eventRecords.List(ctx, eventstreamevents.EventRecordQuery{Limit: readmodelcore.DefaultEventRecordLimit})
 			return err
 		},
 	); err != nil {

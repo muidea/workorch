@@ -3,8 +3,8 @@ package orchestrator
 import (
 	"context"
 
+	runModel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspaceModel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
-	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -22,7 +22,7 @@ func (o *RuntimeOrchestrator) acceptRunStart(ctx context.Context, runID common.R
 	if err != nil {
 		return nil, nil, err
 	}
-	if r.State != common.RunStatePending || !common.RunStateCanTransition(r.State, common.RunStateActive) {
+	if r.State != common.RunStatePending {
 		return nil, nil, common.ErrConflict
 	}
 	ws, err := o.runStateManager().workspaceForCreatedRunStart(ctx, r)
@@ -53,7 +53,7 @@ func (o *RuntimeOrchestrator) blockOnDecisionAtStep(ctx context.Context, r *runM
 	if r == nil || r.ID == "" || ticketID == "" {
 		return common.ErrInvalidArgument
 	}
-	if (r.State != common.RunStatePending && r.State != common.RunStateActive) || !common.RunStateCanTransition(r.State, common.RunStateBlockedOnDecision) {
+	if r.State != common.RunStatePending && r.State != common.RunStateActive {
 		return common.ErrConflict
 	}
 	r.State = common.RunStateBlockedOnDecision
@@ -82,7 +82,7 @@ func (o *RuntimeOrchestrator) blockOnApprovalAtStep(ctx context.Context, r *runM
 	if r == nil || r.ID == "" || approvalID == "" {
 		return common.ErrInvalidArgument
 	}
-	if (r.State != common.RunStatePending && r.State != common.RunStateActive) || !common.RunStateCanTransition(r.State, common.RunStateBlockedOnApproval) {
+	if r.State != common.RunStatePending && r.State != common.RunStateActive {
 		return common.ErrConflict
 	}
 	r.State = common.RunStateBlockedOnApproval

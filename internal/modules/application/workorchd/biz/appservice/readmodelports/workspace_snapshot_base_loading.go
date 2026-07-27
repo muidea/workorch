@@ -23,14 +23,14 @@ func workspaceSnapshotBaseLoadTasks(ctx context.Context, readers WorkspaceSnapsh
 		}),
 		namedLoadTask("workspaceSnapshot.eventRecords", func() error {
 			var err error
-			models.EventRecords, err = readers.EventRecords.List(ctx, readmodelcore.WorkspaceEventRecordRepositoryQuery(workspaceID, readmodelcore.DefaultEventRecordLimit))
+			models.EventRecords, err = readers.EventRecords.List(ctx, readmodelcore.WorkspaceEventRecordOwnerQuery(workspaceID, readmodelcore.DefaultEventRecordLimit))
 			return err
 		}),
 	}
 	if options.includeLLMUsagePayloads {
 		tasks = append(tasks, namedLoadTask("workspaceSnapshot.llmUsageEventRecords", func() error {
 			var err error
-			models.LLMUsageEventRecords, err = readers.EventRecords.List(ctx, readmodelcore.WorkspaceLLMUsageEventRecordRepositoryQuery(workspaceID, readmodelcore.DefaultLLMUsageEventRecordLimit))
+			models.LLMUsageEventRecords, err = readers.EventRecords.List(ctx, readmodelcore.WorkspaceLLMUsageEventRecordOwnerQuery(workspaceID, readmodelcore.DefaultLLMUsageEventRecordLimit))
 			return err
 		}))
 	}

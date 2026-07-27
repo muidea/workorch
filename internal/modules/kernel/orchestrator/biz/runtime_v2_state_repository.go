@@ -8,8 +8,8 @@ import (
 	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )

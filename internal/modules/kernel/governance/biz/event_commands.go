@@ -8,7 +8,6 @@ import (
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -54,23 +53,6 @@ func eventResolveApproval(send func(magicevent.Event) magicevent.Result) Resolve
 		event := magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandEnsureApproved, governancecommon.ModuleID, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 		bindOwnerLane(event, approvalevents.TopicApprovalCommandEnsureApproved, "approval", string(approvalID), workspaceID, "", "")
 		_, err := approvalResponse(send(event), approvalevents.TopicApprovalCommandEnsureApproved)
-		return err
-	}
-}
-
-func eventResumeRun(send func(magicevent.Event) magicevent.Result) ResumeRunFunc {
-	return func(ctx context.Context, runID common.RunID) error {
-		workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-		if send == nil {
-			return common.ErrInvalidArgument
-		}
-		command := orchestratorevents.ResumeRunCommand{
-			WorkspaceID: workspaceID,
-			RunID:       runID,
-		}
-		event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandResumeRun, governancecommon.ModuleID, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-		bindOwnerLane(event, orchestratorevents.TopicOrchestratorCommandResumeRun, "run", string(runID), workspaceID, runID, "")
-		_, err := orchestratorResponse(send(event), orchestratorevents.TopicOrchestratorCommandResumeRun)
 		return err
 	}
 }

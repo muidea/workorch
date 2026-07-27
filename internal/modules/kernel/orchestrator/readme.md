@@ -77,7 +77,7 @@
 
 ## 组件交互及合同
 
-- 通过 EventHub 读取 `blocks/workspace` 和 `kernel/run` 的权威快照，并通过 Run owner command 推进 Run/Step/Checkpoint。
+- 通过 EventHub 读取 `blocks/workspace` 和 `blocks/run` 的权威快照，并通过 Run owner command 推进 Run/Step/Checkpoint。
 - Runtime V2 通过 Orchestrator 自有 `ExecuteRuntimeOperationCommand/Result` 调用 File、Git、Shell、MCP、Web 和 SSH block；operation command/result 使用具体类型，同步返回的 typed result 是提交 execution evidence 的唯一执行回执。
 - 通过 EventHub 调用 Result、Decision、Approval 和 Memory owner 的具体 command；不得直接持有这些 owner 的 service 或 repository。
 - 与 `kernel/governance` 协作处理治理策略、decision/approval blocker 和恢复，但 Orchestrator 保持 runtime contract gate 权威。

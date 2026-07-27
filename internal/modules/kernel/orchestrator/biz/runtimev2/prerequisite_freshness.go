@@ -42,7 +42,7 @@ func (c *RuntimeController) InvalidatePrerequisitesForReadOnlyStale(ctx context.
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	ledger, consumed, err := facts.Recovery.Consume(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh, facts.RecoveryPolicy)
+	ledger, consumed, err := consumeRecoveryBudget(facts.Recovery, runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh, facts.RecoveryPolicy)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -138,7 +138,7 @@ func (c *RuntimeController) InvalidateCandidateRequestSessionForPrerequisiteStal
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	ledger, consumed, err := facts.Recovery.Consume(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh, facts.RecoveryPolicy)
+	ledger, consumed, err := consumeRecoveryBudget(facts.Recovery, runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh, facts.RecoveryPolicy)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -207,7 +207,7 @@ func (c *RuntimeController) InvalidateCandidateAttemptForPrerequisiteStale(ctx c
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	ledger, consumed, err := facts.Recovery.Consume(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh, facts.RecoveryPolicy)
+	ledger, consumed, err := consumeRecoveryBudget(facts.Recovery, runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh, facts.RecoveryPolicy)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -417,7 +417,7 @@ func (c *RuntimeController) InvalidateActiveDispatchForPrerequisiteStale(ctx con
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	ledger, consumed, err := facts.Recovery.Consume(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh, facts.RecoveryPolicy)
+	ledger, consumed, err := consumeRecoveryBudget(facts.Recovery, runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh, facts.RecoveryPolicy)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -479,7 +479,7 @@ func applyReceiptResourceChangeInvalidation(aggregate *RuntimeAggregate, dispatc
 	// A resource-changing accepted receipt is forward progress, not a stale
 	// recovery. Keep its bounded re-acquisition allowance separate so normal
 	// multi-owner workflows cannot exhaust the stale/no-progress budget.
-	ledger, consumed, err := facts.Recovery.Consume(runtimecontract.RuntimeRecoveryBudgetPrerequisiteResourceChangeRefresh, facts.RecoveryPolicy)
+	ledger, consumed, err := consumeRecoveryBudget(facts.Recovery, runtimecontract.RuntimeRecoveryBudgetPrerequisiteResourceChangeRefresh, facts.RecoveryPolicy)
 	if err != nil {
 		return false, err
 	}

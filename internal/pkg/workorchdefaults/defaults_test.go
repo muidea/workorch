@@ -1,16 +1,10 @@
 package workorchdefaults
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"strings"
 	"testing"
-
-	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
-	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
-	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
 func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing.T) {
@@ -481,53 +475,35 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, decision.SoulMD, "不要因为 workspace 为空就直接请求源码")
 }
 
-func TestEnsureBuiltinDefaultsUpsertsEmbeddedSoulsAndTemplates(t *testing.T) {
-	ctx := context.Background()
-	soulRepo := memory.NewSoulRepository()
-	templateRepo := memory.NewWorkspaceTemplateRepository()
-	mcpServerRepo := memory.NewMCPServerRepository()
-	mcpCapabilityRepo := memory.NewMCPCapabilityRepository()
-
-	if err := soulRepo.Create(ctx, &soulmodel.Soul{
-		ID:     common.SoulID("soul-software-dev-planning"),
-		Name:   "stale planning soul",
-		SoulMD: "# stale\n",
-	}); err != nil {
-		t.Fatalf("seed stale soul: %v", err)
+func TestBuiltinDefaultsArePureDeclarations(t *testing.T) {
+	souls, err := BuiltinSoulDefaults()
+	if err != nil || len(souls) == 0 {
+		t.Fatalf("BuiltinSoulDefaults = %d, err=%v", len(souls), err)
 	}
-	if err := templateRepo.Create(ctx, &repository.WorkspaceTemplate{
-		ID:       "software-dev",
-		Name:     "stale template",
-		DoDItems: []string{"stale dod"},
-		SoulBindings: map[string]string{
-			"planning": "stale-soul",
-		},
-	}); err != nil {
-		t.Fatalf("seed stale template: %v", err)
+	var planning *SoulDefault
+	for idx := range souls {
+		if souls[idx].ID == "soul-software-dev-planning" {
+			planning = &souls[idx]
+			break
+		}
 	}
-
-	if err := EnsureBuiltinDefaults(ctx, soulRepo, templateRepo, mcpServerRepo, mcpCapabilityRepo); err != nil {
-		t.Fatalf("EnsureBuiltinDefaults: %v", err)
-	}
-
-	planning, err := soulRepo.Get(ctx, common.SoulID("soul-software-dev-planning"))
-	if err != nil {
-		t.Fatalf("get planning soul: %v", err)
+	if planning == nil {
+		t.Fatal("planning soul declaration missing")
 	}
 	assertSoulContains(t, planning.SoulMD, "workspace 文件清单为空不等于缺少源码")
-	if planning.Name == "stale planning soul" || strings.Contains(planning.SoulMD, "# stale") {
-		t.Fatalf("planning soul was not refreshed: %+v", planning)
+	templates, err := BuiltinWorkspaceTemplateDefaults()
+	if err != nil || len(templates) == 0 {
+		t.Fatalf("BuiltinWorkspaceTemplateDefaults = %d, err=%v", len(templates), err)
 	}
-
-	template, err := templateRepo.Get(ctx, "software-dev")
-	if err != nil {
-		t.Fatalf("get software-dev template: %v", err)
+	var template *WorkspaceTemplateDefault
+	for idx := range templates {
+		if templates[idx].ID == "software-dev" {
+			template = &templates[idx]
+			break
+		}
 	}
-	if template.Name == "stale template" || template.SoulBindings["planning"] != "soul-software-dev-planning" {
-		t.Fatalf("software-dev template was not refreshed: %+v", template)
-	}
-	if template.DefaultSoulID != "soul-software-dev-execution" {
-		t.Fatalf("software-dev defaultSoulId = %q, want soul-software-dev-execution", template.DefaultSoulID)
+	if template == nil || template.SoulBindings["planning"] != "soul-software-dev-planning" || template.DefaultSoulID != "soul-software-dev-execution" {
+		t.Fatalf("software-dev template declaration = %+v", template)
 	}
 	contextHints := template.ContextHints.Map()
 	if contextHints["stateChangePolicy"] != "must_produce_state_change" {
@@ -539,48 +515,13 @@ func TestEnsureBuiltinDefaultsUpsertsEmbeddedSoulsAndTemplates(t *testing.T) {
 	assertSoftwareDevCapabilityUsagePolicies(t, contextHints)
 	assertSoftwareDevValidationPolicies(t, contextHints)
 	assertContainsAnyDoDItem(t, template.DoDItems, "evidenceRefs")
-	if len(template.EvidencePolicies) == 0 {
-		t.Fatalf("software-dev evidence policies were not refreshed: %+v", template)
+	servers, err := BuiltinMCPServerDefaults()
+	if err != nil || len(servers) == 0 {
+		t.Fatalf("BuiltinMCPServerDefaults = %d, err=%v", len(servers), err)
 	}
-	server, err := mcpServerRepo.Get(ctx, common.MCPServerID("mcp-lsp-bridge"))
-	if err != nil {
-		t.Fatalf("get mcp-lsp-bridge server: %v", err)
-	}
-	if server.Transport != "stdio" || server.Command != "lsp-bridge" || server.SessionPolicy != "long_lived" {
-		t.Fatalf("mcp-lsp-bridge server = %+v, want stdio command long_lived", server)
-	}
-	if server.Env["LSP_BRIDGE_CONFIG"] != "{workspaceManagedConfig:lsp-bridge/mcp-config.json}" {
-		t.Fatalf("mcp-lsp-bridge env = %+v, want managed config placeholder", server.Env)
-	}
-	assertStringSliceContains(t, server.AllowedTools, "lsp_diagnostics")
-	assertStringSliceContains(t, server.AllowedTools, "lsp_status")
-	assertStringSliceContains(t, server.AllowedTools, "lsp_shutdown")
-	assertStringSliceContains(t, server.AllowedTools, "lsp_repair")
-	capability, err := mcpCapabilityRepo.Get(ctx, common.MCPCapabilityID("mcp-lsp-bridge:tool:lsp_diagnostics"))
-	if err != nil {
-		t.Fatalf("get lsp diagnostics capability: %v", err)
-	}
-	if capability.Category != "code_semantics" || capability.RiskLevel != "read_only" {
-		t.Fatalf("lsp diagnostics capability = %+v, want code semantics read-only", capability)
-	}
-	if len(capability.Schema.Fields) == 0 {
-		t.Fatalf("lsp diagnostics capability schema is empty")
-	}
-	initializeCapability, err := mcpCapabilityRepo.Get(ctx, common.MCPCapabilityID("mcp-lsp-bridge:tool:lsp_initialize"))
-	if err != nil {
-		t.Fatalf("get lsp initialize capability: %v", err)
-	}
-	required, ok := initializeCapability.Schema.StringSlice("required")
-	if !ok {
-		t.Fatalf("lsp initialize capability required schema = %+v, want string list", initializeCapability.Schema)
-	}
-	assertStringSliceContains(t, required, "lang_id")
-	statusCapability, err := mcpCapabilityRepo.Get(ctx, common.MCPCapabilityID("mcp-lsp-bridge:tool:lsp_status"))
-	if err != nil {
-		t.Fatalf("get lsp status capability: %v", err)
-	}
-	if statusCapability.Category != "code_semantics" || statusCapability.RiskLevel != "read_only" {
-		t.Fatalf("lsp status capability = %+v, want code semantics read-only", statusCapability)
+	capabilities, err := BuiltinMCPCapabilityDefaults()
+	if err != nil || len(capabilities) == 0 {
+		t.Fatalf("BuiltinMCPCapabilityDefaults = %d, err=%v", len(capabilities), err)
 	}
 }
 

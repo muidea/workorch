@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-07-26
+Last Updated: 2026-07-27
 
 
 ## LLM Provider（2026-07-15）
@@ -72,18 +72,26 @@ Last Updated: 2026-07-26
 
 冲突规则：中立约束以 `00-core` 为准；实现细节以 Orchestrator readme + contract 包为准；本文只摘要当前事实；已归档 plan 不得并列约束新实现。
 
-## Ownership Snapshot
+## Ownership and Component Type Snapshot
 
-| 组件 | 职责 |
-| --- | --- |
-| `application/workorchd` | HTTP/CLI/SSE/projection；构造 bootstrap；不持有 drive queue |
-| `kernel/orchestrator` | Runtime V2 convergence authority |
-| `kernel/run` | Run / Step / V2 aggregate 持久化 owner；不做 action 选择 |
-| `blocks/workspace` | Goal / DoD / Template 定义 owner |
-| `blocks/result` | 正式 outcome 存储；不裁决 acceptance |
-| `blocks/decision` / `approval` | 治理 ticket / 授权 |
-| capability blocks（llm/file/git/shell/…） | 同步执行；返回 candidate 或 operation evidence |
-| `kernel/eventstream` | 审计 EventRecord；不是业务修复入口 |
+22 个 framework 运行单元的职责类型固定为 **1 Initiator / 4 Modules / 17
+Blocks**。目录与职责类型一致：`blocks/run` 与 `blocks/eventstream` 是单一资源
+Block owner，不承担跨 owner 编排。
+
+| 类型 | 组件 | 职责 |
+| --- | --- | --- |
+| Initiator | `initiators/workorchruntime` | 单一 repository provider/factory；无业务状态或 EventHub |
+| Module | `application/workorchd` | HTTP/CLI/SSE/projection；构造 bootstrap；不持有 drive queue |
+| Module | `kernel/orchestrator` | Runtime V2 convergence authority |
+| Module | `kernel/governance` | 跨 Decision/Approval/Run 的治理协调；不拥有 Runtime continuation |
+| Module | `kernel/system` | 跨 owner 的启动默认资源 ensure 协调 |
+| Block | `blocks/run` | Run / Step / V2 aggregate 持久化 owner；不做 action 选择 |
+| Block | `blocks/eventstream` | 审计 EventRecord/high-watermark owner；不是业务修复入口 |
+| Block | `blocks/workspace` | Goal / DoD / Template 定义 owner |
+| Block | `blocks/result` | 正式 outcome 存储；不裁决 acceptance |
+| Block | `blocks/decision` / `approval` | 治理 ticket / 授权 owner |
+| Block | `blocks/memory` / `skill` / `soul` / `mcpregistry` | 单一正式资源 registry/aggregate owner |
+| Block | `blocks/llm` / `file` / `git` / `shell` / `mcp` / `ssh` / `web` | 单一技术能力；返回 candidate、observation 或 receipt |
 
 跨组件交互：EventHub + 具体 command/data/result。禁止跨 owner service/repo、Envelope、`map[string]any` bridge。
 

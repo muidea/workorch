@@ -984,13 +984,13 @@ func closeCandidateAttempt(aggregate *RuntimeAggregate, idx, attempt int, failur
 		record := aggregate.CandidateAttempts[idx]
 		sourceFactID := fmt.Sprintf("candidate/%s/%d", strings.TrimSpace(record.AuthorityContractID), attempt)
 		cycleID := runtimecontract.StableRepairCycleID(string(aggregate.Facts.RunID), aggregate.Facts.Focus.ID, failure.Signature, sourceFactID)
-		ledger, _, err := aggregate.Facts.Repair.BeginRepairCycle(aggregate.Facts.Focus.ID, aggregate.Facts.Focus.SliceID, cycleID, failure.Signature, aggregate.Facts.ConvergencePolicy)
+		ledger, _, err := beginRepairCycle(aggregate.Facts.Repair, aggregate.Facts.Focus.ID, aggregate.Facts.Focus.SliceID, cycleID, failure.Signature, aggregate.Facts.ConvergencePolicy)
 		if err != nil {
 			return err
 		}
 		ledger.ActiveGap = &gap
 		if previousCount > 0 {
-			ledger = ledger.NoteNoProgress()
+			ledger = noteRepairNoProgress(ledger)
 		}
 		aggregate.Facts.Repair = ledger
 	}
@@ -1238,7 +1238,7 @@ func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID co
 		priorGap := aggregate.Facts.Repair.ActiveGap
 		signature := runtimecontract.StableAssessmentFailureSignature(aggregate.Facts.Focus.ID, assessment.Disposition, assessment.Gap)
 		cycleID := runtimecontract.StableRepairCycleID(string(aggregate.Facts.RunID), aggregate.Facts.Focus.ID, signature, fact.ID)
-		ledger, _, cycleErr := aggregate.Facts.Repair.BeginRepairCycle(aggregate.Facts.Focus.ID, aggregate.Facts.Focus.SliceID, cycleID, signature, aggregate.Facts.ConvergencePolicy)
+		ledger, _, cycleErr := beginRepairCycle(aggregate.Facts.Repair, aggregate.Facts.Focus.ID, aggregate.Facts.Focus.SliceID, cycleID, signature, aggregate.Facts.ConvergencePolicy)
 		if cycleErr != nil {
 			return RuntimeAggregate{}, cycleErr
 		}
@@ -1251,7 +1251,7 @@ func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID co
 			// Repeated or expanded gaps retain their signatures/shapes and must not
 			// create a fresh retry window merely because an assessment was accepted.
 			if priorGap != nil && runtimecontract.RuntimeAssessmentGapStrictlyNarrows(*priorGap, gap) {
-				ledger = ledger.NoteGapProgress(gap, aggregate.Facts.EvidenceRevision)
+				ledger = noteRepairGapProgress(ledger, gap, aggregate.Facts.EvidenceRevision)
 			} else {
 				// An accepted operation is not harmless merely because its receipt
 				// succeeded. Once assessment reports the same (or a wider) persisted
@@ -1273,13 +1273,13 @@ func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID co
 				}
 			}
 			if hasValidationGap && !hasStateChangeGap {
-				ledger = ledger.MarkValidationOnlyRetry(aggregate.Facts.ConvergencePolicy)
+				ledger = markValidationOnlyRetry(ledger)
 			}
 		}
 		aggregate.Facts.Repair = ledger
 	}
 	if assessment.Disposition == runtimecontract.AssessmentDispositionSatisfied {
-		aggregate.Facts.Repair = aggregate.Facts.Repair.NoteProgress(aggregate.Facts.EvidenceRevision)
+		aggregate.Facts.Repair = noteRepairProgress(aggregate.Facts.Repair, aggregate.Facts.EvidenceRevision)
 	}
 	aggregate.EvidenceSequence++
 	aggregate.Facts.EvidenceRevision = nextEvidenceRevision(aggregate.EvidenceSequence)
@@ -1315,7 +1315,7 @@ func recordAcceptedNoProgressShapes(aggregate RuntimeAggregate, ledger runtimeco
 		if !found {
 			continue
 		}
-		ledger = ledger.RecordNoProgressOperationShape(runtimecontract.RuntimeRejectedOperationShape{
+		ledger = recordNoProgressOperationShape(ledger, runtimecontract.RuntimeRejectedOperationShape{
 			Operation:        operation,
 			EvidenceID:       evidence.ID,
 			FailureClass:     runtimecontract.FailureClassCoverageAssessmentIncomplete,

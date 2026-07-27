@@ -73,7 +73,7 @@ Last Updated: 2026-07-14
 代码落点：
 
 - `internal/modules/blocks/workspace`
-- `internal/modules/kernel/run`
+- `internal/modules/blocks/run`
 - `internal/modules/blocks/result`
 - `internal/modules/kernel/orchestrator`
 - `internal/modules/blocks/decision`
@@ -83,7 +83,7 @@ Last Updated: 2026-07-14
 - `internal/modules/blocks/skill`
 - `internal/modules/blocks/mcpregistry`
 - `internal/modules/blocks/memory`
-- `internal/modules/kernel/eventstream`
+- `internal/modules/blocks/eventstream`
 
 其中 `internal/modules/blocks/workspace`、`result`、`decision`、`approval`、`memory`、`skill`、`soul` 与 `mcpregistry` 分别承载单一资源聚合 stateful block；`mcpregistry` 与 invocation 技术 block `blocks/mcp` 明确分离。其余目录按各自职责保留为 module。职责：
 
@@ -255,7 +255,7 @@ User
 | State / View | Authority | Consumers |
 | --- | --- | --- |
 | WorkspaceState | blocks/workspace + read-model projection | Web/TUI/API |
-| RunState | kernel/run | orchestrator, appservice, projection |
+| RunState | blocks/run | orchestrator, appservice, projection |
 | RuntimeFacts / AuthoritySnapshot / EvidenceLedger / Focus queue | kernel orchestrator aggregate | DriveRuntimeV2, diagnostics |
 | RuntimeDecision / RequiredOutputContract / SealedDispatch | orchestrator reducer / seal | candidate, operation execution, evidence gate |
 | RuntimeStateRecord | Run owner CAS | recovery, projection, audit |

@@ -7,10 +7,10 @@ import (
 	"sort"
 	"strings"
 
+	runcontracts "github.com/muidea/workorch/internal/modules/blocks/run/pkg/contracts"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
 	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
-	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
-	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"

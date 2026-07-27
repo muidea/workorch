@@ -670,7 +670,7 @@ func advanceSatisfiedCoverageFocus(facts runtimecontract.RuntimeFacts) runtimeco
 	facts.Resources.TargetSelection = nil
 	facts.Resources.TargetSnapshots = nil
 	facts.Resources.FailureTarget = nil
-	facts.Repair = facts.Repair.ResetForFocus(facts.Focus.ID, facts.Focus.SliceID, facts.EvidenceRevision)
+	facts.Repair = resetRepairForFocus(facts.Focus.ID, facts.Focus.SliceID, facts.EvidenceRevision)
 	facts.RepairDirective = nil
 	return facts.Normalized()
 }

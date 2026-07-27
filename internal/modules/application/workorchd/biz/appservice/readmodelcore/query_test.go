@@ -6,7 +6,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func TestMemoryRecallTraceRepositoryQueryNormalizesFields(t *testing.T) {
+func TestMemoryRecallTraceOwnerQueryNormalizesFields(t *testing.T) {
 	query := MemoryRecallTraceQuery{
 		WorkspaceID: " ws-001 ",
 		RunID:       " run-001 ",
@@ -17,7 +17,7 @@ func TestMemoryRecallTraceRepositoryQueryNormalizesFields(t *testing.T) {
 		Limit:       25,
 	}
 
-	got := MemoryRecallTraceRepositoryQuery(query)
+	got := MemoryRecallTraceOwnerQuery(query)
 
 	if got.WorkspaceID != common.WorkspaceID("ws-001") {
 		t.Fatalf("workspace id mismatch: %q", got.WorkspaceID)
@@ -36,7 +36,7 @@ func TestMemoryRecallTraceRepositoryQueryNormalizesFields(t *testing.T) {
 	}
 }
 
-func TestEventRecordRepositoryQueryNormalizesFields(t *testing.T) {
+func TestEventRecordOwnerQueryNormalizesFields(t *testing.T) {
 	query := EventRecordQuery{
 		WorkspaceID:    " ws-001 ",
 		RunID:          " run-001 ",
@@ -51,7 +51,7 @@ func TestEventRecordRepositoryQueryNormalizesFields(t *testing.T) {
 		IncludePayload: true,
 	}
 
-	got := EventRecordRepositoryQuery(query)
+	got := EventRecordOwnerQuery(query)
 
 	if got.WorkspaceID != common.WorkspaceID("ws-001") {
 		t.Fatalf("workspace id mismatch: %q", got.WorkspaceID)
@@ -80,7 +80,7 @@ func TestEventRecordRepositoryQueryNormalizesFields(t *testing.T) {
 }
 
 func TestRunEventRecordRepositoryQueries(t *testing.T) {
-	got := RunEventRecordRepositoryQuery(common.RunID(" run-001 "), 100)
+	got := RunEventRecordOwnerQuery(common.RunID(" run-001 "), 100)
 	if got.RunID != common.RunID("run-001") {
 		t.Fatalf("run id mismatch: %q", got.RunID)
 	}
@@ -94,7 +94,7 @@ func TestRunEventRecordRepositoryQueries(t *testing.T) {
 		t.Fatalf("run event query include payload = true, want false")
 	}
 
-	observability := RunObservabilityEventRecordRepositoryQuery(common.RunID(" run-001 "), 100)
+	observability := RunObservabilityEventRecordOwnerQuery(common.RunID(" run-001 "), 100)
 	if observability.RunID != common.RunID("run-001") {
 		t.Fatalf("observability run id mismatch: %q", observability.RunID)
 	}
@@ -111,7 +111,7 @@ func TestRunEventRecordRepositoryQueries(t *testing.T) {
 		t.Fatalf("observability exclude topics = %+v, want complete event timeline", observability.ExcludeTopics)
 	}
 
-	projection := RunProjectionEventRecordRepositoryQuery(common.RunID(" run-001 "), 100)
+	projection := RunProjectionEventRecordOwnerQuery(common.RunID(" run-001 "), 100)
 	if projection.RunID != common.RunID("run-001") || projection.IncludePayload {
 		t.Fatalf("projection query = %+v, want run scoped compact projection query", projection)
 	}
@@ -119,7 +119,7 @@ func TestRunEventRecordRepositoryQueries(t *testing.T) {
 		t.Fatalf("projection exclude topics = %+v, want stream progress excluded", projection.ExcludeTopics)
 	}
 
-	llm := RunLLMUsageEventRecordRepositoryQuery(common.RunID(" run-001 "), 5000)
+	llm := RunLLMUsageEventRecordOwnerQuery(common.RunID(" run-001 "), 5000)
 	if llm.RunID != common.RunID("run-001") {
 		t.Fatalf("llm run id mismatch: %q", llm.RunID)
 	}
@@ -135,7 +135,7 @@ func TestRunEventRecordRepositoryQueries(t *testing.T) {
 }
 
 func TestWorkspaceEventRecordRepositoryQueries(t *testing.T) {
-	got := WorkspaceEventRecordRepositoryQuery(common.WorkspaceID(" ws-001 "), 100)
+	got := WorkspaceEventRecordOwnerQuery(common.WorkspaceID(" ws-001 "), 100)
 	if got.WorkspaceID != common.WorkspaceID("ws-001") {
 		t.Fatalf("workspace id mismatch: %q", got.WorkspaceID)
 	}
@@ -149,7 +149,7 @@ func TestWorkspaceEventRecordRepositoryQueries(t *testing.T) {
 		t.Fatalf("workspace event query include payload = true, want false")
 	}
 
-	llm := WorkspaceLLMUsageEventRecordRepositoryQuery(common.WorkspaceID(" ws-001 "), 5000)
+	llm := WorkspaceLLMUsageEventRecordOwnerQuery(common.WorkspaceID(" ws-001 "), 5000)
 	if llm.WorkspaceID != common.WorkspaceID("ws-001") {
 		t.Fatalf("llm workspace id mismatch: %q", llm.WorkspaceID)
 	}
@@ -164,8 +164,8 @@ func TestWorkspaceEventRecordRepositoryQueries(t *testing.T) {
 	}
 }
 
-func TestRunMemoryRecallTraceRepositoryQuery(t *testing.T) {
-	got := RunMemoryRecallTraceRepositoryQuery(common.WorkspaceID(" ws-001 "), common.RunID(" run-001 "))
+func TestRunMemoryRecallTraceOwnerQuery(t *testing.T) {
+	got := RunMemoryRecallTraceOwnerQuery(common.WorkspaceID(" ws-001 "), common.RunID(" run-001 "))
 	if got.WorkspaceID != common.WorkspaceID("ws-001") {
 		t.Fatalf("workspace id mismatch: %q", got.WorkspaceID)
 	}

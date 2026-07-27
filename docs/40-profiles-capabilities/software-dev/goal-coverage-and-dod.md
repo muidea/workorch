@@ -154,7 +154,7 @@ software-dev profile 的稳定证据面应优先复用：
 - block / step kind 分发：
   `../../30-module-architecture/blocks-runtime-adapters.md`
 - 运行证据与结果落点：
-  `../../30-module-architecture/kernel-workspace-run-result.md`
+  `../../30-module-architecture/blocks-workspace-run-result.md`
 - profile verifier：
   `../../60-verification/profile-software-dev-verifier.md`
 

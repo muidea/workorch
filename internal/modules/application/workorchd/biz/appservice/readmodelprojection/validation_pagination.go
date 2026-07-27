@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 )
 
 func PageRunValidationResults(items []*runmodel.ValidationResult, query readmodelcore.ValidationResultQuery) readmodelcore.ValidationResultPage {

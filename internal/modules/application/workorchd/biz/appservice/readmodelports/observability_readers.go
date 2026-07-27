@@ -5,20 +5,19 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
-	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
-
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
+	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
-	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 type EventRecordReader struct {
 	Hub magicevent.Hub
 }
 
-func (r EventRecordReader) List(ctx context.Context, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+func (r EventRecordReader) List(ctx context.Context, query eventstreamevents.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
 	return ownerreadports.ListEventRecordsByOwnerCommand(ctx, r.Hub, query)
 }
 
@@ -26,7 +25,7 @@ type MemoryRecallTraceReader struct {
 	Hub magicevent.Hub
 }
 
-func (r MemoryRecallTraceReader) List(ctx context.Context, query repository.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error) {
+func (r MemoryRecallTraceReader) List(ctx context.Context, query memoryevents.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error) {
 	if r.Hub == nil {
 		return nil, common.ErrInvalidArgument
 	}

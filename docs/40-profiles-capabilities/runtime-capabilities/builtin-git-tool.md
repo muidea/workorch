@@ -154,7 +154,7 @@ Git 能力应优先沉淀为：
 - block 分发：
   `../../30-module-architecture/blocks-runtime-adapters.md`
 - 运行结果与证据：
-  `../../30-module-architecture/kernel-workspace-run-result.md`
+  `../../30-module-architecture/blocks-workspace-run-result.md`
 - API/detail page：
   `../../50-product-interface/service-api.md`
 

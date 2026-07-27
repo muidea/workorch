@@ -13,7 +13,7 @@ Last Updated: 2026-05-30
 - `../../20-runtime-flow/verification-acceptance-flow.md`
 - `../../20-runtime-flow/evidence-result-flow.md`
 - `../../20-runtime-flow/repair-replan-flow.md`
-- `../../30-module-architecture/kernel-workspace-run-result.md`
+- `../../30-module-architecture/blocks-workspace-run-result.md`
 - `../../30-module-architecture/kernel-orchestrator-governance.md`
 - `../../30-module-architecture/storage-readmodel.md`
 - `../../50-product-interface/service-api.md`

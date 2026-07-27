@@ -13,7 +13,6 @@ import (
 	systemevents "github.com/muidea/workorch/internal/modules/kernel/system/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
-	"github.com/muidea/workorch/internal/pkg/workorchdefaults"
 )
 
 const ModuleID = modulecommon.ModuleID
@@ -92,7 +91,7 @@ func (m *Biz) handleSystemDefaultsCommand(ev magicevent.Event, result magicevent
 		setSystemMCPDefaultsResult(result, common.ErrInvalidArgument)
 		return
 	}
-	setSystemMCPDefaultsResult(result, workorchdefaults.EnsureBuiltinMCPDefaults(ev.Context(), m.servers, m.capabilities))
+	setSystemMCPDefaultsResult(result, ensureBuiltinMCPDefaults(ev.Context(), m.servers, m.capabilities))
 }
 
 func setSystemMCPDefaultsResult(result magicevent.Result, err error) {

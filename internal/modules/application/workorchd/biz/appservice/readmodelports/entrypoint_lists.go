@@ -8,7 +8,7 @@ import (
 )
 
 func MemoryRecallTraces(ctx context.Context, reader readmodelcore.MemoryRecallTraceReader, query readmodelcore.MemoryRecallTraceQuery) ([]readmodelcore.MemoryRecallTrace, error) {
-	items, err := reader.List(ctx, readmodelcore.MemoryRecallTraceRepositoryQuery(query))
+	items, err := reader.List(ctx, readmodelcore.MemoryRecallTraceOwnerQuery(query))
 	if err != nil {
 		return nil, err
 	}
@@ -16,7 +16,7 @@ func MemoryRecallTraces(ctx context.Context, reader readmodelcore.MemoryRecallTr
 }
 
 func EventRecords(ctx context.Context, reader readmodelcore.EventRecordReader, query readmodelcore.EventRecordQuery) ([]readmodelcore.EventRecord, error) {
-	items, err := reader.List(ctx, readmodelcore.EventRecordRepositoryQuery(query))
+	items, err := reader.List(ctx, readmodelcore.EventRecordOwnerQuery(query))
 	if err != nil {
 		return nil, err
 	}

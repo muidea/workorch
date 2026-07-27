@@ -841,7 +841,7 @@ func TestReduceRuntimeStateRequiresRunLevelStateChangeBeforeComplete(t *testing.
 	}
 
 	// satisfy ledger then complete
-	facts.StateChange = facts.StateChange.ApplyAcceptedStateChangeEvidence(runtimecontract.EvidenceFact{
+	facts.StateChange = applyAcceptedStateChangeEvidence(facts.StateChange, runtimecontract.EvidenceFact{
 		ID: "state-1", Kind: runtimecontract.EvidenceKindStateChange, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		Revision: "evidence-v2-00000000000000000002",
 	}, []common.CoverageWorkItemID{"cwi-1"})

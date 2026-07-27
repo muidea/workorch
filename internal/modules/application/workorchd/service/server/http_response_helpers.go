@@ -14,7 +14,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
@@ -121,25 +120,7 @@ func (m *serverMetrics) render(config Config, projection *workspaceProjectionMan
 	if m != nil {
 		body += m.schedulerDiagnostics.renderMetrics()
 	}
-	return body + renderEventRecordIOMetrics() + renderWorkspaceProjectionMetrics(projection, m)
-}
-
-func renderEventRecordIOMetrics() string {
-	metrics := repository.EventRecordIOMetricsSnapshot()
-	return fmt.Sprintf(
-		"# TYPE workorch_event_record_metadata_scans_total counter\n"+
-			"workorch_event_record_metadata_scans_total %d\n"+
-			"# TYPE workorch_event_record_metadata_records_scanned_total counter\n"+
-			"workorch_event_record_metadata_records_scanned_total %d\n"+
-			"# TYPE workorch_event_record_payload_hydrates_total counter\n"+
-			"workorch_event_record_payload_hydrates_total %d\n"+
-			"# TYPE workorch_event_record_payload_hydrate_bytes_total counter\n"+
-			"workorch_event_record_payload_hydrate_bytes_total %d\n",
-		metrics.MetadataScansTotal,
-		metrics.MetadataRecordsScannedTotal,
-		metrics.PayloadHydratesTotal,
-		metrics.PayloadHydrateBytesTotal,
-	)
+	return body + renderWorkspaceProjectionMetrics(projection, m)
 }
 
 func renderWorkspaceProjectionMetrics(projection *workspaceProjectionManager, serverMetrics *serverMetrics) string {

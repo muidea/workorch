@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
-	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

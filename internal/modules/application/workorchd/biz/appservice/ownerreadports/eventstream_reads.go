@@ -4,15 +4,14 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
-	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
-func ListEventRecordsByOwnerCommand(ctx context.Context, hub magicevent.Hub, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+func ListEventRecordsByOwnerCommand(ctx context.Context, hub magicevent.Hub, query eventstreamevents.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}

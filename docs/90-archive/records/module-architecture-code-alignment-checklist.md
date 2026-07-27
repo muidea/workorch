@@ -20,7 +20,7 @@ Last Updated: 2026-05-30
 - `../30-module-architecture/architecture-overview.md`
 - `../30-module-architecture/repository-structure.md`
 - `../30-module-architecture/application-workorchd.md`
-- `../30-module-architecture/kernel-workspace-run-result.md`
+- `../30-module-architecture/blocks-workspace-run-result.md`
 - `../30-module-architecture/kernel-orchestrator-governance.md`
 - `../30-module-architecture/kernel-context-capability.md`
 - `../30-module-architecture/blocks-runtime-adapters.md`

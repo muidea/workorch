@@ -17,7 +17,7 @@ func (c *RuntimeController) ConsumeRecoveryBudget(ctx context.Context, workspace
 		return RuntimeAggregate{}, false, err
 	}
 	expectedRevision := aggregate.StateRevision
-	ledger, consumed, err := aggregate.Facts.Recovery.Consume(kind, aggregate.Facts.RecoveryPolicy)
+	ledger, consumed, err := consumeRecoveryBudget(aggregate.Facts.Recovery, kind, aggregate.Facts.RecoveryPolicy)
 	if err != nil {
 		return RuntimeAggregate{}, false, err
 	}

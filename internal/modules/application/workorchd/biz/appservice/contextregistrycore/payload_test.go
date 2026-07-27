@@ -118,8 +118,8 @@ func TestMemoryItemsFromPayloadAndMapping(t *testing.T) {
 	}
 }
 
-func TestMemorySearchRepositoryQuery(t *testing.T) {
-	got, err := MemorySearchRepositoryQuery(MemoryQuery{
+func TestMemorySearchOwnerQuery(t *testing.T) {
+	got, err := MemorySearchOwnerQuery(MemoryQuery{
 		WorkspaceID: " ws-001 ",
 		Query:       " context ",
 		Tags:        []string{"tag"},
@@ -127,16 +127,16 @@ func TestMemorySearchRepositoryQuery(t *testing.T) {
 		Limit:       3,
 	})
 	if err != nil {
-		t.Fatalf("MemorySearchRepositoryQuery err = %v", err)
+		t.Fatalf("MemorySearchOwnerQuery err = %v", err)
 	}
 	if got.WorkspaceID != common.WorkspaceID("ws-001") || got.Query != "context" || got.Limit != 3 {
-		t.Fatalf("MemorySearchRepositoryQuery = %#v", got)
+		t.Fatalf("MemorySearchOwnerQuery = %#v", got)
 	}
 	if len(got.Tags) != 1 || got.Tags[0] != "tag" || len(got.Types) != 1 || got.Types[0] != "fact" {
-		t.Fatalf("MemorySearchRepositoryQuery filters = tags:%#v types:%#v", got.Tags, got.Types)
+		t.Fatalf("MemorySearchOwnerQuery filters = tags:%#v types:%#v", got.Tags, got.Types)
 	}
 
-	if _, err := MemorySearchRepositoryQuery(MemoryQuery{}); !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("MemorySearchRepositoryQuery missing workspace err = %v", err)
+	if _, err := MemorySearchOwnerQuery(MemoryQuery{}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("MemorySearchOwnerQuery missing workspace err = %v", err)
 	}
 }

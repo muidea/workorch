@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-27
 
 ## Purpose
 
@@ -22,13 +22,11 @@ internal/
     application/workorchd/     # appservice / server / bootstrap / projection
     kernel/
       orchestrator/            # Runtime V2 convergence authority
-      run/                     # Run / Step / Checkpoint / RuntimeStateRecord
       governance/              # auto-governance coordination
-      eventstream/             # audit event persistence
       system/                  # defaults ensure
     blocks/
-      workspace/ result/ decision/ approval/ memory/
-      soul/ skill/ mcpregistry/
+      workspace/ run/ result/ decision/ approval/ memory/
+      soul/ skill/ mcpregistry/ eventstream/
       llm/ file/ git/ shell/ mcp/ web/ ssh/
       pkg/                     # blocks 共享辅助（若有）
   pkg/
@@ -51,15 +49,15 @@ docs/                          # 设计与模块文档
 | `application/workorch` | 进程入口 |
 | `internal/initiators` | framework / repository initiator |
 | `internal/modules/application` | appservice、server、bootstrap、observed/presenter |
-| `internal/modules/kernel` | Run owner、Orchestrator 收敛、governance、eventstream |
+| `internal/modules/kernel` | Orchestrator/Governance/System 多 owner 协调 Modules |
 | `internal/modules/blocks` | stateful owners + capability execution |
 | `internal/pkg` | 全局共享 contract 与基础设施 |
 | `internal/services` | CLI/TUI 等人机入口服务 |
 | `web/workorch-console` | 前端 |
 
-## Module Shape
+## Framework Unit Shape
 
-模块最小形状：
+Module/Block 最小形状：
 
 ```text
 module.go
@@ -78,12 +76,16 @@ readme.md
 - `plugin.go`：向 magicCommon/pluginmodule 注册
 - `module.go`：生命周期入口
 - `biz/`：业务实现
-- `service/`：仅用于 HTTP/CLI/session/protocol adapter；owner module 不导出 direct
+- `service/`：仅用于 HTTP/CLI/session/protocol adapter；owner unit 不导出 direct
   service facade，生产跨组件只能使用 typed EventHub command/result。
 - `pkg/events`：跨组件唯一交互合同
 - `pkg/common` / `pkg/models`：常量与本地模型
 
 ## Kernel / Orchestrator Layout
+
+`kernel/` 只包含多 owner 协调 Module：`orchestrator`、`governance`、`system`。
+`blocks/run` 与 `blocks/eventstream` 是单资源 Block owner；其目录、module ID、
+EventHub source/destination 与 import path 均使用 `blocks/*`。
 
 ```text
 internal/modules/kernel/orchestrator/
@@ -95,7 +97,7 @@ internal/modules/kernel/orchestrator/
 ```
 
 ```text
-internal/modules/kernel/run/
+internal/modules/blocks/run/
   biz/ pkg/events/ pkg/models/ pkg/contracts/
   # RuntimeBootstrap + RuntimeStateRecord 随 Run 持久化与 CAS
 ```
@@ -105,8 +107,8 @@ internal/modules/kernel/run/
 ```text
 internal/modules/blocks/
   # Stateful owners
-  workspace/ result/ decision/ approval/ memory/
-  soul/ skill/ mcpregistry/
+  workspace/ run/ result/ decision/ approval/ memory/
+  soul/ skill/ mcpregistry/ eventstream/
   # Capability execution
   llm/          # 含 biz/runtimev2 candidate 边界
   file/ git/ shell/ mcp/ web/ ssh/
@@ -141,7 +143,7 @@ Capability block 不再依赖“注册到 Orchestrator RuntimeAdapter registry�
 | appservice composition | `internal/modules/application/workorchd/biz/appservice` |
 | Runtime V2 drive | `internal/modules/kernel/orchestrator/biz/runtimev2` + `runtime_v2_drive.go` |
 | Runtime V2 contract | `internal/pkg/workorchruntimecontract` |
-| Run aggregate CAS | `internal/modules/kernel/run` |
+| Run aggregate CAS | `internal/modules/blocks/run` |
 | TUI / CLI | `internal/services/workorch/service/{tui,cli}` |
 | workspace projection | `internal/modules/application/workorchd` observed / appservice |
 
@@ -159,5 +161,5 @@ Capability block 不再依赖“注册到 Orchestrator RuntimeAdapter registry�
 - `application-workorchd.md`
 - `blocks-runtime-adapters.md`
 - `internal/modules/kernel/orchestrator/readme.md`
-- `internal/modules/kernel/run/readme.md`
+- `internal/modules/blocks/run/readme.md`
 - `internal/modules/application/workorchd/readme.md`

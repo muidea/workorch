@@ -11,26 +11,28 @@ import (
 	"testing"
 	"time"
 
+	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
+	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
-	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
-	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -41,6 +43,22 @@ import (
 type countingStepRepository struct {
 	base           readmodelcore.StepReader
 	listByRunCalls int
+}
+
+type eventRecordRepositoryTestReader struct {
+	repository.EventRecordRepository
+}
+
+func (r eventRecordRepositoryTestReader) List(ctx context.Context, query eventstreamevents.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+	return r.EventRecordRepository.List(ctx, repository.EventRecordQuery{WorkspaceID: query.WorkspaceID, RunID: query.RunID, Topic: query.Topic, ExcludeTopics: append([]string(nil), query.ExcludeTopics...), SubjectType: query.SubjectType, SubjectID: query.SubjectID, CursorAfterID: query.CursorAfterID, OccurredAfter: query.OccurredAfter, OccurredBefore: query.OccurredBefore, Limit: query.Limit, IncludePayload: query.IncludePayload})
+}
+
+type memoryRecallTraceRepositoryTestReader struct {
+	repository.MemoryRecallTraceRepository
+}
+
+func (r memoryRecallTraceRepositoryTestReader) List(ctx context.Context, query memoryevents.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error) {
+	return r.MemoryRecallTraceRepository.List(ctx, repository.MemoryRecallTraceQuery{WorkspaceID: query.WorkspaceID, RunID: query.RunID, StepID: query.StepID, Stage: query.Stage, Source: query.Source, Status: query.Status, Limit: query.Limit})
 }
 
 func (r *countingStepRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.Step, error) {
@@ -1089,8 +1107,8 @@ func TestReadRunSnapshotReadsWorkspaceAndRunScopedEvidenceConcurrently(t *testin
 		results:               memory.NewResultRepository(),
 		artifacts:             memory.NewArtifactRepository(),
 		artifactContinuations: memory.NewArtifactContinuationRepository(),
-		eventRecords:          memory.NewEventRecordRepository(),
-		memoryRecalls:         memory.NewMemoryRecallTraceRepository(),
+		eventRecords:          eventRecordRepositoryTestReader{memory.NewEventRecordRepository()},
+		memoryRecalls:         memoryRecallTraceRepositoryTestReader{memory.NewMemoryRecallTraceRepository()},
 		toolCalls:             memory.NewToolCallRepository(),
 		mcpCapabilities:       memory.NewMCPCapabilityRepository(),
 		patches:               memory.NewPatchRepository(),
@@ -1170,8 +1188,8 @@ func TestReadRunSnapshotScopesMemoryRecallTracesByWorkspace(t *testing.T) {
 		results:               memory.NewResultRepository(),
 		artifacts:             memory.NewArtifactRepository(),
 		artifactContinuations: memory.NewArtifactContinuationRepository(),
-		eventRecords:          memory.NewEventRecordRepository(),
-		memoryRecalls:         memoryRecallRepo,
+		eventRecords:          eventRecordRepositoryTestReader{memory.NewEventRecordRepository()},
+		memoryRecalls:         memoryRecallTraceRepositoryTestReader{memoryRecallRepo},
 		toolCalls:             memory.NewToolCallRepository(),
 		mcpCapabilities:       memory.NewMCPCapabilityRepository(),
 		patches:               memory.NewPatchRepository(),
@@ -1668,8 +1686,8 @@ func TestReadRunSnapshotLoadsCapabilityCatalogOnce(t *testing.T) {
 		results:               memory.NewResultRepository(),
 		artifacts:             memory.NewArtifactRepository(),
 		artifactContinuations: memory.NewArtifactContinuationRepository(),
-		eventRecords:          memory.NewEventRecordRepository(),
-		memoryRecalls:         memory.NewMemoryRecallTraceRepository(),
+		eventRecords:          eventRecordRepositoryTestReader{memory.NewEventRecordRepository()},
+		memoryRecalls:         memoryRecallTraceRepositoryTestReader{memory.NewMemoryRecallTraceRepository()},
 		toolCalls:             toolCallRepo,
 		mcpCapabilities:       capabilityRepo,
 		patches:               memory.NewPatchRepository(),
@@ -4113,8 +4131,8 @@ func TestReadWorkspaceSnapshotIncludesWorkspaceGoalsAndDoDs(t *testing.T) {
 		results:               memory.NewResultRepository(),
 		artifacts:             memory.NewArtifactRepository(),
 		artifactContinuations: memory.NewArtifactContinuationRepository(),
-		eventRecords:          memory.NewEventRecordRepository(),
-		memoryRecalls:         memory.NewMemoryRecallTraceRepository(),
+		eventRecords:          eventRecordRepositoryTestReader{memory.NewEventRecordRepository()},
+		memoryRecalls:         memoryRecallTraceRepositoryTestReader{memory.NewMemoryRecallTraceRepository()},
 		toolCalls:             memory.NewToolCallRepository(),
 		mcpCapabilities:       memory.NewMCPCapabilityRepository(),
 		patches:               memory.NewPatchRepository(),
@@ -4165,8 +4183,8 @@ func TestReadWorkspaceSnapshotReadsWorkspaceAndWorkspaceScopedItemsConcurrently(
 		results:               memory.NewResultRepository(),
 		artifacts:             memory.NewArtifactRepository(),
 		artifactContinuations: memory.NewArtifactContinuationRepository(),
-		eventRecords:          memory.NewEventRecordRepository(),
-		memoryRecalls:         memory.NewMemoryRecallTraceRepository(),
+		eventRecords:          eventRecordRepositoryTestReader{memory.NewEventRecordRepository()},
+		memoryRecalls:         memoryRecallTraceRepositoryTestReader{memory.NewMemoryRecallTraceRepository()},
 		toolCalls:             memory.NewToolCallRepository(),
 		mcpCapabilities:       memory.NewMCPCapabilityRepository(),
 		patches:               memory.NewPatchRepository(),

@@ -324,7 +324,7 @@ go test ./internal/modules/blocks/llm/... ./internal/modules/blocks/file/... \
   ./internal/modules/blocks/git/... ./internal/modules/blocks/shell/... \
   ./internal/modules/blocks/mcp/... ./internal/modules/blocks/ssh/... \
   ./internal/modules/blocks/web/... -count=1
-go test ./internal/modules/kernel/orchestrator/... ./internal/modules/kernel/run/... -count=1
+go test ./internal/modules/kernel/orchestrator/... ./internal/modules/blocks/run/... -count=1
 go test -p 1 ./... -count=1
 go vet ./...
 make verify-boundary-contract

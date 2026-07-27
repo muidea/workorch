@@ -11,8 +11,8 @@ import (
 
 	memorymodule "github.com/muidea/workorch/internal/modules/blocks/memory"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
-	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
-	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	runmodule "github.com/muidea/workorch/internal/modules/blocks/run"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"

@@ -6,15 +6,16 @@ import (
 	"sync"
 	"testing"
 
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
+	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
-	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
-	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
-	"github.com/muidea/workorch/internal/pkg/repository"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -276,11 +277,11 @@ func (fakeRunSnapshotArtifactContinuationReader) ListByRun(context.Context, comm
 type fakeRunSnapshotEventReader struct {
 	mu      sync.Mutex
 	calls   int
-	queries []repository.EventRecordQuery
+	queries []eventstreamevents.EventRecordQuery
 	records []*eventstreammodel.EventRecord
 }
 
-func (f *fakeRunSnapshotEventReader) List(_ context.Context, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+func (f *fakeRunSnapshotEventReader) List(_ context.Context, query eventstreamevents.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
 	f.mu.Lock()
 	f.calls++
 	f.queries = append(f.queries, query)
@@ -316,7 +317,7 @@ func (f *fakeRunSnapshotEventReader) List(_ context.Context, query repository.Ev
 
 type fakeRunSnapshotMemoryRecallReader struct{}
 
-func (fakeRunSnapshotMemoryRecallReader) List(context.Context, repository.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error) {
+func (fakeRunSnapshotMemoryRecallReader) List(context.Context, memoryevents.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error) {
 	return nil, nil
 }
 

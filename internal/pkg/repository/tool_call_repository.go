@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 
-	run "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	run "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

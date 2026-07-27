@@ -3,8 +3,8 @@ package readmodelcore
 import (
 	"strings"
 
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 const (
@@ -12,8 +12,8 @@ const (
 	DefaultLLMUsageEventRecordLimit = 200
 )
 
-func EventRecordRepositoryQuery(query EventRecordQuery) repository.EventRecordQuery {
-	return repository.EventRecordQuery{
+func EventRecordOwnerQuery(query EventRecordQuery) eventstreamevents.EventRecordQuery {
+	return eventstreamevents.EventRecordQuery{
 		WorkspaceID:    common.WorkspaceID(strings.TrimSpace(query.WorkspaceID)),
 		RunID:          common.RunID(strings.TrimSpace(query.RunID)),
 		Topic:          strings.TrimSpace(query.Topic),
@@ -28,41 +28,41 @@ func EventRecordRepositoryQuery(query EventRecordQuery) repository.EventRecordQu
 	}
 }
 
-func RunEventRecordRepositoryQuery(runID common.RunID, limit int) repository.EventRecordQuery {
-	return repository.EventRecordQuery{
+func RunEventRecordOwnerQuery(runID common.RunID, limit int) eventstreamevents.EventRecordQuery {
+	return eventstreamevents.EventRecordQuery{
 		RunID: common.RunID(strings.TrimSpace(string(runID))),
 		Limit: limit,
 	}
 }
 
-func RunObservabilityEventRecordRepositoryQuery(runID common.RunID, limit int) repository.EventRecordQuery {
-	query := RunEventRecordRepositoryQuery(runID, limit)
+func RunObservabilityEventRecordOwnerQuery(runID common.RunID, limit int) eventstreamevents.EventRecordQuery {
+	query := RunEventRecordOwnerQuery(runID, limit)
 	query.IncludePayload = true
 	return query
 }
 
-func RunProjectionEventRecordRepositoryQuery(runID common.RunID, limit int) repository.EventRecordQuery {
-	query := RunEventRecordRepositoryQuery(runID, limit)
+func RunProjectionEventRecordOwnerQuery(runID common.RunID, limit int) eventstreamevents.EventRecordQuery {
+	query := RunEventRecordOwnerQuery(runID, limit)
 	query.ExcludeTopics = []string{"/run/llm_stream/progress"}
 	return query
 }
 
-func RunLLMUsageEventRecordRepositoryQuery(runID common.RunID, limit int) repository.EventRecordQuery {
-	query := RunEventRecordRepositoryQuery(runID, limit)
+func RunLLMUsageEventRecordOwnerQuery(runID common.RunID, limit int) eventstreamevents.EventRecordQuery {
+	query := RunEventRecordOwnerQuery(runID, limit)
 	query.Topic = "/run/llm_usage/recorded"
 	query.IncludePayload = true
 	return query
 }
 
-func WorkspaceEventRecordRepositoryQuery(workspaceID common.WorkspaceID, limit int) repository.EventRecordQuery {
-	return repository.EventRecordQuery{
+func WorkspaceEventRecordOwnerQuery(workspaceID common.WorkspaceID, limit int) eventstreamevents.EventRecordQuery {
+	return eventstreamevents.EventRecordQuery{
 		WorkspaceID: common.WorkspaceID(strings.TrimSpace(string(workspaceID))),
 		Limit:       limit,
 	}
 }
 
-func WorkspaceLLMUsageEventRecordRepositoryQuery(workspaceID common.WorkspaceID, limit int) repository.EventRecordQuery {
-	query := WorkspaceEventRecordRepositoryQuery(workspaceID, limit)
+func WorkspaceLLMUsageEventRecordOwnerQuery(workspaceID common.WorkspaceID, limit int) eventstreamevents.EventRecordQuery {
+	query := WorkspaceEventRecordOwnerQuery(workspaceID, limit)
 	query.Topic = "/run/llm_usage/recorded"
 	query.IncludePayload = true
 	return query

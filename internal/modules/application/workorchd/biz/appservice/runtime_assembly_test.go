@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
-	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
+	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -52,7 +52,7 @@ func publishManagedRuntimeRecord(ctx context.Context, hub magicevent.Hub, record
 	}
 	event := magicevent.NewEventWithContext(
 		eventstreamevents.TopicEventStreamRecordAppended,
-		"kernel/eventstream",
+		"blocks/eventstream",
 		eventstreamevents.NotificationDestination,
 		magicevent.NewHeader(),
 		ctx,

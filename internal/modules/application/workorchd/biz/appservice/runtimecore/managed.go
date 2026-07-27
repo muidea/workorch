@@ -2,7 +2,7 @@ package runtimecore
 
 import (
 	magicevent "github.com/muidea/magicCommon/event"
-	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 )
 
 type ManagedRuntime struct {
