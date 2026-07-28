@@ -76,14 +76,14 @@ func TestStableRuntimeOperationShapeIncludesOldText(t *testing.T) {
 	left := RuntimeOperation{
 		ID: "op-1", Kind: RuntimeBlockKindPatchApply, TargetRefs: []string{path},
 		Parameters: []OperationParameter{
-			{Name: "path", String: &path}, {Name: "patchType", String: &patchType},
+			{Name: "patchType", String: &patchType},
 			{Name: "oldText", String: &oldA}, {Name: "newText", String: &newText},
 		},
 	}
 	right := RuntimeOperation{
 		ID: "op-2", Kind: RuntimeBlockKindPatchApply, TargetRefs: []string{path},
 		Parameters: []OperationParameter{
-			{Name: "targetRef", String: &path}, {Name: "patchType", String: &patchType},
+			{Name: "patchType", String: &patchType},
 			{Name: "oldText", String: &oldB}, {Name: "newText", String: &newText},
 		},
 	}

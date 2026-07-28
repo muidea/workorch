@@ -5,6 +5,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -15,6 +16,32 @@ import (
 )
 
 const runtimeV2DriveTransitionLimit = 1024
+
+// runtimeV2PersistedDrivePendingError means an owner-local transition was
+// durably committed but changed only bounded request/recovery bookkeeping. It
+// is not business convergence and not a CAS failure; the scheduler may re-drive
+// the newly persisted revision without consuming another recovery ledger.
+type runtimeV2PersistedDrivePendingError struct {
+	Revision uint64
+}
+
+func (e *runtimeV2PersistedDrivePendingError) Error() string {
+	if e == nil {
+		return "Runtime V2 has persisted pending drive work"
+	}
+	return fmt.Sprintf("Runtime V2 has persisted pending drive work at revision %d", e.Revision)
+}
+
+type runtimeV2InvariantError struct {
+	Message string
+}
+
+func (e *runtimeV2InvariantError) Error() string {
+	if e == nil || strings.TrimSpace(e.Message) == "" {
+		return "Runtime V2 drive invariant failed"
+	}
+	return strings.TrimSpace(e.Message)
+}
 
 type runtimeV2ProjectionError struct {
 	cause error
@@ -139,13 +166,13 @@ func (m *Biz) driveRuntimeV2Locked(ctx context.Context, command orchestratoreven
 			return runtimeV2TerminalDriveResult(aggregate), nil
 		}
 		if aggregate.StateRevision <= previousRevision {
-			return orchestratorevents.DriveRuntimeV2Result{}, fmt.Errorf("%w: Runtime V2 drive made no persisted progress at revision %d", common.ErrConflict, previousRevision)
+			return orchestratorevents.DriveRuntimeV2Result{}, &runtimeV2InvariantError{Message: fmt.Sprintf("Runtime V2 drive made no persisted progress at revision %d", previousRevision)}
 		}
 		if runtimev2.RuntimeConvergenceProgressSignature(aggregate) == previousConvergence {
-			return orchestratorevents.DriveRuntimeV2Result{}, fmt.Errorf("%w: Runtime V2 drive changed only retry bookkeeping at revision %d", common.ErrConflict, aggregate.StateRevision)
+			return orchestratorevents.DriveRuntimeV2Result{}, &runtimeV2PersistedDrivePendingError{Revision: aggregate.StateRevision}
 		}
 	}
-	return orchestratorevents.DriveRuntimeV2Result{}, fmt.Errorf("%w: Runtime V2 drive exceeded %d persisted transitions", common.ErrConflict, runtimeV2DriveTransitionLimit)
+	return orchestratorevents.DriveRuntimeV2Result{}, &runtimeV2InvariantError{Message: fmt.Sprintf("Runtime V2 drive exceeded %d persisted transitions", runtimeV2DriveTransitionLimit)}
 }
 
 func (m *Biz) driveRuntimeV2Decision(ctx context.Context, aggregate runtimev2.RuntimeAggregate, stablePrefixHash string) (runtimev2.RuntimeAggregate, error) {

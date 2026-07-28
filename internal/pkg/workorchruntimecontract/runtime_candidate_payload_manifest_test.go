@@ -53,7 +53,7 @@ func TestDecodeRuntimeCandidatePayloadWithManifestReportsTypedDynamicDiagnostics
 		},
 		{
 			name: "top level dependency", manifest: patchManifest,
-			payload: `{"operations":[{"id":"write","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"targetRef","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}],"dependsOn":["prepare"]}`,
+			payload: `{"operations":[{"id":"write","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}],"dependsOn":["prepare"]}`,
 			path:    "$.dependsOn", actual: "dependsOn", allowed: "operations",
 		},
 		{
@@ -63,7 +63,7 @@ func TestDecodeRuntimeCandidatePayloadWithManifestReportsTypedDynamicDiagnostics
 		},
 		{
 			name: "target refs must be array", manifest: patchManifest,
-			payload: `{"operations":[{"id":"write","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":"main.go","parameters":[{"name":"targetRef","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`,
+			payload: `{"operations":[{"id":"write","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":"main.go","parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`,
 			path:    "$.operations[0].targetRefs", actual: "string", allowed: "array",
 		},
 		{
@@ -74,12 +74,12 @@ func TestDecodeRuntimeCandidatePayloadWithManifestReportsTypedDynamicDiagnostics
 		{
 			name: "parameter alias", manifest: patchManifest,
 			payload: `{"operations":[{"id":"write","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"filePath","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`,
-			path:    "$.operations[0].parameters[0].name", actual: "filePath", allowed: "targetRef",
+			path:    "$.operations[0].parameters[0].name", actual: "filePath", allowed: "patchType",
 		},
 		{
 			name: "missing target refs", manifest: patchManifest,
-			payload: `{"operations":[{"id":"write","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"parameters":[{"name":"targetRef","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`,
-			path:    "$.operations[0].targetRefs", actual: "missing_targetRefs", allowed: "targetRefs",
+			payload: `{"operations":[{"id":"write","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`,
+			path:    "$.operations[0].targetRefs", actual: "missing_targetRefs", allowed: "targetRefs", required: "targetRefs",
 		},
 		{
 			name: "invalid required operation reference", manifest: gitManifest,
@@ -98,7 +98,7 @@ func TestDecodeRuntimeCandidatePayloadWithManifestReportsTypedDynamicDiagnostics
 		},
 		{
 			name: "trailing json", manifest: patchManifest,
-			payload: `{"operations":[{"id":"write","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"targetRef","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]} {}`,
+			payload: `{"operations":[{"id":"write","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]} {}`,
 			path:    "$", actual: "candidate payload contains multiple JSON values",
 		},
 	}
@@ -127,7 +127,7 @@ func TestDecodeRuntimeCandidatePayloadWithManifestReportsTypedDynamicDiagnostics
 func FuzzDecodeRuntimeCandidatePayloadWithManifestRejectsUnknownFieldsWithoutPanicking(f *testing.F) {
 	manifest := fuzzRuntimeCandidatePayloadManifest(f)
 	for _, payload := range []string{
-		`{"operations":[{"id":"write","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"targetRef","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`,
+		`{"operations":[{"id":"write","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`,
 		`{"operations":{}}`,
 		`{"operations":[{"id":"write","kind":"patch/apply","unknown":true}]}`,
 		`{"operations":[`,
@@ -250,7 +250,7 @@ func TestEncodeRuntimeCandidatePayloadWithManifestRoundTripsAllCandidateShapes(t
 			}),
 			candidate: RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{Operation: RuntimeOperation{
 				ID: "write", Kind: RuntimeBlockKindPatchApply, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
-				Parameters: []OperationParameter{{Name: "targetRef", String: stringPtr("main.go")}, {Name: "patchType", String: stringPtr("file_write")}, {Name: "content", String: &content}},
+				Parameters: []OperationParameter{{Name: "patchType", String: stringPtr("file_write")}, {Name: "content", String: &content}},
 			}}}}},
 		},
 		{

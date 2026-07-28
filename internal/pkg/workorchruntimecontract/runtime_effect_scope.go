@@ -144,24 +144,22 @@ func RuntimeEffectScopesFromStrings(values []string) []RuntimeEffectScope {
 // ValidateEffectScopesCompatibleWithAction enforces INV-02 action/effect compatibility.
 func ValidateEffectScopesCompatibleWithAction(action RuntimeAction, scopes []RuntimeEffectScope) error {
 	scopes = NormalizeRuntimeEffectScopes(scopes)
-	switch action {
-	case RuntimeActionProduceStateChange:
-		for _, scope := range scopes {
-			if RuntimeEffectIsDurable(scope) {
-				return nil
-			}
-		}
-		if len(scopes) == 0 {
+	policy, ok := RuntimeActionEffectPolicyFor(action)
+	if !ok {
+		return fmt.Errorf("unknown runtime action %q", action)
+	}
+	if policy.ExecutableOperationsAllowed {
+		if action == RuntimeActionProduceStateChange && len(scopes) == 0 {
 			return fmt.Errorf("produce_state_change requires at least one durable effect scope")
 		}
-		return fmt.Errorf("produce_state_change requires a durable effect scope, got %v", RuntimeEffectScopesAsStrings(scopes))
-	case RuntimeActionProduceValidation:
 		for _, scope := range scopes {
-			if RuntimeEffectIsDurable(scope) || scope == RuntimeEffectUnknown || scope == RuntimeEffectGovernanceOnly {
-				return fmt.Errorf("produce_validation forbids effect scope %q", scope)
+			if !policy.AllowsOperationEffect(scope) {
+				return fmt.Errorf("%s forbids effect scope %q", action, scope)
 			}
 		}
 		return nil
+	}
+	switch action {
 	case RuntimeActionRequestGovernance:
 		for _, scope := range scopes {
 			if scope != RuntimeEffectGovernanceOnly {
@@ -169,13 +167,11 @@ func ValidateEffectScopesCompatibleWithAction(action RuntimeAction, scopes []Run
 			}
 		}
 		return nil
-	case RuntimeActionProduceAssessment, RuntimeActionAcquirePrerequisite, RuntimeActionComplete, RuntimeActionFail:
+	default:
 		if len(scopes) != 0 {
 			return fmt.Errorf("action %s cannot carry operation effect scopes", action)
 		}
 		return nil
-	default:
-		return fmt.Errorf("unknown runtime action %q", action)
 	}
 }
 

@@ -44,7 +44,7 @@ func (c *RuntimeController) EnsureCandidateRequestSession(ctx context.Context, w
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, err
 	}
 	return aggregate, session.Clone(), nil
@@ -86,7 +86,7 @@ func (c *RuntimeController) MarkCandidateRequestSubmitted(ctx context.Context, w
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
@@ -138,7 +138,7 @@ func (c *RuntimeController) RecordCandidateRequestFragment(ctx context.Context, 
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
@@ -179,7 +179,7 @@ func (c *RuntimeController) RecordCandidateRequestTransportOutcome(ctx context.C
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
@@ -223,7 +223,7 @@ func (c *RuntimeController) CompleteCandidateRequestDocument(ctx context.Context
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
@@ -261,7 +261,7 @@ func (c *RuntimeController) TerminateCandidateRequestSession(ctx context.Context
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil

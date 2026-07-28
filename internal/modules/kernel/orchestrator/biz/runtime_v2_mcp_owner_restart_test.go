@@ -57,14 +57,14 @@ func TestRuntimeV2FileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing
 			name: "file_write", want: "package repaired\n",
 			candidate: func(target string) runtimecontract.RuntimeCandidate {
 				patchType, content := "file_write", "package repaired\n"
-				return runtimeV2PatchCandidate("mcp-grounded-patch", target, []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "content", String: &content}})
+				return runtimeV2PatchCandidate("mcp-grounded-patch", target, []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &content}})
 			},
 		},
 		{
 			name: "text_replace", want: "package repaired\n",
 			candidate: func(target string) runtimecontract.RuntimeCandidate {
 				patchType, oldText, newText := "text_replace", "package fixture\n", "package repaired\n"
-				return runtimeV2PatchCandidate("mcp-grounded-patch", target, []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}})
+				return runtimeV2PatchCandidate("mcp-grounded-patch", target, []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}})
 			},
 		},
 		{
@@ -72,7 +72,7 @@ func TestRuntimeV2FileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing
 			candidate: func(target string) runtimecontract.RuntimeCandidate {
 				patchType := "unified_diff"
 				diff := "--- a/implementation.go\n+++ b/implementation.go\n@@ -1 +1 @@\n-package fixture\n+package repaired\n"
-				return runtimeV2PatchCandidate("mcp-grounded-patch", target, []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "diff", String: &diff}})
+				return runtimeV2PatchCandidate("mcp-grounded-patch", target, []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "diff", String: &diff}})
 			},
 		},
 	}
@@ -394,7 +394,7 @@ func TestRuntimeV2FileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing
 					result.Set(runtimeV2CandidateResultForTest(t, command, fileCandidate), nil)
 				})
 				t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
-				patchOwner := NewRuntimeOrchestrator(nil, nil)
+				patchOwner := NewRuntimeOrchestrator()
 				if err := patchOwner.ConfigureRuntimeV2Repository(repository); err != nil {
 					t.Fatal(err)
 				}

@@ -4,7 +4,7 @@ Status: active
 
 Type: implementation closure matrix
 
-Last Updated: 2026-07-27
+Last Updated: 2026-07-28
 
 ## Purpose
 
@@ -64,9 +64,8 @@ degraded projection。
 
 若修改触及 Runtime V2，变更说明必须标出 SM-1～SM-4 的影响。本矩阵只定义
 组件边界与独立回归，**不定义** Runtime V2 语义收口的实施顺序或状态迁移。
-`RUNTIME-VPC` 主方案中已明确授权的工作卡可以修改其指定的 SM-2/SM-3 唯一
-owner；`RUNTIME-SMO` 主方案中已明确授权的工作卡可以修改 SM-1、Workspace/Result lifecycle 与 SM-4
-delivery acknowledgement。矩阵不得以“仅 SM-4”阻断任一收口，也不得创建第三套 reducer/dispatch/lifecycle
+`RUNTIME-SMO` 主方案中已明确授权的工作卡可以修改 SM-1～SM-4、Workspace/Result lifecycle 以及
+candidate/receipt 合同。矩阵不得以“仅 SM-4”阻断任一收口，也不得创建第二套 reducer/dispatch/lifecycle
 任务。ARCH-1 自身的 framework 整改不得借机改写 authority、candidate、evidence 或 lifecycle 语义。
 
 ## Common Interaction Contract
@@ -186,10 +185,9 @@ idempotency 或 lifecycle 单测缺失。
 
 ## SM-4 Deployed Closure (ARCH-1 的 Remaining D Evidence)
 
-本节是 ARCH-1 的**验收索引**，不是独立 Runtime V2 实施计划。前三种 Runtime
-fixture 的 candidate/receipt 构造以 [RUNTIME-VPC 的 N6/N8](runtime-v2-validation-progress-closure-plan.md)
-为准；唯一状态 owner、terminal delivery、crash/restart 序列与退出条件以
-[RUNTIME-SMO 的 S1～S4](runtime-v2-single-owner-state-machine-closure-plan.md) 为准；本矩阵只消费其通过证据来关闭组件的 `D` 标记。`workspace_deleted_late_event`
+本节是 ARCH-1 的**验收索引**，不是独立 Runtime V2 实施计划。Runtime fixture 的 candidate/receipt、
+唯一状态 owner、terminal delivery、crash/restart 序列与退出条件均以
+[RUNTIME-SMO 的 C7-B～C7-F](runtime-v2-single-owner-state-machine-closure-plan.md) 为准；本矩阵只消费其通过证据来关闭组件的 `D` 标记。`workspace_deleted_late_event`
 仍由 EventStream/WorkOrchd 的组件合同单独验证，但不得影响 Runtime authority。
 
 部署验证使用最新构建重启服务后执行，不能调用 Activate/Resume 作为补偿，也不能

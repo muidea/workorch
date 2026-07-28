@@ -68,7 +68,7 @@ func (c *RuntimeController) InvalidatePrerequisitesForReadOnlyStale(ctx context.
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
@@ -170,7 +170,7 @@ func (c *RuntimeController) InvalidateCandidateRequestSessionForPrerequisiteStal
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
@@ -238,7 +238,7 @@ func (c *RuntimeController) InvalidateCandidateAttemptForPrerequisiteStale(ctx c
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
@@ -306,7 +306,7 @@ func (c *RuntimeController) InvalidateCandidateAttemptForFeasibilityPrerequisite
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
@@ -447,7 +447,7 @@ func (c *RuntimeController) InvalidateActiveDispatchForPrerequisiteStale(ctx con
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil

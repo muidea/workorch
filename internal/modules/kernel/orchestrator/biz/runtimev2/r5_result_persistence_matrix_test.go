@@ -229,7 +229,6 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 					ID: "write-1", Kind: runtimecontract.StepKindFileWrite,
 					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"},
 					Parameters: []runtimecontract.OperationParameter{
-						{Name: "path", String: strPtr("target.txt")},
 						{Name: "content", String: strPtr("hello")},
 					},
 				},

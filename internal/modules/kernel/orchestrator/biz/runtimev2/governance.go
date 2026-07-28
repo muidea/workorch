@@ -55,7 +55,7 @@ func (c *RuntimeController) BindGovernanceRequest(ctx context.Context, workspace
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
@@ -89,7 +89,7 @@ func (c *RuntimeController) CommitGovernanceResolution(ctx context.Context, reso
 			Reason: "governance resolution belongs to a stale authority snapshot",
 		})
 		aggregate.StateRevision++
-		if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+		if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 			return EvidenceCommitResult{}, err
 		}
 		return EvidenceCommitResult{Disposition: CommitDispositionStale, Aggregate: aggregate}, nil
@@ -197,7 +197,7 @@ func (c *RuntimeController) CommitGovernanceResolution(ctx context.Context, reso
 	if err := aggregate.Validate(); err != nil {
 		return EvidenceCommitResult{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return EvidenceCommitResult{}, err
 	}
 	return EvidenceCommitResult{Disposition: CommitDispositionCommitted, DispatchCompleted: true, Aggregate: aggregate}, nil

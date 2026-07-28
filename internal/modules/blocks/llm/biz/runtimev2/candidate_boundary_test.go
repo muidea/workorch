@@ -78,75 +78,31 @@ func TestDecodeCandidatePayloadPreservesRequiredOperationRef(t *testing.T) {
 	}
 }
 
-func TestValidateCandidateAttemptAcceptsOnlyCurrentActionCandidate(t *testing.T) {
+func TestRequestCandidateForwardsCompleteFilePathAliasDocument(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
-	candidate, err := runtimecontract.DecodeRuntimeCandidatePayload(request.Decision.Action, []byte(`{
-		"operations":[{
-			"id":"op-1",
-			"kind":"patch/apply",
-			"coverageWorkItemIds":["cwi-1"],
-			"targetRefs":["main.go"],
-			"parameters":[
-				{"name":"targetRef","string":"main.go"},
-				{"name":"patchType","string":"file_write"},
-				{"name":"content","string":"package main\n"}
-			]
-		}]
-	}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	outcome := ValidateCandidateAttempt(request, llmmodels.RuntimeCandidateResponse{Transaction: request.Transaction, Candidate: candidate})
-	if outcome.Disposition != CandidateDispositionAccepted {
-		t.Fatalf("outcome = %+v, want accepted", outcome)
-	}
-
-	wrong := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
-		ID: "validate-1", Kind: "validation/managed_session", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
-	}}}}}
-	outcome = ValidateCandidateAttempt(request, llmmodels.RuntimeCandidateResponse{Transaction: request.Transaction, Candidate: wrong})
-	if outcome.Disposition != CandidateDispositionRetrySameContract {
-		t.Fatalf("wrong action outcome = %+v, want same-contract retry", outcome)
-	}
-}
-
-func TestRequestCandidateRejectsFilePathAliasAsManifestSchemaFailureBeforeDispatch(t *testing.T) {
-	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
+	payload := []byte(`{"operations":[{"id":"patch-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"filePath","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`)
 	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
-		return generationResult([]byte(`{"operations":[{"id":"patch-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"filePath","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`), nil)
+		return generationResult(payload, nil)
 	})
-	_, err := RequestCandidate(context.Background(), provider, request)
-	if err == nil {
-		t.Fatal("filePath alias candidate was accepted")
-	}
-	failure := CandidateFailureFromError(err)
-	if failure.Class != CandidateFailureClassSchema || failure.Diagnostic == nil || failure.Diagnostic.Path != "$.operations[0].parameters[0].name" || failure.Diagnostic.Actual != "filePath" || !strings.Contains(failure.Reason, "path=$.operations[0].parameters[0].name") || !strings.Contains(failure.Reason, "actual=filePath") {
-		t.Fatalf("candidate failure = %+v", failure)
-	}
-	retry, retryErr := RetrySameContract(request, failure)
-	if retryErr != nil {
-		t.Fatal(retryErr)
-	}
-	if retry.Transaction != request.Transaction || retry.StablePrefixHash != request.StablePrefixHash || retry.PreviousFailure == nil || retry.PreviousFailure.Class != CandidateFailureClassSchema {
-		t.Fatalf("manifest schema retry changed authority: initial=%+v retry=%+v", request, retry)
+	response, err := RequestCandidate(context.Background(), provider, request)
+	if err != nil || response.OutputFragment != nil || string(response.DocumentContent) != string(payload) {
+		t.Fatalf("complete alias document was not forwarded unchanged: response=%+v err=%v", response, err)
 	}
 }
 
-func TestRequestCandidateMapsStrictDecoderSchemaMatrixBeforeDispatch(t *testing.T) {
+func TestRequestCandidateForwardsCompleteSchemaInvalidDocuments(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
-	validOperation := `{"id":"patch-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"targetRef","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}`
+	validOperation := `{"id":"patch-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}`
 	cases := []struct {
-		name       string
-		payload    string
-		path       string
-		actualText string
+		name    string
+		payload string
 	}{
-		{name: "unknown top level", payload: `{"operations":[` + validOperation + `],"unexpected":true}`, path: "$.unexpected", actualText: "actual=unexpected"},
-		{name: "missing required operations", payload: `{}`, path: "$", actualText: "actual=missing_operations"},
-		{name: "wrong operations container", payload: `{"operations":{}}`, path: "$.operations", actualText: "actual=object"},
-		{name: "wrong target refs container", payload: `{"operations":[{"id":"patch-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":"main.go","parameters":[{"name":"targetRef","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`, path: "$.operations[0].targetRefs", actualText: "actual=string"},
-		{name: "trailing json", payload: `{"operations":[` + validOperation + `]} {}`, path: "$", actualText: "multiple JSON values"},
-		{name: "field alias", payload: `{"operations":[{"id":"patch-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"filePath","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`, path: "$.operations[0].parameters[0].name", actualText: "actual=filePath"},
+		{name: "unknown top level", payload: `{"operations":[` + validOperation + `],"unexpected":true}`},
+		{name: "missing required operations", payload: `{}`},
+		{name: "wrong operations container", payload: `{"operations":{}}`},
+		{name: "wrong target refs container", payload: `{"operations":[{"id":"patch-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":"main.go","parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`},
+		{name: "trailing json", payload: `{"operations":[` + validOperation + `]} {}`},
+		{name: "field alias", payload: `{"operations":[{"id":"patch-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"filePath","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -156,19 +112,8 @@ func TestRequestCandidateMapsStrictDecoderSchemaMatrixBeforeDispatch(t *testing.
 				return generationResult([]byte(testCase.payload), nil)
 			})
 			response, err := RequestCandidate(context.Background(), provider, request)
-			if err == nil {
-				t.Fatal("schema-invalid payload was accepted")
-			}
-			if calls != 1 || response.Candidate.StateChange != nil || response.OutputFragment != nil {
-				t.Fatalf("schema failure leaked candidate/dispatch state: calls=%d response=%+v", calls, response)
-			}
-			failure := CandidateFailureFromError(err)
-			if failure.Class != CandidateFailureClassSchema || failure.Code != "candidate_schema_invalid" || failure.Signature != "candidate-schema-invalid" || failure.Diagnostic == nil || failure.Diagnostic.Path != testCase.path ||
-				!strings.Contains(failure.Reason, "path="+testCase.path) || !strings.Contains(failure.Reason, testCase.actualText) {
-				t.Fatalf("candidate failure = %+v, want schema code/path/actual", failure)
-			}
-			if got := CandidateDocumentContentFromError(err); string(got) != testCase.payload {
-				t.Fatalf("complete schema rejection document = %q, want %q", got, testCase.payload)
+			if err != nil || calls != 1 || response.OutputFragment != nil || string(response.DocumentContent) != testCase.payload {
+				t.Fatalf("schema-invalid complete document was not forwarded: calls=%d response=%+v err=%v", calls, response, err)
 			}
 		})
 	}
@@ -210,9 +155,6 @@ func TestRequestCandidateClassifiesMidTokenEOFAsOutputFragmentWithoutProviderLim
 	if response.OutputFragment == nil || response.OutputFragment.ReachedProviderLimit || string(response.OutputFragment.Content) != `{"operations":[{"id":"patch-1"` || len(response.DocumentContent) != 0 {
 		t.Fatalf("mid-token candidate output fragment = %+v", response.OutputFragment)
 	}
-	if response.Candidate != (runtimecontract.RuntimeCandidate{}) {
-		t.Fatalf("incomplete response leaked candidate = %+v", response.Candidate)
-	}
 }
 
 func TestRequestCandidateClassifiesEmptySuccessfulBodyAsProviderOutcome(t *testing.T) {
@@ -233,9 +175,6 @@ func TestRequestCandidateClassifiesEmptySuccessfulBodyAsProviderOutcome(t *testi
 	}
 	if len(response.DocumentContent) != 0 {
 		t.Fatalf("empty provider response leaked complete document = %q", response.DocumentContent)
-	}
-	if got := CandidateDocumentContentFromError(err); len(got) != 0 {
-		t.Fatalf("provider protocol error leaked complete document = %q", got)
 	}
 }
 
@@ -265,67 +204,11 @@ func TestRequestCandidatePreservesTypedPrerequisiteStaleWithoutCandidateFailure(
 	if err == nil {
 		t.Fatal("typed prerequisite stale was converted into a successful candidate")
 	}
-	if response.PrerequisiteStale == nil || response.PrerequisiteStale.ObservationID != observation.ObservationID || response.Candidate.StateChange != nil || len(response.DocumentContent) != 0 {
+	if response.PrerequisiteStale == nil || response.PrerequisiteStale.ObservationID != observation.ObservationID || len(response.DocumentContent) != 0 {
 		t.Fatalf("candidate response lost stale boundary: %+v", response)
 	}
 	if extracted := CandidatePrerequisiteStaleFromError(err); extracted == nil || extracted.ObservedRevision != "config-v2" {
 		t.Fatalf("candidate error did not retain typed stale: %v", err)
-	}
-}
-
-func TestCandidateRetryIsExactlyOnceAndKeepsSealedContract(t *testing.T) {
-	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedValidation)
-	failure := runtimecontract.RuntimeCandidateFailure{Class: CandidateFailureClassSchema, Reason: `json: unknown field "candidate"`}
-	retry, err := RetrySameContract(request, failure)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if retry.CandidateAttempt != 1 || retry.PreviousFailure == nil || !reflect.DeepEqual(*retry.PreviousFailure, failure) || retry.Transaction != request.Transaction || retry.StablePrefixHash != request.StablePrefixHash || retry.Decision.AuthoritySnapshot.RequiredOutputHash != request.Decision.AuthoritySnapshot.RequiredOutputHash {
-		t.Fatalf("retry changed sealed request: initial=%+v retry=%+v", request, retry)
-	}
-	if _, err := RetrySameContract(retry, failure); err == nil {
-		t.Fatal("third candidate request was allowed")
-	}
-
-	invalid := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{}}
-	outcome := ValidateCandidateAttempt(retry, llmmodels.RuntimeCandidateResponse{Transaction: retry.Transaction, Candidate: invalid})
-	if outcome.Disposition != CandidateDispositionRequestGovernance {
-		t.Fatalf("second invalid outcome = %+v, want governed wait", outcome)
-	}
-}
-
-func TestCandidateFailuresDoNotSwitchAuthorityAction(t *testing.T) {
-	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedValidation)
-	first := CandidateFailureOutcome(request, CandidateFailureClassSchema, errors.New("invalid candidate schema"))
-	if first.Disposition != CandidateDispositionRetrySameContract || request.Decision.Action != runtimecontract.RuntimeActionProduceValidation {
-		t.Fatalf("first failure = %+v request=%+v", first, request)
-	}
-	retry, err := RetrySameContract(request, runtimecontract.RuntimeCandidateFailure{Class: CandidateFailureClassSchema, Reason: first.Reason})
-	if err != nil {
-		t.Fatal(err)
-	}
-	second := CandidateFailureOutcome(retry, CandidateFailureClassProvider, errors.New("provider failed"))
-	if second.Disposition != CandidateDispositionRequestGovernance || retry.Decision.Action != runtimecontract.RuntimeActionProduceValidation || retry.Transaction != request.Transaction {
-		t.Fatalf("second failure changed authority: outcome=%+v retry=%+v", second, retry)
-	}
-}
-
-func TestCandidateTransactionMismatchIsTerminal(t *testing.T) {
-	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
-	response := llmmodels.RuntimeCandidateResponse{Transaction: request.Transaction}
-	response.Transaction.FocusID = "stale-focus"
-	outcome := ValidateCandidateAttempt(request, response)
-	if outcome.Disposition != CandidateDispositionTerminal || outcome.FailureClass != CandidateFailureClassInternal {
-		t.Fatalf("outcome = %+v, want terminal internal mismatch", outcome)
-	}
-}
-
-func TestCandidateRequestRejectsWeakenedGoalDoDContext(t *testing.T) {
-	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedValidation)
-	request.DefinitionContext.DoDDefinition = ""
-	outcome := CandidateFailureOutcome(request, CandidateFailureClassSchema, errors.New("schema failure"))
-	if outcome.Disposition != CandidateDispositionTerminal || outcome.FailureClass != CandidateFailureClassInternal {
-		t.Fatalf("outcome = %+v, want terminal incomplete definition contract", outcome)
 	}
 }
 
@@ -342,11 +225,15 @@ func TestRequestCandidateProviderReceivesOnlySealedTypedRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if outcome := ValidateCandidateAttempt(request, response); outcome.Disposition != CandidateDispositionAccepted {
-		t.Fatalf("candidate outcome = %+v", outcome)
-	}
 	if string(response.DocumentContent) != string(wantDocument) {
 		t.Fatalf("complete candidate document = %q, want %q", response.DocumentContent, wantDocument)
+	}
+	candidate, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(request.CandidateManifest, response.DocumentContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := candidate.ValidateWithActivation(request.Decision, request.CandidateContext.Activation); err != nil {
+		t.Fatal(err)
 	}
 }
 

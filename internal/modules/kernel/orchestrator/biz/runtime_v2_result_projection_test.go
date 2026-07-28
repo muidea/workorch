@@ -240,7 +240,7 @@ func TestDeliverRuntimeV2TerminalCreatesResultAndProjectsOwnersIdempotently(t *t
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator()
 	module := newTestBiz(biz, hub, nil)
 	for attempt := 0; attempt < 2; attempt++ {
 		if err := module.deliverRuntimeV2Terminal(ctx, aggregate); err != nil {
@@ -858,7 +858,7 @@ func TestRuntimeV2TerminalDeliveryBudgetExhaustionRetainsStartupRecoveryInventor
 	if err := firstRunOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	firstOrchestrator := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	firstOrchestrator := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := firstOrchestrator.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: firstHub}); err != nil {
 		t.Fatal(err)
 	}
@@ -1046,7 +1046,7 @@ func TestDeliverRuntimeV2TerminalRejectsRecoverablePrerequisiteRefresh(t *testin
 		t.Fatal(err)
 	}
 
-	module := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(nil, nil), hub, nil)
+	module := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(), hub, nil)
 	if err := module.deliverRuntimeV2Terminal(ctx, aggregate); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("recoverable refresh terminal delivery error = %v, want invalid argument", err)
 	}
@@ -1096,7 +1096,7 @@ func TestDeliverRuntimeV2TerminalRestartsAfterResultPersistenceBeforeOwnerProjec
 	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
 		t.Fatal(err)
 	}
-	firstModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(nil, nil), firstHub, nil)
+	firstModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(), firstHub, nil)
 	if err := firstModule.deliverRuntimeV2Terminal(ctx, aggregate); err == nil {
 		t.Fatal("expected Result-persisted delivery interruption")
 	}
@@ -1142,7 +1142,7 @@ func TestDeliverRuntimeV2TerminalRestartsAfterResultPersistenceBeforeOwnerProjec
 	if err := restartedAggregate.Validate(); err != nil {
 		t.Fatalf("reloaded terminal aggregate: %v", err)
 	}
-	restartedModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(nil, nil), restartedHub, nil)
+	restartedModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(), restartedHub, nil)
 	if err := restartedModule.deliverRuntimeV2Terminal(ctx, restartedAggregate); err != nil {
 		t.Fatal(err)
 	}
@@ -1197,7 +1197,7 @@ func TestAdministrativeSupersedeRestartsAfterResultPersistenceBeforeOwnerProject
 	if err := firstResultOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	firstOrchestrator := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	firstOrchestrator := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := firstOrchestrator.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: firstHub}); err != nil {
 		t.Fatal(err)
 	}
@@ -1249,7 +1249,7 @@ func TestAdministrativeSupersedeRestartsAfterResultPersistenceBeforeOwnerProject
 		t.Fatalf("reloaded administrative aggregate: %v", err)
 	}
 	assertAdministrativeSupersedeAuthority(t, restartedAggregate)
-	restartedModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(nil, nil), restartedHub, nil)
+	restartedModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(), restartedHub, nil)
 	if err := restartedModule.deliverRuntimeV2Terminal(ctx, restartedAggregate); err != nil {
 		t.Fatalf("restart administrative delivery: %v", err)
 	}
@@ -1303,7 +1303,7 @@ func TestDeliverRuntimeV2PrerequisiteRefreshExhaustedRestartsAfterTerminalPersis
 	if err := firstOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	firstModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(nil, nil), firstHub, nil)
+	firstModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(), firstHub, nil)
 	if err := firstModule.deliverRuntimeV2Terminal(ctx, aggregate); err == nil {
 		t.Fatal("expected terminal delivery interruption before Result persistence")
 	}
@@ -1347,7 +1347,7 @@ func TestDeliverRuntimeV2PrerequisiteRefreshExhaustedRestartsAfterTerminalPersis
 	if err := restartedAggregate.Validate(); err != nil {
 		t.Fatalf("reloaded terminal aggregate: %v", err)
 	}
-	restartedModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(nil, nil), restartedHub, nil)
+	restartedModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(), restartedHub, nil)
 	if err := restartedModule.deliverRuntimeV2Terminal(ctx, restartedAggregate); err != nil {
 		t.Fatal(err)
 	}

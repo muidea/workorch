@@ -4,7 +4,7 @@ Status: active
 
 Type: archive
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-28
 
 ## Purpose
 
@@ -47,6 +47,12 @@ Last Updated: 2026-07-14
 | workorch-service-client-port-migration-plan.md | workorchport / client 现状 |
 | llm-cache-improvement-design.md | runtime-request-cache-note + context-assembly-flow |
 | mvvp-workspace-viewmodel-architecture.md | product-interface / console 现状 |
+
+### 2026-07-28：并入单 Owner 状态机统一收口
+
+| 文档 | 替代入口 |
+| --- | --- |
+| runtime-v2-validation-progress-closure-plan.md | `70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md`；旧文档只作 manifest/evaluator/receipt 回归基线 |
 
 完整文件名以本目录 `ls` 为准。
 

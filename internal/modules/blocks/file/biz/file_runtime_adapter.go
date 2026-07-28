@@ -591,13 +591,8 @@ func fileInventoryAllowsNewTarget(inventory runtimemodel.RuntimeOperationAdmissi
 }
 
 func fileOperationTargetRef(operation runtimemodel.RuntimeOperation) string {
-	for _, parameter := range operation.Parameters {
-		if (parameter.Name == "path" || parameter.Name == "targetRef") && parameter.String != nil && strings.TrimSpace(*parameter.String) != "" {
-			return strings.TrimSpace(*parameter.String)
-		}
-	}
 	if len(operation.TargetRefs) == 1 {
-		return operation.TargetRefs[0]
+		return strings.TrimSpace(operation.TargetRefs[0])
 	}
 	return ""
 }

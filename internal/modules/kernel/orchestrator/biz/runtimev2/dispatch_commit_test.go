@@ -580,7 +580,7 @@ func TestRejectedTextReplaceConsumesRepairBudgetAndRequiresFreshTargetSnapshot(t
 		ID: "patch-1", Kind: runtimecontract.RuntimeBlockKindPatchApply,
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{targetRef},
 		Parameters: []runtimecontract.OperationParameter{
-			{Name: "targetRef", String: &targetRef}, {Name: "patchType", String: &patchType},
+			{Name: "patchType", String: &patchType},
 			{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText},
 		},
 	}}}}}
@@ -887,11 +887,10 @@ func patchApplyTestOperation(id string, targetRef string) runtimecontract.Runtim
 	}
 }
 
-func patchApplyTestParameters(targetRef string) []runtimecontract.OperationParameter {
+func patchApplyTestParameters(_ string) []runtimecontract.OperationParameter {
 	patchType := "file_write"
 	content := "updated\n"
 	return []runtimecontract.OperationParameter{
-		{Name: "targetRef", String: &targetRef},
 		{Name: "patchType", String: &patchType},
 		{Name: "content", String: &content},
 	}

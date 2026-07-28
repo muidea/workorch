@@ -697,6 +697,10 @@ func EvidenceKindFromReceipt(action RuntimeAction, expected RuntimeEffectScope, 
 	if err := receipt.Validate(); err != nil {
 		return "", err
 	}
+	policy, policyKnown := RuntimeActionEffectPolicyFor(action)
+	if !policyKnown {
+		return "", fmt.Errorf("action %q has no receipt effect policy", action)
+	}
 	switch receipt.Outcome {
 	case RuntimeOperationOutcomeRejected:
 		// rejected still forms evidence of the expected kind with failure facts
@@ -719,13 +723,8 @@ func EvidenceKindFromReceipt(action RuntimeAction, expected RuntimeEffectScope, 
 		if RuntimeEffectIsDurable(expected) && !RuntimeEffectIsDurable(receipt.ObservedEffectScope) {
 			return "", fmt.Errorf("receipt observed effect %q cannot satisfy expected durable effect %q", receipt.ObservedEffectScope, expected)
 		}
-		// validation cannot accept durable observed effect
-		if action == RuntimeActionProduceValidation && RuntimeEffectIsDurable(receipt.ObservedEffectScope) {
-			return "", fmt.Errorf("validation action cannot commit durable observed effect %q", receipt.ObservedEffectScope)
-		}
-		// ephemeral cannot close durable state-change requirement
-		if action == RuntimeActionProduceStateChange && !RuntimeEffectIsDurable(receipt.ObservedEffectScope) {
-			return "", fmt.Errorf("state-change action cannot commit non-durable observed effect %q", receipt.ObservedEffectScope)
+		if !policy.AllowsAcceptedReceiptEffect(receipt.ObservedEffectScope) {
+			return "", fmt.Errorf("action %s cannot commit accepted receipt effect %q", action, receipt.ObservedEffectScope)
 		}
 		return evidenceKindForAction(action), nil
 	default:

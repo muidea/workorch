@@ -226,17 +226,15 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 			return
 		}
 		failure := llmruntimev2.CandidateFailureFromError(err)
-		documentContent := llmruntimev2.CandidateDocumentContentFromError(err)
 		m.publishLLMUsageRecorded(event.Context(), audit, usage, status, string(failure.Class))
 		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
 			Transaction:      command.Transaction,
 			LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
-			Failure:         &failure,
-			DocumentContent: documentContent,
-			RequestID:       requestID,
-			Status:          status,
-			Audit:           providerRequestAuditView(audit),
-			Usage:           providerUsageView(usage),
+			Failure:   &failure,
+			RequestID: requestID,
+			Status:    status,
+			Audit:     providerRequestAuditView(audit),
+			Usage:     providerUsageView(usage),
 		}, nil)
 		return
 	}
@@ -247,7 +245,6 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 	result.Set(orchestratorevents.RequestRuntimeCandidateResult{
 		Transaction:      response.Transaction,
 		LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
-		Candidate:       response.Candidate,
 		DocumentContent: append([]byte(nil), response.DocumentContent...),
 		OutputFragment:  response.OutputFragment,
 		RequestID:       requestID,

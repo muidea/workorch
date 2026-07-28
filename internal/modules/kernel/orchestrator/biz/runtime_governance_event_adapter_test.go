@@ -64,7 +64,7 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 	}
 	t.Cleanup(func() { _ = decisionOwner.Stop(ctx) })
 
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	if err := decisionOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = restartedDecisionOwner.Stop(ctx) })
-	restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	restartedBiz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := restartedBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: restartedHub}); err != nil {
 		t.Fatal(err)
 	}
@@ -386,7 +386,7 @@ func TestRuntimeV2FileBackedBoundGovernanceRestartPreservesBindingWithoutCandida
 		t.Fatal(err)
 	}
 
-	firstBiz := NewRuntimeOrchestrator(nil, nil)
+	firstBiz := NewRuntimeOrchestrator()
 	if err := firstBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: firstHub}); err != nil {
 		t.Fatal(err)
 	}
@@ -446,7 +446,7 @@ func TestRuntimeV2FileBackedBoundGovernanceRestartPreservesBindingWithoutCandida
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = restartedDecisionOwner.Stop(ctx) })
-	restartedBiz := NewRuntimeOrchestrator(nil, nil)
+	restartedBiz := NewRuntimeOrchestrator()
 	if err := restartedBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: restartedHub}); err != nil {
 		t.Fatal(err)
 	}

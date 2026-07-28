@@ -79,11 +79,11 @@ func TestRuntimeOperationDescriptorForKindCanonicalAndUnknown(t *testing.T) {
 		t.Fatalf("file/write descriptor must explicitly allow owner-authorized new targets: %+v", fileWrite)
 	}
 	patch, ok := RuntimeOperationDescriptorForKind(RuntimeBlockKindPatchApply)
-	if !ok || patch.AllowsNewTarget {
+	if !ok || patch.AllowsNewTarget || patch.TargetCardinality != RuntimeOperationTargetCardinalityOne {
 		t.Fatalf("patch/apply descriptor must not claim absent-target create semantics: %+v", patch)
 	}
 	shell, ok := RuntimeOperationDescriptorForKind(StepKindShellCommand)
-	if !ok || !shell.AllowsGroundedWorkspaceTarget {
+	if !ok || !shell.AllowsGroundedWorkspaceTarget || shell.TargetCardinality != RuntimeOperationTargetCardinalityMany {
 		t.Fatalf("shell/command descriptor must explicitly allow File-grounded existing targets: %+v", shell)
 	}
 	git, ok := RuntimeOperationDescriptorForKind(StepKindGitWrite)

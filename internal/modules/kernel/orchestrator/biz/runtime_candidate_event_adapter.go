@@ -184,9 +184,6 @@ func RequestRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command or
 		if err := response.OutputFragment.Validate(); err != nil {
 			return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned an invalid runtime candidate output fragment: %w", err)
 		}
-		if response.Candidate != (runtimecontract.RuntimeCandidate{}) {
-			return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned an output fragment together with a candidate")
-		}
 		// An initial fragment is selected by the typed decoder's structural
 		// incomplete-document outcome. ReachedProviderLimit is audit telemetry,
 		// not a state-machine gate: a mid-token EOF must continue exactly like a
@@ -196,22 +193,12 @@ func RequestRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command or
 	if command.OutputContinuation != nil {
 		return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("runtime candidate output continuation returned neither a fragment nor a failure")
 	}
-	// A complete document is the authoritative C4 handoff. C5 reloads and
-	// strictly decodes it after document_complete has been CAS-persisted, so a
-	// provider response may intentionally omit the convenience decoded
-	// Candidate value. When it is present it remains a boundary sanity check,
-	// not the source used for admission.
-	if len(response.DocumentContent) != 0 && response.Candidate == (runtimecontract.RuntimeCandidate{}) {
+	// A complete document is the authoritative C4 handoff. Semantic decode and
+	// candidate admission are exclusively owned by SM-3 after persistence.
+	if len(response.DocumentContent) != 0 {
 		return response, nil
 	}
-	// Revalidate at the EventHub boundary with the same activation-sealed MCP
-	// metadata that the LLM boundary used.  Calling Validate without activation
-	// discards the exact non-durable server/tool declaration and incorrectly
-	// treats every MCP tool call as mutating.
-	if err := response.Candidate.ValidateWithActivation(command.Decision, command.CandidateContext.Activation); err != nil {
-		return orchestratorevents.RequestRuntimeCandidateResult{}, err
-	}
-	return response, nil
+	return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("runtime candidate response returned neither a complete document nor an outcome")
 }
 
 // validateRuntimeCandidateRequestIdentity keeps the EventHub boundary on the

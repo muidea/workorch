@@ -87,7 +87,7 @@ func (c *RuntimeController) CommitOperationReceipt(ctx context.Context, workspac
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
 	}
 	return aggregate, receipt, nil

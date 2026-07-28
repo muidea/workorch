@@ -76,6 +76,7 @@ func RuntimeOperationContractRevision() string {
 		writeHashString(h, fmt.Sprintf("%t", descriptor.RequiresOwnerReceipt))
 		writeHashString(h, fmt.Sprintf("%t", descriptor.AllowsNewTarget))
 		writeHashString(h, fmt.Sprintf("%t", descriptor.AllowsGroundedWorkspaceTarget))
+		writeHashString(h, string(descriptor.TargetCardinality))
 		for _, action := range descriptor.AllowedActions {
 			writeHashString(h, string(action))
 		}
@@ -241,50 +242,45 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 		return RuntimeOperationContract{
 			Kind: StepKindFileRead,
 			Parameters: []RuntimeOperationParameterContract{
-				{Name: "path", Type: RuntimeOperationParameterTypeString, Required: true, Description: "workspace-relative file path"},
 				{Name: "optional", Type: RuntimeOperationParameterTypeBoolean, Description: "return exists=false when the target is absent"},
 				{Name: "maxBytes", Type: RuntimeOperationParameterTypeInteger, Description: "bounded maximum returned content bytes"},
 				{Name: "startLine", Type: RuntimeOperationParameterTypeInteger, Description: "optional 1-based inclusive start line"},
 				{Name: "endLine", Type: RuntimeOperationParameterTypeInteger, Description: "optional 1-based inclusive end line"},
 			},
-			ForbiddenParameters: []string{"input", "output", "payload"},
-			Rules:               []string{"path must be non-empty", "maxBytes must be between 1 and 65536 when provided", "line bounds must be positive and ordered when provided"},
+			RequireTargetRefs:   true,
+			ForbiddenParameters: []string{"input", "output", "payload", "path", "targetRef", "targetRefs"},
+			Rules:               []string{"targetRefs must contain exactly one workspace-relative file path", "maxBytes must be between 1 and 65536 when provided", "line bounds must be positive and ordered when provided"},
 		}, true
 	case StepKindFileWrite:
 		return RuntimeOperationContract{
 			Kind: StepKindFileWrite,
 			Parameters: []RuntimeOperationParameterContract{
-				{Name: "path", Type: RuntimeOperationParameterTypeString, Description: "workspace-relative file path"},
-				{Name: "targetRef", Type: RuntimeOperationParameterTypeString, Description: "workspace-relative target path"},
 				{Name: "content", Type: RuntimeOperationParameterTypeString, Required: true, Description: "complete file content; an empty string is allowed"},
 			},
 			RequireTargetRefs:   true,
-			ForbiddenParameters: []string{"input", "output", "payload"},
-			Rules:               []string{"target must be identified by path, targetRef, or operation targetRefs when provided"},
+			ForbiddenParameters: []string{"input", "output", "payload", "path", "targetRef", "targetRefs"},
+			Rules:               []string{"targetRefs must contain exactly one workspace-relative target"},
 		}, true
 	case StepKindFileEdit:
 		return RuntimeOperationContract{
 			Kind: StepKindFileEdit,
 			Parameters: []RuntimeOperationParameterContract{
-				{Name: "path", Type: RuntimeOperationParameterTypeString, Required: true, Description: "workspace-relative file path"},
 				{Name: "oldText", Type: RuntimeOperationParameterTypeString, Required: true, Description: "exact current text to replace"},
 				{Name: "newText", Type: RuntimeOperationParameterTypeString, Required: true, Description: "replacement text; an empty string is allowed"},
 				{Name: "baseHash", Type: RuntimeOperationParameterTypeString, Description: "optional current content hash"},
 				{Name: "occurrence", Type: RuntimeOperationParameterTypeInteger, Description: "1-based match index when oldText is not unique"},
 			},
 			RequireTargetRefs:   true,
-			ForbiddenParameters: []string{"filePath", "fileContent", "targetRef", "targetRefs"},
+			ForbiddenParameters: []string{"filePath", "fileContent", "path", "targetRef", "targetRefs"},
 			Rules: []string{
 				"oldText must be non-empty and different from newText",
-				"targetRefs must contain the same target as path",
+				"targetRefs must contain exactly one workspace-relative target",
 			},
 		}, true
 	case RuntimeBlockKindPatchApply:
 		return RuntimeOperationContract{
 			Kind: RuntimeBlockKindPatchApply,
 			Parameters: []RuntimeOperationParameterContract{
-				{Name: "targetRef", Type: RuntimeOperationParameterTypeString, Description: "preferred workspace-relative target path"},
-				{Name: "path", Type: RuntimeOperationParameterTypeString, Description: "workspace-relative target path alias"},
 				{Name: "patchType", Type: RuntimeOperationParameterTypeString, Required: true, Description: "file_write, text_replace, or unified_diff"},
 				{Name: "content", Type: RuntimeOperationParameterTypeString, Description: "complete file_write content; an empty string is allowed"},
 				{Name: "diff", Type: RuntimeOperationParameterTypeString, Description: "unified_diff content"},
@@ -295,9 +291,8 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				{Name: "coverageTargets", Type: RuntimeOperationParameterTypeStringList, Description: "coverage targets addressed by this state change"},
 				{Name: "summary", Type: RuntimeOperationParameterTypeString, Description: "bounded change summary"},
 			},
-			RequireOneOfParameters: []string{"targetRef", "path"},
-			RequireTargetRefs:      true,
-			ForbiddenParameters:    []string{"filePath", "fileContent", "targetRefs"},
+			RequireTargetRefs:   true,
+			ForbiddenParameters: []string{"filePath", "fileContent", "path", "targetRef", "targetRefs"},
 			Variants: []RuntimeOperationVariantContract{
 				{ID: "file_write", Discriminators: []RuntimeOperationParameterPredicate{{Name: "patchType", EqualsString: "file_write"}}, RequiredParameters: []string{"content"}, ForbiddenParameters: []string{"diff", "oldText", "newText", "occurrence"}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
 				{ID: "text_replace", Discriminators: []RuntimeOperationParameterPredicate{{Name: "patchType", EqualsString: "text_replace"}}, RequiredParameters: []string{"oldText", "newText"}, RequiredNonEmpty: []string{"oldText"}, ForbiddenParameters: []string{"content", "diff"}, DistinctParameterPairs: []RuntimeOperationParameterPair{{Left: "oldText", Right: "newText"}}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
@@ -307,8 +302,7 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				"file_write must provide content",
 				"text_replace must provide non-empty oldText and a distinct newText",
 				"unified_diff must provide non-empty diff",
-				"exactly one canonical target must be resolved from targetRef or path",
-				"targetRefs must contain the resolved target",
+				"targetRefs must contain exactly one workspace-relative target",
 			},
 		}, true
 	case RuntimeBlockKindPatchPreview:
@@ -326,18 +320,16 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				{Name: "args", Type: RuntimeOperationParameterTypeStringList, Description: "ordered command arguments"},
 				{Name: "timeoutMillis", Type: RuntimeOperationParameterTypeInteger, Description: "bounded execution timeout in milliseconds"},
 				{Name: "stateChanging", Type: RuntimeOperationParameterTypeBoolean, Description: "declares that the command is expected to change workspace state"},
-				{Name: "targetRef", Type: RuntimeOperationParameterTypeString, Description: "primary workspace target"},
-				{Name: "targetRefs", Type: RuntimeOperationParameterTypeStringList, Description: "workspace targets related to the command"},
 				{Name: "verificationScope", Type: RuntimeOperationParameterTypeString, Description: "bounded verification scope"},
 				{Name: "boundedReason", Type: RuntimeOperationParameterTypeString, Description: "reason the command is bounded"},
 				{Name: "validationScratchDir", Type: RuntimeOperationParameterTypeString, Description: "step-scoped validation scratch directory"},
 				{Name: "validationScratchAutoCleanup", Type: RuntimeOperationParameterTypeBoolean, Description: "whether validation scratch is removed after execution"},
 			},
-			ForbiddenParameters: []string{"input", "output", "payload"},
+			ForbiddenParameters: []string{"input", "output", "payload", "targetRef", "targetRefs"},
 			Rules: []string{
 				"command must be non-empty",
 				"timeoutMillis must be between 1000 and 600000 when provided",
-				"stateChanging commands must identify at least one target through targetRef or targetRefs",
+				"stateChanging commands must identify at least one operation targetRefs entry",
 			},
 		}, true
 	case StepKindGitRead, StepKindGitWrite:
@@ -444,6 +436,11 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 	if !known {
 		return nil
 	}
+	if descriptor, found := RuntimeOperationDescriptorForKind(operation.Kind); found {
+		if err := validateRuntimeOperationTargetCardinality(operation, descriptor.TargetCardinality); err != nil {
+			return err
+		}
+	}
 	allowed := make(map[string]RuntimeOperationParameterContract, len(contract.Parameters))
 	for _, parameter := range contract.Parameters {
 		allowed[parameter.Name] = parameter
@@ -488,9 +485,6 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 			return fmt.Errorf("kind %q maxEntries must be between 1 and 500", operation.Kind)
 		}
 	case StepKindFileRead:
-		if parameterString(values["path"]) == "" {
-			return fmt.Errorf("kind %q requires path", operation.Kind)
-		}
 		if limit, ok := parameterInteger(values["maxBytes"]); ok && (limit <= 0 || limit > 65536) {
 			return fmt.Errorf("kind %q maxBytes must be between 1 and 65536", operation.Kind)
 		}
@@ -500,48 +494,16 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 			return fmt.Errorf("kind %q requires positive ordered line bounds", operation.Kind)
 		}
 	case StepKindFileWrite:
-		path := parameterString(values["path"])
-		targetRef := parameterString(values["targetRef"])
-		if path != "" && targetRef != "" && path != targetRef {
-			return fmt.Errorf("kind %q path and targetRef must identify the same target", operation.Kind)
-		}
-		target := targetRef
-		if target == "" {
-			target = path
-		}
-		if target == "" && len(operation.TargetRefs) == 1 {
-			target = operation.TargetRefs[0]
-		}
-		if target == "" {
-			return fmt.Errorf("kind %q requires one target via path, targetRef, or targetRefs", operation.Kind)
-		}
-		if len(operation.TargetRefs) > 0 && !containsString(operation.TargetRefs, target) {
-			return fmt.Errorf("kind %q targetRefs must contain target %q", operation.Kind, target)
-		}
 	case StepKindFileEdit:
-		path := parameterString(values["path"])
 		oldText := parameterRawString(values["oldText"])
 		newText := parameterRawString(values["newText"])
-		if path == "" || oldText == "" || oldText == newText {
-			return fmt.Errorf("kind %q requires non-empty path and oldText with a distinct newText", operation.Kind)
+		if oldText == "" || oldText == newText {
+			return fmt.Errorf("kind %q requires non-empty oldText with a distinct newText", operation.Kind)
 		}
 		if occurrence, ok := parameterInteger(values["occurrence"]); ok && occurrence <= 0 {
 			return fmt.Errorf("kind %q occurrence must be positive", operation.Kind)
 		}
-		if !containsString(operation.TargetRefs, path) {
-			return fmt.Errorf("kind %q targetRefs must contain path %q", operation.Kind, path)
-		}
 	case RuntimeBlockKindPatchApply, RuntimeBlockKindPatchPreview:
-		targetRef := parameterString(values["targetRef"])
-		path := parameterString(values["path"])
-		if targetRef == "" {
-			targetRef = path
-		} else if path != "" && path != targetRef {
-			return fmt.Errorf("kind %q targetRef and path must identify the same target", operation.Kind)
-		}
-		if targetRef == "" || !containsString(operation.TargetRefs, targetRef) {
-			return fmt.Errorf("kind %q targetRefs must contain targetRef %q", operation.Kind, targetRef)
-		}
 		if occurrence, ok := parameterInteger(values["occurrence"]); ok && occurrence <= 0 {
 			return fmt.Errorf("kind %q occurrence must be positive", operation.Kind)
 		}
@@ -556,7 +518,7 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 		if parameter, ok := values["stateChanging"]; ok && parameter.Boolean != nil {
 			stateChanging = *parameter.Boolean
 		}
-		if stateChanging && parameterString(values["targetRef"]) == "" && len(values["targetRefs"].StringList) == 0 && len(operation.TargetRefs) == 0 {
+		if stateChanging && len(operation.TargetRefs) == 0 {
 			return fmt.Errorf("kind %q state-changing command requires target refs", operation.Kind)
 		}
 	case StepKindGitRead, StepKindGitWrite:
@@ -612,6 +574,25 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 		if limit, ok := parameterInteger(values["maxBytes"]); ok && limit <= 0 {
 			return fmt.Errorf("kind %q maxBytes must be positive", operation.Kind)
 		}
+	}
+	return nil
+}
+
+func validateRuntimeOperationTargetCardinality(operation RuntimeOperation, cardinality RuntimeOperationTargetCardinality) error {
+	switch cardinality {
+	case "", RuntimeOperationTargetCardinalityZero:
+		if cardinality == RuntimeOperationTargetCardinalityZero && len(operation.TargetRefs) != 0 {
+			return fmt.Errorf("kind %q does not accept targetRefs", operation.Kind)
+		}
+	case RuntimeOperationTargetCardinalityOne:
+		if len(operation.TargetRefs) != 1 || strings.TrimSpace(operation.TargetRefs[0]) == "" {
+			return fmt.Errorf("kind %q requires exactly one targetRefs entry", operation.Kind)
+		}
+	case RuntimeOperationTargetCardinalityMany:
+		// many permits zero for non-mutating shell/session operations. The
+		// state-changing branch below requires one-or-more outer targets.
+	default:
+		return fmt.Errorf("kind %q has an invalid target cardinality %q", operation.Kind, cardinality)
 	}
 	return nil
 }

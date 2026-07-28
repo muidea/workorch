@@ -67,15 +67,16 @@ type ProviderRequestAudit struct {
 	ResponseBytes         int                                 `json:"responseBytes,omitempty"`
 }
 
-// Runtime candidate response returned across the EventHub boundary after decode/validation.
+// Runtime candidate response returned by the LLM boundary. A complete provider
+// document remains opaque here: only the Orchestrator-owned SM-3 evaluator may
+// decode or admit it after durable persistence.
 type RuntimeCandidateResponse struct {
 	Transaction      runtimecontract.AuthorityTransaction
 	LogicalRequestID string `json:"logicalRequestId,omitempty"`
 	RequestSequence  int    `json:"requestSequence,omitempty"`
 	PhysicalCallID   string `json:"physicalCallId,omitempty"`
-	Candidate        runtimecontract.RuntimeCandidate
-	// DocumentContent carries a complete, successfully decoded provider
-	// document only across the synchronous LLM-owner EventHub exchange. It is
+	// DocumentContent carries a complete provider document only across the
+	// synchronous LLM-owner EventHub exchange. It is
 	// intentionally excluded from JSON/audit projection; Orchestrator must
 	// durably store it before any session or candidate transition consumes it.
 	DocumentContent []byte `json:"-"`

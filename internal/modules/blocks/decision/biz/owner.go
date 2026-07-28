@@ -354,17 +354,14 @@ func (m *Biz) executeCommand(ev magicevent.Event) (decisionevents.DecisionComman
 		if !ok || cmd.TicketID == "" {
 			return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
 		}
-		item := ticketFromUpdateCommand(cmd)
-		if !ticketMatchesDecisionScope(item, decisionCommandScope{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, StepID: cmd.StepID}) {
-			return decisionevents.DecisionCommandResult{}, common.ErrNotFound
-		}
 		current, err := m.tickets.Get(ctx, cmd.TicketID)
 		if err != nil {
 			return decisionevents.DecisionCommandResult{}, err
 		}
-		if current.DecisionKind == "runtime_v2_governance" && item.State == common.DecisionTicketStateResolved {
-			return decisionevents.DecisionCommandResult{}, common.ErrConflict
+		if !ticketMatchesDecisionScope(current, decisionCommandScope{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, StepID: cmd.StepID}) {
+			return decisionevents.DecisionCommandResult{}, common.ErrNotFound
 		}
+		item := ticketFromUpdateCommand(current, cmd)
 		if err := m.tickets.Update(ctx, item); err != nil {
 			return decisionevents.DecisionCommandResult{}, err
 		}
@@ -654,26 +651,21 @@ func resolveTicketContract(cmd decisionevents.EnsureResolvedCommand) decisioncon
 	}
 }
 
-func ticketFromUpdateCommand(cmd decisionevents.UpdateTicketCommand) *decisionmodel.Ticket {
-	return &decisionmodel.Ticket{
-		ID:                     cmd.TicketID,
-		WorkspaceID:            cmd.WorkspaceID,
-		RunID:                  cmd.RunID,
-		StepID:                 cmd.StepID,
-		Reason:                 cmd.Reason,
-		DecisionKind:           cmd.DecisionKind,
-		Question:               cmd.Question,
-		Context:                workorcheventpayload.New(cmd.Context...),
-		State:                  cmd.State,
-		AutoGovernance:         workorcheventpayload.New(cmd.AutoGovernance...),
-		FailureClass:           cmd.FailureClass,
-		FailureSignature:       cmd.FailureSignature,
-		AllowedRecoveryActions: append([]string(nil), cmd.AllowedRecoveryActions...),
-		ResolvedAt:             cmd.ResolvedAt,
-		ResolvedBy:             cmd.ResolvedBy,
-		CreatedAt:              cmd.CreatedAt,
-		UpdatedAt:              cmd.UpdatedAt,
+func ticketFromUpdateCommand(current *decisionmodel.Ticket, cmd decisionevents.UpdateTicketCommand) *decisionmodel.Ticket {
+	if current == nil {
+		return nil
 	}
+	item := *current
+	item.Reason = cmd.Reason
+	item.DecisionKind = cmd.DecisionKind
+	item.Question = cmd.Question
+	item.Context = workorcheventpayload.New(cmd.Context...)
+	item.AutoGovernance = workorcheventpayload.New(cmd.AutoGovernance...)
+	item.FailureClass = cmd.FailureClass
+	item.FailureSignature = cmd.FailureSignature
+	item.AllowedRecoveryActions = append([]string(nil), cmd.AllowedRecoveryActions...)
+	item.UpdatedAt = cmd.UpdatedAt
+	return &item
 }
 
 func (m *Biz) resolveResolutionTicketContextForCommand(ctx context.Context, ticketID common.TicketID, scope decisionCommandScope) (context.Context, error) {

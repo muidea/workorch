@@ -4,7 +4,7 @@ Status: active
 
 Type: core-contract
 
-Last Updated: 2026-07-27
+Last Updated: 2026-07-28
 
 本文定义 WorkOrch 唯一的、领域中立的 Runtime V2 设计合同。生产主链仅为
 `DriveRuntimeV2`、reducer 与 sealed dispatch；它治理事实、约束、证据、恢复与终态，
@@ -16,8 +16,8 @@ Last Updated: 2026-07-27
 2. [Runtime request/cache contract](runtime-request-cache-note.md)；
 3. `internal/modules/kernel/orchestrator/readme.md` 与
    `internal/pkg/workorchruntimecontract`；
-4. [RUNTIME-VPC 收口方案](../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md)（candidate/receipt）；
-5. [RUNTIME-SMO 收口方案](../70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md)（状态 owner/lifecycle）。
+4. [RUNTIME-SMO 统一收口方案](../70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md)
+   （candidate/receipt、状态 owner、跨状态机交接与 lifecycle 的唯一活动实施队列）。
 
 已归档计划、历史 live 记录与过程日志只能帮助定位回归夹具，不能成为新的运行时约束。
 
@@ -316,10 +316,10 @@ LLM 是不可靠的 protocol client，不是 authority。请求必须由 sealed 
    由测试证明；
 4. 覆盖预算/guard 与零副作用断言：在 prerequisite/authority 失败时不得产生 provider request、attempt、
    dispatch、ticket 或 effect；
-5. 同步更新受影响的 RUNTIME-VPC 或 RUNTIME-SMO、当前事实/未关索引与对应 module readme；
+5. 同步更新 RUNTIME-SMO、当前事实/未关索引与对应 module readme；
 6. 通过 `make verify-boundary-contract`，确认没有将状态迁移放入 `pkg`、没有 V1 回流、没有让
    projection/TUI/Web 成为 authority。
 
-活动实施顺序仅由两个不重叠计划定义：RUNTIME-VPC 负责 candidate/receipt，RUNTIME-SMO 负责状态 owner/
-lifecycle。若发现第三份 Runtime V2 状态迁移、graph/step continuation、自动 successor 或 live 热修计划，
+活动实施顺序仅由 RUNTIME-SMO 定义；旧 candidate/receipt 计划只作为 superseded 回归基线。若发现第二份
+Runtime V2 状态迁移、graph/step continuation、自动 successor 或 live 热修计划，
 必须先删除或迁入 `docs/90-archive/`，不能与本文并列。

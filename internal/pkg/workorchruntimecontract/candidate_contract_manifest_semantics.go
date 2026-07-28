@@ -81,6 +81,12 @@ func ValidateRuntimeCandidateAgainstManifest(manifest RuntimeCandidateContractMa
 	if manifest.Revision != RuntimeCandidateContractManifestRevision || manifest.Hash == "" || manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) {
 		return &RuntimeCandidateContractDiagnostic{Path: "$", Actual: "unsealed_manifest", Cause: fmt.Errorf("runtime candidate contract manifest is invalid")}
 	}
+	if manifest.EffectPolicy.Action != manifest.Action {
+		return &RuntimeCandidateContractDiagnostic{Path: "$.effectPolicy.action", Actual: string(manifest.EffectPolicy.Action), Allowed: []string{string(manifest.Action)}, Cause: fmt.Errorf("runtime candidate effect policy action does not match manifest")}
+	}
+	if err := manifest.EffectPolicy.Validate(); err != nil {
+		return &RuntimeCandidateContractDiagnostic{Path: "$.effectPolicy", Actual: "invalid", Cause: err}
+	}
 	if manifest.Action != RuntimeActionProduceStateChange && manifest.Action != RuntimeActionProduceValidation {
 		return nil
 	}
@@ -127,8 +133,8 @@ func validateRuntimeCandidateOperationAgainstManifest(manifest RuntimeCandidateC
 	if manifest.RequireCoverageWorkItemIDs && !runtimeCandidateManifestCoverageMatches(manifest.CoverageWorkItemIDs, operation.CoverageWorkItemIDs) {
 		return runtimeCandidateContractDiagnostic(operation.ID, path+".coverageWorkItemIds", strings.Join(coverageIDStrings(operation.CoverageWorkItemIDs), ","), coverageIDStrings(manifest.CoverageWorkItemIDs), coverageIDStrings(manifest.CoverageWorkItemIDs), nil, nil)
 	}
-	if operationManifest.RequireTargetRefs && len(operation.TargetRefs) == 0 {
-		return runtimeCandidateContractDiagnostic(operation.ID, path+".targetRefs", "missing_targetRefs", operationManifest.AllowedOperationFields, []string{"targetRefs"}, nil, nil)
+	if err := validateRuntimeCandidateManifestTargetCardinality(operation, operationManifest.TargetCardinality); err != nil {
+		return runtimeCandidateContractDiagnostic(operation.ID, path+".targetRefs", runtimeCandidateManifestTargetCardinalityActual(operation.TargetRefs), operationManifest.AllowedOperationFields, []string{string(operationManifest.TargetCardinality)}, nil, err)
 	}
 	// exact_target and prospective_owner_target seal an exclusive membership set
 	// that the decoder may enforce as a typed observation. existing_owner_scope
@@ -178,15 +184,6 @@ func validateRuntimeCandidateOperationAgainstManifest(manifest RuntimeCandidateC
 		}
 		values[name] = parameter
 	}
-	for _, name := range []string{"targetRef", "path"} {
-		value, found := values[name]
-		if !found || value.String == nil || strings.TrimSpace(*value.String) == "" || len(operation.TargetRefs) == 0 {
-			continue
-		}
-		if !runtimeCandidatePayloadContains(operation.TargetRefs, strings.TrimSpace(*value.String)) {
-			return runtimeCandidateContractDiagnostic(operation.ID, path+".targetRefs", strings.TrimSpace(*value.String), operation.TargetRefs, []string{name}, nil, fmt.Errorf("target parameter %q is not present in targetRefs", name))
-		}
-	}
 	for _, parameter := range operationManifest.Parameters {
 		if parameter.Required {
 			if _, found := values[parameter.Name]; !found {
@@ -207,6 +204,32 @@ func validateRuntimeCandidateOperationAgainstManifest(manifest RuntimeCandidateC
 		}
 	}
 	return validateRuntimeCandidateVariantAgainstManifest(operationManifest, operation, values, path)
+}
+
+func runtimeCandidateManifestTargetCardinalityActual(targetRefs []string) string {
+	if len(targetRefs) == 0 {
+		return "missing_targetRefs"
+	}
+	return strings.Join(targetRefs, ",")
+}
+
+func validateRuntimeCandidateManifestTargetCardinality(operation RuntimeOperation, cardinality RuntimeOperationTargetCardinality) error {
+	switch cardinality {
+	case "", RuntimeOperationTargetCardinalityZero:
+		if cardinality == RuntimeOperationTargetCardinalityZero && len(operation.TargetRefs) != 0 {
+			return fmt.Errorf("kind %q does not accept targetRefs", operation.Kind)
+		}
+	case RuntimeOperationTargetCardinalityOne:
+		if len(operation.TargetRefs) != 1 || strings.TrimSpace(operation.TargetRefs[0]) == "" {
+			return fmt.Errorf("kind %q requires exactly one targetRefs entry", operation.Kind)
+		}
+	case RuntimeOperationTargetCardinalityMany:
+		// Many permits an empty target set. Operation-specific state-changing
+		// requirements remain in the executable contract.
+	default:
+		return fmt.Errorf("kind %q has invalid target cardinality %q", operation.Kind, cardinality)
+	}
+	return nil
 }
 
 func validateRuntimeCandidateVariantAgainstManifest(manifest RuntimeCandidateOperationManifest, operation RuntimeOperation, values map[string]OperationParameter, path string) error {

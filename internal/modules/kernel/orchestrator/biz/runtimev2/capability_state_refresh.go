@@ -79,7 +79,7 @@ func (c *RuntimeController) RefreshCapabilityStateAfterStaleReceipt(ctx context.
 		if err := aggregate.Validate(); err != nil {
 			return RuntimeAggregate{}, err
 		}
-		if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+		if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 			return RuntimeAggregate{}, err
 		}
 		return aggregate, nil
@@ -108,7 +108,7 @@ func (c *RuntimeController) RefreshCapabilityStateAfterStaleReceipt(ctx context.
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil

@@ -382,19 +382,20 @@ func TestRuntimeV2FileBackedFocusScopedSelectionsStayRetiredAcrossDurableWrites(
 		}
 		coverageID := command.Decision.Focus.CoverageWorkItemIDs[0]
 		response := orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID}
+		var candidate runtimecontract.RuntimeCandidate
 		switch command.Decision.Action {
 		case runtimecontract.RuntimeActionProduceStateChange:
 			oldText, newText := "before\n", "after-"+focusID+"\n"
-			response.Candidate = runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+			candidate = runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 				ID: "edit-" + focusID, Kind: runtimecontract.StepKindFileEdit,
 				CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{target},
-				Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &target}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}},
+				Parameters: []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}},
 			}}}}}
 		case runtimecontract.RuntimeActionProduceValidation:
-			response.Candidate = runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
+			candidate = runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
 				ID: "read-" + focusID, Kind: runtimecontract.StepKindFileRead,
 				CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{target},
-				Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &target}},
+				Parameters: nil,
 			}}}}}
 		case runtimecontract.RuntimeActionProduceAssessment:
 			refs := make([]string, 0, 2)
@@ -406,7 +407,7 @@ func TestRuntimeV2FileBackedFocusScopedSelectionsStayRetiredAcrossDurableWrites(
 					}
 				}
 			}
-			response.Candidate = runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
+			candidate = runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
 				FocusID: focusID, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID},
 				Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: focusID + " evidence satisfied",
 				Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: coverageID, Satisfied: true, EvidenceRefs: refs}}, EvidenceRefs: refs,
@@ -415,7 +416,7 @@ func TestRuntimeV2FileBackedFocusScopedSelectionsStayRetiredAcrossDurableWrites(
 			t.Errorf("unexpected action %q for %s", command.Decision.Action, focusID)
 			return
 		}
-		response.DocumentContent = runtimeV2CandidateDocumentForTest(t, command.CandidateManifest, response.Candidate)
+		response.DocumentContent = runtimeV2CandidateDocumentForTest(t, command.CandidateManifest, candidate)
 		result.Set(response, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
@@ -1114,13 +1115,13 @@ func TestRuntimeV2FileBackedWorkspaceScopeExecutesTargetBoundShellOperation(t *t
 			stateChanging := true
 			candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 				ID: "tidy-go-sum", Kind: runtimecontract.StepKindShellCommand, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
-				Parameters: []runtimecontract.OperationParameter{{Name: "command", String: &commandName}, {Name: "args", StringList: []string{"-c", script}}, {Name: "stateChanging", Boolean: &stateChanging}, {Name: "targetRef", String: &target}},
+				Parameters: []runtimecontract.OperationParameter{{Name: "command", String: &commandName}, {Name: "args", StringList: []string{"-c", script}}, {Name: "stateChanging", Boolean: &stateChanging}},
 			}}}}}
 			result.Set(runtimeV2CandidateResultForTest(t, command, candidate), nil)
 		case runtimecontract.RuntimeActionProduceValidation:
 			target := "go.sum"
 			candidate := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
-				ID: "read-go-sum", Kind: runtimecontract.StepKindFileRead, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target}, Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &target}},
+				ID: "read-go-sum", Kind: runtimecontract.StepKindFileRead, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
 			}}}}}
 			result.Set(runtimeV2CandidateResultForTest(t, command, candidate), nil)
 		case runtimecontract.RuntimeActionProduceAssessment:
@@ -1187,11 +1188,11 @@ func runtimeV2WorkspaceCreationCandidate(command orchestratorevents.RequestRunti
 	case runtimecontract.RuntimeActionProduceStateChange:
 		return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 			ID: "create-deliverable", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
-			Parameters: []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "content", String: &content}},
+			Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &content}},
 		}}}}}
 	case runtimecontract.RuntimeActionProduceValidation:
 		return runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
-			ID: "read-created-deliverable", Kind: runtimecontract.StepKindFileRead, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target}, Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &target}},
+			ID: "read-created-deliverable", Kind: runtimecontract.StepKindFileRead, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
 		}}}}}
 	case runtimecontract.RuntimeActionProduceAssessment:
 		refs := make([]string, 0, len(command.CandidateContext.Evidence.Accepted))
@@ -1373,12 +1374,12 @@ func runtimeV2GroundedTargetSequenceCandidate(command orchestratorevents.Request
 		oldText, newText := "before\n", "after\n"
 		return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 			ID: "grounded-edit", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
-			Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &target}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}},
+			Parameters: []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}},
 		}}}}}, nil
 	case runtimecontract.RuntimeActionProduceValidation:
 		return runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
 			ID: "grounded-read", Kind: runtimecontract.StepKindFileRead, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
-			Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &target}},
+			Parameters: nil,
 		}}}}}, nil
 	case runtimecontract.RuntimeActionProduceAssessment:
 		refs := make([]string, 0, len(command.CandidateContext.Evidence.Accepted))
@@ -1752,7 +1753,7 @@ func TestRuntimeV2FileBackedGitQueryReceiptCrashBeforePrerequisiteCommitReusesSn
 			return len(current.Facts.Resources.CapabilityStates) == 1 && current.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite
 		},
 	}
-	crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	crashingBiz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := crashingBiz.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 		t.Fatal(err)
 	}
@@ -1968,7 +1969,7 @@ func runRuntimeV2FileBackedManifestCommitCrashRestart(t *testing.T, crashAfterCA
 			return current.Facts.Resources.Manifest != nil && current.Facts.Resources.Manifest.Revision != ""
 		},
 	}
-	crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	crashingBiz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := crashingBiz.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 		t.Fatal(err)
 	}
@@ -2154,7 +2155,7 @@ func TestRuntimeV2FileBackedProviderCeilingCommitCrashRestart(t *testing.T) {
 					return current.Facts.Resources.ProviderCeiling != nil && current.Facts.Resources.ProviderCeiling.ConfigurationRevision != ""
 				},
 			}
-			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator()
 			if err := crashingBiz.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -2352,7 +2353,7 @@ func TestRuntimeV2FileBackedFileCapabilityCommitCrashRestart(t *testing.T) {
 					return len(current.Facts.Capabilities.StateChangeKinds) == 1 && current.Facts.Capabilities.StateChangeKinds[0] == runtimecontract.StepKindFileEdit
 				},
 			}
-			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator()
 			if err := crashingBiz.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -2531,7 +2532,7 @@ func TestRuntimeV2FileBackedGitCapabilityCommitCrashRestart(t *testing.T) {
 			crashRepository := &runtimeV2SaveCrashRepository{delegate: baseRepository, after: crashAfterCAS, marker: marker, match: func(current runtimev2.RuntimeAggregate) bool {
 				return len(current.Facts.Capabilities.StateChangeKinds) == 1 && current.Facts.Capabilities.StateChangeKinds[0] == gitmodule.StepKindWrite
 			}}
-			crashingOwner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+			crashingOwner := orchestratorbiz.NewRuntimeOrchestrator()
 			if err := crashingOwner.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -2703,7 +2704,7 @@ func TestRuntimeV2FileBackedShellCapabilityCommitCrashRestart(t *testing.T) {
 			crashRepository := &runtimeV2SaveCrashRepository{delegate: baseRepository, after: crashAfterCAS, marker: marker, match: func(current runtimev2.RuntimeAggregate) bool {
 				return len(current.Facts.Capabilities.ValidationKinds) == 1 && current.Facts.Capabilities.ValidationKinds[0] == runtimecontract.RuntimeBlockKindManagedValidationSession
 			}}
-			crashingOwner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+			crashingOwner := orchestratorbiz.NewRuntimeOrchestrator()
 			if err := crashingOwner.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -2857,7 +2858,7 @@ func TestRuntimeV2FileBackedValidationScratchCommitCrashRestart(t *testing.T) {
 					return current.Facts.Resources.ValidationScratch != nil && current.Facts.Resources.ValidationScratch.Reference != ""
 				},
 			}
-			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator()
 			if err := crashingBiz.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -3058,7 +3059,7 @@ func runRuntimeV2FileBackedValidationScratchStaleInvalidationCrashRestart(t *tes
 						len(current.Facts.Prerequisites.Pending) == 1 && current.Facts.Prerequisites.Pending[0].Kind == runtimecontract.PrerequisiteKindValidationScratch
 				},
 			}
-			crashingOwner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+			crashingOwner := orchestratorbiz.NewRuntimeOrchestrator()
 			if err := crashingOwner.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -3142,7 +3143,7 @@ func runRuntimeV2FileBackedValidationScratchStaleInvalidationCrashRestart(t *tes
 							current.Facts.Recovery.PrerequisiteRefreshes == maxStaleRefreshes
 					},
 				}
-				crashingOwner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+				crashingOwner := orchestratorbiz.NewRuntimeOrchestrator()
 				if err := crashingOwner.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 					t.Fatal(err)
 				}
@@ -3269,7 +3270,7 @@ func TestRuntimeV2FileBackedFailureTargetCommitCrashRestart(t *testing.T) {
 					return target != nil && target.Signature == "failure-target-v1" && len(target.TargetRefs) == 1 && target.TargetRefs[0] == "implementation.go"
 				},
 			}
-			crashingOwner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+			crashingOwner := orchestratorbiz.NewRuntimeOrchestrator()
 			if err := crashingOwner.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -3452,7 +3453,7 @@ func TestRuntimeV2FileBackedCreationSelectionCommitCrashRestart(t *testing.T) {
 					return selection != nil && selection.Disposition == runtimecontract.RuntimeTargetSelectionCreate && selection.ProspectiveTargetRef == "initial-deliverable.txt"
 				},
 			}
-			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator()
 			if err := crashingBiz.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -3494,7 +3495,7 @@ func TestRuntimeV2FileBackedCreationSelectionCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, workspaceObserver, selectionObserver)
 			hub, processRuns, runOwner, fileOwner, workspaceObserver, selectionObserver, restartedSelectionCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, workspaceObserver, selectionObserver)
-			restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+			restartedBiz := orchestratorbiz.NewRuntimeOrchestrator()
 			if err := restartedBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
@@ -3622,7 +3623,7 @@ func TestRuntimeV2FileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 					return len(current.Facts.Resources.TargetSnapshots) == 1 && current.Facts.Resources.TargetSnapshots[0].TargetRef == "target.txt"
 				},
 			}
-			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator()
 			if err := crashingBiz.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -3662,7 +3663,7 @@ func TestRuntimeV2FileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, workspaceObserver, snapshotObserver)
 			hub, processRuns, runOwner, fileOwner, workspaceObserver, snapshotObserver, restartedSnapshotCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, workspaceObserver, snapshotObserver)
-			restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+			restartedBiz := orchestratorbiz.NewRuntimeOrchestrator()
 			if err := restartedBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
@@ -3782,7 +3783,7 @@ func TestRuntimeV2FileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, workspaceObserver, snapshotObserver)
 			hub, processRuns, runOwner, fileOwner, workspaceObserver, snapshotObserver, staleReacquireCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, workspaceObserver, snapshotObserver)
-			thirdBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+			thirdBiz := orchestratorbiz.NewRuntimeOrchestrator()
 			if err := thirdBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
@@ -3917,7 +3918,7 @@ func TestRuntimeV2FileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 					return len(current.Facts.Resources.OperationAdmissibilities) == 1 && current.Facts.Resources.OperationAdmissibilities[0].OwnerModuleID == runtimecontract.RuntimeModuleFile
 				},
 			}
-			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator()
 			if err := crashingBiz.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -3958,7 +3959,7 @@ func TestRuntimeV2FileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, workspaceObserver, inventoryObserver)
 			hub, processRuns, runOwner, fileOwner, workspaceObserver, inventoryObserver, restartedInventoryCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, workspaceObserver, inventoryObserver)
-			restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+			restartedBiz := orchestratorbiz.NewRuntimeOrchestrator()
 			if err := restartedBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
@@ -4091,7 +4092,7 @@ func TestRuntimeV2FileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, workspaceObserver, inventoryObserver)
 			hub, processRuns, runOwner, fileOwner, workspaceObserver, inventoryObserver, staleReacquireCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, workspaceObserver, inventoryObserver)
-			thirdBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+			thirdBiz := orchestratorbiz.NewRuntimeOrchestrator()
 			if err := thirdBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
@@ -4245,7 +4246,7 @@ func TestRuntimeV2FileBackedGitAdmissibilityCommitCrashRestart(t *testing.T) {
 					return len(current.Facts.Resources.OperationAdmissibilities) == 1 && current.Facts.Resources.OperationAdmissibilities[0].OwnerModuleID == runtimecontract.RuntimeModuleGit
 				},
 			}
-			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator()
 			if err := crashingBiz.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -4287,7 +4288,7 @@ func TestRuntimeV2FileBackedGitAdmissibilityCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, gitOwner, workspaceObserver, inventoryObserver)
 			hub, processRuns, runOwner, fileOwner, gitOwner, workspaceObserver, inventoryObserver, restartedInventoryCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, gitOwner, workspaceObserver, inventoryObserver)
-			restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+			restartedBiz := orchestratorbiz.NewRuntimeOrchestrator()
 			if err := restartedBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
@@ -4426,7 +4427,7 @@ func TestRuntimeV2FileBackedGitAdmissibilityCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, gitOwner, workspaceObserver, inventoryObserver)
 			hub, processRuns, runOwner, fileOwner, gitOwner, workspaceObserver, inventoryObserver, staleReacquireCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, gitOwner, workspaceObserver, inventoryObserver)
-			thirdBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+			thirdBiz := orchestratorbiz.NewRuntimeOrchestrator()
 			if err := thirdBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
@@ -4589,7 +4590,7 @@ func TestRuntimeV2FileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 					return len(current.Facts.Resources.OperationAdmissibilities) == 1 && current.Facts.Resources.OperationAdmissibilities[0].OwnerModuleID == runtimecontract.RuntimeModuleShell
 				},
 			}
-			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+			crashingBiz := orchestratorbiz.NewRuntimeOrchestrator()
 			if err := crashingBiz.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -4629,7 +4630,7 @@ func TestRuntimeV2FileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver)
 			hub, processRuns, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver, restartedInventoryCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver)
-			restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+			restartedBiz := orchestratorbiz.NewRuntimeOrchestrator()
 			if err := restartedBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
@@ -4756,7 +4757,7 @@ func TestRuntimeV2FileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver)
 			hub, processRuns, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver, staleReacquireCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver)
-			thirdBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+			thirdBiz := orchestratorbiz.NewRuntimeOrchestrator()
 			if err := thirdBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
@@ -4824,7 +4825,7 @@ func TestRuntimeV2FileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			shellTimeout = "90s"
 			hub, processRuns, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver, policyReacquireCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver)
-			fourthBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+			fourthBiz := orchestratorbiz.NewRuntimeOrchestrator()
 			if err := fourthBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
@@ -4994,7 +4995,7 @@ func runRuntimeV2FileBackedAdmissibilityThreeOwnerRestart(t *testing.T, staleCas
 	value := startProcess(t)
 	defer func() { stopProcess(value) }()
 	newBiz := func(hub magicevent.Hub) (*RuntimeOrchestrator, *Biz) {
-		owner := NewRuntimeOrchestrator(nil, nil)
+		owner := NewRuntimeOrchestrator()
 		if err := owner.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 			t.Fatal(err)
 		}
@@ -5363,7 +5364,7 @@ func TestRuntimeV2FileBackedGitSnapshotCommitResponseLossRestartReusesCommittedS
 				len(current.Facts.Resources.CapabilityStates) == 1 && len(current.CandidateAttempts) == 0 && current.ActiveDispatch == nil
 		},
 	}
-	crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	crashingBiz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := crashingBiz.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 		t.Fatal(err)
 	}
@@ -5606,7 +5607,7 @@ func TestDriveRuntimeV2FileBackedFreshFileShellGitAcceptance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	delivery := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(nil, nil), hub, nil)
+	delivery := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(), hub, nil)
 	if err := delivery.deliverRuntimeV2Terminal(ctx, aggregate); err != nil {
 		t.Fatal(err)
 	}
@@ -5672,14 +5673,14 @@ func runtimeV2FileShellGitCandidate(command orchestratorevents.RequestRuntimeCan
 		switch command.Decision.Action {
 		case runtimecontract.RuntimeActionProduceStateChange:
 			target, content := "main.go", "package main\n"
-			return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{ID: "file-create", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{target}, Parameters: []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "content", String: &content}}}}}}}, nil
+			return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{ID: "file-create", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{target}, Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &content}}}}}}}, nil
 		case runtimecontract.RuntimeActionProduceValidation:
 			return runtimeV2ManagedShellValidationCandidate("validate-created", coverageID, "main.go", "package main"), nil
 		}
 	case "focus-edit":
 		if command.Decision.Action == runtimecontract.RuntimeActionProduceStateChange {
 			path, oldText, newText := "main.go", "package main\n", "package main\n// edited\n"
-			return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{ID: "file-edit", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{path}, Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &path}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}}}}}}}, nil
+			return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{ID: "file-edit", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{path}, Parameters: []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}}}}}}}, nil
 		}
 	case "focus-git":
 		switch command.Decision.Action {
@@ -5707,7 +5708,7 @@ func runtimeV2ManagedShellValidationCandidate(id string, coverageID common.Cover
 	command, script := "sh", "test -f "+target+" && grep -q '"+want+"' "+target
 	return runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: id, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{target},
-		Parameters: []runtimecontract.OperationParameter{{Name: "command", String: &command}, {Name: "args", StringList: []string{"-c", script}}, {Name: "targetRef", String: &target}},
+		Parameters: []runtimecontract.OperationParameter{{Name: "command", String: &command}, {Name: "args", StringList: []string{"-c", script}}},
 	}}}}}
 }
 
@@ -6152,7 +6153,7 @@ func runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testin
 					current.Facts.Recovery.PrerequisiteResourceChangeRefreshes == maxReceiptRefreshes
 			},
 		}
-		crashingOwner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+		crashingOwner := orchestratorbiz.NewRuntimeOrchestrator()
 		if err := crashingOwner.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 			t.Fatal(err)
 		}
@@ -6465,7 +6466,7 @@ func TestRuntimeV2FileBackedMixedOwnerReceiptThenLocalScratchStaleCrashRestart(t
 						current.Facts.Recovery.PrerequisiteRefreshes == 1 && current.Facts.Recovery.PrerequisiteResourceChangeRefreshes == 1
 				},
 			}
-			crashingOwner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+			crashingOwner := orchestratorbiz.NewRuntimeOrchestrator()
 			if err := crashingOwner.ConfigureRuntimeV2Repository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -6653,14 +6654,14 @@ func TestRuntimeV2FileBackedPatchVariantMatrix(t *testing.T) {
 			name: "file_write", target: "written.txt", initial: "old\n", variant: "file_write", want: "written\n",
 			candidate: func() runtimecontract.RuntimeCandidate {
 				patchType, content, target := "file_write", "written\n", "written.txt"
-				return runtimeV2PatchCandidate("patch-file-write", target, []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "content", String: &content}})
+				return runtimeV2PatchCandidate("patch-file-write", target, []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &content}})
 			},
 		},
 		{
 			name: "text_replace", target: "replace.txt", initial: "old\n", variant: "text_replace", want: "new\n",
 			candidate: func() runtimecontract.RuntimeCandidate {
 				patchType, oldText, newText, target := "text_replace", "old\n", "new\n", "replace.txt"
-				return runtimeV2PatchCandidate("patch-text-replace", target, []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}})
+				return runtimeV2PatchCandidate("patch-text-replace", target, []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}})
 			},
 		},
 		{
@@ -6668,7 +6669,7 @@ func TestRuntimeV2FileBackedPatchVariantMatrix(t *testing.T) {
 			candidate: func() runtimecontract.RuntimeCandidate {
 				patchType, target := "unified_diff", "diff.txt"
 				diff := "--- a/diff.txt\n+++ b/diff.txt\n@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n"
-				return runtimeV2PatchCandidate("patch-unified-diff", target, []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "diff", String: &diff}})
+				return runtimeV2PatchCandidate("patch-unified-diff", target, []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "diff", String: &diff}})
 			},
 		},
 	}
@@ -6771,14 +6772,14 @@ func TestRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(
 			name: "file_write", target: "written.txt", initial: "old\n", variant: "file_write", operationID: "patch-file-write", want: "written\n",
 			candidate: func(target string) runtimecontract.RuntimeCandidate {
 				patchType, content := "file_write", "written\n"
-				return runtimeV2PatchCandidate("patch-file-write", target, []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "content", String: &content}})
+				return runtimeV2PatchCandidate("patch-file-write", target, []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &content}})
 			},
 		},
 		{
 			name: "text_replace", target: "written.txt", initial: "old\n", variant: "text_replace", operationID: "patch-text-replace", want: "written\n",
 			candidate: func(target string) runtimecontract.RuntimeCandidate {
 				patchType, oldText, newText := "text_replace", "old\n", "written\n"
-				return runtimeV2PatchCandidate("patch-text-replace", target, []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}})
+				return runtimeV2PatchCandidate("patch-text-replace", target, []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}})
 			},
 		},
 		{
@@ -6786,7 +6787,7 @@ func TestRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(
 			candidate: func(target string) runtimecontract.RuntimeCandidate {
 				patchType := "unified_diff"
 				diff := "--- a/written.txt\n+++ b/written.txt\n@@ -1,1 +1,1 @@\n-old\n+written\n"
-				return runtimeV2PatchCandidate("patch-unified-diff", target, []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "diff", String: &diff}})
+				return runtimeV2PatchCandidate("patch-unified-diff", target, []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "diff", String: &diff}})
 			},
 		},
 	}
@@ -6854,7 +6855,7 @@ func testRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(
 			return found && execution.State == runtimecontract.OperationExecutionOwnerCommitted
 		},
 	}
-	crashingBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	crashingBiz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := crashingBiz.ConfigureRuntimeV2Repository(failingRepository); err != nil {
 		t.Fatal(err)
 	}
@@ -6995,7 +6996,7 @@ func testRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(
 	})
 	t.Cleanup(func() { restartedLLMObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
 	restartedRepository := runtimeV2StateRepository{hub: restartedHub}
-	restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	restartedBiz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := restartedBiz.ConfigureRuntimeV2Repository(restartedRepository); err != nil {
 		t.Fatal(err)
 	}
@@ -7124,7 +7125,7 @@ func testRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
-	deliveryModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(nil, nil), restartedHub, nil)
+	deliveryModule := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(), restartedHub, nil)
 	results := filerepository.NewResultRepository(filepath.Join(root, "results.json"))
 	interruptedResults := &failAfterResultCreateRepository{ResultRepository: results}
 	firstResultOwner := resultmodule.New()
@@ -7207,14 +7208,14 @@ func TestRuntimeV2FileBackedPatchVariantRestartAfterOwnerReceipt(t *testing.T) {
 			name: "file_write", target: "written.txt", initial: "old\n", variant: "file_write", want: "written\n",
 			candidate: func() runtimecontract.RuntimeCandidate {
 				patchType, content, target := "file_write", "written\n", "written.txt"
-				return runtimeV2PatchCandidate("patch-file-write", target, []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "content", String: &content}})
+				return runtimeV2PatchCandidate("patch-file-write", target, []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &content}})
 			},
 		},
 		{
 			name: "text_replace", target: "replace.txt", initial: "old\n", variant: "text_replace", want: "new\n",
 			candidate: func() runtimecontract.RuntimeCandidate {
 				patchType, oldText, newText, target := "text_replace", "old\n", "new\n", "replace.txt"
-				return runtimeV2PatchCandidate("patch-text-replace", target, []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}})
+				return runtimeV2PatchCandidate("patch-text-replace", target, []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}})
 			},
 		},
 		{
@@ -7222,7 +7223,7 @@ func TestRuntimeV2FileBackedPatchVariantRestartAfterOwnerReceipt(t *testing.T) {
 			candidate: func() runtimecontract.RuntimeCandidate {
 				patchType, target := "unified_diff", "diff.txt"
 				diff := "--- a/diff.txt\n+++ b/diff.txt\n@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n"
-				return runtimeV2PatchCandidate("patch-unified-diff", target, []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "diff", String: &diff}})
+				return runtimeV2PatchCandidate("patch-unified-diff", target, []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "diff", String: &diff}})
 			},
 		},
 	}
@@ -7623,7 +7624,7 @@ func TestRuntimeV2FileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.
 			if testCase.validation {
 				candidate.Validation = &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
 					ID: "read-1", Kind: runtimecontract.StepKindFileRead, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
-					Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &target}},
+					Parameters: nil,
 				}}}}
 			} else {
 				candidate.StateChange = &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
@@ -8035,7 +8036,7 @@ func TestRuntimeV2FileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *
 					hub.Terminate(ctx)
 					t.Fatal(err)
 				}
-				owner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+				owner := orchestratorbiz.NewRuntimeOrchestrator()
 				if err := owner.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 					_ = fileOwner.Stop(ctx)
 					workspace.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
@@ -8093,7 +8094,7 @@ func TestRuntimeV2FileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *
 			target, content := ".env", "TOKEN=granted\n"
 			candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 				ID: "write-governed", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
-				Parameters: []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "content", String: &content}},
+				Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &content}},
 			}}}}}
 			sealed, err := admitAndSealRuntimeV2CandidateAttemptForTest(ctx, first.controller, "ws-v2", "run-v2", 0, candidate)
 			if err != nil || sealed.Aggregate.ActiveDispatch == nil {
@@ -8351,6 +8352,7 @@ func TestDriveRuntimeV2FileBackedTwoFocusStateValidationAssessmentAndRestart(t *
 		coverageID := focus.CoverageWorkItemIDs[0]
 		target := focus.TargetRefs[0]
 		response := orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID}
+		var candidate runtimecontract.RuntimeCandidate
 		if focus.ID == "focus-2" && command.Decision.Action == runtimecontract.RuntimeActionProduceStateChange && !providerTransientInjected {
 			providerTransientInjected = true
 			response.Failure = &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProviderTransient, Reason: "injected provider transport interruption"}
@@ -8361,24 +8363,24 @@ func TestDriveRuntimeV2FileBackedTwoFocusStateValidationAssessmentAndRestart(t *
 		case runtimecontract.RuntimeActionProduceStateChange:
 			if focus.ID == "focus-2" {
 				patchType, content := "file_write", "TOKEN=granted\n"
-				response.Candidate = runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+				candidate = runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 					ID: "patch-" + focus.ID, Kind: runtimecontract.RuntimeBlockKindPatchApply,
 					CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{target},
-					Parameters: []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "content", String: &content}},
+					Parameters: []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &content}},
 				}}}}}
 			} else {
 				oldText, newText := "old\n", "new\n"
-				response.Candidate = runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+				candidate = runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 					ID: "edit-" + focus.ID, Kind: runtimecontract.StepKindFileEdit,
 					CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{target},
-					Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &target}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}},
+					Parameters: []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}},
 				}}}}}
 			}
 		case runtimecontract.RuntimeActionProduceValidation:
-			response.Candidate = runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
+			candidate = runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
 				ID: "read-" + focus.ID, Kind: runtimecontract.StepKindFileRead,
 				CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{target},
-				Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &target}},
+				Parameters: nil,
 			}}}}}
 		case runtimecontract.RuntimeActionProduceAssessment:
 			refs := make([]string, 0)
@@ -8390,7 +8392,7 @@ func TestDriveRuntimeV2FileBackedTwoFocusStateValidationAssessmentAndRestart(t *
 					}
 				}
 			}
-			response.Candidate = runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
+			candidate = runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
 				FocusID: focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID},
 				Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: focus.ID + " satisfied",
 				Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: coverageID, Satisfied: true}}, EvidenceRefs: refs,
@@ -8399,12 +8401,12 @@ func TestDriveRuntimeV2FileBackedTwoFocusStateValidationAssessmentAndRestart(t *
 			t.Errorf("unexpected candidate action %s", command.Decision.Action)
 			return
 		}
-		response.DocumentContent = runtimeV2CandidateDocumentForTest(t, command.CandidateManifest, response.Candidate)
+		response.DocumentContent = runtimeV2CandidateDocumentForTest(t, command.CandidateManifest, candidate)
 		result.Set(response, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
 
-	moduleBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	moduleBiz := orchestratorbiz.NewRuntimeOrchestrator()
 	casRepository := &failOnceCASRuntimeV2Repository{delegate: runtimeV2StateRepository{hub: hub}, remainingFailures: 1}
 	if err := moduleBiz.ConfigureRuntimeV2Repository(casRepository); err != nil {
 		t.Fatal(err)
@@ -8456,7 +8458,7 @@ func TestDriveRuntimeV2FileBackedTwoFocusStateValidationAssessmentAndRestart(t *
 				aggregate.OperationGovernanceBindings[0].State == runtimecontract.RuntimeOperationGovernanceBindingGranted
 		},
 	}
-	grantCrashBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	grantCrashBiz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := grantCrashBiz.ConfigureRuntimeV2Repository(grantCrashRepository); err != nil {
 		t.Fatal(err)
 	}
@@ -8533,7 +8535,7 @@ func TestDriveRuntimeV2FileBackedTwoFocusStateValidationAssessmentAndRestart(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	deliveryBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	deliveryBiz := orchestratorbiz.NewRuntimeOrchestrator()
 	deliveryModule := newTestBiz(deliveryBiz, hub, nil)
 	if err := deliveryModule.deliverRuntimeV2Terminal(ctx, aggregate); err == nil {
 		t.Fatal("first terminal delivery must fail before Result persistence")
@@ -8851,11 +8853,6 @@ func TestDriveRuntimeV2CompleteSchemaFailureStopsAfterSameContractRetry(t *testi
 		requests = append(requests, command)
 		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
 			Transaction: command.Transaction, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
-			Failure: &runtimecontract.RuntimeCandidateFailure{
-				Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid",
-				Signature: "candidate-schema-invalid", Reason: "provider document contains an unknown field",
-				Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{Path: "$.unexpected", Actual: "unexpected", Allowed: []string{"operations"}, Forbidden: []string{"unexpected"}},
-			},
 			DocumentContent: []byte(`{"unexpected":true}`),
 		}, nil)
 	})
@@ -8875,7 +8872,7 @@ func TestDriveRuntimeV2CompleteSchemaFailureStopsAfterSameContractRetry(t *testi
 	}
 	if len(requests) != 2 || requests[0].PreviousFailure != nil || requests[1].PreviousFailure == nil ||
 		requests[1].PreviousFailure.Class != runtimecontract.RuntimeCandidateFailureClassSchema || requests[1].PreviousFailure.Code != "candidate_schema_invalid" ||
-		requests[1].PreviousFailure.Signature != "candidate-schema-invalid" || requests[1].PreviousFailure.Reason != "provider document contains an unknown field" {
+		requests[1].PreviousFailure.Signature != "candidate-schema-invalid" || requests[1].PreviousFailure.Reason == "" {
 		t.Fatalf("candidate retry did not carry the persisted first failure: %+v", requests)
 	}
 }
@@ -8896,14 +8893,14 @@ func TestRequestAndSealRuntimeV2CandidateContinuesProviderLimitedOutput(t *testi
 		t.Fatal(err)
 	}
 	continuations := memory.NewArtifactContinuationRepository()
-	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
+	owner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
 	if err := owner.ConfigureRuntimeV2Repository(repository); err != nil {
 		t.Fatal(err)
 	}
 	module := newTestBiz(owner, hub, nil)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
 	first := `{"operations":[{"id":"op-1","kind":"file/edit","coverageWorkItemIds":["cwi-v2"],`
-	second := `"targetRefs":["target.txt"],"parameters":[{"name":"path","string":"target.txt"},{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`
+	second := `"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`
 	calls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
@@ -8959,13 +8956,13 @@ func TestRequestAndSealRuntimeV2CandidateCommitsSessionBeforeProviderAndAttemptA
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: memory.NewArtifactContinuationRepository()})
+	owner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: memory.NewArtifactContinuationRepository()})
 	if err := owner.ConfigureRuntimeV2Repository(state); err != nil {
 		t.Fatal(err)
 	}
 	module := newTestBiz(owner, hub, nil)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
-	document := []byte(`{"operations":[{"id":"op-1","kind":"file/edit","coverageWorkItemIds":["cwi-v2"],"targetRefs":["target.txt"],"parameters":[{"name":"path","string":"target.txt"},{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)
+	document := []byte(`{"operations":[{"id":"op-1","kind":"file/edit","coverageWorkItemIds":["cwi-v2"],"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
@@ -9006,13 +9003,13 @@ func TestRequestAndSealRuntimeV2CandidateRetriesTransportWithoutCandidateAttempt
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: memory.NewArtifactContinuationRepository()})
+	owner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: memory.NewArtifactContinuationRepository()})
 	if err := owner.ConfigureRuntimeV2Repository(state); err != nil {
 		t.Fatal(err)
 	}
 	module := newTestBiz(owner, hub, nil)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
-	document := []byte(`{"operations":[{"id":"op-1","kind":"file/edit","coverageWorkItemIds":["cwi-v2"],"targetRefs":["target.txt"],"parameters":[{"name":"path","string":"target.txt"},{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)
+	document := []byte(`{"operations":[{"id":"op-1","kind":"file/edit","coverageWorkItemIds":["cwi-v2"],"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)
 	var calls []orchestratorevents.RequestRuntimeCandidateCommand
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
@@ -9060,7 +9057,7 @@ func TestRequestAndSealRuntimeV2CandidateRestartsFromPersistedOutputChunk(t *tes
 		t.Fatal(err)
 	}
 	continuations := memory.NewArtifactContinuationRepository()
-	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
+	owner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
 	if err := owner.ConfigureRuntimeV2Repository(state); err != nil {
 		t.Fatal(err)
 	}
@@ -9093,7 +9090,7 @@ func TestRequestAndSealRuntimeV2CandidateRestartsFromPersistedOutputChunk(t *tes
 		if command.OutputContinuation == nil || command.RequestSequence != 2 || command.OutputContinuation.Sequence != 2 || command.OutputContinuation.PreviousChunkTail != first[len(first)-12:] {
 			t.Fatalf("restart continuation command = %+v", command)
 		}
-		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID, OutputFragment: &runtimecontract.RuntimeCandidateOutputFragment{Content: []byte(`"targetRefs":["target.txt"],"parameters":[{"name":"path","string":"target.txt"},{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)}}, nil)
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID, OutputFragment: &runtimecontract.RuntimeCandidateOutputFragment{Content: []byte(`"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)}}, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
 	restarted := newTestBiz(owner, hub, nil)
@@ -9132,7 +9129,7 @@ func TestRuntimeV2FileBackedCompleteDocumentRestartAdmitsWithoutProviderReplay(t
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 
 	contentsRoot := filepath.Join(root, "candidate-contents")
-	firstOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{
+	firstOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(contentsRoot),
 	})
 	if err := firstOwner.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
@@ -9186,7 +9183,7 @@ func TestRuntimeV2FileBackedCompleteDocumentRestartAdmitsWithoutProviderReplay(t
 		t.Fatal(err)
 	}
 	restartedContents := filerepository.NewArtifactContinuationRepository(contentsRoot)
-	restartedOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{
+	restartedOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{
 		ArtifactContinuations: restartedContents,
 	})
 	if err := restartedOwner.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
@@ -9244,7 +9241,7 @@ func TestRuntimeV2FileBackedPrepareRestartSubmitsOnce(t *testing.T) {
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 
 	contentsRoot := filepath.Join(root, "candidate-contents")
-	firstOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{
+	firstOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(contentsRoot),
 	})
 	if err := firstOwner.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
@@ -9282,7 +9279,7 @@ func TestRuntimeV2FileBackedPrepareRestartSubmitsOnce(t *testing.T) {
 	if err := runOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	restartedOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{
+	restartedOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(contentsRoot),
 	})
 	if err := restartedOwner.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
@@ -9347,7 +9344,7 @@ func TestRuntimeV2FileBackedSubmittedCandidateRestartDoesNotReplayProvider(t *te
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 
-	firstOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{
+	firstOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(filepath.Join(root, "candidate-contents")),
 	})
 	if err := firstOwner.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
@@ -9384,7 +9381,7 @@ func TestRuntimeV2FileBackedSubmittedCandidateRestartDoesNotReplayProvider(t *te
 	if err := runOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	restartedOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{
+	restartedOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(filepath.Join(root, "candidate-contents")),
 	})
 	if err := restartedOwner.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
@@ -9458,7 +9455,7 @@ func TestRuntimeV2FileBackedStaleCompleteSessionInvalidatesBeforeCandidateReuse(
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
 
 	contentsRoot := filepath.Join(root, "candidate-contents")
-	firstOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{
+	firstOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(contentsRoot),
 	})
 	if err := firstOwner.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
@@ -9523,7 +9520,7 @@ func TestRuntimeV2FileBackedStaleCompleteSessionInvalidatesBeforeCandidateReuse(
 	if err := runOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	restartedOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{
+	restartedOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(contentsRoot),
 	})
 	if err := restartedOwner.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
@@ -9564,7 +9561,7 @@ func TestRequestAndSealRuntimeV2CandidateFailsWhenOutputContinuationBudgetExhaus
 		t.Fatal(err)
 	}
 	continuations := memory.NewArtifactContinuationRepository()
-	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
+	owner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
 	if err := owner.ConfigureRuntimeV2Repository(state); err != nil {
 		t.Fatal(err)
 	}
@@ -9611,7 +9608,7 @@ func TestRequestAndSealRuntimeV2CandidateFailsWhenOutputContinuationBudgetExhaus
 	if err != nil {
 		t.Fatal(err)
 	}
-	restartedOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
+	restartedOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
 	if err := restartedOwner.ConfigureRuntimeV2Repository(state); err != nil {
 		t.Fatal(err)
 	}
@@ -9638,7 +9635,7 @@ func TestRequestAndSealRuntimeV2CandidateTerminatesUnknownSubmittedRequestWithou
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	owner := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := owner.ConfigureRuntimeV2Repository(state); err != nil {
 		t.Fatal(err)
 	}
@@ -9691,7 +9688,7 @@ func TestRequestAndSealRuntimeV2CandidateFailsCompleteDocumentContentDefectWitho
 		t.Fatal(err)
 	}
 	contents := memory.NewArtifactContinuationRepository()
-	owner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{ArtifactContinuations: contents})
+	owner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: contents})
 	if err := owner.ConfigureRuntimeV2Repository(state); err != nil {
 		t.Fatal(err)
 	}
@@ -9769,7 +9766,7 @@ func TestRequestAndSealRuntimeV2CandidateReacquiresProviderCeilingAfterTypedStal
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	owner := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := owner.ConfigureRuntimeV2Repository(repository); err != nil {
 		t.Fatal(err)
 	}
@@ -9857,7 +9854,7 @@ func startRuntimeV2FileManifestOwner(t *testing.T, ctx context.Context, hub magi
 
 func newRuntimeV2DriveTestModule(t *testing.T, hub magicevent.Hub) *Biz {
 	t.Helper()
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -9903,7 +9900,7 @@ func TestRuntimeV2DecisionPersistsFeasibilityWithoutCallingProvider(t *testing.T
 		t.Fatal(err)
 	}
 	repository := &runtimeV2DriveRepository{aggregate: runtimev2.RuntimeAggregate{StateRevision: 1, Definition: runtimeV2Definition(), Facts: facts.Normalized(), Decision: decision}}
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := biz.ConfigureRuntimeV2Repository(repository); err != nil {
 		t.Fatal(err)
 	}
@@ -10010,7 +10007,7 @@ func TestRuntimeV2DecisionReconcilesHistoricalAuthorityBeforeProvider(t *testing
 	repository := &runtimeV2DriveRepository{aggregate: runtimev2.RuntimeAggregate{
 		StateRevision: 7, Definition: runtimeV2Definition(), Facts: preparedFacts, Decision: preparedDecision,
 	}}
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := biz.ConfigureRuntimeV2Repository(repository); err != nil {
 		t.Fatal(err)
 	}

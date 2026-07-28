@@ -3,7 +3,6 @@ package runtimev2
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -330,7 +329,8 @@ func TestRuntimeControllerTurnsClaimedWithoutReceiptIntoOutcomeUnknownWithoutRep
 	}
 	executor := &failIfExecutedOperationExecutor{}
 	_, err = controller.ExecuteActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
-	if err == nil || !strings.Contains(err.Error(), "outcome_unknown") {
+	var outcomeUnknown *OperationOutcomeUnknownError
+	if !errors.As(err, &outcomeUnknown) {
 		t.Fatalf("claimed recovery err = %v, want outcome_unknown", err)
 	}
 	if executor.called {
@@ -355,7 +355,7 @@ func TestRuntimeControllerReplaysClaimedSafeOperationWithinRecoveryBudget(t *tes
 	}
 	path := "target.txt"
 	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{
-		Operation: runtimecontract.RuntimeOperation{ID: "read-1", Kind: runtimecontract.StepKindFileRead, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{path}, Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &path}}},
+		Operation: runtimecontract.RuntimeOperation{ID: "read-1", Kind: runtimecontract.StepKindFileRead, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{path}},
 	}}}})
 	if err != nil {
 		t.Fatal(err)
@@ -389,7 +389,7 @@ func TestRuntimeControllerRecoversClaimedAtMostOnceOperationOnlyWithSealedReplay
 	patchType, target, content := "file_write", "target.txt", "after\n"
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "patch-1", Kind: runtimecontract.RuntimeBlockKindPatchApply, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
-		Parameters: []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "content", String: &content}},
+		Parameters: []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &content}},
 	}}}}}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
@@ -451,6 +451,167 @@ func TestRuntimeControllerRoutesDurableNoOpReceiptToStructuredSameFocusRepair(t 
 	}
 	if len(progressed.Facts.Evidence.Accepted) != 0 || len(progressed.Facts.Evidence.Rejected) != 1 || len(progressed.OperationReceipts) != 1 {
 		t.Fatalf("no-op incorrectly closed durable evidence: accepted=%+v rejected=%+v receipts=%+v", progressed.Facts.Evidence.Accepted, progressed.Facts.Evidence.Rejected, progressed.OperationReceipts)
+	}
+}
+
+func TestRuntimeControllerRestartAtomicallyInvalidatesUncommittableOwnerReceipt(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, _ := NewRuntimeController(repository)
+	aggregate, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{
+		Operation: runtimecontract.RuntimeOperation{ID: "write-1", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("content")},
+	}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := controller.claimOperationExecution(context.Background(), "ws-v2", "run-v2", "write-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, ok := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, "write-1")
+	if !ok {
+		t.Fatal("claimed execution is missing")
+	}
+	receipt := runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: execution.ExecutionKey, OperationID: execution.OperationID,
+		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: runtimecontract.RuntimeEffectNone,
+		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "owner observed no durable change"},
+	}
+	if _, _, err := controller.CommitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted, _ := NewRuntimeController(repository)
+	executor := &failIfExecutedOperationExecutor{}
+	progressed, err := restarted.ExecuteActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executor.called || progressed.ActiveDispatch != nil || len(progressed.CompletedDispatches) != 1 ||
+		progressed.CompletedDispatches[0].State != DispatchStateInvalidated {
+		t.Fatalf("uncommittable receipt did not atomically close the dispatch: %+v called=%v", progressed, executor.called)
+	}
+	if progressed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || progressed.Facts.Failure == nil ||
+		progressed.Facts.Failure.Class != runtimecontract.FailureClassEffectMismatch ||
+		len(progressed.Facts.Evidence.Accepted) != 0 || len(progressed.Facts.Evidence.Rejected) != 1 {
+		t.Fatalf("uncommittable receipt did not atomically reduce SM-2: decision=%+v failure=%+v evidence=%+v", progressed.Decision, progressed.Facts.Failure, progressed.Facts.Evidence)
+	}
+}
+
+func TestRuntimeControllerRestartMigratesPersistedMixedEffectDispatchWithoutReplay(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, _ := NewRuntimeController(repository)
+	aggregate, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{
+		Operation: runtimecontract.RuntimeOperation{ID: "write-1", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("content")},
+	}}}})
+	if err != nil || sealed.ActiveDispatch == nil {
+		t.Fatalf("seal aggregate=%+v err=%v", sealed, err)
+	}
+	// Persist the exact pre-C1 shape: a non-durable Shell operation was sealed
+	// alongside a durable File operation under produce_state_change, and its
+	// accepted owner receipt was durable before the process restarted.
+	falseFlag := false
+	command := "go"
+	shell := runtimecontract.RuntimeOperation{
+		ID: "a-validate", Kind: runtimecontract.StepKindShellCommand, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+		Parameters: []runtimecontract.OperationParameter{
+			{Name: "command", String: &command}, {Name: "args", StringList: []string{"test", "./..."}},
+			{Name: "stateChanging", Boolean: &falseFlag},
+		},
+	}
+	dispatch := repository.aggregate.ActiveDispatch
+	dispatch.Candidate.StateChange.Operations = append(dispatch.Candidate.StateChange.Operations, runtimecontract.StateChangingOperation{Operation: shell})
+	dispatch.CandidateHash = runtimecontract.StableRuntimeCandidateHash(dispatch.Candidate)
+	executionKey := runtimecontract.StableRuntimeOperationExecutionKey("ws-v2", "run-v2", dispatch.ID, shell.ID)
+	receipt := runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: executionKey, Fence: 1, OperationID: shell.ID,
+		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: runtimecontract.RuntimeEffectNone,
+		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "validation completed"},
+	}
+	dispatch.OperationExecutions = append(dispatch.OperationExecutions, runtimecontract.RuntimeOperationExecutionRecord{
+		OperationID: shell.ID, ExecutionKey: executionKey, Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
+		State: runtimecontract.OperationExecutionOwnerCommitted, OwnerReceiptRef: "runtime-receipt/" + executionKey,
+		OwnerReceiptHash: runtimecontract.StableRuntimeOperationReceiptHash(receipt),
+	})
+	repository.aggregate.OperationReceipts = append(repository.aggregate.OperationReceipts, receipt)
+
+	restarted, _ := NewRuntimeController(repository)
+	executor := &failIfExecutedOperationExecutor{}
+	progressed, err := restarted.ExecuteActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executor.called || progressed.ActiveDispatch != nil || len(progressed.CompletedDispatches) != 1 ||
+		progressed.CompletedDispatches[0].State != DispatchStateInvalidated || progressed.Facts.Failure == nil ||
+		progressed.Facts.Failure.Class != runtimecontract.FailureClassEffectMismatch {
+		t.Fatalf("persisted mixed-effect dispatch did not migrate atomically: %+v called=%v", progressed, executor.called)
+	}
+}
+
+func TestRecordFailureFactRejectsActiveDispatch(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, _ := NewRuntimeController(repository)
+	aggregate, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{
+		Operation: runtimecontract.RuntimeOperation{ID: "write-1", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("content")},
+	}}}})
+	if err != nil || sealed.ActiveDispatch == nil {
+		t.Fatalf("seal aggregate=%+v err=%v", sealed, err)
+	}
+	revision := repository.aggregate.StateRevision
+	_, err = controller.RecordFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassRuntimeInvariantDefect, Code: "generic", Signature: "generic", Message: "generic failure",
+	})
+	if !errors.Is(err, common.ErrConflict) || repository.aggregate.StateRevision != revision || repository.aggregate.ActiveDispatch == nil {
+		t.Fatalf("generic failure changed an active dispatch: aggregate=%+v err=%v", repository.aggregate, err)
+	}
+}
+
+func TestRecordDriveFailureFactAtomicallyInvalidatesActiveDispatch(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, _ := NewRuntimeController(repository)
+	aggregate, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{
+		Operation: runtimecontract.RuntimeOperation{ID: "write-1", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("content")},
+	}}}})
+	if err != nil || sealed.ActiveDispatch == nil {
+		t.Fatalf("seal aggregate=%+v err=%v", sealed, err)
+	}
+
+	failed, err := controller.RecordDriveFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_v2_drive_failed",
+		Signature: "runtime-v2-drive-failed", Message: "typed drive contract failure",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.ActiveDispatch != nil || len(failed.CompletedDispatches) != 1 ||
+		failed.CompletedDispatches[0].ID != sealed.ActiveDispatch.ID || failed.CompletedDispatches[0].State != DispatchStateInvalidated {
+		t.Fatalf("drive failure did not atomically invalidate dispatch: %+v", failed)
+	}
+	if failed.Decision.Action != runtimecontract.RuntimeActionFail || failed.Decision.Terminal == nil ||
+		failed.Facts.Failure == nil || failed.Facts.Failure.Class != runtimecontract.FailureClassRuntimeContractMisalignment {
+		t.Fatalf("drive failure did not atomically reduce SM-2: %+v", failed)
+	}
+	saves := repository.saves
+	replayed, err := controller.RecordDriveFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassRuntimeContractMisalignment, Message: "duplicate drive failure",
+	})
+	if err != nil || repository.saves != saves || replayed.StateRevision != failed.StateRevision {
+		t.Fatalf("duplicate terminal drive failure changed state: aggregate=%+v saves=%d want=%d err=%v", replayed, repository.saves, saves, err)
 	}
 }
 

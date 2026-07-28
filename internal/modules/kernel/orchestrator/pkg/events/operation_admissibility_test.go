@@ -18,13 +18,13 @@ func TestValidateRuntimeOperationFeasibilityCommandRequiresSealedIdentity(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	path, oldText, newText := "target.txt", "old", "new"
+	oldText, newText := "old", "new"
 	base := ProbeRuntimeOperationFeasibilityCommand{
 		WorkspaceID: "ws-v2", RunID: "run-v2", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "snapshot-v2"},
 		WorkspaceDeliverableDirectory: t.TempDir(), Admissibility: inventory,
 		CandidateManifestHash: "manifest-n5", OperationAuthorization: authorization,
 		Operation: runtimecontract.RuntimeOperation{ID: "edit-1", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{"target.txt"}, Parameters: []runtimecontract.OperationParameter{
-			{Name: "path", String: &path}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText},
+			{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText},
 		}},
 	}
 	if err := ValidateRuntimeOperationFeasibilityCommand(base, runtimecontract.RuntimeModuleFile); err != nil {

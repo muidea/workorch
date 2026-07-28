@@ -74,12 +74,12 @@ func semanticShapeStateChangeCandidate(prepareID, writeID string) RuntimeCandida
 		{Operation: RuntimeOperation{
 			ID: prepareID, Kind: RuntimeBlockKindPatchApply, RequiredOperationRef: "bootstrap-variant",
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"coverage-bootstrap"}, TargetRefs: []string{preparePath},
-			Parameters: []OperationParameter{{Name: "path", String: &preparePath}, {Name: "patchType", String: &patchType}, {Name: "content", String: &prepareContent}},
+			Parameters: []OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &prepareContent}},
 		}},
 		{Operation: RuntimeOperation{
 			ID: writeID, Kind: RuntimeBlockKindPatchApply, RequiredOperationRef: "implementation-variant", DependsOn: []string{prepareID},
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"coverage-implementation"}, TargetRefs: []string{writePath},
-			Parameters: []OperationParameter{{Name: "path", String: &writePath}, {Name: "patchType", String: &patchType}, {Name: "content", String: &writeContent}},
+			Parameters: []OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &writeContent}},
 		}},
 	}}}
 }

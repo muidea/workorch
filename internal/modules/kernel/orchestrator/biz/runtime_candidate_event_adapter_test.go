@@ -90,7 +90,7 @@ func TestRequestRuntimeCandidateReturnsTypedProviderFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.Failure == nil || response.Failure.Class != runtimecontract.RuntimeCandidateFailureClassProvider || response.Candidate.StateChange != nil || len(response.DocumentContent) != 0 {
+	if response.Failure == nil || response.Failure.Class != runtimecontract.RuntimeCandidateFailureClassProvider || len(response.DocumentContent) != 0 {
 		t.Fatalf("response = %+v", response)
 	}
 }
@@ -123,8 +123,8 @@ func TestRequestRuntimeCandidateForwardsCompleteSchemaRejectionDocumentOnly(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.Failure == nil || response.Failure.Class != runtimecontract.RuntimeCandidateFailureClassSchema || string(response.DocumentContent) != string(payload) {
-		t.Fatalf("complete schema rejection handoff = %+v", response)
+	if response.Failure != nil || string(response.DocumentContent) != string(payload) {
+		t.Fatalf("complete schema document handoff = %+v", response)
 	}
 }
 
@@ -172,7 +172,7 @@ func TestRequestRuntimeCandidateReturnsTypedPrerequisiteStaleWithoutCandidateFai
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.Stale == nil || response.Stale.ObservationID != observation.ObservationID || response.Failure != nil || response.Candidate.StateChange != nil || len(response.DocumentContent) != 0 {
+	if response.Stale == nil || response.Stale.ObservationID != observation.ObservationID || response.Failure != nil || len(response.DocumentContent) != 0 {
 		t.Fatalf("candidate response = %+v, want typed stale only", response)
 	}
 }
@@ -191,7 +191,7 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 		EventHub: hub,
 		CandidateProvider: eventCandidateProviderFunc(func(_ context.Context, request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			captured = append(captured, request)
-			return eventGenerationResult([]byte(`{"operations":[{"id":"op-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"targetRef","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`), nil)
+			return eventGenerationResult([]byte(`{"operations":[{"id":"op-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`), nil)
 		}),
 	}); err != nil {
 		t.Fatal(err)
@@ -211,7 +211,7 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := first.Candidate.Validate(decision); err != nil {
+	if _, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(base.CandidateManifest, first.DocumentContent); err != nil {
 		t.Fatal(err)
 	}
 	if len(first.DocumentContent) == 0 {
@@ -232,7 +232,7 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := second.Candidate.Validate(decision); err != nil {
+	if _, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(base.CandidateManifest, second.DocumentContent); err != nil {
 		t.Fatal(err)
 	}
 	if len(second.DocumentContent) == 0 {
@@ -478,8 +478,12 @@ func TestRequestRuntimeCandidatePreservesSealedReadOnlyMCPMetadata(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.Candidate.Validation == nil || len(response.Candidate.Validation.Operations) != 1 || response.Candidate.Validation.Operations[0].Operation.Kind != runtimecontract.StepKindMCPToolCall {
-		t.Fatalf("read-only MCP validation candidate = %+v", response.Candidate)
+	candidate, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(candidateManifestForEventRequest(t, decision, context), response.DocumentContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if candidate.Validation == nil || len(candidate.Validation.Operations) != 1 || candidate.Validation.Operations[0].Operation.Kind != runtimecontract.StepKindMCPToolCall {
+		t.Fatalf("read-only MCP validation document = %s", response.DocumentContent)
 	}
 }
 

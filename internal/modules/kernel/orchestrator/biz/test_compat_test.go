@@ -67,11 +67,8 @@ func newTestBiz(owner *RuntimeOrchestrator, hub magicevent.Hub, background magic
 	return &Biz{Base: basebiz.New(ModuleID, hub, background), bizPtr: owner}
 }
 
-func (orchestratorBizTestShim) NewRuntimeOrchestrator(
-	tickets repository.DecisionTicketRepository,
-	approvals repository.ApprovalRepository,
-) *RuntimeOrchestrator {
-	return NewRuntimeOrchestrator(tickets, approvals)
+func (orchestratorBizTestShim) NewRuntimeOrchestrator() *RuntimeOrchestrator {
+	return NewRuntimeOrchestrator()
 }
 
 // runtimeV2CandidateResultForTest is the only scripted-provider success
@@ -98,7 +95,7 @@ func runtimeV2CandidateResultForTest(t *testing.T, command orchestratorevents.Re
 	return orchestratorevents.RequestRuntimeCandidateResult{
 		Transaction: command.Transaction, LogicalRequestID: command.LogicalRequestID,
 		RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
-		Candidate: candidate, DocumentContent: document,
+		DocumentContent: document,
 	}
 }
 

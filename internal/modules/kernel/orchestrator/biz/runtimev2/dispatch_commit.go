@@ -122,14 +122,23 @@ type EvidenceCommitResult struct {
 }
 
 type DispatchCoordinator struct {
-	repository RuntimeStateRepository
+	repository  RuntimeStateRepository
+	transitions *RuntimeTransitionCoordinator
 }
 
 func NewDispatchCoordinator(repository RuntimeStateRepository) (*DispatchCoordinator, error) {
-	if repository == nil {
+	transitions, err := NewRuntimeTransitionCoordinator(repository)
+	if err != nil {
+		return nil, err
+	}
+	return newDispatchCoordinator(repository, transitions)
+}
+
+func newDispatchCoordinator(repository RuntimeStateRepository, transitions *RuntimeTransitionCoordinator) (*DispatchCoordinator, error) {
+	if repository == nil || transitions == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return &DispatchCoordinator{repository: repository}, nil
+	return &DispatchCoordinator{repository: repository, transitions: transitions}, nil
 }
 
 func SealDispatch(decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate) (SealedDispatch, error) {
@@ -262,9 +271,11 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 	if err != nil {
 		return EvidenceCommitResult{}, err
 	}
-	if err := aggregate.Validate(); err != nil {
-		return EvidenceCommitResult{}, err
-	}
+	// Apply the owner-local receipt transition before validating the complete
+	// next aggregate. This permits deterministic recovery of an active dispatch
+	// sealed by an older contract whose mixed-effect shape is invalid under the
+	// current policy. RuntimeTransitionCoordinator validates the post-transition
+	// aggregate before the only CAS write, so partial corrupt state is impossible.
 	if containsString(aggregate.ProcessedEventIDs, evidence.EventID) {
 		return EvidenceCommitResult{Disposition: CommitDispositionDuplicate, Aggregate: aggregate}, nil
 	}
@@ -277,7 +288,7 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 			DispatchID: evidence.DispatchID, Reason: "execution evidence belongs to a stale authority snapshot",
 		})
 		aggregate.StateRevision++
-		if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+		if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 			return EvidenceCommitResult{}, err
 		}
 		return EvidenceCommitResult{Disposition: CommitDispositionStale, Aggregate: aggregate}, nil
@@ -481,20 +492,24 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 			aggregate.Facts.FreshnessReacquireCoverage = removeFreshnessReacquireCoverage(aggregate.Facts.FreshnessReacquireCoverage, fact.CoverageWorkItemIDs)
 		}
 	}
-	dispatchCompleted := freshnessInvalidated || evidence.Status == ExecutionEvidenceStatusRejected || len(dispatch.CompletedOperationIDs) == candidateOperationCount(dispatch.Candidate)
+	effectUncommittable := evidence.Status == ExecutionEvidenceStatusRejected && evidence.Failure != nil &&
+		evidence.Failure.Class == runtimecontract.FailureClassEffectMismatch && evidence.Receipt != nil &&
+		(evidence.Receipt.Outcome == runtimecontract.RuntimeOperationOutcomeAccepted || evidence.Receipt.Outcome == runtimecontract.RuntimeOperationOutcomeNoOp)
+	dispatchInvalidated := freshnessInvalidated || effectUncommittable
+	dispatchCompleted := dispatchInvalidated || evidence.Status == ExecutionEvidenceStatusRejected || len(dispatch.CompletedOperationIDs) == candidateOperationCount(dispatch.Candidate)
 	if dispatchCompleted {
-		if freshnessInvalidated {
+		if dispatchInvalidated {
 			dispatch.State = DispatchStateInvalidated
 		} else {
 			dispatch.State = DispatchStateCommitted
 		}
 		aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
 		aggregate.ActiveDispatch = nil
-		if !freshnessInvalidated {
+		if !dispatchInvalidated {
 			aggregate.Facts = advanceSatisfiedCoverageFocus(aggregate.Facts)
 		}
 		var previousSnapshot *runtimecontract.AuthoritySnapshot
-		if !freshnessInvalidated {
+		if !dispatchInvalidated {
 			previousSnapshot = &aggregate.Decision.AuthoritySnapshot
 		}
 		facts, nextDecision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, previousSnapshot)
@@ -507,7 +522,7 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 		aggregate.ActiveDispatch = &dispatch
 	}
 	aggregate.StateRevision++
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return EvidenceCommitResult{}, err
 	}
 	return EvidenceCommitResult{Disposition: CommitDispositionCommitted, DispatchCompleted: dispatchCompleted, Aggregate: aggregate}, nil

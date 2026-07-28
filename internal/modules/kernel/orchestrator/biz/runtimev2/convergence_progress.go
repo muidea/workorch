@@ -25,7 +25,6 @@ func RuntimeConvergenceProgressSignature(aggregate RuntimeAggregate) string {
 		Prerequisites              runtimecontract.PrerequisiteState
 		Repair                     runtimecontract.RuntimeRepairLedger
 		RepairDirective            *runtimecontract.RuntimeRepairDirective
-		Recovery                   runtimecontract.RuntimeRecoveryLedger
 		FreshnessReacquireCoverage []common.CoverageWorkItemID
 		PrerequisiteObservations   []runtimecontract.RuntimePrerequisiteObservation
 		PrerequisiteInvalidations  []runtimecontract.RuntimePrerequisiteInvalidationRecord
@@ -43,7 +42,7 @@ func RuntimeConvergenceProgressSignature(aggregate RuntimeAggregate) string {
 	}{
 		Focus: facts.Focus, RemainingFocuses: facts.RemainingFocuses, CompletedFocuses: facts.CompletedFocuses,
 		EvidenceRevision: facts.EvidenceRevision, Failure: facts.Failure,
-		Prerequisites: facts.Prerequisites, Repair: facts.Repair, RepairDirective: facts.RepairDirective, Recovery: facts.Recovery,
+		Prerequisites: facts.Prerequisites, Repair: facts.Repair, RepairDirective: facts.RepairDirective,
 		FreshnessReacquireCoverage: facts.FreshnessReacquireCoverage,
 		PrerequisiteObservations:   facts.Resources.PrerequisiteObservations,
 		PrerequisiteInvalidations:  append([]runtimecontract.RuntimePrerequisiteInvalidationRecord(nil), aggregate.PrerequisiteInvalidations...),

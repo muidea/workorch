@@ -260,6 +260,94 @@ EOF
   exit 1
 fi
 
+# RUNTIME-SMO: SM-2/SM-3/SM-4 share one Orchestrator-owned aggregate.  Local
+# reducers may construct a complete next value, but only the transition
+# coordinator may cross the opaque Run-owner CAS boundary.
+runtime_transition_root="internal/modules/kernel/orchestrator/biz/runtimev2"
+matches="$(
+  find "$runtime_transition_root" -type f -name '*.go' ! -name '*_test.go' ! -name 'transition_coordinator.go' -print0 |
+    xargs -0 -r grep -n -E -- '\.repository\.Save\(' || true
+)"
+if [[ -n "$matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: Runtime V2 aggregate CAS bypasses the sole
+Orchestrator transition coordinator.
+
+$matches
+
+Local SM reducers and use-cases must submit a complete aggregate through
+RuntimeTransitionCoordinator.Commit. Only transition_coordinator.go may call
+the opaque RuntimeStateRepository Save method.
+EOF
+  exit 1
+fi
+
+# RUNTIME-SMO: action/effect semantics have exactly one pure contract source.
+# Every production consumer must call that source instead of reconstructing a
+# local action switch or accepted-effect table. Keep the paths explicit so a
+# file move or consumer replacement requires an ownership review here.
+runtime_effect_policy_consumers=(
+  "internal/pkg/workorchruntimecontract/candidate_contract_manifest.go:RuntimeActionEffectPolicyFor"
+  "internal/modules/blocks/llm/biz/runtime_candidate_provider.go:RuntimeActionEffectInstruction"
+  "internal/pkg/workorchruntimecontract/runtime_effect_scope.go:RuntimeActionEffectPolicyFor"
+  "internal/pkg/workorchruntimecontract/runtime_effect_resolve.go:RuntimeActionEffectPolicyFor"
+  "internal/pkg/workorchruntimecontract/runtime_operation_receipt.go:RuntimeActionEffectPolicyFor"
+  "internal/modules/kernel/orchestrator/biz/runtimev2/executor.go:RuntimeActionEffectPolicyFor"
+)
+for consumer in "${runtime_effect_policy_consumers[@]}"; do
+  consumer_path="${consumer%%:*}"
+  policy_symbol="${consumer#*:}"
+  if [[ ! -f "$consumer_path" ]] || ! grep -q -E -- "${policy_symbol}[[:space:]]*\\(" "$consumer_path"; then
+    cat >&2 <<EOF
+Boundary contract violation: Runtime V2 action/effect consumer does not use the
+single RuntimeActionEffectPolicy source: $consumer_path
+
+Manifest compilation, provider rendering, candidate evaluation, seal-time
+effect resolution, receipt evidence admission and executor adjudication must
+all derive their rules from internal/pkg/workorchruntimecontract.
+EOF
+    exit 1
+  fi
+done
+
+# RUNTIME-SMO C7-D: RuntimeOperation.TargetRefs is the single cross-owner
+# target authority. File mutation/read/edit/patch and shell command contracts
+# must not reintroduce a second path/targetRef parameter authority. file/list
+# is intentionally outside this range because its path is a read-only query
+# scope rather than a durable operation target.
+target_contract_source="internal/pkg/workorchruntimecontract/runtime_operation_contract.go"
+target_parameter_aliases="$(
+  sed -n '/case StepKindFileRead:/,/case StepKindGitRead, StepKindGitWrite:/p' "$target_contract_source" |
+    grep -n -E -- 'Name: "(path|targetRef|targetRefs)"' || true
+)"
+if [[ -n "$target_parameter_aliases" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: canonical Runtime target operations retain a
+duplicate path/targetRef parameter authority.
+
+$target_parameter_aliases
+
+File read/write/edit, patch apply/preview and shell command targets must be
+declared only through RuntimeOperation.TargetRefs. Owner-local command payloads
+may derive their path from the sealed outer target list.
+EOF
+  exit 1
+fi
+
+# A generic SM-2 failure transition cannot replace current authority while an
+# SM-3 dispatch remains active. Receipt/candidate/dispatch-specific transitions
+# must close or advance that dispatch in the same aggregate CAS.
+if ! grep -q -F -- 'if aggregate.ActiveDispatch != nil {' "$runtime_transition_root/controller.go" ||
+   ! grep -q -F -- 'active dispatch failures require a dispatch/receipt-specific transition' "$runtime_transition_root/controller.go"; then
+  cat >&2 <<EOF
+Boundary contract violation: RecordFailureFact lacks the active-dispatch fence.
+
+Generic failure recording is only valid when SM-3 has no active dispatch.
+Keep active receipt/candidate failures on their atomic dispatch transition.
+EOF
+  exit 1
+fi
+
 # RUNTIME-SMO: generic owner updates are not lifecycle reducers. Keep the
 # check structural (rather than relying on a field use-site grep) so a new
 # mapper cannot silently reintroduce a second state-write path.
@@ -284,6 +372,20 @@ run_update_body="$(struct_body internal/modules/blocks/run/pkg/contracts/command
 if grep -q -E -- "$forbidden_run_update_fields" <<<"$run_update_body"; then
   echo "boundary contract violation: generic Run update exposes SM-1 lifecycle fields" >&2
   exit 1
+fi
+
+forbidden_decision_update_fields='(^|[[:space:]])(State|ResolvedAt|ResolvedBy|CreatedAt)([[:space:]]|$)'
+decision_update_body="$(struct_body internal/modules/blocks/decision/pkg/events/messages.go UpdateTicketCommand)"
+if grep -q -E -- "$forbidden_decision_update_fields" <<<"$decision_update_body"; then
+	 echo "boundary contract violation: generic Decision update exposes lifecycle fields" >&2
+	 exit 1
+fi
+
+forbidden_approval_update_fields='(^|[[:space:]])(State|ResolvedAt|ResolvedBy|CreatedAt)([[:space:]]|$)'
+approval_update_body="$(struct_body internal/modules/blocks/approval/pkg/events/messages.go UpdateApprovalCommand)"
+if grep -q -E -- "$forbidden_approval_update_fields" <<<"$approval_update_body"; then
+	 echo "boundary contract violation: generic Approval update exposes lifecycle fields" >&2
+	 exit 1
 fi
 
 result_terminal_body="$(struct_body internal/modules/blocks/result/pkg/events/lifecycle_messages.go ApplyRuntimeTerminalDeliveryCommand)"
@@ -439,6 +541,23 @@ $matches
 Target snapshot content/hash acquisition belongs to blocks/file via runtime
 managed file/read. Orchestrator may request acquisition and consume successful
 block output, but must not materialize workspace file content itself.
+EOF
+  exit 1
+fi
+
+# Decision and Approval own their lifecycle reducers. Orchestrator must use
+# their typed intent/fact topics directly and must not recreate repository
+# facades that accept caller-selected owner state.
+matches="$(source_matches 'repository\.(DecisionTicketRepository|DecisionResolutionRepository|ApprovalRepository)|decisionEventTicketRepository|decisionEventResolutionRepository|approvalEventRepository' internal/modules/kernel/orchestrator)"
+if [[ -n "$matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: Orchestrator retains a Decision/Approval repository facade.
+
+$matches
+
+Decision and Approval state transitions belong to their owner Biz. Runtime V2
+may publish typed intent and consume immutable facts, but it cannot inject or
+wrap their repositories.
 EOF
   exit 1
 fi

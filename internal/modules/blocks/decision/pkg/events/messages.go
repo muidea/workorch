@@ -37,14 +37,10 @@ type UpdateTicketCommand struct {
 	DecisionKind           string
 	Question               string
 	Context                []DecisionEvidenceField
-	State                  common.DecisionTicketState
 	AutoGovernance         []DecisionEvidenceField
 	FailureClass           string
 	FailureSignature       string
 	AllowedRecoveryActions []string
-	ResolvedAt             string
-	ResolvedBy             string
-	CreatedAt              string
 	UpdatedAt              string
 }
 type DeleteTicketCommand = decisioncontracts.DeleteTicketCommand

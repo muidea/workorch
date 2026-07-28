@@ -23,7 +23,7 @@ func TestEvaluateCandidateAdmissionClassifiesFullAndPartialReplay(t *testing.T) 
 	second.ID = "patch-2"
 	content := "corrected\n"
 	second.Parameters = patchApplyTestParameters("main.go")
-	second.Parameters[2].String = &content
+	second.Parameters[1].String = &content
 	partialCandidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{
 		candidate.StateChange.Operations[0], {Operation: second},
 	}}}
@@ -79,7 +79,7 @@ func TestActiveRejectedOperationShapesRetainsOnlyCurrentLineageAndInfeasibleProp
 	fresh.ID = "fresh-patch"
 	content := "corrected\n"
 	fresh.Parameters = patchApplyTestParameters("main.go")
-	fresh.Parameters[2].String = &content
+	fresh.Parameters[1].String = &content
 	if admitted := EvaluateCandidateAdmission(aggregate, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: fresh}}}}); !admitted.Accepted() {
 		t.Fatalf("new operation shape rejected: %+v", admitted)
 	}

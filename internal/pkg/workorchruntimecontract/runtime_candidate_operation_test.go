@@ -60,7 +60,7 @@ func TestRuntimeCandidateRejectsFileOperationAliasesAndNoOpBeforeDispatch(t *tes
 	}
 
 	candidate.StateChange.Operations[0].Operation.Parameters = []OperationParameter{
-		{Name: "path", String: &filePath}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &oldText},
+		{Name: "oldText", String: &oldText}, {Name: "newText", String: &oldText},
 	}
 	if err := candidate.Validate(decision); err == nil || !strings.Contains(err.Error(), "distinct newText") {
 		t.Fatalf("no-op candidate error = %v", err)
@@ -83,7 +83,7 @@ func TestRuntimeCandidateAcceptsConcretePatchApplyContract(t *testing.T) {
 	candidate := RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{Operation: RuntimeOperation{
 		ID: "patch-1", Kind: RuntimeBlockKindPatchApply, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{targetRef},
 		Parameters: []OperationParameter{
-			{Name: "targetRef", String: &targetRef}, {Name: "patchType", String: &patchType},
+			{Name: "patchType", String: &patchType},
 			{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText},
 		},
 	}}}}}
@@ -114,7 +114,6 @@ func TestValidateRuntimeOperationsRejectsMutatingKindForValidation(t *testing.T)
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 			TargetRefs:          []string{path},
 			Parameters: []OperationParameter{
-				{Name: "targetRef", String: &path},
 				{Name: "patchType", String: &patchType},
 				{Name: "content", String: &content},
 			},
@@ -132,7 +131,6 @@ func TestValidateRuntimeOperationsRejectsMutatingKindForValidation(t *testing.T)
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 			TargetRefs:          []string{path},
 			Parameters: []OperationParameter{
-				{Name: "targetRef", String: &path},
 				{Name: "patchType", String: &previewType},
 				{Name: "diff", String: &diff},
 			},
@@ -155,7 +153,6 @@ func TestValidateRuntimeOperationsRejectsMutatingKindForValidation(t *testing.T)
 				{Name: "command", String: &shCmd},
 				{Name: "args", StringList: args},
 				{Name: "stateChanging", Boolean: &stateChanging},
-				{Name: "targetRef", String: &target},
 			},
 		},
 	}}}}
@@ -212,13 +209,12 @@ func TestRuntimeOperationNormalizedPreservesOrderedArgs(t *testing.T) {
 		Parameters: []OperationParameter{
 			{Name: "command", String: &cmd},
 			{Name: "args", StringList: args},
-			{Name: "targetRefs", StringList: []string{"b", "a", "a", "  "}},
 		},
 	}.Normalized()
-	gotTargets := operationStringListParameter(operation.Parameters, "targetRefs")
+	gotTargets := operation.TargetRefs
 	wantTargets := []string{"a", "b"}
 	if len(gotTargets) != len(wantTargets) || gotTargets[0] != wantTargets[0] || gotTargets[1] != wantTargets[1] {
-		t.Fatalf("targetRefs after Normalized() = %#v, want %#v", gotTargets, wantTargets)
+		t.Fatalf("outer targetRefs after Normalized() = %#v, want %#v", gotTargets, wantTargets)
 	}
 	// pathspecs are positional for git; preserve order too.
 	pathspecs := []string{"z.go", "a.go"}

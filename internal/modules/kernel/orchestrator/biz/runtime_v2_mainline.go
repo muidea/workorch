@@ -417,7 +417,7 @@ func (m *Biz) requestRuntimeV2CandidateDocument(
 	}
 	aggregate = ensured
 	if session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentComplete {
-		return m.admitRuntimeV2CompletedCandidateDocument(ctx, aggregate, manifest, session.LogicalRequestID, candidateAttempt, nil)
+		return m.admitRuntimeV2CompletedCandidateDocument(ctx, aggregate, manifest, session.LogicalRequestID, candidateAttempt)
 	}
 	if session.State == runtimecontract.RuntimeCandidateRequestSessionTerminal {
 		return aggregate, runtimecontract.RuntimeCandidate{}, false, nil
@@ -486,8 +486,7 @@ func (m *Biz) requestRuntimeV2CandidateDocument(
 		if assembleErr != nil {
 			return runtimev2.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, assembleErr
 		}
-		_, decodeErr := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, assembled)
-		if decodeErr != nil && runtimecontract.RuntimeCandidateDocumentDispositionForError(decodeErr) == runtimecontract.RuntimeCandidateDocumentIncomplete {
+		if runtimecontract.InspectRuntimeCandidateDocumentFraming(assembled) == runtimecontract.RuntimeCandidateDocumentIncomplete {
 			updatedSession, found := runtimeV2CandidateRequestSession(updated, session.LogicalRequestID)
 			if !found {
 				return runtimev2.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, fmt.Errorf("runtime candidate request session %q disappeared after fragment commit", session.LogicalRequestID)
@@ -508,19 +507,9 @@ func (m *Biz) requestRuntimeV2CandidateDocument(
 		if completeErr != nil {
 			return runtimev2.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, completeErr
 		}
-		if decodeErr != nil {
-			return m.admitRuntimeV2CompletedCandidateDocument(ctx, completed, manifest, session.LogicalRequestID, candidateAttempt, runtimeV2CandidateSchemaFailure(decodeErr))
-		}
-		return m.admitRuntimeV2CompletedCandidateDocument(ctx, completed, manifest, session.LogicalRequestID, candidateAttempt, nil)
+		return m.admitRuntimeV2CompletedCandidateDocument(ctx, completed, manifest, session.LogicalRequestID, candidateAttempt)
 	}
 	if response.Failure != nil {
-		if len(response.DocumentContent) > 0 {
-			completed, _, _, completeErr := m.persistAndCompleteRuntimeCandidateRequestDocument(ctx, aggregate, session.LogicalRequestID, sequence, physicalCallID, response.DocumentContent)
-			if completeErr != nil {
-				return runtimev2.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, completeErr
-			}
-			return m.admitRuntimeV2CompletedCandidateDocument(ctx, completed, manifest, session.LogicalRequestID, candidateAttempt, response.Failure)
-		}
 		if response.Failure.Class == runtimecontract.RuntimeCandidateFailureClassProviderTransient {
 			updated, recordErr := m.bizPtr.RecordRuntimeV2CandidateRequestTransportOutcome(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, physicalCallID, runtimecontract.RuntimeCandidateRequestOutcome{
 				Class: runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient, Code: firstNonEmptyString(response.Failure.Code, "provider_transient"), Signature: firstNonEmptyString(response.Failure.Signature, "provider-transient"),
@@ -563,13 +552,13 @@ func (m *Biz) requestRuntimeV2CandidateDocument(
 	if completeErr != nil {
 		return runtimev2.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, completeErr
 	}
-	return m.admitRuntimeV2CompletedCandidateDocument(ctx, completed, manifest, session.LogicalRequestID, candidateAttempt, nil)
+	return m.admitRuntimeV2CompletedCandidateDocument(ctx, completed, manifest, session.LogicalRequestID, candidateAttempt)
 }
 
 // admitRuntimeV2CompletedCandidateDocument is the C5 boundary used by C4's
 // production switch. The raw document must already be durable and the session
 // must already be document_complete before attempt 0/1 is allocated.
-func (m *Biz) admitRuntimeV2CompletedCandidateDocument(ctx context.Context, aggregate runtimev2.RuntimeAggregate, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, candidateAttempt int, completeFailure *runtimecontract.RuntimeCandidateFailure) (runtimev2.RuntimeAggregate, runtimecontract.RuntimeCandidate, bool, error) {
+func (m *Biz) admitRuntimeV2CompletedCandidateDocument(ctx context.Context, aggregate runtimev2.RuntimeAggregate, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, candidateAttempt int) (runtimev2.RuntimeAggregate, runtimecontract.RuntimeCandidate, bool, error) {
 	session, found := runtimeV2CandidateRequestSession(aggregate, logicalRequestID)
 	if !found {
 		return runtimev2.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, fmt.Errorf("runtime candidate request session %q is missing", logicalRequestID)
@@ -585,28 +574,24 @@ func (m *Biz) admitRuntimeV2CompletedCandidateDocument(ctx context.Context, aggr
 		})
 		return failed, runtimecontract.RuntimeCandidate{}, false, failureErr
 	}
-	pending, err := m.bizPtr.BeginRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, session.StablePrefixHash, manifest, session.LogicalRequestID)
-	if err != nil {
-		return runtimev2.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
-	}
-	if completeFailure != nil {
-		failed, failureErr := m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, pending.Facts.WorkspaceID, pending.Facts.RunID, candidateAttempt, *completeFailure)
-		return failed, runtimecontract.RuntimeCandidate{}, false, failureErr
-	}
-	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(pending.Facts, pending.Decision, runtimev2.ActiveRejectedOperationShapes(pending))
-	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, pending.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources)); err != nil {
+	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, runtimev2.ActiveRejectedOperationShapes(aggregate))
+	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources)); err != nil {
 		return runtimev2.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
 	candidate, decodeErr := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, document)
 	if decodeErr != nil {
-		failed, failureErr := m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, pending.Facts.WorkspaceID, pending.Facts.RunID, candidateAttempt, *runtimeV2CandidateSchemaFailure(decodeErr))
+		failed, failureErr := m.bizPtr.RejectRuntimeV2CompletedCandidateDocument(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, session.StablePrefixHash, manifest, session.LogicalRequestID, *runtimeV2CandidateSchemaFailure(decodeErr))
 		return failed, runtimecontract.RuntimeCandidate{}, false, failureErr
 	}
-	if validateErr := candidate.ValidateWithActivation(pending.Decision, candidateContext.Activation); validateErr != nil {
-		failed, failureErr := m.bizPtr.FailRuntimeV2CandidateAttempt(ctx, pending.Facts.WorkspaceID, pending.Facts.RunID, candidateAttempt, runtimecontract.RuntimeCandidateFailure{
+	if validateErr := candidate.ValidateWithActivation(aggregate.Decision, candidateContext.Activation); validateErr != nil {
+		failed, failureErr := m.bizPtr.RejectRuntimeV2CompletedCandidateDocument(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, session.StablePrefixHash, manifest, session.LogicalRequestID, runtimecontract.RuntimeCandidateFailure{
 			Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid", Signature: "candidate-contract-invalid", Reason: validateErr.Error(),
 		})
 		return failed, runtimecontract.RuntimeCandidate{}, false, failureErr
+	}
+	pending, err := m.bizPtr.BeginRuntimeV2CandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, candidateAttempt, session.StablePrefixHash, manifest, session.LogicalRequestID)
+	if err != nil {
+		return runtimev2.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
 	proposal, proposalErr := m.bizPtr.AdmitRuntimeV2CandidateProposal(ctx, pending.Facts.WorkspaceID, pending.Facts.RunID, candidateAttempt, manifest, session.LogicalRequestID, candidate)
 	if proposalErr != nil {

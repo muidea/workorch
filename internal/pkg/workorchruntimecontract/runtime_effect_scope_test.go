@@ -32,6 +32,9 @@ func TestValidateEffectScopesCompatibleWithAction(t *testing.T) {
 	if err := ValidateEffectScopesCompatibleWithAction(RuntimeActionProduceStateChange, []RuntimeEffectScope{RuntimeEffectNone}); err == nil {
 		t.Fatal("state-change with none must fail")
 	}
+	if err := ValidateEffectScopesCompatibleWithAction(RuntimeActionProduceStateChange, []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectNone}); err == nil {
+		t.Fatal("state-change policy must reject a mixed durable/non-durable scope set")
+	}
 	if err := ValidateEffectScopesCompatibleWithAction(RuntimeActionProduceValidation, []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession}); err != nil {
 		t.Fatalf("validation non-durable should pass: %v", err)
 	}
@@ -43,6 +46,27 @@ func TestValidateEffectScopesCompatibleWithAction(t *testing.T) {
 	}
 	if err := ValidateEffectScopesCompatibleWithAction(RuntimeActionProduceAssessment, []RuntimeEffectScope{RuntimeEffectNone}); err == nil {
 		t.Fatal("assessment cannot carry effect scopes")
+	}
+}
+
+func TestRuntimeActionEffectPolicyIsClosedAcrossCandidateAndReceipt(t *testing.T) {
+	stateChange, ok := RuntimeActionEffectPolicyFor(RuntimeActionProduceStateChange)
+	if !ok || stateChange.Validate() != nil {
+		t.Fatalf("state-change policy = %+v, ok=%v", stateChange, ok)
+	}
+	if !stateChange.AllowsOperationEffect(RuntimeEffectWorkspaceDurable) ||
+		stateChange.AllowsOperationEffect(RuntimeEffectNone) ||
+		stateChange.AllowsAcceptedReceiptEffect(RuntimeEffectEphemeralSession) {
+		t.Fatalf("state-change policy accepts an incompatible effect: %+v", stateChange)
+	}
+	validation, ok := RuntimeActionEffectPolicyFor(RuntimeActionProduceValidation)
+	if !ok || validation.Validate() != nil || !validation.AllowsOperationEffect(RuntimeEffectNone) ||
+		validation.AllowsAcceptedReceiptEffect(RuntimeEffectRemoteDurable) {
+		t.Fatalf("validation policy = %+v, ok=%v", validation, ok)
+	}
+	assessment, ok := RuntimeActionEffectPolicyFor(RuntimeActionProduceAssessment)
+	if !ok || assessment.ExecutableOperationsAllowed || assessment.AllowsOperationEffect(RuntimeEffectNone) {
+		t.Fatalf("assessment policy permits executable operations: %+v", assessment)
 	}
 }
 

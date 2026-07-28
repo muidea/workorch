@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-07-27
+Last Updated: 2026-07-28
 
 ## Purpose
 
@@ -23,8 +23,7 @@ matrix as separately actionable work and cannot override a newer persisted aggre
 
 | ID | 项 | 说明 | 当前方案 |
 | --- | --- | --- | --- |
-| RUNTIME-VPC | contract normalization and live convergence | R5 将 owner facts 先编译为唯一 sealed manifest，renderer/decoder/evaluator/owner feasibility 只消费该授权；complete rejection 必须是可修正一次或明确终态。N1～N8 代码/本地门禁已完成；剩余 real-provider 双 activation 与三态 deployed restart 依赖外部 fixture，不阻塞代码收口。旧 R4/P0～P6/A-4 仅是 archive 回归基线，不得定义当前顺序。 | [VPC candidate/receipt 方案](../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md) |
-| RUNTIME-SMO | single-owner state machine and lifecycle closure | owner reducer、事实 topic 与旧 Orchestrator facade 已完成第一阶段迁移，但 2026-07-27 实现复核确认 generic lifecycle 写入口、governance sealed identity、administrative terminal、delivery fence/CAS、startup recovery 与门禁仍未闭合；不得以 candidate 合同或 TUI/Web 分支绕过。 | [单 owner 收口方案（第 12 节为唯一执行队列）](../70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md) |
+| RUNTIME-SMO | single-owner Runtime V2 convergence closure | 唯一活动 Runtime 队列。complete document 在 EventHub adapter 丢失并被误判 provider protocol 的问题已按 C7-B～C7-E 完成 handoff、SM-3 evaluator、canonical target 和全量门禁收口；仅保留 C7-F 重新部署后的新 workspace fresh live、restart 与并发验收。 | [单 owner统一收口方案](../70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md) |
 
 ### B. 运行单元架构 / 生命周期
 
@@ -60,13 +59,13 @@ matrix as separately actionable work and cannot override a newer persisted aggre
 
 ## Judgment
 
-- **代码主链**：Runtime V2 only；V1 authority 不再是问题来源。但 `RUNTIME-SMO` 所列 lifecycle owner 改造仍是
-  未关闭代码项：已有 owner reducer 不代表单 owner 语义已闭合；以 SMO 第 12 节的 R1～R8 为准。
-- **正向收敛基础**：既有 bootstrap、CAS、sealed dispatch、receipt/evidence 与 terminal delivery 继续是回归基线；N1～N8 代码收口已完成：sealed authorization、三种 TargetPolicy、admissibility 编译、独立预算、manifest-only renderer/decoder、correctable_once/rejected_final、统一 owner feasibility、五类结果 persistence/recovery、legacy 清零，以及 selector-only MCP inventory 不强制 targetRefs。本地 L1～L5、`make release-check`、`verify-runtime-v2-positive-convergence-file`、managed `verify-ci-mvp-file`、`verify-runtime-v2-p6-scripted` 已通过。剩余 real-provider 双 activation 与三态 deployed restart 需外部部署 fixture（与 ARCH-1 同类 observation residual）。
+- **代码主链**：Runtime V2 only；V1 authority 不再是问题来源。complete candidate document 必须先持久化，
+  再由 SM-3 single evaluator 裁决；以 SMO C7-B～C7-F 为准。
+- **正向收敛基础**：既有 bootstrap、CAS、sealed authorization、三种 TargetPolicy、request session、receipt与
+  terminal delivery继续是回归基线；latest persisted aggregate反例优先于过去的本地绿灯和阶段完成声明。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；不得再从已归档 plan 推导实现约束。
-- **Active roadmap**：RUNTIME-VPC（candidate/receipt）与 RUNTIME-SMO（state owner/lifecycle）是唯一两个不重叠的
-  Runtime V2 实施队列，另有 ARCH-1、OPS-1（+ 可选 OPT-1）；RCA-1、RPF 和 RPA-1 的历史 completion record
-  均归 archive，但不得覆盖新的 deployed 反证。
+- **Active roadmap**：RUNTIME-SMO 是唯一 Runtime V2 实施队列，另有 ARCH-1、OPS-1（+ 可选 OPT-1）；旧VPC、
+  RCA-1、RPF和RPA-1均归archive，不能覆盖新的deployed反证。
 - **清理原则**：失效主链叙述、重复 audit、过程日记、live 产物一律归档或出库，不在 active 保留“假活跃”项。
 
 ## Navigation

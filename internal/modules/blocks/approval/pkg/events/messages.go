@@ -32,11 +32,7 @@ type UpdateApprovalCommand struct {
 	Reason         string
 	Action         string
 	Context        []ApprovalEvidenceField
-	State          common.ApprovalState
 	AutoGovernance []ApprovalEvidenceField
-	ResolvedAt     string
-	ResolvedBy     string
-	CreatedAt      string
 	UpdatedAt      string
 }
 type DeleteApprovalCommand = approvalcontracts.DeleteApprovalCommand

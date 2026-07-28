@@ -80,6 +80,7 @@ type runtimeCandidateContextProjection struct {
 
 type runtimeCandidateOutputContractProjection struct {
 	Action                      runtimecontract.RuntimeAction                 `json:"action"`
+	EffectPolicy                runtimeCandidateEffectPolicyProjection        `json:"effectPolicy"`
 	ManifestHash                string                                        `json:"manifestHash,omitempty"`
 	Schema                      json.RawMessage                               `json:"schema"`
 	StructuredOutputInstruction string                                        `json:"structuredOutputInstruction"`
@@ -87,22 +88,29 @@ type runtimeCandidateOutputContractProjection struct {
 	OperationContracts          []runtimeCandidateOperationContractProjection `json:"operationContracts,omitempty"`
 }
 
+type runtimeCandidateEffectPolicyProjection struct {
+	ExecutableOperationsAllowed   bool                                 `json:"executableOperationsAllowed"`
+	AllowedOperationEffects       []runtimecontract.RuntimeEffectScope `json:"allowedOperationEffects,omitempty"`
+	AllowedAcceptedReceiptEffects []runtimecontract.RuntimeEffectScope `json:"allowedAcceptedReceiptEffects,omitempty"`
+}
+
 type runtimeCandidateOperationContractProjection struct {
-	Kind                        string                                         `json:"kind"`
-	OwnerModuleID               string                                         `json:"ownerModuleId,omitempty"`
-	AllowedOperationFields      []string                                       `json:"allowedOperationFields,omitempty"`
-	AllowedVariantIDs           []string                                       `json:"allowedVariantIds,omitempty"`
-	Parameters                  []runtimeCandidateOperationParameterProjection `json:"parameters"`
-	RequireOneOfParameters      []string                                       `json:"requireOneOfParameters,omitempty"`
-	RequireTargetRefs           bool                                           `json:"requireTargetRefs,omitempty"`
-	ForbiddenParameters         []string                                       `json:"forbiddenParameters,omitempty"`
-	Variants                    []runtimeCandidateOperationVariantProjection   `json:"variants,omitempty"`
-	Rules                       []string                                       `json:"rules,omitempty"`
-	AllowsDynamicParameters     bool                                           `json:"allowsDynamicParameters,omitempty"`
-	DynamicParameterPrefixes    []string                                       `json:"dynamicParameterPrefixes,omitempty"`
-	RequiredOperationReferences []string                                       `json:"requiredOperationReferences,omitempty"`
-	AcceptedEffectScopes        []runtimecontract.RuntimeEffectScope           `json:"acceptedEffectScopes,omitempty"`
-	RequiredEffectScopes        []runtimecontract.RuntimeEffectScope           `json:"requiredEffectScopes,omitempty"`
+	Kind                        string                                            `json:"kind"`
+	OwnerModuleID               string                                            `json:"ownerModuleId,omitempty"`
+	AllowedOperationFields      []string                                          `json:"allowedOperationFields,omitempty"`
+	AllowedVariantIDs           []string                                          `json:"allowedVariantIds,omitempty"`
+	Parameters                  []runtimeCandidateOperationParameterProjection    `json:"parameters"`
+	RequireOneOfParameters      []string                                          `json:"requireOneOfParameters,omitempty"`
+	TargetCardinality           runtimecontract.RuntimeOperationTargetCardinality `json:"targetCardinality,omitempty"`
+	RequireTargetRefs           bool                                              `json:"requireTargetRefs,omitempty"`
+	ForbiddenParameters         []string                                          `json:"forbiddenParameters,omitempty"`
+	Variants                    []runtimeCandidateOperationVariantProjection      `json:"variants,omitempty"`
+	Rules                       []string                                          `json:"rules,omitempty"`
+	AllowsDynamicParameters     bool                                              `json:"allowsDynamicParameters,omitempty"`
+	DynamicParameterPrefixes    []string                                          `json:"dynamicParameterPrefixes,omitempty"`
+	RequiredOperationReferences []string                                          `json:"requiredOperationReferences,omitempty"`
+	AcceptedEffectScopes        []runtimecontract.RuntimeEffectScope              `json:"acceptedEffectScopes,omitempty"`
+	RequiredEffectScopes        []runtimecontract.RuntimeEffectScope              `json:"requiredEffectScopes,omitempty"`
 	// Target is the sealed TargetPolicy authorization compiled by the single
 	// manifest compiler. Renderer/schema/instruction must consume it instead of
 	// re-deriving owner inventory or inventing a second allow-list.
@@ -876,9 +884,9 @@ func runtimeV2TargetSelectionInstruction(selection *runtimecontract.RuntimeTarge
 		if value.ProspectiveTargetRef == "" {
 			return ""
 		}
-		return fmt.Sprintf("The File owner observed an empty workspace creation scope with sealed prospective target %q. Propose at least one durable File-owner operation whose sole targetRefs entry and matching target parameter are exactly that path. Do not substitute another path, leave it blank, or use this scope to authorize Git, Shell, MCP, or another owner. The File owner will validate the path before execution.", value.ProspectiveTargetRef)
+		return fmt.Sprintf("The File owner observed an empty workspace creation scope with sealed prospective target %q. Propose at least one durable File-owner operation whose sole targetRefs entry is exactly that path. Do not duplicate the target as an operation parameter, substitute another path, leave it blank, or use this scope to authorize Git, Shell, MCP, or another owner. The File owner will validate the path before execution.", value.ProspectiveTargetRef)
 	case runtimecontract.RuntimeTargetSelectionScope:
-		return "The File owner provided a bounded workspace feasibility scope, not a selected repair target. Follow any concrete target already sealed in the Focus, FailureTarget, current failure, or RepairDirective. Only when none is present, propose at least one durable File-owner operation with a concrete workspace-relative targetRefs entry and matching target parameter; that target may be a new file and remains subject to File-owner feasibility. Do not use this scope to authorize Git, Shell, MCP, or another owner."
+		return "The File owner provided a bounded workspace feasibility scope, not a selected repair target. Follow any concrete target already sealed in the Focus, FailureTarget, current failure, or RepairDirective. Only when none is present, propose at least one durable File-owner operation with a concrete workspace-relative targetRefs entry; do not duplicate it as an operation parameter. That target may be a new file and remains subject to File-owner feasibility. Do not use this scope to authorize Git, Shell, MCP, or another owner."
 	default:
 		return ""
 	}
@@ -915,9 +923,9 @@ func runtimeV2CandidateSoul(activation runtimecontract.RuntimeActivationContext,
 func runtimeV2CandidateSchema(action runtimecontract.RuntimeAction) string {
 	switch action {
 	case runtimecontract.RuntimeActionProduceStateChange:
-		return runtimeV2OperationCandidateSchema("workorch.runtime_candidate.state_change.v2", "Runtime V2 durable state-change candidate", "At least one operation must have a sealed durable effect compatible with requiredEffectScopes.")
+		return runtimeV2OperationCandidateSchema("workorch.runtime_candidate.state_change.v2", "Runtime V2 durable state-change candidate", runtimecontract.RuntimeActionEffectInstruction(action))
 	case runtimecontract.RuntimeActionProduceValidation:
-		return runtimeV2OperationCandidateSchema("workorch.runtime_candidate.validation.v2", "Runtime V2 non-durable validation candidate", "Every operation must have a sealed none or explicitly accepted ephemeral_session effect; durable and unknown effects are forbidden.")
+		return runtimeV2OperationCandidateSchema("workorch.runtime_candidate.validation.v2", "Runtime V2 non-durable validation candidate", runtimecontract.RuntimeActionEffectInstruction(action))
 	case runtimecontract.RuntimeActionProduceAssessment:
 		return `{"type":"object","additionalProperties":false,"required":["focusId","coverageWorkItemIds","disposition","summary"],"properties":{"focusId":{"type":"string"},"sliceId":{"type":"string"},"coverageWorkItemIds":{"type":"array","minItems":1,"items":{"type":"string"}},"disposition":{"type":"string","enum":["satisfied","repairable_gap","governance_required","terminal_rejection"]},"items":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["coverageWorkItemId","satisfied"],"properties":{"coverageWorkItemId":{"type":"string"},"satisfied":{"type":"boolean"},"reason":{"type":"string"},"evidenceRefs":{"type":"array","items":{"type":"string"}}}}},"gap":{"type":"object","additionalProperties":false,"properties":{"coverageWorkItemIds":{"type":"array","items":{"type":"string"}},"missingEvidenceKinds":{"type":"array","items":{"type":"string"}},"targetRefs":{"type":"array","items":{"type":"string"}},"evidenceRefs":{"type":"array","items":{"type":"string"}},"reason":{"type":"string"},"failureClass":{"type":"string"},"failureCode":{"type":"string"},"failureSignature":{"type":"string"}}},"summary":{"type":"string"},"evidenceRefs":{"type":"array","items":{"type":"string"}},"artifactRefs":{"type":"array","items":{"type":"string"}}},"allOf":[{"if":{"properties":{"disposition":{"const":"satisfied"}},"required":["disposition"]},"then":{"required":["evidenceRefs"],"properties":{"evidenceRefs":{"type":"array","minItems":1,"items":{"type":"string"}}}}}]}`
 	case runtimecontract.RuntimeActionRequestGovernance:
@@ -932,6 +940,9 @@ func runtimeV2CandidateSchema(action runtimecontract.RuntimeAction) string {
 // descriptor/parameter/dependency rules must not be reconstructed here.
 func runtimeV2CandidateSchemaForManifest(manifest runtimecontract.RuntimeCandidateContractManifest) string {
 	manifest = manifest.Normalized()
+	if manifest.EffectPolicy.Action != manifest.Action || manifest.EffectPolicy.Validate() != nil {
+		return ""
+	}
 	base := runtimeV2CandidateSchema(manifest.Action)
 	if manifest.Action != runtimecontract.RuntimeActionProduceStateChange && manifest.Action != runtimecontract.RuntimeActionProduceValidation {
 		return base
@@ -1057,8 +1068,14 @@ func runtimeV2OperationSchemaConditionsForManifest(operations []runtimecontract.
 				targetItems["enum"] = append([]string(nil), allowedTargets...)
 			}
 			targetSchema := map[string]any{"type": "array", "items": targetItems}
-			if operation.RequireTargetRefs {
+			switch operation.TargetCardinality {
+			case runtimecontract.RuntimeOperationTargetCardinalityOne:
 				targetSchema["minItems"] = 1
+				targetSchema["maxItems"] = 1
+			case runtimecontract.RuntimeOperationTargetCardinalityMany:
+				if operation.RequireTargetRefs {
+					targetSchema["minItems"] = 1
+				}
 			}
 			thenProperties["targetRefs"] = targetSchema
 		}
@@ -1266,7 +1283,12 @@ func runtimeV2CandidateContractCatalog() string {
 func runtimeV2CandidateOutputContractForManifest(manifest runtimecontract.RuntimeCandidateContractManifest) runtimeCandidateOutputContractProjection {
 	manifest = manifest.Normalized()
 	return runtimeCandidateOutputContractProjection{
-		Action:                      manifest.Action,
+		Action: manifest.Action,
+		EffectPolicy: runtimeCandidateEffectPolicyProjection{
+			ExecutableOperationsAllowed:   manifest.EffectPolicy.ExecutableOperationsAllowed,
+			AllowedOperationEffects:       append([]runtimecontract.RuntimeEffectScope(nil), manifest.EffectPolicy.AllowedOperationEffects...),
+			AllowedAcceptedReceiptEffects: append([]runtimecontract.RuntimeEffectScope(nil), manifest.EffectPolicy.AllowedAcceptedReceiptEffects...),
+		},
 		ManifestHash:                manifest.Hash,
 		Schema:                      json.RawMessage(runtimeV2CandidateSchemaForManifest(manifest)),
 		StructuredOutputInstruction: runtimeV2CandidateStructuredOutputInstruction(manifest),
@@ -1286,6 +1308,7 @@ func runtimeV2CandidateOperationContractsForManifest(values []runtimecontract.Ru
 			AllowedOperationFields:      append([]string(nil), operation.AllowedOperationFields...),
 			AllowedVariantIDs:           append([]string(nil), operation.AllowedVariantIDs...),
 			RequireOneOfParameters:      append([]string(nil), operation.RequireOneOfParameters...),
+			TargetCardinality:           operation.TargetCardinality,
 			RequireTargetRefs:           operation.RequireTargetRefs,
 			ForbiddenParameters:         append([]string(nil), operation.ForbiddenParameters...),
 			Rules:                       append([]string(nil), operation.Rules...),
@@ -1336,6 +1359,7 @@ func runtimeV2CandidateStructuredOutputInstruction(manifest runtimecontract.Runt
 	lines := []string{
 		"Sealed candidate manifest hash: " + manifest.Hash + ".",
 		"Return action " + string(manifest.Action) + " with required top-level fields: " + runtimeV2CandidateContractFieldList(manifest.RequiredTopLevelFields) + ".",
+		runtimecontract.RuntimeActionEffectInstruction(manifest.EffectPolicy.Action),
 		"The only allowed top-level fields are: " + runtimeV2CandidateContractFieldList(manifest.AllowedTopLevelFields) + ".",
 	}
 	if len(manifest.ForbiddenTopLevelFields) > 0 {
@@ -1370,6 +1394,9 @@ func runtimeV2CandidateStructuredOutputInstruction(manifest runtimecontract.Runt
 		}
 		if len(operation.RequireOneOfParameters) > 0 {
 			line += " Require one non-empty parameter from: " + runtimeV2CandidateContractFieldList(operation.RequireOneOfParameters) + "."
+		}
+		if operation.TargetCardinality != "" {
+			line += " targetRefs cardinality=" + string(operation.TargetCardinality) + "."
 		}
 		if operation.RequireTargetRefs {
 			line += " targetRefs is required and must name the concrete target changed by this operation."

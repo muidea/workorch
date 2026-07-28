@@ -5,6 +5,17 @@ import (
 	"strings"
 )
 
+// RuntimeOperationTargetCardinality is the sole descriptor-level declaration
+// of an operation's outer TargetRefs shape. Parameters must not duplicate this
+// identity; owner adapters receive the already sealed outer refs.
+type RuntimeOperationTargetCardinality string
+
+const (
+	RuntimeOperationTargetCardinalityZero RuntimeOperationTargetCardinality = "zero"
+	RuntimeOperationTargetCardinalityOne  RuntimeOperationTargetCardinality = "one"
+	RuntimeOperationTargetCardinalityMany RuntimeOperationTargetCardinality = "many"
+)
+
 // RuntimeOperationDescriptor is the single shared technical contract for a concrete operation kind.
 // It does not register executors and does not restore a generic RuntimeAdapter registry.
 // DefaultEffectScope is the kind-level default; concrete ExpectedEffectScope may still be
@@ -17,6 +28,7 @@ type RuntimeOperationDescriptor struct {
 	CapabilityClass      RuntimeCapabilityClass
 	IdempotencyClass     RuntimeOperationIdempotencyClass
 	RequiresOwnerReceipt bool
+	TargetCardinality    RuntimeOperationTargetCardinality
 	// AllowsNewTarget is a technical operation-contract property. It means the
 	// owner can apply this kind to an owner-authorized, workspace-relative
 	// target that is absent at observation time. It does not grant a path: the
@@ -189,6 +201,7 @@ func cloneRuntimeOperationDescriptor(value RuntimeOperationDescriptor) RuntimeOp
 	value.DefaultEffectScope = NormalizeRuntimeEffectScope(value.DefaultEffectScope)
 	value.CapabilityClass = RuntimeCapabilityClass(strings.TrimSpace(string(value.CapabilityClass)))
 	value.IdempotencyClass = NormalizeRuntimeOperationIdempotencyClass(value.IdempotencyClass)
+	value.TargetCardinality = RuntimeOperationTargetCardinality(strings.TrimSpace(string(value.TargetCardinality)))
 	if len(value.AllowedActions) > 0 {
 		value.AllowedActions = append([]RuntimeAction(nil), value.AllowedActions...)
 	}
@@ -214,32 +227,32 @@ func init() {
 			Kind: StepKindFileRead, OwnerModuleID: RuntimeModuleFile,
 			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
 			AllowedActions: []RuntimeAction{RuntimeActionProduceValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
-			RequiresOwnerReceipt: true,
+			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne,
 		},
 		{
 			Kind: StepKindFileEdit, OwnerModuleID: RuntimeModuleFile,
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedActions: []RuntimeAction{RuntimeActionProduceStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
-			RequiresOwnerReceipt: true,
+			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne,
 		},
 		{
 			// Historical durable file mutation kind used by fixtures/capability contracts.
 			Kind: StepKindFileWrite, OwnerModuleID: RuntimeModuleFile,
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedActions: []RuntimeAction{RuntimeActionProduceStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
-			RequiresOwnerReceipt: true, AllowsNewTarget: true,
+			RequiresOwnerReceipt: true, AllowsNewTarget: true, TargetCardinality: RuntimeOperationTargetCardinalityOne,
 		},
 		{
 			Kind: RuntimeBlockKindPatchApply, OwnerModuleID: RuntimeModuleFile,
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedActions: []RuntimeAction{RuntimeActionProduceStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
-			RequiresOwnerReceipt: true,
+			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne,
 		},
 		{
 			Kind: RuntimeBlockKindPatchPreview, OwnerModuleID: RuntimeModuleFile,
 			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
 			AllowedActions: []RuntimeAction{RuntimeActionProduceValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
-			RequiresOwnerReceipt: true,
+			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne,
 		},
 		{
 			Kind: RuntimeBlockKindPatchRevert, OwnerModuleID: RuntimeModuleFile,
@@ -266,6 +279,7 @@ func init() {
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyUnknown,
 			AllowedActions:  []RuntimeAction{RuntimeActionProduceStateChange, RuntimeActionProduceValidation},
 			CapabilityClass: RuntimeCapabilityClassStateChange, RequiresOwnerReceipt: true,
+			TargetCardinality:             RuntimeOperationTargetCardinalityMany,
 			AllowsGroundedWorkspaceTarget: true,
 		},
 		{

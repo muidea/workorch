@@ -159,7 +159,6 @@ func TestRuntimeOperationVariantContractMatchesPatchVariants(t *testing.T) {
 		ID: "patch-1", Kind: RuntimeBlockKindPatchApply, TargetRefs: []string{target},
 		Parameters: []OperationParameter{
 			{Name: "patchType", String: strPtr("file_write")},
-			{Name: "targetRef", String: &target},
 			{Name: "content", String: &content},
 		},
 	}
@@ -178,7 +177,6 @@ func TestRuntimeOperationVariantContractMatchesPatchVariants(t *testing.T) {
 	invalid := valid
 	invalid.Parameters = []OperationParameter{
 		{Name: "patchType", String: strPtr("text_replace")},
-		{Name: "targetRef", String: &target},
 		{Name: "oldText", String: strPtr("same")},
 		{Name: "newText", String: strPtr("same")},
 	}
@@ -198,12 +196,12 @@ func TestRuntimeOperationVariantContractRejectsOwnerIgnoredParameters(t *testing
 	}{
 		{
 			name: "patch file write diff", operation: RuntimeOperation{Kind: RuntimeBlockKindPatchApply, TargetRefs: []string{target}, Parameters: []OperationParameter{
-				{Name: "patchType", String: strPtr("file_write")}, {Name: "targetRef", String: &target}, {Name: "content", String: strPtr("ok")}, {Name: "diff", String: &value},
+				{Name: "patchType", String: strPtr("file_write")}, {Name: "content", String: strPtr("ok")}, {Name: "diff", String: &value},
 			}}, forbidden: "diff",
 		},
 		{
 			name: "patch text replace content", operation: RuntimeOperation{Kind: RuntimeBlockKindPatchApply, TargetRefs: []string{target}, Parameters: []OperationParameter{
-				{Name: "patchType", String: strPtr("text_replace")}, {Name: "targetRef", String: &target}, {Name: "oldText", String: strPtr("before")}, {Name: "newText", String: strPtr("after")}, {Name: "content", String: &value},
+				{Name: "patchType", String: strPtr("text_replace")}, {Name: "oldText", String: strPtr("before")}, {Name: "newText", String: strPtr("after")}, {Name: "content", String: &value},
 			}}, forbidden: "content",
 		},
 		{

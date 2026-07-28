@@ -28,7 +28,6 @@ func TestRuntimeAdapterProbeRejectsDirectoryPatchTargetWithoutMutation(t *testin
 	failure := adapter.ProbeRuntimeOperationFeasibility(workspace, inventory, runtimecontract.RuntimeOperation{
 		ID: "patch-directory", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{"."},
 		Parameters: []runtimecontract.OperationParameter{
-			{Name: "targetRef", String: stringPointer(".")},
 			{Name: "patchType", String: &patchType},
 			{Name: "content", String: &content},
 		},
@@ -313,11 +312,10 @@ func TestRuntimeAdapterProbeRejectsStaleAdmissibilitySnapshotWithoutMutation(t *
 	if err := os.WriteFile(path, []byte("package main\n// changed after inventory\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	target, oldText, newText := "main.go", "package main\n", "package app\n"
+	oldText, newText := "package main\n", "package app\n"
 	failure := adapter.ProbeRuntimeOperationFeasibility(workspace, inventory, runtimecontract.RuntimeOperation{
 		ID: "stale-edit", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{"main.go"},
 		Parameters: []runtimecontract.OperationParameter{
-			{Name: "path", String: &target},
 			{Name: "oldText", String: &oldText},
 			{Name: "newText", String: &newText},
 		},
@@ -365,7 +363,6 @@ func TestRuntimeAdapterProbeAllowsSelectedNewFileWriteTargetWithoutMutation(t *t
 	failure := adapter.ProbeRuntimeOperationFeasibility(workspace, inventory, runtimecontract.RuntimeOperation{
 		ID: "create-main", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{target},
 		Parameters: []runtimecontract.OperationParameter{
-			{Name: "targetRef", String: &target},
 			{Name: "patchType", String: &patchType},
 			{Name: "content", String: &content},
 		},
@@ -398,7 +395,6 @@ func TestRuntimeAdapterProbeReportsTypedStaleAfterExternalWorkspaceMutation(t *t
 	path := "main.go"
 	failure, stale := adapter.ProbeRuntimeOperationFeasibilityWithObservation(workspace, inventory, runtimecontract.RuntimeOperation{
 		ID: "edit-main", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{path},
-		Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &path}},
 	}, &observation)
 	if failure != nil || stale == nil {
 		t.Fatalf("external mutation probe failure/stale=%+v/%+v, want typed stale", failure, stale)
@@ -429,7 +425,6 @@ func TestRuntimeAdapterProbeRejectsNewTargetWithoutOwnerSelector(t *testing.T) {
 	failure := adapter.ProbeRuntimeOperationFeasibility(workspace, inventory, runtimecontract.RuntimeOperation{
 		ID: "create-main", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{target},
 		Parameters: []runtimecontract.OperationParameter{
-			{Name: "targetRef", String: &target},
 			{Name: "patchType", String: &patchType},
 			{Name: "content", String: &content},
 		},
@@ -452,7 +447,6 @@ func TestRuntimeAdapterProbeNewTargetSelectorRejectsWorkspaceEscape(t *testing.T
 	failure := adapter.ProbeRuntimeOperationFeasibility(workspace, inventory, runtimecontract.RuntimeOperation{
 		ID: "escape-workspace", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{target},
 		Parameters: []runtimecontract.OperationParameter{
-			{Name: "targetRef", String: &target},
 			{Name: "patchType", String: &patchType},
 			{Name: "content", String: &content},
 		},
@@ -480,7 +474,6 @@ func TestRuntimeAdapterProbeNewTargetSelectorDoesNotAuthorizeExistingUnlistedTar
 	failure := adapter.ProbeRuntimeOperationFeasibility(workspace, inventory, runtimecontract.RuntimeOperation{
 		ID: "overwrite-unlisted", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{target},
 		Parameters: []runtimecontract.OperationParameter{
-			{Name: "targetRef", String: &target},
 			{Name: "patchType", String: &patchType},
 			{Name: "content", String: &content},
 		},
@@ -507,7 +500,6 @@ func TestRuntimeAdapterProbeRejectsMissingTextReplaceDespiteNewTargetSelector(t 
 	failure := adapter.ProbeRuntimeOperationFeasibility(workspace, inventory, runtimecontract.RuntimeOperation{
 		ID: "edit-missing", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{target},
 		Parameters: []runtimecontract.OperationParameter{
-			{Name: "targetRef", String: &target},
 			{Name: "patchType", String: &patchType},
 			{Name: "oldText", String: &oldText},
 			{Name: "newText", String: &newText},
@@ -913,23 +905,23 @@ func TestRuntimeAdapterPatchApplyReplayProofCoversAllDurableVariants(t *testing.
 		{
 			name: "file_write",
 			parameters: func() []runtimecontract.OperationParameter {
-				patchType, content, target := patchTypeFileWrite, "after\n", "README.md"
-				return []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "content", String: &content}}
+				patchType, content := patchTypeFileWrite, "after\n"
+				return []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &content}}
 			},
 		},
 		{
 			name: "text_replace",
 			parameters: func() []runtimecontract.OperationParameter {
-				patchType, oldText, newText, target := patchTypeTextReplace, "before", "after", "README.md"
-				return []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}}
+				patchType, oldText, newText := patchTypeTextReplace, "before", "after"
+				return []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}}
 			},
 		},
 		{
 			name: "unified_diff",
 			parameters: func() []runtimecontract.OperationParameter {
-				patchType, target := patchTypeUnifiedDiff, "README.md"
+				patchType := patchTypeUnifiedDiff
 				diff := "--- a/README.md\n+++ b/README.md\n@@ -1,1 +1,1 @@\n-before\n+after\n"
-				return []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "diff", String: &diff}}
+				return []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "diff", String: &diff}}
 			},
 		},
 	}
@@ -989,7 +981,7 @@ func TestFileOperationSnapshotPrerequisiteRequestRequiresMissingCurrentSnapshot(
 	targetRef, patchType, oldText, newText := "target.txt", "text_replace", "old", "new"
 	operation := runtimecontract.RuntimeOperation{
 		ID: "replace-target", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{targetRef},
-		Parameters: []runtimecontract.OperationParameter{{Name: "targetRef", String: &targetRef}, {Name: "patchType", String: &patchType}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}},
+		Parameters: []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}},
 	}
 	failure := &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_replay_proof_unavailable", Signature: "file-preview-conflict", Message: "preview cannot prove patch", TargetRefs: []string{targetRef}}
 	request := fileOperationSnapshotPrerequisiteRequest(operation, failure, nil)
@@ -1089,7 +1081,7 @@ func TestRuntimeAdapterProbeRejectsUnverifiedFileWriteReplayBaseHash(t *testing.
 	failure := adapter.ProbeRuntimeOperationFeasibility(workspace, inventory, runtimecontract.RuntimeOperation{
 		ID: "sealed-file-write", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{"README.md"},
 		Parameters: []runtimecontract.OperationParameter{
-			{Name: "targetRef", String: stringPointer("README.md")}, {Name: "patchType", String: &patchType},
+			{Name: "patchType", String: &patchType},
 			{Name: "content", String: &content}, {Name: "baseHash", String: &staleHash},
 		},
 	})
@@ -1345,7 +1337,7 @@ func TestRuntimeAdapterRuntimeFeasibilityRejectsStaleUnifiedDiff(t *testing.T) {
 	failure := adapter.ProbeRuntimeOperationFeasibility(workspace, inventory, runtimecontract.RuntimeOperation{
 		ID: "stale-diff", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{target},
 		Parameters: []runtimecontract.OperationParameter{
-			{Name: "patchType", String: &patchType}, {Name: "targetRef", String: &target}, {Name: "diff", String: &diff},
+			{Name: "patchType", String: &patchType}, {Name: "diff", String: &diff},
 		},
 	})
 	if failure == nil || failure.Code != "unified_diff_apply_conflict" {

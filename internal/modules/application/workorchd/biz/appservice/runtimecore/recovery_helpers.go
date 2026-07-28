@@ -21,21 +21,6 @@ func IsTerminalRunState(state common.RunState) bool {
 	}
 }
 
-func RecoveredWorkspaceStateForTerminalRun(state common.RunState) common.WorkspaceState {
-	switch state {
-	case common.RunStateSuperseded:
-		return common.WorkspaceStateSuperseded
-	case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled:
-		return common.WorkspaceStateActive
-	default:
-		return common.WorkspaceStateActive
-	}
-}
-
-func IsActiveWorkspaceStateForRecovery(state common.WorkspaceState) bool {
-	return common.CanonicalWorkspaceOwnerState(state) == common.WorkspaceStateActive
-}
-
 func NonEmptyString(value any) bool {
 	text, ok := value.(string)
 	return ok && text != ""

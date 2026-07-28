@@ -115,7 +115,7 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 		execution, hasExec := operationExecutionRecord(aggregate.ActiveDispatch.OperationExecutions, operation.ID)
 		if !hasExec {
 			_, _ = c.markOperationExecutionOutcomeUnknown(ctx, workspaceID, runID, operation.ID)
-			return RuntimeAggregate{}, fmt.Errorf("operation %q has no execution ledger; outcome_unknown", operation.ID)
+			return RuntimeAggregate{}, operationOutcomeUnknown(operation.ID, "execution ledger is missing")
 		}
 		var governanceGrant *runtimecontract.RuntimeOperationGovernanceGrant
 		switch execution.State {
@@ -168,7 +168,7 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 				hasReplayProof := execution.ReplayProof != nil
 				if idempotency != runtimecontract.RuntimeOperationIdempotencySafeToReplay && idempotency != runtimecontract.RuntimeOperationIdempotencyOwnerManaged && !hasReplayProof {
 					_, _ = c.markOperationExecutionOutcomeUnknown(ctx, workspaceID, runID, operation.ID)
-					return RuntimeAggregate{}, fmt.Errorf("operation %q claimed without receipt; outcome_unknown", operation.ID)
+					return RuntimeAggregate{}, operationOutcomeUnknown(operation.ID, "claimed execution has no receipt or replay authority")
 				}
 				recovered, consumed, recoverErr := c.ConsumeRecoveryBudget(ctx, workspaceID, runID, runtimecontract.RuntimeRecoveryBudgetOperationRecovery)
 				if recoverErr != nil {
@@ -176,7 +176,7 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 				}
 				if !consumed {
 					_, _ = c.markOperationExecutionOutcomeUnknown(ctx, workspaceID, runID, operation.ID)
-					return RuntimeAggregate{}, fmt.Errorf("operation %q safe replay recovery budget exhausted; outcome_unknown", operation.ID)
+					return RuntimeAggregate{}, operationOutcomeUnknown(operation.ID, "safe replay recovery budget exhausted")
 				}
 				aggregate = recovered
 				dispatch = *aggregate.ActiveDispatch
@@ -186,7 +186,7 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 				}
 			}
 		case runtimecontract.OperationExecutionOutcomeUnknown:
-			return RuntimeAggregate{}, fmt.Errorf("operation %q has outcome_unknown; refuse blind replay", operation.ID)
+			return RuntimeAggregate{}, operationOutcomeUnknown(operation.ID, "blind replay is forbidden")
 		}
 		if execution.State == runtimecontract.OperationExecutionSealed {
 			claimed, claimErr := c.claimOperationExecution(ctx, workspaceID, runID, operation.ID)
@@ -347,9 +347,12 @@ func runtimeOperationEffectMismatchFailure(decision runtimecontract.RuntimeDecis
 	expected := runtimecontract.NormalizeRuntimeEffectScope(execution.ExpectedEffectScope)
 	observed := runtimecontract.NormalizeRuntimeEffectScope(receipt.ObservedEffectScope)
 	reason := ""
+	policy, policyKnown := runtimecontract.RuntimeActionEffectPolicyFor(decision.Action)
 	switch {
 	case decision.Action == runtimecontract.RuntimeActionProduceStateChange && receipt.Outcome == runtimecontract.RuntimeOperationOutcomeNoOp:
 		reason = "owner completed the operation without a durable state change"
+	case policyKnown && (receipt.Outcome == runtimecontract.RuntimeOperationOutcomeAccepted || receipt.Outcome == runtimecontract.RuntimeOperationOutcomeNoOp) && !policy.AllowsAcceptedReceiptEffect(observed):
+		reason = fmt.Sprintf("action %s cannot commit owner observed effect %q", decision.Action, observed)
 	case decision.Action == runtimecontract.RuntimeActionProduceStateChange && runtimecontract.RuntimeEffectIsDurable(expected) && !runtimecontract.RuntimeEffectIsDurable(observed):
 		reason = fmt.Sprintf("owner observed effect %q cannot satisfy expected durable effect %q", observed, expected)
 	case decision.Action == runtimecontract.RuntimeActionProduceValidation && runtimecontract.RuntimeEffectIsDurable(observed):
@@ -433,7 +436,7 @@ func (c *RuntimeController) recordOperationGovernanceRequired(ctx context.Contex
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
@@ -467,7 +470,14 @@ func (c *RuntimeController) commitPersistedOperationReceiptEvidence(ctx context.
 	case runtimecontract.RuntimeOperationOutcomeRejected:
 		status = ExecutionEvidenceStatusRejected
 	case runtimecontract.RuntimeOperationOutcomeAccepted, runtimecontract.RuntimeOperationOutcomeNoOp:
-		if qualityFailure := runtimeOperationEvidenceQualityFailure(operation, receipt.Evidence); qualityFailure != nil {
+		execution, found := operationExecutionRecord(dispatch.OperationExecutions, operation.ID)
+		if !found {
+			return EvidenceCommitResult{}, fmt.Errorf("operation %q has no sealed execution record", operation.ID)
+		}
+		if effectFailure := runtimeOperationEffectMismatchFailure(aggregate.Decision, execution, operation, receipt); effectFailure != nil {
+			status = ExecutionEvidenceStatusRejected
+			failure = effectFailure
+		} else if qualityFailure := runtimeOperationEvidenceQualityFailure(operation, receipt.Evidence); qualityFailure != nil {
 			status = ExecutionEvidenceStatusRejected
 			failure = qualityFailure
 		}
@@ -542,7 +552,7 @@ func (c *RuntimeController) claimOperationExecution(ctx context.Context, workspa
 		case runtimecontract.OperationExecutionOwnerCommitted, runtimecontract.OperationExecutionEvidenceCommitted:
 			return aggregate, nil
 		case runtimecontract.OperationExecutionOutcomeUnknown:
-			return RuntimeAggregate{}, fmt.Errorf("operation %q outcome_unknown cannot be reclaimed for replay", operationID)
+			return RuntimeAggregate{}, operationOutcomeUnknown(operationID, "execution cannot be reclaimed for replay")
 		}
 	}
 	if !found {
@@ -567,7 +577,7 @@ func (c *RuntimeController) claimOperationExecution(ctx context.Context, workspa
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if !found {
@@ -601,7 +611,7 @@ func (c *RuntimeController) markOperationExecutionOwnerCommitted(ctx context.Con
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
@@ -642,7 +652,7 @@ func (c *RuntimeController) markOperationExecutionOutcomeUnknown(ctx context.Con
 		})
 	}
 	aggregate.StateRevision++
-	_ = c.repository.Save(ctx, aggregate, expectedRevision)
+	_ = c.transitions.Commit(ctx, aggregate, expectedRevision)
 	return aggregate, nil
 }
 

@@ -280,14 +280,18 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		t.Fatal(requestErr)
 	}
 	response, ok := requestData.(orchestratorevents.RequestRuntimeCandidateResult)
-	if !ok || response.Failure != nil || response.Candidate.StateChange == nil {
+	if !ok || response.Failure != nil {
 		t.Fatalf("LLM candidate response = %#v", requestData)
+	}
+	decodedCandidate, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, response.DocumentContent)
+	if err != nil || decodedCandidate.StateChange == nil {
+		t.Fatalf("LLM candidate document = %q err=%v", response.DocumentContent, err)
 	}
 	if len(provider.requests) != 1 {
 		t.Fatalf("LLM provider calls = %d, want 1", len(provider.requests))
 	}
 	assertObservedTargetAuthorityInCandidateRequest(t, provider.requests[0], stablePrefix)
-	proposal, err := controller.AdmitCandidateProposalForTest(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, 0, response.Candidate)
+	proposal, err := controller.AdmitCandidateProposalForTest(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, 0, decodedCandidate)
 	if err != nil || !proposal.Admission.Accepted() {
 		t.Fatalf("target-bound candidate proposal was not admitted: result=%+v err=%v", proposal, err)
 	}
@@ -304,9 +308,9 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleFile,
 		magicevent.NewHeader(), ctx, orchestratorevents.ProbeRuntimeOperationFeasibilityCommand{
 			WorkspaceID: persisted.Facts.WorkspaceID, RunID: persisted.Facts.RunID, Transaction: persisted.Decision.AuthorityTransaction(),
-			WorkspaceDeliverableDirectory: workspaceDirectory, Operation: response.Candidate.StateChange.Operations[0].Operation,
+			WorkspaceDeliverableDirectory: workspaceDirectory, Operation: decodedCandidate.StateChange.Operations[0].Operation,
 			Admissibility: inventory, CapabilityStateBinding: inventory.AcquisitionBinding, Observation: &observation,
-			CandidateManifestHash: "manifest-mcp-file-integration", OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, response.Candidate.StateChange.Operations[0].Operation.Kind),
+			CandidateManifestHash: "manifest-mcp-file-integration", OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, decodedCandidate.StateChange.Operations[0].Operation.Kind),
 		},
 	))
 	if probeResult == nil {
@@ -321,13 +325,13 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		t.Fatalf("File candidate feasibility response = %#v", probeData)
 	}
 	persisted, err = controller.RecordCandidateFeasibility(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
-		OperationID: response.Candidate.StateChange.Operations[0].Operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID,
+		OperationID: decodedCandidate.StateChange.Operations[0].Operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID,
 		AcquisitionBinding: inventory.AcquisitionBinding, Feasible: true, ReplayProof: probeResponse.ReplayProof,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sealed, err := controller.AdmitAndSealCandidateAttemptForTest(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, 0, response.Candidate)
+	sealed, err := controller.AdmitAndSealCandidateAttemptForTest(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, 0, decodedCandidate)
 	if err != nil || !sealed.Admission.Accepted() || sealed.Aggregate.ActiveDispatch == nil {
 		t.Fatalf("target-bound candidate was not sealed: result=%+v err=%v", sealed, err)
 	}
@@ -725,7 +729,7 @@ func runtimeV2ObservedCandidatePayload(request llmmodels.RuntimeCandidateRequest
 				break
 			}
 		}
-		return []byte(fmt.Sprintf(`{"operations":[{"id":"repair-implementation","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["implementation.go"],"parameters":[{"name":"targetRef","string":"implementation.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package fixture\n// repaired\n"},{"name":"baseHash","string":%q}]}]}`, baseHash))
+		return []byte(fmt.Sprintf(`{"operations":[{"id":"repair-implementation","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["implementation.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package fixture\n// repaired\n"},{"name":"baseHash","string":%q}]}]}`, baseHash))
 	case runtimecontract.RuntimeActionProduceValidation:
 		// After an owner-observed FailureTarget is sealed, N1/N2 compile
 		// exact_target membership from that grounded set. Revalidation must
@@ -770,12 +774,16 @@ func requestAndSealObservedCandidate(t *testing.T, ctx context.Context, hub magi
 	if !ok || response.Failure != nil {
 		t.Fatalf("candidate response = %#v", data)
 	}
-	proposal, err := controller.AdmitCandidateProposalForTest(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, response.Candidate)
+	candidate, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, response.DocumentContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := controller.AdmitCandidateProposalForTest(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, candidate)
 	if err != nil || !proposal.Admission.Accepted() {
 		t.Fatalf("candidate proposal = %+v err=%v", proposal, err)
 	}
 	aggregate = proposal.Aggregate
-	for _, operation := range candidateRuntimeOperations(response.Candidate) {
+	for _, operation := range candidateRuntimeOperations(candidate) {
 		descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
 		if !found {
 			t.Fatalf("candidate operation descriptor missing: %+v", operation)
@@ -802,7 +810,7 @@ func requestAndSealObservedCandidate(t *testing.T, ctx context.Context, hub magi
 			t.Fatal(err)
 		}
 	}
-	sealed, err := controller.AdmitAndSealCandidateAttemptForTest(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, response.Candidate)
+	sealed, err := controller.AdmitAndSealCandidateAttemptForTest(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, candidate)
 	if err != nil || !sealed.Admission.Accepted() {
 		t.Fatalf("candidate seal = %+v err=%v", sealed, err)
 	}

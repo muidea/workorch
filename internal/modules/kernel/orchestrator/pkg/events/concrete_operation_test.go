@@ -30,7 +30,7 @@ func TestConcreteFileInspectionOperationData(t *testing.T) {
 	read, err := FileReadOperationDataFromRuntimeOperation(runtimecontract.RuntimeOperation{
 		ID: "read-1", Kind: runtimecontract.StepKindFileRead, TargetRefs: []string{path},
 		Parameters: []runtimecontract.OperationParameter{
-			{Name: "path", String: &path}, {Name: "optional", Boolean: &optional}, {Name: "maxBytes", Integer: &maxBytes},
+			{Name: "optional", Boolean: &optional}, {Name: "maxBytes", Integer: &maxBytes},
 			{Name: "startLine", Integer: &startLine}, {Name: "endLine", Integer: &endLine},
 		},
 	})
@@ -49,7 +49,7 @@ func TestConcretePatchPreviewOperationData(t *testing.T) {
 	data, err := PatchPreviewOperationDataFromRuntimeOperation(runtimecontract.RuntimeOperation{
 		ID: "preview-1", Kind: runtimecontract.RuntimeBlockKindPatchPreview, TargetRefs: []string{target},
 		Parameters: []runtimecontract.OperationParameter{
-			{Name: "targetRef", String: &target}, {Name: "patchType", String: &patchType}, {Name: "content", String: &content},
+			{Name: "patchType", String: &patchType}, {Name: "content", String: &content},
 		},
 	})
 	if err != nil {
@@ -65,7 +65,7 @@ func TestConcreteFileWriteOperationData(t *testing.T) {
 	content := "typed file write\n"
 	data, err := FileWriteOperationDataFromRuntimeOperation(runtimecontract.RuntimeOperation{
 		ID: "write-1", Kind: runtimecontract.StepKindFileWrite, TargetRefs: []string{target},
-		Parameters: []runtimecontract.OperationParameter{{Name: "targetRef", String: &target}, {Name: "content", String: &content}},
+		Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &content}},
 	})
 	if err != nil {
 		t.Fatal(err)

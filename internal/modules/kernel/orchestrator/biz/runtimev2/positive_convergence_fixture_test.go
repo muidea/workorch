@@ -116,9 +116,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 					ID: "validate-1", Kind: runtimecontract.StepKindFileRead,
 					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 					TargetRefs:          []string{"target.txt"},
-					Parameters: []runtimecontract.OperationParameter{
-						{Name: "path", String: strPtr("target.txt")},
-					},
+					Parameters:          nil,
 				},
 			}}},
 		})
@@ -230,9 +228,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 					ID: "validate-repair", Kind: runtimecontract.StepKindFileRead,
 					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 					TargetRefs:          []string{"target.txt"},
-					Parameters: []runtimecontract.OperationParameter{
-						{Name: "path", String: strPtr("target.txt")},
-					},
+					Parameters:          nil,
 				},
 			}}},
 		})
@@ -355,9 +351,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 					Operation: runtimecontract.RuntimeOperation{
 						ID: "v1", Kind: runtimecontract.StepKindFileRead,
 						CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
-						Parameters: []runtimecontract.OperationParameter{
-							{Name: "path", String: strPtr("target.txt")},
-						},
+						TargetRefs:          []string{"target.txt"},
 					},
 				}}},
 			})
@@ -447,9 +441,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 					Operation: runtimecontract.RuntimeOperation{
 						ID: "v2", Kind: runtimecontract.StepKindFileRead,
 						CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
-						Parameters: []runtimecontract.OperationParameter{
-							{Name: "path", String: strPtr("target.txt")},
-						},
+						TargetRefs:          []string{"target.txt"},
 					},
 				}}},
 			})
@@ -619,9 +611,7 @@ func TestPositiveConvergenceFixture_FocusAdvanceAfterSatisfiedAssessment(t *test
 					Operation: runtimecontract.RuntimeOperation{
 						ID: "v1", Kind: runtimecontract.StepKindFileRead,
 						CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
-						Parameters: []runtimecontract.OperationParameter{
-							{Name: "path", String: strPtr("target.txt")},
-						},
+						TargetRefs:          []string{"target.txt"},
 					},
 				}}},
 			})

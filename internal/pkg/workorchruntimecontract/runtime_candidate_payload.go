@@ -69,6 +69,27 @@ func RuntimeCandidateDocumentDispositionForError(err error) RuntimeCandidateDocu
 	return RuntimeCandidateDocumentComplete
 }
 
+// InspectRuntimeCandidateDocumentFraming classifies provider bytes without
+// decoding a Runtime candidate. A complete but malformed/schema-invalid JSON
+// value is still complete: SM-3 must persist and adjudicate it. Only a blank
+// body or a first JSON value cut off at EOF changes the request-session path.
+func InspectRuntimeCandidateDocumentFraming(payload []byte) RuntimeCandidateDocumentDisposition {
+	if len(bytes.TrimSpace(payload)) == 0 {
+		return RuntimeCandidateDocumentEmpty
+	}
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	var value json.RawMessage
+	if err := decoder.Decode(&value); err != nil {
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			return RuntimeCandidateDocumentIncomplete
+		}
+		return RuntimeCandidateDocumentComplete
+	}
+	// Once the first value is complete, trailing bytes are a completed
+	// document defect for the SM-3 evaluator, never an output continuation.
+	return RuntimeCandidateDocumentComplete
+}
+
 // DecodeRuntimeCandidatePayload is the owner-neutral, strict DTO decoder for
 // a completed provider candidate document. It performs no state transition or
 // admission decision; Orchestrator remains the sole authority for both.

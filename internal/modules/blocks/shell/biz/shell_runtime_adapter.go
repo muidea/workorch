@@ -260,13 +260,11 @@ func shellProbeRequestFromOperation(workspaceDirectory string, operation runtime
 			if parameter.Boolean != nil {
 				request.StateChanging = *parameter.Boolean
 			}
-		case "targetRef":
-			if parameter.String != nil {
-				request.TargetRef = *parameter.String
-			}
-		case "targetRefs":
-			request.TargetRefs = append([]string(nil), parameter.StringList...)
 		}
+	}
+	request.TargetRefs = append([]string(nil), operation.TargetRefs...)
+	if len(request.TargetRefs) == 1 {
+		request.TargetRef = request.TargetRefs[0]
 	}
 	return request, nil
 }

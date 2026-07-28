@@ -33,6 +33,11 @@ func TestBuildRuntimeCandidateContractManifestNarrowsCreationScopeWithoutSecondF
 		len(manifest.Operations) != 1 || manifest.Operations[0].Kind != RuntimeBlockKindPatchApply {
 		t.Fatalf("creation-scope manifest = %+v", manifest)
 	}
+	if manifest.EffectPolicy.Action != RuntimeActionProduceStateChange ||
+		!manifest.EffectPolicy.AllowsOperationEffect(RuntimeEffectWorkspaceDurable) ||
+		manifest.EffectPolicy.AllowsOperationEffect(RuntimeEffectNone) {
+		t.Fatalf("manifest effect policy = %+v", manifest.EffectPolicy)
+	}
 	operation := manifest.Operations[0]
 	if operation.OwnerModuleID != RuntimeModuleFile ||
 		operation.OperationContractRevision == "" ||
@@ -82,7 +87,7 @@ func TestBuildRuntimeCandidateContractManifestScopeAllowsOnlyDescriptorDeclaredG
 			t.Fatalf("scope selection must seal existing_owner_scope for %s: %+v", operation.Kind, operation.Target)
 		}
 	}
-	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"id":"tidy","kind":"shell/command","coverageWorkItemIds":["cwi-1"],"targetRefs":["go.sum"],"parameters":[{"name":"command","string":"go"},{"name":"args","stringList":["mod","tidy"]},{"name":"stateChanging","boolean":true},{"name":"targetRef","string":"go.sum"}]}]}`))
+	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"id":"tidy","kind":"shell/command","coverageWorkItemIds":["cwi-1"],"targetRefs":["go.sum"],"parameters":[{"name":"command","string":"go"},{"name":"args","stringList":["mod","tidy"]},{"name":"stateChanging","boolean":true}]}]}`))
 	if err != nil {
 		t.Fatalf("decode File-grounded shell candidate: %v", err)
 	}
@@ -296,7 +301,7 @@ func TestValidateRuntimeCandidateAgainstManifestReportsTypedSemanticDiagnostics(
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"id":"write","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"targetRef","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`))
+	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"id":"write","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +329,7 @@ func TestValidateRuntimeCandidateAgainstManifestReportsTypedSemanticDiagnostics(
 		},
 		{
 			name: "target", mutate: func(operation *RuntimeOperation) { operation.TargetRefs = nil },
-			path: "$.operations[0].targetRefs", actual: "missing_targetRefs", required: "targetRefs",
+			path: "$.operations[0].targetRefs", actual: "missing_targetRefs", required: "one",
 		},
 		{
 			// Sealed exact_target membership is the first-failure for an outside
@@ -332,19 +337,6 @@ func TestValidateRuntimeCandidateAgainstManifestReportsTypedSemanticDiagnostics(
 			// after membership succeeds.
 			name: "target outside sealed policy", mutate: func(operation *RuntimeOperation) { operation.TargetRefs = []string{"other.go"} },
 			path: "$.operations[0].targetRefs", actual: "other.go", allowed: "main.go",
-		},
-		{
-			name: "target parameter mismatch", mutate: func(operation *RuntimeOperation) {
-				// Clone parameters so table-driven cases cannot share pointer state.
-				operation.Parameters = append([]OperationParameter(nil), operation.Parameters...)
-				for index := range operation.Parameters {
-					if operation.Parameters[index].Name == "targetRef" {
-						value := "other.go"
-						operation.Parameters[index].String = &value
-					}
-				}
-			},
-			path: "$.operations[0].targetRefs", actual: "other.go", allowed: "main.go", required: "targetRef",
 		},
 		{
 			name: "parameter", mutate: func(operation *RuntimeOperation) {
@@ -584,7 +576,7 @@ func TestValidateRuntimeCandidateAgainstManifestRejectsTargetOutsideSealedPolicy
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"id":"edit","kind":"file/edit","coverageWorkItemIds":["cwi-1"],"targetRefs":["other.go"],"parameters":[{"name":"path","string":"other.go"},{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`))
+	_, err = DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"id":"edit","kind":"file/edit","coverageWorkItemIds":["cwi-1"],"targetRefs":["other.go"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`))
 	if err == nil {
 		t.Fatal("decoder must reject target outside sealed AllowedTargetRefs")
 	}
@@ -596,7 +588,6 @@ func TestValidateRuntimeCandidateAgainstManifestRejectsTargetOutsideSealedPolicy
 	decoded := RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{Operation: RuntimeOperation{
 		ID: "edit", Kind: StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"other.go"},
 		Parameters: []OperationParameter{
-			{Name: "path", String: semanticShapeStringPointer("other.go")},
 			{Name: "oldText", String: semanticShapeStringPointer("old")},
 			{Name: "newText", String: semanticShapeStringPointer("new")},
 		},

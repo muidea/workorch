@@ -45,7 +45,7 @@ func (c *RuntimeController) RecordDeliveryAcknowledgement(ctx context.Context, a
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, false, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expected); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expected); err != nil {
 		return RuntimeAggregate{}, false, err
 	}
 	return aggregate, true, nil

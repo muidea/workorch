@@ -15,7 +15,7 @@ import (
 // correction renderer. It is deliberately separate from the executable
 // operation-contract revision: this value tracks the candidate wire shape,
 // while RuntimeOperationContractRevision tracks executable owner semantics.
-const RuntimeCandidateContractManifestRevision = "candidate-contract-manifest-v1"
+const RuntimeCandidateContractManifestRevision = "candidate-contract-manifest-v2"
 
 // RuntimeOperationTargetPolicy is the only owner-neutral target authorization
 // vocabulary sealed into a candidate manifest. Concrete File/Git/Shell/MCP
@@ -63,6 +63,9 @@ type RuntimeCandidateContractManifest struct {
 	Revision string
 	Hash     string
 	Action   RuntimeAction
+	// EffectPolicy is the canonical action-level policy shared by renderer,
+	// candidate admission, dispatch seal and receipt evidence adjudication.
+	EffectPolicy RuntimeActionEffectPolicy
 	// OperationContractRevision is the executable catalog fence compiled into
 	// this binary. It is also stored on every operation authorization so a
 	// consumer can verify one kind without re-deriving the whole inventory.
@@ -90,6 +93,10 @@ type RuntimeCandidateOperationManifest struct {
 	AllowedVariantIDs      []string
 	Parameters             []RuntimeOperationParameterContract
 	RequireOneOfParameters []string
+	// TargetCardinality is projected directly from the executable descriptor.
+	// It is the one wire-shape authority for outer targetRefs; parameters must
+	// never restate a target path.
+	TargetCardinality RuntimeOperationTargetCardinality
 	// RequireTargetRefs is the wire-level obligation derived from the sealed
 	// TargetPolicy and the executable operation contract. It is not an
 	// independent policy source: consumers that need membership rules must read
@@ -160,6 +167,7 @@ func BuildRuntimeCandidateContractManifest(decision RuntimeDecision, ownerFacts 
 	manifest := RuntimeCandidateContractManifest{
 		Revision:                  RuntimeCandidateContractManifestRevision,
 		Action:                    decision.Action,
+		EffectPolicy:              mustRuntimeActionEffectPolicy(decision.Action),
 		OperationContractRevision: contractRevision,
 		CoverageWorkItemIDs:       append([]common.CoverageWorkItemID(nil), required.CoverageWorkItemIDs...),
 		TargetRefs:                append([]string(nil), required.TargetRefs...),
@@ -268,6 +276,7 @@ func (m RuntimeCandidateContractManifest) Normalized() RuntimeCandidateContractM
 	m.Revision = strings.TrimSpace(m.Revision)
 	m.Hash = strings.TrimSpace(m.Hash)
 	m.Action = RuntimeAction(strings.TrimSpace(string(m.Action)))
+	m.EffectPolicy = m.EffectPolicy.Normalized()
 	m.OperationContractRevision = strings.TrimSpace(m.OperationContractRevision)
 	m.RequiredTopLevelFields = normalizeStrings(m.RequiredTopLevelFields)
 	m.AllowedTopLevelFields = normalizeStrings(m.AllowedTopLevelFields)
@@ -300,6 +309,7 @@ func (m RuntimeCandidateOperationManifest) Normalized() RuntimeCandidateOperatio
 	m.AllowedVariantIDs = normalizeStrings(m.AllowedVariantIDs)
 	m.Parameters = cloneRuntimeOperationParameterContracts(m.Parameters)
 	m.RequireOneOfParameters = cloneRuntimeCandidateContractStrings(m.RequireOneOfParameters)
+	m.TargetCardinality = RuntimeOperationTargetCardinality(strings.TrimSpace(string(m.TargetCardinality)))
 	m.ForbiddenParameters = cloneRuntimeCandidateContractStrings(m.ForbiddenParameters)
 	m.Variants = cloneRuntimeOperationVariantContracts(m.Variants)
 	m.Rules = cloneRuntimeCandidateContractStrings(m.Rules)
@@ -395,6 +405,14 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 	h := sha256.New()
 	writeHashString(h, manifest.Revision)
 	writeHashString(h, string(manifest.Action))
+	writeHashString(h, string(manifest.EffectPolicy.Action))
+	writeHashString(h, fmt.Sprintf("%t", manifest.EffectPolicy.ExecutableOperationsAllowed))
+	for _, scope := range manifest.EffectPolicy.AllowedOperationEffects {
+		writeHashString(h, string(scope))
+	}
+	for _, scope := range manifest.EffectPolicy.AllowedAcceptedReceiptEffects {
+		writeHashString(h, string(scope))
+	}
 	writeHashString(h, manifest.OperationContractRevision)
 	writeHashStrings(h, manifest.RequiredTopLevelFields)
 	writeHashStrings(h, manifest.AllowedTopLevelFields)
@@ -426,6 +444,7 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 			writeHashString(h, parameter.Description)
 		}
 		writeHashStrings(h, operation.RequireOneOfParameters)
+		writeHashString(h, string(operation.TargetCardinality))
 		writeHashString(h, fmt.Sprintf("%t", operation.RequireTargetRefs))
 		writeHashStrings(h, operation.ForbiddenParameters)
 		for _, variant := range operation.Variants {
@@ -465,6 +484,14 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 		writeHashString(h, operation.OperationContractRevision)
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+func mustRuntimeActionEffectPolicy(action RuntimeAction) RuntimeActionEffectPolicy {
+	policy, ok := RuntimeActionEffectPolicyFor(action)
+	if !ok {
+		return RuntimeActionEffectPolicy{Action: action}
+	}
+	return policy
 }
 
 func runtimeCandidateEnvelopeFields(action RuntimeAction) (required, allowed, forbidden []string) {
@@ -534,6 +561,7 @@ func runtimeCandidateOperationManifestForKind(kind string, required RequiredOutp
 		AllowedVariantIDs:           allowedVariantIDs,
 		Parameters:                  cloneRuntimeOperationParameterContracts(contract.Parameters),
 		RequireOneOfParameters:      append([]string(nil), contract.RequireOneOfParameters...),
+		TargetCardinality:           descriptor.TargetCardinality,
 		RequireTargetRefs:           requireTargetRefs,
 		ForbiddenParameters:         append([]string(nil), contract.ForbiddenParameters...),
 		Variants:                    variants,

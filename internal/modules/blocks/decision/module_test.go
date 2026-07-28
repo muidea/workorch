@@ -821,7 +821,6 @@ func TestDecisionUpdateTicketCommandPublishesUpdatedNotification(t *testing.T) {
 		WorkspaceID:  "ws-ticket-update",
 		RunID:        "run-ticket-update",
 		StepID:       "step-ticket-update",
-		State:        common.DecisionTicketStateOpen,
 		Reason:       "provider unavailable",
 		DecisionKind: "operator_input",
 		Question:     "provide runtime config",
@@ -836,8 +835,8 @@ func TestDecisionUpdateTicketCommandPublishesUpdatedNotification(t *testing.T) {
 		t.Fatalf("get ticket: %v", err)
 	}
 	attempt, _ := item.Context.Float64("attempt")
-	if item.State != common.DecisionTicketStateOpen || attempt != float64(2) {
-		t.Fatalf("ticket after update = %+v, want reopened ticket with updated context", item)
+	if item.State != common.DecisionTicketStateResolved || attempt != float64(2) {
+		t.Fatalf("ticket after update = %+v, want owner-preserved state with updated context", item)
 	}
 
 	select {
@@ -845,8 +844,8 @@ func TestDecisionUpdateTicketCommandPublishesUpdatedNotification(t *testing.T) {
 		if data.WorkspaceID != "ws-ticket-update" || data.RunID != "run-ticket-update" || data.StepID != "step-ticket-update" {
 			t.Fatalf("updated scope = ws:%s run:%s step:%s", data.WorkspaceID, data.RunID, data.StepID)
 		}
-		if data.State != common.DecisionTicketStateOpen || data.Reason != "provider unavailable" {
-			t.Fatalf("updated data = %+v, want reopened provider ticket", data)
+		if data.State != common.DecisionTicketStateResolved || data.Reason != "provider unavailable" {
+			t.Fatalf("updated data = %+v, want owner-preserved resolved ticket", data)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("ticket update command did not publish ticket updated notification")

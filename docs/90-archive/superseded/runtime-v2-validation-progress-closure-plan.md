@@ -1,6 +1,6 @@
 # Runtime V2 Contract Normalization Closure Plan
 
-Status: active
+Status: superseded
 
 Type: implementation closure plan
 
@@ -8,9 +8,13 @@ Last Updated: 2026-07-26
 
 Execution Revision: R5 — one sealed authorization, one evaluator, finite outcomes
 
+> Superseded on 2026-07-28 by
+> [Runtime V2 单 Owner 状态机统一收口方案](../../70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md)。
+> 本文只保留 manifest/evaluator/receipt 回归基线，不再定义活动实施顺序或状态转换规则。
+
 ## 1. Purpose
 
-本文是 Runtime V2 代码收口的唯一活动执行队列。目标不是继续增加针对单个 live 错误的校验分支，而是把
+本文曾是 Runtime V2 candidate/receipt 代码收口队列。目标不是继续增加针对单个 live 错误的校验分支，而是把
 owner facts、candidate manifest、decoder、admission、owner feasibility、correction 与 recovery 归一为有限、
 可枚举的合同代数，使不稳定 LLM 输出只能进入确定路径。
 

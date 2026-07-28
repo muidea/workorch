@@ -91,7 +91,8 @@ func runtimeCandidateContextManifest(action runtimecontract.RuntimeAction, kinds
 	for _, kind := range kinds {
 		operations = append(operations, runtimecontract.RuntimeCandidateOperationManifest{Kind: kind})
 	}
-	return runtimecontract.RuntimeCandidateContractManifest{Action: action, Operations: operations}
+	policy, _ := runtimecontract.RuntimeActionEffectPolicyFor(action)
+	return runtimecontract.RuntimeCandidateContractManifest{Action: action, EffectPolicy: policy, Operations: operations}
 }
 
 func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T) {
@@ -179,7 +180,7 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, facts.Activation.ExecutionContract)
 	rejectedPath := "main.go"
 	rejectedShape := runtimecontract.RuntimeRejectedOperationShape{
-		Operation:        runtimecontract.RuntimeOperation{ID: "rejected-edit", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{rejectedPath}, Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &rejectedPath}}},
+		Operation:        runtimecontract.RuntimeOperation{ID: "rejected-edit", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{rejectedPath}},
 		FailureSignature: "rejected-shape-signature",
 	}
 	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(facts, decision, []runtimecontract.RuntimeRejectedOperationShape{rejectedShape})
@@ -224,8 +225,8 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 	}
 	for _, value := range []string{
 		`"outputContract"`, `"manifestHash"`, `"structuredOutputInstruction"`, `"$id":"workorch.runtime_candidate.state_change.v2"`, `"forbiddenTopLevelFields"`,
-		`"operationContracts":[{"kind":"file/edit"`, `"name":"path"`, `"name":"oldText"`, `"name":"newText"`,
-		`"forbiddenParameters":["filePath","fileContent","targetRef","targetRefs"]`,
+		`"operationContracts":[{"kind":"file/edit"`, `"name":"oldText"`, `"name":"newText"`, `"targetCardinality":"one"`,
+		`"forbiddenParameters":["filePath","fileContent","path","targetRef","targetRefs"]`,
 		`"RequirementID":"repo-init"`, `"capabilityStates"`, `"repo-state-hash"`, `"targetSelectionInstruction"`, "empty workspace creation scope", `sealed prospective target \"initial-deliverable.txt\"`,
 	} {
 		if !strings.Contains(dynamicSection, value) {
@@ -585,6 +586,9 @@ func TestRuntimeV2CandidateSchemasAreActionSpecific(t *testing.T) {
 	if !strings.Contains(stateChange, "workorch.runtime_candidate.state_change.v2") || !strings.Contains(stateChange, "durable") {
 		t.Fatalf("state-change schema = %s", stateChange)
 	}
+	if !strings.Contains(stateChange, "Every operation") || strings.Contains(stateChange, "At least one operation") {
+		t.Fatalf("state-change schema does not render the canonical all-durable effect policy: %s", stateChange)
+	}
 	if !strings.Contains(validation, "workorch.runtime_candidate.validation.v2") || !strings.Contains(validation, "non-durable") {
 		t.Fatalf("validation schema = %s", validation)
 	}
@@ -677,7 +681,7 @@ func TestRuntimeV2CandidateSchemaDerivesPatchTargetRequirementsFromOperationCont
 			AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
 		},
 	}, nil)
-	for _, value := range []string{`"const":"patch/apply"`, `"const":"patchType"`, `"const":"targetRef"`, `"const":"path"`, `"targetRefs"`, `"minItems":1`, `"minLength":1`} {
+	for _, value := range []string{`"const":"patch/apply"`, `"const":"patchType"`, `"targetRefs"`, `"minItems":1`, `"maxItems":1`, `"minLength":1`} {
 		if !strings.Contains(schema, value) {
 			t.Fatalf("descriptor-driven patch schema lost %q: %s", value, schema)
 		}
@@ -1027,7 +1031,7 @@ func TestRuntimeV2CandidateManifestDrivesSchemaInstructionAndRetryCorrection(t *
 				AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
 			}},
-			contains: []string{"patch/apply", "targetRefs is required", "TargetPolicy=exact_target", "Allowed targets: main.go", "targetRef:string", "Forbidden parameters"},
+			contains: []string{"patch/apply", "targetRefs cardinality=one", "targetRefs is required", "TargetPolicy=exact_target", "Allowed targets: main.go", "Forbidden parameters"},
 		},
 		{
 			name: "shell summary remains forbidden",
@@ -1345,7 +1349,7 @@ func TestRuntimeV2AssessmentRequestPublishesCanonicalEvidenceRefContract(t *test
 
 func TestRuntimeV2CandidateContextPublishesExactRejectedShapes(t *testing.T) {
 	path := "main.go"
-	operation := runtimecontract.RuntimeOperation{ID: "validate-1", Kind: runtimecontract.StepKindFileRead, TargetRefs: []string{path}, Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &path}}}
+	operation := runtimecontract.RuntimeOperation{ID: "validate-1", Kind: runtimecontract.StepKindFileRead, TargetRefs: []string{path}}
 	facts := runtimecontract.RuntimeFacts{
 		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-v2-00000000000000000001",

@@ -141,21 +141,19 @@ func ValidateOperationEffectAgainstRequired(operation RuntimeOperation, required
 	if !ok {
 		return scope, nil
 	}
+	policy, ok := RuntimeActionEffectPolicyFor(action)
+	if !ok {
+		return scope, fmt.Errorf("operation %q has no effect policy for action %q", operation.ID, action)
+	}
 	switch action {
-	case RuntimeActionProduceValidation:
-		if RuntimeEffectIsDurable(scope) || scope == RuntimeEffectUnknown || scope == RuntimeEffectGovernanceOnly {
-			return scope, fmt.Errorf("operation %q expected effect %q cannot satisfy produce_validation", operation.ID, scope)
+	case RuntimeActionProduceValidation, RuntimeActionProduceStateChange:
+		if !policy.AllowsOperationEffect(scope) {
+			if action == RuntimeActionProduceStateChange {
+				return scope, fmt.Errorf("operation %q expected effect %q is not a durable effect and cannot satisfy %s", operation.ID, scope, action)
+			}
+			return scope, fmt.Errorf("operation %q expected effect %q cannot satisfy %s", operation.ID, scope, action)
 		}
 		if len(required.AcceptedEffectScopes) > 0 && !EffectScopeSatisfiesAccepted(scope, required.AcceptedEffectScopes) {
-			return scope, fmt.Errorf("operation %q expected effect %q is not in accepted effect scopes", operation.ID, scope)
-		}
-	case RuntimeActionProduceStateChange:
-		// Individual operations may be non-durable dependencies; durable satisfaction
-		// is checked across the full candidate. Still reject unknown as primary proof.
-		if scope == RuntimeEffectUnknown {
-			return scope, fmt.Errorf("operation %q has unknown effect and cannot be sealed", operation.ID)
-		}
-		if len(required.AcceptedEffectScopes) > 0 && RuntimeEffectIsDurable(scope) && !EffectScopeSatisfiesAccepted(scope, required.AcceptedEffectScopes) {
 			return scope, fmt.Errorf("operation %q expected effect %q is not in accepted effect scopes", operation.ID, scope)
 		}
 	case RuntimeActionRequestGovernance:
@@ -167,7 +165,7 @@ func ValidateOperationEffectAgainstRequired(operation RuntimeOperation, required
 }
 
 // ValidateCandidateEffectCompatibility enforces forward/reverse effect gates before seal.
-// - produce_state_change: at least one durable operation matching RequiredEffectScopes
+// - produce_state_change: every operation durable; candidate effects match RequiredEffectScopes
 // - produce_validation: every operation non-durable; no durable/unknown
 // - unknown effect never accepted
 func ValidateCandidateEffectCompatibility(operations []RuntimeOperation, required RequiredOutputContract, capabilities []RuntimeMCPCapabilityContext) error {
@@ -183,34 +181,23 @@ func ValidateCandidateEffectCompatibility(operations []RuntimeOperation, require
 		return err
 	}
 
-	var durableObserved []RuntimeEffectScope
+	var observed []RuntimeEffectScope
 	for _, operation := range operations {
 		scope, err := ValidateOperationEffectAgainstRequired(operation, required, capabilities)
 		if err != nil {
 			return err
 		}
-		if RuntimeEffectIsDurable(scope) {
-			durableObserved = append(durableObserved, scope)
-		}
-		// Validation: already rejected durable/unknown in ValidateOperationEffectAgainstRequired.
-		// State-change: collect durable for required-scope check.
-		_ = action
+		observed = append(observed, scope)
 	}
 
 	switch action {
 	case RuntimeActionProduceStateChange:
-		if len(durableObserved) == 0 {
-			return fmt.Errorf("produce_state_change candidate requires at least one durable effect operation; read-only/session/no-op operations alone cannot satisfy state-change")
-		}
-		if !EffectScopeMeetsRequired(durableObserved, required.RequiredEffectScopes) {
+		if !EffectScopeMeetsRequired(observed, required.RequiredEffectScopes) {
 			return fmt.Errorf("produce_state_change candidate durable effects %v do not meet required effect scopes %v",
-				RuntimeEffectScopesAsStrings(durableObserved), RuntimeEffectScopesAsStrings(required.RequiredEffectScopes))
+				RuntimeEffectScopesAsStrings(observed), RuntimeEffectScopesAsStrings(required.RequiredEffectScopes))
 		}
 	case RuntimeActionProduceValidation:
-		// All operations already checked non-durable.
-		if len(durableObserved) > 0 {
-			return fmt.Errorf("produce_validation candidate must not include durable effect operations")
-		}
+		// Every operation was checked against the same non-durable policy above.
 	}
 	return nil
 }
@@ -228,23 +215,8 @@ func OperationEffectCompatibleWithAction(kind string, action RuntimeAction, capa
 	if !runtimeDescriptorAllowsAction(descriptor, action) {
 		return false
 	}
-	scope := NormalizeRuntimeEffectScope(descriptor.DefaultEffectScope)
-	switch action {
-	case RuntimeActionProduceValidation:
-		return RuntimeEffectIsNonDurable(scope)
-	case RuntimeActionProduceStateChange:
-		// Non-durable-only kinds cannot satisfy state-change as primary ops, but may
-		// still appear as dependency nodes — kind feasibility includes kinds that can
-		// be durable or are dual-use.
-		if !RuntimeEffectIsDurable(scope) {
-			return false
-		}
-		return true
-	case RuntimeActionRequestGovernance:
-		return scope == RuntimeEffectGovernanceOnly
-	default:
-		return true
-	}
+	policy, ok := RuntimeActionEffectPolicyFor(action)
+	return ok && policy.AllowsOperationEffect(descriptor.DefaultEffectScope)
 }
 
 // OperationEffectCompatibleWithSealedCapabilities is the activation-aware
@@ -260,20 +232,17 @@ func OperationEffectCompatibleWithSealedCapabilities(kind string, action Runtime
 	if !OperationEffectCompatibleWithActionDescriptor(kind, action) {
 		return false
 	}
+	policy, ok := RuntimeActionEffectPolicyFor(action)
+	if !ok {
+		return false
+	}
 	for _, capability := range mcpCapabilities {
 		if !capability.Enabled || CanonicalRuntimeBlockKind(capability.OperationKind) != StepKindMCPToolCall {
 			continue
 		}
 		scope := NormalizeRuntimeEffectScope(RuntimeEffectScope(capability.EffectScope))
-		switch action {
-		case RuntimeActionProduceValidation:
-			if RuntimeEffectIsNonDurable(scope) {
-				return true
-			}
-		case RuntimeActionProduceStateChange:
-			if RuntimeEffectIsDurable(scope) {
-				return true
-			}
+		if policy.AllowsOperationEffect(scope) {
+			return true
 		}
 	}
 	return false
@@ -285,6 +254,10 @@ func OperationEffectCompatibleWithSealedCapabilities(kind string, action Runtime
 // a state-change request never sees non-durable tool capabilities. Resource/prompt
 // capability kinds retain their descriptor-defined non-durable effect.
 func RuntimeMCPCapabilitiesForAction(capabilities []RuntimeMCPCapabilityContext, action RuntimeAction) []RuntimeMCPCapabilityContext {
+	policy, ok := RuntimeActionEffectPolicyFor(action)
+	if !ok || !policy.ExecutableOperationsAllowed {
+		return nil
+	}
 	ret := make([]RuntimeMCPCapabilityContext, 0, len(capabilities))
 	for _, raw := range capabilities {
 		capability := SealMCPCapabilityEffect(raw)
@@ -303,15 +276,8 @@ func RuntimeMCPCapabilitiesForAction(capabilities []RuntimeMCPCapabilityContext,
 		if kind == StepKindMCPToolCall {
 			scope = NormalizeRuntimeEffectScope(RuntimeEffectScope(capability.EffectScope))
 		}
-		switch action {
-		case RuntimeActionProduceValidation:
-			if !RuntimeEffectIsNonDurable(scope) {
-				continue
-			}
-		case RuntimeActionProduceStateChange:
-			if !RuntimeEffectIsDurable(scope) {
-				continue
-			}
+		if !policy.AllowsOperationEffect(scope) {
+			continue
 		}
 		ret = append(ret, capability)
 	}

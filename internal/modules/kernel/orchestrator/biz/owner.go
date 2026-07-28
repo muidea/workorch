@@ -18,6 +18,7 @@ import (
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -67,10 +68,7 @@ func (m *Biz) Configure(deps Dependencies) error {
 		return common.ErrInvalidArgument
 	}
 	m.Base = basebiz.New(ModuleID, deps.CommandHub, deps.BackgroundRoutine)
-	m.bizPtr = NewRuntimeOrchestratorWithResolutionsAndEvidence(
-		decisionEventTicketRepository{hub: m.EventHub()},
-		decisionEventResolutionRepository{hub: m.EventHub()},
-		approvalEventRepository{hub: m.EventHub()},
+	m.bizPtr = NewRuntimeOrchestratorWithEvidence(
 		RuntimeEvidenceRepositories{
 			Results:               resultEventResultRepository{hub: m.EventHub()},
 			Artifacts:             resultEventArtifactRepository{hub: deps.CommandHub},
@@ -462,6 +460,12 @@ func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.Wor
 		}
 		defer m.lifecycleMu.RUnlock()
 		if err := m.driveAndProjectRuntimeV2Locked(driveCtx, workspaceID, runID); err != nil && !errors.Is(err, context.Canceled) {
+			var persistedPending *runtimeV2PersistedDrivePendingError
+			if errors.As(err, &persistedPending) {
+				slog.Debug("workorch Runtime V2 persisted bounded retry state", "source", source, "workspaceID", workspaceID, "runID", runID, "revision", persistedPending.Revision)
+				retryDelivery = true
+				return
+			}
 			var projectionErr *runtimeV2ProjectionError
 			if errors.As(err, &projectionErr) {
 				slog.Warn("workorch Runtime V2 projection failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", err)
@@ -487,7 +491,7 @@ func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.Wor
 					}
 					retryDelivery = consumed
 					if !consumed && failure.Class == runtimecontract.FailureClassOwnerTransientUnavailable {
-						if _, recordErr := m.bizPtr.RecordRuntimeV2FailureFact(driveCtx, workspaceID, runID, failure); recordErr != nil {
+						if _, recordErr := m.bizPtr.RecordRuntimeV2DriveFailureFact(driveCtx, workspaceID, runID, failure); recordErr != nil {
 							slog.Warn("workorch Runtime V2 exhausted operation recovery fact commit failed", "workspaceID", workspaceID, "runID", runID, "err", recordErr)
 						} else {
 							retryDelivery = true
@@ -496,7 +500,7 @@ func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.Wor
 				}
 				return
 			}
-			aggregate, recordErr := m.bizPtr.RecordRuntimeV2FailureFact(driveCtx, workspaceID, runID, failure)
+			aggregate, recordErr := m.bizPtr.RecordRuntimeV2DriveFailureFact(driveCtx, workspaceID, runID, failure)
 			if recordErr != nil {
 				slog.Warn("workorch Runtime V2 drive failure fact commit failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", recordErr)
 				return
@@ -668,6 +672,9 @@ func classifyRuntimeV2DriveFailure(err error) runtimecontract.FailureFact {
 	}
 	msg := err.Error()
 	var unsupportedCapability *orchestratorevents.RuntimeCapabilityUnsupportedError
+	var outcomeUnknown *runtimev2.OperationOutcomeUnknownError
+	var timeout interface{ Timeout() bool }
+	var temporary interface{ Temporary() bool }
 	switch {
 	case errors.As(err, &unsupportedCapability):
 		return runtimecontract.FailureFact{
@@ -676,12 +683,10 @@ func classifyRuntimeV2DriveFailure(err error) runtimecontract.FailureFact {
 		}
 	case errors.Is(err, common.ErrConflict):
 		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassCASConflict, Code: "cas_conflict", Signature: "cas-conflict", Message: msg}
-	case strings.Contains(msg, "outcome_unknown"):
+	case errors.As(err, &outcomeUnknown):
 		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassOperationOutcomeUnknown, Code: "operation_outcome_unknown", Signature: "operation-outcome-unknown", Message: msg}
-	case strings.Contains(msg, "owner") && (strings.Contains(msg, "unavailable") || strings.Contains(msg, "timeout") || strings.Contains(msg, "temporarily")):
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &timeout) && timeout.Timeout(), errors.As(err, &temporary) && temporary.Temporary():
 		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassOwnerTransientUnavailable, Code: "owner_transient", Signature: "owner-transient", Message: msg}
-	case strings.Contains(msg, "projection"):
-		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassProjectionDeliveryFailure, Code: "projection_delivery_failure", Signature: "projection-delivery", Message: msg}
 	default:
 		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_v2_drive_failed", Signature: "runtime-v2-drive-failed", Message: msg}
 	}

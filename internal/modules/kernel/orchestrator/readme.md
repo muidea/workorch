@@ -34,10 +34,12 @@ Orchestrator 直接准入、blocked/terminal 投影或写入外部 owner state �
 - 任何修改 reducer/controller/drive/operation projection 前，必须说明影响的 SM 编号并补合法/禁止迁移、幂等、restart、stale/duplicate、budget/guard 测试。
 - 本模块不得恢复 V1 mainline、application continuation queue、通用 RuntimeAdapter registry、projection authority 或自动 successor。
 
-## Candidate 合同归一目标（R5, 2026-07-26）
+## Candidate 合同归一目标
 
-完整语义以 `docs/00-core/runtime-stage-contract.md` 的“规范化候选合同”为准，代码收口顺序只由
-`docs/70-roadmap/active/runtime-v2-validation-progress-closure-plan.md` 的 R5 N1～N8 定义。旧 R4/P0～P6/A-4 分段不再是实施标准。
+完整语义以 `docs/00-core/runtime-stage-contract.md` 的“规范化候选合同”为准，未关闭的 candidate/receipt、
+跨 SM 原子交接与 single-owner 收口顺序只由
+`docs/70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md` 定义。旧 VPC R5 N1～N8、
+R4/P0～P6/A-4 只作回归基线，不再是活动实施标准。
 
 - SM-2 从 persisted focus/required output 与 typed owner facts 编译唯一
   `RuntimeCandidateContractManifest`。每个 operation kind 恰好对应一条纯值

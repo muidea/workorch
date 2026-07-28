@@ -14,8 +14,9 @@ import (
 )
 
 type RuntimeController struct {
-	repository RuntimeStateRepository
-	dispatch   *DispatchCoordinator
+	repository  RuntimeStateRepository
+	dispatch    *DispatchCoordinator
+	transitions *RuntimeTransitionCoordinator
 }
 
 // CandidateAdmissionCommitResult couples the persisted aggregate with the
@@ -30,11 +31,15 @@ func NewRuntimeController(repository RuntimeStateRepository) (*RuntimeController
 	if repository == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	dispatch, err := NewDispatchCoordinator(repository)
+	transitions, err := NewRuntimeTransitionCoordinator(repository)
 	if err != nil {
 		return nil, err
 	}
-	return &RuntimeController{repository: repository, dispatch: dispatch}, nil
+	dispatch, err := newDispatchCoordinator(repository, transitions)
+	if err != nil {
+		return nil, err
+	}
+	return &RuntimeController{repository: repository, dispatch: dispatch, transitions: transitions}, nil
 }
 
 // Initialize 建立一个 Run 唯一的 Runtime V2 aggregate。
@@ -94,7 +99,7 @@ func (c *RuntimeController) Initialize(ctx context.Context, facts runtimecontrac
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, 0); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, 0); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
@@ -148,7 +153,7 @@ func (c *RuntimeController) ReconcileAuthorityBeforeCandidate(ctx context.Contex
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
@@ -187,7 +192,7 @@ func (c *RuntimeController) RecordFeasibilityFact(ctx context.Context, workspace
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
@@ -197,6 +202,19 @@ func (c *RuntimeController) RecordFeasibilityFact(ctx context.Context, workspace
 // repair, governance, or terminal. Drive/adapter errors must never project a
 // Run terminal without this authority transition.
 func (c *RuntimeController) RecordFailureFact(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, fact runtimecontract.FailureFact) (RuntimeAggregate, error) {
+	return c.recordFailureFact(ctx, workspaceID, runID, fact, false)
+}
+
+// RecordDriveFailureFact is the SM-4 error handoff. When a drive defect is
+// observed while SM-3 still has an active dispatch, the same aggregate CAS
+// invalidates that dispatch before SM-2 reduces the typed failure. This keeps
+// generic failure recording narrow while ensuring Resume/restart never sees a
+// new authority paired with the former dispatch transaction.
+func (c *RuntimeController) RecordDriveFailureFact(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, fact runtimecontract.FailureFact) (RuntimeAggregate, error) {
+	return c.recordFailureFact(ctx, workspaceID, runID, fact, true)
+}
+
+func (c *RuntimeController) recordFailureFact(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, fact runtimecontract.FailureFact, closeActiveDispatch bool) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || fact.Class == "" || strings.TrimSpace(fact.Message) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -207,10 +225,19 @@ func (c *RuntimeController) RecordFailureFact(ctx context.Context, workspaceID c
 	if aggregate.Decision.Action == runtimecontract.RuntimeActionComplete || aggregate.Decision.Action == runtimecontract.RuntimeActionFail {
 		return aggregate, nil
 	}
+	if aggregate.ActiveDispatch != nil && !closeActiveDispatch {
+		return RuntimeAggregate{}, fmt.Errorf("%w: active dispatch failures require a dispatch/receipt-specific transition", common.ErrConflict)
+	}
 	expectedRevision := aggregate.StateRevision
 	fact.Code = strings.TrimSpace(fact.Code)
 	fact.Signature = strings.TrimSpace(fact.Signature)
 	fact.Message = strings.TrimSpace(fact.Message)
+	if aggregate.ActiveDispatch != nil {
+		dispatch := *aggregate.ActiveDispatch
+		dispatch.State = DispatchStateInvalidated
+		aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
+		aggregate.ActiveDispatch = nil
+	}
 	aggregate.Facts.Failure = &fact
 	// A persisted FailureTarget is scoped to the current typed failure identity.
 	// Re-recording a failure with a different signature/target set must return to
@@ -231,7 +258,7 @@ func (c *RuntimeController) RecordFailureFact(ctx context.Context, workspaceID c
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
@@ -292,7 +319,7 @@ func (c *RuntimeController) RequestTermination(ctx context.Context, workspaceID 
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
@@ -342,7 +369,7 @@ func (c *RuntimeController) CommitPrerequisite(ctx context.Context, workspaceID 
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
@@ -398,7 +425,7 @@ func (c *RuntimeController) BeginCandidateAttempt(ctx context.Context, workspace
 				if err := aggregate.Validate(); err != nil {
 					return RuntimeAggregate{}, err
 				}
-				if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+				if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 					return RuntimeAggregate{}, err
 				}
 				return aggregate, nil
@@ -430,7 +457,73 @@ func (c *RuntimeController) BeginCandidateAttempt(ctx context.Context, workspace
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return aggregate, nil
+}
+
+// RejectCompletedCandidateDocument is the single SM-3 transition for a
+// complete document that cannot become an executable candidate. It creates
+// the attempt record and closes it in one aggregate CAS, so restart never
+// observes a newly allocated but semantically meaningless pending attempt.
+func (c *RuntimeController) RejectCompletedCandidateDocument(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, failure runtimecontract.RuntimeCandidateFailure) (RuntimeAggregate, error) {
+	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) || strings.TrimSpace(stablePrefixHash) == "" || strings.TrimSpace(logicalRequestID) == "" || failure.Class == "" || strings.TrimSpace(failure.Reason) == "" {
+		return RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	transaction := aggregate.Decision.AuthorityTransaction()
+	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, transaction)
+	for _, record := range aggregate.CandidateAttempts {
+		if record.Attempt != attempt || record.ManifestHash != manifest.Hash || record.LogicalRequestID != logicalRequestID {
+			continue
+		}
+		if record.State == runtimecontract.RuntimeCandidateAttemptStateFailed {
+			return aggregate, nil
+		}
+		if runtimecontract.CandidateAttemptAuthorityContractID(workspaceID, runID, record) != contractID || record.State != runtimecontract.RuntimeCandidateAttemptStatePending {
+			return RuntimeAggregate{}, fmt.Errorf("%w: completed candidate document attempt %d is already %s", common.ErrConflict, attempt, record.State)
+		}
+	}
+	if err := validateCandidateAttemptSessionBinding(aggregate, stablePrefixHash, manifest, logicalRequestID); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	switch aggregate.Decision.Action {
+	case runtimecontract.RuntimeActionProduceStateChange, runtimecontract.RuntimeActionProduceValidation, runtimecontract.RuntimeActionProduceAssessment:
+	default:
+		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action does not request a candidate", common.ErrConflict)
+	}
+	current := candidateAttemptsForContract(aggregate.CandidateAttempts, workspaceID, runID, contractID)
+	idx, _, pending := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
+	if !pending {
+		if attempt == 0 {
+			if len(current) != 0 {
+				return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt 0 is no longer available", common.ErrConflict)
+			}
+		} else {
+			first, ok := candidateAttemptRecord(current, 0)
+			if !ok || first.State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.StablePrefixHash != stablePrefixHash || first.ManifestHash != manifest.Hash || !runtimecontract.SameAuthorityContract(first.Transaction, transaction) || first.Failure == nil || !runtimecontract.RuntimeCandidateFailureIsCorrectableOnce(first.Failure) {
+				return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt 1 requires a failed correctable same-contract attempt 0", common.ErrConflict)
+			}
+		}
+		aggregate.CandidateAttempts = append(aggregate.CandidateAttempts, runtimecontract.RuntimeCandidateAttemptRecord{
+			AuthorityContractID: contractID, Transaction: transaction, Attempt: attempt, StablePrefixHash: stablePrefixHash,
+			ManifestHash: manifest.Hash, LogicalRequestID: logicalRequestID, State: runtimecontract.RuntimeCandidateAttemptStatePending,
+		})
+		idx = len(aggregate.CandidateAttempts) - 1
+	}
+	expectedRevision := aggregate.StateRevision
+	if err := closeCandidateAttempt(&aggregate, idx, attempt, failure); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
@@ -479,7 +572,7 @@ func (c *RuntimeController) AdmitCandidateProposal(ctx context.Context, workspac
 		if err := aggregate.Validate(); err != nil {
 			return CandidateAdmissionCommitResult{}, err
 		}
-		if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+		if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 			return CandidateAdmissionCommitResult{}, err
 		}
 		return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: admission}, nil
@@ -497,7 +590,7 @@ func (c *RuntimeController) AdmitCandidateProposal(ctx context.Context, workspac
 	if err := aggregate.Validate(); err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
 	return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: admission}, nil
@@ -558,7 +651,7 @@ func (c *RuntimeController) RecordCandidateFeasibility(ctx context.Context, work
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
@@ -632,7 +725,7 @@ func (c *RuntimeController) AdmitAndSealCandidateAttempt(ctx context.Context, wo
 		if err := aggregate.Validate(); err != nil {
 			return CandidateAdmissionCommitResult{}, err
 		}
-		if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+		if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 			return CandidateAdmissionCommitResult{}, err
 		}
 		return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: admission}, nil
@@ -659,7 +752,7 @@ func (c *RuntimeController) AdmitAndSealCandidateAttempt(ctx context.Context, wo
 	if err := aggregate.Validate(); err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
 	return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: admission}, nil
@@ -707,7 +800,7 @@ func (c *RuntimeController) SealGovernanceDispatch(ctx context.Context, workspac
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
@@ -890,7 +983,7 @@ func (c *RuntimeController) FailCandidateAttempt(ctx context.Context, workspaceI
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
@@ -1295,7 +1388,7 @@ func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID co
 	aggregate.Facts = facts
 	aggregate.Decision = nextDecision
 	aggregate.StateRevision++
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil

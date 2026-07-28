@@ -243,10 +243,14 @@ func (m *Biz) executeCommand(ev magicevent.Event) (approvalevents.ApprovalComman
 		if !ok || cmd.ApprovalID == "" {
 			return approvalevents.ApprovalCommandResult{}, common.ErrInvalidArgument
 		}
-		item := approvalFromUpdateCommand(cmd)
-		if !approvalMatchesCommandScope(item, approvalCommandScope{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, StepID: cmd.StepID}) {
+		current, err := m.approvals.Get(ctx, cmd.ApprovalID)
+		if err != nil {
+			return approvalevents.ApprovalCommandResult{}, err
+		}
+		if !approvalMatchesCommandScope(current, approvalCommandScope{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, StepID: cmd.StepID}) {
 			return approvalevents.ApprovalCommandResult{}, common.ErrNotFound
 		}
+		item := approvalFromUpdateCommand(current, cmd)
 		if err := m.approvals.Update(ctx, item); err != nil {
 			return approvalevents.ApprovalCommandResult{}, err
 		}
@@ -369,22 +373,17 @@ func resolveApprovalContract(cmd approvalevents.ResolveApprovalCommand) approval
 	}
 }
 
-func approvalFromUpdateCommand(cmd approvalevents.UpdateApprovalCommand) *approvalmodel.Approval {
-	return &approvalmodel.Approval{
-		ID:             cmd.ApprovalID,
-		WorkspaceID:    cmd.WorkspaceID,
-		RunID:          cmd.RunID,
-		StepID:         cmd.StepID,
-		Reason:         cmd.Reason,
-		Action:         cmd.Action,
-		Context:        workorcheventpayload.New(cmd.Context...),
-		State:          cmd.State,
-		AutoGovernance: workorcheventpayload.New(cmd.AutoGovernance...),
-		ResolvedAt:     cmd.ResolvedAt,
-		ResolvedBy:     cmd.ResolvedBy,
-		CreatedAt:      cmd.CreatedAt,
-		UpdatedAt:      cmd.UpdatedAt,
+func approvalFromUpdateCommand(current *approvalmodel.Approval, cmd approvalevents.UpdateApprovalCommand) *approvalmodel.Approval {
+	if current == nil {
+		return nil
 	}
+	item := *current
+	item.Reason = cmd.Reason
+	item.Action = cmd.Action
+	item.Context = workorcheventpayload.New(cmd.Context...)
+	item.AutoGovernance = workorcheventpayload.New(cmd.AutoGovernance...)
+	item.UpdatedAt = cmd.UpdatedAt
+	return &item
 }
 
 func (m *Biz) ensureApprovalScopeForCommand(ctx context.Context, approvalID common.ApprovalID, scope approvalCommandScope) (*approvalmodel.Approval, error) {

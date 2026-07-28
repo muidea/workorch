@@ -10,9 +10,6 @@ import (
 )
 
 type RuntimeOrchestrator struct {
-	tickets             repository.DecisionTicketRepository
-	resolutions         repository.DecisionResolutionRepository
-	approvals           repository.ApprovalRepository
 	evidence            RuntimeEvidenceRepositories
 	runtimeV2Controller *runtimev2.RuntimeController
 }
@@ -80,6 +77,13 @@ func (o *RuntimeOrchestrator) RecordRuntimeV2FailureFact(ctx context.Context, wo
 		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	return o.runtimeV2Controller.RecordFailureFact(ctx, workspaceID, runID, fact)
+}
+
+func (o *RuntimeOrchestrator) RecordRuntimeV2DriveFailureFact(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, fact runtimemodel.FailureFact) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.RecordDriveFailureFact(ctx, workspaceID, runID, fact)
 }
 
 func (o *RuntimeOrchestrator) ConsumeRuntimeV2RecoveryBudget(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, kind runtimemodel.RuntimeRecoveryBudgetKind) (runtimev2.RuntimeAggregate, bool, error) {
@@ -153,6 +157,13 @@ func (o *RuntimeOrchestrator) BeginRuntimeV2CandidateAttempt(ctx context.Context
 		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	return o.runtimeV2Controller.BeginCandidateAttempt(ctx, workspaceID, runID, attempt, stablePrefixHash, manifest, logicalRequestID)
+}
+
+func (o *RuntimeOrchestrator) RejectRuntimeV2CompletedCandidateDocument(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string, manifest runtimemodel.RuntimeCandidateContractManifest, logicalRequestID string, failure runtimemodel.RuntimeCandidateFailure) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.RejectCompletedCandidateDocument(ctx, workspaceID, runID, attempt, stablePrefixHash, manifest, logicalRequestID, failure)
 }
 
 func (o *RuntimeOrchestrator) AdmitRuntimeV2CandidateProposal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, manifest runtimemodel.RuntimeCandidateContractManifest, logicalRequestID string, candidate runtimemodel.RuntimeCandidate) (runtimev2.CandidateAdmissionCommitResult, error) {
@@ -281,23 +292,10 @@ func (o *RuntimeOrchestrator) EvidenceRepositories() RuntimeEvidenceRepositories
 	return o.evidence
 }
 
-func NewRuntimeOrchestrator(
-	ticketRepo repository.DecisionTicketRepository,
-	approvalRepo repository.ApprovalRepository,
-) *RuntimeOrchestrator {
-	return NewRuntimeOrchestratorWithResolutionsAndEvidence(ticketRepo, nil, approvalRepo, RuntimeEvidenceRepositories{})
+func NewRuntimeOrchestrator() *RuntimeOrchestrator {
+	return NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{})
 }
 
-func NewRuntimeOrchestratorWithResolutionsAndEvidence(
-	ticketRepo repository.DecisionTicketRepository,
-	resolutionRepo repository.DecisionResolutionRepository,
-	approvalRepo repository.ApprovalRepository,
-	evidence RuntimeEvidenceRepositories,
-) *RuntimeOrchestrator {
-	return &RuntimeOrchestrator{
-		tickets:     ticketRepo,
-		resolutions: resolutionRepo,
-		approvals:   approvalRepo,
-		evidence:    evidence,
-	}
+func NewRuntimeOrchestratorWithEvidence(evidence RuntimeEvidenceRepositories) *RuntimeOrchestrator {
+	return &RuntimeOrchestrator{evidence: evidence}
 }

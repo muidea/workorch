@@ -218,7 +218,7 @@ func TestRuntimeV2InitializesFromPersistedRunBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -1689,7 +1689,7 @@ func TestRuntimeV2StateRepositoryOwnerFailureObservationReceiptCrashRestartIsAto
 	candidate := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "failure-observation-read", Kind: runtimecontract.StepKindFileRead,
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{path},
-		Parameters: []runtimecontract.OperationParameter{{Name: "path", String: &path}},
+		Parameters: nil,
 	}}}}}
 	sealed, err := admitAndSealRuntimeV2CandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, candidate)
 	if err != nil || !sealed.Admission.Accepted() || sealed.Aggregate.ActiveDispatch == nil {
@@ -2552,7 +2552,7 @@ func TestRuntimeV2MainlinePreparesLocalPrerequisiteThroughPersistedController(t 
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -2609,7 +2609,7 @@ func TestRuntimeV2OperationAdmissibilityRefreshUsesGroundedFailureTarget(t *test
 		ID: "operation_admissibility:file-refresh", Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
 		OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.StepKindFileEdit},
 	}
-	module := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(nil, nil), hub, nil)
+	module := newTestBiz(orchestratorbiz.NewRuntimeOrchestrator(), hub, nil)
 	resolved, err := module.resolveRuntimeV2Prerequisite(ctx, aggregate, t.TempDir(), t.TempDir(), prerequisite)
 	if err != nil {
 		t.Fatal(err)
@@ -2673,7 +2673,7 @@ func TestRuntimeV2MainlineRequestsAndSealsTypedCandidate(t *testing.T) {
 	})
 	t.Cleanup(func() { fileObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteFileEditOperation) })
 
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -2939,15 +2939,9 @@ func TestRuntimeV2MainlineRetriesSameCandidateContractOnce(t *testing.T) {
 		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
 		attempts = append(attempts, command)
 		if command.CandidateAttempt == 0 {
-			failure := runtimecontract.RuntimeCandidateFailure{
-				Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
-				Reason: "raw schema failure is persisted but never rendered", Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
-					Path: "$.operations[0].kind", Actual: runtimecontract.StepKindShellCommand, Allowed: []string{runtimecontract.StepKindFileEdit},
-				},
-			}
 			result.Set(orchestratorevents.RequestRuntimeCandidateResult{
 				Transaction: command.Transaction, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
-				Failure: &failure, DocumentContent: []byte(`{"unexpected":true}`),
+				DocumentContent: []byte(`{"unexpected":true}`),
 			}, nil)
 			return
 		}
@@ -2959,7 +2953,7 @@ func TestRuntimeV2MainlineRetriesSameCandidateContractOnce(t *testing.T) {
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
 
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -2972,7 +2966,7 @@ func TestRuntimeV2MainlineRetriesSameCandidateContractOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sealed.ActiveDispatch == nil || len(attempts) != 2 || attempts[0].CandidateAttempt != 0 || attempts[1].CandidateAttempt != 1 || attempts[0].PreviousFailure != nil || attempts[1].PreviousFailure == nil || attempts[1].PreviousFailure.Diagnostic == nil || attempts[1].PreviousFailure.Diagnostic.Path != "$.operations[0].kind" || attempts[1].PreviousFailure.Diagnostic.ManifestHash != attempts[1].CandidateManifest.Hash || !reflect.DeepEqual(attempts[1].PreviousFailure.Diagnostic.Objectives, []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSelectOperationKind}) ||
+	if sealed.ActiveDispatch == nil || len(attempts) != 2 || attempts[0].CandidateAttempt != 0 || attempts[1].CandidateAttempt != 1 || attempts[0].PreviousFailure != nil || attempts[1].PreviousFailure == nil || attempts[1].PreviousFailure.Diagnostic == nil || attempts[1].PreviousFailure.Diagnostic.Path != "$.unexpected" || attempts[1].PreviousFailure.Diagnostic.ManifestHash != attempts[1].CandidateManifest.Hash ||
 		attempts[0].Transaction != attempts[1].Transaction || attempts[0].StablePrefixHash != attempts[1].StablePrefixHash {
 		t.Fatalf("attempts=%+v sealed=%+v", attempts, sealed)
 	}
@@ -3032,7 +3026,7 @@ func TestRuntimeV2MainlineRenderedPreflightStopsBeforeCandidateAttempt(t *testin
 		CapabilityRevision:       "capability-1",
 		ConfigurationRevision:    "config-1",
 	}
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -3088,7 +3082,7 @@ func TestDriveRuntimeV2DecisionReacquiresMissingSealedProviderCeilingBeforeLLM(t
 		MinimumBytes: 96 * 1024, Reason: "provider ceiling required",
 	}
 
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -3211,7 +3205,7 @@ func TestRuntimeV2MainlineRecordsInfeasibleCandidateBeforeDispatchSeal(t *testin
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{
 		runtimeV2FileAdmissibilityObservation(inventory),
 	}
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -3246,7 +3240,7 @@ func TestRuntimeV2CandidateAdmissionSkipsOwnerProbeForAssessment(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(1)
 	t.Cleanup(func() { hub.Terminate(ctx) })
-	module := newTestBiz(NewRuntimeOrchestrator(nil, nil), hub, nil)
+	module := newTestBiz(NewRuntimeOrchestrator(), hub, nil)
 	candidate := runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Disposition: runtimecontract.AssessmentDispositionRepairableGap, Summary: "assessment-only"}}
 	failure, stale, prerequisiteRequest, err := module.probeRuntimeV2CandidateFeasibility(ctx, runtimev2.RuntimeAggregate{}, t.TempDir(), candidate, runtimecontract.RuntimeCandidateContractManifest{}, 0)
 	if err != nil || failure != nil || stale != nil || prerequisiteRequest != nil {
@@ -3324,7 +3318,7 @@ func TestRuntimeV2FileBackedCorrectionRestartSealsOwnerAdmissibleCandidate(t *te
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{
 		runtimeV2FileAdmissibilityObservation(inventory),
 	}
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -3382,7 +3376,7 @@ func TestRuntimeV2FileBackedCorrectionRestartSealsOwnerAdmissibleCandidate(t *te
 		result.Set(runtimeV2CandidateResultForTest(t, command, candidate), nil)
 	})
 	t.Cleanup(func() { restartedLLMObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
-	restartedBiz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	restartedBiz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := restartedBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -3456,7 +3450,7 @@ func TestRuntimeV2FileBackedCorrectionCompleteRestartExhaustsWithoutProviderRepl
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{runtimeV2FileAdmissibilityObservation(inventory)}
 
 	contentsRoot := filepath.Join(root, "candidate-contents")
-	firstOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{
+	firstOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(contentsRoot),
 	})
 	if err := firstOwner.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
@@ -3557,7 +3551,7 @@ func TestRuntimeV2FileBackedCorrectionCompleteRestartExhaustsWithoutProviderRepl
 		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID, Failure: &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProvider, Code: "unexpected_provider_replay"}}, nil)
 	})
 	t.Cleanup(func() { restartedLLMObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
-	restartedOwner := NewRuntimeOrchestratorWithResolutionsAndEvidence(nil, nil, nil, RuntimeEvidenceRepositories{
+	restartedOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(contentsRoot),
 	})
 	if err := restartedOwner.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
@@ -3639,7 +3633,7 @@ func TestRuntimeV2MainlineExhaustsTwoInfeasibleCandidatesWithoutDispatch(t *test
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{
 		runtimeV2FileAdmissibilityObservation(inventory),
 	}
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -3683,7 +3677,7 @@ func TestRuntimeV2MainlineRestartsFromPersistedCandidateProposalWithoutProviderR
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
 
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -3737,7 +3731,7 @@ func TestRuntimeV2MainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *t
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator()
 	repository := runtimeV2StateRepository{hub: hub}
 	if err := biz.ConfigureRuntimeV2Repository(repository); err != nil {
 		t.Fatal(err)
@@ -3787,7 +3781,7 @@ func TestRuntimeV2MainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *t
 			newOperation.ID = "new-edit"
 			newText := "corrected"
 			newOperation.Parameters = runtimeV2FileEditParameters("target.txt")
-			newOperation.Parameters[2].String = &newText
+			newOperation.Parameters[1].String = &newText
 			candidate.StateChange = &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: replayedOperation}, {Operation: newOperation}}}
 		} else {
 			if command.PreviousFailure == nil || command.PreviousFailure.Code != "candidate_partially_replays_rejected_shape" {
@@ -3797,7 +3791,7 @@ func TestRuntimeV2MainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *t
 			corrected.ID = "corrected-edit"
 			newText := "corrected"
 			corrected.Parameters = runtimeV2FileEditParameters("target.txt")
-			corrected.Parameters[2].String = &newText
+			corrected.Parameters[1].String = &newText
 			candidate.StateChange = &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: corrected}}}
 		}
 		result.Set(runtimeV2CandidateResultForTest(t, command, candidate), nil)
@@ -3864,7 +3858,7 @@ func TestRuntimeV2MainlineRestartSkipsPersistedFeasibilityProbe(t *testing.T) {
 	inventory := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "operation_admissibility:blocks/file", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{"target.txt"}, ObservedRevision: "test-revision"}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -3897,11 +3891,10 @@ func TestRuntimeV2MainlineRestartSkipsPersistedFeasibilityProbe(t *testing.T) {
 	}
 }
 
-func runtimeV2FileEditParameters(path string) []runtimecontract.OperationParameter {
+func runtimeV2FileEditParameters(_ string) []runtimecontract.OperationParameter {
 	oldText := "old"
 	newText := "new"
 	return []runtimecontract.OperationParameter{
-		{Name: "path", String: &path},
 		{Name: "oldText", String: &oldText},
 		{Name: "newText", String: &newText},
 	}
@@ -3932,7 +3925,7 @@ func TestRuntimeV2MainlineTerminatesGenericProviderProtocolFailureWithoutCandida
 		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID, Failure: &failure}, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
-	biz := orchestratorbiz.NewRuntimeOrchestrator(nil, nil)
+	biz := orchestratorbiz.NewRuntimeOrchestrator()
 	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}

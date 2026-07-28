@@ -146,7 +146,7 @@ func (e eventRuntimeV2OperationExecutor) executeWeb(ctx context.Context, request
 	}
 	ret := runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt)
 	// RVC-R11: pre-effect approval must surface as governance, not execution repair.
-	if response.Data.ApprovalNeeded || (response.Failure != nil && strings.Contains(strings.ToLower(response.Failure.Code+response.Failure.Message), "approval")) {
+	if response.Data.ApprovalNeeded {
 		subject := firstNonEmptyString(response.Data.URL, response.Data.Query, request.Operation.Kind)
 		ret.Governance = &runtimecontract.RuntimeGovernanceRequirement{
 			Kind: runtimecontract.GovernanceApproval, SubjectRef: subject,

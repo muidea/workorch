@@ -23,10 +23,10 @@ func TestResolveExpectedEffectScopeShell(t *testing.T) {
 	}
 
 	trueFlag := true
+	op.TargetRefs = []string{"main.go"}
 	op.Parameters = []OperationParameter{
 		{Name: "command", String: strPtr("go")},
 		{Name: "stateChanging", Boolean: &trueFlag},
-		{Name: "targetRef", String: strPtr("main.go")},
 	}
 	if got := ResolveExpectedEffectScope(op, nil); got != RuntimeEffectWorkspaceDurable {
 		t.Fatalf("stateChanging=true shell effect = %q, want workspace_durable", got)
@@ -179,6 +179,35 @@ func TestSealRejectsReadOnlyMCPUnderStateChange(t *testing.T) {
 	}
 }
 
+func TestSealRejectsMixedDurableAndNonDurableStateChangeCandidate(t *testing.T) {
+	falseFlag := false
+	required := RequiredOutputContract{
+		Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{StepKindFileWrite, StepKindShellCommand},
+		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
+		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+		CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
+	}
+	operations := []RuntimeOperation{
+		{
+			ID: "write", Kind: StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+			TargetRefs: []string{"main.go"}, Parameters: []OperationParameter{
+				{Name: "content", String: strPtr("package main\n")},
+			},
+		},
+		{
+			ID: "validate", Kind: StepKindShellCommand, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+			Parameters: []OperationParameter{
+				{Name: "command", String: strPtr("go")},
+				{Name: "args", StringList: []string{"test", "./..."}},
+				{Name: "stateChanging", Boolean: &falseFlag},
+			},
+		},
+	}
+	if err := ValidateCandidateEffectCompatibility(operations, required, nil); err == nil || !strings.Contains(err.Error(), "validate") {
+		t.Fatalf("mixed state-change candidate must be rejected before seal, got %v", err)
+	}
+}
+
 func TestSealRejectsMutatingUnderValidation(t *testing.T) {
 	required := RequiredOutputContract{
 		Kind: RequiredOutputKindValidation, AcceptedKinds: []string{RuntimeBlockKindPatchApply},
@@ -191,7 +220,6 @@ func TestSealRejectsMutatingUnderValidation(t *testing.T) {
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		TargetRefs:          []string{"main.go"},
 		Parameters: []OperationParameter{
-			{Name: "targetRef", String: strPtr("main.go")},
 			{Name: "patchType", String: strPtr("file_write")},
 			{Name: "content", String: strPtr("package main\n")},
 		},
@@ -240,7 +268,6 @@ func TestSealAcceptsDurableShellUnderStateChange(t *testing.T) {
 			{Name: "command", String: strPtr("go")},
 			{Name: "args", StringList: []string{"generate", "./..."}},
 			{Name: "stateChanging", Boolean: &trueFlag},
-			{Name: "targetRef", String: strPtr("main.go")},
 		},
 	}}
 	if err := ValidateCandidateEffectCompatibility(ops, required, nil); err != nil {

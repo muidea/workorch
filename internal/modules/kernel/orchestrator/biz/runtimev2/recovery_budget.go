@@ -29,7 +29,7 @@ func (c *RuntimeController) ConsumeRecoveryBudget(ctx context.Context, workspace
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, false, fmt.Errorf("runtime recovery budget: %w", err)
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, false, err
 	}
 	return aggregate, true, nil

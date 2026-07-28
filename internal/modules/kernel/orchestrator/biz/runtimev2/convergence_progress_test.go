@@ -16,6 +16,8 @@ func TestRuntimeConvergenceProgressSignatureIgnoresRetryBookkeeping(t *testing.T
 	right := left
 	right.StateRevision = 99
 	right.Decision.AuthoritySnapshot.Attempt = 98
+	right.Facts.Recovery.ProviderTransportAttempts = 3
+	right.Facts.Recovery.CASReloadAttempts = 2
 	right.CandidateAttempts = []runtimecontract.RuntimeCandidateAttemptRecord{{
 		AuthorityContractID: runtimecontract.StableAuthorityContractID(facts.WorkspaceID, facts.RunID, decision.AuthorityTransaction()),
 		Transaction:         decision.AuthorityTransaction(), Attempt: 0, StablePrefixHash: "stable-prefix",

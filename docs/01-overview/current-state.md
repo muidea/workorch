@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-07-27
+Last Updated: 2026-07-28
 
 
 ## LLM Provider（2026-07-15）
@@ -26,10 +26,12 @@ Last Updated: 2026-07-27
 
 **生产代码路径 = Runtime V2 only。**
 
-> 实施状态限定：下列架构规则是当前目标合同，不表示 RUNTIME-SMO 已完成。2026-07-27 的实现复核已确认
-> lifecycle generic 写入、sealed identity、administrative terminal、delivery CAS/fence 与 startup recovery
-> 仍有缺口；唯一执行清单见
-> [runtime-v2-single-owner-state-machine-closure-plan.md](../70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md) 第 12 节。
+> 实施状态限定：2026-07-28 fresh deployed live 已重新打开 Runtime candidate 边界。首个 durable File receipt、
+> freshness invalidation 和 terminal delivery 已取得正向证据，但第二份 complete semantic-invalid document 在
+> EventHub adapter 被丢失并误判为 provider protocol。当前必须按 C7-B～C7-F 收口 document handoff、SM-3
+> single evaluator、canonical target、回归与 fresh live。C7-B～C7-E 已完成代码与回归门禁；仅 C7-F fresh live
+> 未验收。唯一执行清单为
+> [runtime-v2-single-owner-state-machine-closure-plan.md](../70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md)。
 
 - Start / Resume 只提交到 Run owner 的 typed activation / continuation intent；Run owner 成功迁移后发布事实，
   Orchestrator 才进入 Runtime V2 drive。缺少 typed bootstrap 必须按 owner-local terminal delivery 收敛。
@@ -107,19 +109,21 @@ Block owner，不承担跨 owner 编排。
 
 ## Remaining Open Work
 
-历史 fresh Run 的局部成功和 R4/P0～P6/A-4 过程分段只保留为 archive regression evidence，不再定义当前实施顺序，也不能证明当前 live 链路可持续推进。最新反证表明，owner fact、manifest、provider schema、decoder、admission、feasibility 与 correction 仍在多处重复解释同一授权；成功路径已 typed，部分拒绝路径却缺少有界 allowed set 或可执行 directive，导致 live 中持续暴露相邻合同违例。
+历史 fresh Run 的局部成功、R4/P0～P6/A-4 过程分段和旧 VPC 的 N1～N8 只保留为 archive regression
+evidence，不再定义当前实施顺序，也不能代替最新 deployed live。旧反例 `ws-025ecc6a936133bb/run-007` 所暴露的
+mixed-effect candidate、receipt非原子交接与Resume重复 invariant failure 已形成代码收口和回归；最新反例
+`ws-8974c4e22de0b2a4/run-001` 优先决定当前未关项。
 
-1. **Runtime V2 合同归一（RUNTIME-VPC）**：R5 使每个 authority transaction 只有一份 persisted `RuntimeCandidateContractManifest`、每个 complete candidate 只经过一个 evaluator，并将 pipeline 结果限定为 `request_recoverable`、`candidate_correctable`、`candidate_rejected_final`、`prerequisite_stale`、`accepted`。N1～N8 代码/本地门禁已完成（`SealedOperationAuthorization` + 三种 `TargetPolicy` + owner fact/admissibility 编译、独立预算类型、manifest-only schema/C3/C4 renderer 与 strict decoder、complete rejection 的 `correctable_once`/`rejected_final` 矩阵与 `runtime_contract_defect` 替代 `candidate_correction_undefined`、owner feasibility 统一 outer observation、五类结果 persistence/recovery 门禁、legacy 清零，以及 selector-only MCP inventory 不强制 `targetRefs`）。剩余 real-provider 双 activation 与三态 deployed restart 为外部 fixture observation residual。不通过放宽业务合同、调高固定预算、增加 prompt 补丁、UI Resume 或 live 热修换取推进。详见 [VPC candidate/receipt 收口方案](../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md)。
-
-2. **Runtime V2 单 owner 状态机（RUNTIME-SMO）**：最新核对发现 Orchestrator 仍直接准入或投影
-   Run/Workspace/Result lifecycle，违反唯一 owner。必须迁为 Run、Workspace、Result 各自的 owner-local reducer；
-   跨 owner 只传 activation/governance/terminal immutable fact，SM-4 仅保持 delivery acknowledgement。
-   此项尚未实施，详见 [单 owner 收口方案](../70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md)。
-3. **组件边界 / 生命周期（ARCH-1）**：SM-4 startup recovery、channel-free process lifecycle、owner Service facade、repository DTO 与 test-data isolation 均已有实现/回归证据；2026-07-19 的 go-multi-module-dev 审计发现的共享 Base Biz 缺失和 framework Module 根直接持有 EventHub，现已迁移到 component-local Biz，且本地 structural/race/file-backed 门禁已重跑。22 个组件的职责、typed 交互合同、禁止边界和可单独执行的回归命令已固化在 `70-roadmap/active/component-contract-and-regression-closure-matrix.md`。仅待提供重启后的外部目标与 `active_no_dispatch`、`active_sealed_dispatch`、`terminal_delivery_pending` 三类 fixture manifest，以执行 deployed SM-4 matrix；workspace 删除后的迟到投影还必须验证 `/readyz` 恢复 ready，不能以放宽 readiness 绕过。
-4. **运维切换（OPS-1）**：真实生产目录 `runtime-v1-retirement --apply` + clean build 维护窗口（过程日记已归档，不在 active 放长文）。
-5. **可选验证（OPT-1）**：file-patch `apply + validation + DoD closeout` 的 deployed live 一次。
-6. **延期候选**：LLM context budget 高级项见 `70-roadmap/candidates/`，**不占 active**。
-7. **文档维护**：权威层术语抽查、个别 block readme 措辞、archive 索引（见 matrix）。
+1. **Runtime V2 单 owner candidate/document 收口（RUNTIME-SMO C7-F）**：complete document EventHub handoff、
+   SM-3 single evaluator、operation canonical TargetRefs及 attempt/restart/static 矩阵已完成。剩余项是用最新 binary
+   与全新 workspace 重跑 activation、repair、governance、restart、terminal delivery、多 workspace 与重复 Resume。
+   旧 VPC 仅作为回归基线，不能新增兼容路径或独立规则。详见
+   [单 owner 统一收口方案](../70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md)。
+2. **组件边界 / 生命周期（ARCH-1）**：SM-4 startup recovery、channel-free process lifecycle、owner Service facade、repository DTO 与 test-data isolation 均已有实现/回归证据；2026-07-19 的 go-multi-module-dev 审计发现的共享 Base Biz 缺失和 framework Module 根直接持有 EventHub，现已迁移到 component-local Biz，且本地 structural/race/file-backed 门禁已重跑。22 个组件的职责、typed 交互合同、禁止边界和可单独执行的回归命令已固化在 `70-roadmap/active/component-contract-and-regression-closure-matrix.md`。仅待提供重启后的外部目标与 `active_no_dispatch`、`active_sealed_dispatch`、`terminal_delivery_pending` 三类 fixture manifest，以执行 deployed SM-4 matrix；workspace 删除后的迟到投影还必须验证 `/readyz` 恢复 ready，不能以放宽 readiness 绕过。
+3. **运维切换（OPS-1）**：真实生产目录 `runtime-v1-retirement --apply` + clean build 维护窗口（过程日记已归档，不在 active 放长文）。
+4. **可选验证（OPT-1）**：file-patch `apply + validation + DoD closeout` 的 deployed live 一次。
+5. **延期候选**：LLM context budget 高级项见 `70-roadmap/candidates/`，**不占 active**。
+6. **文档维护**：权威层术语抽查、个别 block readme 措辞、archive 索引（见 matrix）。
 
 2026-07-20 RCA-1 已由 `1ca44996` 完成：candidate admission authority 位于
 Orchestrator，full/partial replay、attempt 0/1、terminal closure 与 freshness priority

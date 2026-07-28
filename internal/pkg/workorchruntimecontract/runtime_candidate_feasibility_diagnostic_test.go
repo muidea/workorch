@@ -12,7 +12,7 @@ func TestRuntimeCandidateFailureDiagnosticForFeasibilityUsesOnlySealedFacts(t *t
 	content := "replacement"
 	candidate := RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{Operation: RuntimeOperation{
 		ID: "edit-directory", Kind: StepKindFileEdit, TargetRefs: []string{target}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"coverage"},
-		Parameters: []OperationParameter{{Name: "targetRef", String: &target}, {Name: "oldText", String: &content}, {Name: "newText", String: &content}},
+		Parameters: []OperationParameter{{Name: "oldText", String: &content}, {Name: "newText", String: &content}},
 	}}}}}
 	decision := RuntimeDecision{Action: RuntimeActionProduceStateChange, RequiredOutput: RequiredOutputContract{
 		Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{StepKindFileEdit}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"coverage"},
@@ -63,7 +63,7 @@ func TestRuntimeCandidateFeasibilityCorrectionRoundTripsSameManifest(t *testing.
 	content := "replacement"
 	initial := RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{Operation: RuntimeOperation{
 		ID: "edit-directory", Kind: StepKindFileEdit, TargetRefs: []string{initialTarget}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"coverage"},
-		Parameters: []OperationParameter{{Name: "path", String: &initialTarget}, {Name: "oldText", String: &content}, {Name: "newText", String: &content}},
+		Parameters: []OperationParameter{{Name: "oldText", String: &content}, {Name: "newText", String: &content}},
 	}}}}}
 	decision := RuntimeDecision{Action: RuntimeActionProduceStateChange, RequiredOutput: RequiredOutputContract{
 		Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{StepKindFileEdit}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"coverage"},
@@ -84,7 +84,7 @@ func TestRuntimeCandidateFeasibilityCorrectionRoundTripsSameManifest(t *testing.
 	}
 	corrected := RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{Operation: RuntimeOperation{
 		ID: "edit-replacement", Kind: StepKindFileEdit, TargetRefs: []string{replacementTarget}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"coverage"},
-		Parameters: []OperationParameter{{Name: "path", String: &replacementTarget}, {Name: "oldText", String: &content}, {Name: "newText", String: &content}},
+		Parameters: []OperationParameter{{Name: "oldText", String: &content}, {Name: "newText", String: &content}},
 	}}}}}
 	payload, err := EncodeRuntimeCandidatePayloadWithManifest(manifest, corrected)
 	if err != nil {

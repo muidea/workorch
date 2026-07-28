@@ -282,14 +282,13 @@ type RequestRuntimeCandidateResult struct {
 	LogicalRequestID string
 	RequestSequence  int
 	PhysicalCallID   string
-	Candidate        runtimecontract.RuntimeCandidate
-	// DocumentContent is an in-process handoff for a complete decoded document.
+	// DocumentContent is an in-process handoff for a complete provider document.
 	// It is never an audit/projection payload and must be persisted only by the
 	// Orchestrator-owned request content store.
 	DocumentContent []byte
 	Failure         *runtimecontract.RuntimeCandidateFailure
 	// Stale is an owner-confirmed pre-candidate freshness outcome. It is
-	// mutually exclusive with Candidate and Failure; Orchestrator invalidates
+	// mutually exclusive with DocumentContent and Failure; Orchestrator invalidates
 	// and reacquires without spending candidate or provider-recovery budget.
 	Stale *runtimecontract.RuntimePrerequisiteStale
 	// RequestID correlates this result with the persisted LLM usage audit record.
@@ -301,7 +300,7 @@ type RequestRuntimeCandidateResult struct {
 	Audit *runtimecontract.ProviderRequestAuditView
 	// Usage is provider-reported token usage when available.
 	Usage *runtimecontract.ProviderUsageView
-	// OutputFragment is mutually exclusive with Candidate, Failure and Stale.
+	// OutputFragment is mutually exclusive with DocumentContent, Failure and Stale.
 	// The Orchestrator persists it in its own artifact repository before making
 	// another suffix request or assembling the candidate document.
 	OutputFragment *runtimecontract.RuntimeCandidateOutputFragment

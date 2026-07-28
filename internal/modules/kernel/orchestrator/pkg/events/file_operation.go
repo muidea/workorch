@@ -41,11 +41,9 @@ func FileReadOperationDataFromRuntimeOperation(operation runtimecontract.Runtime
 	if err := runtimecontract.ValidateRuntimeOperationContract(operation); err != nil {
 		return FileReadOperationData{}, err
 	}
-	ret := FileReadOperationData{}
+	ret := FileReadOperationData{Path: operation.TargetRefs[0]}
 	for _, parameter := range operation.Parameters {
 		switch parameter.Name {
-		case "path":
-			ret.Path = *parameter.String
 		case "optional":
 			ret.Optional = *parameter.Boolean
 		case "maxBytes":
@@ -67,11 +65,9 @@ func FileEditOperationDataFromRuntimeOperation(operation runtimecontract.Runtime
 	if err := runtimecontract.ValidateRuntimeOperationContract(operation); err != nil {
 		return FileEditOperationData{}, err
 	}
-	ret := FileEditOperationData{}
+	ret := FileEditOperationData{Path: operation.TargetRefs[0]}
 	for _, parameter := range operation.Parameters {
 		switch parameter.Name {
-		case "path":
-			ret.Path = *parameter.String
 		case "oldText":
 			ret.OldText = *parameter.String
 		case "newText":
@@ -93,20 +89,13 @@ func FileWriteOperationDataFromRuntimeOperation(operation runtimecontract.Runtim
 	if err := runtimecontract.ValidateRuntimeOperationContract(operation); err != nil {
 		return FileWriteOperationData{}, err
 	}
-	ret := FileWriteOperationData{}
+	ret := FileWriteOperationData{TargetRef: operation.TargetRefs[0]}
 	for _, parameter := range operation.Parameters {
 		switch parameter.Name {
-		case "path", "targetRef":
-			if ret.TargetRef == "" {
-				ret.TargetRef = *parameter.String
-			}
 		case "content":
 			ret.Content = *parameter.String
 			ret.ContentPresent = true
 		}
-	}
-	if ret.TargetRef == "" && len(operation.TargetRefs) == 1 {
-		ret.TargetRef = operation.TargetRefs[0]
 	}
 	return ret, nil
 }
@@ -119,15 +108,9 @@ func PatchApplyOperationDataFromRuntimeOperation(operation runtimecontract.Runti
 	if err := runtimecontract.ValidateRuntimeOperationContract(operation); err != nil {
 		return PatchApplyOperationData{}, err
 	}
-	ret := PatchApplyOperationData{}
+	ret := PatchApplyOperationData{TargetRef: operation.TargetRefs[0]}
 	for _, parameter := range operation.Parameters {
 		switch parameter.Name {
-		case "targetRef":
-			ret.TargetRef = *parameter.String
-		case "path":
-			if ret.TargetRef == "" {
-				ret.TargetRef = *parameter.String
-			}
 		case "patchType":
 			ret.PatchType = *parameter.String
 		case "content":
@@ -165,15 +148,9 @@ func PatchPreviewOperationDataFromRuntimeOperation(operation runtimecontract.Run
 }
 
 func patchOperationData(operation runtimecontract.RuntimeOperation) PatchApplyOperationData {
-	ret := PatchApplyOperationData{}
+	ret := PatchApplyOperationData{TargetRef: operation.TargetRefs[0]}
 	for _, parameter := range operation.Parameters {
 		switch parameter.Name {
-		case "targetRef":
-			ret.TargetRef = *parameter.String
-		case "path":
-			if ret.TargetRef == "" {
-				ret.TargetRef = *parameter.String
-			}
 		case "patchType":
 			ret.PatchType = *parameter.String
 		case "content":

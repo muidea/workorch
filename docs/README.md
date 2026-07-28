@@ -2,7 +2,7 @@
 
 Status: active
 
-Last Updated: 2026-07-27
+Last Updated: 2026-07-28
 
 ## Purpose
 
@@ -31,9 +31,7 @@ Last Updated: 2026-07-27
   [runtime-stage-contract.md](00-core/runtime-stage-contract.md)
 - Runtime V2 candidate admission / attempt transaction 完成记录：
   [runtime-v2-candidate-admission-transaction-closure.md](90-archive/completed/runtime-v2-candidate-admission-transaction-closure.md)
-- Runtime V2 live 合同正向收敛当前收口：
-  [runtime-v2-validation-progress-closure-plan.md](70-roadmap/active/runtime-v2-validation-progress-closure-plan.md)
-- Runtime V2 单 owner 状态机 / lifecycle 当前收口：
+- Runtime V2 candidate/receipt、单 owner 状态机与 lifecycle 唯一当前收口：
   [runtime-v2-single-owner-state-machine-closure-plan.md](70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md)
 - 当前仓库事实 / 未关项：
   [current-state.md](01-overview/current-state.md),
@@ -100,17 +98,17 @@ Last Updated: 2026-07-27
 
 若旧文档与核心合约冲突，以 `00-core/runtime-stage-contract.md` 为准。若设计文档与模块 readme/代码冲突，以代码与模块 readme 为准并回写设计文档。
 
-## Current Documentation Status（2026-07-27）
+## Current Documentation Status（2026-07-28）
 
 - **生产代码路径 = Runtime V2 only**（Start/Resume → `DriveRuntimeV2`）。
 - 权威层已按 V2 刷新：`00-core` 双层映射、`01-overview` 事实入口、`20-runtime-flow` / `30-module-architecture` 主链。
 - 2026-07-14：约 146 份 completed / V1-absorbed plan 已迁 `90-archive/completed/`。
 - **2026-07-16 文档清理**：`active/` 假活跃产品/审计/收口日记全部归档；dated live verification 迁 `records/`；`60-verification/artifacts/**` 出库。
-- **Runtime V2 有两个不重叠的 active 收口队列**：`RUNTIME-VPC` 仅处理 sealed manifest、renderer/decoder/
-  evaluator、receipt 与 live observation；`RUNTIME-SMO` 仅处理四状态机的唯一 owner、Run/Workspace/Result
-  lifecycle projection、owner-local event 与跨 owner immutable fact。历史 focus authority、strict manifest/
-  admission、correction renderer、C4～C6 与 P0～P6 均只作回归基线。不得新增第三套状态迁移或以 TUI/Web
-  兼容分支绕过 SMO。active 当前包含 RUNTIME-VPC、RUNTIME-SMO、ARCH-1、OPS-1 与可选 OPT-1。
+- **Runtime V2 只有一个 active 收口队列 `RUNTIME-SMO`**：2026-07-28 fresh live 已重新打开 complete candidate
+  document handoff、SM-3 single evaluator、canonical target 与 recovery 分类，当前按 C7-B～C7-F 串行收口。
+  旧 VPC 已迁入 `90-archive/superseded/`，仅作 manifest/evaluator/receipt 回归基线；不得新增第二套状态迁移
+  或以 TUI/Web 兼容分支绕过 SMO。active 当前包含
+  RUNTIME-SMO、ARCH-1、OPS-1 与可选 OPT-1。
 - **已废止作为生产主链叙述**：StagePacket、NextAction、graph dispatch checkpoint、ExecutionContextPatch、自动 replan successor。
 - 根目录正式导航：本文。历史目录重组计划见 `90-archive/completed/docs-domain-module-flow-reorganization-plan.md`。
 

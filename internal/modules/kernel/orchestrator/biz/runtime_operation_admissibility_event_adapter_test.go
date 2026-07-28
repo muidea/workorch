@@ -55,13 +55,13 @@ func TestProbeRuntimeOperationFeasibilityRejectsMalformedResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path, oldText, newText := "target.txt", "old", "new"
+	oldText, newText := "old", "new"
 	command := orchestratorevents.ProbeRuntimeOperationFeasibilityCommand{
 		WorkspaceID: "ws-v2", RunID: "run-v2", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "snapshot-v2"},
 		WorkspaceDeliverableDirectory: t.TempDir(), Admissibility: inventory,
 		CandidateManifestHash: "manifest-test", OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, runtimecontract.StepKindFileEdit),
 		Operation: runtimecontract.RuntimeOperation{ID: "edit-1", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{"target.txt"}, Parameters: []runtimecontract.OperationParameter{
-			{Name: "path", String: &path}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText},
+			{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText},
 		}},
 	}
 	if _, err := ProbeRuntimeOperationFeasibility(ctx, hub, orchestratorevents.ProbeRuntimeOperationFeasibilityCommand{}); err == nil {
