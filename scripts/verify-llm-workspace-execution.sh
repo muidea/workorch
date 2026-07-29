@@ -270,7 +270,9 @@ def next_scenario(request):
 
 def validation_ops(request):
     # produce_validation forbids workspace side effects; use read-only file/read
-    # (same contract as verify-tui-long-output-e2e). optional=true tolerates first-run absence.
+    # (same contract as verify-tui-long-output-e2e). The sealed target is
+    # carried by targetRefs; path is deliberately not duplicated as a free
+    # parameter. optional=true tolerates first-run absence.
     coverage = request["coverage"]
     focus = request["focusId"]
     return {
@@ -280,7 +282,6 @@ def validation_ops(request):
             "coverageWorkItemIds": coverage[:1],
             "targetRefs": ["runtime-validation-source.txt"],
             "parameters": [
-                {"name": "path", "string": "runtime-validation-source.txt"},
                 {"name": "optional", "boolean": True},
                 {"name": "maxBytes", "integer": 16384},
             ],
