@@ -107,6 +107,17 @@ Orchestrator 内部事件最少包括：
 
 `CorrectionDisposition` 只属于 `CandidateRejection`；它只能由纯 CandidateEvaluator 产生。owner feasibility 不携带 `RuntimeAction`、`Terminal`、`Retry`、`Governance` 或“写入哪个状态”的指令。
 
+### 4.1.1 Provider candidate wire normalization
+
+SM-3 的 complete document 先以原始 provider bytes 持久化到 C4，原文 hash、fragment 和 request-session
+identity 不得因解析便利而改变。C5 在 strict decode 前仅允许调用
+`NormalizeRuntimeCandidatePayloadDocument`：它只移除唯一、完整、外层为 `json` 语言标记的 Markdown 围栏，且仅允许围栏外存在空白。
+
+- 裸 JSON 不变；围栏内文本仍由既有 strict JSON decoder 与 sealed manifest 校验。
+- 前后 prose、其他语言标签、多个/嵌套围栏、缺失 closing fence、空 body、多个 JSON value、未知字段、参数/target/effect/coverage 违例均不得被兼容或修复。
+- normalization 是 `internal/pkg/workorchruntimecontract` 的纯函数；LLM Block 继续透传原始 provider output，Orchestrator 仍是唯一 C5 decode/admission、attempt 与 dispatch owner。
+- 已完成的 exact fenced candidate 是 wire 表达归一，不产生 correction attempt；不能安全归一的完整 document 才由 CandidateEvaluator 分类。
+
 ### 4.2 owner feasibility observation
 
 `internal/pkg/workorchruntimecontract` 只定义纯 DTO/validator：

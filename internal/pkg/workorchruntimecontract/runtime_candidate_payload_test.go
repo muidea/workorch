@@ -1,10 +1,38 @@
 package workorchruntimecontract
 
 import (
+	"bytes"
 	"errors"
 	"strings"
 	"testing"
 )
+
+func TestNormalizeRuntimeCandidatePayloadDocumentOnlyUnwrapsOneExactJSONFence(t *testing.T) {
+	bare := []byte(`{"operations":[]}`)
+	fenced := []byte("```json\n" + string(bare) + "\n```")
+
+	normalized, wrapped := NormalizeRuntimeCandidatePayloadDocument(fenced)
+	if !wrapped || !bytes.Equal(normalized, bare) {
+		t.Fatalf("fenced candidate normalization = %q wrapped=%v, want bare JSON", normalized, wrapped)
+	}
+
+	for name, payload := range map[string][]byte{
+		"bare JSON":             bare,
+		"prose before fence":    append([]byte("candidate:\n"), fenced...),
+		"prose after fence":     append(append([]byte(nil), fenced...), []byte("\nthanks")...),
+		"wrong language":        []byte("```yaml\n" + string(bare) + "\n```"),
+		"missing closing fence": []byte("```json\n" + string(bare)),
+		"empty fenced body":     []byte("```json\n\n```"),
+		"multiple outer fences": []byte("```json\n" + string(bare) + "\n```\n```json\n{}\n```"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, accepted := NormalizeRuntimeCandidatePayloadDocument(payload)
+			if accepted || !bytes.Equal(got, payload) {
+				t.Fatalf("normalization must preserve non-canonical payload: got=%q accepted=%v", got, accepted)
+			}
+		})
+	}
+}
 
 func TestDecodeRuntimeCandidatePayloadClassifiesIncompleteAndEmptyDocuments(t *testing.T) {
 	for name, payload := range map[string][]byte{

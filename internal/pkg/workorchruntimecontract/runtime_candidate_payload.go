@@ -90,6 +90,31 @@ func InspectRuntimeCandidateDocumentFraming(payload []byte) RuntimeCandidateDocu
 	return RuntimeCandidateDocumentComplete
 }
 
+// NormalizeRuntimeCandidatePayloadDocument removes only one complete, outer
+// Markdown json fence from a provider document. It is a wire normalization,
+// not a permissive decoder: prose before or after the fence, a different
+// language tag, a missing closing fence, an empty fenced body, multiple JSON
+// values, unknown fields, and every schema violation remain for the strict
+// decoder to reject. The raw provider bytes must remain the persisted audit
+// artifact; callers use the returned bytes solely for candidate decoding.
+func NormalizeRuntimeCandidatePayloadDocument(payload []byte) ([]byte, bool) {
+	raw := bytes.TrimSpace(payload)
+	openingEnd := bytes.IndexByte(raw, '\n')
+	if openingEnd <= 0 || !bytes.Equal(bytes.TrimSpace(raw[:openingEnd]), []byte("```json")) {
+		return payload, false
+	}
+	remainder := raw[openingEnd+1:]
+	closingStart := bytes.LastIndex(remainder, []byte("\n```"))
+	if closingStart < 0 || !bytes.Equal(bytes.TrimSpace(remainder[closingStart+1:]), []byte("```")) {
+		return payload, false
+	}
+	document := bytes.TrimSpace(remainder[:closingStart])
+	if len(document) == 0 || bytes.Contains(document, []byte("\n```")) {
+		return payload, false
+	}
+	return append([]byte(nil), document...), true
+}
+
 // DecodeRuntimeCandidatePayload is the owner-neutral, strict DTO decoder for
 // a completed provider candidate document. It performs no state transition or
 // admission decision; Orchestrator remains the sole authority for both.

@@ -618,7 +618,12 @@ func (m *Biz) admitRuntimeV2CompletedCandidateDocument(ctx context.Context, aggr
 	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources)); err != nil {
 		return runtimev2.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
-	candidate, decodeErr := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, document)
+	// Raw provider bytes stay in the C4 artifact for audit/restart integrity.
+	// C5 may remove one exact outer ```json fence before strict decoding; this
+	// cannot admit prose, alternate fence forms, multiple JSON values, or any
+	// manifest/schema violation.
+	decodedDocument, _ := runtimecontract.NormalizeRuntimeCandidatePayloadDocument(document)
+	candidate, decodeErr := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, decodedDocument)
 	if decodeErr != nil {
 		failure := *runtimeV2CandidateSchemaFailure(decodeErr)
 		failed, failureErr := m.runtimeV2CandidateDocument(ctx, aggregate, runtimev2.RuntimeInternalEventCandidateDocumentRejected, candidateAttempt, session.StablePrefixHash, manifest, session.LogicalRequestID, nil, &failure)

@@ -8958,7 +8958,7 @@ func TestRequestAndSealRuntimeV2CandidateCommitsSessionBeforeProviderAndAttemptA
 	}
 	module := newTestBiz(owner, hub, nil)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
-	document := []byte(`{"operations":[{"id":"op-1","kind":"file/edit","coverageWorkItemIds":["cwi-v2"],"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)
+	document := []byte("```json\n{\"operations\":[{\"id\":\"op-1\",\"kind\":\"file/edit\",\"coverageWorkItemIds\":[\"cwi-v2\"],\"targetRefs\":[\"target.txt\"],\"parameters\":[{\"name\":\"oldText\",\"string\":\"old\"},{\"name\":\"newText\",\"string\":\"new\"}]}]}\n```")
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
@@ -9153,7 +9153,8 @@ func TestRuntimeV2FileBackedCompleteDocumentRestartAdmitsWithoutProviderReplay(t
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "reloaded-edit", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileEditParameters("target.txt"),
 	}}}}}
-	document := runtimeV2CandidateDocumentForTest(t, manifest, candidate)
+	bareDocument := runtimeV2CandidateDocumentForTest(t, manifest, candidate)
+	document := []byte("```json\n" + string(bareDocument) + "\n```")
 	committed, _, _, err := newTestBiz(firstOwner, hub, nil).persistAndCompleteRuntimeCandidateRequestDocument(ctx, submitted, session.LogicalRequestID, session.NextSequence, physicalCallID, document)
 	if err != nil {
 		t.Fatal(err)
