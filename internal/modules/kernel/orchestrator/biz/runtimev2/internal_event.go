@@ -36,13 +36,14 @@ type RuntimeInternalEvent struct {
 	RequestFragment  *runtimecontract.RuntimeCandidateRequestFragment
 	RequestOutcome   *runtimecontract.RuntimeCandidateRequestOutcome
 
-	Attempt              int
-	Manifest             *runtimecontract.RuntimeCandidateContractManifest
-	Candidate            *runtimecontract.RuntimeCandidate
-	CandidateFailure     *runtimecontract.RuntimeCandidateFailure
-	CandidateFeasibility *runtimecontract.RuntimeCandidateFeasibilityRecord
-	PrerequisiteRequest  *runtimecontract.RuntimeOperationPrerequisiteRequest
-	OwnerFeasibility     *runtimecontract.RuntimeOwnerFeasibilityObservation
+	Attempt                   int
+	Manifest                  *runtimecontract.RuntimeCandidateContractManifest
+	Candidate                 *runtimecontract.RuntimeCandidate
+	CandidateFailure          *runtimecontract.RuntimeCandidateFailure
+	CandidateFeasibility      *runtimecontract.RuntimeCandidateFeasibilityRecord
+	PrerequisiteRequest       *runtimecontract.RuntimeOperationPrerequisiteRequest
+	OwnerFeasibility          *runtimecontract.RuntimeOwnerFeasibilityObservation
+	RepairSurfaceConfirmation *runtimecontract.RuntimeRepairSurfaceConfirmation
 
 	OperationReceipt *runtimecontract.RuntimeOperationReceipt
 	DispatchID       string
@@ -88,6 +89,8 @@ const (
 	RuntimeInternalEventGovernanceRequestObserved          RuntimeInternalEventKind = "governance_request_observed"
 	RuntimeInternalEventGovernanceResolutionObserved       RuntimeInternalEventKind = "governance_resolution_observed"
 	RuntimeInternalEventOperationReceiptObserved           RuntimeInternalEventKind = "operation_receipt_observed"
+	RuntimeInternalEventValidationFailureObserved          RuntimeInternalEventKind = "validation_failure_observed"
+	RuntimeInternalEventRepairSurfaceConfirmationObserved  RuntimeInternalEventKind = "repair_surface_confirmation_observed"
 	RuntimeInternalEventDispatchExecutionRequested         RuntimeInternalEventKind = "dispatch_execution_requested"
 	RuntimeInternalEventTerminalDeliveryAcknowledged       RuntimeInternalEventKind = "terminal_delivery_ack_observed"
 	RuntimeInternalEventRecoveryBudgetConsumed             RuntimeInternalEventKind = "recovery_budget_consumed"
@@ -293,6 +296,23 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		aggregate, receipt, err := c.CommitOperationReceipt(ctx, event.WorkspaceID, event.RunID, event.DispatchID, event.Fence, *event.OperationReceipt)
 		result.Aggregate = aggregate
 		result.Receipt = &receipt
+		return result, err
+	case RuntimeInternalEventValidationFailureObserved:
+		// The rejected operation receipt already persisted the capability fact.
+		// This event is the explicit owner-local handoff boundary; confirmation
+		// below is the first event permitted to turn it into repair authority.
+		if event.FailureFact == nil || event.FailureFact.ValidationFailureObservation == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.RecordValidationFailureObservation(ctx, event.WorkspaceID, event.RunID, *event.FailureFact.ValidationFailureObservation)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventRepairSurfaceConfirmationObserved:
+		if event.RepairSurfaceConfirmation == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.RecordRepairSurfaceConfirmation(ctx, event.WorkspaceID, event.RunID, *event.RepairSurfaceConfirmation)
+		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventDispatchExecutionRequested:
 		if event.Executor == nil {

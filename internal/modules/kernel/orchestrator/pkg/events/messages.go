@@ -75,6 +75,20 @@ type AcquireWorkspaceManifestResult struct {
 	Observation    *runtimecontract.RuntimePrerequisiteObservation
 }
 
+// ConfirmRuntimeRepairSurfaceCommand asks the File owner to verify a bounded
+// Shell validation-failure observation against the current workspace.  It is
+// read-only and contains no Runtime action or aggregate mutation.
+type ConfirmRuntimeRepairSurfaceCommand struct {
+	WorkspaceID                   common.WorkspaceID
+	RunID                         common.RunID
+	WorkspaceDeliverableDirectory string
+	Observation                   runtimecontract.RuntimeValidationFailureObservation
+}
+
+type ConfirmRuntimeRepairSurfaceResult struct {
+	Confirmation runtimecontract.RuntimeRepairSurfaceConfirmation
+}
+
 type AcquireProviderCeilingCommand struct {
 	WorkspaceID         common.WorkspaceID
 	RunID               common.RunID
@@ -1231,6 +1245,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[AcquireTargetSnapshotCommand, AcquireTargetSnapshotResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireTargetSnapshot).MessageContract(),
 		eventcontract.CommandTopic[AcquireRuntimeTargetSelectionCommand, AcquireRuntimeTargetSelectionResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireRuntimeTargetSelection).MessageContract(),
 		eventcontract.CommandTopic[AcquireWorkspaceManifestCommand, AcquireWorkspaceManifestResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireWorkspaceManifest).MessageContract(),
+		eventcontract.CommandTopic[ConfirmRuntimeRepairSurfaceCommand, ConfirmRuntimeRepairSurfaceResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorConfirmRuntimeRepairSurface).MessageContract(),
 		eventcontract.CommandTopic[AcquireProviderCeilingCommand, AcquireProviderCeilingResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireProviderCeiling).MessageContract(),
 		eventcontract.CommandTopic[AcquireRuntimeCapabilitiesCommand, AcquireRuntimeCapabilitiesResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireRuntimeCapabilities).MessageContract(),
 		eventcontract.CommandTopic[AcquireRuntimeOperationAdmissibilityCommand, AcquireRuntimeOperationAdmissibilityResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireRuntimeOperationAdmissibility).MessageContract(),

@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-07-28
+Last Updated: 2026-07-29
 
 
 ## LLM Provider（2026-07-15）
@@ -26,9 +26,10 @@ Last Updated: 2026-07-28
 
 **生产代码路径 = Runtime V2 only。**
 
-> 实施状态限定：最新 fresh deployed live 已证明既有 receipt、multi-operation dispatch 与 terminal delivery
-> 的局部基线，但同时暴露 owner feasibility 被错误折叠为 candidate correction，以及空 workspace coverage/
-> blueprint 与 validation dependency 断链。当前唯一实施顺序是 RUNTIME-SMO SMO-1～SMO-7；历史 C7/C8
+> 实施状态限定：最新 fresh deployed live 已证明 activation、receipt、sealed dispatch 与 terminal delivery
+> 的局部基线，但暴露可修复 implementation failure 缺少 Shell → File → Orchestrator 的 owner-grounded
+> repair-authority handoff，因而错误进入 validation-only loop。SMO-7A 已完成代码、targeted regression 与
+> static gate；当前唯一实施项是 RUNTIME-SMO SMO-7 fresh live。历史 C7/C8
 > 只作回归基线，不能据此声明 workspace 已持续收敛：
 > [runtime-v2-single-owner-state-machine-closure-plan.md](../70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md)。
 
@@ -112,11 +113,12 @@ Block owner，不承担跨 owner 编排。
 evidence，不再定义当前实施顺序，也不能代替最新 deployed live。最新 persisted aggregate 反例优先决定当前未关项；
 active 文档不保存 workspace/run 的 dated 过程日志或 raw provider/runtime data。
 
-1. **Runtime V2 单 owner convergence 收口（RUNTIME-SMO SMO-1～SMO-7）**：先统一 candidate rejection 与
-   owner feasibility 的正交合同和 Orchestrator internal event，以及所有 aggregate transition 到唯一
-   coordinator 已完成；随后收口 feasibility 后继、activation-time coverage/blueprint、capability code taxonomy 与
-   request boundary，最后执行 restart/concurrency/fresh live。历史 C7/C8、canonical target、receipt/effect 等
-   只作为回归基线，不能新增兼容路径或独立规则。详见
+1. **Runtime V2 单 owner convergence 收口（RUNTIME-SMO SMO-7）**：candidate rejection 与
+   owner feasibility 的正交合同、Orchestrator internal event、唯一 aggregate coordinator、activation-time
+   coverage/blueprint、capability code taxonomy 与 request boundary均为已完成基线。当前先收口可修复
+   validation failure 的 Shell fact → File repair-surface confirmation → Orchestrator internal event → new
+   authority attempt-0 已完成代码收口；当前执行 restart/concurrency/fresh live。历史 C7/C8、canonical target、receipt/effect
+   等只作为回归基线，不能新增兼容路径或独立规则。详见
    [单 owner 统一收口方案](../70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md)。
 2. **组件边界 / 生命周期（ARCH-1）**：SM-4 startup recovery、channel-free process lifecycle、owner Service facade、repository DTO 与 test-data isolation 均已有实现/回归证据；2026-07-19 的 go-multi-module-dev 审计发现的共享 Base Biz 缺失和 framework Module 根直接持有 EventHub，现已迁移到 component-local Biz，且本地 structural/race/file-backed 门禁已重跑。22 个组件的职责、typed 交互合同、禁止边界和可单独执行的回归命令已固化在 `70-roadmap/active/component-contract-and-regression-closure-matrix.md`。仅待提供重启后的外部目标与 `active_no_dispatch`、`active_sealed_dispatch`、`terminal_delivery_pending` 三类 fixture manifest，以执行 deployed SM-4 matrix；workspace 删除后的迟到投影还必须验证 `/readyz` 恢复 ready，不能以放宽 readiness 绕过。
 3. **运维切换（OPS-1）**：真实生产目录 `runtime-v1-retirement --apply` + clean build 维护窗口（过程日记已归档，不在 active 放长文）。

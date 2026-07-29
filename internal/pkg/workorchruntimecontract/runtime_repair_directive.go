@@ -369,7 +369,8 @@ func SameRuntimeRepairDirective(left *RuntimeRepairDirective, right *RuntimeRepa
 			l.CurrentFailure.Signature != r.CurrentFailure.Signature || l.CurrentFailure.Message != r.CurrentFailure.Message ||
 			!sameStrings(l.CurrentFailure.TargetRefs, r.CurrentFailure.TargetRefs) ||
 			!sameRuntimeFailureTargetObservation(l.CurrentFailure.TargetObservation, r.CurrentFailure.TargetObservation) ||
-			!sameValidationFailureDiagnostic(l.CurrentFailure.ValidationDiagnostic, r.CurrentFailure.ValidationDiagnostic) {
+			!sameValidationFailureDiagnostic(l.CurrentFailure.ValidationDiagnostic, r.CurrentFailure.ValidationDiagnostic) ||
+			!sameRuntimeValidationFailureObservation(l.CurrentFailure.ValidationFailureObservation, r.CurrentFailure.ValidationFailureObservation) {
 			return false
 		}
 	}
@@ -390,6 +391,16 @@ func SameRuntimeRepairDirective(left *RuntimeRepairDirective, right *RuntimeRepa
 		}
 	}
 	return true
+}
+
+func sameRuntimeValidationFailureObservation(left *RuntimeValidationFailureObservation, right *RuntimeValidationFailureObservation) bool {
+	if left == nil && right == nil {
+		return true
+	}
+	if left == nil || right == nil {
+		return false
+	}
+	return SameRuntimeValidationFailureObservation(*left, *right)
 }
 
 func sameRuntimeFailureTargetObservation(left *RuntimeFailureTargetObservation, right *RuntimeFailureTargetObservation) bool {

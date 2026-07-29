@@ -27,32 +27,28 @@ Last Updated: 2026-07-29
 
 ## 2. 最新 deployed 反例与根因
 
-全新空 workspace `ws-d3f6c386d1ab82a5` 的单次 activation 证明：
+已完成的 SMO-1～SMO-6 是不可回退的代码与测试基线，但不构成 fresh deployed 正向收敛的证明。最新全新 workspace
+`ws-bc03e2587d09de64/run-001` 仅 activation 一次、未手改 runtime data、Decision、Approval 或 Resume，得到以下事实：
 
-1. SM-1 自动进入 `active` 并封存 ready provider/model；
-2. SM-3 的 `go.mod`、`main.go` 两个 File operation 都形成真实 `workspace_durable` receipt；首个 receipt 改变 workspace tree 后，同 dispatch 后续 operation 继续执行；
-3. File、Shell、LLM、Result、Workspace、Run 都没有越权写对方状态；terminal delivery 完成 `Result -> Workspace -> Run` acknowledgement；
-4. 没有无信息 Decision/Approval，也没有人工 Resume 补偿。
+1. SM-1 正常封存 ready 的 `ai-proxy/deepseek-v4-flash` 并进入 `active`；
+2. activation blueprint 正确封存并形成 `go.mod`、`internal/lsp/manager.go`、`internal/lsp/manager_test.go` 的 durable File receipt；
+3. 每个副作用均有 `ExecutionKey + Fence`、sealed target、owner receipt 和精确 prerequisite invalidation；没有无信息 Decision/Approval，也没有跨 workspace 串扰；
+4. Shell 的 `go test ./...` 返回受封存 scope 约束的 structured failure：`undefined: os` 及 Manager API 缺失，diagnostic 已列出上述三个 target；
+5. 随后 SM-2 连续选择 `produce_validation`，SM-3 连续封存 validation-only dispatch，没有新的 durable repair receipt；Run 在 `runtimeRepairAttempts=10` 后以 `no_progress_exhausted` 失败，并完成 `Result -> Workspace -> Run` delivery acknowledgement。
 
-但 Run 最终进入：
-
-```text
-runtime_contract_defect:
-complete rejection code is not declared in the correction matrix
-```
-
-直接原因不是 Shell 错误。Shell 对没有 `*_test.go` 的 `go test` 正确返回 `validation_target_missing` feasibility observation。错误发生在 Orchestrator：该普通 owner feasibility 先被记为 `RuntimeCandidateFailureClassInfeasible`，下一次 drive 又把它当作同 manifest 的 candidate correction；correction matrix 未声明该 owner code，于是错误密封为 contract defect。
-
-根因有两类：
+这不是 provider、上下文裁剪、activation coverage 或 CandidateEvaluator correction matrix 的问题。根因是
+**可修复 implementation failure 的 repair authority 事实链不完整**：Shell 已返回 structured validation diagnostic，
+但该 diagnostic 没有经过当前 File owner 的 target/revision/selector 确认而成为 `FailureTarget`。现有 SM-2 只在
+`FailureTarget` 已持久化时才选择 state change，故将实际 implementation/effect gap 降格为 validation gap。
 
 | ID | 根因 | 违反点 |
 | --- | --- | --- |
-| SMO-FEASIBILITY | candidate contract rejection、owner feasibility、prerequisite stale 被压入同一 candidate-attempt 失败通道 | owner 事实没有唯一、可持久化的 SM-2 交接；新增 capability code 会重复暴露未知分支 |
-| SMO-COVERAGE | 空 workspace 的 generic `source_change` 与 DoD executable validation 分成不同 focus | 首轮没有被封存为必须创建测试产物；后续 validation focus 又没有合法 state-change authority |
-| SMO-EVENT | adapter/mainline 可直接调用 candidate attempt 关闭入口 | 外部 observation 未先转为 Orchestrator owner-local event，难以审计每个事实的唯一转换 |
-| SMO-TEST | 单测直接调用首次 `FailCandidateAttempt`，未覆盖下一次 drive 的 attempt-1 gate | 测试绿不能证明 production handoff 闭环 |
+| SMO-REPAIR-AUTHORITY | Shell validation failure 与 File owner 的当前 target/revision 确认之间不存在 typed fact handoff | SM-2 没有 owner-grounded implementation/effect fact，无法合法生成 state-change authority |
+| SMO-REPAIR-ROUTING | receipt/diagnostic 到下一 authority 的分类未区分 `implementation_effect_observed` 与 `validation_recipe_or_evidence_gap` | 违反“结构化 gap 类别是下一 action 的唯一依据” |
+| SMO-NO-PROGRESS | 相同 failure signature、相同 target revision、零 durable repair receipt 仍重复驱动 validation | SM-4 的无进展 guard 未在错误 authority 路径上及早 fail-fast |
+| SMO-TEST | 现有测试只证明普通 validation entry 不会凭文本变成写权限 | 未覆盖“sealed target + File freshness 确认后产生有限 state-change repair authority”的正向矩阵 |
 
-因此不得用“把 `validation_target_missing` 加进 correction matrix”“提高 repair budget”“让 LLM 再试一次”“自动 Resume”作为修复。
+不得以“允许 stderr 直接授予写权限”“把 Shell code 加入 candidate correction matrix”“提高 repair budget”“让 LLM 再试一次”或“自动 Resume”处理该反例。
 
 ## 3. 状态 owner 与允许交互
 
@@ -85,6 +81,8 @@ Orchestrator 内部事件最少包括：
 - `candidate_evaluation_observed`；
 - `owner_feasibility_observed`；
 - `operation_receipt_observed`；
+- `validation_failure_observed`；
+- `repair_surface_confirmation_observed`；
 - `assessment_observed`；
 - `governance_resolution_observed`；
 - `terminal_delivery_ack_observed`。
@@ -139,6 +137,28 @@ attempt 保留 observation lineage，新 authority 只能重新从 attempt-0 开
 
 同 focus 形成新 authority 必须改变 persisted feasibility/gap fact、manifest hash 或 prerequisite generation；仅 revision 增长而 convergence signature 不变必须 fail-fast。不得由 owner code 或 LLM 文本直接选择 `produce_state_change`。
 
+### 4.4 Validation failure 到 repair authority 的单 owner 交接
+
+本节是 SMO-REPAIR-AUTHORITY 的唯一实施标准。它不放宽 candidate 合同，也不把状态迁移下放到 capability Block。
+
+1. Shell 在执行 sealed validation operation 后只能返回 `RuntimeValidationFailureObservation`：完整 workspace/run/authority/dispatch/operation identity、failure category、signature、sealed validation scope 内的候选 target refs、evidence ref 和有界 diagnostic。该 DTO 是事实，**不得**含 Runtime action、retry、terminal、governance、coverage mutation 或 repair directive。
+2. Orchestrator 接收 receipt 后先写入 `validation_failure_observed` 内部事件。它只保存 failure lineage；若类别可能是 implementation/effect，Orchestrator 以 typed File command 请求当前 repair-surface confirmation，不能从 stderr、Goal/DoD 或 LLM 文本猜 target。
+3. File owner 只确认事实：目标是否属于 current sealed selector/manifest、是否为 regular target、当前 revision、可修复 target refs 和 observation binding。File 不写 Runtime aggregate、不变更 focus、不选择 action，也不调用 Shell/LLM。
+4. Orchestrator 将 File result 映射为 `repair_surface_confirmation_observed`。仅当 signature、workspace/run/authority、sealed scope、target role 和 File revision 都匹配时，SM-2 才把事实归类为 `implementation_effect_observed`，持久化 repair closure 并生成新的 `produce_state_change` authority。
+5. `validation_recipe_or_evidence_gap` 保持 `produce_validation`；recipe 不可用形成 `validation_recipe_exhausted`；stale confirmation 仅退休精确 prerequisite 后重取。任何 capability code、diagnostic 文本或 LLM 输出均不能直接选择 action。
+6. 新 authority 必须具有新的 `AuthoritySnapshotID` 和新 candidate attempt-0。旧 validation dispatch/attempt 只保留审计 lineage，绝不能转为 attempt-1，也不能复用为 state-change dispatch。
+
+唯一允许的数据流为：
+
+```text
+Shell receipt/failure fact
+  -> Orchestrator validation_failure_observed
+  -> File repair-surface confirmation command/result
+  -> Orchestrator repair_surface_confirmation_observed
+  -> SM-2 reducer/CAS: new state-change authority
+  -> SM-3 sealed dispatch -> File durable receipt
+```
+
 ## 5. 空 workspace 覆盖编译收口
 
 Application 不拥有 Runtime 状态机，但它拥有 activation-time `RuntimeBootstrap` 编译。因此它必须在 Run 创建前完成声明式 coverage/blueprint 选择：
@@ -155,18 +175,19 @@ Application 不拥有 Runtime 状态机，但它拥有 activation-time `RuntimeB
 
 | 组件 | 变更职责 | 禁止职责 | 独立回归 |
 | --- | --- | --- | --- |
-| `internal/pkg/workorchruntimecontract` | feasibility/evaluation outcome DTO、纯 validate/hash | transition/CAS/retry/EventHub/I/O | outcome normalization、未知 category/code 拒绝 |
-| `kernel/orchestrator/biz/runtimev2` | 唯一 internal-event transition coordinator；SM-2/3 fact handoff | capability I/O、领域/文件名特判 | evaluation→feasibility→new authority/terminal 全矩阵 |
-| `kernel/orchestrator/biz/runtime_v2_mainline.go` | 发起 I/O 后投递内部 observation | 直接关闭 candidate attempt 或选择修复 action | production drive 的 attempt-0/next-drive 回归 |
-| `application/workorchd/.../activationcore` | 编译 sealed coverage、blueprint、dependency | 迁移 Run/Runtime state、猜测 owner state | empty workspace bootstrap/DoD coverage matrix |
+| `internal/pkg/workorchruntimecontract` | feasibility/evaluation、validation-failure、repair-surface DTO 与纯 validate/hash | transition/CAS/retry/EventHub/I/O/Runtime action | outcome normalization、未知 category/code 拒绝、repair observation identity/hash |
+| `kernel/orchestrator/biz/runtimev2` | 唯一 internal-event transition coordinator；SM-2/3 fact handoff、repair authority 归约 | capability I/O、领域/文件名特判 | validation failure→File confirmation→new authority/terminal 全矩阵 |
+| `kernel/orchestrator/biz/runtime_v2_mainline.go` 及 adapter | 发起 typed I/O 后投递 internal observation | 直接关闭 candidate attempt、直接写 aggregate 或选择修复 action | production drive 的 receipt/confirmation/next-drive 回归 |
+| `application/workorchd/.../activationcore` | 编译 sealed coverage、blueprint、dependency | 迁移 Run/Runtime state、猜测 owner state 或补 repair action | empty workspace bootstrap/DoD coverage matrix |
 | `workorchdefaults/defaults/templates.json` | profile/template 声明 state-change + validation blueprint/policy | core 领域分支 | template/profile compilation tests |
-| `blocks/shell/biz` | 真实 preflight/effect/validation observation 与 factual category | Runtime action/retry/terminal | all Shell code→category 与 exact receipt restart |
-| `blocks/file/git/mcp/ssh/web/biz` | 同一 typed feasibility/receipt taxonomy | aggregate/focus/coverage 写入 | all emitted owner code category completeness |
-| `blocks/llm/biz` | 渲染 sealed C0-C5，其中 C4 仅含 provider-safe feasibility fact | 补 action、重建 authority | stable-prefix / new-authority request audit |
+| `blocks/shell/biz` | 真实 preflight/effect/validation failure observation；候选 target 必须绑定 sealed validation scope | Runtime action/retry/terminal/repair target state | Shell failure category、receipt restart、无 action 字段 |
+| `blocks/file/biz` | manifest/selector/current revision 的 repair-surface confirmation | aggregate/focus/coverage 写入、从 diagnostic 猜 target、选择 action | confirmation freshness、scope mismatch、stale/duplicate |
+| `blocks/git/mcp/ssh/web/biz` | 同一 typed feasibility/receipt taxonomy；审计不携带 Runtime state | aggregate/focus/coverage/action 写入 | all emitted owner code category completeness |
+| `blocks/llm/biz` | 渲染 sealed C0-C5，其中 C4 仅含 provider-safe repair fact/diagnostic projection | 补 action、重建 authority、从 raw diagnostic 推 target | stable-prefix / new-authority request audit |
 | `blocks/run` | SM-1 owner-local activation/block/terminal | action selection | duplicate intent、terminal delivery |
 | `blocks/result`、`blocks/workspace` | terminal delivery owner-local acknowledgement | acceptance/terminal 裁决 | Result→Workspace→Run idempotency |
 | TUI/Web/eventstream | intent、审计、投影 | setter、自动 Resume、错误文本驱动 | no implicit state mutation scan |
-| `scripts/verify-boundary-contract.sh` | 静态边界门禁 | 业务分流 | pkg purity、owner-result、UI/application scan |
+| `scripts/verify-boundary-contract.sh` | 静态边界门禁 | 业务分流 | pkg purity、owner-result、UI/application scan、repair fact 无 action、唯一 coordinator CAS |
 
 ## 7. 唯一串行实施队列
 
@@ -180,9 +201,10 @@ Application 不拥有 Runtime 状态机，但它拥有 activation-time `RuntimeB
 | SMO-4 | activation coverage/blueprint 收口 | completed | activation→SM-2 | `activationcore` 在 Run 创建前编译 profile recipe artifact 拓扑、owner-grounded prospective target、bootstrap 前置 slices 与 source→validation reopen dependency；空 workspace 不靠 Runtime/core 猜测布局 |
 | SMO-5 | capability taxonomy 全量收口 | completed | owner→SM-2/3 | File/Git/Shell/MCP/SSH/Web 所有当前 emitted code 都以 `owner + code` 映射到 typed factual category；能力 owner 的 EventHub result boundary 拒绝未映射或跨 owner code，total-matrix 与 capability suite 均已回归 |
 | SMO-6 | request/rendering 与 boundary gate | completed | SM-3/SM-4 | C4 仅含专用 provider-safe failure/evidence/assessment/shape projection及 sealed correction/continuation suffix；raw reason/summary/payload、owner feasibility、repair/recovery/governance action 均被拒绝，静态扫描通过 |
+| SMO-7A | validation failure repair-authority owner handoff | completed（code / targeted regression / static gate） | SM-2/SM-3/SM-4、Shell/File | `RuntimeValidationFailureObservation`、File read-only confirmation 与 Orchestrator two-event/CAS handoff 已实现；确认后形成 new authority attempt-0，拒绝 confirmation 在 provider 前 typed fail-fast。fresh deployed 证明移交给 SMO-7。 |
 | SMO-7 | restart/concurrency/fresh live | in_progress | SM-1～SM-4 | 第 9 节所有退出条件通过；不得人工 Resume/改 runtime data 补偿 |
 
-C7-B～C7-E、C8-B～C8-F 是 regression baseline，不再作为可独立开始的卡。原 C8-G 被 SMO-1～SMO-7 取代，因为 live 已证明其前置合同未闭合。
+C7-B～C7-E、C8-B～C8-F 是 regression baseline，不再作为可独立开始的卡。原 C8-G 被 SMO-1～SMO-7A/SMO-7 取代，因为 live 已证明其前置合同未闭合。
 
 ## 8. 强制测试矩阵
 
@@ -194,6 +216,10 @@ C7-B～C7-E、C8-B～C8-F 是 regression baseline，不再作为可独立开始�
 - attempt 1 仅发生于完整 `correctable_once` directive；owner infeasible 后零 attempt-1；
 - 每个外部结果都经 owner-local internal event 后才增加 `StateRevision`；
 - 无 convergence signature 进展的连续 transition typed fail-fast。
+- Shell failure observation、File confirmation、Orchestrator internal event 的 workspace/run/authority/dispatch/operation identity 必须完全一致；任一不一致零 aggregate mutation；
+- Shell/other capability DTO 无 `RuntimeAction`、retry、terminal、governance、repair directive 或 aggregate 字段；
+- `implementation_effect_observed + fresh File confirmation` 必须产生 new-authority attempt-0；同一事实不得进入 candidate correction；
+- `validation_recipe_or_evidence_gap` 在无 repair-surface confirmation 时只能 validation 或 typed terminal，绝不因 diagnostic 文本获得 state change。
 
 ### 8.2 空 workspace 与 evidence
 
@@ -210,6 +236,8 @@ C7-B～C7-E、C8-B～C8-F 是 regression baseline，不再作为可独立开始�
 - duplicate Resume 只合并 drive；
 - 多 workspace 同时 activation、feasibility、dispatch、delivery，没有 context/identity 串扰；
 - terminal delivery 保持 `Result -> Workspace -> Run`，projection 失败不改写 terminal。
+- validation receipt 后、File confirmation 前后 crash/restart、duplicate、乱序：最多一次确认命令，零副作用重放，且只由 Orchestrator 内部事件提交状态；
+- 相同 failure signature、相同 confirmed revision 且零 durable repair receipt 时，SM-4 必须在再次请求 provider 前 typed fail-fast；不得耗尽普通 validation repair budget。
 
 ## 9. Fresh deployed live 退出条件
 
@@ -222,11 +250,12 @@ C7-B～C7-E、C8-B～C8-F 是 regression baseline，不再作为可独立开始�
 3. 同一 dispatch 首项 durable effect 后其余 sealed operation 继续；
 4. 每个副作用都有 owner receipt，且真实 changed refs 不越出 sealed target；
 5. owner feasibility stale、prerequisite、infeasible 分别进入唯一、可观察后继；
-6. 缺测试或无 validation recipe 不触发 candidate correction matrix，也不产生随机写入或无信息 ticket；
-7. validation 与 assessment 使用 structured observation；
-8. restart、duplicate Resume、并发 workspace 不重放副作用/provider，也不串 scope；
-9. workspace 独立验证满足 Goal/DoD，Runtime sealed completed terminal，并完成 Result→Workspace→Run acknowledgement；
-10. 不出现只增长 revision、相邻合同逐轮暴露或 error-text 驱动的循环。
+6. 可修复的 implementation/effect validation failure 必须经历 Shell fact → File confirmation → Orchestrator internal event，并以新的 state-change authority/attempt-0 进行一次受封存 target 约束的 repair；
+7. validation/evidence-quality gap 与 recipe-unavailable 分别保持 validation 或形成 typed terminal，均不产生随机写入、candidate correction 或无信息 ticket；
+8. validation 与 assessment 使用 structured observation；
+9. restart、duplicate Resume、confirmation 乱序和并发 workspace 不重放副作用/provider，也不串 scope；
+10. workspace 独立验证满足 Goal/DoD，Runtime sealed completed terminal，并完成 Result→Workspace→Run acknowledgement；
+11. 不出现只增长 revision、相邻合同逐轮暴露、error-text 驱动的循环，或同 signature 的十轮 validation-only 重试。
 
 ## 10. 静态门禁与完成定义
 
@@ -248,6 +277,7 @@ go test -p 1 ./... -count=1
 
 - `workorchruntimecontract` 无 transition/CAS/retry/EventHub/I/O；
 - capability result 不含 Runtime action、terminal、retry 或 aggregate mutation；
+- validation failure observation 不得直接构成 repair authority；只有经当前 File owner confirmation 的 immutable fact 才可被 Orchestrator reducer 消费；
 - mainline/adapter 不直接调用 aggregate transition persistence；
 - 只有 Orchestrator coordinator 写 SM-2/SM-3/SM-4 aggregate；
 - 只有 Run/Workspace/Result owner 写各自 lifecycle；

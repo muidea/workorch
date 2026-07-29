@@ -202,6 +202,9 @@ type FailureFact struct {
 	TargetRefs           []string
 	TargetObservation    *RuntimeFailureTargetObservation
 	ValidationDiagnostic *ValidationFailureDiagnostic
+	// ValidationFailureObservation is a capability fact only. It remains
+	// separate from TargetRefs until the File owner confirms the repair surface.
+	ValidationFailureObservation *RuntimeValidationFailureObservation
 	// GovernanceDependency is present only when an owner, prerequisite, or
 	// activation fact has already identified a concrete external dependency.
 	// Its presence is not a request to open a ticket; the Orchestrator reducer
@@ -223,6 +226,10 @@ func (f FailureFact) Normalized() FailureFact {
 		diagnostic := f.ValidationDiagnostic.Normalized()
 		f.ValidationDiagnostic = &diagnostic
 	}
+	if f.ValidationFailureObservation != nil {
+		observation := f.ValidationFailureObservation.Normalized()
+		f.ValidationFailureObservation = &observation
+	}
 	if f.GovernanceDependency != nil {
 		dependency := f.GovernanceDependency.Normalized()
 		f.GovernanceDependency = &dependency
@@ -240,6 +247,10 @@ func (f FailureFact) Clone() FailureFact {
 	if f.ValidationDiagnostic != nil {
 		diagnostic := f.ValidationDiagnostic.Clone()
 		f.ValidationDiagnostic = &diagnostic
+	}
+	if f.ValidationFailureObservation != nil {
+		observation := f.ValidationFailureObservation.Clone()
+		f.ValidationFailureObservation = &observation
 	}
 	if f.GovernanceDependency != nil {
 		dependency := f.GovernanceDependency.Clone()
@@ -1051,6 +1062,11 @@ func (f RuntimeFacts) Validate() error {
 		}
 		if err := ValidateRuntimeFailureGovernanceDependency(*f.Failure); err != nil {
 			return fmt.Errorf("runtime facts governance dependency: %w", err)
+		}
+		if f.Failure.ValidationFailureObservation != nil {
+			if err := f.Failure.ValidationFailureObservation.Validate(); err != nil {
+				return fmt.Errorf("runtime facts validation failure observation: %w", err)
+			}
 		}
 	}
 	if f.Resources.FailureTarget != nil && f.Resources.FailureTarget.TargetObservation != nil {

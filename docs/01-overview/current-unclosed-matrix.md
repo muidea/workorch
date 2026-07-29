@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-07-28
+Last Updated: 2026-07-29
 
 ## Purpose
 
@@ -23,7 +23,7 @@ matrix as separately actionable work and cannot override a newer persisted aggre
 
 | ID | 项 | 说明 | 当前方案 |
 | --- | --- | --- | --- |
-| RUNTIME-SMO | single-owner Runtime V2 convergence closure | 唯一活动 Runtime 队列。SMO-1～SMO-6 已完成：正交 candidate/feasibility、internal-event/唯一 CAS coordinator、feasibility 后继、activation-time 空 workspace blueprint/dependency、owner-code total taxonomy，以及 C4 provider-safe request boundary；剩余 SMO-7 执行 restart/concurrency/fresh live。 | [单 owner统一收口方案](../70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md) |
+| RUNTIME-SMO | single-owner Runtime V2 convergence closure | 唯一活动 Runtime 队列。SMO-1～SMO-7A 已完成代码基线；Shell failure fact → File repair-surface confirmation → Orchestrator internal event → new authority attempt-0 已由 targeted regression/static gate 覆盖。当前仅 SMO-7：重新部署后的 restart/concurrency/fresh live。 | [单 owner统一收口方案](../70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md) |
 
 ### B. 运行单元架构 / 生命周期
 
@@ -60,7 +60,7 @@ matrix as separately actionable work and cannot override a newer persisted aggre
 ## Judgment
 
 - **代码主链**：Runtime V2 only；V1 authority 不再是问题来源。complete candidate document 必须先持久化，
-  再由 SM-3 single evaluator 裁决；owner feasibility 是正交 typed fact，绝不得进入 candidate correction matrix。当前实施顺序以 SMO-1～SMO-7 为准，C7/C8 只作为不可回退基线。
+  再由 SM-3 single evaluator 裁决；owner feasibility 是正交 typed fact，绝不得进入 candidate correction matrix。validation failure 的 repair authority 同样只能由 Shell fact、File confirmation 与 Orchestrator internal event 形成；当前实施项为 SMO-7 fresh live，C7/C8 只作为不可回退基线。
 - **正向收敛基础**：既有 bootstrap、CAS、sealed authorization、三种 TargetPolicy、request session、receipt与
   terminal delivery继续是回归基线；latest persisted aggregate反例优先于过去的本地绿灯和阶段完成声明。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；不得再从已归档 plan 推导实现约束。

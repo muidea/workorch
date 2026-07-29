@@ -13,6 +13,7 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorAcquireTargetSnapshot,
 		TopicOrchestratorAcquireRuntimeTargetSelection,
 		TopicOrchestratorAcquireWorkspaceManifest,
+		TopicOrchestratorConfirmRuntimeRepairSurface,
 		TopicOrchestratorAcquireProviderCeiling,
 		TopicOrchestratorAcquireRuntimeCapabilities,
 		TopicOrchestratorAcquireRuntimeOperationAdmissibility,

@@ -55,6 +55,7 @@ func (m *Biz) Start() error {
 	m.SubscribeMatchedFunc(ModuleID+"/prerequisite", orchestratorevents.PrerequisiteCommandDestination, orchestratorevents.TopicOrchestratorAcquireTargetSnapshot, m.handleAcquireTargetSnapshot)
 	m.SubscribeMatchedFunc(ModuleID+"/prerequisite", orchestratorevents.PrerequisiteCommandDestination, orchestratorevents.TopicOrchestratorAcquireRuntimeTargetSelection, m.handleAcquireRuntimeTargetSelection)
 	m.SubscribeMatchedFunc(ModuleID+"/prerequisite", orchestratorevents.PrerequisiteCommandDestination, orchestratorevents.TopicOrchestratorAcquireWorkspaceManifest, m.handleAcquireWorkspaceManifest)
+	m.SubscribeMatchedFunc(ModuleID+"/prerequisite", orchestratorevents.PrerequisiteCommandDestination, orchestratorevents.TopicOrchestratorConfirmRuntimeRepairSurface, m.handleConfirmRuntimeRepairSurface)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
@@ -72,6 +73,7 @@ func (m *Biz) Teardown(context.Context) {
 		return
 	}
 	m.UnsubscribeMatchedFunc(ModuleID+"/prerequisite", orchestratorevents.TopicOrchestratorAcquireWorkspaceManifest)
+	m.UnsubscribeMatchedFunc(ModuleID+"/prerequisite", orchestratorevents.TopicOrchestratorConfirmRuntimeRepairSurface)
 	m.UnsubscribeMatchedFunc(ModuleID+"/prerequisite", orchestratorevents.TopicOrchestratorAcquireTargetSnapshot)
 	m.UnsubscribeMatchedFunc(ModuleID+"/prerequisite", orchestratorevents.TopicOrchestratorAcquireRuntimeTargetSelection)
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorExecutePatchPreviewOperation)
@@ -481,6 +483,51 @@ func (m *Biz) handleAcquireWorkspaceManifest(event magicevent.Event, result magi
 	}
 	observation := fileManifestObservation(command.PrerequisiteID, manifest)
 	result.Set(orchestratorevents.AcquireWorkspaceManifestResult{PrerequisiteID: command.PrerequisiteID, Manifest: manifest, Observation: &observation}, nil)
+}
+
+// handleConfirmRuntimeRepairSurface is a File-owner read observation.  File
+// verifies only the current regular workspace surface; it never derives a
+// Runtime action from the diagnostic or mutates the Runtime aggregate.
+func (m *Biz) handleConfirmRuntimeRepairSurface(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.ConfirmRuntimeRepairSurfaceCommand)
+	if !ok || m.runtimeAdapter == nil || command.WorkspaceID == "" || command.RunID == "" || strings.TrimSpace(command.WorkspaceDeliverableDirectory) == "" {
+		setPrerequisiteError(result, common.ErrInvalidArgument)
+		return
+	}
+	observation := command.Observation.Normalized()
+	if observation.WorkspaceID != command.WorkspaceID || observation.RunID != command.RunID || observation.Validate() != nil {
+		setPrerequisiteError(result, common.ErrInvalidArgument)
+		return
+	}
+	manifest, err := m.runtimeAdapter.AcquireWorkspaceManifest(command.WorkspaceDeliverableDirectory)
+	if setPrerequisiteError(result, err) {
+		return
+	}
+	known := make(map[string]struct{}, len(manifest.TargetRefs))
+	for _, target := range manifest.TargetRefs {
+		known[target] = struct{}{}
+	}
+	confirmed := true
+	for _, target := range observation.CandidateTargetRefs {
+		if _, exists := known[target]; !exists {
+			confirmed = false
+			break
+		}
+	}
+	confirmation := runtimecontract.RuntimeRepairSurfaceConfirmation{
+		Observation: observation, OwnerModuleID: ModuleID, SubjectRef: "workspace_deliverable", ObservedRevision: manifest.Revision,
+		Disposition: runtimecontract.RuntimeRepairSurfaceRejected, Reason: "candidate target is not a current regular workspace file",
+	}
+	if confirmed {
+		confirmation.Disposition = runtimecontract.RuntimeRepairSurfaceConfirmed
+		confirmation.ConfirmedTargetRefs = append([]string(nil), observation.CandidateTargetRefs...)
+		confirmation.Reason = ""
+	}
+	if err := confirmation.Validate(); err != nil {
+		setPrerequisiteError(result, err)
+		return
+	}
+	result.Set(orchestratorevents.ConfirmRuntimeRepairSurfaceResult{Confirmation: confirmation}, nil)
 }
 
 func (m *Biz) handleAcquireTargetSnapshot(event magicevent.Event, result magicevent.Result) {

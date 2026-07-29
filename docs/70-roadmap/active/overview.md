@@ -4,7 +4,7 @@ Status: active
 
 Type: roadmap
 
-Last Updated: 2026-07-28
+Last Updated: 2026-07-29
 
 ## Purpose
 
@@ -15,7 +15,7 @@ Last Updated: 2026-07-28
 | 主题 | 状态 |
 | --- | --- |
 | Runtime V2 生产主链 | **代码已收口**（Start/Resume → `DriveRuntimeV2` only） |
-| Runtime V2 正向收敛与状态机 owner | **RUNTIME-SMO active，按 SMO-1～SMO-7 串行收口**；C7/C8 仅为回归基线。最新 fresh live 暴露 owner feasibility 被错误送入 candidate correction，以及空 workspace coverage/blueprint 断链。 |
+| Runtime V2 正向收敛与状态机 owner | **RUNTIME-SMO active，SMO-7 fresh live**；SMO-7A 的 Shell → File → Orchestrator repair-authority handoff 已完成代码、targeted regression 与静态门禁，待重新部署进行 restart/concurrency/fresh live。C7/C8 仅为回归基线。 |
 | 历史 prerequisite / candidate closure records | **archive baseline only**；旧 VPC、freshness、admission、positive-acceptance 计划不得独立定义当前状态或实施顺序 |
 | 22-component framework boundary | **remediation active**；共享 Base Biz、全量本地 structural/race/file-backed 门禁已完成，待外部 deployed restart-fixture matrix |
 | V1 StagePacket / NextAction / graph dispatch 主链 | **已删除** |
@@ -25,7 +25,7 @@ Last Updated: 2026-07-28
 
 | ID | 项 | 说明 | 方案 / 历史过程稿 |
 | --- | --- | --- | --- |
-| RUNTIME-SMO | Runtime V2 单 owner 状态机统一收口 | 唯一活动 Runtime 队列。按 SMO-1 合同与事件词汇、SMO-2 transition coordinator、SMO-3 feasibility 收敛、SMO-4 activation blueprint、SMO-5 owner taxonomy、SMO-6 boundary gate、SMO-7 fresh live 串行执行；不做兼容双写。 | [单 owner 统一收口方案](runtime-v2-single-owner-state-machine-closure-plan.md) |
+| RUNTIME-SMO | Runtime V2 单 owner 状态机统一收口 | 唯一活动 Runtime 队列。SMO-1～SMO-7A 为已完成代码基线；当前执行 SMO-7 fresh live，验证可修复 validation failure 的 Shell fact → File confirmation → Orchestrator internal-event handoff 不重放且能形成 state-change attempt-0；不做兼容双写。 | [单 owner 统一收口方案](runtime-v2-single-owner-state-machine-closure-plan.md) |
 | ARCH-1 | 22 组件 framework boundary / lifecycle 验证 | Base Biz / Module-root EventHub 拓扑及本地验证已收口；按 22 组件合同矩阵逐项保持独立回归，待有重启后的外部目标与三类 fixture manifest 后执行 deployed SM-4 matrix | [组件矩阵](component-contract-and-regression-closure-matrix.md) |
 | OPS-1 | 生产目录 V1 retirement 正式 apply | 代码/live 已 complete；等待 clean build + 真实生产目录维护窗口执行 `runtime-v1-retirement --apply` | [deployed-workspace-progress-blocker-component-closure-plan.md](../../90-archive/completed/deployed-workspace-progress-blocker-component-closure-plan.md) |
 | OPT-1 | file-patch deployed live（可选） | 代码迁移已完成；可选补一次 `patch apply + validation + DoD closeout` 的 deployed live | [file-patch-side-effect-owner-migration-plan.md](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |

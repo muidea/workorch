@@ -73,6 +73,39 @@ func (m *Biz) prepareRuntimeV2Prerequisites(ctx context.Context, aggregate runti
 	return aggregate, nil
 }
 
+// confirmRuntimeV2RepairSurface implements the owner handoff after a rejected
+// validation receipt. The File command is a query; only the resulting internal
+// event may change SM-2 authority.
+func (m *Biz) confirmRuntimeV2RepairSurface(ctx context.Context, aggregate runtimev2.RuntimeAggregate) (runtimev2.RuntimeAggregate, bool, error) {
+	if m == nil || m.EventHub() == nil || aggregate.Facts.Failure == nil || aggregate.Facts.Failure.ValidationFailureObservation == nil || aggregate.Facts.Resources.FailureTarget != nil {
+		return aggregate, false, nil
+	}
+	observation := aggregate.Facts.Failure.ValidationFailureObservation.Clone()
+	if observation.Validate() != nil {
+		return runtimev2.RuntimeAggregate{}, false, common.ErrInvalidArgument
+	}
+	// Keep the receipt-to-confirmation handoff explicit in the owner-local
+	// vocabulary. This identity event deliberately does not mutate aggregate
+	// state; the following confirmation event is the only authority-changing
+	// step.
+	if _, err := m.submitRuntimeV2InternalEvent(ctx, runtimev2.RuntimeInternalEvent{
+		Kind: runtimev2.RuntimeInternalEventValidationFailureObserved, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		FailureFact: aggregate.Facts.Failure,
+	}); err != nil {
+		return runtimev2.RuntimeAggregate{}, false, err
+	}
+	workspace, err := (workspaceEventRepository{hub: m.EventHub()}).Get(ctx, aggregate.Facts.WorkspaceID)
+	if err != nil {
+		return runtimev2.RuntimeAggregate{}, false, err
+	}
+	confirmation, err := ConfirmRuntimeRepairSurface(ctx, m.EventHub(), events.ConfirmRuntimeRepairSurfaceCommand{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, WorkspaceDeliverableDirectory: workspace.DeliverableDirectory, Observation: observation})
+	if err != nil {
+		return runtimev2.RuntimeAggregate{}, false, err
+	}
+	updated, err := m.submitRuntimeV2InternalEvent(ctx, runtimev2.RuntimeInternalEvent{Kind: runtimev2.RuntimeInternalEventRepairSurfaceConfirmationObserved, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, RepairSurfaceConfirmation: &confirmation.Confirmation})
+	return updated.Aggregate, true, err
+}
+
 func (m *Biz) resolveRuntimeV2Prerequisite(
 	ctx context.Context,
 	aggregate runtimev2.RuntimeAggregate,

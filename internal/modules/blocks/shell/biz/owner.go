@@ -2,6 +2,8 @@ package shell
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 
 	cd "github.com/muidea/magicCommon/def"
@@ -143,6 +145,10 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		if operationResult.ValidationFailureDiagnostic != nil {
 			diagnostic := operationResult.ValidationFailureDiagnostic.Clone()
 			response.Failure.ValidationDiagnostic = &diagnostic
+			if observation := shellValidationFailureObservation(command, diagnostic); observation != nil {
+				observation.FailureSignature = response.Failure.Signature
+				response.Failure.ValidationFailureObservation = observation
+			}
 		}
 	} else if undeclared := shellUndeclaredWorkspaceTargets(operationResult.WorkspaceObservedTargetChanges, command.Data.TargetRefs); len(undeclared) > 0 {
 		response.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
@@ -166,6 +172,37 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 	}
 	response.Receipt = committed
 	result.Set(response, nil)
+}
+
+// shellValidationFailureObservation exports only the sealed validation scope
+// plus bounded diagnostic candidates.  It is not a repair target and cannot
+// carry a Runtime action; the File owner must independently confirm it.
+func shellValidationFailureObservation(command orchestratorevents.ExecuteShellOperationCommand, diagnostic runtimecontract.ValidationFailureDiagnostic) *runtimecontract.RuntimeValidationFailureObservation {
+	diagnostic = diagnostic.Normalized()
+	if !shellValidationDiagnosticMayIdentifyImplementationEffect(diagnostic.Class) || command.WorkspaceID == "" || command.RunID == "" || command.Transaction.AuthoritySnapshotID == "" || strings.TrimSpace(command.DispatchID) == "" || strings.TrimSpace(command.OperationID) == "" || strings.TrimSpace(command.TargetRole) == "" || strings.TrimSpace(diagnostic.Class) == "" || len(diagnostic.TargetRefs) == 0 || len(command.TargetRefs) == 0 {
+		return nil
+	}
+	// The deterministic bounded digest permits File/Orchestrator causation
+	// checks without passing raw stdout/stderr across owner boundaries.
+	hash := sha256.Sum256([]byte(strings.Join([]string{diagnostic.Class, diagnostic.Stage, diagnostic.Operation, strings.Join(diagnostic.TargetRefs, ","), strings.Join(command.TargetRefs, ",")}, "\x00")))
+	value := runtimecontract.RuntimeValidationFailureObservation{
+		WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.Transaction.AuthoritySnapshotID,
+		DispatchID: command.DispatchID, OperationID: command.OperationID, TargetRole: command.TargetRole,
+		DiagnosticClass: diagnostic.Class, CandidateTargetRefs: diagnostic.TargetRefs, ValidationScopeTargetRefs: command.TargetRefs,
+		DiagnosticHash: hex.EncodeToString(hash[:]),
+	}.Normalized()
+	// The failure signature is added by RuntimeOperationFailure below; do not
+	// validate this transient value before the caller binds that causation key.
+	return &value
+}
+
+func shellValidationDiagnosticMayIdentifyImplementationEffect(class string) bool {
+	switch strings.TrimSpace(class) {
+	case runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationDiagnosticTestFailed, runtimecontract.ValidationDiagnosticImplementationGap:
+		return true
+	default:
+		return false
+	}
 }
 
 // shellMutationReceiptObservation turns only the Shell owner's bounded,

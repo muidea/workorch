@@ -52,7 +52,7 @@ func TestShellOwnerDoesNotInferFailureTargetFromValidationCommand(t *testing.T) 
 		},
 		WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell",
 		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
-		OperationID: "validate-entry", EvidenceKind: runtimecontract.EvidenceKindValidation,
+		OperationID: "validate-entry", EvidenceKind: runtimecontract.EvidenceKindValidation, TargetRole: "implementation",
 		WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"validation-entry.go"},
 		Data: orchestratorevents.ShellOperationData{Command: "sh", Args: []string{"-c", "echo assertion failed >&2; exit 7"}, TargetRefs: []string{"validation-entry.go"}},
 	}
@@ -75,12 +75,18 @@ func TestShellOwnerDoesNotInferFailureTargetFromValidationCommand(t *testing.T) 
 	if response.Failure.ValidationDiagnostic == nil || response.Failure.ValidationDiagnostic.Class != runtimecontract.ValidationDiagnosticBuildFailed {
 		t.Fatalf("shell owner failure lost validation diagnostic: %+v", response.Failure)
 	}
+	if observation := response.Failure.ValidationFailureObservation; observation == nil || observation.FailureSignature != response.Failure.Signature || !reflect.DeepEqual(observation.CandidateTargetRefs, []string{"validation-entry.go"}) || !reflect.DeepEqual(observation.ValidationScopeTargetRefs, []string{"validation-entry.go"}) {
+		t.Fatalf("shell owner did not emit a bounded validation-failure fact: %+v", response.Failure)
+	}
 	if !reflect.DeepEqual(response.Receipt.TargetRefs, []string{"validation-entry.go"}) || response.Receipt.Failure == nil ||
 		len(response.Receipt.Failure.TargetRefs) != 0 || response.Receipt.Failure.TargetObservation != nil {
 		t.Fatalf("shell owner receipt = %+v", response.Receipt)
 	}
 	if response.Receipt.Failure.ValidationDiagnostic == nil || response.Receipt.Failure.ValidationDiagnostic.Class != runtimecontract.ValidationDiagnosticBuildFailed {
 		t.Fatalf("shell owner receipt lost validation diagnostic: %+v", response.Receipt.Failure)
+	}
+	if response.Receipt.Failure.ValidationFailureObservation == nil || response.Receipt.Failure.ValidationFailureObservation.FailureSignature != response.Failure.Signature {
+		t.Fatalf("shell owner receipt lost validation-failure fact: %+v", response.Receipt.Failure)
 	}
 	if receipt, found := receipts[command.Execution.ExecutionKey]; !found || !reflect.DeepEqual(receipt, response.Receipt) {
 		t.Fatalf("committed receipt = %+v, response receipt = %+v", receipt, response.Receipt)
@@ -105,6 +111,15 @@ func TestShellOwnerDoesNotInferFailureTargetFromValidationCommand(t *testing.T) 
 	}
 	if duplicate.Failure.ValidationDiagnostic == nil || duplicate.Failure.ValidationDiagnostic.Class != runtimecontract.ValidationDiagnosticBuildFailed {
 		t.Fatalf("duplicate shell validation lost persisted diagnostic: %+v", duplicate.Failure)
+	}
+}
+
+func TestShellValidationFailureObservationOnlyExportsImplementationEffectCategories(t *testing.T) {
+	if !shellValidationDiagnosticMayIdentifyImplementationEffect(runtimecontract.ValidationDiagnosticBuildFailed) ||
+		!shellValidationDiagnosticMayIdentifyImplementationEffect(runtimecontract.ValidationDiagnosticTestFailed) ||
+		shellValidationDiagnosticMayIdentifyImplementationEffect(runtimecontract.ValidationDiagnosticEnvironmentMissing) ||
+		shellValidationDiagnosticMayIdentifyImplementationEffect(runtimecontract.ValidationDiagnosticCommandInvalid) {
+		t.Fatal("Shell validation category classification permits non-implementation failures to create repair candidates")
 	}
 }
 

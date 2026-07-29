@@ -440,6 +440,14 @@ func (r RuntimeOperationReceipt) Validate() error {
 		if err := ValidateRuntimeFailureTargetObservationBinding(*r.Failure); err != nil {
 			return fmt.Errorf("rejected operation receipt failure target observation: %w", err)
 		}
+		if r.Failure.ValidationFailureObservation != nil {
+			if err := r.Failure.ValidationFailureObservation.Validate(); err != nil {
+				return fmt.Errorf("rejected operation receipt validation failure observation: %w", err)
+			}
+			if r.Failure.ValidationFailureObservation.FailureSignature != r.Failure.Signature {
+				return fmt.Errorf("rejected operation receipt validation failure observation signature does not match failure")
+			}
+		}
 	case RuntimeOperationOutcomeUnknown:
 		// unknown is intentionally sparse; recovery path decides governance vs fail.
 	}
@@ -641,6 +649,22 @@ func StableRuntimeOperationReceiptHash(receipt RuntimeOperationReceipt) string {
 			writeHashString(h, diagnostic.EvidenceMode)
 			writeHashString(h, diagnostic.StdoutPreview)
 			writeHashString(h, diagnostic.StderrPreview)
+		}
+		if receipt.Failure.ValidationFailureObservation == nil {
+			writeHashString(h, "validation-failure-observation:nil")
+		} else {
+			observation := receipt.Failure.ValidationFailureObservation.Normalized()
+			writeHashString(h, string(observation.WorkspaceID))
+			writeHashString(h, string(observation.RunID))
+			writeHashString(h, observation.AuthoritySnapshotID)
+			writeHashString(h, observation.DispatchID)
+			writeHashString(h, observation.OperationID)
+			writeHashString(h, observation.FailureSignature)
+			writeHashString(h, observation.TargetRole)
+			writeHashString(h, observation.DiagnosticClass)
+			writeHashStrings(h, observation.CandidateTargetRefs)
+			writeHashStrings(h, observation.ValidationScopeTargetRefs)
+			writeHashString(h, observation.DiagnosticHash)
 		}
 	}
 	if receipt.Governance == nil {

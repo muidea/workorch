@@ -178,6 +178,19 @@ func (m *Biz) driveRuntimeV2Locked(ctx context.Context, command orchestratoreven
 func (m *Biz) driveRuntimeV2Decision(ctx context.Context, aggregate runtimev2.RuntimeAggregate, stablePrefixHash string) (runtimev2.RuntimeAggregate, error) {
 	var err error
 	if aggregate.ActiveDispatch == nil {
+		// SMO-7A: a Shell validation diagnostic is only a candidate repair
+		// surface. Before any next provider request, obtain File's current
+		// read-only confirmation and feed it back through the Orchestrator's
+		// internal-event/CAS boundary.
+		if aggregate.Facts.Failure != nil && aggregate.Facts.Failure.ValidationFailureObservation != nil && aggregate.Facts.Resources.FailureTarget == nil {
+			updated, handled, handoffErr := m.confirmRuntimeV2RepairSurface(ctx, aggregate)
+			if handoffErr != nil {
+				return runtimev2.RuntimeAggregate{}, handoffErr
+			}
+			if handled {
+				return updated, nil
+			}
+		}
 		// This gate runs before BeginCandidateAttempt. A stale selection or
 		// focus-scoped prerequisite is SM-2 authority debt, not a malformed
 		// provider candidate; persist the deterministic cleanup and let the

@@ -14,6 +14,7 @@ const (
 	TopicOrchestratorAcquireTargetSnapshot                = "/orchestrator/prerequisite/acquire-target-snapshot"
 	TopicOrchestratorAcquireRuntimeTargetSelection        = "/orchestrator/prerequisite/acquire-runtime-target-selection"
 	TopicOrchestratorAcquireWorkspaceManifest             = "/orchestrator/prerequisite/acquire-workspace-manifest"
+	TopicOrchestratorConfirmRuntimeRepairSurface          = "/orchestrator/prerequisite/confirm-runtime-repair-surface"
 	TopicOrchestratorAcquireProviderCeiling               = "/orchestrator/prerequisite/acquire-provider-ceiling"
 	TopicOrchestratorAcquireRuntimeCapabilities           = "/orchestrator/prerequisite/acquire-runtime-capabilities"
 	TopicOrchestratorAcquireRuntimeOperationAdmissibility = "/orchestrator/prerequisite/acquire-runtime-operation-admissibility"

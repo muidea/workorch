@@ -107,6 +107,31 @@ func AcquireRuntimeTargetSelectionPrerequisite(ctx context.Context, hub magiceve
 	return response, nil
 }
 
+func ConfirmRuntimeRepairSurface(ctx context.Context, hub magicevent.Hub, command orchestratorevents.ConfirmRuntimeRepairSurfaceCommand) (orchestratorevents.ConfirmRuntimeRepairSurfaceResult, error) {
+	if hub == nil || command.WorkspaceID == "" || command.RunID == "" || strings.TrimSpace(command.WorkspaceDeliverableDirectory) == "" || command.Observation.Validate() != nil || command.Observation.WorkspaceID != command.WorkspaceID || command.Observation.RunID != command.RunID {
+		return orchestratorevents.ConfirmRuntimeRepairSurfaceResult{}, common.ErrInvalidArgument
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorConfirmRuntimeRepairSurface, ModuleID, orchestratorevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, command))
+	if result == nil {
+		return orchestratorevents.ConfirmRuntimeRepairSurfaceResult{}, common.ErrInvalidArgument
+	}
+	if err := prerequisiteResultError(result); err != nil {
+		return orchestratorevents.ConfirmRuntimeRepairSurfaceResult{}, err
+	}
+	data, magicErr := result.Get()
+	if magicErr != nil {
+		return orchestratorevents.ConfirmRuntimeRepairSurfaceResult{}, prerequisiteMagicError(magicErr)
+	}
+	response, ok := data.(orchestratorevents.ConfirmRuntimeRepairSurfaceResult)
+	if !ok || response.Confirmation.Validate() != nil || response.Confirmation.OwnerModuleID != runtimecontract.RuntimeModuleFile || !runtimecontract.SameRuntimeValidationFailureObservation(response.Confirmation.Observation, command.Observation) {
+		return orchestratorevents.ConfirmRuntimeRepairSurfaceResult{}, fmt.Errorf("repair surface confirmation returned an invalid result")
+	}
+	return response, nil
+}
+
 func validateRuntimeTargetSelectionObservation(prerequisiteID string, selection runtimecontract.RuntimeTargetSelection, observation *runtimecontract.RuntimePrerequisiteObservation) error {
 	selection = selection.Normalized()
 	if observation == nil {
