@@ -233,7 +233,7 @@ func (m *Biz) resolveRuntimeV2Prerequisite(
 		state, err := AcquireGitCapabilityStatePrerequisite(ctx, m.EventHub(), prerequisite.OwnerModuleID, events.AcquireGitCapabilityStateCommand{
 			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
 			PrerequisiteID: prerequisite.ID, WorkspaceDeliverableDirectory: deliverableDirectory, CapabilityStateKind: prerequisite.CapabilityStateKind, SubjectRef: prerequisite.SubjectRef,
-			AcquisitionKey: stableRuntimeV2CapabilityStateAcquisitionKey(commandScope.workspaceID, commandScope.runID, prerequisite.ID, runtimeV2CapabilityStateAcquisitionGeneration(aggregate.Facts.Recovery)),
+			AcquisitionKey: stableRuntimeV2CapabilityStateAcquisitionKey(commandScope.workspaceID, commandScope.runID, prerequisite.ID, runtimeV2CapabilityStateAcquisitionGeneration(aggregate.PrerequisiteInvalidations, prerequisite.ID)),
 		})
 		if err != nil {
 			return runtimev2.PrerequisiteResult{}, err
@@ -293,13 +293,12 @@ func stableRuntimeV2CapabilityStateAcquisitionKey(workspaceID common.WorkspaceID
 	return fmt.Sprintf("capability-state/%s/%s/%s/%d", workspaceID, runID, strings.TrimSpace(prerequisiteID), refreshGeneration)
 }
 
-// runtimeV2CapabilityStateAcquisitionGeneration advances whenever an event
-// invalidates capability-state freshness. Both read-only stale recovery and
-// accepted owner resource changes require a new owner query; unrelated retry
-// ledgers must not change the durable acquisition key.
-func runtimeV2CapabilityStateAcquisitionGeneration(recovery runtimecontract.RuntimeRecoveryLedger) int {
-	recovery = recovery.Normalized()
-	return recovery.PrerequisiteRefreshes + recovery.PrerequisiteResourceChangeRefreshes
+// runtimeV2CapabilityStateAcquisitionGeneration is derived exclusively from
+// persisted invalidations that affect this prerequisite. A durable receipt is
+// normal progress, not recovery; its exact invalidation record advances the
+// key without borrowing a run-global retry budget.
+func runtimeV2CapabilityStateAcquisitionGeneration(invalidations []runtimecontract.RuntimePrerequisiteInvalidationRecord, prerequisiteID string) int {
+	return runtimecontract.RuntimePrerequisiteInvalidationGeneration(invalidations, prerequisiteID)
 }
 
 func (m *Biz) requestAndSealRuntimeV2Candidate(

@@ -53,7 +53,6 @@ type RuntimeAuthorityInvariantReport struct {
 	TerminalCode                     string
 	RepairAttempts                   int
 	PrerequisiteRefreshes            int
-	PrerequisiteReceiptRefreshes     int
 	Violations                       []RuntimeAuthorityInvariantViolation
 }
 
@@ -64,12 +63,11 @@ type RuntimeAuthorityInvariantReport struct {
 func InspectRuntimeAuthorityInvariants(aggregate RuntimeAggregate) RuntimeAuthorityInvariantReport {
 	facts := aggregate.Facts.Normalized()
 	report := RuntimeAuthorityInvariantReport{
-		StateRevision:                aggregate.StateRevision,
-		FocusID:                      facts.Focus.ID,
-		CandidateAttemptCount:        len(aggregate.CandidateAttempts),
-		RepairAttempts:               facts.Repair.RepairAttempts,
-		PrerequisiteRefreshes:        facts.Recovery.PrerequisiteRefreshes,
-		PrerequisiteReceiptRefreshes: facts.Recovery.PrerequisiteResourceChangeRefreshes,
+		StateRevision:         aggregate.StateRevision,
+		FocusID:               facts.Focus.ID,
+		CandidateAttemptCount: len(aggregate.CandidateAttempts),
+		RepairAttempts:        facts.Repair.RepairAttempts,
+		PrerequisiteRefreshes: facts.Recovery.PrerequisiteRefreshes,
 	}
 	if facts.Resources.TargetSelection != nil {
 		report.TargetSelectionPrerequisiteID = facts.Resources.TargetSelection.PrerequisiteID

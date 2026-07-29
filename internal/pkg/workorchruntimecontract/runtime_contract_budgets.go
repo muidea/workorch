@@ -31,12 +31,11 @@ type RuntimeCandidateAttemptBudget struct {
 	MaxAttempts int
 }
 
-// RuntimePrerequisiteRefreshBudget bounds the two independent refresh ledgers:
-// read-only stale observation refresh and owner-receipt resource-change refresh.
-// Provider/candidate/terminal delivery must not consume either counter.
+// RuntimePrerequisiteRefreshBudget bounds read-only stale/no-progress recovery.
+// Owner-receipt resource changes advance the persisted prerequisite generation
+// and must never consume a recovery budget.
 type RuntimePrerequisiteRefreshBudget struct {
-	MaxStaleRefreshes          int
-	MaxResourceChangeRefreshes int
+	MaxStaleRefreshes int
 }
 
 func DefaultRuntimeOwnerInventoryBudget() RuntimeOwnerInventoryBudget {
@@ -54,8 +53,7 @@ func DefaultRuntimeCandidateAttemptBudget() RuntimeCandidateAttemptBudget {
 
 func DefaultRuntimePrerequisiteRefreshBudget() RuntimePrerequisiteRefreshBudget {
 	return RuntimePrerequisiteRefreshBudget{
-		MaxStaleRefreshes:          DefaultMaxPrerequisiteRefreshes,
-		MaxResourceChangeRefreshes: DefaultMaxPrerequisiteResourceChangeRefreshes,
+		MaxStaleRefreshes: DefaultMaxPrerequisiteRefreshes,
 	}
 }
 
@@ -108,16 +106,13 @@ func (b RuntimePrerequisiteRefreshBudget) Normalized() RuntimePrerequisiteRefres
 	if b.MaxStaleRefreshes <= 0 {
 		b.MaxStaleRefreshes = DefaultMaxPrerequisiteRefreshes
 	}
-	if b.MaxResourceChangeRefreshes <= 0 {
-		b.MaxResourceChangeRefreshes = DefaultMaxPrerequisiteResourceChangeRefreshes
-	}
 	return b
 }
 
 func (b RuntimePrerequisiteRefreshBudget) Validate() error {
 	b = b.Normalized()
-	if b.MaxStaleRefreshes < 1 || b.MaxResourceChangeRefreshes < 1 {
-		return fmt.Errorf("prerequisite refresh budget requires positive stale and resource-change limits")
+	if b.MaxStaleRefreshes < 1 {
+		return fmt.Errorf("prerequisite refresh budget requires a positive stale limit")
 	}
 	return nil
 }

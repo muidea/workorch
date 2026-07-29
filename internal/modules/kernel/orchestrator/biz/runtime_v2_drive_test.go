@@ -3773,8 +3773,7 @@ func TestRuntimeV2FileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 			}
 			if invalidated.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(invalidated.Facts.Resources.TargetSnapshots) != 0 ||
 				len(invalidated.Facts.Resources.PrerequisiteObservations) != 1 || len(invalidated.Facts.Prerequisites.Pending) != 1 ||
-				invalidated.Facts.Prerequisites.Pending[0].ID != committedPrerequisite.ID || invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 ||
-				invalidated.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 || len(invalidated.CandidateAttempts) != 0 || invalidated.ActiveDispatch != nil ||
+				invalidated.Facts.Prerequisites.Pending[0].ID != committedPrerequisite.ID || invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 || len(invalidated.CandidateAttempts) != 0 || invalidated.ActiveDispatch != nil ||
 				len(invalidated.CandidateRequestSessions) != 1 || invalidated.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||
 				invalidated.CandidateRequestSessions[0].LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale {
 				t.Fatalf("target snapshot stale did not isolate owner fact: %+v", invalidated)
@@ -3799,7 +3798,6 @@ func TestRuntimeV2FileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 			if *staleReacquireCalls != 1 || len(reacquired.Facts.Resources.TargetSnapshots) != 1 ||
 				reacquired.Facts.Resources.TargetSnapshots[0].Content != "after\n" || len(reacquired.Facts.Resources.PrerequisiteObservations) != 2 ||
 				reacquired.Facts.Recovery.PrerequisiteRefreshes != 1 ||
-				reacquired.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 ||
 				len(reacquired.CandidateAttempts) != 0 || reacquired.ActiveDispatch != nil {
 				t.Fatalf("fresh-process target snapshot stale reacquisition=%+v calls=%d", reacquired, *staleReacquireCalls)
 			}
@@ -4082,8 +4080,7 @@ func TestRuntimeV2FileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 			}
 			if invalidated.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(invalidated.Facts.Resources.OperationAdmissibilities) != 0 ||
 				len(invalidated.Facts.Resources.PrerequisiteObservations) != 1 || len(invalidated.Facts.Prerequisites.Pending) != 1 ||
-				invalidated.Facts.Prerequisites.Pending[0].ID != inventory.PrerequisiteID || invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 ||
-				invalidated.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 || len(invalidated.CandidateAttempts) != 0 || invalidated.ActiveDispatch != nil ||
+				invalidated.Facts.Prerequisites.Pending[0].ID != inventory.PrerequisiteID || invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 || len(invalidated.CandidateAttempts) != 0 || invalidated.ActiveDispatch != nil ||
 				len(invalidated.CandidateRequestSessions) != 1 || invalidated.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||
 				invalidated.CandidateRequestSessions[0].LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale {
 				t.Fatalf("File inventory stale did not isolate owner fact: %+v", invalidated)
@@ -4107,8 +4104,7 @@ func TestRuntimeV2FileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 			}
 			if *staleReacquireCalls != 1 || len(reacquired.Facts.Resources.OperationAdmissibilities) != 1 ||
 				reacquired.Facts.Resources.OperationAdmissibilities[0].ObservedRevision == inventory.ObservedRevision ||
-				len(reacquired.Facts.Resources.PrerequisiteObservations) != 2 || reacquired.Facts.Recovery.PrerequisiteRefreshes != 1 ||
-				reacquired.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 || len(reacquired.CandidateAttempts) != 0 || reacquired.ActiveDispatch != nil {
+				len(reacquired.Facts.Resources.PrerequisiteObservations) != 2 || reacquired.Facts.Recovery.PrerequisiteRefreshes != 1 || len(reacquired.CandidateAttempts) != 0 || reacquired.ActiveDispatch != nil {
 				t.Fatalf("fresh-process File inventory stale reacquisition=%+v calls=%d", reacquired, *staleReacquireCalls)
 			}
 			if _, err := processRuns.GetByWorkspaceID(ctx, "ws-v2", "run-v2"); err != nil {
@@ -4410,8 +4406,7 @@ func TestRuntimeV2FileBackedGitAdmissibilityCommitCrashRestart(t *testing.T) {
 			}
 			if invalidated.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(invalidated.Facts.Resources.OperationAdmissibilities) != 0 ||
 				len(invalidated.Facts.Resources.CapabilityStates) != 0 || len(invalidated.Facts.Resources.PrerequisiteObservations) != 1 ||
-				len(invalidated.Facts.Prerequisites.Pending) != 2 || invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 ||
-				invalidated.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 || len(invalidated.CandidateAttempts) != 0 || invalidated.ActiveDispatch != nil ||
+				len(invalidated.Facts.Prerequisites.Pending) != 2 || invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 || len(invalidated.CandidateAttempts) != 0 || invalidated.ActiveDispatch != nil ||
 				len(invalidated.CandidateRequestSessions) != 1 || invalidated.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||
 				invalidated.CandidateRequestSessions[0].LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale {
 				t.Fatalf("Git inventory stale did not retire the bound repository-state chain: %+v", invalidated)
@@ -4442,8 +4437,7 @@ func TestRuntimeV2FileBackedGitAdmissibilityCommitCrashRestart(t *testing.T) {
 			}
 			if *staleReacquireCalls != 1 || len(reacquired.Facts.Resources.OperationAdmissibilities) != 1 || len(reacquired.Facts.Resources.CapabilityStates) != 1 ||
 				reacquired.Facts.Resources.OperationAdmissibilities[0].AcquisitionBinding != reacquired.Facts.Resources.CapabilityStates[0].AcquisitionBinding ||
-				len(reacquired.Facts.Resources.PrerequisiteObservations) != 3 || reacquired.Facts.Recovery.PrerequisiteRefreshes != 1 ||
-				reacquired.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 || len(reacquired.CandidateAttempts) != 0 || reacquired.ActiveDispatch != nil {
+				len(reacquired.Facts.Resources.PrerequisiteObservations) != 3 || reacquired.Facts.Recovery.PrerequisiteRefreshes != 1 || len(reacquired.CandidateAttempts) != 0 || reacquired.ActiveDispatch != nil {
 				t.Fatalf("fresh-process Git stale reacquisition=%+v calls=%d", reacquired, *staleReacquireCalls)
 			}
 			if _, err := processRuns.GetByWorkspaceID(ctx, "ws-v2", "run-v2"); err != nil {
@@ -4747,8 +4741,7 @@ func TestRuntimeV2FileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			}
 			if invalidated.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(invalidated.Facts.Resources.OperationAdmissibilities) != 0 ||
 				len(invalidated.Facts.Resources.PrerequisiteObservations) != 1 || len(invalidated.Facts.Prerequisites.Pending) != 1 ||
-				invalidated.Facts.Prerequisites.Pending[0].ID != inventory.PrerequisiteID || invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 ||
-				invalidated.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 || len(invalidated.CandidateAttempts) != 0 || invalidated.ActiveDispatch != nil ||
+				invalidated.Facts.Prerequisites.Pending[0].ID != inventory.PrerequisiteID || invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 || len(invalidated.CandidateAttempts) != 0 || invalidated.ActiveDispatch != nil ||
 				len(invalidated.CandidateRequestSessions) != 1 || invalidated.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||
 				invalidated.CandidateRequestSessions[0].LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale {
 				t.Fatalf("Shell target stale did not isolate Shell inventory: %+v", invalidated)
@@ -4773,8 +4766,7 @@ func TestRuntimeV2FileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			reacquiredInventory := reacquired.Facts.Resources.OperationAdmissibilities[0]
 			reacquiredObservation, found := runtimecontract.RuntimePrerequisiteObservationForID(reacquired.Facts.Resources.PrerequisiteObservations, reacquiredInventory.PrerequisiteID)
 			if !found || *staleReacquireCalls != 1 || len(reacquired.Facts.Resources.OperationAdmissibilities) != 1 ||
-				len(reacquired.Facts.Resources.PrerequisiteObservations) != 2 || reacquired.Facts.Recovery.PrerequisiteRefreshes != 1 ||
-				reacquired.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 || reacquiredObservation.ObservationID == inventoryObservation.ObservationID ||
+				len(reacquired.Facts.Resources.PrerequisiteObservations) != 2 || reacquired.Facts.Recovery.PrerequisiteRefreshes != 1 || reacquiredObservation.ObservationID == inventoryObservation.ObservationID ||
 				len(reacquired.CandidateAttempts) != 0 || reacquired.ActiveDispatch != nil {
 				t.Fatalf("fresh-process Shell inventory stale reacquisition=%+v calls=%d", reacquired, *staleReacquireCalls)
 			}
@@ -4813,8 +4805,7 @@ func TestRuntimeV2FileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			}
 			if policyInvalidated.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(policyInvalidated.Facts.Resources.OperationAdmissibilities) != 0 ||
 				len(policyInvalidated.Facts.Resources.PrerequisiteObservations) != 1 || len(policyInvalidated.Facts.Prerequisites.Pending) != 1 ||
-				policyInvalidated.Facts.Prerequisites.Pending[0].ID != reacquiredInventory.PrerequisiteID || policyInvalidated.Facts.Recovery.PrerequisiteRefreshes != 2 ||
-				policyInvalidated.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 || len(policyInvalidated.CandidateAttempts) != 0 || policyInvalidated.ActiveDispatch != nil {
+				policyInvalidated.Facts.Prerequisites.Pending[0].ID != reacquiredInventory.PrerequisiteID || policyInvalidated.Facts.Recovery.PrerequisiteRefreshes != 2 || len(policyInvalidated.CandidateAttempts) != 0 || policyInvalidated.ActiveDispatch != nil {
 				t.Fatalf("Shell policy stale did not isolate Shell inventory: %+v", policyInvalidated)
 			}
 
@@ -4841,8 +4832,7 @@ func TestRuntimeV2FileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			policyInventory := reacquiredPolicy.Facts.Resources.OperationAdmissibilities[0]
 			policyObservation, found := runtimecontract.RuntimePrerequisiteObservationForID(reacquiredPolicy.Facts.Resources.PrerequisiteObservations, policyInventory.PrerequisiteID)
 			if !found || *policyReacquireCalls != 1 || len(reacquiredPolicy.Facts.Resources.OperationAdmissibilities) != 1 ||
-				len(reacquiredPolicy.Facts.Resources.PrerequisiteObservations) != 2 || reacquiredPolicy.Facts.Recovery.PrerequisiteRefreshes != 2 ||
-				reacquiredPolicy.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 || policyInventory.ObservedRevision == reacquiredInventory.ObservedRevision ||
+				len(reacquiredPolicy.Facts.Resources.PrerequisiteObservations) != 2 || reacquiredPolicy.Facts.Recovery.PrerequisiteRefreshes != 2 || policyInventory.ObservedRevision == reacquiredInventory.ObservedRevision ||
 				policyObservation.ObservationID == reacquiredObservation.ObservationID || len(reacquiredPolicy.CandidateAttempts) != 0 || reacquiredPolicy.ActiveDispatch != nil {
 				t.Fatalf("fresh-process Shell policy stale reacquisition=%+v calls=%d", reacquiredPolicy, *policyReacquireCalls)
 			}
@@ -5582,7 +5572,7 @@ func TestDriveRuntimeV2FileBackedFreshFileShellGitAcceptance(t *testing.T) {
 		t.Fatalf("persisted file-shell-git run=%+v err=%v", persisted, err)
 	}
 	state := persisted.RuntimeState
-	if state.Facts.Recovery.PrerequisiteRefreshes != 0 || state.Facts.Recovery.PrerequisiteResourceChangeRefreshes < 3 || len(state.PrerequisiteInvalidations) < 3 {
+	if state.Facts.Recovery.PrerequisiteRefreshes != 0 || len(state.PrerequisiteInvalidations) < 3 {
 		t.Fatalf("durable effects did not trigger persisted freshness re-acquisition: recovery=%+v invalidations=%+v", state.Facts.Recovery, state.PrerequisiteInvalidations)
 	}
 	if state.Facts.Recovery.ProviderTransportAttempts != 0 || state.Facts.Failure != nil {
@@ -5631,7 +5621,6 @@ func runtimeV2FileShellGitBootstrap() runtimecontract.RuntimeBootstrap {
 	// (create, edit, init, add, commit). Each can invalidate a mutable
 	// prerequisite. The activation-sealed resource-change allowance covers this
 	// normal progressing path; stale/no-progress recovery remains independent.
-	bootstrap.RecoveryPolicy.MaxPrerequisiteResourceChangeRefreshes = 8
 	bootstrap.Definition.CapabilityContract = []string{
 		runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileEdit,
 		runtimecontract.RuntimeBlockKindManagedValidationSession, runtimecontract.StepKindGitWrite,
@@ -5938,35 +5927,32 @@ func runRuntimeV2FileBackedGitStaleRefreshCrashRestart(t *testing.T, crashAfterC
 	}
 }
 
-// An accepted owner receipt that changed a prerequisite resource is not a
-// read-only stale refresh. Its invalidation consumes only the separate
-// resource-change ledger and must never replay the durable operation that
-// produced the receipt, regardless of which side of the invalidation CAS
-// crashed.
+// An accepted owner receipt that changed a prerequisite resource advances the
+// affected prerequisite generation without consuming recovery budget. Restart
+// must never replay the durable operation that produced the receipt.
 func TestRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestartDoesNotReplayReceipt(t *testing.T) {
-	runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t, true, 0, false)
+	runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t, true)
 }
 
 func TestRuntimeV2FileBackedGitReceiptResourceChangeRefreshBeforeCASRestartUsesCommittedReceipt(t *testing.T) {
-	runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t, false, 0, false)
+	runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t, false)
 }
 
-// Several resource-changing operations in one sealed dispatch share the same
-// next-authority refresh. They must therefore consume one receipt-refresh
-// allowance, rather than terminalizing midway through the transaction.
+// Resource-changing receipts never terminalize solely by count, including
+// when a process loses the response around the invalidation CAS.
 func TestRuntimeV2FileBackedGitSingleDispatchResourceRefreshDoesNotExhaust(t *testing.T) {
-	for _, crashAfterTerminalCAS := range []bool{false, true} {
-		phase := "terminal_before_cas"
-		if crashAfterTerminalCAS {
-			phase = "terminal_after_cas"
+	for _, crashAfterCAS := range []bool{false, true} {
+		phase := "before_cas"
+		if crashAfterCAS {
+			phase = "after_cas"
 		}
 		t.Run(phase, func(t *testing.T) {
-			runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t, crashAfterTerminalCAS, 1, false)
+			runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t, crashAfterCAS)
 		})
 	}
 }
 
-func runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testing.T, crashAfterCAS bool, maxReceiptRefreshes int, crashTerminal bool) {
+func runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testing.T, crashAfterCAS bool) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -5980,9 +5966,6 @@ func runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testin
 	}
 	writeRuntimeV2GitFixtureFile(t, deliverable)
 	bootstrap := runtimeV2GitCapabilityStateBootstrap()
-	if maxReceiptRefreshes > 0 {
-		bootstrap.RecoveryPolicy.MaxPrerequisiteResourceChangeRefreshes = maxReceiptRefreshes
-	}
 	runsPath := filepath.Join(root, "runs.json")
 	runs := filerepository.NewRunRepository(runsPath)
 	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2", DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, State: common.RunStateActive}); err != nil {
@@ -6046,7 +6029,6 @@ func runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testin
 		delegate: baseRepository, after: crashAfterCAS, marker: crashMarker,
 		match: func(current runtimev2.RuntimeAggregate) bool {
 			return current.ActiveDispatch != nil && current.Decision.Action == runtimecontract.RuntimeActionProduceStateChange &&
-				current.Facts.Recovery.PrerequisiteRefreshes == 0 && current.Facts.Recovery.PrerequisiteResourceChangeRefreshes == 1 &&
 				len(current.Facts.Resources.CapabilityStates) == 0 && len(current.OperationReceipts) == 1 && current.EvidenceSequence == 1
 		},
 	}
@@ -6073,14 +6055,12 @@ func runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testin
 	}
 	initReceipt := crashed.RuntimeState.OperationReceipts[0]
 	if crashAfterCAS {
-		if crashed.RuntimeState.ActiveDispatch == nil || crashed.RuntimeState.Facts.Recovery.PrerequisiteRefreshes != 0 ||
-			crashed.RuntimeState.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 || len(crashed.RuntimeState.Facts.Resources.CapabilityStates) != 0 ||
+		if crashed.RuntimeState.ActiveDispatch == nil || crashed.RuntimeState.Facts.Recovery.PrerequisiteRefreshes != 0 || len(crashed.RuntimeState.Facts.Resources.CapabilityStates) != 0 ||
 			crashed.RuntimeState.EvidenceSequence != 1 || len(crashed.RuntimeState.PrerequisiteInvalidations) != 1 ||
 			crashed.RuntimeState.PrerequisiteInvalidations[0].ReceiptHash == "" {
 			t.Fatalf("after-CAS resource-change invalidation was not committed exactly once: %+v", crashed.RuntimeState)
 		}
-	} else if crashed.RuntimeState.ActiveDispatch == nil || crashed.RuntimeState.Facts.Recovery.PrerequisiteRefreshes != 0 ||
-		crashed.RuntimeState.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 || len(crashed.RuntimeState.Facts.Resources.CapabilityStates) != 1 ||
+	} else if crashed.RuntimeState.ActiveDispatch == nil || crashed.RuntimeState.Facts.Recovery.PrerequisiteRefreshes != 0 || len(crashed.RuntimeState.Facts.Resources.CapabilityStates) != 1 ||
 		crashed.RuntimeState.EvidenceSequence != 0 || len(crashed.RuntimeState.PrerequisiteInvalidations) != 0 {
 		t.Fatalf("before-CAS resource-change invalidation leaked uncommitted authority: %+v", crashed.RuntimeState)
 	}
@@ -6136,94 +6116,12 @@ func runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testin
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, restartedHub)
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, newRuntimeV2DriveTestModule(t, restartedHub).handleRuntimeV2Drive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
-	if maxReceiptRefreshes > 0 && crashTerminal {
-		marker := "git-receipt-refresh-exhaustion-terminal-before-cas"
-		if crashAfterCAS {
-			marker = "git-receipt-refresh-exhaustion-terminal-after-cas"
-		}
-		crashRepository := &runtimeV2SaveCrashRepository{
-			delegate: runtimeV2StateRepository{hub: restartedHub}, after: crashAfterCAS, marker: marker,
-			match: func(current runtimev2.RuntimeAggregate) bool {
-				return current.Decision.Action == runtimecontract.RuntimeActionFail && current.Facts.Failure != nil &&
-					current.Facts.Failure.Code == "prerequisite_receipt_refresh_exhausted" &&
-					current.Facts.Recovery.PrerequisiteRefreshes == 0 &&
-					current.Facts.Recovery.PrerequisiteResourceChangeRefreshes == maxReceiptRefreshes
-			},
-		}
-		crashingOwner := orchestratorbiz.NewRuntimeOrchestrator()
-		if err := crashingOwner.ConfigureRuntimeV2Repository(crashRepository); err != nil {
-			t.Fatal(err)
-		}
-		crashing := newTestBiz(crashingOwner, restartedHub, nil)
-		func() {
-			defer func() {
-				if recovered := recover(); recovered != marker {
-					t.Fatalf("unexpected receipt-refresh exhaustion terminal crash marker: %v", recovered)
-				}
-			}()
-			_, _ = crashing.driveRuntimeV2Locked(ctx, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-			t.Fatal("expected receipt-refresh exhaustion terminal CAS crash")
-		}()
-		if !crashRepository.fired {
-			t.Fatal("receipt-refresh exhaustion terminal CAS point was not reached")
-		}
-		crashed, loadErr := restartedRuns.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
-		if loadErr != nil || crashed.RuntimeState == nil {
-			t.Fatalf("receipt-refresh exhaustion crash state=%+v err=%v", crashed, loadErr)
-		}
-		if crashAfterCAS {
-			if crashed.RuntimeState.Decision.Action != runtimecontract.RuntimeActionFail || crashed.RuntimeState.Facts.Failure == nil ||
-				crashed.RuntimeState.Facts.Failure.Code != "prerequisite_receipt_refresh_exhausted" ||
-				crashed.RuntimeState.Facts.Recovery.PrerequisiteRefreshes != 0 ||
-				crashed.RuntimeState.Facts.Recovery.PrerequisiteResourceChangeRefreshes != maxReceiptRefreshes {
-				t.Fatalf("after-CAS receipt-refresh exhaustion was not terminal: %+v", crashed.RuntimeState)
-			}
-		} else if crashed.RuntimeState.Decision.Action == runtimecontract.RuntimeActionFail || crashed.RuntimeState.Facts.Failure != nil ||
-			crashed.RuntimeState.Facts.Recovery.PrerequisiteRefreshes != 0 ||
-			crashed.RuntimeState.Facts.Recovery.PrerequisiteResourceChangeRefreshes != maxReceiptRefreshes {
-			t.Fatalf("before-CAS receipt-refresh exhaustion leaked terminal authority: %+v", crashed.RuntimeState)
-		}
-		llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate)
-		driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2)
-		if err := restartedGitOwner.Stop(ctx); err != nil {
-			t.Fatal(err)
-		}
-		if err := restartedRunOwner.Stop(ctx); err != nil {
-			t.Fatal(err)
-		}
-		restartedWorkspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
-		restartedHub.Terminate(ctx)
-		assertRuntimeV2GitReceiptRefreshTerminalReload(t, ctx, runsPath, storeRoot, deliverable, internalDir, maxReceiptRefreshes)
-		return
-	}
 	completed, err := DriveRuntimeV2(ctx, restartedHub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if crashTerminal {
-		if err != nil || completed.Action != runtimecontract.RuntimeActionFail || candidateCalls != 1 {
-			t.Fatalf("receipt-resource-change exhaustion completed=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
-		}
-		persisted, loadErr := restartedRuns.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
-		if loadErr != nil || persisted.RuntimeState == nil || persisted.RuntimeState.Facts.Failure == nil ||
-			persisted.RuntimeState.Facts.Failure.Code != "prerequisite_receipt_refresh_exhausted" ||
-			persisted.RuntimeState.Facts.Recovery.PrerequisiteRefreshes != 0 ||
-			persisted.RuntimeState.Facts.Recovery.PrerequisiteResourceChangeRefreshes != maxReceiptRefreshes ||
-			len(persisted.RuntimeState.OperationReceipts) != 2 || len(persisted.RuntimeState.CandidateAttempts) != 2 ||
-			persisted.RuntimeState.ActiveDispatch != nil || len(persisted.RuntimeState.GovernanceRequests) != 0 {
-			t.Fatalf("receipt-resource-change exhaustion persisted=%+v err=%v", persisted.RuntimeState, loadErr)
-		}
-		// Terminal recovery is delivery-only. Reissuing the same drive command
-		// cannot request another candidate or owner operation.
-		repeated, repeatErr := DriveRuntimeV2(ctx, restartedHub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-		if repeatErr != nil || repeated.Action != runtimecontract.RuntimeActionFail || candidateCalls != 1 {
-			t.Fatalf("receipt-resource-change terminal re-drive looped: result=%+v candidateCalls=%d err=%v", repeated, candidateCalls, repeatErr)
-		}
-		return
-	}
 	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 0 {
 		t.Fatalf("resource-change restart completed=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
 	}
 	persisted, err := restartedRuns.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
-	if err != nil || persisted.RuntimeState == nil || persisted.RuntimeState.Facts.Recovery.PrerequisiteRefreshes != 0 ||
-		persisted.RuntimeState.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 {
+	if err != nil || persisted.RuntimeState == nil || persisted.RuntimeState.Facts.Recovery.PrerequisiteRefreshes != 0 {
 		t.Fatalf("resource-change restart recovery=%+v err=%v", persisted.RuntimeState.Facts.Recovery, err)
 	}
 	initReceipts := 0
@@ -6241,69 +6139,8 @@ func runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testin
 	}
 }
 
-// assertRuntimeV2GitReceiptRefreshTerminalReload starts a fourth, independent
-// process after the terminal-write response loss.  It proves that SM-4 only
-// delivers the persisted SM-2 terminal; it cannot request a candidate or
-// execute the Git owner again.
-func assertRuntimeV2GitReceiptRefreshTerminalReload(t *testing.T, ctx context.Context, runsPath, storeRoot, deliverable, internalDir string, maxReceiptRefreshes int) {
-	t.Helper()
-	hub := magicevent.NewHub(32)
-	defer hub.Terminate(ctx)
-	runs := filerepository.NewRunRepository(runsPath)
-	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
-		t.Fatal(err)
-	}
-	if err := runOwner.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer runOwner.Stop(ctx)
-	startRuntimeV2ReceiptTestOwner(t, hub)
-	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
-	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
-	})
-	defer workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
-	startRuntimeV2FileManifestOwner(t, ctx, hub)
-	store, err := gitbiz.NewCapabilityStateReceiptStore(storeRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gitOwner := gitmodule.New()
-	if err := gitOwner.Configure(gitmodule.Dependencies{EventHub: hub, RuntimeAdapter: gitbiz.NewRuntimeAdapter(true), CapabilityStateReceipts: store}); err != nil {
-		t.Fatal(err)
-	}
-	if err := gitOwner.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer gitOwner.Stop(ctx)
-	candidateCalls := 0
-	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
-		candidateCalls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
-		result.Set(runtimeV2CandidateResultForTest(t, command, runtimeV2GitStateCandidate(requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence))), nil)
-	})
-	defer llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate)
-	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
-	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, newRuntimeV2DriveTestModule(t, hub).handleRuntimeV2Drive)
-	defer driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2)
-
-	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Action != runtimecontract.RuntimeActionFail || candidateCalls != 0 {
-		t.Fatalf("receipt-resource-change fresh terminal recovery=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
-	}
-	persisted, loadErr := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
-	if loadErr != nil || persisted.RuntimeState == nil || persisted.RuntimeState.Facts.Failure == nil ||
-		persisted.RuntimeState.Facts.Failure.Code != "prerequisite_receipt_refresh_exhausted" ||
-		persisted.RuntimeState.Facts.Recovery.PrerequisiteRefreshes != 0 ||
-		persisted.RuntimeState.Facts.Recovery.PrerequisiteResourceChangeRefreshes != maxReceiptRefreshes ||
-		persisted.RuntimeState.ActiveDispatch != nil || len(persisted.RuntimeState.GovernanceRequests) != 0 {
-		t.Fatalf("receipt-resource-change fresh persisted terminal=%+v err=%v", persisted.RuntimeState, loadErr)
-	}
-}
-
-// A-5 composes the two independent freshness sources in one persisted Run.
+// A-5 combines a receipt-driven prerequisite invalidation with a local stale
+// prerequisite. Only the latter consumes the bounded stale-refresh budget.
 // Git's accepted init receipt first retires its external repository-state
 // observations.  Only after that committed owner transition do we lose the
 // orchestrator-local validation scratch.  The second transition must consume
@@ -6437,8 +6274,7 @@ func TestRuntimeV2FileBackedMixedOwnerReceiptThenLocalScratchStaleCrashRestart(t
 			if err != nil {
 				t.Fatal(err)
 			}
-			if firstReceipt.ActiveDispatch != nil || firstReceipt.Facts.Recovery.PrerequisiteRefreshes != 0 ||
-				firstReceipt.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 || firstReceipt.Facts.Resources.ValidationScratch == nil ||
+			if firstReceipt.ActiveDispatch != nil || firstReceipt.Facts.Recovery.PrerequisiteRefreshes != 0 || firstReceipt.Facts.Resources.ValidationScratch == nil ||
 				firstReceipt.Facts.Resources.ValidationScratch.Revision != committedScratch.Revision || len(firstReceipt.OperationReceipts) != 3 {
 				t.Fatalf("external receipt did not establish the mixed-owner boundary: %+v", firstReceipt)
 			}
@@ -6459,7 +6295,7 @@ func TestRuntimeV2FileBackedMixedOwnerReceiptThenLocalScratchStaleCrashRestart(t
 				delegate: baseRepository, after: crashAfterCAS, marker: marker,
 				match: func(current runtimev2.RuntimeAggregate) bool {
 					return current.ActiveDispatch == nil && current.Facts.Resources.ValidationScratch == nil &&
-						current.Facts.Recovery.PrerequisiteRefreshes == 1 && current.Facts.Recovery.PrerequisiteResourceChangeRefreshes == 1
+						current.Facts.Recovery.PrerequisiteRefreshes == 1
 				},
 			}
 			crashingOwner := orchestratorbiz.NewRuntimeOrchestrator()
@@ -6492,12 +6328,10 @@ func TestRuntimeV2FileBackedMixedOwnerReceiptThenLocalScratchStaleCrashRestart(t
 				t.Fatalf("mixed-owner stale crash state=%+v err=%v", crashed, err)
 			}
 			if crashAfterCAS {
-				if crashed.RuntimeState.Facts.Resources.ValidationScratch != nil || crashed.RuntimeState.Facts.Recovery.PrerequisiteRefreshes != 1 ||
-					crashed.RuntimeState.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 {
+				if crashed.RuntimeState.Facts.Resources.ValidationScratch != nil || crashed.RuntimeState.Facts.Recovery.PrerequisiteRefreshes != 1 {
 					t.Fatalf("after-CAS mixed stale did not preserve independent ledgers: %+v", crashed.RuntimeState)
 				}
-			} else if crashed.RuntimeState.Facts.Resources.ValidationScratch == nil || crashed.RuntimeState.Facts.Recovery.PrerequisiteRefreshes != 0 ||
-				crashed.RuntimeState.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 {
+			} else if crashed.RuntimeState.Facts.Resources.ValidationScratch == nil || crashed.RuntimeState.Facts.Recovery.PrerequisiteRefreshes != 0 {
 				t.Fatalf("before-CAS mixed stale leaked local invalidation: %+v", crashed.RuntimeState)
 			}
 			if len(crashed.RuntimeState.CandidateRequestSessions) != 1 || len(crashed.RuntimeState.CandidateAttempts) != 1 || crashed.RuntimeState.ActiveDispatch != nil ||
@@ -6527,8 +6361,7 @@ func TestRuntimeV2FileBackedMixedOwnerReceiptThenLocalScratchStaleCrashRestart(t
 				t.Fatal(err)
 			}
 			if resumed.Facts.Resources.ValidationScratch == nil || resumed.Facts.Resources.ValidationScratch.Reference != committedScratch.Reference ||
-				resumed.Facts.Resources.ValidationScratch.Revision == committedScratch.Revision || resumed.Facts.Recovery.PrerequisiteRefreshes != 1 ||
-				resumed.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 || len(resumed.Facts.Prerequisites.Pending) != 0 ||
+				resumed.Facts.Resources.ValidationScratch.Revision == committedScratch.Revision || resumed.Facts.Recovery.PrerequisiteRefreshes != 1 || len(resumed.Facts.Prerequisites.Pending) != 0 ||
 				len(resumed.CandidateRequestSessions) != 1 || len(resumed.CandidateAttempts) != 1 || resumed.ActiveDispatch != nil ||
 				len(resumed.GovernanceRequests) != 0 || len(resumed.OperationReceipts) != 3 {
 				t.Fatalf("mixed-owner restart did not converge only prerequisite facts: %+v", resumed)
@@ -10022,7 +9855,7 @@ func TestRuntimeV2DecisionReconcilesHistoricalAuthorityBeforeProvider(t *testing
 	}
 	if providerCalls != 0 || next.StateRevision != 8 || next.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite ||
 		len(next.CandidateAttempts) != 0 || next.Facts.Repair.RepairAttempts != 0 ||
-		next.Facts.Recovery.PrerequisiteRefreshes != 0 || next.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 {
+		next.Facts.Recovery.PrerequisiteRefreshes != 0 {
 		t.Fatalf("pre-provider authority gate leaked into candidate/recovery path: %+v providerCalls=%d", next, providerCalls)
 	}
 	if next.Facts.Resources.TargetSelection != nil || len(next.Facts.Prerequisites.Retired) != 1 ||

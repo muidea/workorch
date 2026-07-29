@@ -25,6 +25,17 @@ Last Updated: 2026-07-29
 
 历史 C7、C8-B～C8-F 只保留为不可回退的测试基线。它们不证明新的 deployed aggregate 已收敛，也不能覆盖新的 persisted counterexample。
 
+### 2026-07-29：receipt freshness 收口
+
+已关闭一个会把正常执行误判为 recovery 的 SM-2 缺口：accepted durable receipt 的资源 revision 变化不再消耗
+run-global recovery budget，也不会形成 `prerequisite_receipt_refresh_exhausted` terminal。Orchestrator 仍是唯一
+invalidation、reacquisition、authority transition 与 CAS owner；它为每个受影响 prerequisite 持久化精确
+invalidation record，并仅用该 `PrerequisiteID` 的 record generation 生成 capability-state acquisition key。
+
+因此同一 execution receipt 的重放不会重复增长 generation 或重放 owner effect；无关 prerequisite 的变更不影响
+该 key；read-only stale/no-progress 仍独占唯一有界的 `prerequisite_refresh` budget。File/Git/Shell 等 Block 只返回
+typed receipt/fact，TUI/Web/read-model 仅投影 stale budget 与 invalidation 审计，均不得接管该状态迁移。
+
 ## 2. 最新 deployed 反例与根因
 
 已完成的 SMO-1～SMO-6 是不可回退的代码与测试基线，但不构成 fresh deployed 正向收敛的证明。最新全新 workspace

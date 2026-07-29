@@ -377,6 +377,28 @@ func NormalizeRuntimePrerequisiteInvalidations(values []RuntimePrerequisiteInval
 	return nilIfEmpty(ret)
 }
 
+// RuntimePrerequisiteInvalidationGeneration returns the exact persisted
+// invalidation generation for one prerequisite. Both an owner-confirmed stale
+// fact and an accepted durable receipt require a new acquisition generation;
+// neither provider/CAS/delivery recovery nor invalidations of unrelated
+// prerequisites may change this value.
+func RuntimePrerequisiteInvalidationGeneration(values []RuntimePrerequisiteInvalidationRecord, prerequisiteID string) int {
+	prerequisiteID = strings.TrimSpace(prerequisiteID)
+	if prerequisiteID == "" {
+		return 0
+	}
+	generation := 0
+	for _, value := range NormalizeRuntimePrerequisiteInvalidations(values) {
+		for _, affectedID := range value.PrerequisiteIDs {
+			if affectedID == prerequisiteID {
+				generation++
+				break
+			}
+		}
+	}
+	return generation
+}
+
 func RuntimeFreshnessDependencyIntersectsChange(dependency RuntimeFreshnessDependency, change RuntimeResourceChange) bool {
 	dependency = dependency.Normalized()
 	change = change.Normalized()

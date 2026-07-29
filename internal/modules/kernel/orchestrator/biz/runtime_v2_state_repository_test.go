@@ -3125,8 +3125,7 @@ func TestDriveRuntimeV2DecisionReacquiresMissingSealedProviderCeilingBeforeLLM(t
 	}
 	if reconciled.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || preflightCalls != 0 || candidateCalls != 0 ||
 		len(reconciled.CandidateAttempts) != 0 || reconciled.Facts.Repair.RepairAttempts != 0 ||
-		reconciled.Facts.Recovery.ProviderTransportAttempts != 0 || reconciled.Facts.Recovery.PrerequisiteRefreshes != 0 ||
-		reconciled.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 {
+		reconciled.Facts.Recovery.ProviderTransportAttempts != 0 || reconciled.Facts.Recovery.PrerequisiteRefreshes != 0 {
 		t.Fatalf("missing provider ceiling reached LLM or spent a budget: preflight=%d candidate=%d aggregate=%+v", preflightCalls, candidateCalls, reconciled)
 	}
 	if len(reconciled.Facts.Prerequisites.Pending) != 1 || reconciled.Facts.Prerequisites.Pending[0].ID != providerPrerequisite.ID ||
@@ -3241,7 +3240,7 @@ func TestRuntimeV2CandidateAdmissionSkipsOwnerProbeForAssessment(t *testing.T) {
 	}
 }
 
-func TestRuntimeV2FileBackedCorrectionRestartSealsOwnerAdmissibleCandidate(t *testing.T) {
+func TestRuntimeV2FileBackedOwnerInfeasibilityDoesNotRequestCorrection(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -3270,10 +3269,8 @@ func TestRuntimeV2FileBackedCorrectionRestartSealsOwnerAdmissibleCandidate(t *te
 	probeObserver.Subscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
 		probes++
 		command := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
-		response := orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: command.Operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: probes != 1}
-		if !response.Feasible {
-			response.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_target_not_regular", Signature: "operation-admissibility/file/edit/operation_target_not_regular", Message: "target is a directory", TargetRefs: []string{"."}}
-		}
+		response := orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: command.Operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: false,
+			Failure: &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_target_not_regular", Signature: "operation-admissibility/file/edit/operation_target_not_regular", Message: "target is a directory", TargetRefs: []string{"."}}}
 		result.Set(response, nil)
 	})
 	t.Cleanup(func() {
@@ -3285,16 +3282,11 @@ func TestRuntimeV2FileBackedCorrectionRestartSealsOwnerAdmissibleCandidate(t *te
 	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
 		requests = append(requests, command)
-		target := "target.txt"
-		if command.CandidateAttempt == 0 {
-			target = "."
-		} else if command.PreviousFailure == nil || command.PreviousFailure.Class != runtimecontract.RuntimeCandidateFailureClassContract || command.PreviousFailure.Code != "candidate_target_outside_grounding" {
-			t.Fatalf("retry did not receive persisted infeasibility: %+v", command.PreviousFailure)
-		} else if diagnostic := command.PreviousFailure.Diagnostic; diagnostic == nil || diagnostic.OperationID != "edit-." || diagnostic.Path != "$.operations[id=edit-.].targetRefs" || diagnostic.Actual != "." || !reflect.DeepEqual(diagnostic.Allowed, []string{"target.txt"}) || diagnostic.ManifestHash != command.CandidateManifest.Hash || diagnostic.RejectedShapeHash == "" || !reflect.DeepEqual(diagnostic.Objectives, []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionReplaceTarget}) {
-			t.Fatalf("retry did not receive manifest-bound infeasibility diagnostic: %+v", diagnostic)
+		if command.CandidateAttempt != 0 {
+			t.Fatalf("owner infeasibility must not request correction: %+v", command)
 		}
 		candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
-			ID: "edit-" + target, Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target}, Parameters: runtimeV2FileEditParameters(target),
+			ID: "edit-.", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"."}, Parameters: runtimeV2FileEditParameters("."),
 		}}}}}
 		result.Set(runtimeV2CandidateResultForTest(t, command, candidate), nil)
 	})
@@ -3324,80 +3316,11 @@ func TestRuntimeV2FileBackedCorrectionRestartSealsOwnerAdmissibleCandidate(t *te
 		t.Fatal(err)
 	}
 	if len(requests) != 1 || len(first.CandidateAttempts) != 1 || first.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated || first.CandidateAttempts[0].OwnerFeasibility == nil || first.CandidateAttempts[0].Failure != nil || first.Facts.Failure == nil || first.Facts.Failure.Class != runtimecontract.FailureClassCandidateInfeasible {
-		t.Fatalf("owner infeasibility was not durably handed to SM-2 before restart: requests=%+v aggregate=%+v", requests, first)
-	}
-	// The old body below exercises a same-contract attempt-1 correction. Owner
-	// infeasibility is intentionally no longer eligible for that path; a
-	// dedicated restart/idempotency test covers its new-authority handoff.
-	return
-	// Recreate the full process boundary. The only input to attempt 1 is the
-	// file-backed failed attempt/session; it must not reuse an in-process
-	// provider response, EventHub responder, or owner failure probe.
-	if err := runOwner.Stop(ctx); err != nil {
-		t.Fatal(err)
-	}
-	hub.Terminate(ctx)
-	hub = magicevent.NewHub(16)
-	runOwner = runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: filerepository.NewRunRepository(runsPath), EventHub: hub}); err != nil {
-		t.Fatal(err)
-	}
-	if err := runOwner.Start(); err != nil {
-		t.Fatal(err)
-	}
-	restartedWorkspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
-	restartedWorkspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir()}}, nil)
-	})
-	t.Cleanup(func() { restartedWorkspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
-	restartedProbeObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
-	restartedProbeObserver.Subscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
-		probes++
-		command := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
-		result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: command.Operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: true}, nil)
-	})
-	t.Cleanup(func() {
-		restartedProbeObserver.Unsubscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
-	})
-	restartedLLMObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	restartedLLMObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
-		requests = append(requests, event.Data().(orchestratorevents.RequestRuntimeCandidateCommand))
-		command := requests[len(requests)-1]
-		if command.CandidateAttempt != 1 || command.PreviousFailure == nil || command.PreviousFailure.Diagnostic == nil {
-			t.Errorf("restarted correction request lost persisted diagnostic: %+v", command)
-			return
-		}
-		candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
-			ID: "edit-target.txt", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileEditParameters("target.txt"),
-		}}}}}
-		result.Set(runtimeV2CandidateResultForTest(t, command, candidate), nil)
-	})
-	t.Cleanup(func() { restartedLLMObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
-	restartedBiz := orchestratorbiz.NewRuntimeOrchestrator()
-	if err := restartedBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
-		t.Fatal(err)
-	}
-	reloaded, err := restartedBiz.LoadRuntimeV2(ctx, "ws-v2", "run-v2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	sealed, err := newTestBiz(restartedBiz, hub, nil).requestAndSealRuntimeV2CandidateWithRetry(ctx, reloaded, "stable-admissibility-prefix")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sealed.ActiveDispatch == nil || probes != 2 || len(requests) != 2 || len(sealed.CandidateAttempts) != 2 ||
-		sealed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || sealed.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStateAccepted {
-		t.Fatalf("corrected candidate was not sealed after one infeasible retry: probes=%d requests=%+v aggregate=%+v", probes, requests, sealed)
-	}
-	if len(sealed.OperationReceipts) != 0 || len(sealed.Facts.Evidence.Accepted) != 0 || len(sealed.Facts.Evidence.Rejected) != 0 {
-		t.Fatalf("candidate admission created execution state: %+v", sealed)
+		t.Fatalf("owner infeasibility was not durably handed to SM-2: requests=%+v aggregate=%+v", requests, first)
 	}
 }
 
-// P3-B3 correction-complete boundary: attempt 1's C4 document is durable
-// before C5 admission. A restarted decoder/admission must consume that body,
-// atomically exhaust a semantic replay, and never make a third provider call.
-func TestRuntimeV2FileBackedCorrectionCompleteRestartExhaustsWithoutProviderReplay(t *testing.T) {
+func TestRuntimeV2FileBackedOwnerInfeasibilityPersistsWithoutCorrection(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -3480,94 +3403,6 @@ func TestRuntimeV2FileBackedCorrectionCompleteRestartExhaustsWithoutProviderRepl
 	}
 	if providerCalls != 1 || len(failed.CandidateAttempts) != 1 || failed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated || failed.CandidateAttempts[0].OwnerFeasibility == nil || failed.CandidateAttempts[0].Failure != nil || failed.Facts.Failure == nil || failed.Facts.Failure.Class != runtimecontract.FailureClassCandidateInfeasible {
 		t.Fatalf("owner infeasibility was not persisted: providerCalls=%d aggregate=%+v", providerCalls, failed)
-	}
-	return
-
-	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(failed.Facts, failed.Decision, runtimev2.ActiveRejectedOperationShapes(failed))
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(failed.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
-	if err != nil {
-		t.Fatal(err)
-	}
-	previousFailure, err := runtimeV2PreviousCandidateFailure(failed, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, correctionSession, err := firstOwner.EnsureRuntimeV2CandidateRequestSession(ctx, failed.Facts.WorkspaceID, failed.Facts.RunID, prefix, manifest.Hash, runtimecontract.StableRuntimeCandidateRequestCorrectionHash(previousFailure))
-	if err != nil {
-		t.Fatal(err)
-	}
-	physicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(correctionSession.LogicalRequestID, correctionSession.NextSequence)
-	submitted, err := firstOwner.MarkRuntimeV2CandidateRequestSubmitted(ctx, failed.Facts.WorkspaceID, failed.Facts.RunID, correctionSession.LogicalRequestID, correctionSession.NextSequence, physicalCallID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	corrected := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
-		ID: "edit-.", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"."}, Parameters: runtimeV2FileEditParameters("."),
-	}}}}}
-	document := runtimeV2CandidateDocumentForTest(t, manifest, corrected)
-	completed, _, _, err := newTestBiz(firstOwner, hub, nil).persistAndCompleteRuntimeCandidateRequestDocument(ctx, submitted, correctionSession.LogicalRequestID, correctionSession.NextSequence, physicalCallID, document)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if providerCalls != 1 || len(completed.CandidateAttempts) != 1 || completed.CandidateRequestSessions[len(completed.CandidateRequestSessions)-1].State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete {
-		t.Fatalf("correction C4 boundary is not attempt-free/durable: providerCalls=%d aggregate=%+v", providerCalls, completed)
-	}
-
-	// All in-process candidate response and controller state is discarded. C5
-	// must read the file-backed correction document and admit attempt 1 only.
-	if err := runOwner.Stop(ctx); err != nil {
-		t.Fatal(err)
-	}
-	hub.Terminate(ctx)
-	hub = magicevent.NewHub(16)
-	runOwner = runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: filerepository.NewRunRepository(filepath.Join(root, "runs.json")), EventHub: hub}); err != nil {
-		t.Fatal(err)
-	}
-	if err := runOwner.Start(); err != nil {
-		t.Fatal(err)
-	}
-	restartedWorkspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
-	restartedWorkspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir()}}, nil)
-	})
-	t.Cleanup(func() { restartedWorkspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
-	restartedProbeObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
-	restartedProbeObserver.Subscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
-		probes++
-		command := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
-		result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: command.Operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: false}, nil)
-	})
-	t.Cleanup(func() {
-		restartedProbeObserver.Unsubscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
-	})
-	restartedLLMCalls := 0
-	restartedLLMObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	restartedLLMObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
-		restartedLLMCalls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
-		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID, Failure: &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProvider, Code: "unexpected_provider_replay"}}, nil)
-	})
-	t.Cleanup(func() { restartedLLMObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
-	restartedOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{
-		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(contentsRoot),
-	})
-	if err := restartedOwner.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
-		t.Fatal(err)
-	}
-	reloaded, err := restartedOwner.LoadRuntimeV2(ctx, failed.Facts.WorkspaceID, failed.Facts.RunID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sealed, err := newTestBiz(restartedOwner, hub, nil).requestAndSealRuntimeV2CandidateWithRetry(ctx, reloaded, prefix)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if providerCalls != 1 || restartedLLMCalls != 0 || probes != 1 || sealed.ActiveDispatch != nil || len(sealed.CandidateAttempts) != 2 ||
-		sealed.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStateFailed ||
-		sealed.CandidateAttempts[1].LogicalRequestID != correctionSession.LogicalRequestID || sealed.Decision.Terminal == nil ||
-		sealed.Decision.Terminal.Code != "candidate_retry_exhausted" || len(sealed.GovernanceRequests) != 0 || sealed.Facts.Repair.RepairAttempts != 0 {
-		t.Fatalf("correction-complete restart did not atomically exhaust replay: providerCalls=%d probes=%d aggregate=%+v", providerCalls, probes, sealed)
 	}
 }
 

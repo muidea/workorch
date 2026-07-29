@@ -3,6 +3,7 @@ package runtimev2
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -216,7 +217,7 @@ func TestTargetSnapshotReadOnlyStaleReacquiresOnlyFileSnapshot(t *testing.T) {
 		len(invalidated.Facts.Resources.TargetSnapshots) != 0 || len(invalidated.Facts.Resources.PrerequisiteObservations) != 0 ||
 		len(invalidated.Facts.Prerequisites.Satisfied) != 0 || len(invalidated.Facts.Prerequisites.Pending) != 1 ||
 		invalidated.Facts.Prerequisites.Pending[0].ID != prerequisite.ID ||
-		invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 || invalidated.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 ||
+		invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 ||
 		invalidated.Facts.Repair.RepairAttempts != 0 || invalidated.Facts.Recovery.ProviderTransportAttempts != 0 || invalidated.ActiveDispatch != nil {
 		t.Fatalf("target snapshot stale did not isolate prerequisite freshness: %+v", invalidated)
 	}
@@ -253,7 +254,7 @@ func TestTargetSnapshotReadOnlyStaleReacquiresOnlyFileSnapshot(t *testing.T) {
 	if reacquired.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(reacquired.Facts.Resources.TargetSnapshots) != 1 ||
 		reacquired.Facts.Resources.TargetSnapshots[0].ContentHash != "target-v2" || len(reacquired.Facts.Resources.PrerequisiteObservations) != 1 ||
 		reacquired.Facts.Resources.PrerequisiteObservations[0].ObservationID != freshObservation.ObservationID ||
-		reacquired.Facts.Recovery.PrerequisiteRefreshes != 1 || reacquired.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 {
+		reacquired.Facts.Recovery.PrerequisiteRefreshes != 1 {
 		t.Fatalf("fresh target snapshot did not replace stale owner fact: %+v", reacquired)
 	}
 }
@@ -581,7 +582,6 @@ func TestAcceptedReceiptResourceChangeRetiresPrerequisitesButKeepsRemainingDispa
 		len(committed.Aggregate.ActiveDispatch.CompletedOperationIDs) != 1 || committed.Aggregate.ActiveDispatch.CompletedOperationIDs[0] != "write-1" ||
 		len(committed.Aggregate.Facts.Evidence.Accepted) != 1 || len(committed.Aggregate.Facts.Evidence.Rejected) != 0 ||
 		committed.Aggregate.Facts.Repair.RepairAttempts != 0 || committed.Aggregate.Facts.Recovery.PrerequisiteRefreshes != 0 ||
-		committed.Aggregate.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 ||
 		committed.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(committed.Aggregate.Facts.FreshnessReacquireCoverage) != 0 {
 		t.Fatalf("accepted resource change did not preserve sealed dispatch: %+v", committed.Aggregate)
 	}
@@ -610,44 +610,38 @@ func TestAcceptedReceiptResourceChangeRetiresPrerequisitesButKeepsRemainingDispa
 		t.Fatalf("completed resource-changing dispatch did not defer SM-2 until refresh: %+v", completed.Aggregate)
 	}
 	duplicate, err := coordinator.CommitEvidence(ctx, evidence)
-	if err != nil || duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.Facts.Recovery.PrerequisiteRefreshes != 0 ||
-		duplicate.Aggregate.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 {
+	if err != nil || duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.Facts.Recovery.PrerequisiteRefreshes != 0 {
 		t.Fatalf("duplicate resource-change evidence changed refresh budget: aggregate=%+v err=%v", duplicate.Aggregate, err)
 	}
 }
 
-func TestAcceptedReceiptResourceChangeExhaustionSealsTerminalFact(t *testing.T) {
+func TestAcceptedReceiptResourceChangesAdvanceInvalidationWithoutRecoveryBudget(t *testing.T) {
 	aggregate := stateChangeAggregate(t)
-	_, _ = addFreshFileAdmissibilityObservation(t, &aggregate)
-	aggregate.Facts.RecoveryPolicy.MaxPrerequisiteResourceChangeRefreshes = 1
-	aggregate.Facts.Recovery.PrerequisiteResourceChangeRefreshes = 1
-
-	changed, err := applyReceiptResourceChangeInvalidation(&aggregate, "dispatch-1", "write-1", runtimecontract.RuntimeOperationReceipt{
-		ResourceChanges: []runtimecontract.RuntimeResourceChange{{
-			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
-			SubjectRef: "workspace_deliverable", BeforeRevision: "tree-v1", AfterRevision: "tree-v2",
-		}},
-	})
-	if err != nil || !changed {
-		t.Fatalf("resource-change invalidation = changed:%v err:%v", changed, err)
+	prerequisite, _ := addFreshFileAdmissibilityObservation(t, &aggregate)
+	for revision := 2; revision <= 10; revision++ {
+		changed, err := applyReceiptResourceChangeInvalidation(&aggregate, "dispatch-"+strconv.Itoa(revision), "write-"+strconv.Itoa(revision), runtimecontract.RuntimeOperationReceipt{
+			ResourceChanges: []runtimecontract.RuntimeResourceChange{{
+				Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+				SubjectRef: "workspace_deliverable", BeforeRevision: "tree-v" + strconv.Itoa(revision-1), AfterRevision: "tree-v" + strconv.Itoa(revision),
+			}},
+		})
+		if err != nil || !changed {
+			t.Fatalf("resource-change invalidation #%d = changed:%v err:%v", revision, changed, err)
+		}
+		if revision < 10 {
+			// Re-acquisition restores the owner fact before the next durable
+			// operation changes that same resource again.
+			addFreshFileAdmissibilityObservation(t, &aggregate)
+		}
 	}
-	if aggregate.Facts.Recovery.PrerequisiteRefreshes != 0 || aggregate.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 ||
-		aggregate.Facts.Failure == nil || aggregate.Facts.Failure.Class != runtimecontract.FailureClassPrerequisiteRefreshExhausted ||
-		aggregate.Facts.Failure.Code != "prerequisite_receipt_refresh_exhausted" {
-		t.Fatalf("resource-change exhaustion did not preserve independent terminal fact: %+v", aggregate.Facts)
-	}
-	_, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil)
-	if err != nil || decision.Action != runtimecontract.RuntimeActionFail {
-		t.Fatalf("resource-change exhaustion decision = %+v err=%v", decision, err)
+	if aggregate.Facts.Recovery.PrerequisiteRefreshes != 0 || aggregate.Facts.Failure != nil ||
+		runtimecontract.RuntimePrerequisiteInvalidationGeneration(aggregate.PrerequisiteInvalidations, prerequisite.ID) != 9 {
+		t.Fatalf("resource changes must be progress, not recovery exhaustion: facts=%+v invalidations=%+v", aggregate.Facts, aggregate.PrerequisiteInvalidations)
 	}
 }
 
-// The two prerequisite refresh ledgers have different causes and must remain
-// independent even when an external owner receipt and an orchestrator-local
-// resource become stale during the same authority lifetime.  In particular,
-// an accepted File receipt is forward progress and consumes only the receipt
-// ledger; loss of the local validation scratch is read-only freshness loss and
-// consumes only the stale ledger.
+// Receipt-driven invalidation is normal progress, while loss of a local
+// prerequisite remains bounded stale/no-progress recovery.
 func TestMixedOwnerPrerequisiteRefreshLedgersRemainIndependent(t *testing.T) {
 	ctx := context.Background()
 	aggregate := stateChangeAggregate(t)
@@ -671,7 +665,7 @@ func TestMixedOwnerPrerequisiteRefreshLedgersRemainIndependent(t *testing.T) {
 	if err != nil || !changed {
 		t.Fatalf("external resource-change invalidation = changed:%t err:%v", changed, err)
 	}
-	if aggregate.Facts.Recovery.PrerequisiteRefreshes != 0 || aggregate.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 ||
+	if aggregate.Facts.Recovery.PrerequisiteRefreshes != 0 ||
 		len(aggregate.Facts.Prerequisites.Pending) != 1 || aggregate.Facts.Prerequisites.Pending[0].ID != filePrerequisite.ID ||
 		len(aggregate.Facts.Prerequisites.Satisfied) != 1 || aggregate.Facts.Prerequisites.Satisfied[0].ID != scratchPrerequisite.ID ||
 		aggregate.Facts.Resources.ValidationScratch == nil || len(aggregate.Facts.Resources.PrerequisiteObservations) != 1 ||
@@ -694,7 +688,7 @@ func TestMixedOwnerPrerequisiteRefreshLedgersRemainIndependent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 || invalidated.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 ||
+	if invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 ||
 		len(invalidated.Facts.Prerequisites.Pending) != 2 || len(invalidated.Facts.Prerequisites.Satisfied) != 0 ||
 		invalidated.Facts.Resources.ValidationScratch != nil || len(invalidated.Facts.Resources.OperationAdmissibilities) != 0 ||
 		len(invalidated.CandidateRequestSessions) != 0 || len(invalidated.CandidateAttempts) != 0 || invalidated.ActiveDispatch != nil ||
@@ -706,8 +700,7 @@ func TestMixedOwnerPrerequisiteRefreshLedgersRemainIndependent(t *testing.T) {
 	}
 	revision := invalidated.StateRevision
 	duplicate, err := controller.InvalidatePrerequisitesForReadOnlyStale(ctx, "ws-1", "run-1", stale)
-	if err != nil || duplicate.StateRevision != revision || duplicate.Facts.Recovery.PrerequisiteRefreshes != 1 ||
-		duplicate.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 {
+	if err != nil || duplicate.StateRevision != revision || duplicate.Facts.Recovery.PrerequisiteRefreshes != 1 {
 		t.Fatalf("duplicate local stale retried mixed-owner refresh: aggregate=%+v err=%v", duplicate, err)
 	}
 
@@ -720,147 +713,8 @@ func TestMixedOwnerPrerequisiteRefreshLedgersRemainIndependent(t *testing.T) {
 			SubjectRef: "unrelated.go", BeforeRevision: "v1", AfterRevision: "v2",
 		}},
 	})
-	if err != nil || unchanged || duplicate.Facts.Recovery.PrerequisiteRefreshes != 1 || duplicate.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 {
+	if err != nil || unchanged || duplicate.Facts.Recovery.PrerequisiteRefreshes != 1 {
 		t.Fatalf("unrelated external change mutated mixed-owner ledger: changed=%t aggregate=%+v err=%v", unchanged, duplicate, err)
-	}
-}
-
-// Exhausting either ledger is a terminal SM-2 fact, not permission to borrow
-// the other ledger or to start another prerequisite/provider loop.  The setup
-// deliberately crosses owner boundaries before the terminal transition: File
-// first reports durable workspace progress, then the orchestrator observes its
-// local validation resource as stale, and both prerequisites are reacquired.
-func TestMixedOwnerPrerequisiteRefreshExhaustionKeepsOtherLedgerStable(t *testing.T) {
-	for _, test := range []struct {
-		name            string
-		maxReadOnly     int
-		maxReceipt      int
-		exhaust         string
-		wantFailureCode string
-		wantReadOnly    int
-		wantReceipt     int
-	}{
-		{name: "receipt_resource_change", maxReadOnly: 2, maxReceipt: 1, exhaust: "receipt", wantFailureCode: "prerequisite_receipt_refresh_exhausted", wantReadOnly: 1, wantReceipt: 1},
-		{name: "local_read_only_stale", maxReadOnly: 1, maxReceipt: 2, exhaust: "stale", wantFailureCode: "prerequisite_refresh_exhausted", wantReadOnly: 1, wantReceipt: 1},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
-			aggregate := stateChangeAggregate(t)
-			aggregate.Facts.ConvergencePolicy.MaxCandidateContextItems = 4
-			filePrerequisite, fileObservation := addFreshFileAdmissibilityObservation(t, &aggregate)
-			fileInventory := aggregate.Facts.Resources.OperationAdmissibilities[0]
-			scratchPrerequisite, scratchObservation := addFreshValidationScratchObservation(t, &aggregate, "scratch-v1")
-			aggregate.Facts.RecoveryPolicy.MaxPrerequisiteRefreshes = test.maxReadOnly
-			aggregate.Facts.RecoveryPolicy.MaxPrerequisiteResourceChangeRefreshes = test.maxReceipt
-			facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			aggregate.Facts = facts
-			aggregate.Decision = decision
-
-			changed, err := applyReceiptResourceChangeInvalidation(&aggregate, "dispatch-file", "write-main", runtimecontract.RuntimeOperationReceipt{
-				ExecutionKey: "exec/ws-1/run-1/dispatch-file/write-main", Fence: 1, OperationID: "write-main",
-				ResourceChanges: []runtimecontract.RuntimeResourceChange{{
-					Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
-					SubjectRef: "workspace_deliverable", BeforeRevision: "tree-v1", AfterRevision: "tree-v2",
-				}},
-			})
-			if err != nil || !changed {
-				t.Fatalf("first File receipt invalidation = changed:%t err:%v", changed, err)
-			}
-			commitFreshnessInvalidationForTest(t, &aggregate)
-			repository := &durableRuntimeStateRepository{aggregate: aggregate}
-			controller, err := NewRuntimeController(repository)
-			if err != nil {
-				t.Fatal(err)
-			}
-			firstStale := runtimecontract.RuntimePrerequisiteStale{
-				PrerequisiteID: scratchPrerequisite.ID, ObservationID: scratchObservation.ObservationID,
-				Domain: runtimecontract.RuntimeResourceLocalResource, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
-				SubjectRef: "validation-scratch/ws-1/run-1/cwi-1", ExpectedRevision: "scratch-v1", ObservedRevision: "scratch-v2", Reason: "local scratch disappeared",
-			}
-			if _, err := controller.InvalidatePrerequisitesForReadOnlyStale(ctx, "ws-1", "run-1", firstStale); err != nil {
-				t.Fatal(err)
-			}
-
-			freshFileInventory := fileInventory
-			freshFileInventory.ObservedRevision = "tree-v2"
-			freshFileInventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(freshFileInventory)
-			freshFileObservation := fileObservation
-			freshFileObservation.ContentHash = freshFileInventory.SnapshotID
-			freshFileObservation.Dependencies[0].Revision = "tree-v2"
-			freshFileObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(freshFileObservation)
-			if _, err := controller.CommitPrerequisite(ctx, "ws-1", "run-1", PrerequisiteResult{
-				PrerequisiteID: filePrerequisite.ID, OperationAdmissibility: &freshFileInventory, Observation: &freshFileObservation,
-			}); err != nil {
-				t.Fatalf("reacquire File owner prerequisite: %v", err)
-			}
-			freshScratch := runtimecontract.ValidationScratch{Reference: ".workorch-internal/validation-scratch/ws-1/run-1/cwi-1", Revision: "scratch-v2"}
-			freshScratchObservation := scratchObservation
-			freshScratchObservation.ContentHash = freshScratch.Revision
-			freshScratchObservation.Dependencies[0].Revision = freshScratch.Revision
-			freshScratchObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(freshScratchObservation)
-			reacquired, err := controller.CommitPrerequisite(ctx, "ws-1", "run-1", PrerequisiteResult{
-				PrerequisiteID: scratchPrerequisite.ID, ValidationScratch: &freshScratch, Observation: &freshScratchObservation,
-			})
-			if err != nil {
-				t.Fatalf("reacquire local validation scratch: %v", err)
-			}
-			if reacquired.Facts.Recovery.PrerequisiteRefreshes != 1 || reacquired.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 ||
-				len(reacquired.Facts.Prerequisites.Pending) != 0 || len(reacquired.CandidateRequestSessions) != 0 || len(reacquired.CandidateAttempts) != 0 ||
-				reacquired.ActiveDispatch != nil || len(reacquired.GovernanceRequests) != 0 || len(reacquired.OperationReceipts) != 0 {
-				t.Fatalf("mixed prerequisites did not reacquire cleanly: %+v", reacquired)
-			}
-
-			var terminal RuntimeAggregate
-			if test.exhaust == "receipt" {
-				changed, err = applyReceiptResourceChangeInvalidation(&reacquired, "dispatch-file-2", "write-main-2", runtimecontract.RuntimeOperationReceipt{
-					ExecutionKey: "exec/ws-1/run-1/dispatch-file-2/write-main-2", Fence: 1, OperationID: "write-main-2",
-					ResourceChanges: []runtimecontract.RuntimeResourceChange{{
-						Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
-						SubjectRef: "workspace_deliverable", BeforeRevision: "tree-v2", AfterRevision: "tree-v3",
-					}},
-				})
-				if err != nil || !changed {
-					t.Fatalf("exhausting File receipt invalidation = changed:%t err:%v", changed, err)
-				}
-				commitFreshnessInvalidationForTest(t, &reacquired)
-				terminal = reacquired
-				duplicate, err := applyReceiptResourceChangeInvalidation(&terminal, "dispatch-file-2", "write-main-2", runtimecontract.RuntimeOperationReceipt{
-					ExecutionKey: "exec/ws-1/run-1/dispatch-file-2/write-main-2", Fence: 1, OperationID: "write-main-2",
-					ResourceChanges: []runtimecontract.RuntimeResourceChange{{
-						Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
-						SubjectRef: "workspace_deliverable", BeforeRevision: "tree-v2", AfterRevision: "tree-v3",
-					}},
-				})
-				if err != nil || duplicate {
-					t.Fatalf("duplicate exhausted receipt invalidation = changed:%t err:%v", duplicate, err)
-				}
-			} else {
-				repository.aggregate = reacquired
-				secondStale := firstStale
-				secondStale.ObservationID = freshScratchObservation.ObservationID
-				secondStale.ExpectedRevision = "scratch-v2"
-				secondStale.ObservedRevision = "scratch-v3"
-				secondStale.Reason = "local scratch disappeared again"
-				terminal, err = controller.InvalidatePrerequisitesForReadOnlyStale(ctx, "ws-1", "run-1", secondStale)
-				if err != nil {
-					t.Fatal(err)
-				}
-				revision := terminal.StateRevision
-				duplicate, err := controller.InvalidatePrerequisitesForReadOnlyStale(ctx, "ws-1", "run-1", secondStale)
-				if err != nil || duplicate.StateRevision != revision {
-					t.Fatalf("duplicate exhausted read-only stale looped: aggregate=%+v err=%v", duplicate, err)
-				}
-			}
-			if terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Facts.Failure == nil || terminal.Facts.Failure.Code != test.wantFailureCode ||
-				terminal.Facts.Recovery.PrerequisiteRefreshes != test.wantReadOnly || terminal.Facts.Recovery.PrerequisiteResourceChangeRefreshes != test.wantReceipt ||
-				len(terminal.CandidateRequestSessions) != 0 || len(terminal.CandidateAttempts) != 0 || terminal.ActiveDispatch != nil ||
-				len(terminal.GovernanceRequests) != 0 || len(terminal.OperationReceipts) != 0 {
-				t.Fatalf("mixed-owner exhaustion contaminated a different state machine: %+v", terminal)
-			}
-		})
 	}
 }
 
@@ -1016,7 +870,7 @@ func TestFileTargetChangeInvalidatesShellValidationObservation(t *testing.T) {
 			SubjectRef: "main.go", BeforeRevision: "missing", AfterRevision: "main-v1",
 		}},
 	})
-	if err != nil || !changed || aggregate.Facts.Recovery.PrerequisiteRefreshes != 0 || aggregate.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 ||
+	if err != nil || !changed || aggregate.Facts.Recovery.PrerequisiteRefreshes != 0 ||
 		len(aggregate.Facts.Prerequisites.Pending) != 1 || aggregate.Facts.Prerequisites.Pending[0].ID != shellPrerequisite.ID ||
 		len(aggregate.Facts.Prerequisites.Satisfied) != 1 || aggregate.Facts.Prerequisites.Satisfied[0].ID != filePrerequisite.ID ||
 		len(aggregate.Facts.Resources.OperationAdmissibilities) != 1 || aggregate.Facts.Resources.OperationAdmissibilities[0].PrerequisiteID != filePrerequisite.ID ||
@@ -1030,7 +884,7 @@ func TestFileTargetChangeInvalidatesShellValidationObservation(t *testing.T) {
 			SubjectRef: "main.go", BeforeRevision: "missing", AfterRevision: "main-v1",
 		}},
 	})
-	if err != nil || duplicate || aggregate.Facts.Recovery.PrerequisiteRefreshes != 0 || aggregate.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 || len(aggregate.PrerequisiteInvalidations) != 1 {
+	if err != nil || duplicate || aggregate.Facts.Recovery.PrerequisiteRefreshes != 0 || len(aggregate.PrerequisiteInvalidations) != 1 {
 		t.Fatalf("duplicate File resource change consumed Shell refresh again: aggregate=%+v changed=%t err=%v", aggregate, duplicate, err)
 	}
 }
@@ -1105,7 +959,7 @@ func TestGitAdmissibilityReadOnlyStaleRetiresOnlyGitInventory(t *testing.T) {
 		len(invalidated.Facts.Resources.PrerequisiteObservations) != 1 || invalidated.Facts.Resources.PrerequisiteObservations[0].PrerequisiteID != filePrerequisite.ID ||
 		len(invalidated.Facts.Prerequisites.Pending) != 1 || invalidated.Facts.Prerequisites.Pending[0].ID != gitPrerequisite.ID ||
 		len(invalidated.Facts.Prerequisites.Satisfied) != 1 || invalidated.Facts.Prerequisites.Satisfied[0].ID != filePrerequisite.ID ||
-		invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 || invalidated.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 ||
+		invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 ||
 		len(invalidated.CandidateAttempts) != 1 || invalidated.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated ||
 		invalidated.ActiveDispatch != nil || len(invalidated.GovernanceRequests) != 0 {
 		t.Fatalf("Git read-only stale did not isolate Git inventory: %+v", invalidated)
@@ -1337,7 +1191,6 @@ func TestWorkspaceTreeChangeInvalidatesOwnerTargetSelectionOnce(t *testing.T) {
 func addFreshFileAdmissibilityObservation(t *testing.T, aggregate *RuntimeAggregate) (runtimecontract.RuntimePrerequisite, runtimecontract.RuntimePrerequisiteObservation) {
 	t.Helper()
 	aggregate.Facts.RecoveryPolicy.MaxPrerequisiteRefreshes = 2
-	aggregate.Facts.RecoveryPolicy.MaxPrerequisiteResourceChangeRefreshes = 2
 	inventory := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "operation_admissibility:file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		OperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: []string{"main.go", "other.go"}, ObservedRevision: "tree-v1",

@@ -547,10 +547,8 @@ func portRuntimeV2ProgressInfo(item *readmodelcore.RuntimeV2Progress) *port.Runt
 		FailureCode: item.FailureCode, FailureSignature: item.FailureSignature, FailureMessage: item.FailureMessage,
 		RepairHintCodes:          append([]string(nil), item.RepairHintCodes...),
 		PrerequisiteRefreshState: item.PrerequisiteRefreshState, PrerequisiteRefreshUsed: item.PrerequisiteRefreshUsed,
-		PrerequisiteRefreshLimit:               item.PrerequisiteRefreshLimit,
-		PrerequisiteResourceChangeRefreshUsed:  item.PrerequisiteResourceChangeRefreshUsed,
-		PrerequisiteResourceChangeRefreshLimit: item.PrerequisiteResourceChangeRefreshLimit,
-		PrerequisiteInvalidations:              portPrerequisiteRefreshInvalidations(item.PrerequisiteInvalidations),
+		PrerequisiteRefreshLimit:  item.PrerequisiteRefreshLimit,
+		PrerequisiteInvalidations: portPrerequisiteRefreshInvalidations(item.PrerequisiteInvalidations),
 	}
 }
 

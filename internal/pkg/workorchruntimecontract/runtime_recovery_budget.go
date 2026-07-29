@@ -12,24 +12,18 @@ const (
 	// deliberately separate from normal owner-reported resource changes: a
 	// progressing Run may legitimately change several independent resources.
 	DefaultMaxPrerequisiteRefreshes = 3
-	// DefaultMaxPrerequisiteResourceChangeRefreshes is the sealed allowance for
-	// normal durable owner receipts that invalidate an intersecting prerequisite.
-	// It is still bounded by RuntimeRecoveryBudgetLimit and does not relax stale
-	// or duplicate receipt handling.
-	DefaultMaxPrerequisiteResourceChangeRefreshes = 8
-	RuntimeRecoveryBudgetLimit                    = 100
+	RuntimeRecoveryBudgetLimit      = 100
 )
 
 type RuntimeRecoveryBudgetKind string
 
 const (
-	RuntimeRecoveryBudgetProviderTransport                 RuntimeRecoveryBudgetKind = "provider_transport"
-	RuntimeRecoveryBudgetOperationRecovery                 RuntimeRecoveryBudgetKind = "operation_recovery"
-	RuntimeRecoveryBudgetCASReload                         RuntimeRecoveryBudgetKind = "cas_reload"
-	RuntimeRecoveryBudgetTerminalDelivery                  RuntimeRecoveryBudgetKind = "terminal_delivery"
-	RuntimeRecoveryBudgetDriveSchedule                     RuntimeRecoveryBudgetKind = "drive_schedule"
-	RuntimeRecoveryBudgetPrerequisiteRefresh               RuntimeRecoveryBudgetKind = "prerequisite_refresh"
-	RuntimeRecoveryBudgetPrerequisiteResourceChangeRefresh RuntimeRecoveryBudgetKind = "prerequisite_receipt_refresh"
+	RuntimeRecoveryBudgetProviderTransport   RuntimeRecoveryBudgetKind = "provider_transport"
+	RuntimeRecoveryBudgetOperationRecovery   RuntimeRecoveryBudgetKind = "operation_recovery"
+	RuntimeRecoveryBudgetCASReload           RuntimeRecoveryBudgetKind = "cas_reload"
+	RuntimeRecoveryBudgetTerminalDelivery    RuntimeRecoveryBudgetKind = "terminal_delivery"
+	RuntimeRecoveryBudgetDriveSchedule       RuntimeRecoveryBudgetKind = "drive_schedule"
+	RuntimeRecoveryBudgetPrerequisiteRefresh RuntimeRecoveryBudgetKind = "prerequisite_refresh"
 )
 
 type RuntimeRecoveryPolicy struct {
@@ -40,10 +34,6 @@ type RuntimeRecoveryPolicy struct {
 	MaxDriveScheduleAttempts     int
 	// MaxPrerequisiteRefreshes is the stale/no-progress recovery budget.
 	MaxPrerequisiteRefreshes int
-	// MaxPrerequisiteResourceChangeRefreshes bounds normal progressing owner
-	// receipts whose resource revisions invalidate a prerequisite observation.
-	// It is sealed at activation and is not a live orchestrator configuration.
-	MaxPrerequisiteResourceChangeRefreshes int
 }
 
 type RuntimeRecoveryLedger struct {
@@ -54,20 +44,16 @@ type RuntimeRecoveryLedger struct {
 	DriveScheduleAttempts     int
 	// PrerequisiteRefreshes tracks stale/no-progress recovery only.
 	PrerequisiteRefreshes int
-	// PrerequisiteResourceChangeRefreshes tracks normal progressing owner
-	// receipts separately from stale/no-progress recovery.
-	PrerequisiteResourceChangeRefreshes int
 }
 
 func DefaultRuntimeRecoveryPolicy() RuntimeRecoveryPolicy {
 	return RuntimeRecoveryPolicy{
-		MaxProviderTransportAttempts:           DefaultMaxProviderTransportAttempts,
-		MaxOperationRecoveryAttempts:           DefaultMaxOperationRecoveryAttempts,
-		MaxCASReloadAttempts:                   DefaultMaxCASReloadAttempts,
-		MaxTerminalDeliveryAttempts:            DefaultMaxTerminalDeliveryAttempts,
-		MaxDriveScheduleAttempts:               DefaultMaxDriveScheduleAttempts,
-		MaxPrerequisiteRefreshes:               DefaultMaxPrerequisiteRefreshes,
-		MaxPrerequisiteResourceChangeRefreshes: DefaultMaxPrerequisiteResourceChangeRefreshes,
+		MaxProviderTransportAttempts: DefaultMaxProviderTransportAttempts,
+		MaxOperationRecoveryAttempts: DefaultMaxOperationRecoveryAttempts,
+		MaxCASReloadAttempts:         DefaultMaxCASReloadAttempts,
+		MaxTerminalDeliveryAttempts:  DefaultMaxTerminalDeliveryAttempts,
+		MaxDriveScheduleAttempts:     DefaultMaxDriveScheduleAttempts,
+		MaxPrerequisiteRefreshes:     DefaultMaxPrerequisiteRefreshes,
 	}
 }
 
@@ -91,22 +77,18 @@ func (p RuntimeRecoveryPolicy) Normalized() RuntimeRecoveryPolicy {
 	if p.MaxPrerequisiteRefreshes <= 0 {
 		p.MaxPrerequisiteRefreshes = defaults.MaxPrerequisiteRefreshes
 	}
-	if p.MaxPrerequisiteResourceChangeRefreshes <= 0 {
-		p.MaxPrerequisiteResourceChangeRefreshes = defaults.MaxPrerequisiteResourceChangeRefreshes
-	}
 	return p
 }
 
 func (p RuntimeRecoveryPolicy) Validate() error {
 	p = p.Normalized()
 	for name, value := range map[string]int{
-		"MaxProviderTransportAttempts":           p.MaxProviderTransportAttempts,
-		"MaxOperationRecoveryAttempts":           p.MaxOperationRecoveryAttempts,
-		"MaxCASReloadAttempts":                   p.MaxCASReloadAttempts,
-		"MaxTerminalDeliveryAttempts":            p.MaxTerminalDeliveryAttempts,
-		"MaxDriveScheduleAttempts":               p.MaxDriveScheduleAttempts,
-		"MaxPrerequisiteRefreshes":               p.MaxPrerequisiteRefreshes,
-		"MaxPrerequisiteResourceChangeRefreshes": p.MaxPrerequisiteResourceChangeRefreshes,
+		"MaxProviderTransportAttempts": p.MaxProviderTransportAttempts,
+		"MaxOperationRecoveryAttempts": p.MaxOperationRecoveryAttempts,
+		"MaxCASReloadAttempts":         p.MaxCASReloadAttempts,
+		"MaxTerminalDeliveryAttempts":  p.MaxTerminalDeliveryAttempts,
+		"MaxDriveScheduleAttempts":     p.MaxDriveScheduleAttempts,
+		"MaxPrerequisiteRefreshes":     p.MaxPrerequisiteRefreshes,
 	} {
 		if value < 1 || value > RuntimeRecoveryBudgetLimit {
 			return fmt.Errorf("%s must be in 1..%d", name, RuntimeRecoveryBudgetLimit)
@@ -122,13 +104,12 @@ func (l RuntimeRecoveryLedger) Validate(policy RuntimeRecoveryPolicy) error {
 		return err
 	}
 	for name, value := range map[string]int{
-		"ProviderTransportAttempts":           l.ProviderTransportAttempts,
-		"OperationRecoveryAttempts":           l.OperationRecoveryAttempts,
-		"CASReloadAttempts":                   l.CASReloadAttempts,
-		"TerminalDeliveryAttempts":            l.TerminalDeliveryAttempts,
-		"DriveScheduleAttempts":               l.DriveScheduleAttempts,
-		"PrerequisiteRefreshes":               l.PrerequisiteRefreshes,
-		"PrerequisiteResourceChangeRefreshes": l.PrerequisiteResourceChangeRefreshes,
+		"ProviderTransportAttempts": l.ProviderTransportAttempts,
+		"OperationRecoveryAttempts": l.OperationRecoveryAttempts,
+		"CASReloadAttempts":         l.CASReloadAttempts,
+		"TerminalDeliveryAttempts":  l.TerminalDeliveryAttempts,
+		"DriveScheduleAttempts":     l.DriveScheduleAttempts,
+		"PrerequisiteRefreshes":     l.PrerequisiteRefreshes,
 	} {
 		if value < 0 {
 			return fmt.Errorf("%s cannot be negative", name)
@@ -156,8 +137,6 @@ func (l RuntimeRecoveryLedger) Used(kind RuntimeRecoveryBudgetKind) int {
 		return l.DriveScheduleAttempts
 	case RuntimeRecoveryBudgetPrerequisiteRefresh:
 		return l.PrerequisiteRefreshes
-	case RuntimeRecoveryBudgetPrerequisiteResourceChangeRefresh:
-		return l.PrerequisiteResourceChangeRefreshes
 	default:
 		return 0
 	}
@@ -178,8 +157,6 @@ func (p RuntimeRecoveryPolicy) Limit(kind RuntimeRecoveryBudgetKind) int {
 		return p.MaxDriveScheduleAttempts
 	case RuntimeRecoveryBudgetPrerequisiteRefresh:
 		return p.MaxPrerequisiteRefreshes
-	case RuntimeRecoveryBudgetPrerequisiteResourceChangeRefresh:
-		return p.MaxPrerequisiteResourceChangeRefreshes
 	default:
 		return 0
 	}

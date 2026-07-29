@@ -47,12 +47,10 @@ type RuntimeV2Progress struct {
 	RepairHintCodes                 []string `json:"repairHintCodes,omitempty"`
 	// PrerequisiteRefresh is a read-only audit of generic freshness recovery.
 	// It is deliberately separate from candidate/repair/provider retry counters.
-	PrerequisiteRefreshState               string                                   `json:"prerequisiteRefreshState,omitempty"`
-	PrerequisiteRefreshUsed                int                                      `json:"prerequisiteRefreshUsed,omitempty"`
-	PrerequisiteRefreshLimit               int                                      `json:"prerequisiteRefreshLimit,omitempty"`
-	PrerequisiteResourceChangeRefreshUsed  int                                      `json:"prerequisiteResourceChangeRefreshUsed,omitempty"`
-	PrerequisiteResourceChangeRefreshLimit int                                      `json:"prerequisiteResourceChangeRefreshLimit,omitempty"`
-	PrerequisiteInvalidations              []RuntimePrerequisiteRefreshInvalidation `json:"prerequisiteInvalidations,omitempty"`
+	PrerequisiteRefreshState  string                                   `json:"prerequisiteRefreshState,omitempty"`
+	PrerequisiteRefreshUsed   int                                      `json:"prerequisiteRefreshUsed,omitempty"`
+	PrerequisiteRefreshLimit  int                                      `json:"prerequisiteRefreshLimit,omitempty"`
+	PrerequisiteInvalidations []RuntimePrerequisiteRefreshInvalidation `json:"prerequisiteInvalidations,omitempty"`
 }
 
 // RuntimePrerequisiteRefreshInvalidation is a metadata-only rendering of one

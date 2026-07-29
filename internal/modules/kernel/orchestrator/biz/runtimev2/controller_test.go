@@ -159,8 +159,7 @@ func TestRuntimeControllerReconcileMissingSealedProviderCeilingReturnsToPrerequi
 	}
 	if reconciled.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite ||
 		len(reconciled.CandidateAttempts) != 0 || reconciled.Facts.Repair.RepairAttempts != 0 ||
-		reconciled.Facts.Recovery.ProviderTransportAttempts != 0 || reconciled.Facts.Recovery.PrerequisiteRefreshes != 0 ||
-		reconciled.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 {
+		reconciled.Facts.Recovery.ProviderTransportAttempts != 0 || reconciled.Facts.Recovery.PrerequisiteRefreshes != 0 {
 		t.Fatalf("missing provider ceiling consumed a candidate or recovery budget: %+v", reconciled)
 	}
 	if len(reconciled.Facts.Prerequisites.Pending) != 1 || reconciled.Facts.Prerequisites.Pending[0].ID != prerequisite.ID ||
@@ -452,7 +451,7 @@ func TestRuntimeControllerReconcilesHistoricalFocusAuthorityBeforeCandidate(t *t
 	}
 	if reconciled.StateRevision != 8 || reconciled.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite ||
 		len(reconciled.CandidateAttempts) != 0 || reconciled.Facts.Repair.RepairAttempts != 0 ||
-		reconciled.Facts.Recovery.PrerequisiteRefreshes != 0 || reconciled.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 0 {
+		reconciled.Facts.Recovery.PrerequisiteRefreshes != 0 {
 		t.Fatalf("authority reconciliation consumed candidate or recovery state: %+v", reconciled)
 	}
 	if reconciled.Facts.Resources.TargetSelection != nil || len(reconciled.Facts.Resources.TargetSnapshots) != 0 ||

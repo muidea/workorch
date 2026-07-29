@@ -147,7 +147,7 @@ func TestPortWorkspaceSnapshotInfoDoesNotFallbackToPayloadSummaryMap(t *testing.
 func TestPortRuntimeV2ProgressPreservesPrerequisiteRefreshAudit(t *testing.T) {
 	got := portRuntimeV2ProgressInfo(&readmodelcore.RuntimeV2Progress{
 		PrerequisiteRefreshState: "prerequisite_refreshing", PrerequisiteRefreshUsed: 1, PrerequisiteRefreshLimit: 3,
-		AcceptedValidationEvidenceCount: 2, PrerequisiteResourceChangeRefreshUsed: 4, PrerequisiteResourceChangeRefreshLimit: 8,
+		AcceptedValidationEvidenceCount: 2,
 		PrerequisiteInvalidations: []readmodelcore.RuntimePrerequisiteRefreshInvalidation{{
 			Signature: "resource-change-1", Source: "owner_receipt_resource_change", OwnerModuleID: "file",
 			ResourceDomain: "workspace_target", SubjectRef: "main.go",
@@ -157,8 +157,7 @@ func TestPortRuntimeV2ProgressPreservesPrerequisiteRefreshAudit(t *testing.T) {
 		}},
 	})
 	if got == nil || got.PrerequisiteRefreshState != "prerequisite_refreshing" || got.PrerequisiteRefreshUsed != 1 ||
-		got.PrerequisiteRefreshLimit != 3 || got.AcceptedValidationEvidenceCount != 2 ||
-		got.PrerequisiteResourceChangeRefreshUsed != 4 || got.PrerequisiteResourceChangeRefreshLimit != 8 || len(got.PrerequisiteInvalidations) != 1 {
+		got.PrerequisiteRefreshLimit != 3 || got.AcceptedValidationEvidenceCount != 2 || len(got.PrerequisiteInvalidations) != 1 {
 		t.Fatalf("runtime v2 refresh port = %+v", got)
 	}
 	invalidation := got.PrerequisiteInvalidations[0]

@@ -693,10 +693,8 @@ func runtimeV2ProgressFromClient(item *client.RuntimeV2Progress) *RuntimeV2Progr
 		FailureCode: item.FailureCode, FailureSignature: item.FailureSignature, FailureMessage: item.FailureMessage,
 		RepairHintCodes:          append([]string(nil), item.RepairHintCodes...),
 		PrerequisiteRefreshState: item.PrerequisiteRefreshState, PrerequisiteRefreshUsed: item.PrerequisiteRefreshUsed,
-		PrerequisiteRefreshLimit:               item.PrerequisiteRefreshLimit,
-		PrerequisiteResourceChangeRefreshUsed:  item.PrerequisiteResourceChangeRefreshUsed,
-		PrerequisiteResourceChangeRefreshLimit: item.PrerequisiteResourceChangeRefreshLimit,
-		PrerequisiteInvalidations:              prerequisiteRefreshInvalidationsFromClient(item.PrerequisiteInvalidations),
+		PrerequisiteRefreshLimit:  item.PrerequisiteRefreshLimit,
+		PrerequisiteInvalidations: prerequisiteRefreshInvalidationsFromClient(item.PrerequisiteInvalidations),
 	}
 }
 

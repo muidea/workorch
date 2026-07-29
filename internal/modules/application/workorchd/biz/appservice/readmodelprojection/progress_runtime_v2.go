@@ -68,8 +68,6 @@ func mapRuntimeV2Progress(state runtimecontract.RuntimeStateRecord) readmodelcor
 	}
 	ret.PrerequisiteRefreshUsed = facts.Recovery.Used(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh)
 	ret.PrerequisiteRefreshLimit = facts.RecoveryPolicy.Limit(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh)
-	ret.PrerequisiteResourceChangeRefreshUsed = facts.Recovery.Used(runtimecontract.RuntimeRecoveryBudgetPrerequisiteResourceChangeRefresh)
-	ret.PrerequisiteResourceChangeRefreshLimit = facts.RecoveryPolicy.Limit(runtimecontract.RuntimeRecoveryBudgetPrerequisiteResourceChangeRefresh)
 	ret.PrerequisiteInvalidations = mapPrerequisiteRefreshInvalidations(state.PrerequisiteInvalidations)
 	ret.PrerequisiteRefreshState = runtimePrerequisiteRefreshState(facts, ret.PrerequisiteInvalidations)
 	hints := runtimecontract.DeriveRuntimeRepairHints(facts)
@@ -86,9 +84,6 @@ func mapRuntimeV2Progress(state runtimecontract.RuntimeStateRecord) readmodelcor
 
 func runtimePrerequisiteRefreshState(facts runtimecontract.RuntimeFacts, invalidations []readmodelcore.RuntimePrerequisiteRefreshInvalidation) string {
 	if facts.Failure != nil && facts.Failure.Class == runtimecontract.FailureClassPrerequisiteRefreshExhausted {
-		if facts.Failure.Code == "prerequisite_receipt_refresh_exhausted" {
-			return "prerequisite_receipt_refresh_exhausted"
-		}
 		return "prerequisite_refresh_exhausted"
 	}
 	if len(invalidations) == 0 {

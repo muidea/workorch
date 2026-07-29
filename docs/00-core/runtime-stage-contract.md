@@ -207,8 +207,9 @@ load facts
   validation scratch、provider ceiling 等必须通过 typed acquisition 获得并持久化。
 - `RequiredOutputContract` 必须是 current focus、owner-confirmed capability、evidence policy 和
   side-effect compatibility 的中立交集。可行动性不足必须在 provider 前确定失败，而不是让 LLM 猜测。
-- accepted owner receipt 的资源变更与 read-only stale 分别使用封存、独立且有界的 refresh ledger；
-  只退休 dependency 精确相交的 observation。duplicate 不得重复 CAS、查询或扣减预算。
+- accepted owner receipt 的资源变更是正常前进：它只退休 dependency 精确相交的 observation，并以该
+  `PrerequisiteID` 已持久化 invalidation record 的代际重获；不得消耗 recovery budget。read-only stale/
+  no-progress 才使用封存且有界的 `prerequisite_refresh` ledger。duplicate 不得重复 CAS、查询、代际或扣减预算。
 - evidence 必须同时通过 current-run、focus、coverage、quality、effect、receipt 和适用的 claim/
   executable-observation 门禁。历史 summary、memory、projection 和前一 focus evidence 不能关闭当前
   coverage。

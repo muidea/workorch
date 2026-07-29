@@ -158,8 +158,6 @@ func consumeRecoveryBudget(ledger runtimecontract.RuntimeRecoveryLedger, kind ru
 		ledger.DriveScheduleAttempts++
 	case runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh:
 		ledger.PrerequisiteRefreshes++
-	case runtimecontract.RuntimeRecoveryBudgetPrerequisiteResourceChangeRefresh:
-		ledger.PrerequisiteResourceChangeRefreshes++
 	}
 	return ledger, true, nil
 }

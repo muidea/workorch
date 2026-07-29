@@ -1246,9 +1246,7 @@ func runtimeV2ProgressEqual(a, b *backend.RuntimeV2ProgressInfo) bool {
 		strings.TrimSpace(a.FailureMessage) != strings.TrimSpace(b.FailureMessage) ||
 		strings.TrimSpace(a.PrerequisiteRefreshState) != strings.TrimSpace(b.PrerequisiteRefreshState) ||
 		a.PrerequisiteRefreshUsed != b.PrerequisiteRefreshUsed ||
-		a.PrerequisiteRefreshLimit != b.PrerequisiteRefreshLimit ||
-		a.PrerequisiteResourceChangeRefreshUsed != b.PrerequisiteResourceChangeRefreshUsed ||
-		a.PrerequisiteResourceChangeRefreshLimit != b.PrerequisiteResourceChangeRefreshLimit {
+		a.PrerequisiteRefreshLimit != b.PrerequisiteRefreshLimit {
 		return false
 	}
 	if len(a.MissingEvidenceKinds) != len(b.MissingEvidenceKinds) {

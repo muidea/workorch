@@ -174,7 +174,7 @@ R4/P0～P6/A-4 只作回归基线，不再是活动实施标准。
   typed current-run provenance gap 终态化，禁止通过无关文件修改制造 durable delta。exact receipt replay 保持原
   `ExecutionKey + Fence`，不重放 owner side effect。
 - candidate attempt 只投影为 SM-3 contract attempt；read model 的 repair loop、ineffective retry 和 repair budget 必须来自 `Facts.Repair` 与当前 failure，不得把历史 candidate retry 当成当前 focus repair。
-- prerequisite freshness 保持两条有界、封存的 ledger：owner accepted receipt 的真实资源变更使用 `prerequisite_receipt_refresh`，read-only stale/no-progress 使用 `prerequisite_refresh`。两者都必须原子失效相交 observation、重复 receipt 不得重复扣减；前者不得耗尽后者的恢复预算。capability-state owner acquisition key 的代际只由这两条 ledger 的持久化计数共同推进，保证资源变更后不会重放旧查询回执，同时 provider/CAS/terminal-delivery 等无关恢复记账不得改变该 key。
+- prerequisite freshness 只有一条有界的 stale/no-progress `prerequisite_refresh` ledger。owner accepted receipt 的真实资源变更是正常进展：它原子退休精确相交的 observation、持久化 invalidation record，但不扣减 recovery budget。capability-state acquisition key 的代际仅由同一 `PrerequisiteID` 的 persisted invalidation records 推导；因此资源变更会重查 owner 而不会重放旧 receipt，且无关 prerequisite、provider、CAS 与 delivery 记账都不能改变 key。
 - Eventstream 订阅仍在生产发布的 Orchestrator、Run 和 Result typed notification 形成审计记录；Runtime V2 只消费同步 typed operation result 推进状态。
 - workspace/run purge 时，Orchestrator 只删除自身 ToolCall/Patch/ValidationResult/Evidence/Coverage/ArtifactContinuation/MemoryTrace；Step 与 RuntimeCheckpoint 必须通过带 WorkspaceID/RunID 的 Run owner purge command 删除，Orchestrator 不持有其 repository。
 - Runtime V1 retirement resource release 使用 Orchestrator 自有 typed command，关闭 pending/executing Step、ToolCall、ArtifactContinuation，并释放 managed validation resource；重复调用只返回本次实际变化数量。
