@@ -45,7 +45,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 		runtimecontract.EvidenceKindStateChange,
 		runtimecontract.EvidenceKindValidation,
 	}
-	facts.Capabilities.ValidationKinds = []string{runtimecontract.StepKindFileRead}
+	facts.Capabilities.ValidationKinds = []string{runtimecontract.StepKindFileRead, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	if _, err := controller.Initialize(ctx, facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
@@ -225,10 +225,10 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 		sealedVal2, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
 			Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{
 				Operation: runtimecontract.RuntimeOperation{
-					ID: "validate-repair", Kind: runtimecontract.StepKindFileRead,
+					ID: "validate-repair", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 					TargetRefs:          []string{"target.txt"},
-					Parameters:          nil,
+					Parameters:          []runtimecontract.OperationParameter{{Name: "command", String: runtimeV2StringPointer("true")}},
 				},
 			}}},
 		})
@@ -265,7 +265,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 			Items: []runtimecontract.RuntimeAssessmentItemFact{
 				{CoverageWorkItemID: "cwi-v2", Satisfied: true},
 			},
-			EvidenceRefs: []string{"event-sc-1", "event-sc-repair"},
+			EvidenceRefs: []string{"event-sc-1", "event-val-repair"},
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -512,6 +512,11 @@ func TestPositiveConvergenceFixture_PartialSlicePersistsAcrossControllerRestart(
 		ID: "validation-1", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1", "cwi-2"}, Revision: "evidence-v2-00000000000000000001",
 	}}}
 	facts.EvidenceRevision = "evidence-v2-00000000000000000001"
+	// This fixture intentionally leaves one validation-only repair after the
+	// partial assessment. The sealed budget must permit that recipe; zero means
+	// no validation retry is authorized and is correctly terminal elsewhere.
+	facts.ConvergencePolicy = runtimecontract.RuntimeConvergencePolicy{MaxValidationOnlyRetriesPerFocus: 2}
+	facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
 	if _, err := first.Initialize(ctx, facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}

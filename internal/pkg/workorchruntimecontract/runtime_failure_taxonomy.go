@@ -8,9 +8,9 @@ import "strings"
 const (
 	FailureClassCandidateSchemaFailure   FailureClass = "candidate_schema_failure"
 	FailureClassCandidateContractFailure FailureClass = "candidate_contract_failure"
-	// FailureClassCandidateInfeasible is a typed owner feasibility rejection
-	// promoted by the orchestrator only when activation policy requires a
-	// same-focus repair instead of another candidate under the old authority.
+	// FailureClassCandidateInfeasible is a typed owner feasibility rejection.
+	// It never by itself authorizes an SM-2 state-changing repair; that requires
+	// a current owner-grounded failure target in the Runtime aggregate.
 	FailureClassCandidateInfeasible       FailureClass = "candidate_infeasible"
 	FailureClassProviderTransient         FailureClass = "provider_transient"
 	FailureClassProviderAuthentication    FailureClass = "provider_authentication"

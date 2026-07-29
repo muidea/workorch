@@ -7,16 +7,17 @@ import (
 )
 
 func TestRepairDirectiveSurvivesPrerequisiteReacquisition(t *testing.T) {
-	// Mirrors the production failure chain: a validation candidate is infeasible,
-	// SM-2 selects a state-change repair, and a later rejected repair invalidates
-	// its target snapshot. The prerequisite interlude must not re-open validation.
+	// Mirrors an owner-grounded implementation failure: SM-2 selects a
+	// state-change repair and a later prerequisite interlude must not re-open
+	// validation.
 	facts := validationFacts()
 	facts.Focus.TargetRefs = []string{"lsp_manager.go"}
 	facts.Failure = &runtimecontract.FailureFact{
-		Class: runtimecontract.FailureClassCandidateInfeasible,
+		Class: runtimecontract.FailureClassExecutionFailure,
 		Code:  "validation_target_missing", Signature: "missing-test-target",
-		Message: "validation target is not executable",
+		Message: "implementation target is not executable", TargetRefs: []string{"lsp_manager.go"},
 	}
+	facts.Resources.FailureTarget = &runtimecontract.FailureTarget{Signature: "missing-test-target", TargetRefs: []string{"lsp_manager.go"}}
 
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
 	if err != nil {
@@ -322,16 +323,10 @@ func TestAssessmentGapRepairClosureBindsGroundedTargetsAndFollowupValidation(t *
 	}
 }
 
-func TestRejectedValidationSupersedesPersistedValidationDirectiveAndFeasibility(t *testing.T) {
+func TestRejectedValidationWithNoFeasibleRecipeTerminals(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
 	facts.Focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.RuntimeBlockKindManagedValidationSession}
-	facts.Activation.ExecutionContract.ValidationPolicies = []runtimecontract.RuntimeValidationPolicy{{
-		ID:                                  "validation-repair",
-		Scope:                               "focus",
-		AppliesToEvidenceKinds:              []string{runtimecontract.EvidenceKindValidation},
-		ValidationFailureImpliesStateChange: true,
-	}}
 	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
 		ID: "accepted-state-change", Kind: runtimecontract.EvidenceKindStateChange,
 		Revision: "evidence-v2-00000000000000000002", CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
@@ -363,13 +358,10 @@ func TestRejectedValidationSupersedesPersistedValidationDirectiveAndFeasibility(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceStateChange || decision.State != runtimecontract.ConvergenceStateNeedStateChange {
-		t.Fatalf("decision = %+v, want produce_state_change without governance", decision)
+	if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "capability_unavailable" {
+		t.Fatalf("decision = %+v, want typed no-validation-recipe terminal", decision)
 	}
-	if facts.RepairDirective == nil || facts.RepairDirective.RequiredAction != runtimecontract.RuntimeActionProduceStateChange {
-		t.Fatalf("directive = %+v, want superseding state-change repair", facts.RepairDirective)
-	}
-	if facts.RepairDirective.Trigger != runtimecontract.RuntimeRepairTriggerRejectedValidation {
-		t.Fatalf("directive trigger = %s, want rejected_validation", facts.RepairDirective.Trigger)
+	if facts.RepairDirective != nil && facts.RepairDirective.RequiredAction == runtimecontract.RuntimeActionProduceStateChange {
+		t.Fatalf("validation failure fabricated state-change repair directive: %+v", facts.RepairDirective)
 	}
 }

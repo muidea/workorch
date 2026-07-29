@@ -290,19 +290,14 @@ func TestRejectedValidationScopeMemberDoesNotBecomeFailureTarget(t *testing.T) {
 	if committed.Aggregate.Facts.RepairDirective != nil && len(committed.Aggregate.Facts.RepairDirective.TargetRefs) != 0 {
 		t.Fatalf("File scope member became a concrete repair directive target: %+v", committed.Aggregate.Facts.RepairDirective)
 	}
-	if committed.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(committed.Aggregate.Decision.RequiredOutput.TargetRefs) != 0 {
-		t.Fatalf("scope-backed validation failure did not return to an unbound File repair: decision=%+v", committed.Aggregate.Decision)
+	if committed.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceValidation || len(committed.Aggregate.Decision.RequiredOutput.TargetRefs) != 0 {
+		t.Fatalf("scope-backed validation failure did not remain an unbound validation gap: decision=%+v", committed.Aggregate.Decision)
 	}
 	if committed.Aggregate.Facts.Resources.TargetSelection == nil || committed.Aggregate.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionScope {
 		t.Fatalf("scope feasibility inventory was not retained: %+v", committed.Aggregate.Facts.Resources.TargetSelection)
 	}
 	if len(committed.Aggregate.Facts.Prerequisites.Pending) != 0 || len(committed.Aggregate.Facts.Resources.TargetSnapshots) != 0 {
 		t.Fatalf("scope was promoted into concrete target snapshots: prerequisites=%+v snapshots=%+v", committed.Aggregate.Facts.Prerequisites.Pending, committed.Aggregate.Facts.Resources.TargetSnapshots)
-	}
-	next := stateChangeCandidate()
-	next.StateChange.Operations[0].Operation = patchApplyTestOperation("patch-next", "generated.go")
-	if admission := EvaluateCandidateAdmission(committed.Aggregate, next); !admission.Accepted() {
-		t.Fatalf("scope did not allow the next concrete File target proposal: %+v", admission)
 	}
 }
 

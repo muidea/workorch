@@ -96,6 +96,25 @@ func noteRepairProgress(ledger runtimecontract.RuntimeRepairLedger, revision str
 	return ledger
 }
 
+// noteRepairProgressPreservingNoOpProvenance closes the ordinary repair
+// window while retaining the exact no-op observation needed by the C8-F
+// reducer branch. The retained shape is not accepted evidence and cannot
+// satisfy a state-change requirement on its own.
+func noteRepairProgressPreservingNoOpProvenance(ledger runtimecontract.RuntimeRepairLedger, revision string) runtimecontract.RuntimeRepairLedger {
+	ledger = ledger.Normalized()
+	noOps := make([]runtimecontract.RuntimeRejectedOperationShape, 0, len(ledger.NoProgressOperationShapes))
+	for _, shape := range ledger.NoProgressOperationShapes {
+		if shape.FailureClass == runtimecontract.FailureClassEffectMismatch && shape.FailureCode == runtimeStateChangeNoOpWithoutProvenanceCode {
+			noOps = append(noOps, shape)
+		}
+	}
+	noProgressCount := ledger.NoProgressCount
+	ledger = noteRepairProgress(ledger, revision)
+	ledger.NoProgressOperationShapes = runtimecontract.NormalizeRuntimeRejectedOperationShapes(noOps)
+	ledger.NoProgressCount = noProgressCount
+	return ledger
+}
+
 func noteRepairGapProgress(ledger runtimecontract.RuntimeRepairLedger, gap runtimecontract.RuntimeAssessmentGap, revision string) runtimecontract.RuntimeRepairLedger {
 	ledger = noteRepairProgress(ledger, revision)
 	gap = gap.Normalized()

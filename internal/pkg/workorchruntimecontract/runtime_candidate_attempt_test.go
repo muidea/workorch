@@ -10,8 +10,6 @@ func TestRuntimeCandidateAttemptScopeValidationRequiresExplicitContractAndReject
 	decision := validDecisionForState(ConvergenceStateNeedStateChange)
 	current := decision.AuthorityTransaction()
 	resealed := current
-	resealed.AuthoritySnapshotID = "resealed-snapshot"
-	resealed.Attempt = 7
 	contractID := StableAuthorityContractID(facts.WorkspaceID, facts.RunID, current)
 	failure := &RuntimeCandidateFailure{Class: RuntimeCandidateFailureClassContract, Reason: "invalid candidate"}
 	values := []RuntimeCandidateAttemptRecord{

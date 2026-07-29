@@ -20,9 +20,11 @@ import (
 )
 
 const (
-	DefaultCommandTimeout = 60 * time.Second
-	MaxCommandTimeout     = 10 * time.Minute
-	MaxCommandOutputBytes = 64 * 1024
+	DefaultCommandTimeout           = 60 * time.Second
+	MaxCommandTimeout               = 10 * time.Minute
+	MaxCommandOutputBytes           = 64 * 1024
+	maxObservedWorkspaceFiles       = 2048
+	maxObservedWorkspaceBytes int64 = 32 * 1024 * 1024
 )
 
 type RuntimeAdapter struct {
@@ -370,6 +372,10 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 	}
 	beforeChange := workspaceStateChangeFingerprint(ctx, deliverableDirectory, request.StateChanging)
 	beforeTargets := shellWorkspaceTargetRevisions(deliverableDirectory, request)
+	beforeWorkspace, observationErr := shellWorkspaceFileRevisions(deliverableDirectory, request.StateChanging)
+	if observationErr != nil {
+		return RuntimeCommandResult{}, observationErr
+	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -443,7 +449,18 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 	if request.StateChanging {
 		afterTargets := shellWorkspaceTargetRevisions(deliverableDirectory, request)
 		output.WorkspaceTargetChanges = shellWorkspaceTargetChanges(beforeTargets, afterTargets)
-		if !shellWorkspaceTargetChangesChanged(output.WorkspaceTargetChanges) {
+		afterWorkspace, observeErr := shellWorkspaceFileRevisions(deliverableDirectory, true)
+		if observeErr != nil {
+			err := fmt.Errorf("%w: state-changing shell command workspace observation failed: %v", common.ErrInvalidArgument, observeErr)
+			output.Status = "failed"
+			output.Stage = "shell_workspace_observation_unavailable"
+			output.FailureReason = "workspace_observation_unavailable"
+			attachManagedValidationResources(&output, request, pid, startedAt, time.Now().UTC(), "failed")
+			attachShellValidationFailureDiagnostic(&output, request, execCommand, exitCode, false, false, err)
+			return finalizeShellResult(output, err)
+		}
+		output.WorkspaceObservedTargetChanges = shellWorkspaceTargetChanges(beforeWorkspace, afterWorkspace)
+		if !shellWorkspaceTargetChangesChanged(output.WorkspaceObservedTargetChanges) {
 			err := fmt.Errorf("%w: state-changing shell command produced no observable workspace delta for its declared targets", common.ErrInvalidArgument)
 			output.Status = "failed"
 			output.Stage = "shell_state_changing_no_progress"
@@ -491,6 +508,64 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 	}
 	attachManagedValidationResources(&output, request, pid, startedAt, time.Now().UTC(), "released")
 	return finalizeShellResult(output, nil)
+}
+
+// shellWorkspaceFileRevisions is an owner-local, bounded observation of the
+// deliverable tree. It deliberately excludes .git: repository metadata is not
+// a workspace deliverable target. Symlinks and special files are not admitted
+// as durable Shell effects because they cannot be safely content-addressed.
+func shellWorkspaceFileRevisions(deliverableDirectory string, required bool) (map[string]string, error) {
+	if !required {
+		return nil, nil
+	}
+	root, err := filepath.Abs(strings.TrimSpace(deliverableDirectory))
+	if err != nil || root == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	values := map[string]string{}
+	var count int
+	var totalBytes int64
+	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == root {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil || rel == "." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return common.ErrInvalidArgument
+		}
+		if entry.IsDir() {
+			if rel == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !entry.Type().IsRegular() {
+			return nil
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			return infoErr
+		}
+		count++
+		totalBytes += info.Size()
+		if count > maxObservedWorkspaceFiles || totalBytes > maxObservedWorkspaceBytes {
+			return fmt.Errorf("workspace observation exceeds bounded file or byte limit")
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		hash := sha256.Sum256(data)
+		values[filepath.ToSlash(rel)] = hex.EncodeToString(hash[:])
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return values, nil
 }
 
 func shellWorkspaceTargetRevisions(deliverableDirectory string, request RuntimeCommandRequest) map[string]string {

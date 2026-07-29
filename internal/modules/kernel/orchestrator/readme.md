@@ -29,6 +29,10 @@ Orchestrator 直接准入、blocked/terminal 投影或写入外部 owner state �
 实现必须保持：
 
 - SM-1 不选择 action，SM-2 不执行 operation，SM-3 不选择 next action，SM-4 不重建 authority。
+- Orchestrator 的外部 typed command/result、owner receipt、request outcome 与 delivery acknowledgement 必须先映射为
+  owner-local `RuntimeInternalEvent`；Biz 只能经 `submitRuntimeV2InternalEvent` 提交，
+  `RuntimeController.ApplyInternalEvent` 是唯一 mutation dispatcher，
+  `RuntimeTransitionCoordinator.Commit` 是唯一 aggregate CAS 边界。internal event 不得成为跨 owner EventHub envelope。
 - 所有跨状态机推进都使用 persisted aggregate + typed EventHub command/result。
 - projection failure 不得覆盖 reducer terminal；重启不得重复 prerequisite/candidate/side effect。
 - 任何修改 reducer/controller/drive/operation projection 前，必须说明影响的 SM 编号并补合法/禁止迁移、幂等、restart、stale/duplicate、budget/guard 测试。
@@ -48,8 +52,9 @@ R4/P0～P6/A-4 只作回归基线，不再是活动实施标准。
 - renderer、wire schema、strict decoder、candidate evaluator、owner feasibility command 与 fixture 只消费该
   manifest 及其 hash，不得从 profile、focus、raw reason 或临时 inventory 重建第二份允许集。
 - complete document 只调用一个纯 `CandidateEvaluator`，并按 manifest identity → wire/field →
-  kind/variant/parameter → target → effect/coverage/dependency → replay → owner feasibility 的固定顺序
-  返回 `accepted` 或完整 `CandidateRejection`。
+  kind/variant/parameter → target → effect/coverage/dependency → replay 的固定顺序返回 `accepted` 或完整
+  `CandidateRejection`。owner feasibility 是 capability owner 的独立 typed factual observation，不得伪装为
+  candidate rejection。
 - owner probe 前只允许用 kind 解析 manifest 中的 owner/authorization identity，该解析不做 admission；
   unknown kind 零 owner call，可解析 kind 只调用无副作用 probe。evaluator 仍优先返回顺序中更早的
   field/target 违例，owner observation 不得形成第二套 first-failure 路由。
@@ -57,8 +62,16 @@ R4/P0～P6/A-4 只作回归基线，不再是活动实施标准。
   可仅用 manifest + rejection 验证的 `CorrectionDirective`，后者零 correction call；无法归类是
   `runtime_contract_defect`，不能退化为 `candidate_correction_undefined` 或无信息 governance ticket。
 - candidate pipeline 只产生 `request_recoverable`、`candidate_correctable`、
-  `candidate_rejected_final`、`prerequisite_stale` 和 `accepted`。SM-3 只消费 evaluator 结果执行
-  CAS transition，SM-4 只从 persisted result 恢复，两者都不再解释 raw failure。
+  `candidate_rejected_final`、`owner_feasibility` 和 `accepted`。attempt 0/1 与 correction matrix 只消费
+  evaluator 产生的 `CorrectionDisposition`；owner feasibility 必须先成为 Orchestrator internal event，再由
+  SM-2/SM-3 coordinator 选择 prerequisite、新 authority 或 typed terminal，零 correction attempt。SM-4 只从
+  persisted result 恢复，不再解释 raw failure。
+- owner feasibility 若证明当前 sealed validation recipe 不可用，SM-2 必须以
+  `validation_recipe_exhausted` 直接形成 typed terminal；不得将其降级为普通 repair、candidate correction 或
+  `runtime_contract_defect`。
+- candidate retry contract 必须绑定完整 `AuthoritySnapshotID`。同 focus 收到新的 owner feasibility 事实后，即使
+  action、required output 与 prerequisite hash 相同，也只能生成新合同的 attempt-0；旧 invalidated attempt 保留为
+  audit lineage，不能被覆盖或变成 attempt-1。
 - `OwnerInventoryBudget`、`CandidateContextBudget`、`RequestRecoveryBudget`、
   `CandidateAttemptBudget` 与 `PrerequisiteRefreshBudget` 是不可互借的合同。inventory 必须完整或
   使用 owner 可独立验证的封闭 selector，不得将 context 裁剪当成 authority 裁剪。
@@ -73,10 +86,22 @@ R4/P0～P6/A-4 只作回归基线，不再是活动实施标准。
 - seal 前 `ValidateCandidateEffectCompatibility` 强制：`produce_state_change` 至少一个 durable effect；`produce_validation` 不得含 durable/unknown；`stateChanging=false` shell 与 read-only/session MCP 不能关闭 durable state-change。
 - `SealedDispatch.OperationExecutions` 在 seal 时写入 per-operation `ExecutionKey` + `ExpectedEffectScope`；execute 前 claim fence，owner 返回后 `owner_committed`，evidence CAS 后 `evidence_committed`；owner error 记 `outcome_unknown`，禁止盲重放。
 - owner 已持久化 exact `ExecutionKey + Fence` receipt 但响应丢失时，executor 必须先重新加载 aggregate：存在 terminal receipt 则继续 governance/evidence commit，不得把 `owner_committed` 覆盖为 `outcome_unknown`。
-- claimed/no-receipt recovery 只允许 sealed idempotency=`safe_to_replay|owner_managed`，并先消耗独立 operation-recovery budget；`at_most_once|unknown` 一律转 `outcome_unknown`。单 operation evidence 与 dispatch close 在同一 CAS 中原子提交。
+- claimed/no-receipt recovery 只允许 sealed idempotency=`safe_to_replay|owner_managed`，并先消耗独立 operation-recovery budget；`at_most_once|unknown` 一律转 `outcome_unknown`。每项 operation evidence 独立 CAS 持久化；只有最后一项成功或任一项 rejected/stale 时，才在该 evidence CAS 中原子 settle dispatch。
 - current-schema evidence commit 必须携带已持久化 owner receipt，并按 sealed expectation + `ObservedEffectScope` 联合裁决 Kind；declared Kind 不构成 authority。
+- multi-operation dispatch 中，同一 dispatch receipt 造成的 prerequisite/resource revision 变化属于内生变化；可以
+  退休后续 SM-2 observation，但不能仅因此清除 `ActiveDispatch`。SM-3 必须继续尚未完成且 dependency 已满足的
+  sealed operation，直到全部成功或任一 operation rejected/stale 后再 settle/reduce。
+- state-changing Shell receipt 必须使用 owner 实际观察到的 changed refs/resource changes；真实变化越出 sealed
+  `TargetRefs` 时以 `undeclared_workspace_effect` 拒绝，不能通过额外 touch 一个声明目标取得 durable evidence。
 - `Facts.RepairDirective` 是同 focus 唯一 next-action 权威（INV-05）；`ReduceRuntimeStateWithDirective` 同步 directive；anti-replay 与 repair hints 不得覆盖 directive action。
 - repair directive 的创建、切换和清除均属于 Orchestrator SM-2 reducer；`internal/pkg/workorchruntimecontract` 仅保存 directive DTO、校验和纯计算。`acquire_prerequisite` / governance wait 是同一 repair cycle 的临时 interlude，必须保留 directive；只有 accepted repair evidence、focus advance 或 terminal 才能切换或清除它。
+- validation entry 不是 state-change repair target；只有 focus exact target、仍新鲜的 owner-grounded failure target 或
+  sealed owner selector/prospective constraint可以形成 repair authority。validation/evidence-quality gap保持
+  `produce_validation`，不得在 validation-only 重试后退化为无关 `produce_state_change`；耗尽封存 validation
+  recipe/budget 时必须形成 typed terminal。
+- assessment gate 只消费 current-run accepted evidence、sealed coverage/effect与 owner structured validation
+  observation；profile 封存的 observable recipe 只在候选选择该命令时校验必要参数；不得用 Goal/DoD、summary、
+  operation/check name 的自由文本 token 相似度作为覆盖裁决。
 - File owner 对 `unified_diff` 在 owner feasibility probe 中执行无写入 dry-run；hunk/context 冲突必须在 dispatch seal 前以 typed infeasible result 返回，owner 不选择后续 RuntimeAction。
 - active V2 Cancel/Supersede 必须先 `RequestTermination` CAS 持久化 `RuntimeTerminationRecord`，再投影 SM-1 terminal。
 - drive failure 经 `classifyRuntimeV2DriveFailure` 分类：CAS/owner-transient/projection 不终态化业务 Run。
@@ -94,7 +119,7 @@ R4/P0～P6/A-4 只作回归基线，不再是活动实施标准。
 - Runtime V2 prerequisite command/result 由 Orchestrator 在 `kernel/orchestrator/pkg/events` 定义；当前 target snapshot acquisition 通过 EventHub 交给 File block，并将具体 `TargetSnapshot` 提交回 typed runtime facts。
 - `kernel/orchestrator/pkg/events` 只保存 typed command/result、receipt DTO 与确定性校验/构造；能力 Block 的 Biz 负责发送 receipt query/commit command，Orchestrator Biz 负责消费并持久化，任何 `pkg` 不得持有 Hub、执行 I/O 或推进状态。
 - Runtime V2 candidate command/result 同样由 Orchestrator 定义；请求封存完整 authority transaction，LLM block 返回的 candidate 必须绑定同一 snapshot，transaction 漂移不得进入执行。
-- candidate request 携带从 persisted facts 和唯一 manifest 渲染的 typed `RuntimeCandidateContext`；当前 focus/evidence/failure 是 context，operation kind/parameter/target/effect/coverage/dependency 授权只来自 manifest，attempt 1 的 C4 只来自 typed rejection/directive。LLM block 不从 V1 map、raw reason 或临时上下文重建 authority。
+- candidate request 携带从 persisted facts 和唯一 manifest 渲染的 typed `RuntimeCandidateContext`；当前 focus/evidence/failure 是 context，operation kind/parameter/target/effect/coverage/dependency 授权只来自 manifest。C4 只投影 provider-safe failure/evidence/assessment/shape identity 与 attempt-1 的 typed rejection/directive；它不得携带 raw reason/summary/payload、owner feasibility 或 recovery/governance action。LLM block 不从 V1 map、raw reason 或临时上下文重建 authority。
 - Runtime V2 dispatch 在执行前持久化 `SealedDispatch`、完整 transaction、candidate hash 和 typed step input；execution evidence 只有在 snapshot、dispatch 与 operation 一致时才能提交并触发下一次 reducer。
 - capability owner 的 validation receipt 必须持久化中立 quality/zero-work/check observation，并纳入 stable receipt hash；SM-3 在普通响应与 exact-fence restart recovery 两条路径执行同一质量裁决，弱验证只进入 rejected evidence，不得因 owner exit code 为 0 关闭 coverage。
 - Runtime V2 aggregate 通过 Run owner 的 EventHub update 合同持久化；Orchestrator 使用 expected revision 执行 CAS，不直接访问 Run repository，也不把 aggregate 编码进 `map[string]any`。
@@ -115,8 +140,12 @@ R4/P0～P6/A-4 只作回归基线，不再是活动实施标准。
   Workspace owner 自行释放 active run，Run owner 自行进入 terminal。Result block 不参与 acceptance 裁决。
 - CoverageFocus 可携带 evidence role、accepted/rejected step kinds 与 accepted operations；reducer 只在 owner 已确认的 capability kinds 中做中立交集/排除，并把结果封入 `RequiredOutputContract`。若声明 accepted operations，candidate 至少包含一个匹配的具体 operation 参数，不能用同 step kind 的其他动作替代。
 - provider request session（logical request ID、physical-call/fragment sequence、transport outcome）先于 candidate attempt 随 aggregate 持久化；未形成完整 candidate document 时不得创建/失败 attempt。complete attempt 0 的 `rejected_final` 直接终态；只有 `correctable_once` 可在相同 transaction、manifest 和 stable prefix 下开启 attempt 1，attempt 1 再次 complete rejection 形成 `candidate_retry_exhausted`，不能创建第三次请求或无信息 governance ticket。
-- candidate retry 预算按稳定且显式持久化的 `AuthorityContractID` 计算；identity 绑定 workspace/run、focus、action、definition/evidence revision 与 requiredOutput hash，不包含 snapshot/authority attempt。缺失或不匹配该字段属于 current-schema invariant violation；同一 contract 超过 attempt 0/1 必须 fail-fast，禁止再次请求 provider。
-- complete schema/contract failure 只记录统一 evaluator 生成的 rejection/disposition；provider authentication/configuration、transient transport、incomplete document 与 unknown submission 走独立 dependency 或 request-session/recovery ledger，绝不占用 attempt。prerequisite stale 退回 SM-2 精确退休旧授权，历史 execution failure 不得触发 authority reseal。
+- candidate retry 预算按稳定且显式持久化的 `AuthorityContractID` 计算；identity 绑定 workspace/run、完整 `AuthoritySnapshotID`、focus、action、definition/evidence revision 与 requiredOutput hash。缺失或不匹配该字段属于 current-schema invariant violation；同一 contract 超过 attempt 0/1 必须 fail-fast，禁止再次请求 provider。
+- complete schema/contract failure 只记录统一 evaluator 生成的 rejection/disposition；owner feasibility 的
+  `stale`、`prerequisite_required`、`infeasible` 必须作为独立 internal event 交给 SM-2，绝不进入
+  correction matrix 或占用 attempt。provider authentication/configuration、transient transport、incomplete
+  document 与 unknown submission 走独立 dependency 或 request-session/recovery ledger。prerequisite stale
+  精确退休旧授权，历史 execution failure 不得触发 authority reseal。
 - governance candidate 作为 sealed dispatch 持久化；治理结果通过 `CommitRuntimeGovernanceResolutionCommand/Result` typed owner command 提交，同一 resolution ID 与 authority snapshot 最多消费一次。
 - Decision owner 可通过 `CommitRuntimeGovernanceTicketResolutionCommand` 只提交 ticket resolution；Orchestrator 从 persisted binding 补齐 authority snapshot、dispatch 与 dependency 后进入同一 resolution commit。
 - governed dispatch 通过 `OpenRuntimeGovernanceRequestCommand/Result` 向 Decision owner 创建确定性 ticket；ticket、snapshot、dispatch 与 dependency 的绑定随 Runtime V2 aggregate 持久化。
@@ -140,6 +169,10 @@ R4/P0～P6/A-4 只作回归基线，不再是活动实施标准。
 - SM-4 对 owner-local delivery acknowledgement 做有界重试：重复 fact 必须幂等，单边成功不得重写，缺失 ack
   只保留 delivery pending，避免单边成功后永久悬挂。
 - repair ledger 的 `RepairAttempts` 是同 focus 总预算；有效新 evidence 只重置 failure-signature、validation-only 与 no-progress 窗口，不清零总预算。只有原子 focus advance 才创建下一 focus 的全新 repair ledger。
+- owner 报告 state-changing no-op 时，SM-3 只持久化 rejected/no-progress shape，绝不写入 state-change evidence。
+  SM-2 对要求 assessment 且有可观测 validation 的 focus 只能按 `validation -> assessment` 验证已有状态；否则以
+  typed current-run provenance gap 终态化，禁止通过无关文件修改制造 durable delta。exact receipt replay 保持原
+  `ExecutionKey + Fence`，不重放 owner side effect。
 - candidate attempt 只投影为 SM-3 contract attempt；read model 的 repair loop、ineffective retry 和 repair budget 必须来自 `Facts.Repair` 与当前 failure，不得把历史 candidate retry 当成当前 focus repair。
 - prerequisite freshness 保持两条有界、封存的 ledger：owner accepted receipt 的真实资源变更使用 `prerequisite_receipt_refresh`，read-only stale/no-progress 使用 `prerequisite_refresh`。两者都必须原子失效相交 observation、重复 receipt 不得重复扣减；前者不得耗尽后者的恢复预算。capability-state owner acquisition key 的代际只由这两条 ledger 的持久化计数共同推进，保证资源变更后不会重放旧查询回执，同时 provider/CAS/terminal-delivery 等无关恢复记账不得改变该 key。
 - Eventstream 订阅仍在生产发布的 Orchestrator、Run 和 Result typed notification 形成审计记录；Runtime V2 只消费同步 typed operation result 推进状态。

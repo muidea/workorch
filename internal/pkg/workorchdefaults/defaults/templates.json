@@ -542,16 +542,7 @@
             "deferred",
             "decision"
           ],
-          "validationFailureImpliesStateChange": true,
-          "implementationGapDiagnosticClasses": [
-            "implementation_gap_detected",
-            "validation_build_failed",
-            "validation_test_failed",
-            "validation_command_invalid"
-          ],
           "maxValidationOnlyRetriesPerFocus": 2,
-          "preferMinimalPatchBeforeRepeatedValidation": true,
-          "ifNoTargetRoute": "failed_assessment_with_missing_evidence_or_deferred",
           "validationScratchRequired": true,
           "allowedValidationModes": [
             "discovered_target",
@@ -1060,6 +1051,10 @@
         "commandName": "go",
         "argsContain": [
           "test"
+        ],
+        "requiredArgs": [
+          "test",
+          "-v"
         ],
         "zeroWorkMarkers": [
           "testing: warning: no tests to run",

@@ -187,7 +187,7 @@ idempotency 或 lifecycle 单测缺失。
 
 本节是 ARCH-1 的**验收索引**，不是独立 Runtime V2 实施计划。Runtime fixture 的 candidate/receipt、
 唯一状态 owner、terminal delivery、crash/restart 序列与退出条件均以
-[RUNTIME-SMO 的 C7-B～C7-F](runtime-v2-single-owner-state-machine-closure-plan.md) 为准；本矩阵只消费其通过证据来关闭组件的 `D` 标记。`workspace_deleted_late_event`
+[RUNTIME-SMO 的 SMO-1～SMO-7](runtime-v2-single-owner-state-machine-closure-plan.md) 为准；C7/C8 仅作为不可回退基线。本矩阵只消费其通过证据来关闭组件的 `D` 标记。`workspace_deleted_late_event`
 仍由 EventStream/WorkOrchd 的组件合同单独验证，但不得影响 Runtime authority。
 
 部署验证使用最新构建重启服务后执行，不能调用 Activate/Resume 作为补偿，也不能

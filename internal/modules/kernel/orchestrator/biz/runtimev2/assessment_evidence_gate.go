@@ -3,7 +3,6 @@ package runtimev2
 import (
 	"fmt"
 	"strings"
-	"unicode"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -58,7 +57,6 @@ func applyAssessmentEvidenceGate(aggregate RuntimeAggregate, assessment runtimec
 
 func assessmentItemEvidenceGateFailure(aggregate RuntimeAggregate, coverageID common.CoverageWorkItemID, refs []string) string {
 	focus := aggregate.Facts.Focus.Normalized()
-	claim := runtimeCoverageClaimText(aggregate.Facts.Coverage, coverageID)
 	evidenceFacts := acceptedEvidenceFactsForRefs(aggregate.Facts, coverageID, refs)
 	if len(evidenceFacts) == 0 {
 		return "satisfied claim has no accepted evidence bound to the coverage item"
@@ -84,9 +82,10 @@ func assessmentItemEvidenceGateFailure(aggregate RuntimeAggregate, coverageID co
 			continue
 		}
 		sawExecutableBehavior = true
-		if focus.RequireClaimEvidence && !runtimeEvidenceAlignsWithClaim(claim, operation, evidence) {
-			continue
-		}
+		// CoverageWorkItemID plus accepted evidence refs are the sealed,
+		// structural claim binding. Semantic comparison between Goal/DoD prose,
+		// summary, operation ID and check name belongs to the assessment
+		// candidate, never to the Runtime reducer.
 		return ""
 	}
 	if !sawNonWeak {
@@ -94,9 +93,6 @@ func assessmentItemEvidenceGateFailure(aggregate RuntimeAggregate, coverageID co
 	}
 	if focus.RequireExecutableBehaviorEvidence && !sawExecutableBehavior {
 		return "accepted evidence does not show executed behavior for the coverage claim"
-	}
-	if focus.RequireClaimEvidence {
-		return "accepted evidence is not aligned with the concrete coverage claim"
 	}
 	return "accepted evidence does not satisfy the focus evidence contract"
 }
@@ -173,135 +169,6 @@ func runtimeEvidenceShowsExecutableBehavior(operation runtimecontract.RuntimeOpe
 	}
 	observation := evidence.Validation.Normalized()
 	return len(observation.PassedChecks) > 0
-}
-
-func runtimeEvidenceAlignsWithClaim(claim string, operation runtimecontract.RuntimeOperation, evidence runtimecontract.EvidenceFact) bool {
-	claim = strings.TrimSpace(claim)
-	if claim == "" {
-		return true
-	}
-	signals := []string{evidence.Summary, operation.ID, operation.Kind}
-	signals = append(signals, operation.TargetRefs...)
-	signals = append(signals, evidence.EvidenceRefs...)
-	if evidence.Validation != nil {
-		observation := evidence.Validation.Normalized()
-		signals = append(signals, observation.PassedChecks...)
-		signals = append(signals, observation.OutputPreview)
-	}
-	signalText := strings.Join(signals, " ")
-	if !numericClaimEvidenceAligned(claim, signalText) {
-		return false
-	}
-	claimTokens := alignmentTokens(claim)
-	significant := make([]string, 0, len(claimTokens))
-	seen := map[string]struct{}{}
-	for _, token := range claimTokens {
-		if len([]rune(token)) < 3 || alignmentStopToken(token) {
-			continue
-		}
-		if _, ok := seen[token]; ok {
-			continue
-		}
-		seen[token] = struct{}{}
-		significant = append(significant, token)
-	}
-	if claimAlignmentMayBeSkipped(significant, claim) {
-		return true
-	}
-	signalTokens := stringSet(alignmentTokens(signalText))
-	matched := 0
-	for _, token := range significant {
-		if _, ok := signalTokens[token]; ok {
-			matched++
-		}
-	}
-	required := (len(significant)*2 + 2) / 3
-	if required < 2 {
-		required = 2
-	}
-	if required > len(significant) {
-		required = len(significant)
-	}
-	return matched >= required
-}
-
-func claimAlignmentMayBeSkipped(tokens []string, claim string) bool {
-	if len(numericTokens(claim)) > 0 {
-		return false
-	}
-	if len(tokens) == 0 {
-		return true
-	}
-	return len(tokens) == 1 && len([]rune(tokens[0])) <= 8
-}
-
-func runtimeCoverageClaimText(values []runtimecontract.RuntimeCoverageItemFact, id common.CoverageWorkItemID) string {
-	for _, value := range values {
-		if value.ID == id {
-			return strings.TrimSpace(value.TargetText)
-		}
-	}
-	return ""
-}
-
-func alignmentTokens(value string) []string {
-	value = splitAlignmentIdentifier(value)
-	return strings.FieldsFunc(strings.ToLower(value), func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
-	})
-}
-
-func splitAlignmentIdentifier(value string) string {
-	runes := []rune(value)
-	if len(runes) < 2 {
-		return value
-	}
-	var builder strings.Builder
-	for idx, current := range runes {
-		if idx > 0 {
-			previous := runes[idx-1]
-			var next rune
-			if idx+1 < len(runes) {
-				next = runes[idx+1]
-			}
-			letterDigitBoundary := unicode.IsLetter(previous) != unicode.IsLetter(current) &&
-				(unicode.IsDigit(previous) || unicode.IsDigit(current))
-			camelBoundary := unicode.IsLower(previous) && unicode.IsUpper(current)
-			acronymBoundary := unicode.IsUpper(previous) && unicode.IsUpper(current) && next != 0 && unicode.IsLower(next)
-			if letterDigitBoundary || camelBoundary || acronymBoundary {
-				builder.WriteRune(' ')
-			}
-		}
-		builder.WriteRune(current)
-	}
-	return builder.String()
-}
-
-func numericClaimEvidenceAligned(claim, signal string) bool {
-	numbers := numericTokens(claim)
-	if len(numbers) == 0 {
-		return true
-	}
-	signalNumbers := stringSet(numericTokens(signal))
-	for _, number := range numbers {
-		if _, ok := signalNumbers[number]; ok {
-			return true
-		}
-	}
-	return false
-}
-
-func numericTokens(value string) []string {
-	return strings.FieldsFunc(value, func(r rune) bool { return !unicode.IsDigit(r) })
-}
-
-func alignmentStopToken(value string) bool {
-	switch value {
-	case "test", "tests", "testing", "pass", "passed", "run", "runtime", "validation", "validate", "validated", "operation", "completed", "evidence":
-		return true
-	default:
-		return false
-	}
 }
 
 func coverageWorkItemIDIncluded(values []common.CoverageWorkItemID, expected common.CoverageWorkItemID) bool {

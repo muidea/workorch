@@ -25,7 +25,7 @@ Runtime V2-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **�
 
 | # | 主题 | 待办 | 当前方案 |
 | --- | --- | --- | --- |
-| A1 | Runtime V2 单 owner candidate/document 收口 | complete semantic-invalid document越过SM-3并被误判provider protocol 的代码与回归已按 C7-B～C7-E 收口；仅待 C7-F 用全新 workspace 完成 fresh live、restart 与并发验收。旧计划仅作 archive baseline，不得加入 compatibility fallback 或 live 热修跳卡 | [唯一收口方案](../70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md) |
+| A1 | Runtime V2 单 owner convergence 收口 | 依 SMO-1～SMO-7 串行处理：先分离 candidate rejection 与 owner feasibility，再收敛唯一 transition coordinator、feasibility 后继、空 workspace blueprint、capability taxonomy、boundary gate，最后 fresh live。历史 C7/C8 仅作回归基线；不加入 compatibility fallback 或 live 热修跳卡。 | [唯一收口方案](../70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md) |
 
 ## B. 运行单元架构 / 生命周期
 
@@ -69,7 +69,7 @@ Runtime V2-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **�
 - 2026-07-16 归档的产品/审计日记：ai-proxy cutover、operation-map、module-inventory、auto-gov、software-dev DoD/SRD、next-mvp、TUI 统一、run-quality、authority-live design、module-block contract validation、deployed blocker 长文、file-patch 长文、llm-context-budget todo、docs reorg plan
 - dated live verification 记录与 `60-verification/artifacts/**`（出库；结论在 records markdown）
 - dated prerequisite freshness、candidate admission、旧 VPC 与 production admissibility completion record（仅
-  archive regression baseline；当前实施顺序统一由 RUNTIME-SMO C7-B～C7-F 定义）
+archive regression baseline；当前实施顺序统一由 RUNTIME-SMO SMO-1～SMO-7 定义）
 
 事实入口：[current-state.md](current-state.md)  
 未关矩阵：[current-unclosed-matrix.md](current-unclosed-matrix.md)  

@@ -112,11 +112,18 @@ func (m *Biz) handleRuntimeV2GovernanceResolutionLocked(event magicevent.Event, 
 		setRuntimeV2GovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument)
 		return
 	}
-	commit, err := m.bizPtr.CommitRuntimeV2GovernanceResolution(event.Context(), command.Resolution)
+	commitEvent, err := m.submitRuntimeV2InternalEvent(event.Context(), runtimev2.RuntimeInternalEvent{
+		Kind: runtimev2.RuntimeInternalEventGovernanceResolutionObserved, WorkspaceID: command.Resolution.WorkspaceID, RunID: command.Resolution.RunID, GovernanceResolution: &command.Resolution,
+	})
 	if err != nil {
 		setRuntimeV2GovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err)
 		return
 	}
+	if commitEvent.Evidence == nil {
+		setRuntimeV2GovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument)
+		return
+	}
+	commit := *commitEvent.Evidence
 	response := orchestratorevents.CommitRuntimeGovernanceResolutionResult{
 		ResolutionID:        command.Resolution.ResolutionID,
 		Disposition:         runtimeGovernanceDisposition(commit.Disposition),

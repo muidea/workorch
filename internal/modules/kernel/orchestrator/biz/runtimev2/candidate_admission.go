@@ -407,9 +407,6 @@ func GroundedRepairTargets(facts workorchruntimecontract.RuntimeFacts) []string 
 	if len(facts.Focus.TargetRefs) > 0 {
 		return append([]string(nil), facts.Focus.TargetRefs...)
 	}
-	if facts.Failure != nil && len(facts.Failure.TargetRefs) > 0 {
-		return append([]string(nil), facts.Failure.TargetRefs...)
-	}
 	if targets := ownerGroundedAssessmentGapTargets(facts); len(targets) > 0 {
 		return targets
 	}
@@ -492,32 +489,6 @@ func ActiveRejectedOperationShapes(aggregate RuntimeAggregate) []workorchruntime
 				FailureSignature: evidence.FailureSignature,
 				FailureMessage:   evidence.FailureMessage,
 			})
-		}
-	}
-	for _, attempt := range aggregate.CandidateAttempts {
-		if attempt.State != workorchruntimecontract.RuntimeCandidateAttemptStateFailed || attempt.Failure == nil ||
-			attempt.Failure.Class != workorchruntimecontract.RuntimeCandidateFailureClassInfeasible ||
-			attempt.Transaction.FocusID != facts.Focus.ID || attempt.Proposal == nil ||
-			(latestAcceptedRevision != "" && attempt.Transaction.EvidenceRevision != latestAcceptedRevision && !evidenceRevisionAfter(attempt.Transaction.EvidenceRevision, latestAcceptedRevision)) {
-			continue
-		}
-		for _, feasibility := range attempt.Feasibilities {
-			if feasibility.Feasible || feasibility.Failure == nil {
-				continue
-			}
-			for _, operation := range candidateRuntimeOperations(*attempt.Proposal) {
-				if operation.Normalized().ID != strings.TrimSpace(feasibility.OperationID) {
-					continue
-				}
-				ret = append(ret, workorchruntimecontract.RuntimeRejectedOperationShape{
-					Hash:             workorchruntimecontract.StableRuntimeOperationShape(operation),
-					Operation:        operation.Normalized(),
-					FailureClass:     feasibility.Failure.Class,
-					FailureCode:      feasibility.Failure.Code,
-					FailureSignature: feasibility.Failure.Signature,
-					FailureMessage:   feasibility.Failure.Message,
-				})
-			}
 		}
 	}
 	return workorchruntimecontract.NormalizeRuntimeRejectedOperationShapes(ret)

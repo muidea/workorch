@@ -158,26 +158,17 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 	if len(facts.FreshnessReacquireCoverage) > 0 {
 		return stateChangeDecision(base, facts)
 	}
-	if facts.Failure != nil {
-		switch facts.Failure.Class {
-		case runtimecontract.FailureClassCandidateInfeasible:
-			// Owner feasibility may reject a validation candidate before a dispatch
-			// exists. The activation-sealed validation policy marks that as a
-			// same-focus implementation repair; this remains neutral to the owner
-			// failure code and operation domain.
-			return stateChangeDecision(base, facts)
-		}
-	}
-	// SM-2 must interpret a newly rejected validation before consulting the
-	// feasibility fact sealed for the previous validation action. When the
-	// activation policy requires implementation repair, that older fact no
-	// longer describes the current action and must not escalate the Run to
-	// governance before the reducer can select produce_state_change.
-	if needsStateChangeAfterRejectedValidation(facts) {
+	// A validation failure remains a validation gap unless a capability owner
+	// has persisted a current, exact repair surface.  Policy text, a command
+	// entry, and an infeasible candidate are not implementation authority.
+	if needsStateChangeForOwnerGroundedFailure(facts) {
 		return stateChangeDecision(base, facts)
 	}
 	if feasibilityBlocksCurrentAction(facts) {
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "capability_unavailable", firstNonEmpty(facts.Feasibility.Reason, "current focus has no feasible operation under sealed capabilities")), nil
+	}
+	if decision, handled, err := noOpWithoutProvenanceDecision(base, facts); err != nil || handled {
+		return decision, err
 	}
 	// INV-05: persisted RepairDirective is the sole next-action authority for the focus.
 	// Raw MissingRequiredEvidenceKinds and anti-replay must not override it.
@@ -235,6 +226,72 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 	return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "unsupported_evidence_gap", fmt.Sprintf("unsupported required evidence kinds: %s", strings.Join(missing, ","))), nil
 }
 
+const runtimeStateChangeNoOpWithoutProvenanceCode = "state_change_noop_without_provenance"
+
+// noOpWithoutProvenanceDecision is the C8-F convergence branch for a
+// state-change operation which the owner proves did nothing.  It deliberately
+// does not turn that receipt into accepted state-change evidence.  If the
+// focus has a validation capability, SM-2 asks for one owner-observable
+// inspection of the current state. An assessment-required focus can then make
+// its semantic claim from that validation evidence. Only that structured
+// validation plus assessment path may close an already-current workspace; a
+// focus without an assessment requirement terminates with a typed provenance
+// gap rather than requesting another random write to manufacture a delta.
+func noOpWithoutProvenanceDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision, bool, error) {
+	if !hasStateChangeNoOpWithoutProvenance(facts) || !contains(missingEvidenceKinds(facts), runtimecontract.EvidenceKindStateChange) {
+		return runtimecontract.RuntimeDecision{}, false, nil
+	}
+	if hasAcceptedCurrentFocusValidationEvidence(facts) {
+		if facts.Focus.RequireAssessment {
+			if assessment, found := assessmentForCurrentFocus(facts); found {
+				switch assessment.Disposition {
+				case runtimecontract.AssessmentDispositionSatisfied:
+					if currentFocusCoverageSatisfied(facts) {
+						if facts.StateChange.Required && !facts.StateChange.Satisfied {
+							return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail,
+								"state_change_provenance_missing", "workspace state was validated and assessed after a no-op, but the run policy requires durable state-change provenance"), true, nil
+						}
+						decision, err := completeOrAdvanceDecision(base, facts, "current workspace state was validated and assessed after a no-op")
+						return decision, true, err
+					}
+					decision, err := repairableAssessmentDecision(base, facts, assessment)
+					return decision, true, err
+				case runtimecontract.AssessmentDispositionRepairableGap:
+					decision, err := repairableAssessmentDecision(base, facts, assessment)
+					return decision, true, err
+				}
+			}
+			return assessmentDecision(base, facts), true, nil
+		}
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail,
+			"state_change_provenance_missing", "workspace state was validated after a no-op, but this run has no durable state-change provenance"), true, nil
+	}
+	if len(focusAcceptedKinds(facts.Capabilities.ValidationKinds, facts.Focus)) == 0 {
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail,
+			"state_change_provenance_missing", "owner reported a no-op and no validation capability can observe the existing workspace state"), true, nil
+	}
+	decision, err := validationDecision(base, facts)
+	return decision, true, err
+}
+
+func hasStateChangeNoOpWithoutProvenance(facts runtimecontract.RuntimeFacts) bool {
+	for _, shape := range facts.Repair.NoProgressOperationShapes {
+		if shape.FailureClass == runtimecontract.FailureClassEffectMismatch && shape.FailureCode == runtimeStateChangeNoOpWithoutProvenanceCode {
+			return true
+		}
+	}
+	return false
+}
+
+func hasAcceptedCurrentFocusValidationEvidence(facts runtimecontract.RuntimeFacts) bool {
+	for _, evidence := range facts.Evidence.Accepted {
+		if evidence.Kind == runtimecontract.EvidenceKindValidation && runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) {
+			return true
+		}
+	}
+	return false
+}
+
 // reduceDeterminedFailure owns the SM-2 ordering rule for failure facts whose
 // next authority is already determined. It intentionally lives in the
 // Orchestrator owner: the shared runtime contract validates persisted shapes but
@@ -277,6 +334,13 @@ func reduceDeterminedFailure(base runtimecontract.RuntimeDecision, facts runtime
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "candidate_output_continuation_exhausted", failure.Message), true, nil
 	case runtimecontract.FailureClassPrerequisiteRefreshExhausted:
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "prerequisite_refresh_exhausted", failure.Message), true, nil
+	case runtimecontract.FailureClassNoProgressExhausted:
+		// A sealed owner observation can prove that no admissible recipe exists
+		// for the current authority (for example, validation has no recipe).
+		// This is a bounded SM-2 terminal, not an invitation to create another
+		// same-focus candidate or a generic contract-defect terminal.
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail,
+			firstNonEmpty(strings.TrimSpace(failure.Code), "no_progress_exhausted"), failure.Message), true, nil
 	case runtimecontract.FailureClassGovernanceRejected:
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "governance_rejected", failure.Message), true, nil
 	default:
@@ -621,52 +685,29 @@ func missingEvidenceKinds(facts runtimecontract.RuntimeFacts) []string {
 	return runtimecontract.MissingRequiredEvidenceKinds(facts)
 }
 
-// needsStateChangeAfterRejectedValidation forces repair state-change after a focus-local
-// validation rejection until a later state-change is accepted. Rejected repair attempts do
-// not re-open produce_validation: replaying the same failed validation would be blocked by
-// anti-replay and only waste candidate budget. Re-validation is allowed only after accepted
-// state-change progress supersedes the failed validation lineage.
-func needsStateChangeAfterRejectedValidation(facts runtimecontract.RuntimeFacts) bool {
-	diagnosticClass := ""
-	if facts.Failure != nil && facts.Failure.ValidationDiagnostic != nil {
-		diagnosticClass = facts.Failure.ValidationDiagnostic.Class
-	}
-	if !runtimecontract.RuntimeValidationFailureRequiresStateChange(facts.Activation.ExecutionContract.ValidationPolicies, runtimecontract.EvidenceKindValidation, diagnosticClass) {
+// needsStateChangeForOwnerGroundedFailure is the only SM-2 bridge from a
+// rejected validation/effect fact to a durable repair.  A raw failure target
+// is intentionally insufficient: the target must have been retained as the
+// current owner-grounded FailureTarget by the receipt/prerequisite path.
+func needsStateChangeForOwnerGroundedFailure(facts runtimecontract.RuntimeFacts) bool {
+	failure := facts.Failure
+	if failure == nil || facts.Resources.FailureTarget == nil {
 		return false
 	}
-	validationRevision, ok := latestRejectedValidationRevision(facts)
-	if !ok {
+	switch failure.Class {
+	case runtimecontract.FailureClassExecutionRejected, runtimecontract.FailureClassExecutionFailure,
+		runtimecontract.FailureClassBuildFailure, runtimecontract.FailureClassEffectMismatch:
+	default:
 		return false
 	}
-	for _, evidence := range facts.Evidence.Accepted {
-		if !runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) || evidence.Kind != runtimecontract.EvidenceKindStateChange {
-			continue
-		}
-		if evidenceRevisionAfter(evidence.Revision, validationRevision) {
-			return false
-		}
-	}
-	return true
+	target := facts.Resources.FailureTarget
+	return strings.TrimSpace(target.Signature) != "" && target.Signature == failure.Signature &&
+		len(target.TargetRefs) > 0 && sameRuntimeTargetRefs(target.TargetRefs, failure.TargetRefs)
 }
 
-func latestRejectedValidationRevision(facts runtimecontract.RuntimeFacts) (string, bool) {
-	found := false
-	revision := ""
-	for _, evidence := range facts.Evidence.Rejected {
-		if !runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) || evidence.Kind != runtimecontract.EvidenceKindValidation {
-			continue
-		}
-		if evidence.FailureClass == "" && strings.TrimSpace(evidence.FailureMessage) == "" {
-			continue
-		}
-		if !found || evidenceRevisionAfter(evidence.Revision, revision) || (evidence.Revision == "" && revision == "") {
-			found = true
-			revision = evidence.Revision
-		}
-	}
-	return revision, found
-}
-
+// evidenceRevisionAfter is an owner-local convenience shared by candidate
+// admission and SM-2 reduction. The contract package supplies the pure value
+// comparison; neither path uses it to choose a state transition on its own.
 func evidenceRevisionAfter(left string, right string) bool {
 	return runtimecontract.EvidenceRevisionAfter(left, right)
 }
@@ -772,10 +813,7 @@ func repairableAssessmentDecision(base runtimecontract.RuntimeDecision, facts ru
 		}
 	}
 	if wantValidationOnly {
-		if ledger.ValidationOnlyRetries >= policy.MaxValidationOnlyRetriesPerFocus {
-			if runtimecontract.RuntimeValidationFailureRequiresStateChange(facts.Activation.ExecutionContract.ValidationPolicies, runtimecontract.EvidenceKindValidation) && len(facts.Capabilities.StateChangeKinds) > 0 {
-				return stateChangeDecision(base, facts)
-			}
+		if policy.MaxValidationOnlyRetriesPerFocus > 0 && ledger.ValidationOnlyRetries >= policy.MaxValidationOnlyRetriesPerFocus {
 			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "no_progress_exhausted", "validation-only repair budget exhausted"), nil
 		}
 		return validationDecision(base, facts)

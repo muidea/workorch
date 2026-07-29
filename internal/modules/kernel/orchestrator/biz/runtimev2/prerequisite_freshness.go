@@ -3,6 +3,7 @@ package runtimev2
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -312,6 +313,89 @@ func (c *RuntimeController) InvalidateCandidateAttemptForFeasibilityPrerequisite
 	return aggregate, nil
 }
 
+// InvalidateCandidateAttemptForOwnerInfeasibility is the SM-2/SM-3 handoff
+// for a completed owner feasibility probe. Unlike FailCandidateAttempt it
+// never seals a CorrectionDisposition and never permits attempt 1. The
+// controller preserves the factual observation as immutable lineage, then lets
+// the owner reducer choose a fresh authority or a typed terminal.
+func (c *RuntimeController) InvalidateCandidateAttemptForOwnerInfeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, observation runtimecontract.RuntimeOwnerFeasibilityObservation) (RuntimeAggregate, error) {
+	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) {
+		return RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	observation = observation.Normalized()
+	if err := observation.Validate(); err != nil || observation.Disposition != runtimecontract.RuntimeOwnerFeasibilityInfeasible {
+		return RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	for _, record := range aggregate.CandidateAttempts {
+		if record.Attempt == attempt && record.State == runtimecontract.RuntimeCandidateAttemptStateInvalidated && record.OwnerFeasibility != nil && reflect.DeepEqual(record.OwnerFeasibility.Clone(), observation) {
+			return aggregate, nil
+		}
+	}
+	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
+	idx, record, found := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
+	if !found || record.Proposal == nil {
+		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d is not pending", common.ErrConflict, attempt)
+	}
+	matched := false
+	for _, feasibility := range record.Feasibilities {
+		if feasibility.Observation == nil {
+			continue
+		}
+		if reflect.DeepEqual(feasibility.Observation.Clone(), observation) {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return RuntimeAggregate{}, fmt.Errorf("%w: owner infeasibility has no matching persisted feasibility observation", common.ErrConflict)
+	}
+
+	expectedRevision := aggregate.StateRevision
+	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateInvalidated
+	aggregate.CandidateAttempts[idx].Proposal = nil
+	aggregate.CandidateAttempts[idx].Feasibilities = nil
+	aggregate.CandidateAttempts[idx].Failure = nil
+	aggregate.CandidateAttempts[idx].Stale = nil
+	aggregate.CandidateAttempts[idx].PrerequisiteRequest = nil
+	copyObservation := observation.Clone()
+	aggregate.CandidateAttempts[idx].OwnerFeasibility = &copyObservation
+	facts := aggregate.Facts
+	failure := runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassCandidateInfeasible, Code: observation.Code,
+		Signature: observation.Signature, Message: observation.Reason, TargetRefs: append([]string(nil), observation.TargetRefs...),
+	}
+	// An owner that reports that the sealed validation recipe is unavailable
+	// cannot be repaired by asking for another candidate under the same
+	// validation authority. A valid alternative must arrive as a new sealed
+	// prerequisite/blueprint fact; absent that fact the factual outcome is a
+	// deterministic terminal, not a correction or random state change.
+	if observation.Category == runtimecontract.RuntimeOwnerFeasibilityCategoryValidationRecipeUnavailable {
+		failure.Class = runtimecontract.FailureClassNoProgressExhausted
+		failure.Code = "validation_recipe_exhausted"
+		failure.Signature = "validation-recipe-exhausted/" + observation.Signature
+		failure.Message = "sealed validation recipe is unavailable: " + observation.Reason
+	}
+	facts.Failure = &failure
+	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	aggregate.Facts = facts
+	aggregate.Decision = decision
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return aggregate, nil
+}
+
 func candidateOperationByID(candidate runtimecontract.RuntimeCandidate, operationID string) (runtimecontract.RuntimeOperation, bool) {
 	operationID = strings.TrimSpace(operationID)
 	for _, operation := range candidateRuntimeOperations(candidate) {
@@ -454,8 +538,11 @@ func (c *RuntimeController) InvalidateActiveDispatchForPrerequisiteStale(ctx con
 }
 
 // applyReceiptResourceChangeInvalidation is called while committing accepted
-// evidence. It keeps the accepted receipt/evidence, but atomically prevents
-// any remaining sealed operation from using an intersecting old observation.
+// evidence. It keeps the accepted receipt/evidence and atomically retires any
+// intersecting owner observation for the next SM-2 authority. It never makes
+// the remaining operations of the current sealed SM-3 transaction stale:
+// their identity, targets, dependencies and effect contract were sealed before
+// the first owner side effect.
 func applyReceiptResourceChangeInvalidation(aggregate *RuntimeAggregate, dispatchID, operationID string, receipt runtimecontract.RuntimeOperationReceipt) (bool, error) {
 	if aggregate == nil {
 		return false, common.ErrInvalidArgument

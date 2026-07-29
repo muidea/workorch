@@ -1009,6 +1009,14 @@ func TestRuntimeV2FileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing
 				return
 			}
 		}
+		if command.Decision.Action == runtimecontract.RuntimeActionProduceValidation {
+			// C8-F: the no-op's sealed shape is only provenance for the
+			// current-state inspection. Validation must observe that existing
+			// target, not invent a different writable deliverable merely to make
+			// the state-change evidence requirement pass.
+			result.Set(runtimeV2CandidateResultForTest(t, command, runtimeV2WorkspaceCreationCandidate(command, "implementation.txt", "before\n")), nil)
+			return
+		}
 		result.Set(runtimeV2CandidateResultForTest(t, command, runtimeV2WorkspaceCreationCandidate(command, "new-deliverable.txt", "created\n")), nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
@@ -1018,18 +1026,17 @@ func TestRuntimeV2FileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 
 	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 4 || stateChangeCalls != 2 {
+	if err != nil || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 3 || stateChangeCalls != 1 {
 		t.Fatalf("bounded scope new-deliverable completion=%+v candidateCalls=%d stateChangeCalls=%d err=%v", completed, candidateCalls, stateChangeCalls, err)
 	}
-	content, err := os.ReadFile(filepath.Join(deliverable, "new-deliverable.txt"))
-	if err != nil || string(content) != "created\n" {
-		t.Fatalf("bounded scope new-deliverable content=%q err=%v", string(content), err)
+	if _, err := os.Stat(filepath.Join(deliverable, "new-deliverable.txt")); !os.IsNotExist(err) {
+		t.Fatalf("no-op convergence manufactured a new durable target: err=%v", err)
 	}
 	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil || persisted.RuntimeState == nil || initialSelection != runtimecontract.RuntimeTargetSelectionScope || initialSelectionCount != 5 || initialSnapshots != 0 ||
 		persisted.RuntimeState.Facts.Resources.TargetSelection == nil || persisted.RuntimeState.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionScope ||
-		persisted.RuntimeState.Facts.Resources.TargetSelection.CandidateCount != 6 || len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 0 ||
-		len(persisted.RuntimeState.OperationReceipts) != 3 || len(persisted.RuntimeState.Facts.Evidence.Accepted) != 2 || len(persisted.RuntimeState.Facts.Evidence.Rejected) != 1 ||
+		persisted.RuntimeState.Facts.Resources.TargetSelection.CandidateCount != 5 || len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 0 ||
+		len(persisted.RuntimeState.OperationReceipts) != 2 || len(persisted.RuntimeState.Facts.Evidence.Accepted) != 1 || len(persisted.RuntimeState.Facts.Evidence.Rejected) != 1 ||
 		persisted.RuntimeState.Facts.Resources.FailureTarget != nil || (persisted.RuntimeState.Facts.RepairDirective != nil && len(persisted.RuntimeState.Facts.RepairDirective.TargetRefs) != 0) {
 		t.Fatalf("bounded scope new-deliverable authority=%+v err=%v", persisted, err)
 	}
@@ -1427,25 +1434,18 @@ func TestRuntimeV2FileBackedGitCapabilityStateSequenceMatrix(t *testing.T) {
 		expectedCount      int
 	}{
 		{
-			name: "repository_absent",
-			expectedCandidates: [][]string{
-				{"create-commit", "repo-init", "stage-changes"},
-				{"create-commit", "stage-changes"},
-				{"create-commit"},
-			},
-			expectedCount: 3,
+			name:               "repository_absent",
+			expectedCandidates: [][]string{{"create-commit", "repo-init", "stage-changes"}},
+			expectedCount:      3,
 			prepare: func(t *testing.T, deliverable string) {
 				t.Helper()
 				writeRuntimeV2GitFixtureFile(t, deliverable)
 			},
 		},
 		{
-			name: "initialized_unstaged",
-			expectedCandidates: [][]string{
-				{"create-commit", "stage-changes"},
-				{"create-commit"},
-			},
-			expectedCount: 2,
+			name:               "initialized_unstaged",
+			expectedCandidates: [][]string{{"create-commit", "stage-changes"}},
+			expectedCount:      2,
 			prepare: func(t *testing.T, deliverable string) {
 				t.Helper()
 				runRuntimeV2Git(t, deliverable, "init", "-q")
@@ -1636,12 +1636,12 @@ func TestRuntimeV2FileBackedGitRestartAfterInitEvidenceCommitContinuesSequence(t
 	crashRepository := &runtimeV2SaveCrashRepository{
 		delegate: baseRepository, after: true, marker: "git-init-evidence",
 		match: func(current runtimev2.RuntimeAggregate) bool {
-			if current.ActiveDispatch != nil || current.EvidenceSequence != 1 || len(current.OperationReceipts) != 1 ||
-				current.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(current.CompletedDispatches) != 1 ||
-				current.CompletedDispatches[0].State != runtimev2.DispatchStateInvalidated || len(current.CompletedDispatches[0].CompletedOperationIDs) != 1 {
+			if current.ActiveDispatch == nil || current.EvidenceSequence != 1 || len(current.OperationReceipts) != 1 ||
+				current.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(current.CompletedDispatches) != 0 ||
+				len(current.ActiveDispatch.CompletedOperationIDs) != 1 {
 				return false
 			}
-			return current.CompletedDispatches[0].CompletedOperationIDs[0] == "git-repo-init"
+			return current.ActiveDispatch.CompletedOperationIDs[0] == "git-repo-init"
 		},
 	}
 	crashingController, err := runtimev2.NewRuntimeController(crashRepository)
@@ -1679,7 +1679,7 @@ func TestRuntimeV2FileBackedGitRestartAfterInitEvidenceCommitContinuesSequence(t
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, restarted.handleRuntimeV2Drive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 2 {
+	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 0 {
 		t.Fatalf("restart completed=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
 	}
 	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
@@ -1863,7 +1863,7 @@ func TestRuntimeV2FileBackedGitQueryReceiptCrashBeforePrerequisiteCommitReusesSn
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, restarted.handleRuntimeV2Drive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 	completed, err := DriveRuntimeV2(ctx, restartedHub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 3 || !firstCandidateReusedQueryReceipt {
+	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 1 || !firstCandidateReusedQueryReceipt {
 		t.Fatalf("restart completed=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
 	}
 	persisted, err := restartedRuns.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
@@ -5453,7 +5453,7 @@ func TestRuntimeV2FileBackedGitSnapshotCommitResponseLossRestartReusesCommittedS
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, newRuntimeV2DriveTestModule(t, restartedHub).handleRuntimeV2Drive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 	completed, err := DriveRuntimeV2(ctx, restartedHub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 3 || !firstCandidateReusedSnapshot {
+	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 1 || !firstCandidateReusedSnapshot {
 		t.Fatalf("restart after snapshot commit completed=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
 	}
 	persisted, err := restartedRuns.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
@@ -5582,7 +5582,7 @@ func TestDriveRuntimeV2FileBackedFreshFileShellGitAcceptance(t *testing.T) {
 		t.Fatalf("persisted file-shell-git run=%+v err=%v", persisted, err)
 	}
 	state := persisted.RuntimeState
-	if state.Facts.Recovery.PrerequisiteRefreshes != 0 || state.Facts.Recovery.PrerequisiteResourceChangeRefreshes < 4 || len(state.PrerequisiteInvalidations) < 4 {
+	if state.Facts.Recovery.PrerequisiteRefreshes != 0 || state.Facts.Recovery.PrerequisiteResourceChangeRefreshes < 3 || len(state.PrerequisiteInvalidations) < 3 {
 		t.Fatalf("durable effects did not trigger persisted freshness re-acquisition: recovery=%+v invalidations=%+v", state.Facts.Recovery, state.PrerequisiteInvalidations)
 	}
 	if state.Facts.Recovery.ProviderTransportAttempts != 0 || state.Facts.Failure != nil {
@@ -5595,8 +5595,8 @@ func TestDriveRuntimeV2FileBackedFreshFileShellGitAcceptance(t *testing.T) {
 			}
 		}
 	}
-	if attempts := candidateAttempts["focus-git/"+string(runtimecontract.RuntimeActionProduceStateChange)]; len(attempts) < 3 {
-		t.Fatalf("Git init/add/commit did not use refreshed transactions: %+v", candidateAttempts)
+	if attempts := candidateAttempts["focus-git/"+string(runtimecontract.RuntimeActionProduceStateChange)]; len(attempts) != 1 {
+		t.Fatalf("Git sequence did not remain one sealed transaction: %+v", candidateAttempts)
 	}
 	for _, receipt := range state.OperationReceipts {
 		if receipt.PrerequisiteStale != nil || receipt.Outcome == runtimecontract.RuntimeOperationOutcomeRejected {
@@ -5908,9 +5908,6 @@ func runRuntimeV2FileBackedGitStaleRefreshCrashRestart(t *testing.T, crashAfterC
 		refs := requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence)
 		result.Set(runtimeV2CandidateResultForTest(t, command, runtimeV2GitStateCandidate(refs)), nil)
 		expected := []string{"create-commit", "stage-changes"}
-		if candidateCalls == 2 {
-			expected = []string{"create-commit"}
-		}
 		if !equalStrings(refs, expected) {
 			t.Errorf("stale refresh used wrong required sequence on candidate %d: %v", candidateCalls, refs)
 		}
@@ -5920,7 +5917,7 @@ func runRuntimeV2FileBackedGitStaleRefreshCrashRestart(t *testing.T, crashAfterC
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, newRuntimeV2DriveTestModule(t, restartedHub).handleRuntimeV2Drive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 	completed, err := DriveRuntimeV2(ctx, restartedHub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 2 {
+	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 1 {
 		t.Fatalf("stale refresh restart completed=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
 	}
 	persisted, err := restartedRuns.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
@@ -5954,17 +5951,17 @@ func TestRuntimeV2FileBackedGitReceiptResourceChangeRefreshBeforeCASRestartUsesC
 	runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t, false, 0, false)
 }
 
-// Once the receipt-resource-change ledger is exhausted, a later accepted
-// owner receipt must terminalize in SM-2.  It must not borrow the read-only
-// stale budget or submit a further candidate to compensate for the terminal.
-func TestRuntimeV2FileBackedGitReceiptResourceChangeRefreshExhaustionIsTerminal(t *testing.T) {
+// Several resource-changing operations in one sealed dispatch share the same
+// next-authority refresh. They must therefore consume one receipt-refresh
+// allowance, rather than terminalizing midway through the transaction.
+func TestRuntimeV2FileBackedGitSingleDispatchResourceRefreshDoesNotExhaust(t *testing.T) {
 	for _, crashAfterTerminalCAS := range []bool{false, true} {
 		phase := "terminal_before_cas"
 		if crashAfterTerminalCAS {
 			phase = "terminal_after_cas"
 		}
 		t.Run(phase, func(t *testing.T) {
-			runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t, crashAfterTerminalCAS, 1, true)
+			runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t, crashAfterTerminalCAS, 1, false)
 		})
 	}
 }
@@ -6048,7 +6045,7 @@ func runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testin
 	crashRepository := &runtimeV2SaveCrashRepository{
 		delegate: baseRepository, after: crashAfterCAS, marker: crashMarker,
 		match: func(current runtimev2.RuntimeAggregate) bool {
-			return current.ActiveDispatch == nil && current.Decision.Action == runtimecontract.RuntimeActionAcquirePrerequisite &&
+			return current.ActiveDispatch != nil && current.Decision.Action == runtimecontract.RuntimeActionProduceStateChange &&
 				current.Facts.Recovery.PrerequisiteRefreshes == 0 && current.Facts.Recovery.PrerequisiteResourceChangeRefreshes == 1 &&
 				len(current.Facts.Resources.CapabilityStates) == 0 && len(current.OperationReceipts) == 1 && current.EvidenceSequence == 1
 		},
@@ -6076,7 +6073,7 @@ func runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testin
 	}
 	initReceipt := crashed.RuntimeState.OperationReceipts[0]
 	if crashAfterCAS {
-		if crashed.RuntimeState.ActiveDispatch != nil || crashed.RuntimeState.Facts.Recovery.PrerequisiteRefreshes != 0 ||
+		if crashed.RuntimeState.ActiveDispatch == nil || crashed.RuntimeState.Facts.Recovery.PrerequisiteRefreshes != 0 ||
 			crashed.RuntimeState.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 || len(crashed.RuntimeState.Facts.Resources.CapabilityStates) != 0 ||
 			crashed.RuntimeState.EvidenceSequence != 1 || len(crashed.RuntimeState.PrerequisiteInvalidations) != 1 ||
 			crashed.RuntimeState.PrerequisiteInvalidations[0].ReceiptHash == "" {
@@ -6200,7 +6197,7 @@ func runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testin
 		return
 	}
 	completed, err := DriveRuntimeV2(ctx, restartedHub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if maxReceiptRefreshes > 0 {
+	if crashTerminal {
 		if err != nil || completed.Action != runtimecontract.RuntimeActionFail || candidateCalls != 1 {
 			t.Fatalf("receipt-resource-change exhaustion completed=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
 		}
@@ -6221,12 +6218,12 @@ func runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testin
 		}
 		return
 	}
-	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 2 {
+	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 0 {
 		t.Fatalf("resource-change restart completed=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
 	}
 	persisted, err := restartedRuns.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil || persisted.RuntimeState == nil || persisted.RuntimeState.Facts.Recovery.PrerequisiteRefreshes != 0 ||
-		persisted.RuntimeState.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 3 {
+		persisted.RuntimeState.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 {
 		t.Fatalf("resource-change restart recovery=%+v err=%v", persisted.RuntimeState.Facts.Recovery, err)
 	}
 	initReceipts := 0
@@ -6239,7 +6236,7 @@ func runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testin
 			t.Fatalf("init receipt was replayed or replaced: before=%+v after=%+v", initReceipt, receipt)
 		}
 	}
-	if initReceipts != 1 || len(persisted.RuntimeState.PrerequisiteInvalidations) != 3 || strings.TrimSpace(runtimeV2GitOutput(t, deliverable, "rev-list", "--count", "HEAD")) != "1" {
+	if initReceipts != 1 || len(persisted.RuntimeState.PrerequisiteInvalidations) != 1 || strings.TrimSpace(runtimeV2GitOutput(t, deliverable, "rev-list", "--count", "HEAD")) != "1" {
 		t.Fatalf("resource-change restart replayed init or duplicated invalidations: receipts=%d invalidations=%+v", initReceipts, persisted.RuntimeState.PrerequisiteInvalidations)
 	}
 }
@@ -6442,8 +6439,7 @@ func TestRuntimeV2FileBackedMixedOwnerReceiptThenLocalScratchStaleCrashRestart(t
 			}
 			if firstReceipt.ActiveDispatch != nil || firstReceipt.Facts.Recovery.PrerequisiteRefreshes != 0 ||
 				firstReceipt.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 || firstReceipt.Facts.Resources.ValidationScratch == nil ||
-				firstReceipt.Facts.Resources.ValidationScratch.Revision != committedScratch.Revision || len(firstReceipt.OperationReceipts) != 1 ||
-				firstReceipt.OperationReceipts[0].OperationID != "git-repo-init" {
+				firstReceipt.Facts.Resources.ValidationScratch.Revision != committedScratch.Revision || len(firstReceipt.OperationReceipts) != 3 {
 				t.Fatalf("external receipt did not establish the mixed-owner boundary: %+v", firstReceipt)
 			}
 			if err := os.RemoveAll(committedScratch.Reference); err != nil {
@@ -6505,7 +6501,7 @@ func TestRuntimeV2FileBackedMixedOwnerReceiptThenLocalScratchStaleCrashRestart(t
 				t.Fatalf("before-CAS mixed stale leaked local invalidation: %+v", crashed.RuntimeState)
 			}
 			if len(crashed.RuntimeState.CandidateRequestSessions) != 1 || len(crashed.RuntimeState.CandidateAttempts) != 1 || crashed.RuntimeState.ActiveDispatch != nil ||
-				len(crashed.RuntimeState.GovernanceRequests) != 0 || len(crashed.RuntimeState.OperationReceipts) != 1 {
+				len(crashed.RuntimeState.GovernanceRequests) != 0 || len(crashed.RuntimeState.OperationReceipts) != 3 {
 				t.Fatalf("mixed stale replayed a candidate, dispatch, ticket, or operation: %+v", crashed.RuntimeState)
 			}
 			stopProcess(second)
@@ -6534,7 +6530,7 @@ func TestRuntimeV2FileBackedMixedOwnerReceiptThenLocalScratchStaleCrashRestart(t
 				resumed.Facts.Resources.ValidationScratch.Revision == committedScratch.Revision || resumed.Facts.Recovery.PrerequisiteRefreshes != 1 ||
 				resumed.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 || len(resumed.Facts.Prerequisites.Pending) != 0 ||
 				len(resumed.CandidateRequestSessions) != 1 || len(resumed.CandidateAttempts) != 1 || resumed.ActiveDispatch != nil ||
-				len(resumed.GovernanceRequests) != 0 || len(resumed.OperationReceipts) != 1 || resumed.OperationReceipts[0].OperationID != "git-repo-init" {
+				len(resumed.GovernanceRequests) != 0 || len(resumed.OperationReceipts) != 3 {
 				t.Fatalf("mixed-owner restart did not converge only prerequisite facts: %+v", resumed)
 			}
 			if info, statErr := os.Stat(resumed.Facts.Resources.ValidationScratch.Reference); statErr != nil || !info.IsDir() {

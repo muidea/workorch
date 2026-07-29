@@ -183,19 +183,28 @@ func (m *Biz) driveRuntimeV2Decision(ctx context.Context, aggregate runtimev2.Ru
 		// provider candidate; persist the deterministic cleanup and let the
 		// outer drive acquire the current owner fact on the next transition.
 		if report := runtimev2.InspectRuntimeAuthorityInvariants(aggregate); len(report.Violations) != 0 {
-			return m.bizPtr.ReconcileRuntimeV2AuthorityBeforeCandidate(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+			updated, err := m.submitRuntimeV2InternalEvent(ctx, runtimev2.RuntimeInternalEvent{
+				Kind: runtimev2.RuntimeInternalEventReconcileAuthority, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+			})
+			return updated.Aggregate, err
 		}
 		stale, staleErr := InspectValidationScratchPrerequisite(aggregate.Facts)
 		if staleErr != nil {
 			return runtimev2.RuntimeAggregate{}, staleErr
 		}
 		if stale != nil {
-			return m.bizPtr.InvalidateRuntimeV2PrerequisitesForReadOnlyStale(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, *stale)
+			updated, err := m.submitRuntimeV2InternalEvent(ctx, runtimev2.RuntimeInternalEvent{
+				Kind: runtimev2.RuntimeInternalEventPrerequisitesReadOnlyStaleObserved, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, Stale: stale,
+			})
+			return updated.Aggregate, err
 		}
 		if feasibility, feasibilityErr := runtimeV2FeasibilityFact(aggregate); feasibilityErr != nil {
 			return runtimev2.RuntimeAggregate{}, feasibilityErr
 		} else if feasibility != nil {
-			return m.bizPtr.RecordRuntimeV2FeasibilityFact(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, *feasibility)
+			updated, err := m.submitRuntimeV2InternalEvent(ctx, runtimev2.RuntimeInternalEvent{
+				Kind: runtimev2.RuntimeInternalEventFeasibilityObserved, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, FeasibilityFact: feasibility,
+			})
+			return updated.Aggregate, err
 		}
 		aggregate, err = m.requestAndSealRuntimeV2CandidateWithRetry(ctx, aggregate, stablePrefixHash)
 		if err != nil {
@@ -209,7 +218,10 @@ func (m *Biz) driveRuntimeV2Decision(ctx context.Context, aggregate runtimev2.Ru
 		return m.prepareRuntimeV2GovernanceRequest(ctx, aggregate)
 	}
 	if aggregate.ActiveDispatch.Candidate.Assessment != nil {
-		return m.bizPtr.CommitRuntimeV2Assessment(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+		updated, err := m.submitRuntimeV2InternalEvent(ctx, runtimev2.RuntimeInternalEvent{
+			Kind: runtimev2.RuntimeInternalEventAssessmentObserved, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		})
+		return updated.Aggregate, err
 	}
 	return m.executeRuntimeV2ActiveDispatch(ctx, aggregate)
 }

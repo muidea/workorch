@@ -184,6 +184,14 @@ func NewProbeRuntimeOperationFeasibilityResult(command ProbeRuntimeOperationFeas
 	if !feasible && failure == nil && stale == nil && prerequisiteRequest == nil {
 		return ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("runtime operation feasibility result must be feasible, stale, or infeasible")
 	}
+	if failure != nil {
+		// This constructor is invoked by the capability owner's event handler.
+		// Reject new or cross-owner code strings here, before the fact crosses
+		// the EventHub boundary and can reach the Runtime aggregate.
+		if _, err := runtimecontract.RuntimeOwnerFeasibilityCategoryFor(command.Admissibility.OwnerModuleID, failure.Code); err != nil {
+			return ProbeRuntimeOperationFeasibilityResult{}, err
+		}
+	}
 	// Capability identity on the outer observation is the inventory acquisition
 	// binding the owner validated against. A mismatched command binding is an
 	// owner-local stale/infeasible signal and must not rewrite this identity.

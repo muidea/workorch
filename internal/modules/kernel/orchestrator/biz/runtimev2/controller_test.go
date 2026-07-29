@@ -74,6 +74,65 @@ func TestRuntimeControllerInitializeRunsPreflightReduceAndPersistOnce(t *testing
 	}
 }
 
+func TestRuntimeControllerApplyInternalEventPersistsOwnerFactOnce(t *testing.T) {
+	ctx := context.Background()
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialized, err := controller.Initialize(ctx, controllerFacts(), controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeRevision, beforeSaves := initialized.StateRevision, repository.saves
+	fact := runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassRuntimeContractMisalignment,
+		Code:  "internal-event-regression", Signature: "internal-event-regression", Message: "owner-local test fact",
+	}
+	committed, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventFailureObserved, WorkspaceID: initialized.Facts.WorkspaceID, RunID: initialized.Facts.RunID, FailureFact: &fact,
+	})
+	if err != nil {
+		t.Fatalf("ApplyInternalEvent: %v", err)
+	}
+	if committed.Aggregate.StateRevision != beforeRevision+1 || repository.saves != beforeSaves+1 {
+		t.Fatalf("internal event did not perform exactly one transition: aggregate=%+v saves=%d before=%d", committed.Aggregate, repository.saves, beforeSaves)
+	}
+	if committed.Aggregate.Facts.Failure == nil || committed.Aggregate.Facts.Failure.Code != fact.Code {
+		t.Fatalf("owner fact was not persisted through internal event: %+v", committed.Aggregate.Facts.Failure)
+	}
+	duplicate, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventFailureObserved, WorkspaceID: initialized.Facts.WorkspaceID, RunID: initialized.Facts.RunID, FailureFact: &fact,
+	})
+	if err != nil {
+		t.Fatalf("duplicate terminal internal event: %v", err)
+	}
+	if duplicate.Aggregate.StateRevision != committed.Aggregate.StateRevision || repository.saves != beforeSaves+1 {
+		t.Fatalf("duplicate terminal fact rewrote aggregate: aggregate=%+v saves=%d", duplicate.Aggregate, repository.saves)
+	}
+}
+
+func TestRuntimeControllerOwnerValidationRecipeExhaustionIsStableTypedTerminal(t *testing.T) {
+	facts := controllerFacts()
+	facts.Failure = &runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassNoProgressExhausted,
+		Code:  "validation_recipe_exhausted", Signature: "validation-recipe-exhausted/test", Message: "sealed validation recipe is unavailable",
+	}
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aggregate.Decision.Action != runtimecontract.RuntimeActionFail || aggregate.Decision.Terminal == nil || aggregate.Decision.Terminal.Code != "validation_recipe_exhausted" {
+		t.Fatalf("validation recipe exhaustion did not become its typed terminal: %+v", aggregate.Decision)
+	}
+}
+
 func TestRuntimeControllerReconcileMissingSealedProviderCeilingReturnsToPrerequisiteWithoutCandidateBudget(t *testing.T) {
 	ctx := context.Background()
 	aggregate := stateChangeAggregate(t)
@@ -1122,7 +1181,7 @@ func TestRuntimeControllerInternalCandidateFailureIsImmediatelyTerminal(t *testi
 	}
 }
 
-func TestFailInfeasibleValidationCandidateRoutesToSealedStateChangeRepair(t *testing.T) {
+func TestFailInfeasibleValidationCandidateDoesNotFabricateStateChangeRepair(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, err := NewRuntimeController(repository)
 	if err != nil {
@@ -1134,10 +1193,6 @@ func TestFailInfeasibleValidationCandidateRoutesToSealedStateChangeRepair(t *tes
 		StateChangeKinds: []string{runtimecontract.StepKindFileWrite},
 		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 	}
-	facts.Activation.ExecutionContract.ValidationPolicies = []runtimecontract.RuntimeValidationPolicy{{
-		ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
-		ValidationFailureImpliesStateChange: true,
-	}}
 	initialized, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1148,33 +1203,24 @@ func TestFailInfeasibleValidationCandidateRoutesToSealedStateChangeRepair(t *tes
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	repaired, err := controller.FailCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
-		Class: runtimecontract.RuntimeCandidateFailureClassInfeasible, Code: "owner_target_missing", Signature: "owner/target/missing", Reason: "validation target is unavailable",
+	continued, err := controller.FailCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid", Signature: "owner/target/missing", Reason: "validation target is unavailable",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repaired.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || repaired.Decision.RequiredOutput.Kind != runtimecontract.RequiredOutputKindStateChange {
-		t.Fatalf("infeasible validation did not route to state-change repair: %+v", repaired.Decision)
+	if continued.Decision.Action != runtimecontract.RuntimeActionProduceValidation || continued.Decision.RequiredOutput.Kind != runtimecontract.RequiredOutputKindValidation {
+		t.Fatalf("infeasible validation fabricated state-change repair: %+v", continued.Decision)
 	}
-	if repaired.Facts.Failure == nil || repaired.Facts.Failure.Class != runtimecontract.FailureClassCandidateInfeasible || repaired.Facts.Failure.Code != "owner_target_missing" {
-		t.Fatalf("repair failure fact = %+v", repaired.Facts.Failure)
+	if continued.Facts.Failure != nil || continued.Facts.Repair.RepairAttempts != 0 || continued.Facts.Repair.ActiveGap != nil {
+		t.Fatalf("candidate infeasibility created repair authority: %+v", continued.Facts)
 	}
-	if repaired.Facts.Repair.RepairAttempts != 1 || repaired.Facts.Repair.ActiveGap == nil || repaired.Facts.Repair.LastCycleID == "" {
-		t.Fatalf("candidate infeasible did not start repair cycle: %+v", repaired.Facts.Repair)
-	}
-	if got := repaired.Facts.Repair.ActiveGap.MissingEvidenceKinds; len(got) != 1 || got[0] != runtimecontract.EvidenceKindValidation {
-		t.Fatalf("candidate infeasible gap evidence = %v", got)
-	}
-	if repaired.Facts.Repair.ActiveGap.FailureSignature != "owner/target/missing" || len(repaired.Facts.Repair.SignatureCounts) != 1 || repaired.Facts.Repair.SignatureCounts[0].Count != 1 {
-		t.Fatalf("candidate infeasible gap signature ledger = %+v", repaired.Facts.Repair)
-	}
-	if len(repaired.CandidateAttempts) != 1 || repaired.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed {
-		t.Fatalf("original validation attempt was not retained as a failed admission record: %+v", repaired.CandidateAttempts)
+	if len(continued.CandidateAttempts) != 1 || continued.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed {
+		t.Fatalf("validation candidate failure was not retained: %+v", continued.CandidateAttempts)
 	}
 }
 
-func TestFailInfeasibleValidationCandidateExhaustsSameFocusRepairBudget(t *testing.T) {
+func TestFailInfeasibleValidationCandidateDoesNotConsumeRepairBudget(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, err := NewRuntimeController(repository)
 	if err != nil {
@@ -1190,24 +1236,20 @@ func TestFailInfeasibleValidationCandidateExhaustsSameFocusRepairBudget(t *testi
 		MaxRepairAttemptsPerFocus: 1, MaxValidationOnlyRetriesPerFocus: 1,
 		MaxAcceptanceSliceWorkItems: 1, MaxFocuses: 1, MaxCandidateContextItems: 1,
 	}
-	facts.Activation.ExecutionContract.ValidationPolicies = []runtimecontract.RuntimeValidationPolicy{{
-		ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
-		ValidationFailureImpliesStateChange: true,
-	}}
 	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	terminal, err := controller.FailCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
-		Class: runtimecontract.RuntimeCandidateFailureClassInfeasible, Code: "owner_target_missing", Signature: "owner/target/missing", Reason: "validation target is unavailable",
+	continued, err := controller.FailCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid", Signature: "owner/target/missing", Reason: "validation target is unavailable",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if terminal.Facts.Repair.RepairAttempts != 1 || terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "no_progress_exhausted" {
-		t.Fatalf("candidate infeasible repair budget did not terminal atomically: %+v", terminal)
+	if continued.Facts.Repair.RepairAttempts != 0 || continued.Decision.Action != runtimecontract.RuntimeActionProduceValidation {
+		t.Fatalf("candidate infeasible consumed repair budget: %+v", continued)
 	}
 }
 
@@ -1223,10 +1265,6 @@ func TestFailInfeasibleValidationCandidateKeepsValidationWhenPolicyAllowsAlterna
 		StateChangeKinds: []string{runtimecontract.StepKindFileWrite},
 		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 	}
-	facts.Activation.ExecutionContract.ValidationPolicies = []runtimecontract.RuntimeValidationPolicy{{
-		ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
-		ValidationFailureImpliesStateChange: false,
-	}}
 	initialized, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1238,7 +1276,7 @@ func TestFailInfeasibleValidationCandidateKeepsValidationWhenPolicyAllowsAlterna
 		t.Fatal(err)
 	}
 	continued, err := controller.FailCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
-		Class: runtimecontract.RuntimeCandidateFailureClassInfeasible, Code: "owner_target_missing", Reason: "validation target is unavailable",
+		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid", Reason: "validation target is unavailable",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1260,11 +1298,6 @@ func TestFailInfeasibleValidationCommandDiagnosticKeepsSameContractRetry(t *test
 		StateChangeKinds: []string{runtimecontract.StepKindFileWrite},
 		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 	}
-	facts.Activation.ExecutionContract.ValidationPolicies = []runtimecontract.RuntimeValidationPolicy{{
-		ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
-		ValidationFailureImpliesStateChange: true,
-		ImplementationGapDiagnosticClasses:  []string{runtimecontract.ValidationDiagnosticBuildFailed},
-	}}
 	initialized, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1273,7 +1306,7 @@ func TestFailInfeasibleValidationCommandDiagnosticKeepsSameContractRetry(t *test
 		t.Fatal(err)
 	}
 	continued, err := controller.FailCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
-		Class: runtimecontract.RuntimeCandidateFailureClassInfeasible, Code: "validation_target_missing", Signature: "validation-target-missing", Reason: "package target is unavailable",
+		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid", Signature: "validation-target-missing", Reason: "package target is unavailable",
 		ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{
 			SchemaVersion: runtimecontract.ValidationFailureDiagnosticSchemaVersion,
 			Class:         runtimecontract.ValidationDiagnosticCommandInvalid, RecommendedEvidenceTargetType: runtimecontract.ValidationEvidenceTargetCommandContract,
@@ -1290,7 +1323,7 @@ func TestFailInfeasibleValidationCommandDiagnosticKeepsSameContractRetry(t *test
 	}
 }
 
-func TestFailInfeasibleValidationCommandDiagnosticRoutesToDeclaredImplementationRepair(t *testing.T) {
+func TestFailInfeasibleValidationCommandDiagnosticDoesNotCreateImplementationRepair(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, err := NewRuntimeController(repository)
 	if err != nil {
@@ -1302,22 +1335,14 @@ func TestFailInfeasibleValidationCommandDiagnosticRoutesToDeclaredImplementation
 		StateChangeKinds: []string{runtimecontract.StepKindFileWrite},
 		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 	}
-	// This is profile data, not a core command-name rule: a profile may state
-	// that a rejected validation command proves the required implementation is
-	// not yet present and therefore needs a durable repair before re-validation.
-	facts.Activation.ExecutionContract.ValidationPolicies = []runtimecontract.RuntimeValidationPolicy{{
-		ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
-		ValidationFailureImpliesStateChange: true,
-		ImplementationGapDiagnosticClasses:  []string{runtimecontract.ValidationDiagnosticCommandInvalid},
-	}}
 	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	repaired, err := controller.FailCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
-		Class: runtimecontract.RuntimeCandidateFailureClassInfeasible, Code: "validation_target_missing", Signature: "validation-target-missing", Reason: "declared validation command is unavailable",
+	continued, err := controller.FailCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid", Signature: "validation-target-missing", Reason: "declared validation command is unavailable",
 		ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{
 			SchemaVersion: runtimecontract.ValidationFailureDiagnosticSchemaVersion,
 			Class:         runtimecontract.ValidationDiagnosticCommandInvalid, RecommendedEvidenceTargetType: runtimecontract.ValidationEvidenceTargetCommandContract,
@@ -1326,8 +1351,8 @@ func TestFailInfeasibleValidationCommandDiagnosticRoutesToDeclaredImplementation
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repaired.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || repaired.Facts.Failure == nil || repaired.Facts.Repair.RepairAttempts != 1 {
-		t.Fatalf("declared command diagnostic did not produce same-focus implementation repair: %+v", repaired)
+	if continued.Decision.Action != runtimecontract.RuntimeActionProduceValidation || continued.Facts.Failure != nil || continued.Facts.Repair.RepairAttempts != 0 {
+		t.Fatalf("validation command diagnostic created implementation repair: %+v", continued)
 	}
 }
 

@@ -622,7 +622,7 @@ func (c *RuntimeController) RecordCandidateFeasibility(ctx context.Context, work
 		if strings.TrimSpace(persisted.OperationID) != strings.TrimSpace(record.OperationID) {
 			continue
 		}
-		if persisted.AdmissibilitySnapshotID != record.AdmissibilitySnapshotID || persisted.AcquisitionBinding != record.AcquisitionBinding || persisted.Feasible != record.Feasible || !reflect.DeepEqual(persisted.ReplayProof, record.ReplayProof) || !reflect.DeepEqual(persisted.Failure, record.Failure) || !reflect.DeepEqual(persisted.Stale, record.Stale) || !reflect.DeepEqual(persisted.PrerequisiteRequest, record.PrerequisiteRequest) {
+		if persisted.AdmissibilitySnapshotID != record.AdmissibilitySnapshotID || persisted.AcquisitionBinding != record.AcquisitionBinding || persisted.Feasible != record.Feasible || !reflect.DeepEqual(persisted.ReplayProof, record.ReplayProof) || !reflect.DeepEqual(persisted.Observation, record.Observation) || !reflect.DeepEqual(persisted.Failure, record.Failure) || !reflect.DeepEqual(persisted.Stale, record.Stale) || !reflect.DeepEqual(persisted.PrerequisiteRequest, record.PrerequisiteRequest) {
 			return RuntimeAggregate{}, fmt.Errorf("%w: candidate feasibility result for operation %q changed", common.ErrConflict, record.OperationID)
 		}
 		return aggregate, nil
@@ -633,6 +633,10 @@ func (c *RuntimeController) RecordCandidateFeasibility(ctx context.Context, work
 		failure := *record.Failure
 		failure.TargetRefs = append([]string(nil), record.Failure.TargetRefs...)
 		copyRecord.Failure = &failure
+	}
+	if record.Observation != nil {
+		observation := record.Observation.Clone()
+		copyRecord.Observation = &observation
 	}
 	if record.Stale != nil {
 		stale := *record.Stale
@@ -995,11 +999,9 @@ func closeCandidateAttempt(aggregate *RuntimeAggregate, idx, attempt int, failur
 	if aggregate == nil || idx < 0 || idx >= len(aggregate.CandidateAttempts) || failure.Class == "" || strings.TrimSpace(failure.Reason) == "" {
 		return common.ErrInvalidArgument
 	}
-	diagnosticClass := ""
 	if failure.ValidationDiagnostic != nil {
 		diagnostic := failure.ValidationDiagnostic.Clone()
 		failure.ValidationDiagnostic = &diagnostic
-		diagnosticClass = diagnostic.Class
 	}
 	if failure.Diagnostic != nil {
 		diagnostic := failure.Diagnostic.Normalized()
@@ -1018,8 +1020,6 @@ func closeCandidateAttempt(aggregate *RuntimeAggregate, idx, attempt int, failur
 			failure.Code = "candidate_schema_invalid"
 		case runtimecontract.RuntimeCandidateFailureClassContract:
 			failure.Code = "candidate_contract_invalid"
-		case runtimecontract.RuntimeCandidateFailureClassInfeasible:
-			failure.Code = "operation_target_not_regular"
 		case runtimecontract.RuntimeCandidateFailureClassInternal:
 			failure.Code = "runtime_contract_defect"
 		default:
@@ -1052,52 +1052,11 @@ func closeCandidateAttempt(aggregate *RuntimeAggregate, idx, attempt int, failur
 			_ = originalClass
 		}
 	}
-	needsInfeasibleRepair := failure.Class == runtimecontract.RuntimeCandidateFailureClassInfeasible &&
-		aggregate.Decision.Action == runtimecontract.RuntimeActionProduceValidation &&
-		runtimecontract.RuntimeValidationFailureRequiresStateChange(aggregate.Facts.Activation.ExecutionContract.ValidationPolicies, runtimecontract.EvidenceKindValidation, diagnosticClass)
-	if needsInfeasibleRepair {
-		gap := runtimecontract.RuntimeAssessmentGap{
-			CoverageWorkItemIDs:  append([]common.CoverageWorkItemID(nil), aggregate.Facts.Focus.CoverageWorkItemIDs...),
-			MissingEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
-			TargetRefs:           append([]string(nil), failure.TargetRefs...),
-			Reason:               failure.Reason,
-			FailureClass:         runtimecontract.FailureClassCandidateInfeasible,
-			FailureCode:          failure.Code,
-			FailureSignature:     failure.Signature,
-		}
-		if len(gap.TargetRefs) == 0 {
-			gap.TargetRefs = append([]string(nil), aggregate.Facts.Focus.TargetRefs...)
-		}
-		gap = gap.Normalized()
-		if strings.TrimSpace(failure.Signature) == "" {
-			failure.Signature = runtimecontract.StableAssessmentFailureSignature(aggregate.Facts.Focus.ID, runtimecontract.AssessmentDispositionRepairableGap, &gap)
-			gap.FailureSignature = failure.Signature
-		}
-		previousCount := repairFailureSignatureCount(aggregate.Facts.Repair, failure.Signature)
-		record := aggregate.CandidateAttempts[idx]
-		sourceFactID := fmt.Sprintf("candidate/%s/%d", strings.TrimSpace(record.AuthorityContractID), attempt)
-		cycleID := runtimecontract.StableRepairCycleID(string(aggregate.Facts.RunID), aggregate.Facts.Focus.ID, failure.Signature, sourceFactID)
-		ledger, _, err := beginRepairCycle(aggregate.Facts.Repair, aggregate.Facts.Focus.ID, aggregate.Facts.Focus.SliceID, cycleID, failure.Signature, aggregate.Facts.ConvergencePolicy)
-		if err != nil {
-			return err
-		}
-		ledger.ActiveGap = &gap
-		if previousCount > 0 {
-			ledger = noteRepairNoProgress(ledger)
-		}
-		aggregate.Facts.Repair = ledger
-	}
 	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateFailed
 	failureCopy := failure
 	aggregate.CandidateAttempts[idx].Failure = &failureCopy
 	needsReduce := false
-	if needsInfeasibleRepair {
-		aggregate.Facts.Failure = &runtimecontract.FailureFact{
-			Class: runtimecontract.FailureClassCandidateInfeasible, Code: failure.Code, Signature: failure.Signature,
-			Message: failure.Reason, TargetRefs: append([]string(nil), failure.TargetRefs...), ValidationDiagnostic: failure.ValidationDiagnostic,
-		}
-		needsReduce = true
-	} else if failure.Class == runtimecontract.RuntimeCandidateFailureClassInternal {
+	if failure.Class == runtimecontract.RuntimeCandidateFailureClassInternal {
 		aggregate.Facts.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeContractMisalignment, Signature: "candidate-internal", Message: failure.Reason}
 		needsReduce = true
 	} else if attempt == 1 {
@@ -1108,10 +1067,9 @@ func closeCandidateAttempt(aggregate *RuntimeAggregate, idx, attempt int, failur
 		needsReduce = true
 	} else if attempt == 0 && runtimecontract.RuntimeCandidateFailureIsRejectedFinal(&failure) {
 		// N6: explicit rejected_final attempt 0 seals terminal in the same CAS.
-		// Non-matrix / incomplete-correctable failures still rely on the attempt-1
-		// BeginCandidateAttempt + mainline fences so same-contract repair paths
-		// (for example validation infeasible without state-change policy) are not
-		// collapsed into an immediate terminal here.
+		// Attempt 0 may still have one sealed correction.  A validation candidate
+		// infeasibility never fabricates state-change repair authority; exhaustion
+		// is terminalized by the normal candidate pipeline.
 		code := runtimecontract.RuntimeCandidateRejectionTerminalCode(failure.Code)
 		if code == "" {
 			code = "runtime_contract_defect"
@@ -1372,7 +1330,16 @@ func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID co
 		aggregate.Facts.Repair = ledger
 	}
 	if assessment.Disposition == runtimecontract.AssessmentDispositionSatisfied {
-		aggregate.Facts.Repair = noteRepairProgress(aggregate.Facts.Repair, aggregate.Facts.EvidenceRevision)
+		if hasStateChangeNoOpWithoutProvenance(aggregate.Facts) {
+			// A satisfied assessment can establish that the observed current state
+			// meets this focus, but it must not erase the distinct no-op provenance
+			// fact before the reducer consumes it. Retaining the exact rejected
+			// operation shape makes the completion branch restart-safe and prevents
+			// a later raw missing-state-change fallback from manufacturing a delta.
+			aggregate.Facts.Repair = noteRepairProgressPreservingNoOpProvenance(aggregate.Facts.Repair, aggregate.Facts.EvidenceRevision)
+		} else {
+			aggregate.Facts.Repair = noteRepairProgress(aggregate.Facts.Repair, aggregate.Facts.EvidenceRevision)
+		}
 	}
 	aggregate.EvidenceSequence++
 	aggregate.Facts.EvidenceRevision = nextEvidenceRevision(aggregate.EvidenceSequence)

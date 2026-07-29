@@ -282,6 +282,35 @@ EOF
   exit 1
 fi
 
+# RUNTIME-SMO SMO-2: mainline and inbound adapters may translate external
+# typed facts into owner-local events, but they must not choose a controller
+# transition facade themselves.  The one Biz entry is
+# submitRuntimeV2InternalEvent -> ApplyRuntimeV2InternalEvent ->
+# RuntimeController.ApplyInternalEvent -> RuntimeTransitionCoordinator.Commit.
+if [[ ! -f "$runtime_transition_root/internal_event.go" ]] ||
+   ! grep -q -E -- 'func \(c \*RuntimeController\) ApplyInternalEvent\(' "$runtime_transition_root/internal_event.go" ||
+   ! grep -q -E -- 'func \(m \*Biz\) submitRuntimeV2InternalEvent\(' "internal/modules/kernel/orchestrator/biz/runtime_v2_internal_events.go"; then
+  echo "boundary contract violation: Runtime V2 internal-event transition coordinator is missing" >&2
+  exit 1
+fi
+matches="$(
+  find internal/modules/kernel/orchestrator/biz -maxdepth 1 -type f -name '*.go' ! -name '*_test.go' ! -name 'runtime_orchestrator.go' -print0 |
+    xargs -0 -r grep -n -E -- '\.bizPtr\.(CommitRuntimeV2|RecordRuntimeV2|InvalidateRuntimeV2|AdmitRuntimeV2|FailRuntimeV2|SealRuntimeV2|ExecuteRuntimeV2|BindRuntimeV2|ConsumeRuntimeV2|EnsureRuntimeV2|MarkRuntimeV2|TerminateRuntimeV2|BeginRuntimeV2|RejectRuntimeV2)' || true
+)"
+if [[ -n "$matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: Orchestrator mainline/adapter bypasses the
+owner-local Runtime V2 internal-event coordinator.
+
+$matches
+
+Translate the typed owner result into RuntimeInternalEvent and submit it via
+Biz.submitRuntimeV2InternalEvent. Do not select a controller transition facade
+from drive, mainline, receipt, governance or delivery adapters.
+EOF
+  exit 1
+fi
+
 # RUNTIME-SMO: action/effect semantics have exactly one pure contract source.
 # Every production consumer must call that source instead of reconstructing a
 # local action switch or accepted-effect table. Keep the paths explicit so a
@@ -469,6 +498,10 @@ deprecated_workspace_decision_endpoint_pattern='/api/v1/workorch/workspaces/[^[:
 readmodel_presenter_import_pattern='internal/modules/application/workorchd/pkg/presenter'
 orchestrator_patch_side_effect_pattern='PatchRuntimeAdapter|NewPatchRuntimeAdapter|applyWorkspacePatch|applyWorkspaceFileWrite|applyWorkspaceTextReplace|applyWorkspaceUnifiedDiff'
 orchestrator_repair_target_snapshot_read_pattern='os\.ReadFile|ioutil\.ReadFile'
+# The assessment gate is a structural verifier.  Lexical comparison between a
+# Goal/DoD claim and summaries, operation IDs, targets, test names or output
+# makes coverage language-dependent and creates a second semantic evaluator.
+assessment_lexical_alignment_pattern='runtimeEvidenceAlignsWithClaim|runtimeCoverageClaimText|runtimeClaimToken|runtimeNumericToken|unicode\.(IsLetter|IsDigit|IsNumber)|strings\.Fields'
 
 event_contract_violations=()
 while IFS= read -r topics_file; do
@@ -541,6 +574,21 @@ $matches
 Target snapshot content/hash acquisition belongs to blocks/file via runtime
 managed file/read. Orchestrator may request acquisition and consume successful
 block output, but must not materialize workspace file content itself.
+EOF
+  exit 1
+fi
+
+matches="$(source_matches "$assessment_lexical_alignment_pattern" internal/modules/kernel/orchestrator/biz/runtimev2/assessment_evidence_gate.go)"
+if [[ -n "$matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: assessment evidence gate uses lexical claim alignment.
+
+$matches
+
+Assessment coverage is decided from accepted current-run evidence references,
+coverage bindings, sealed operation/effect contracts and owner observations.
+Goal/DoD or check-name text similarity belongs only to the provider assessment,
+not to the Orchestrator reducer.
 EOF
   exit 1
 fi
@@ -637,6 +685,30 @@ Use /api/v1/workorch/decisions?workspaceId=... for list operations and
 /api/v1/workorch/decisions/{ticketId}?workspaceId=... or
 /api/v1/workorch/decisions/{ticketId}/resolve?workspaceId=... for scoped
 decision detail and resolution operations.
+EOF
+  exit 1
+fi
+
+# C4 is a provider-facing diagnostic projection, not a Runtime aggregate
+# mirror. Keep its struct limited to the LLM owner's narrow provider-safe
+# values so owner actions, recovery continuation, raw facts and repair hints
+# cannot reach a future candidate request by accident.
+c4_projection_file="internal/modules/blocks/llm/biz/runtime_candidate_provider.go"
+matches="$(
+  sed -n '/^type runtimeCandidateExecutionTailProjection struct {/,/^}/p' "$c4_projection_file" |
+    grep -n -E -- 'RuntimeAction|RuntimeRepairHint|RuntimeContinuationContext|FailureFact|EvidenceFact|RuntimeAssessmentFact|RuntimeRejectedOperationShape' || true
+)"
+if [[ -n "$matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: provider-facing C4 execution tail leaks a raw
+Runtime fact, action/recovery value, or owner retry guidance.
+
+$matches
+
+C4 may contain only its dedicated provider-safe projections, the sealed
+CandidateRejection correction projection, and an output-continuation suffix.
+Keep Runtime actions, repair hints, continuation/governance history, raw
+failure messages and complete evidence/assessment facts with their owners.
 EOF
   exit 1
 fi

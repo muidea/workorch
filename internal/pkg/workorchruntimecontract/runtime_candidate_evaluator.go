@@ -93,8 +93,7 @@ func RuntimeCandidateRejectionCodeDisposition(code string) (RuntimeCandidateCorr
 		"candidate_replays_no_progress_shape",
 		"candidate_action_evidence_mismatch",
 		"candidate_target_outside_grounding",
-		"candidate_creation_scope_missing_file_target",
-		"operation_target_not_regular":
+		"candidate_creation_scope_missing_file_target":
 		return RuntimeCandidateCorrectionCorrectableOnce, true
 	case "candidate_replays_rejected_candidate_shape",
 		"candidate_retry_exhausted",

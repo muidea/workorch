@@ -23,19 +23,23 @@ func TestAssessmentEvidenceGateRejectsManagedValidationWithoutPassedChecks(t *te
 	assertAssessmentEvidenceGap(t, got, "does not show executed behavior")
 }
 
-func TestAssessmentEvidenceGateRejectsGenericExistenceCheckForCompleteImplementationClaim(t *testing.T) {
+func TestAssessmentEvidenceGateDoesNotUseClaimTextToRejectStructuredEvidence(t *testing.T) {
 	aggregate, assessment := assessmentGateFixture("complete LSP tool implementation", "TestLSPToolExistence")
 	got := applyAssessmentEvidenceGate(aggregate, assessment)
-	assertAssessmentEvidenceGap(t, got, "not aligned")
+	if got.Disposition != runtimecontract.AssessmentDispositionSatisfied || !got.Items[0].Satisfied || got.Gap != nil {
+		t.Fatalf("structured evidence was rejected by claim text: %+v", got)
+	}
 }
 
-func TestAssessmentEvidenceGateRequiresNumericClaimSignal(t *testing.T) {
+func TestAssessmentEvidenceGateDoesNotUseNumericClaimText(t *testing.T) {
 	aggregate, assessment := assessmentGateFixture("request latency stays under 50ms", "TestRequestLatency")
 	got := applyAssessmentEvidenceGate(aggregate, assessment)
-	assertAssessmentEvidenceGap(t, got, "not aligned")
+	if got.Disposition != runtimecontract.AssessmentDispositionSatisfied || !got.Items[0].Satisfied {
+		t.Fatalf("numeric claim text altered structural evidence decision: %+v", got)
+	}
 }
 
-func TestAssessmentEvidenceGateAcceptsAlignedExecutedNumericEvidence(t *testing.T) {
+func TestAssessmentEvidenceGateAcceptsStructuredExecutedEvidenceRegardlessOfText(t *testing.T) {
 	aggregate, assessment := assessmentGateFixture("request latency stays under 50ms", "TestRequestLatencyUnder50ms")
 	got := applyAssessmentEvidenceGate(aggregate, assessment)
 	if got.Disposition != runtimecontract.AssessmentDispositionSatisfied || !got.Items[0].Satisfied || got.Gap != nil {
@@ -43,11 +47,11 @@ func TestAssessmentEvidenceGateAcceptsAlignedExecutedNumericEvidence(t *testing.
 	}
 }
 
-func TestAssessmentEvidenceGateSkipsAlignmentForShortLowInformationTitle(t *testing.T) {
+func TestAssessmentEvidenceGateAcceptsChineseClaimWithEnglishCheckByStructure(t *testing.T) {
 	aggregate, assessment := assessmentGateFixture("LSP 工具", "TestToolBehavior")
 	got := applyAssessmentEvidenceGate(aggregate, assessment)
 	if got.Disposition != runtimecontract.AssessmentDispositionSatisfied || !got.Items[0].Satisfied {
-		t.Fatalf("short title should retain the basic evidence gate only: %+v", got)
+		t.Fatalf("cross-language structured evidence was rejected: %+v", got)
 	}
 }
 
@@ -71,20 +75,21 @@ func TestAssessmentEvidenceGatePreservesNeutralBehaviorWhenStrictFlagsAreDisable
 	}
 }
 
-func TestAssessmentEvidenceGateMergesQualityFailureIntoExistingRepairableGap(t *testing.T) {
+func TestAssessmentEvidenceGateMergesStructuralQualityFailureIntoExistingRepairableGap(t *testing.T) {
 	aggregate, assessment := assessmentGateFixture("complete LSP tool implementation", "TestLSPToolExistence")
+	aggregate.Facts.Evidence.Accepted[0].Validation.PassedChecks = nil
 	assessment.Disposition = runtimecontract.AssessmentDispositionRepairableGap
 	assessment.Gap = &runtimecontract.RuntimeAssessmentGap{
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-other"}, TargetRefs: []string{"other.txt"}, Reason: "another gap",
 	}
 	got := applyAssessmentEvidenceGate(aggregate, assessment)
 	if got.Gap == nil || len(got.Gap.CoverageWorkItemIDs) != 2 || got.Gap.TargetRefs[0] != "other.txt" ||
-		!strings.Contains(got.Gap.Reason, "another gap") || !strings.Contains(got.Gap.Reason, "not aligned") {
+		!strings.Contains(got.Gap.Reason, "another gap") || !strings.Contains(got.Gap.Reason, "does not show executed behavior") {
 		t.Fatalf("quality gap did not preserve existing repair context: %+v", got)
 	}
 }
 
-func TestCommitAssessmentPersistsClaimEvidenceGapAndKeepsRunRepairable(t *testing.T) {
+func TestCommitAssessmentAcceptsStructuredClaimEvidenceWithoutTextSimilarity(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
 	facts := validationQualityFacts()
@@ -132,11 +137,10 @@ func TestCommitAssessmentPersistsClaimEvidenceGapAndKeepsRunRepairable(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if progressed.Decision.Action != runtimecontract.RuntimeActionProduceValidation || progressed.Decision.Terminal != nil ||
-		len(progressed.Facts.Assessments) != 1 || progressed.Facts.Assessments[0].Disposition != runtimecontract.AssessmentDispositionRepairableGap ||
-		progressed.Facts.Assessments[0].Gap == nil || progressed.Facts.Assessments[0].Gap.FailureCode != "assessment_evidence_quality_gap" ||
-		progressed.Facts.Coverage[0].State == runtimecontract.RuntimeCoverageItemStateSatisfied {
-		t.Fatalf("claim evidence gap did not remain repairable: %+v", progressed)
+	if progressed.Decision.Action != runtimecontract.RuntimeActionComplete || progressed.Decision.Terminal == nil ||
+		len(progressed.Facts.Assessments) != 1 || progressed.Facts.Assessments[0].Disposition != runtimecontract.AssessmentDispositionSatisfied ||
+		progressed.Facts.Coverage[0].State != runtimecontract.RuntimeCoverageItemStateSatisfied {
+		t.Fatalf("structured claim evidence did not close coverage: %+v", progressed)
 	}
 }
 

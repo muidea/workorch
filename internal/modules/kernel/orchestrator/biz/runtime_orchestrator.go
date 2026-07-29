@@ -30,6 +30,17 @@ func (o *RuntimeOrchestrator) RuntimeV2RepositoryConfigured() bool {
 	return o != nil && o.runtimeV2Controller != nil
 }
 
+// ApplyRuntimeV2InternalEvent is the sole mutation entry point used by the
+// Orchestrator Biz. The event is owner-local (never an EventHub envelope): it
+// is created only after an external typed result has been validated against
+// its workspace/run/causation/sealed authority scope.
+func (o *RuntimeOrchestrator) ApplyRuntimeV2InternalEvent(ctx context.Context, event runtimev2.RuntimeInternalEvent) (runtimev2.RuntimeInternalEventResult, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeInternalEventResult{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.ApplyInternalEvent(ctx, event)
+}
+
 func (o *RuntimeOrchestrator) InitializeRuntimeV2(ctx context.Context, facts runtimemodel.RuntimeFacts, definition runtimemodel.RuntimeDefinitionContext, requirements []runtimev2.RuntimeRequirement) (runtimev2.RuntimeAggregate, error) {
 	if o == nil || o.runtimeV2Controller == nil {
 		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
@@ -199,6 +210,13 @@ func (o *RuntimeOrchestrator) InvalidateRuntimeV2CandidateAttemptForFeasibilityP
 		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	return o.runtimeV2Controller.InvalidateCandidateAttemptForFeasibilityPrerequisite(ctx, workspaceID, runID, attempt, request)
+}
+
+func (o *RuntimeOrchestrator) InvalidateRuntimeV2CandidateAttemptForOwnerInfeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, observation runtimemodel.RuntimeOwnerFeasibilityObservation) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.InvalidateCandidateAttemptForOwnerInfeasibility(ctx, workspaceID, runID, attempt, observation)
 }
 
 func (o *RuntimeOrchestrator) QueryRuntimeV2OperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID, operationID, executionKey string, fence uint64, grant *runtimemodel.RuntimeOperationGovernanceGrant) (runtimemodel.RuntimeOperationReceipt, bool, error) {

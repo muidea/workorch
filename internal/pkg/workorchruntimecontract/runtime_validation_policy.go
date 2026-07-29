@@ -10,21 +10,17 @@ import (
 // at activation. Runtime core consumes only these fields and never interprets
 // template/profile maps directly.
 type RuntimeValidationPolicy struct {
-	ID                                         string
-	Scope                                      string
-	AppliesToEvidenceKinds                     []string
-	ValidationSafetyClass                      string
-	DiscoveryRequired                          bool
-	DiscoverySources                           []string
-	AllowedExecutionModes                      []string
-	ValidationFailureImpliesStateChange        bool
-	ImplementationGapDiagnosticClasses         []string
-	MaxValidationOnlyRetriesPerFocus           int
-	PreferMinimalPatchBeforeRepeatedValidation bool
-	IfNoTargetRoute                            string
-	ValidationScratchRequired                  bool
-	AllowedValidationModes                     []string
-	Notes                                      []string
+	ID                               string
+	Scope                            string
+	AppliesToEvidenceKinds           []string
+	ValidationSafetyClass            string
+	DiscoveryRequired                bool
+	DiscoverySources                 []string
+	AllowedExecutionModes            []string
+	MaxValidationOnlyRetriesPerFocus int
+	ValidationScratchRequired        bool
+	AllowedValidationModes           []string
+	Notes                            []string
 }
 
 // Validation discovery source IDs are neutral contract vocabulary. Profiles
@@ -47,8 +43,6 @@ func NormalizeRuntimeValidationPolicies(values []RuntimeValidationPolicy) []Runt
 		value.ValidationSafetyClass = strings.TrimSpace(value.ValidationSafetyClass)
 		value.DiscoverySources = normalizeStrings(value.DiscoverySources)
 		value.AllowedExecutionModes = normalizeStrings(value.AllowedExecutionModes)
-		value.ImplementationGapDiagnosticClasses = normalizeStrings(value.ImplementationGapDiagnosticClasses)
-		value.IfNoTargetRoute = strings.TrimSpace(value.IfNoTargetRoute)
 		value.AllowedValidationModes = normalizeStrings(value.AllowedValidationModes)
 		value.Notes = normalizeStrings(value.Notes)
 		if value.ID != "" {
@@ -70,8 +64,6 @@ func NormalizeRuntimeValidationPolicies(values []RuntimeValidationPolicy) []Runt
 func ValidateRuntimeValidationPolicies(values []RuntimeValidationPolicy) error {
 	values = NormalizeRuntimeValidationPolicies(values)
 	retryLimits := map[string]int{}
-	failureRoutes := map[string]bool{}
-	failureRouteSet := map[string]struct{}{}
 	for _, value := range values {
 		if value.ID == "" || value.Scope == "" || len(value.AppliesToEvidenceKinds) == 0 {
 			return fmt.Errorf("runtime validation policy requires id, scope and evidence kinds")
@@ -80,11 +72,6 @@ func ValidateRuntimeValidationPolicies(values []RuntimeValidationPolicy) error {
 			return fmt.Errorf("runtime validation policy %q max validation-only retries must be in 0..%d", value.ID, MaxValidationOnlyRetriesPerFocusLimit)
 		}
 		for _, kind := range value.AppliesToEvidenceKinds {
-			if _, ok := failureRouteSet[kind]; ok && failureRoutes[kind] != value.ValidationFailureImpliesStateChange {
-				return fmt.Errorf("runtime validation policies define conflicting failure routes for evidence kind %q", kind)
-			}
-			failureRouteSet[kind] = struct{}{}
-			failureRoutes[kind] = value.ValidationFailureImpliesStateChange
 			if value.MaxValidationOnlyRetriesPerFocus == 0 {
 				continue
 			}
@@ -95,25 +82,6 @@ func ValidateRuntimeValidationPolicies(values []RuntimeValidationPolicy) error {
 		}
 	}
 	return nil
-}
-
-func RuntimeValidationFailureRequiresStateChange(values []RuntimeValidationPolicy, evidenceKind string, diagnosticClasses ...string) bool {
-	evidenceKind = strings.TrimSpace(evidenceKind)
-	diagnosticClass := ""
-	if len(diagnosticClasses) > 0 {
-		diagnosticClass = strings.TrimSpace(diagnosticClasses[0])
-	}
-	for _, value := range NormalizeRuntimeValidationPolicies(values) {
-		if containsStringValue(value.AppliesToEvidenceKinds, evidenceKind) {
-			if diagnosticClass != "" && len(value.ImplementationGapDiagnosticClasses) > 0 {
-				return value.ValidationFailureImpliesStateChange && containsStringValue(value.ImplementationGapDiagnosticClasses, diagnosticClass)
-			}
-			return value.ValidationFailureImpliesStateChange
-		}
-	}
-	// Legacy/no-policy behavior remains conservative: rejected validation must
-	// be followed by state-changing repair before the same validation can recur.
-	return true
 }
 
 func RuntimeValidationRetryLimit(values []RuntimeValidationPolicy, evidenceKind string) (int, bool) {
@@ -152,13 +120,10 @@ func sameRuntimeValidationPolicies(left, right []RuntimeValidationPolicy) bool {
 	for idx := range left {
 		l, r := left[idx], right[idx]
 		if l.ID != r.ID || l.Scope != r.Scope || l.ValidationSafetyClass != r.ValidationSafetyClass ||
-			l.DiscoveryRequired != r.DiscoveryRequired || l.ValidationFailureImpliesStateChange != r.ValidationFailureImpliesStateChange ||
-			l.MaxValidationOnlyRetriesPerFocus != r.MaxValidationOnlyRetriesPerFocus ||
-			l.PreferMinimalPatchBeforeRepeatedValidation != r.PreferMinimalPatchBeforeRepeatedValidation ||
-			l.IfNoTargetRoute != r.IfNoTargetRoute || l.ValidationScratchRequired != r.ValidationScratchRequired ||
+			l.DiscoveryRequired != r.DiscoveryRequired || l.MaxValidationOnlyRetriesPerFocus != r.MaxValidationOnlyRetriesPerFocus ||
+			l.ValidationScratchRequired != r.ValidationScratchRequired ||
 			!sameStrings(l.AppliesToEvidenceKinds, r.AppliesToEvidenceKinds) || !sameStrings(l.DiscoverySources, r.DiscoverySources) ||
 			!sameStrings(l.AllowedExecutionModes, r.AllowedExecutionModes) ||
-			!sameStrings(l.ImplementationGapDiagnosticClasses, r.ImplementationGapDiagnosticClasses) ||
 			!sameStrings(l.AllowedValidationModes, r.AllowedValidationModes) || !sameStrings(l.Notes, r.Notes) {
 			return false
 		}

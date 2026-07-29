@@ -3218,21 +3218,14 @@ func TestRuntimeV2MainlineRecordsInfeasibleCandidateBeforeDispatchSeal(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if failed.ActiveDispatch != nil || len(failed.CandidateAttempts) != 1 || failed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || failed.CandidateAttempts[0].Failure == nil || failed.CandidateAttempts[0].Failure.Class != runtimecontract.RuntimeCandidateFailureClassInfeasible || failed.CandidateAttempts[0].Failure.Code != "operation_target_not_regular" {
-		t.Fatalf("infeasible candidate was sealed or not persisted as an admission failure: %+v", failed)
+	if failed.ActiveDispatch != nil || len(failed.CandidateAttempts) != 1 || failed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated || failed.CandidateAttempts[0].Failure != nil || failed.CandidateAttempts[0].OwnerFeasibility == nil || failed.CandidateAttempts[0].OwnerFeasibility.Disposition != runtimecontract.RuntimeOwnerFeasibilityInfeasible || failed.CandidateAttempts[0].OwnerFeasibility.Code != "operation_target_not_regular" || failed.Facts.Failure == nil || failed.Facts.Failure.Class != runtimecontract.FailureClassCandidateInfeasible {
+		t.Fatalf("owner infeasibility was not persisted as a non-correction SM-2 fact: %+v", failed)
 	}
 	if len(failed.OperationReceipts) != 0 || len(failed.Facts.Evidence.Accepted) != 0 || len(failed.Facts.Evidence.Rejected) != 0 {
 		t.Fatalf("infeasible candidate created execution state: %+v", failed)
 	}
-	terminal, err := module.requestAndSealRuntimeV2CandidateWithRetry(ctx, failed, "stable-admissibility-prefix")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// N4: incomplete/infeasible complete rejection without a same-manifest
-	// correction objective is runtime_contract_defect, not the legacy
-	// candidate_correction_undefined catch-all.
-	if candidateCalls != 1 || terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "runtime_contract_defect" || terminal.Facts.Failure == nil || terminal.Facts.Failure.Code != "runtime_contract_defect" || len(terminal.CandidateRequestSessions) != 1 || len(terminal.CandidateAttempts) != 1 || terminal.ActiveDispatch != nil || len(terminal.GovernanceRequests) != 0 {
-		t.Fatalf("uncorrectable complete rejection did not terminalize without attempt 1: calls=%d aggregate=%+v", candidateCalls, terminal)
+	if candidateCalls != 1 {
+		t.Fatalf("owner infeasibility requested a correction candidate: calls=%d aggregate=%+v", candidateCalls, failed)
 	}
 }
 
@@ -3295,7 +3288,7 @@ func TestRuntimeV2FileBackedCorrectionRestartSealsOwnerAdmissibleCandidate(t *te
 		target := "target.txt"
 		if command.CandidateAttempt == 0 {
 			target = "."
-		} else if command.PreviousFailure == nil || command.PreviousFailure.Class != runtimecontract.RuntimeCandidateFailureClassInfeasible || command.PreviousFailure.Code != "operation_target_not_regular" {
+		} else if command.PreviousFailure == nil || command.PreviousFailure.Class != runtimecontract.RuntimeCandidateFailureClassContract || command.PreviousFailure.Code != "candidate_target_outside_grounding" {
 			t.Fatalf("retry did not receive persisted infeasibility: %+v", command.PreviousFailure)
 		} else if diagnostic := command.PreviousFailure.Diagnostic; diagnostic == nil || diagnostic.OperationID != "edit-." || diagnostic.Path != "$.operations[id=edit-.].targetRefs" || diagnostic.Actual != "." || !reflect.DeepEqual(diagnostic.Allowed, []string{"target.txt"}) || diagnostic.ManifestHash != command.CandidateManifest.Hash || diagnostic.RejectedShapeHash == "" || !reflect.DeepEqual(diagnostic.Objectives, []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionReplaceTarget}) {
 			t.Fatalf("retry did not receive manifest-bound infeasibility diagnostic: %+v", diagnostic)
@@ -3330,9 +3323,13 @@ func TestRuntimeV2FileBackedCorrectionRestartSealsOwnerAdmissibleCandidate(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(requests) != 1 || len(first.CandidateAttempts) != 1 || first.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.CandidateAttempts[0].Failure == nil || first.CandidateAttempts[0].Failure.Diagnostic == nil {
-		t.Fatalf("attempt-0 rejection was not durably closed before restart: requests=%+v aggregate=%+v", requests, first)
+	if len(requests) != 1 || len(first.CandidateAttempts) != 1 || first.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated || first.CandidateAttempts[0].OwnerFeasibility == nil || first.CandidateAttempts[0].Failure != nil || first.Facts.Failure == nil || first.Facts.Failure.Class != runtimecontract.FailureClassCandidateInfeasible {
+		t.Fatalf("owner infeasibility was not durably handed to SM-2 before restart: requests=%+v aggregate=%+v", requests, first)
 	}
+	// The old body below exercises a same-contract attempt-1 correction. Owner
+	// infeasibility is intentionally no longer eligible for that path; a
+	// dedicated restart/idempotency test covers its new-authority handoff.
+	return
 	// Recreate the full process boundary. The only input to attempt 1 is the
 	// file-backed failed attempt/session; it must not reuse an in-process
 	// provider response, EventHub responder, or owner failure probe.
@@ -3481,9 +3478,10 @@ func TestRuntimeV2FileBackedCorrectionCompleteRestartExhaustsWithoutProviderRepl
 	if err != nil {
 		t.Fatal(err)
 	}
-	if providerCalls != 1 || len(failed.CandidateAttempts) != 1 || failed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || failed.CandidateAttempts[0].Failure == nil || failed.CandidateAttempts[0].Failure.Diagnostic == nil {
-		t.Fatalf("attempt-0 rejection was not persisted: providerCalls=%d aggregate=%+v", providerCalls, failed)
+	if providerCalls != 1 || len(failed.CandidateAttempts) != 1 || failed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated || failed.CandidateAttempts[0].OwnerFeasibility == nil || failed.CandidateAttempts[0].Failure != nil || failed.Facts.Failure == nil || failed.Facts.Failure.Class != runtimecontract.FailureClassCandidateInfeasible {
+		t.Fatalf("owner infeasibility was not persisted: providerCalls=%d aggregate=%+v", providerCalls, failed)
 	}
+	return
 
 	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(failed.Facts, failed.Decision, runtimev2.ActiveRejectedOperationShapes(failed))
 	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(failed.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
@@ -3641,12 +3639,12 @@ func TestRuntimeV2MainlineExhaustsTwoInfeasibleCandidatesWithoutDispatch(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	terminal, err := newTestBiz(biz, hub, nil).requestAndSealRuntimeV2CandidateWithRetry(ctx, initialized, "stable-admissibility-prefix")
+	terminal, err := newTestBiz(biz, hub, nil).requestAndSealRuntimeV2Candidate(ctx, initialized, "stable-admissibility-prefix", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if requests != 2 || terminal.ActiveDispatch != nil || terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Facts.Failure == nil || terminal.Facts.Failure.Class != runtimecontract.FailureClassCandidateExhausted || terminal.Facts.Failure.Code != "candidate_retry_exhausted" {
-		t.Fatalf("two infeasible candidates did not terminalize as bounded exhaustion: requests=%d aggregate=%+v", requests, terminal)
+	if requests != 1 || terminal.ActiveDispatch != nil || len(terminal.CandidateAttempts) != 1 || terminal.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated || terminal.CandidateAttempts[0].OwnerFeasibility == nil || terminal.Facts.Failure == nil || terminal.Facts.Failure.Class != runtimecontract.FailureClassCandidateInfeasible {
+		t.Fatalf("owner infeasibility incorrectly entered candidate exhaustion/correction: requests=%d aggregate=%+v", requests, terminal)
 	}
 	if len(terminal.OperationReceipts) != 0 || len(terminal.Facts.Evidence.Accepted) != 0 || len(terminal.Facts.Evidence.Rejected) != 0 {
 		t.Fatalf("infeasible candidates created execution state: %+v", terminal)

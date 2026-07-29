@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -157,11 +158,7 @@ const (
 	RuntimeCandidateFailureClassProviderTransient      RuntimeCandidateFailureClass = "provider_transient"
 	RuntimeCandidateFailureClassProviderAuthentication RuntimeCandidateFailureClass = "provider_authentication"
 	RuntimeCandidateFailureClassProviderConfiguration  RuntimeCandidateFailureClass = "provider_configuration"
-	// RuntimeCandidateFailureClassInfeasible is an owner-authored, read-only
-	// feasibility rejection before dispatch seal. It cannot stand for execution
-	// evidence or an owner receipt.
-	RuntimeCandidateFailureClassInfeasible RuntimeCandidateFailureClass = "infeasible"
-	RuntimeCandidateFailureClassInternal   RuntimeCandidateFailureClass = "internal"
+	RuntimeCandidateFailureClassInternal               RuntimeCandidateFailureClass = "internal"
 )
 
 type RuntimeCandidateFailure struct {
@@ -306,7 +303,7 @@ func RuntimeCandidateCorrectionObjectivesForFailure(failure *RuntimeCandidateFai
 	switch strings.TrimSpace(failure.Code) {
 	case "candidate_replays_rejected_shape", "candidate_partially_replays_rejected_shape", "candidate_replays_no_progress_shape":
 		objectives = append(objectives, RuntimeCandidateCorrectionChangeReplayedShape)
-	case "candidate_target_outside_grounding", "candidate_creation_scope_missing_file_target", "operation_target_not_regular":
+	case "candidate_target_outside_grounding", "candidate_creation_scope_missing_file_target":
 		if len(diagnostic.Allowed) != 0 {
 			objectives = append(objectives, RuntimeCandidateCorrectionReplaceTarget)
 		}
@@ -314,93 +311,6 @@ func RuntimeCandidateCorrectionObjectivesForFailure(failure *RuntimeCandidateFai
 		objectives = append(objectives, RuntimeCandidateCorrectionSatisfyCoverage)
 	}
 	return (&RuntimeCandidateFailureDiagnostic{Objectives: objectives}).Normalized().Objectives
-}
-
-// RuntimeCandidateFailureDiagnosticForFeasibility converts a persisted,
-// owner-authored feasibility fact into the bounded correction facts for the
-// same sealed candidate. It intentionally reads neither FailureFact.Message
-// nor any workspace state: the proposed operation supplies actual values, and
-// the sealed manifest plus owner admissibility snapshot supply allowed values.
-//
-// A missing operation ID, manifest operation, or alternative admissible target
-// yields an incomplete diagnostic with no target objective. SM-3, not this
-// pure helper, decides whether that absence permits a retry or requires a
-// terminal route.
-func RuntimeCandidateFailureDiagnosticForFeasibility(
-	failure *FailureFact,
-	operation RuntimeOperation,
-	manifest RuntimeCandidateContractManifest,
-	admissibility RuntimeOperationAdmissibility,
-	candidate RuntimeCandidate,
-) *RuntimeCandidateFailureDiagnostic {
-	if failure == nil {
-		return nil
-	}
-	operation = operation.Normalized()
-	manifest = manifest.Normalized()
-	admissibility = admissibility.Normalized()
-	if operation.ID == "" || manifest.Hash == "" {
-		return nil
-	}
-	if _, found := runtimeCandidatePayloadOperationManifest(manifest, operation.Kind); !found {
-		return nil
-	}
-	diagnostic := RuntimeCandidateFailureDiagnostic{
-		OperationID:       operation.ID,
-		ManifestHash:      manifest.Hash,
-		RejectedShapeHash: StableRuntimeCandidateSemanticShape(candidate),
-	}
-	if runtimeCandidateFeasibilityFailureTargets(failure.Code) {
-		diagnostic.Path = "$.operations[id=" + operation.ID + "].targetRefs"
-		diagnostic.Actual = strings.Join(operation.TargetRefs, ",")
-		diagnostic.Allowed = runtimeCandidateFeasibilityAlternativeTargets(manifest, admissibility, operation.TargetRefs)
-	}
-	converted := RuntimeCandidateFailure{
-		Class:      RuntimeCandidateFailureClassInfeasible,
-		Code:       failure.Code,
-		Signature:  failure.Signature,
-		TargetRefs: append([]string(nil), failure.TargetRefs...),
-		Diagnostic: &diagnostic,
-	}
-	diagnostic.Objectives = RuntimeCandidateCorrectionObjectivesForFailure(&converted)
-	return diagnostic.Clone()
-}
-
-func runtimeCandidateFeasibilityFailureTargets(code string) bool {
-	switch strings.TrimSpace(code) {
-	case "operation_target_not_regular", "candidate_target_outside_grounding", "candidate_creation_scope_missing_file_target":
-		return true
-	default:
-		return false
-	}
-}
-
-func runtimeCandidateFeasibilityAlternativeTargets(manifest RuntimeCandidateContractManifest, admissibility RuntimeOperationAdmissibility, rejected []string) []string {
-	manifest = manifest.Normalized()
-	admissibility = admissibility.Normalized()
-	rejectedSet := make(map[string]struct{}, len(rejected))
-	for _, target := range rejected {
-		if target = strings.TrimSpace(target); target != "" {
-			rejectedSet[target] = struct{}{}
-		}
-	}
-	allowedByManifest := make(map[string]struct{}, len(manifest.TargetRefs))
-	for _, target := range manifest.TargetRefs {
-		allowedByManifest[target] = struct{}{}
-	}
-	allowed := make([]string, 0, len(admissibility.TargetRefs))
-	for _, target := range admissibility.TargetRefs {
-		if _, rejected := rejectedSet[target]; rejected {
-			continue
-		}
-		if len(allowedByManifest) != 0 {
-			if _, allowed := allowedByManifest[target]; !allowed {
-				continue
-			}
-		}
-		allowed = append(allowed, target)
-	}
-	return normalizeStrings(allowed)
 }
 
 func StableRuntimeCandidateHash(candidate RuntimeCandidate) string {
@@ -622,7 +532,11 @@ func (c RuntimeCandidate) ValidateWithActivation(decision RuntimeDecision, activ
 		if c.Validation == nil {
 			return fmt.Errorf("action %s requires a validation candidate", decision.Action)
 		}
-		return validateRuntimeOperations(validationRuntimeOperations(c.Validation.Operations), decision.RequiredOutput, activation.MCPCapabilities)
+		operations := validationRuntimeOperations(c.Validation.Operations)
+		if err := validateRuntimeOperations(operations, decision.RequiredOutput, activation.MCPCapabilities); err != nil {
+			return err
+		}
+		return ValidateRuntimeValidationOperationRecipes(operations, activation.EvidencePolicies)
 	case RuntimeActionProduceAssessment:
 		if c.Assessment == nil {
 			return fmt.Errorf("action %s requires an assessment candidate", decision.Action)
@@ -770,6 +684,68 @@ func validateRuntimeOperations(operations []RuntimeOperation, required RequiredO
 		return err
 	}
 	return nil
+}
+
+// ValidateRuntimeValidationOperationRecipes is a pure candidate-boundary
+// check for profile-declared observable validation recipes. It never chooses a
+// Runtime action, interprets Goal/DoD text, or observes a process. A policy
+// applies only when a Shell operation explicitly selects its declared command;
+// other capability recipes remain owner-observed and are judged by the
+// assessment evidence gate.
+func ValidateRuntimeValidationOperationRecipes(operations []RuntimeOperation, policies []RuntimeEvidencePolicy) error {
+	for _, operation := range operations {
+		operation = operation.Normalized()
+		if CanonicalRuntimeBlockKind(operation.Kind) != StepKindShellCommand {
+			continue
+		}
+		command, args := runtimeShellOperationCommandAndArgs(operation)
+		for _, policy := range NormalizeRuntimeEvidencePolicies(policies) {
+			if len(policy.RequiredArgs) == 0 || !runtimeEvidencePolicyMatchesShellCommand(policy, command) {
+				continue
+			}
+			for _, required := range policy.RequiredArgs {
+				if !containsStringValue(args, required) {
+					return fmt.Errorf("runtime validation operation %q command %q requires observable recipe argument %q from evidence policy %q", operation.ID, command, required, policy.ID)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func runtimeShellOperationCommandAndArgs(operation RuntimeOperation) (string, []string) {
+	for _, parameter := range operation.Parameters {
+		switch strings.TrimSpace(parameter.Name) {
+		case "command":
+			if parameter.String != nil {
+				return strings.TrimSpace(*parameter.String), runtimeShellOperationArgs(operation.Parameters)
+			}
+		}
+	}
+	return "", runtimeShellOperationArgs(operation.Parameters)
+}
+
+func runtimeShellOperationArgs(parameters []OperationParameter) []string {
+	for _, parameter := range parameters {
+		if strings.TrimSpace(parameter.Name) == "args" {
+			return normalizeOrderedStrings(parameter.StringList)
+		}
+	}
+	return nil
+}
+
+func runtimeEvidencePolicyMatchesShellCommand(policy RuntimeEvidencePolicy, command string) bool {
+	policy = policy.Normalized()
+	if policy.AppliesTo != StepKindShellCommand || policy.CommandName == "" {
+		return false
+	}
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return false
+	}
+	base := strings.ToLower(filepath.Base(command))
+	expected := strings.ToLower(policy.CommandName)
+	return base == expected || base == expected+".exe"
 }
 
 func ValidateRequiredOperationBindings(operations []RuntimeOperation, requirements []RuntimeRequiredOperationVariant) error {

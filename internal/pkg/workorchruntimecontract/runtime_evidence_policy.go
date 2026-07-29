@@ -7,12 +7,19 @@ import (
 )
 
 type RuntimeEvidencePolicy struct {
-	ID                   string
-	Profile              string
-	Rule                 string
-	AppliesTo            string
-	CommandName          string
-	ArgsContain          []string
+	ID          string
+	Profile     string
+	Rule        string
+	AppliesTo   string
+	CommandName string
+	ArgsContain []string
+	// RequiredArgs is a command-argument set that a
+	// Shell validation candidate must include when it selects CommandName. It
+	// is a profile-owned observable-validation recipe, not an Orchestrator
+	// action rule. Keeping it on the sealed evidence policy lets the candidate
+	// boundary reject a command that cannot yield the observation the profile
+	// requires before any side effect or validation session is started.
+	RequiredArgs         []string
 	ZeroWorkMarkers      []string
 	WorkEvidenceMarkers  []string
 	QualityOnZeroWork    string
@@ -42,6 +49,7 @@ func (p RuntimeEvidencePolicy) Normalized() RuntimeEvidencePolicy {
 	p.AppliesTo = strings.TrimSpace(p.AppliesTo)
 	p.CommandName = strings.TrimSpace(p.CommandName)
 	p.ArgsContain = normalizeStrings(p.ArgsContain)
+	p.RequiredArgs = normalizeStrings(p.RequiredArgs)
 	p.ZeroWorkMarkers = normalizeStrings(p.ZeroWorkMarkers)
 	p.WorkEvidenceMarkers = normalizeStrings(p.WorkEvidenceMarkers)
 	p.QualityOnZeroWork = strings.TrimSpace(p.QualityOnZeroWork)
@@ -59,6 +67,9 @@ func (p RuntimeEvidencePolicy) Validate() error {
 	}
 	if len(p.ZeroWorkMarkers) > 0 && p.QualityOnZeroWork == "" {
 		return fmt.Errorf("runtime evidence policy with zero-work markers requires a quality")
+	}
+	if len(p.RequiredArgs) > 0 && (p.AppliesTo != StepKindShellCommand || p.CommandName == "") {
+		return fmt.Errorf("runtime evidence policy required args require a shell command name")
 	}
 	for _, requirement := range p.CoverageRequirements {
 		if requirement.ID == "" || requirement.Scope == "" {
@@ -142,7 +153,7 @@ func sameRuntimeEvidencePolicy(left RuntimeEvidencePolicy, right RuntimeEvidence
 	if left.ID != right.ID || left.Profile != right.Profile || left.Rule != right.Rule || left.AppliesTo != right.AppliesTo ||
 		left.CommandName != right.CommandName || left.QualityOnZeroWork != right.QualityOnZeroWork || left.MarksZeroWork != right.MarksZeroWork ||
 		left.EvidenceReason != right.EvidenceReason || left.Description != right.Description ||
-		!sameStrings(left.ArgsContain, right.ArgsContain) || !sameStrings(left.ZeroWorkMarkers, right.ZeroWorkMarkers) ||
+		!sameStrings(left.ArgsContain, right.ArgsContain) || !sameStrings(left.RequiredArgs, right.RequiredArgs) || !sameStrings(left.ZeroWorkMarkers, right.ZeroWorkMarkers) ||
 		!sameStrings(left.WorkEvidenceMarkers, right.WorkEvidenceMarkers) || !sameStrings(left.EvidenceTags, right.EvidenceTags) ||
 		len(left.CoverageRequirements) != len(right.CoverageRequirements) {
 		return false

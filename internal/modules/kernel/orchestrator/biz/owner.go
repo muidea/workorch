@@ -153,11 +153,15 @@ func (m *Biz) handleRuntimeTerminationRequest(ev magicevent.Event, result magice
 		setOrchestratorAck(result, common.ErrInvalidArgument)
 		return
 	}
-	aggregate, err := m.bizPtr.RequestTermination(ev.Context(), cmd.WorkspaceID, cmd.RunID, cmd.Kind, cmd.RequestedBy, cmd.Reason)
+	terminated, err := m.submitRuntimeV2InternalEvent(ev.Context(), runtimev2.RuntimeInternalEvent{
+		Kind: runtimev2.RuntimeInternalEventTerminationRequested, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID,
+		TerminationKind: cmd.Kind, RequestedBy: cmd.RequestedBy, Reason: cmd.Reason,
+	})
 	if err != nil {
 		setOrchestratorAck(result, err)
 		return
 	}
+	aggregate := terminated.Aggregate
 	request := terminalDeliveryRequest(aggregate)
 	err = m.deliverRuntimeV2Terminal(ev.Context(), aggregate)
 	if err != nil {
@@ -184,13 +188,15 @@ func (m *Biz) handleRuntimeDeliveryAcknowledgement(ev magicevent.Event, result m
 		setOrchestratorAck(result, common.ErrInvalidArgument)
 		return
 	}
-	updated, recorded, err := m.bizPtr.RecordRuntimeV2DeliveryAcknowledgement(ev.Context(), cmd.Acknowledgement)
+	updatedEvent, err := m.submitRuntimeV2InternalEvent(ev.Context(), runtimev2.RuntimeInternalEvent{
+		Kind: runtimev2.RuntimeInternalEventTerminalDeliveryAcknowledged, WorkspaceID: cmd.Acknowledgement.WorkspaceID, RunID: cmd.Acknowledgement.RunID, DeliveryAcknowledgement: &cmd.Acknowledgement,
+	})
 	if err != nil {
 		setOrchestratorAck(result, err)
 		return
 	}
 	if result != nil {
-		result.Set(orchestratorevents.RecordRuntimeDeliveryAcknowledgementResult{TerminalDeliveryID: cmd.Acknowledgement.TerminalDeliveryID, Owner: cmd.Acknowledgement.Owner, Recorded: recorded, StateRevision: updated.StateRevision}, nil)
+		result.Set(orchestratorevents.RecordRuntimeDeliveryAcknowledgementResult{TerminalDeliveryID: cmd.Acknowledgement.TerminalDeliveryID, Owner: cmd.Acknowledgement.Owner, Recorded: updatedEvent.BudgetConsumed, StateRevision: updatedEvent.Aggregate.StateRevision}, nil)
 	}
 }
 
@@ -337,7 +343,7 @@ func (m *Biz) recordRuntimeV2DriveScheduleFailure(ctx context.Context, workspace
 		if m.bizPtr == nil {
 			return
 		}
-		_, consumed, commitErr := m.bizPtr.ConsumeRuntimeV2RecoveryBudget(recoveryCtx, workspaceID, runID, runtimecontract.RuntimeRecoveryBudgetDriveSchedule)
+		_, consumed, commitErr := m.runtimeV2ConsumeRecoveryBudget(recoveryCtx, runtimev2.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: workspaceID, RunID: runID}}, runtimecontract.RuntimeRecoveryBudgetDriveSchedule)
 		if commitErr != nil {
 			slog.Warn("workorch Runtime V2 schedule recovery commit failed", "source", source, "workspaceID", workspaceID, "runID", runID, "scheduleErr", scheduleErr, "err", commitErr)
 			return
@@ -469,7 +475,7 @@ func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.Wor
 			var projectionErr *runtimeV2ProjectionError
 			if errors.As(err, &projectionErr) {
 				slog.Warn("workorch Runtime V2 projection failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", err)
-				_, consumed, budgetErr := m.bizPtr.ConsumeRuntimeV2RecoveryBudget(driveCtx, workspaceID, runID, runtimecontract.RuntimeRecoveryBudgetTerminalDelivery)
+				_, consumed, budgetErr := m.runtimeV2ConsumeRecoveryBudget(driveCtx, runtimev2.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: workspaceID, RunID: runID}}, runtimecontract.RuntimeRecoveryBudgetTerminalDelivery)
 				if budgetErr != nil {
 					slog.Warn("workorch Runtime V2 terminal delivery budget commit failed", "workspaceID", workspaceID, "runID", runID, "err", budgetErr)
 					return
@@ -484,14 +490,14 @@ func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.Wor
 			if !runtimecontract.FailureClassIsBusinessTerminal(failure.Class) {
 				slog.Warn("workorch Runtime V2 drive non-terminal failure", "source", source, "workspaceID", workspaceID, "runID", runID, "class", failure.Class, "err", err)
 				if budgetKind, ok := runtimeV2RecoveryBudgetKind(failure.Class); ok {
-					_, consumed, budgetErr := m.bizPtr.ConsumeRuntimeV2RecoveryBudget(driveCtx, workspaceID, runID, budgetKind)
+					_, consumed, budgetErr := m.runtimeV2ConsumeRecoveryBudget(driveCtx, runtimev2.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: workspaceID, RunID: runID}}, budgetKind)
 					if budgetErr != nil {
 						slog.Warn("workorch Runtime V2 recovery budget commit failed", "workspaceID", workspaceID, "runID", runID, "kind", budgetKind, "err", budgetErr)
 						return
 					}
 					retryDelivery = consumed
 					if !consumed && failure.Class == runtimecontract.FailureClassOwnerTransientUnavailable {
-						if _, recordErr := m.bizPtr.RecordRuntimeV2DriveFailureFact(driveCtx, workspaceID, runID, failure); recordErr != nil {
+						if _, recordErr := m.submitRuntimeV2InternalEvent(driveCtx, runtimev2.RuntimeInternalEvent{Kind: runtimev2.RuntimeInternalEventDriveFailureObserved, WorkspaceID: workspaceID, RunID: runID, FailureFact: &failure}); recordErr != nil {
 							slog.Warn("workorch Runtime V2 exhausted operation recovery fact commit failed", "workspaceID", workspaceID, "runID", runID, "err", recordErr)
 						} else {
 							retryDelivery = true
@@ -500,18 +506,19 @@ func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.Wor
 				}
 				return
 			}
-			aggregate, recordErr := m.bizPtr.RecordRuntimeV2DriveFailureFact(driveCtx, workspaceID, runID, failure)
+			recorded, recordErr := m.submitRuntimeV2InternalEvent(driveCtx, runtimev2.RuntimeInternalEvent{Kind: runtimev2.RuntimeInternalEventDriveFailureObserved, WorkspaceID: workspaceID, RunID: runID, FailureFact: &failure})
 			if recordErr != nil {
 				slog.Warn("workorch Runtime V2 drive failure fact commit failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", recordErr)
 				return
 			}
+			aggregate := recorded.Aggregate
 			if aggregate.Decision.Action != runtimecontract.RuntimeActionFail || aggregate.Decision.Terminal == nil {
 				slog.Warn("workorch Runtime V2 drive failure did not reduce to terminal", "source", source, "workspaceID", workspaceID, "runID", runID)
 				return
 			}
 			if projectErr := m.deliverRuntimeV2Terminal(driveCtx, aggregate); projectErr != nil {
 				slog.Warn("workorch Runtime V2 drive failure delivery failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", projectErr)
-				_, consumed, budgetErr := m.bizPtr.ConsumeRuntimeV2RecoveryBudget(driveCtx, workspaceID, runID, runtimecontract.RuntimeRecoveryBudgetTerminalDelivery)
+				_, consumed, budgetErr := m.runtimeV2ConsumeRecoveryBudget(driveCtx, runtimev2.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: workspaceID, RunID: runID}}, runtimecontract.RuntimeRecoveryBudgetTerminalDelivery)
 				if budgetErr != nil {
 					slog.Warn("workorch Runtime V2 terminal delivery budget commit failed", "workspaceID", workspaceID, "runID", runID, "err", budgetErr)
 					return

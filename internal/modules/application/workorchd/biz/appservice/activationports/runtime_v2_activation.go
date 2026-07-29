@@ -119,13 +119,10 @@ func runtimeV2ExecutionContract(input map[string]any) runtimecontract.RuntimeExe
 			AppliesToEvidenceKinds: runtimeV2Strings(item["appliesToEvidenceKinds"]),
 			ValidationSafetyClass:  runtimeV2String(item["validationSafetyClass"]),
 			DiscoveryRequired:      runtimeV2Bool(item["discoveryRequired"]), DiscoverySources: runtimeV2Strings(item["discoverySources"]),
-			AllowedExecutionModes:                      runtimeV2Strings(item["allowedExecutionModes"]),
-			ValidationFailureImpliesStateChange:        runtimeV2Bool(item["validationFailureImpliesStateChange"]),
-			ImplementationGapDiagnosticClasses:         runtimeV2Strings(item["implementationGapDiagnosticClasses"]),
-			MaxValidationOnlyRetriesPerFocus:           runtimeV2Int(item["maxValidationOnlyRetriesPerFocus"]),
-			PreferMinimalPatchBeforeRepeatedValidation: runtimeV2Bool(item["preferMinimalPatchBeforeRepeatedValidation"]),
-			IfNoTargetRoute:                            runtimeV2String(item["ifNoTargetRoute"]), ValidationScratchRequired: runtimeV2Bool(item["validationScratchRequired"]),
-			AllowedValidationModes: runtimeV2Strings(item["allowedValidationModes"]), Notes: runtimeV2Strings(item["notes"]),
+			AllowedExecutionModes:            runtimeV2Strings(item["allowedExecutionModes"]),
+			MaxValidationOnlyRetriesPerFocus: runtimeV2Int(item["maxValidationOnlyRetriesPerFocus"]),
+			ValidationScratchRequired:        runtimeV2Bool(item["validationScratchRequired"]),
+			AllowedValidationModes:           runtimeV2Strings(item["allowedValidationModes"]), Notes: runtimeV2Strings(item["notes"]),
 		})
 	}
 	profileContracts := runtimeV2Map(input["profileContracts"])
@@ -263,7 +260,7 @@ func runtimeV2EvidencePolicies(items []workorcheventpayload.Payload) []runtimeco
 		ret = append(ret, runtimecontract.RuntimeEvidencePolicy{
 			ID: payloadString(item, "id"), Profile: payloadString(item, "profile"), Rule: payloadString(item, "rule"),
 			AppliesTo: payloadString(item, "appliesTo"), CommandName: payloadString(item, "commandName"),
-			ArgsContain: payloadStrings(item, "argsContain"), ZeroWorkMarkers: payloadStrings(item, "zeroWorkMarkers"),
+			ArgsContain: payloadStrings(item, "argsContain"), RequiredArgs: payloadStrings(item, "requiredArgs"), ZeroWorkMarkers: payloadStrings(item, "zeroWorkMarkers"),
 			WorkEvidenceMarkers: payloadStrings(item, "workEvidenceMarkers"), QualityOnZeroWork: payloadString(item, "qualityOnZeroWork"),
 			MarksZeroWork: payloadBool(item, "zeroWork"), EvidenceTags: payloadStrings(item, "evidenceTags"),
 			EvidenceReason: payloadString(item, "evidenceReason"), CoverageRequirements: payloadCoverageEvidenceRequirements(item, "coverageRequirements"),

@@ -15,7 +15,7 @@ func TestReduceRuntimeStateLiveFailureFixtures(t *testing.T) {
 		facts runtimecontract.RuntimeFacts
 	}{
 		{
-			name: "lsp validation failure requires another state change",
+			name: "lsp validation failure remains validation without owner repair target",
 			facts: runtimecontract.RuntimeFacts{
 				Activation:         runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 				WorkspaceID:        "ws-5cfc9874cebda0b8",
@@ -71,10 +71,14 @@ func TestReduceRuntimeStateLiveFailureFixtures(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ReduceRuntimeState() error = %v", err)
 			}
-			if got.State != runtimecontract.ConvergenceStateNeedStateChange || got.Action != runtimecontract.RuntimeActionProduceStateChange {
-				t.Fatalf("decision = %+v, want ProduceStateChange", got)
+			wantAction := runtimecontract.RuntimeActionProduceStateChange
+			if tt.name == "lsp validation failure remains validation without owner repair target" {
+				wantAction = runtimecontract.RuntimeActionProduceValidation
 			}
-			if got.RequiredOutput.Kind != runtimecontract.RequiredOutputKindStateChange || got.AuthoritySnapshot.RequiredOutputHash == "" {
+			if got.Action != wantAction {
+				t.Fatalf("decision = %+v, want %s", got, wantAction)
+			}
+			if got.AuthoritySnapshot.RequiredOutputHash == "" {
 				t.Fatalf("required output is not atomically sealed: %+v", got)
 			}
 		})
@@ -583,9 +587,10 @@ func TestReduceRuntimeStateKeepsStateChangeAfterRejectedRepair(t *testing.T) {
 		},
 		Failure: &runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassExecutionFailure, Code: "conflict",
-			Signature: "sig-repair", Message: "conflict",
+			Signature: "sig-repair", Message: "conflict", TargetRefs: []string{"cmd/proxy/main.go"},
 		},
-		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-001", State: runtimecontract.RuntimeCoverageItemStateOpen}},
+		Resources: runtimecontract.RuntimeResourceFacts{FailureTarget: &runtimecontract.FailureTarget{Signature: "sig-repair", TargetRefs: []string{"cmd/proxy/main.go"}}},
+		Coverage:  []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-001", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Capabilities: runtimecontract.RuntimeCapabilities{
 			StateChangeKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
 			ValidationKinds:  []string{runtimecontract.StepKindShellCommand},
@@ -600,11 +605,11 @@ func TestReduceRuntimeStateKeepsStateChangeAfterRejectedRepair(t *testing.T) {
 	}
 }
 
-func TestReduceRuntimeStateHonorsTypedValidationFailureRoute(t *testing.T) {
+func TestReduceRuntimeStateKeepsValidationGapAsValidationWithoutOwnerTarget(t *testing.T) {
 	facts := validationFacts()
 	facts.Activation.ExecutionContract.ValidationPolicies = []runtimecontract.RuntimeValidationPolicy{{
 		ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
-		ValidationFailureImpliesStateChange: false, MaxValidationOnlyRetriesPerFocus: 2,
+		MaxValidationOnlyRetriesPerFocus: 2,
 	}}
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
 	facts.Capabilities.StateChangeKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
@@ -614,25 +619,23 @@ func TestReduceRuntimeStateHonorsTypedValidationFailureRoute(t *testing.T) {
 	}}
 	facts.Evidence.Rejected = []runtimecontract.EvidenceFact{{
 		ID: "rejected-validation", Kind: runtimecontract.EvidenceKindValidation, Revision: "evidence-v2-00000000000000000002",
-		FailureClass: runtimecontract.FailureClassExecutionFailure, FailureMessage: "validation failed", CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+		FailureClass: runtimecontract.FailureClassExecutionFailure, FailureMessage: "validation failed", TargetRefs: []string{"validation-entry"}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	}}
-	facts.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassExecutionFailure, Message: "validation failed"}
+	facts.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassExecutionFailure, Signature: "validation-failed", Message: "validation failed", TargetRefs: []string{"validation-entry"}}
 	decision, err := ReduceRuntimeState(facts, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if decision.Action != runtimecontract.RuntimeActionProduceValidation {
-		t.Fatalf("typed validation failure route decision = %+v", decision)
+		t.Fatalf("ungrounded validation failure decision = %+v", decision)
+	}
+	if len(decision.RequiredOutput.TargetRefs) != 0 {
+		t.Fatalf("validation command entry became repair target: %+v", decision.RequiredOutput)
 	}
 }
 
-func TestReduceRuntimeStateRoutesValidationBySealedDiagnosticClass(t *testing.T) {
+func TestReduceRuntimeStateUsesOwnerGroundedFailureForStateChangeRepair(t *testing.T) {
 	base := validationFacts()
-	base.Activation.ExecutionContract.ValidationPolicies = []runtimecontract.RuntimeValidationPolicy{{
-		ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
-		ValidationFailureImpliesStateChange: true,
-		ImplementationGapDiagnosticClasses:  []string{runtimecontract.ValidationDiagnosticBuildFailed},
-	}}
 	base.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
 	base.Capabilities.StateChangeKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
 	base.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
@@ -644,30 +647,32 @@ func TestReduceRuntimeStateRoutesValidationBySealedDiagnosticClass(t *testing.T)
 		FailureClass: runtimecontract.FailureClassExecutionFailure, FailureMessage: "validation failed", CoverageWorkItemIDs: base.Focus.CoverageWorkItemIDs,
 	}}
 
-	commandFailure := base
-	commandFailure.Failure = &runtimecontract.FailureFact{
-		Class: runtimecontract.FailureClassExecutionFailure, Message: "validation target is invalid",
-		ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{Class: runtimecontract.ValidationDiagnosticCommandInvalid},
+	ungrounded := base
+	ungrounded.Failure = &runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassExecutionFailure, Signature: "build-failed", Message: "build failed", TargetRefs: []string{"implementation.go"},
 	}
-	decision, err := ReduceRuntimeState(commandFailure, nil)
+	decision, err := ReduceRuntimeState(ungrounded, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if decision.Action != runtimecontract.RuntimeActionProduceValidation {
-		t.Fatalf("command diagnostic decision = %+v, want validation correction", decision)
+		t.Fatalf("ungrounded implementation failure decision = %+v, want validation", decision)
 	}
 
-	implementationFailure := base
-	implementationFailure.Failure = &runtimecontract.FailureFact{
-		Class: runtimecontract.FailureClassExecutionFailure, Message: "build failed",
-		ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{Class: runtimecontract.ValidationDiagnosticBuildFailed},
+	grounded := base
+	grounded.Failure = &runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassExecutionFailure, Signature: "build-failed", Message: "build failed", TargetRefs: []string{"implementation.go"},
 	}
-	decision, err = ReduceRuntimeState(implementationFailure, nil)
+	grounded.Resources.FailureTarget = &runtimecontract.FailureTarget{Signature: "build-failed", TargetRefs: []string{"implementation.go"}}
+	decision, err = ReduceRuntimeState(grounded, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if decision.Action != runtimecontract.RuntimeActionProduceStateChange {
-		t.Fatalf("implementation diagnostic decision = %+v, want state-change repair", decision)
+		t.Fatalf("owner-grounded implementation failure decision = %+v, want state-change repair", decision)
+	}
+	if got := decision.RequiredOutput.TargetRefs; len(got) != 1 || got[0] != "implementation.go" {
+		t.Fatalf("state-change repair targets = %v, want owner target", got)
 	}
 }
 
@@ -711,7 +716,7 @@ func TestReduceRuntimeStateAllowsValidationAfterAcceptedRepair(t *testing.T) {
 	}
 }
 
-func TestReduceRuntimeStateForcesStateChangeOnlyForUnresolvedValidationFailure(t *testing.T) {
+func TestReduceRuntimeStateRejectedValidationWithoutOwnerTargetRemainsValidation(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
 		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		WorkspaceID: "ws-1", RunID: "run-2", DefinitionRevision: "def-1", EvidenceRevision: "ev-2",
@@ -740,8 +745,8 @@ func TestReduceRuntimeStateForcesStateChangeOnlyForUnresolvedValidationFailure(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Action != runtimecontract.RuntimeActionProduceStateChange {
-		t.Fatalf("action = %s, want produce_state_change immediately after rejected validation", got.Action)
+	if got.Action != runtimecontract.RuntimeActionProduceValidation {
+		t.Fatalf("action = %s, want produce_validation for ungrounded validation failure", got.Action)
 	}
 }
 
@@ -994,7 +999,7 @@ func TestReduceRuntimeStateRepairBudgetExhausted(t *testing.T) {
 	}
 }
 
-func TestReduceRuntimeStateValidationOnlyCapEscalatesToStateChange(t *testing.T) {
+func TestReduceRuntimeStateValidationOnlyCapTerminalsWithoutStateChange(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.RequireAssessment = true
 	facts.Capabilities.StateChangeKinds = []string{"patch/apply"}
@@ -1020,8 +1025,8 @@ func TestReduceRuntimeStateValidationOnlyCapEscalatesToStateChange(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceStateChange {
-		t.Fatalf("decision = %+v, want escalate to state-change after validation-only cap", decision)
+	if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "no_progress_exhausted" {
+		t.Fatalf("decision = %+v, want validation-only budget terminal", decision)
 	}
 }
 

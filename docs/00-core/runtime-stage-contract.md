@@ -76,7 +76,11 @@ typed RuntimeBootstrap
 
 任何正式状态只由唯一 owner 的 Biz 内部 reducer 修改并持久化。跨 owner 消息只能携带 immutable intent、
 已持久化 fact 或 delivery acknowledgement；不得携带“把接收方状态设为 X”的命令。接收 owner 必须先校验
-workspace/run scope、causation、definition/evidence revision 与 sealed identity，再转为 owner-local event。
+ workspace/run scope、causation、definition/evidence revision 与 sealed identity，再转为 owner-local event。
+
+Orchestrator 对 SM-2/SM-3/SM-4 的 owner-local event 使用唯一内部 dispatch：外部结果不得直接选择具体
+aggregate transition；内部 dispatcher 校验后调用 reducer/controller，并且只能通过 transition coordinator
+执行一次 CAS。internal event 不是新的跨 owner EventHub 通用 envelope。
 
 - SM-1 Run lifecycle 只由 `blocks/run` 迁移；Workspace active-run/state projection 只由
   `blocks/workspace` 迁移；Result lifecycle 只由 `blocks/result` 迁移。
@@ -125,15 +129,16 @@ owner inventory 与 provider context 是两个不同合同：
 ### 单一 candidate evaluator
 
 完整 candidate document 只允许进入一个纯 `CandidateEvaluator`。它的输入是 persisted manifest、decoded
-candidate、同一 authority contract 的 prior attempt fact 和 typed owner feasibility observations；输出只能是 `accepted` 或一个完整的
-`CandidateRejection`。decoder、admission 与 owner-feasibility adapter 可以提供 typed observation，但不能各自
+candidate 和同一 authority contract 的 prior attempt fact；输出只能是 `accepted` 或一个完整的
+`CandidateRejection`。owner feasibility 是 capability owner 的独立 typed factual observation，不是
+`CandidateRejection` 的子类。decoder、admission 与 owner-feasibility adapter 可以提供 typed observation，但不能各自
 选择 retry、terminal、governance 或下一 action。
 
 为取得 feasibility observation，Orchestrator 只可先用 operation kind 解析 manifest 中的 owner 和
 authorization identity；该步骤不做 candidate admission。无法解析的 kind 不调 owner，由 evaluator 在
 kind 层拒绝；可解析的 operation 可调用无副作用 owner probe，owner 只返回
-`feasible | stale | infeasible` observation。即使 owner 已返回 infeasible，evaluator 仍按固定顺序优先返回更早的
-wire/parameter/target 违例，保证同一 document 只有一个 first-failure。
+`feasible | stale | prerequisite_required | infeasible` observation。候选的结构性 evaluator 必须先按固定顺序
+返回 wire/parameter/target 违例；只有结构性校验接受后，Orchestrator 才将 owner observation 作为独立后继处理。
 
 `CandidateRejection` 至少包含：class/code、operation ID（若适用）、field path、actual、allowed/required/
 forbidden、manifest hash、rejected shape hash，以及显式 `CorrectionDisposition`：
@@ -150,20 +155,20 @@ provider/decoder/owner 错误文本。
 若 complete rejection 无法归入上述两类，属于 `runtime_contract_defect`，必须 fail-fast 且零额外 provider、
 ticket、dispatch 或 effect。`candidate_correction_undefined` 不得继续作为正常模型输出的兜底路径。
 
-### 五类统一处理结果
+### 正交候选与 owner 处理结果
 
 provider dependency/governance 在进入 candidate pipeline 前单独处理。进入候选处理后，所有结果只允许归入：
 
 | 结果 | 来源 | 状态机行为 |
 | --- | --- | --- |
 | `request_recoverable` | fragment、EOF、timeout、429/5xx、未完成 document | request-session 有界恢复；不创建 attempt |
-| `candidate_correctable` | complete rejection + 完整 `CorrectionDirective` | 同 transaction/stable prefix 的唯一 attempt 1 |
-| `candidate_rejected_final` | complete rejection + `rejected_final` | typed terminal；不请求 correction |
-| `prerequisite_stale` | owner revision/receipt 与封存授权不一致 | SM-2 精确退休并重取；旧 document/attempt 不复活 |
-| `accepted` | evaluator 与 owner feasibility 均接受 | persist sealed dispatch 后才可执行 |
+| `candidate_correctable` | CandidateEvaluator 的 complete rejection + 完整 `CorrectionDirective` | 同 transaction/stable prefix 的唯一 attempt 1 |
+| `candidate_rejected_final` | CandidateEvaluator 的 complete rejection + `rejected_final` | typed terminal；不请求 correction |
+| `owner_feasibility` | capability owner 的 `stale`、`prerequisite_required` 或 `infeasible` factual observation | 先转为 Orchestrator internal event，再由 SM-2 退休 prerequisite、取得新 authority 或形成 typed terminal；零 correction attempt |
+| `accepted` | evaluator 接受且 owner feasibility 为 feasible | persist sealed dispatch 后才可执行 |
 
-以上分类是候选处理的唯一分流表。错误字符串、TUI/Web、projection、repair hint、owner adapter 或测试 fixture
-不得定义额外分流。
+`CorrectionDisposition` 仅适用于 `CandidateRejection`，不得接收 owner code。以上分类是候选处理的唯一
+分流表。错误字符串、TUI/Web、projection、repair hint、owner adapter 或测试 fixture不得定义额外分流。
 
 ## 四个协调状态机
 
@@ -209,6 +214,17 @@ load facts
   coverage。
 - repairable gap 保持同一 focus，必须持久化结构化缺口。有效新 evidence 不清零同 focus 总 repair
   budget；只有原子 focus advance 才开启新的 repair ledger。
+- gap 的结构化类别与缺失 evidence kind 是下一 action 的唯一依据：validation/evidence-quality gap 只能回到
+  validation，owner-grounded implementation/effect gap 才能回到 state change；validation command entry 不得自动
+  晋升为 repair target。validation-only budget 只能终止同类 recipe，不得将该 gap 改写为 state change；没有合法
+  替代 validation recipe 时形成 typed terminal。
+- assessment evidence gate 只验证 current-run/focus/coverage binding、owner receipt、effect、quality 与封存的
+  structured observation policy；profile 的 observable validation recipe 只能约束候选选择该命令时的必要参数，
+  不得用 Goal/DoD、summary、operation ID 或检查名之间的自由文本相似度裁决 coverage。
+- state-changing operation 的 owner no-op 不能形成 durable state-change evidence。SM-2 必须持久化 exact
+  no-progress operation shape；若 focus 具备可观测 validation 且要求 assessment，只能走一次
+  `validation -> assessment` 来确认已有状态。没有该语义验证路径时必须形成 typed provenance terminal，禁止修改
+  无关文件制造 delta；重复同 shape 仍受 no-progress/repair budget 约束。
 - governance 只用于真实权限、外部依赖、不可行 capability、预算升级或配置阻塞。可继续的候选/证据
   合同违规不能创建无信息 ticket。
 
@@ -235,10 +251,16 @@ sealed authority + preflight ready
   operation kind 不得由兼容 fallback 静默放宽。
 - accepted candidate 必须在执行前持久化 `SealedDispatch`。operation 依 sealed dependency order 执行，
   每项使用稳定的 `ExecutionKey + Fence`；owner receipt 是 evidence 的唯一副作用回执。
+- 同一 dispatch 内 accepted receipt 造成的资源 revision 变化是内生事实：它可以使后续 SM-2 prerequisite
+  observation 失效，但不得仅因此结束尚有 sealed operation 的 active dispatch。全部 operation 成功或任一
+  operation rejected/stale 后，SM-3 才结算 dispatch 并交回 SM-2 reduce。
 - duplicate 结果幂等，stale 只进 diagnostic lineage。已存在 exact receipt 时重启只提交后续 evidence，
   不得重放副作用；未知、非安全重放的副作用进入 typed outcome-unknown/failure 路由。
 - effect/evidence 类型由 sealed `RequiredOutput`、sealed expected effect 与 owner observed effect
   联合裁决。`none`、`ephemeral_session`、`unknown` 或 zero-work 不能满足 durable state change。
+- exact `ExecutionKey + Fence` receipt 重放只复用既有 receipt；no-op 的 current-run provenance 与普通无
+  provenance no-op 必须分流。后者只留下 rejected/no-progress lineage，不能被重放、target 变化或文本修改伪装成
+  新的 durable evidence。
 
 禁止：未持久化 request session 请求 provider、未完整 document 消耗 attempt、accepted candidate 不 seal
 直接执行、executor/owner 选择下一 action、owner 直接终态化 Run/Result、依错误文本猜 target 或创建 ticket。
@@ -285,6 +307,11 @@ Run 的 accepted evidence；assessment-only focus 不执行 executable operation
 operation-scoped governance 必须保存 ticket、resolution、dependency、subject、receipt hash、ExecutionKey
 与 fence binding。continue 以同一 ExecutionKey 的下一 fence 执行，owner 必须 preflight grant；普通 receipt
 不能绕过治理。
+
+state-changing capability operation 的 receipt 必须由 owner 对真实 effect 做有界观察。对 workspace durable Shell
+operation，真实 changed refs 必须非空且属于 sealed `RuntimeOperation.TargetRefs`；存在未声明 changed ref、只有
+unknown effect 或 zero-work 时不能形成 accepted durable evidence。owner observation 只返回 typed receipt，不得
+解释 Goal/DoD 或选择下一 Runtime action。
 
 ## LLM request、cache 与上下文
 

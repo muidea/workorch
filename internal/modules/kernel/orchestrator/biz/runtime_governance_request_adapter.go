@@ -69,8 +69,12 @@ func (m *Biz) prepareRuntimeV2GovernanceRequest(ctx context.Context, aggregate r
 	if err != nil {
 		return runtimev2.RuntimeAggregate{}, err
 	}
-	return m.bizPtr.BindRuntimeV2GovernanceRequest(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeGovernanceRequestRecord{
+	request := runtimecontract.RuntimeGovernanceRequestRecord{
 		TicketID: response.TicketID, AuthoritySnapshotID: response.AuthoritySnapshotID, DispatchID: response.DispatchID,
 		DependencyKind: dependency.Kind, SubjectRef: dependency.SubjectRef,
+	}
+	updated, err := m.submitRuntimeV2InternalEvent(ctx, runtimev2.RuntimeInternalEvent{
+		Kind: runtimev2.RuntimeInternalEventGovernanceRequestObserved, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, GovernanceRequest: &request,
 	})
+	return updated.Aggregate, err
 }

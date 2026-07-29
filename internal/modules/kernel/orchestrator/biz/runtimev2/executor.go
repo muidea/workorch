@@ -160,7 +160,15 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 				if commitErr != nil {
 					return RuntimeAggregate{}, commitErr
 				}
-				return commit.Aggregate, nil
+				aggregate = commit.Aggregate
+				completed[operation.ID] = struct{}{}
+				if commit.DispatchCompleted {
+					return aggregate, nil
+				}
+				// A restart may find a receipt persisted before its evidence. Once
+				// that evidence is committed, continue the remaining sealed work
+				// instead of forcing another drive or requesting a new candidate.
+				continue
 			}
 			governanceGrant = governanceGrantForExecution(aggregate, execution)
 			if governanceGrant == nil {
@@ -361,8 +369,17 @@ func runtimeOperationEffectMismatchFailure(decision runtimecontract.RuntimeDecis
 	if reason == "" {
 		return nil
 	}
+	code := "operation_effect_mismatch"
+	if decision.Action == runtimecontract.RuntimeActionProduceStateChange && receipt.Outcome == runtimecontract.RuntimeOperationOutcomeNoOp {
+		// A no-op is not an effect mismatch that can be repaired by changing the
+		// same file again.  It means the owner observed an already-current state
+		// but this Run has no durable provenance for it.  Keep the neutral class
+		// for receipt/effect audit, while giving SM-2 a typed branch that can
+		// inspect the current workspace once instead of creating random deltas.
+		code = runtimeStateChangeNoOpWithoutProvenanceCode
+	}
 	return &runtimecontract.FailureFact{
-		Class: runtimecontract.FailureClassEffectMismatch, Code: "operation_effect_mismatch",
+		Class: runtimecontract.FailureClassEffectMismatch, Code: code,
 		Signature: "effect-mismatch-" + operation.ID, Message: reason,
 	}
 }

@@ -144,9 +144,21 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 			diagnostic := operationResult.ValidationFailureDiagnostic.Clone()
 			response.Failure.ValidationDiagnostic = &diagnostic
 		}
+	} else if undeclared := shellUndeclaredWorkspaceTargets(operationResult.WorkspaceObservedTargetChanges, command.Data.TargetRefs); len(undeclared) > 0 {
+		response.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
+		response.Failure = &runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassEffectMismatch, Code: "undeclared_workspace_effect",
+			Signature:  "undeclared-workspace-effect/" + command.OperationID,
+			Message:    "state-changing shell command changed workspace target(s) outside sealed TargetRefs",
+			TargetRefs: undeclared,
+		}
 	}
 	observation := shellMutationReceiptObservation(command.Data.StateChanging, response.Status, operationResult)
-	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, nil, observation)
+	receiptTargets := operationResult.TargetRefs
+	if response.Status == runtimecontract.RuntimeOperationExecutionStatusAccepted && command.Data.StateChanging {
+		receiptTargets = shellObservedChangedWorkspaceTargets(operationResult.WorkspaceObservedTargetChanges)
+	}
+	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, receiptTargets, response.Evidence, response.Failure, nil, observation)
 	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
 	if err != nil {
 		setCapabilityError(result, err)
@@ -170,8 +182,8 @@ func shellMutationReceiptObservation(stateChanging bool, status runtimecontract.
 	if status != runtimecontract.RuntimeOperationExecutionStatusAccepted {
 		return observation
 	}
-	changes := make([]runtimecontract.RuntimeResourceChange, 0, len(result.WorkspaceTargetChanges)+1)
-	for _, change := range result.WorkspaceTargetChanges {
+	changes := make([]runtimecontract.RuntimeResourceChange, 0, len(result.WorkspaceObservedTargetChanges)+1)
+	for _, change := range result.WorkspaceObservedTargetChanges {
 		targetRef := strings.TrimSpace(change.TargetRef)
 		if targetRef == "" || change.BeforeRevision == change.AfterRevision || strings.TrimSpace(change.AfterRevision) == "" {
 			continue
@@ -196,6 +208,32 @@ func shellMutationReceiptObservation(stateChanging bool, status runtimecontract.
 	observation.Changed = true
 	observation.ResourceChanges = changes
 	return observation
+}
+
+func shellObservedChangedWorkspaceTargets(changes []RuntimeWorkspaceTargetChange) []string {
+	ret := make([]string, 0, len(changes))
+	for _, change := range changes {
+		if target := strings.TrimSpace(change.TargetRef); target != "" && change.BeforeRevision != change.AfterRevision {
+			ret = append(ret, target)
+		}
+	}
+	return normalizeShellStrings(ret)
+}
+
+func shellUndeclaredWorkspaceTargets(changes []RuntimeWorkspaceTargetChange, declared []string) []string {
+	allowed := make(map[string]struct{}, len(declared))
+	for _, target := range declared {
+		if target = strings.TrimSpace(target); target != "" {
+			allowed[target] = struct{}{}
+		}
+	}
+	undeclared := make([]string, 0, len(changes))
+	for _, target := range shellObservedChangedWorkspaceTargets(changes) {
+		if _, found := allowed[target]; !found {
+			undeclared = append(undeclared, target)
+		}
+	}
+	return normalizeShellStrings(undeclared)
 }
 
 func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {

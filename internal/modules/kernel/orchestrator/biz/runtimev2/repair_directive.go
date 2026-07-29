@@ -72,9 +72,10 @@ func repairDirectiveRequired(facts runtimecontract.RuntimeFacts) bool {
 	if facts.Repair.ActiveGap != nil || facts.Repair.RepairAttempts > 0 {
 		return true
 	}
-	// Owner feasibility rejection is the one repairable failure that occurs
-	// before an operation receipt can create a repair ledger entry.
-	return facts.Failure != nil && facts.Failure.Class == runtimecontract.FailureClassCandidateInfeasible
+	// A receipt-backed, owner-grounded implementation/effect failure can begin
+	// a repair before an assessment creates its gap. Candidate infeasibility is
+	// deliberately excluded: it carries no durable repair target authority.
+	return needsStateChangeForOwnerGroundedFailure(facts)
 }
 
 func applyRepairDirectiveAction(facts runtimecontract.RuntimeFacts, base runtimecontract.RuntimeDecision) (runtimecontract.RuntimeDecision, bool, error) {
@@ -130,7 +131,7 @@ func repairDirectiveEvidenceSatisfied(facts runtimecontract.RuntimeFacts, direct
 
 func buildRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimecontract.RuntimeDecision) runtimecontract.RuntimeRepairDirective {
 	trigger := runtimecontract.RuntimeRepairTriggerMissingEvidence
-	if needsStateChangeAfterRejectedValidation(facts) {
+	if needsStateChangeForOwnerGroundedFailure(facts) {
 		trigger = runtimecontract.RuntimeRepairTriggerRejectedValidation
 	}
 	if facts.Failure != nil {
@@ -220,9 +221,6 @@ func repairDirectiveTargets(facts runtimecontract.RuntimeFacts, fallback []strin
 	}
 	if len(facts.Focus.TargetRefs) > 0 {
 		return append([]string(nil), facts.Focus.TargetRefs...)
-	}
-	if facts.Failure != nil && len(facts.Failure.TargetRefs) > 0 {
-		return append([]string(nil), facts.Failure.TargetRefs...)
 	}
 	if targets := ownerGroundedAssessmentGapTargets(facts); len(targets) > 0 {
 		return targets

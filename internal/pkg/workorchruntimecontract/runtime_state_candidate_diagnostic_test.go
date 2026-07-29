@@ -9,7 +9,7 @@ func TestRuntimeStateRecordClonePreservesCandidateFailureDiagnostic(t *testing.T
 		Objectives: []RuntimeCandidateCorrectionObjective{RuntimeCandidateCorrectionReplaceTarget},
 	}
 	state := RuntimeStateRecord{CandidateAttempts: []RuntimeCandidateAttemptRecord{{
-		Failure: &RuntimeCandidateFailure{Class: RuntimeCandidateFailureClassInfeasible, Code: "operation_target_not_regular", Signature: "signature", Reason: "owner detail", Diagnostic: diagnostic},
+		Failure: &RuntimeCandidateFailure{Class: RuntimeCandidateFailureClassContract, Code: "candidate_target_outside_grounding", Signature: "signature", Reason: "candidate detail", Diagnostic: diagnostic},
 	}}}
 	clone := state.Clone()
 	got := clone.CandidateAttempts[0].Failure.Diagnostic

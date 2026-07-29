@@ -125,6 +125,9 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 				{Stage: "validation", Soul: runtimecontract.RuntimeSoulContext{ID: "soul-validation", Instructions: "validation-only-soul" + strings.Repeat("v", 13*1024)}},
 			},
 			Skills: []runtimecontract.RuntimeSkillContext{{ID: "skill-1", Instruction: "typed skill instructions"}},
+			EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
+				ID: "go-test-observable", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "go", RequiredArgs: []string{"test", "-v"},
+			}},
 			Continuation: runtimecontract.RuntimeContinuationContext{
 				Replan: &runtimecontract.RuntimeReplanContinuation{
 					PredecessorRunID: "run-old", TicketID: "ticket-old", ResolutionID: "resolution-old", ResolutionType: "replan", RecoveryAction: "replan",
@@ -227,7 +230,7 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 		`"outputContract"`, `"manifestHash"`, `"structuredOutputInstruction"`, `"$id":"workorch.runtime_candidate.state_change.v2"`, `"forbiddenTopLevelFields"`,
 		`"operationContracts":[{"kind":"file/edit"`, `"name":"oldText"`, `"name":"newText"`, `"targetCardinality":"one"`,
 		`"forbiddenParameters":["filePath","fileContent","path","targetRef","targetRefs"]`,
-		`"RequirementID":"repo-init"`, `"capabilityStates"`, `"repo-state-hash"`, `"targetSelectionInstruction"`, "empty workspace creation scope", `sealed prospective target \"initial-deliverable.txt\"`,
+		`"RequirementID":"repo-init"`, `"capabilityStates"`, `"repo-state-hash"`, `"targetSelectionInstruction"`, "empty workspace creation scope", `sealed prospective target \"initial-deliverable.txt\"`, `"RequiredArgs":["-v","test"]`,
 	} {
 		if !strings.Contains(dynamicSection, value) {
 			t.Fatalf("provider request dynamic output contract lost %q: %s", value, dynamicSection)
@@ -239,9 +242,13 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 	if !strings.Contains(request.PromptContext.Sections[3].Content, "typed skill instructions") || !strings.Contains(request.PromptContext.Sections[3].Content, "zh-CN") ||
 		!strings.Contains(request.PromptContext.Sections[3].Content, "execution-only-soul") || strings.Contains(request.PromptContext.Sections[3].Content, "validation-only-soul") ||
 		strings.Contains(request.PromptContext.Sections[3].Content, "default-only-soul") || strings.Contains(request.PromptContext.Sections[3].Content, "must_produce_state_change") ||
-		strings.Contains(request.PromptContext.Sections[3].Content, "lsp_diagnostics") ||
-		!strings.Contains(executionTail, "signature-old") || !strings.Contains(executionTail, "target-old") {
+		strings.Contains(request.PromptContext.Sections[3].Content, "lsp_diagnostics") {
 		t.Fatalf("provider request lost typed activation context: %s", request.PromptContext.Sections[3].Content)
+	}
+	for _, forbidden := range []string{"signature-old", "target-old", "RecoveryAction", `"continuation"`} {
+		if strings.Contains(executionTail, forbidden) {
+			t.Fatalf("C4 leaked continuation/recovery detail %q: %s", forbidden, executionTail)
+		}
 	}
 	capabilitySection := request.PromptContext.Sections[2].Content
 	if strings.Contains(capabilitySection, "signature-old") || strings.Contains(capabilitySection, "target-old") {
@@ -297,19 +304,6 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 				Reason: "raw owner explanation must not be rendered", TargetRefs: []string{"main.go"},
 			},
 			want: []string{`"code":"candidate_target_outside_grounding"`, `"targetRefs":["main.go"]`},
-		},
-		{
-			name: "owner feasibility diagnostic",
-			failure: runtimecontract.RuntimeCandidateFailure{
-				Class: runtimecontract.RuntimeCandidateFailureClassInfeasible, Code: "operation_target_not_regular", Signature: "owner-target-not-regular",
-				Reason: "owner-private path detail must not be rendered", TargetRefs: []string{"directory"},
-				Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
-					OperationID: "edit-directory", Path: "$.operations[id=edit-directory].targetRefs", Actual: "directory",
-					Allowed: []string{"replacement.txt"}, RejectedShapeHash: "owner-rejected-shape",
-					Objectives: []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionReplaceTarget},
-				},
-			},
-			want: []string{`"class":"infeasible"`, `"code":"operation_target_not_regular"`, `"operationId":"edit-directory"`, `"allowed":["replacement.txt"]`, `"rejectedShapeHash":"owner-rejected-shape"`, `"objectives":["replace_target_with_allowed_target"]`},
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -454,6 +448,53 @@ func TestRuntimeV2CandidateRetryExplainsOperationShapeReplayWithoutChangingStabl
 		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_admission_invalid",
 	}); retry == nil || strings.Contains(retry.Instruction, "materially different operation shape") {
 		t.Fatalf("non-replay retry instruction = %+v, want no replay-specific correction", retry)
+	}
+}
+
+func TestRuntimeV2CandidateExecutionTailOnlyRendersProviderSafeFacts(t *testing.T) {
+	secretParameter := "raw-operation-payload-must-not-reach-c4"
+	context := runtimecontract.RuntimeCandidateContext{
+		Failure: &runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassExecutionFailure, Code: "owner_fact", Signature: "owner-signature",
+			Message: "raw failure message must not reach c4", TargetRefs: []string{"main.go"},
+			GovernanceDependency: &runtimecontract.ExternalDependency{Kind: "external", SubjectRef: "dep-1", Reason: "raw governance reason must not reach c4"},
+		},
+		Evidence: runtimecontract.EvidenceLedger{Accepted: []runtimecontract.EvidenceFact{{
+			ID: "evidence-1", Kind: runtimecontract.EvidenceKindValidation, SubjectRef: "main.go", FailureCode: "validation_failed",
+			FailureSignature: "evidence-signature", FailureMessage: "raw evidence failure must not reach c4", Summary: "raw evidence summary must not reach c4",
+			EvidenceReason: "raw evidence reason must not reach c4", TargetRefs: []string{"main.go"},
+		}}},
+		Assessments: []runtimecontract.RuntimeAssessmentFact{{
+			ID: "assessment-1", FocusID: "focus-1", RequirementID: "requirement-1", Summary: "raw assessment summary must not reach c4",
+			RequirementText: "raw assessment requirement must not reach c4", Disposition: runtimecontract.AssessmentDispositionSatisfied,
+		}},
+		RejectedOperationShapes: []runtimecontract.RuntimeRejectedOperationShape{{
+			Operation:   runtimecontract.RuntimeOperation{ID: "op-1", Kind: runtimecontract.StepKindFileWrite, TargetRefs: []string{"main.go"}, Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &secretParameter}}},
+			FailureCode: "rejected_shape", FailureSignature: "shape-signature", FailureMessage: "raw rejected-shape message must not reach c4",
+		}},
+		Activation: runtimecontract.RuntimeActivationContext{Continuation: runtimecontract.RuntimeContinuationContext{
+			Replan: &runtimecontract.RuntimeReplanContinuation{PredecessorRunID: "run-prior", RecoveryAction: "raw-recovery-action-must-not-reach-c4", Reason: "raw continuation reason must not reach c4"},
+		}},
+	}
+	tail := runtimeV2CandidateExecutionTailProjection(context, 0, nil, nil, runtimecontract.RuntimeCandidateContractManifest{})
+	encoded, err := json.Marshal(tail)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	for _, forbidden := range []string{
+		"raw failure message", "raw governance reason", "raw evidence failure", "raw evidence summary", "raw evidence reason",
+		"raw assessment summary", "raw assessment requirement", "raw rejected-shape message", secretParameter,
+		"raw-recovery-action", "raw continuation reason", `"repairHints"`, `"continuation"`,
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("C4 leaked non-provider-safe detail %q: %s", forbidden, text)
+		}
+	}
+	for _, required := range []string{`"code":"owner_fact"`, `"failureCode":"validation_failed"`, `"failureSignature":"shape-signature"`, `"kind":"file/write"`} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("C4 lost provider-safe fact %q: %s", required, text)
+		}
 	}
 }
 

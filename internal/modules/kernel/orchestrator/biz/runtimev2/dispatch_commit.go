@@ -457,7 +457,20 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 				return EvidenceCommitResult{}, cycleErr
 			}
 			ledger.ActiveGap = &gap
-			if previousCount > 0 {
+			if isStateChangeNoOpWithoutProvenanceFailure(failure, evidence.Receipt) {
+				// The receipt is durable audit evidence, but cannot become
+				// state-change evidence. Persist its exact operation shape so
+				// candidate admission and restart take the same no-progress path.
+				ledger = recordNoProgressOperationShape(ledger, runtimecontract.RuntimeRejectedOperationShape{
+					Operation:        committedOperation,
+					EvidenceID:       fact.ID,
+					FailureClass:     failure.Class,
+					FailureCode:      failure.Code,
+					FailureSignature: failure.Signature,
+					FailureMessage:   failure.Message,
+				})
+				ledger = noteRepairNoProgress(ledger)
+			} else if previousCount > 0 {
 				ledger = noteRepairNoProgress(ledger)
 			}
 			aggregate.Facts.Repair = ledger
@@ -475,27 +488,25 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 	aggregate.ProcessedEventIDs = appendNormalizedString(aggregate.ProcessedEventIDs, evidence.EventID)
 	dispatch := *aggregate.ActiveDispatch
 	dispatch.CompletedOperationIDs = appendNormalizedString(dispatch.CompletedOperationIDs, evidence.OperationID)
-	freshnessInvalidated := false
+	prerequisitesInvalidated := false
 	if evidence.Status == ExecutionEvidenceStatusAccepted && evidence.Receipt != nil {
-		freshnessInvalidated, err = applyReceiptResourceChangeInvalidation(&aggregate, evidence.DispatchID, evidence.OperationID, *evidence.Receipt)
+		// A receipt can make owner facts stale for the next SM-2 authority. That
+		// does not invalidate the immutable operation set already sealed by this
+		// SM-3 transaction: continue until every sealed operation has committed
+		// evidence, unless this receipt reports a genuine failure or stale fence.
+		prerequisitesInvalidated, err = applyReceiptResourceChangeInvalidation(&aggregate, evidence.DispatchID, evidence.OperationID, *evidence.Receipt)
 		if err != nil {
 			return EvidenceCommitResult{}, err
-		}
-		// The accepted effect remains durable evidence, but an invalidated
-		// multi-operation dispatch has not completed the sealed operation set.
-		// Reopen its coverage binding so reducer cannot skip the refreshed
-		// prerequisite and the remaining required operation(s).
-		if freshnessInvalidated && len(dispatch.CompletedOperationIDs) < candidateOperationCount(dispatch.Candidate) {
-			aggregate.Facts.Coverage = reopenCoverageForEvidence(aggregate.Facts.Coverage, fact)
-			aggregate.Facts.FreshnessReacquireCoverage = append(aggregate.Facts.FreshnessReacquireCoverage, fact.CoverageWorkItemIDs...)
-		} else if evidence.Status == ExecutionEvidenceStatusAccepted {
-			aggregate.Facts.FreshnessReacquireCoverage = removeFreshnessReacquireCoverage(aggregate.Facts.FreshnessReacquireCoverage, fact.CoverageWorkItemIDs)
 		}
 	}
 	effectUncommittable := evidence.Status == ExecutionEvidenceStatusRejected && evidence.Failure != nil &&
 		evidence.Failure.Class == runtimecontract.FailureClassEffectMismatch && evidence.Receipt != nil &&
 		(evidence.Receipt.Outcome == runtimecontract.RuntimeOperationOutcomeAccepted || evidence.Receipt.Outcome == runtimecontract.RuntimeOperationOutcomeNoOp)
-	dispatchInvalidated := freshnessInvalidated || effectUncommittable
+	// Exhausting the bounded refresh ledger is a determined runtime failure and
+	// stops the transaction. Ordinary prerequisite invalidation is not.
+	refreshExhausted := prerequisitesInvalidated && aggregate.Facts.Failure != nil &&
+		aggregate.Facts.Failure.Class == runtimecontract.FailureClassPrerequisiteRefreshExhausted
+	dispatchInvalidated := effectUncommittable || refreshExhausted
 	dispatchCompleted := dispatchInvalidated || evidence.Status == ExecutionEvidenceStatusRejected || len(dispatch.CompletedOperationIDs) == candidateOperationCount(dispatch.Candidate)
 	if dispatchCompleted {
 		if dispatchInvalidated {
@@ -505,11 +516,14 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 		}
 		aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
 		aggregate.ActiveDispatch = nil
-		if !dispatchInvalidated {
+		// A completed transaction remains durable audit/provenance evidence, but
+		// SM-2 must reacquire changed owner facts before advancing this focus.
+		canAdvanceFocus := !dispatchInvalidated && len(aggregate.Facts.Prerequisites.Pending) == 0
+		if canAdvanceFocus {
 			aggregate.Facts = advanceSatisfiedCoverageFocus(aggregate.Facts)
 		}
 		var previousSnapshot *runtimecontract.AuthoritySnapshot
-		if !dispatchInvalidated {
+		if canAdvanceFocus {
 			previousSnapshot = &aggregate.Decision.AuthoritySnapshot
 		}
 		facts, nextDecision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, previousSnapshot)
@@ -526,6 +540,17 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 		return EvidenceCommitResult{}, err
 	}
 	return EvidenceCommitResult{Disposition: CommitDispositionCommitted, DispatchCompleted: dispatchCompleted, Aggregate: aggregate}, nil
+}
+
+// isStateChangeNoOpWithoutProvenanceFailure identifies the one bounded C8-F
+// branch.  Receipt outcome is checked as well as the typed failure code so a
+// provider- or adapter-supplied failure string can never enter it.
+func isStateChangeNoOpWithoutProvenanceFailure(failure runtimecontract.FailureFact, receipt *runtimecontract.RuntimeOperationReceipt) bool {
+	if failure.Class != runtimecontract.FailureClassEffectMismatch || failure.Code != runtimeStateChangeNoOpWithoutProvenanceCode || receipt == nil {
+		return false
+	}
+	value := receipt.Normalized()
+	return value.Outcome == runtimecontract.RuntimeOperationOutcomeNoOp && value.NoOp && !value.Changed && value.ObservedEffectScope == runtimecontract.RuntimeEffectNone
 }
 
 // validationFailureTargetsAreGrounded verifies that a validation receipt does
@@ -732,31 +757,6 @@ func closeCoverageForEvidence(coverage []runtimecontract.RuntimeCoverageItemFact
 	return runtimecontract.NormalizeRuntimeCoverageFacts(coverage)
 }
 
-// reopenCoverageForEvidence keeps accepted evidence as lineage while making
-// the work item available to the fresh transaction that must replace an
-// invalidated partial dispatch. Only the matching evidence reference is
-// removed; evidence itself is never rewritten or rejected.
-func reopenCoverageForEvidence(coverage []runtimecontract.RuntimeCoverageItemFact, evidence runtimecontract.EvidenceFact) []runtimecontract.RuntimeCoverageItemFact {
-	matched := map[common.CoverageWorkItemID]struct{}{}
-	for _, id := range evidence.CoverageWorkItemIDs {
-		matched[id] = struct{}{}
-	}
-	for idx := range coverage {
-		if _, ok := matched[coverage[idx].ID]; !ok {
-			continue
-		}
-		coverage[idx].State = runtimecontract.RuntimeCoverageItemStateOpen
-		kept := make([]string, 0, len(coverage[idx].EvidenceRefs))
-		for _, ref := range coverage[idx].EvidenceRefs {
-			if ref != string(evidence.ID) {
-				kept = append(kept, ref)
-			}
-		}
-		coverage[idx].EvidenceRefs = kept
-	}
-	return runtimecontract.NormalizeRuntimeCoverageFacts(coverage)
-}
-
 // reopenCoverageDependenciesForEvidence applies compiled profile dependency
 // edges to the coverage ledger.  The edges and trigger kinds were sealed at
 // activation, so this reducer helper remains neutral to target paths, owner
@@ -849,20 +849,6 @@ func requeueReopenedCoverageFocuses(facts runtimecontract.RuntimeFacts, reopened
 	facts.CompletedFocuses = completed
 	facts.RemainingFocuses = append(requeued, facts.RemainingFocuses...)
 	return facts.Normalized()
-}
-
-func removeFreshnessReacquireCoverage(values []common.CoverageWorkItemID, completed []common.CoverageWorkItemID) []common.CoverageWorkItemID {
-	removed := map[common.CoverageWorkItemID]struct{}{}
-	for _, id := range completed {
-		removed[id] = struct{}{}
-	}
-	kept := make([]common.CoverageWorkItemID, 0, len(values))
-	for _, id := range values {
-		if _, ok := removed[id]; !ok {
-			kept = append(kept, id)
-		}
-	}
-	return kept
 }
 
 func (a RuntimeAggregate) Validate() error {

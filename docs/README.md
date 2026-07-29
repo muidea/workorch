@@ -104,10 +104,10 @@ Last Updated: 2026-07-28
 - 权威层已按 V2 刷新：`00-core` 双层映射、`01-overview` 事实入口、`20-runtime-flow` / `30-module-architecture` 主链。
 - 2026-07-14：约 146 份 completed / V1-absorbed plan 已迁 `90-archive/completed/`。
 - **2026-07-16 文档清理**：`active/` 假活跃产品/审计/收口日记全部归档；dated live verification 迁 `records/`；`60-verification/artifacts/**` 出库。
-- **Runtime V2 只有一个 active 收口队列 `RUNTIME-SMO`**：2026-07-28 fresh live 已重新打开 complete candidate
-  document handoff、SM-3 single evaluator、canonical target 与 recovery 分类，当前按 C7-B～C7-F 串行收口。
-  旧 VPC 已迁入 `90-archive/superseded/`，仅作 manifest/evaluator/receipt 回归基线；不得新增第二套状态迁移
-  或以 TUI/Web 兼容分支绕过 SMO。active 当前包含
+- **Runtime V2 只有一个 active 收口队列 `RUNTIME-SMO`**：最新 fresh live 暴露 owner feasibility 被错误送入
+  candidate correction，以及空 workspace coverage/blueprint 断链；当前按 SMO-1～SMO-7 串行收口。
+  C7/C8 与旧 VPC 仅作 manifest/evaluator/receipt 回归基线；不得新增第二套状态迁移或以 TUI/Web 兼容分支
+  绕过 SMO。active 当前包含
   RUNTIME-SMO、ARCH-1、OPS-1 与可选 OPT-1。
 - **已废止作为生产主链叙述**：StagePacket、NextAction、graph dispatch checkpoint、ExecutionContextPatch、自动 replan successor。
 - 根目录正式导航：本文。历史目录重组计划见 `90-archive/completed/docs-domain-module-flow-reorganization-plan.md`。

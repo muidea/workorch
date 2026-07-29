@@ -108,11 +108,14 @@ func (m *Biz) persistAndRecordRuntimeCandidateRequestFragment(ctx context.Contex
 	if err != nil {
 		return runtimev2.RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestFragment{}, err
 	}
-	updated, err := m.bizPtr.RecordRuntimeV2CandidateRequestFragment(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, logicalRequestID, fragment)
+	updatedEvent, err := m.submitRuntimeV2InternalEvent(ctx, runtimev2.RuntimeInternalEvent{
+		Kind: runtimev2.RuntimeInternalEventCandidateRequestFragmentObserved, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		LogicalRequestID: logicalRequestID, RequestFragment: &fragment,
+	})
 	if err != nil {
 		return runtimev2.RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestFragment{}, err
 	}
-	return updated, fragment, nil
+	return updatedEvent.Aggregate, fragment, nil
 }
 
 // persistRuntimeCandidateRequestDocument stores a complete raw document before
@@ -176,11 +179,14 @@ func (m *Biz) persistAndCompleteRuntimeCandidateRequestDocument(ctx context.Cont
 	if err != nil {
 		return runtimev2.RuntimeAggregate{}, "", "", err
 	}
-	updated, err := m.bizPtr.CompleteRuntimeV2CandidateRequestDocument(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, logicalRequestID, physicalCallID)
+	updatedEvent, err := m.submitRuntimeV2InternalEvent(ctx, runtimev2.RuntimeInternalEvent{
+		Kind: runtimev2.RuntimeInternalEventCandidateDocumentObserved, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		LogicalRequestID: logicalRequestID, PhysicalCallID: physicalCallID,
+	})
 	if err != nil {
 		return runtimev2.RuntimeAggregate{}, "", "", err
 	}
-	return updated, id, hash, nil
+	return updatedEvent.Aggregate, id, hash, nil
 }
 
 // markRuntimeCandidateRequestContentFailed closes the opaque content carrier

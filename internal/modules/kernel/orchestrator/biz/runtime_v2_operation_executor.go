@@ -357,5 +357,9 @@ func (m *Biz) executeRuntimeV2ActiveDispatch(ctx context.Context, aggregate runt
 	if m == nil || m.bizPtr == nil || m.EventHub() == nil {
 		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	return m.bizPtr.ExecuteRuntimeV2Dispatch(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, eventRuntimeV2OperationExecutor{hub: m.EventHub()})
+	updated, err := m.submitRuntimeV2InternalEvent(ctx, runtimev2.RuntimeInternalEvent{
+		Kind: runtimev2.RuntimeInternalEventDispatchExecutionRequested, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		Executor: eventRuntimeV2OperationExecutor{hub: m.EventHub()},
+	})
+	return updated.Aggregate, err
 }

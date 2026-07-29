@@ -73,7 +73,7 @@ func TestNewProbeRuntimeOperationFeasibilityResultEnforcesOuterXOR(t *testing.T)
 		t.Fatalf("feasible observation = %+v err=%v", feasible, err)
 	}
 
-	failure := RuntimeOperationInfeasibleFailure(command.Operation, "operation_infeasible", "not currently feasible")
+	failure := RuntimeOperationInfeasibleFailure(command.Operation, "operation_target_missing", "not currently feasible")
 	infeasible, err := NewProbeRuntimeOperationFeasibilityResult(command, false, failure, nil, nil, nil)
 	if err != nil || infeasible.Feasible || infeasible.Failure == nil || infeasible.Stale != nil {
 		t.Fatalf("infeasible observation = %+v err=%v", infeasible, err)
@@ -98,5 +98,9 @@ func TestNewProbeRuntimeOperationFeasibilityResultEnforcesOuterXOR(t *testing.T)
 	}
 	if _, err := NewProbeRuntimeOperationFeasibilityResult(command, false, nil, nil, nil, nil); err == nil {
 		t.Fatal("empty non-feasible observation accepted")
+	}
+	unknown := RuntimeOperationInfeasibleFailure(command.Operation, "file_unmapped_code", "not currently feasible")
+	if _, err := NewProbeRuntimeOperationFeasibilityResult(command, false, unknown, nil, nil, nil); err == nil {
+		t.Fatal("unmapped owner feasibility code accepted")
 	}
 }

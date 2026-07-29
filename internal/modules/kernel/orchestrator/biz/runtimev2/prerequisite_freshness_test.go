@@ -342,6 +342,91 @@ func TestFeasibilityPrerequisiteInvalidatesAttemptWithoutRetryOrRepairDebt(t *te
 	}
 }
 
+// An ordinary owner infeasibility is neither a candidate correction nor a
+// prerequisite refresh. It must leave an immutable invalidated-attempt
+// lineage, re-reduce SM-2 with the factual failure, and make a fresh attempt
+// 0 possible only under the resulting authority.
+func TestOwnerInfeasibilityInvalidatesAttemptAndFormsNewAuthorityWithoutCorrection(t *testing.T) {
+	ctx := context.Background()
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := controllerFacts()
+	facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindFileWrite}
+	inventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "operation_admissibility:file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: []string{"target.txt"}, ObservedRevision: "tree-v1",
+	}
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	prerequisite := runtimecontract.RuntimePrerequisite{ID: inventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.StepKindFileWrite}}
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID, ContentHash: inventory.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: "tree-v1"}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
+	initialized, err := controller.Initialize(ctx, facts, controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeAuthority := initialized.Decision.AuthoritySnapshot.ID
+	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+		ID: "write-target", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("state"),
+	}}}}}
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, facts.WorkspaceID, facts.RunID, 0, "owner-infeasible-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.RecordCandidateProposal(ctx, facts.WorkspaceID, facts.RunID, 0, candidate); err != nil {
+		t.Fatal(err)
+	}
+	ownerObservation := runtimecontract.RuntimeOwnerFeasibilityObservation{
+		Disposition: runtimecontract.RuntimeOwnerFeasibilityInfeasible, Category: runtimecontract.RuntimeOwnerFeasibilityCategoryTargetNotRegular,
+		Code: "operation_target_not_regular", Signature: "file/target-not-regular", Reason: "owner rejected non-regular target", TargetRefs: []string{"target.txt"},
+	}
+	if _, err := controller.RecordCandidateFeasibility(ctx, facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+		OperationID: "write-target", AdmissibilitySnapshotID: inventory.SnapshotID, Feasible: false, Observation: &ownerObservation,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ownerEvent, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventOwnerFeasibilityObserved, WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, Attempt: 0, OwnerFeasibility: &ownerObservation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalidated := ownerEvent.Aggregate
+	if invalidated.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || invalidated.Decision.AuthoritySnapshot.ID == beforeAuthority ||
+		len(invalidated.CandidateAttempts) != 1 || invalidated.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated ||
+		invalidated.CandidateAttempts[0].OwnerFeasibility == nil || invalidated.CandidateAttempts[0].Failure != nil ||
+		invalidated.Facts.Failure == nil || invalidated.Facts.Failure.Class != runtimecontract.FailureClassCandidateInfeasible || invalidated.Facts.Repair.RepairAttempts != 0 {
+		t.Fatalf("owner infeasibility did not form a clean new authority: %+v", invalidated)
+	}
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, facts.WorkspaceID, facts.RunID, 1, "owner-infeasible-prefix"); err == nil {
+		t.Fatal("owner infeasibility incorrectly opened correction attempt 1")
+	}
+	// Recreate the controller over the same persisted aggregate. No process-local
+	// attempt map may be needed to distinguish the old invalidated contract from
+	// this newly sealed authority.
+	restarted, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restarted.BeginCandidateAttemptForTest(ctx, facts.WorkspaceID, facts.RunID, 0, "owner-infeasible-new-authority"); err != nil {
+		t.Fatalf("new authority did not permit fresh attempt 0: %v", err)
+	}
+	saves := repository.saves
+	duplicateEvent, err := restarted.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventOwnerFeasibilityObserved, WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, Attempt: 0, OwnerFeasibility: &ownerObservation,
+	})
+	if err != nil || duplicateEvent.Aggregate.StateRevision != repository.aggregate.StateRevision || repository.saves != saves {
+		t.Fatalf("duplicate owner observation rewrote aggregate: duplicate=%+v saves=%d err=%v", duplicateEvent.Aggregate, repository.saves, err)
+	}
+}
+
 func TestMCPOwnerCatalogStaleRestartDoesNotReuseFailureTarget(t *testing.T) {
 	ctx := context.Background()
 	repository := &controllerRepository{}
@@ -444,7 +529,7 @@ func TestActiveDispatchPrerequisiteStaleInvalidatesWithoutRejectedEvidence(t *te
 	}
 }
 
-func TestAcceptedReceiptResourceChangeInvalidatesRemainingDispatch(t *testing.T) {
+func TestAcceptedReceiptResourceChangeRetiresPrerequisitesButKeepsRemainingDispatch(t *testing.T) {
 	ctx := context.Background()
 	aggregate := stateChangeAggregate(t)
 	_, _ = addFreshFileAdmissibilityObservation(t, &aggregate)
@@ -491,14 +576,14 @@ func TestAcceptedReceiptResourceChangeInvalidatesRemainingDispatch(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !committed.DispatchCompleted || committed.Aggregate.ActiveDispatch != nil || len(committed.Aggregate.CompletedDispatches) != 1 ||
-		committed.Aggregate.CompletedDispatches[0].State != DispatchStateInvalidated ||
+	if committed.DispatchCompleted || committed.Aggregate.ActiveDispatch == nil || len(committed.Aggregate.CompletedDispatches) != 0 ||
+		committed.Aggregate.ActiveDispatch.ID != sealed.ActiveDispatch.ID ||
+		len(committed.Aggregate.ActiveDispatch.CompletedOperationIDs) != 1 || committed.Aggregate.ActiveDispatch.CompletedOperationIDs[0] != "write-1" ||
 		len(committed.Aggregate.Facts.Evidence.Accepted) != 1 || len(committed.Aggregate.Facts.Evidence.Rejected) != 0 ||
 		committed.Aggregate.Facts.Repair.RepairAttempts != 0 || committed.Aggregate.Facts.Recovery.PrerequisiteRefreshes != 0 ||
 		committed.Aggregate.Facts.Recovery.PrerequisiteResourceChangeRefreshes != 1 ||
-		committed.Aggregate.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(committed.Aggregate.Facts.FreshnessReacquireCoverage) != 1 ||
-		committed.Aggregate.Facts.FreshnessReacquireCoverage[0] != "cwi-1" {
-		t.Fatalf("accepted resource change did not atomically invalidate remaining dispatch: %+v", committed.Aggregate)
+		committed.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(committed.Aggregate.Facts.FreshnessReacquireCoverage) != 0 {
+		t.Fatalf("accepted resource change did not preserve sealed dispatch: %+v", committed.Aggregate)
 	}
 	if len(committed.Aggregate.Facts.Prerequisites.Pending) != 1 || len(committed.Aggregate.Facts.Resources.OperationAdmissibilities) != 0 ||
 		len(committed.Aggregate.PrerequisiteInvalidations) != 1 {
@@ -507,6 +592,22 @@ func TestAcceptedReceiptResourceChangeInvalidatesRemainingDispatch(t *testing.T)
 	if changes := committed.Aggregate.PrerequisiteInvalidations[0].ResourceChanges; len(changes) != 1 ||
 		changes[0].Domain != runtimecontract.RuntimeResourceWorkspaceTree || changes[0].AfterRevision != "tree-v2" {
 		t.Fatalf("invalidation did not retain owner resource-change source: %#v", changes)
+	}
+	secondEvidence := ExecutionEvidence{
+		EventID: "event-freshness-resource-change-second", WorkspaceID: "ws-1", RunID: "run-1", DispatchID: sealed.ActiveDispatch.ID,
+		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "write-2",
+		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
+	}
+	attachRuntimeV2TestOwnerReceipt(t, &repository.aggregate, &secondEvidence)
+	completed, err := coordinator.CommitEvidence(ctx, secondEvidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !completed.DispatchCompleted || completed.Aggregate.ActiveDispatch != nil || len(completed.Aggregate.CompletedDispatches) != 1 ||
+		completed.Aggregate.CompletedDispatches[0].State != DispatchStateCommitted ||
+		completed.Aggregate.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite ||
+		len(completed.Aggregate.Facts.Prerequisites.Pending) != 1 {
+		t.Fatalf("completed resource-changing dispatch did not defer SM-2 until refresh: %+v", completed.Aggregate)
 	}
 	duplicate, err := coordinator.CommitEvidence(ctx, evidence)
 	if err != nil || duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.Facts.Recovery.PrerequisiteRefreshes != 0 ||

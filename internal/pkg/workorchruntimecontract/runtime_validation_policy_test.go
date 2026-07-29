@@ -13,14 +13,24 @@ func TestRuntimeValidationPolicyRetryLimitIsTypedAndDeterministic(t *testing.T) 
 	if got, ok := RuntimeValidationRetryLimit(policies, EvidenceKindValidation); !ok || got != 2 {
 		t.Fatalf("validation retry limit = %d/%v, want 2/true", got, ok)
 	}
-	if RuntimeValidationFailureRequiresStateChange(policies, EvidenceKindValidation) {
-		t.Fatal("policy with false validationFailureImpliesStateChange was ignored")
-	}
 	conflicting := append(policies, RuntimeValidationPolicy{
 		ID: "other", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{EvidenceKindValidation}, MaxValidationOnlyRetriesPerFocus: 3,
 	})
 	if err := ValidateRuntimeValidationPolicies(conflicting); err == nil {
 		t.Fatal("expected conflicting validation retry policy to fail")
+	}
+}
+
+func TestRuntimeValidationEvidenceRecipeRequiresObservableArguments(t *testing.T) {
+	policy := RuntimeEvidencePolicy{
+		ID: "go-test-observable", AppliesTo: StepKindShellCommand, CommandName: "go",
+		RequiredArgs: []string{"test", "-v"},
+	}
+	if err := policy.Validate(); err != nil {
+		t.Fatalf("observable recipe policy rejected: %v", err)
+	}
+	if err := (RuntimeEvidencePolicy{ID: "invalid", AppliesTo: StepKindShellCommand, RequiredArgs: []string{"-v"}}).Validate(); err == nil {
+		t.Fatal("required recipe args without a command name must be rejected")
 	}
 }
 
@@ -35,22 +45,5 @@ func TestRequiredRuntimeValidationDiscoverySourcesArePureAndScoped(t *testing.T)
 	want := []string{RuntimeValidationDiscoverySourceProjectFiles, RuntimeValidationDiscoverySourceWorkspaceManifest}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("validation discovery sources = %v, want %v", got, want)
-	}
-}
-
-func TestRuntimeValidationFailureRouteHonorsImplementationDiagnosticClasses(t *testing.T) {
-	policies := []RuntimeValidationPolicy{{
-		ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{EvidenceKindValidation},
-		ValidationFailureImpliesStateChange: true,
-		ImplementationGapDiagnosticClasses:  []string{ValidationDiagnosticBuildFailed, ValidationDiagnosticTestFailed},
-	}}
-	if !RuntimeValidationFailureRequiresStateChange(policies, EvidenceKindValidation, ValidationDiagnosticBuildFailed) {
-		t.Fatal("declared build failure did not route to state-change repair")
-	}
-	if RuntimeValidationFailureRequiresStateChange(policies, EvidenceKindValidation, ValidationDiagnosticCommandInvalid) {
-		t.Fatal("command-contract failure incorrectly routed to implementation repair")
-	}
-	if !RuntimeValidationFailureRequiresStateChange(policies, EvidenceKindValidation) {
-		t.Fatal("missing diagnostic must retain the sealed conservative route")
 	}
 }

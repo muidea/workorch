@@ -26,11 +26,10 @@ Last Updated: 2026-07-28
 
 **生产代码路径 = Runtime V2 only。**
 
-> 实施状态限定：2026-07-28 fresh deployed live 已重新打开 Runtime candidate 边界。首个 durable File receipt、
-> freshness invalidation 和 terminal delivery 已取得正向证据，但第二份 complete semantic-invalid document 在
-> EventHub adapter 被丢失并误判为 provider protocol。当前必须按 C7-B～C7-F 收口 document handoff、SM-3
-> single evaluator、canonical target、回归与 fresh live。C7-B～C7-E 已完成代码与回归门禁；仅 C7-F fresh live
-> 未验收。唯一执行清单为
+> 实施状态限定：最新 fresh deployed live 已证明既有 receipt、multi-operation dispatch 与 terminal delivery
+> 的局部基线，但同时暴露 owner feasibility 被错误折叠为 candidate correction，以及空 workspace coverage/
+> blueprint 与 validation dependency 断链。当前唯一实施顺序是 RUNTIME-SMO SMO-1～SMO-7；历史 C7/C8
+> 只作回归基线，不能据此声明 workspace 已持续收敛：
 > [runtime-v2-single-owner-state-machine-closure-plan.md](../70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md)。
 
 - Start / Resume 只提交到 Run owner 的 typed activation / continuation intent；Run owner 成功迁移后发布事实，
@@ -40,7 +39,7 @@ Last Updated: 2026-07-28
 - `runtimeContractVersion=v2` 仅为审计字段，不是 V1/V2 路由开关。
 - V1 主链已删除：`StagePacket`、`NextAction`、`DispatchNextStep`、`ExecutionContextPatch`、自动 replan successor、V1 progress/terminal checkpoint replay、通用 RuntimeAdapter registry。
 - 完整生产规约由四个协调状态机组成：SM-1 Run lifecycle、SM-2 authority/focus convergence、SM-3 candidate/sealed dispatch transaction、SM-4 drive/recovery/projection delivery；任何 runtime 变更必须通过四状态机变更门禁。
-- complete candidate 只经过一个 evaluator；rejection 只能是同 manifest 内可修正一次或明确终态。candidate attempt 预算按稳定 authority contract identity 计算，不与 request recovery、prerequisite refresh 或 focus repair 共用。
+- complete candidate 只经过一个 evaluator；其 structural rejection 才能是同 manifest 内可修正一次或明确终态。owner feasibility 是独立事实，必须经 Orchestrator internal event 进入 SM-2 后继，绝不消耗 candidate attempt。各预算按稳定 authority contract identity 分离。
 - drive 同时要求 persisted revision 与 convergence progress signature 推进；仅增加 retry/snapshot bookkeeping 不算正向进展。
 - terminal delivery 统一为 persisted terminal → Result owner → Workspace owner → Run owner；SM-4 只保存
   delivery acknowledgement 并对缺失回执执行幂等重试。
@@ -110,14 +109,14 @@ Block owner，不承担跨 owner 编排。
 ## Remaining Open Work
 
 历史 fresh Run 的局部成功、R4/P0～P6/A-4 过程分段和旧 VPC 的 N1～N8 只保留为 archive regression
-evidence，不再定义当前实施顺序，也不能代替最新 deployed live。旧反例 `ws-025ecc6a936133bb/run-007` 所暴露的
-mixed-effect candidate、receipt非原子交接与Resume重复 invariant failure 已形成代码收口和回归；最新反例
-`ws-8974c4e22de0b2a4/run-001` 优先决定当前未关项。
+evidence，不再定义当前实施顺序，也不能代替最新 deployed live。最新 persisted aggregate 反例优先决定当前未关项；
+active 文档不保存 workspace/run 的 dated 过程日志或 raw provider/runtime data。
 
-1. **Runtime V2 单 owner candidate/document 收口（RUNTIME-SMO C7-F）**：complete document EventHub handoff、
-   SM-3 single evaluator、operation canonical TargetRefs及 attempt/restart/static 矩阵已完成。剩余项是用最新 binary
-   与全新 workspace 重跑 activation、repair、governance、restart、terminal delivery、多 workspace 与重复 Resume。
-   旧 VPC 仅作为回归基线，不能新增兼容路径或独立规则。详见
+1. **Runtime V2 单 owner convergence 收口（RUNTIME-SMO SMO-1～SMO-7）**：先统一 candidate rejection 与
+   owner feasibility 的正交合同和 Orchestrator internal event，以及所有 aggregate transition 到唯一
+   coordinator 已完成；随后收口 feasibility 后继、activation-time coverage/blueprint、capability code taxonomy 与
+   request boundary，最后执行 restart/concurrency/fresh live。历史 C7/C8、canonical target、receipt/effect 等
+   只作为回归基线，不能新增兼容路径或独立规则。详见
    [单 owner 统一收口方案](../70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md)。
 2. **组件边界 / 生命周期（ARCH-1）**：SM-4 startup recovery、channel-free process lifecycle、owner Service facade、repository DTO 与 test-data isolation 均已有实现/回归证据；2026-07-19 的 go-multi-module-dev 审计发现的共享 Base Biz 缺失和 framework Module 根直接持有 EventHub，现已迁移到 component-local Biz，且本地 structural/race/file-backed 门禁已重跑。22 个组件的职责、typed 交互合同、禁止边界和可单独执行的回归命令已固化在 `70-roadmap/active/component-contract-and-regression-closure-matrix.md`。仅待提供重启后的外部目标与 `active_no_dispatch`、`active_sealed_dispatch`、`terminal_delivery_pending` 三类 fixture manifest，以执行 deployed SM-4 matrix；workspace 删除后的迟到投影还必须验证 `/readyz` 恢复 ready，不能以放宽 readiness 绕过。
 3. **运维切换（OPS-1）**：真实生产目录 `runtime-v1-retirement --apply` + clean build 维护窗口（过程日记已归档，不在 active 放长文）。

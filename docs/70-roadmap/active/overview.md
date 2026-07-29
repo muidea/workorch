@@ -15,7 +15,7 @@ Last Updated: 2026-07-28
 | 主题 | 状态 |
 | --- | --- |
 | Runtime V2 生产主链 | **代码已收口**（Start/Resume → `DriveRuntimeV2` only） |
-| Runtime V2 正向收敛与状态机 owner | **RUNTIME-SMO active，C7-B～C7-E 已完成，C7-F 待 fresh live**；complete document handoff、SM-3 single evaluator、canonical target与全量门禁已收口，尚待重新部署后的新 workspace 验收。 |
+| Runtime V2 正向收敛与状态机 owner | **RUNTIME-SMO active，按 SMO-1～SMO-7 串行收口**；C7/C8 仅为回归基线。最新 fresh live 暴露 owner feasibility 被错误送入 candidate correction，以及空 workspace coverage/blueprint 断链。 |
 | 历史 prerequisite / candidate closure records | **archive baseline only**；旧 VPC、freshness、admission、positive-acceptance 计划不得独立定义当前状态或实施顺序 |
 | 22-component framework boundary | **remediation active**；共享 Base Biz、全量本地 structural/race/file-backed 门禁已完成，待外部 deployed restart-fixture matrix |
 | V1 StagePacket / NextAction / graph dispatch 主链 | **已删除** |
@@ -25,7 +25,7 @@ Last Updated: 2026-07-28
 
 | ID | 项 | 说明 | 方案 / 历史过程稿 |
 | --- | --- | --- | --- |
-| RUNTIME-SMO | Runtime V2 单 owner 状态机统一收口 | 唯一活动 Runtime 队列。C7-B～C7-E 已完成；仅保留 C7-F fresh live（新 workspace、restart、并发与 terminal delivery）验收，不做兼容双写。 | [单 owner 统一收口方案](runtime-v2-single-owner-state-machine-closure-plan.md) |
+| RUNTIME-SMO | Runtime V2 单 owner 状态机统一收口 | 唯一活动 Runtime 队列。按 SMO-1 合同与事件词汇、SMO-2 transition coordinator、SMO-3 feasibility 收敛、SMO-4 activation blueprint、SMO-5 owner taxonomy、SMO-6 boundary gate、SMO-7 fresh live 串行执行；不做兼容双写。 | [单 owner 统一收口方案](runtime-v2-single-owner-state-machine-closure-plan.md) |
 | ARCH-1 | 22 组件 framework boundary / lifecycle 验证 | Base Biz / Module-root EventHub 拓扑及本地验证已收口；按 22 组件合同矩阵逐项保持独立回归，待有重启后的外部目标与三类 fixture manifest 后执行 deployed SM-4 matrix | [组件矩阵](component-contract-and-regression-closure-matrix.md) |
 | OPS-1 | 生产目录 V1 retirement 正式 apply | 代码/live 已 complete；等待 clean build + 真实生产目录维护窗口执行 `runtime-v1-retirement --apply` | [deployed-workspace-progress-blocker-component-closure-plan.md](../../90-archive/completed/deployed-workspace-progress-blocker-component-closure-plan.md) |
 | OPT-1 | file-patch deployed live（可选） | 代码迁移已完成；可选补一次 `patch apply + validation + DoD closeout` 的 deployed live | [file-patch-side-effect-owner-migration-plan.md](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |

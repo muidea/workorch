@@ -34,7 +34,7 @@ request 应按 cacheability 从高到低组织：
 - `C1` semi-stable workspace definition（Goal / DoD）
 - `C2` stable capability / governance / validation / acceptance-slice / template stage-policy **声明**（语义输入，非 kernel 状态名）
 - `C3` current focus / requiredOutput / decision bundle
-- `C4` volatile execution tail（failure、recent evidence、attempt diagnostics）
+- `C4` volatile execution tail（provider-safe failure、recent evidence identity、attempt diagnostics）
 - `C5` large refs / trace
 
 稳定前缀必须保持：
@@ -46,7 +46,8 @@ request 应按 cacheability 从高到低组织：
 - C3 的 operation kind、parameter、effect、coverage 与 target policy 只能由 persisted
   `RuntimeCandidateContractManifest` 渲染；不得从 owner inventory、profile 或错误文本重新拼装第二份合同
 - C4 correction 只能包含 `CandidateRejection` 的 provider-safe diagnostic 和唯一
-  `CorrectionDirective`；不得渲染 raw reason，也不得由 prompt 文案补充未封存的 allowed 值
+  `CorrectionDirective`；owner feasibility、Run/repair/recovery action、governance/continuation、raw reason、
+  raw evidence/assessment summary 与 operation payload 均不得渲染，也不得由 prompt 文案补充未封存的 allowed 值
 - raw stream、full provider payload、large artifact 默认 ref-only
 
 ### Provider-Facing Stable Prefix

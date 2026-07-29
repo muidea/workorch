@@ -5,6 +5,7 @@ package orchestrator
 import (
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
+	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -56,12 +57,19 @@ func (m *Biz) handleRuntimeV2OperationReceipt(event magicevent.Event, result mag
 			result.Set(nil, runtimeOperationMagicFailure(common.ErrInvalidArgument))
 			return
 		}
-		aggregate, receipt, err := m.bizPtr.CommitRuntimeV2OperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Fence, command.Receipt)
+		committed, err := m.submitRuntimeV2InternalEvent(event.Context(), runtimev2.RuntimeInternalEvent{
+			Kind: runtimev2.RuntimeInternalEventOperationReceiptObserved, WorkspaceID: command.WorkspaceID, RunID: command.RunID,
+			DispatchID: command.DispatchID, Fence: command.Fence, OperationReceipt: &command.Receipt,
+		})
 		if err != nil {
 			result.Set(nil, runtimeOperationMagicFailure(err))
 			return
 		}
-		result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: receipt, StateRevision: aggregate.StateRevision}, nil)
+		if committed.Receipt == nil {
+			result.Set(nil, runtimeOperationMagicFailure(common.ErrInvalidArgument))
+			return
+		}
+		result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: *committed.Receipt, StateRevision: committed.Aggregate.StateRevision}, nil)
 	default:
 		result.Set(nil, runtimeOperationMagicFailure(common.ErrInvalidArgument))
 	}

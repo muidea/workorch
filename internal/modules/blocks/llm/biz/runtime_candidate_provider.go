@@ -195,15 +195,64 @@ type runtimeCandidateAuthorityProjection struct {
 type runtimeCandidateExecutionTailProjection struct {
 	Attempt                   int                                                        `json:"candidateAttempt"`
 	Retry                     *runtimeCandidateRetryProjection                           `json:"retry,omitempty"`
-	Failure                   *runtimecontract.FailureFact                               `json:"failure,omitempty"`
-	AcceptedEvidence          []runtimecontract.EvidenceFact                             `json:"latestAcceptedEvidence,omitempty"`
-	RejectedEvidence          []runtimecontract.EvidenceFact                             `json:"latestRejectedEvidence,omitempty"`
-	Assessments               []runtimecontract.RuntimeAssessmentFact                    `json:"recentAssessments,omitempty"`
-	RepairHints               []runtimecontract.RuntimeRepairHint                        `json:"repairHints,omitempty"`
-	RejectedOperationShapes   []runtimecontract.RuntimeRejectedOperationShape            `json:"rejectedOperationShapes,omitempty"`
-	NoProgressOperationShapes []runtimecontract.RuntimeRejectedOperationShape            `json:"noProgressOperationShapes,omitempty"`
-	Continuation              *runtimecontract.RuntimeContinuationContext                `json:"continuation,omitempty"`
+	Failure                   *runtimeCandidateProviderSafeFailureProjection             `json:"failure,omitempty"`
+	AcceptedEvidence          []runtimeCandidateProviderSafeEvidenceProjection           `json:"latestAcceptedEvidence,omitempty"`
+	RejectedEvidence          []runtimeCandidateProviderSafeEvidenceProjection           `json:"latestRejectedEvidence,omitempty"`
+	Assessments               []runtimeCandidateProviderSafeAssessmentProjection         `json:"recentAssessments,omitempty"`
+	RejectedOperationShapes   []runtimeCandidateProviderSafeOperationShapeProjection     `json:"rejectedOperationShapes,omitempty"`
+	NoProgressOperationShapes []runtimeCandidateProviderSafeOperationShapeProjection     `json:"noProgressOperationShapes,omitempty"`
 	OutputContinuation        *runtimecontract.RuntimeCandidateOutputContinuationRequest `json:"outputContinuation,omitempty"`
+}
+
+// The following C4 values are deliberately narrower than the persisted
+// Runtime facts. C4 is a provider-facing diagnostic tail, not an aggregate
+// mirror: raw messages/summaries, governance/recovery continuation and any
+// Runtime action or retry policy stay with their owning state machine.
+type runtimeCandidateProviderSafeFailureProjection struct {
+	Class      runtimecontract.FailureClass `json:"class,omitempty"`
+	Code       string                       `json:"code,omitempty"`
+	Signature  string                       `json:"signature,omitempty"`
+	TargetRefs []string                     `json:"targetRefs,omitempty"`
+}
+
+type runtimeCandidateProviderSafeEvidenceProjection struct {
+	ID                  common.EvidenceRecordID      `json:"id,omitempty"`
+	Kind                string                       `json:"kind,omitempty"`
+	SubjectRef          string                       `json:"subjectRef,omitempty"`
+	AuthoritySnapshotID string                       `json:"authoritySnapshotId,omitempty"`
+	DispatchID          string                       `json:"dispatchId,omitempty"`
+	OperationID         string                       `json:"operationId,omitempty"`
+	Revision            string                       `json:"revision,omitempty"`
+	FailureClass        runtimecontract.FailureClass `json:"failureClass,omitempty"`
+	FailureCode         string                       `json:"failureCode,omitempty"`
+	FailureSignature    string                       `json:"failureSignature,omitempty"`
+	ContentHash         string                       `json:"contentHash,omitempty"`
+	ExitCode            *int64                       `json:"exitCode,omitempty"`
+	EvidenceRefs        []string                     `json:"evidenceRefs,omitempty"`
+	TargetRefs          []string                     `json:"targetRefs,omitempty"`
+	CoverageWorkItemIDs []common.CoverageWorkItemID  `json:"coverageWorkItemIds,omitempty"`
+	Quality             common.EvidenceQuality       `json:"quality,omitempty"`
+	ZeroWork            bool                         `json:"zeroWork,omitempty"`
+}
+
+type runtimeCandidateProviderSafeAssessmentProjection struct {
+	ID                  string                                `json:"id,omitempty"`
+	FocusID             string                                `json:"focusId,omitempty"`
+	SliceID             string                                `json:"sliceId,omitempty"`
+	RequirementID       string                                `json:"requirementId,omitempty"`
+	CoverageWorkItemIDs []common.CoverageWorkItemID           `json:"coverageWorkItemIds,omitempty"`
+	Disposition         runtimecontract.AssessmentDisposition `json:"disposition,omitempty"`
+	EvidenceRefs        []string                              `json:"evidenceRefs,omitempty"`
+	ArtifactRefs        []string                              `json:"artifactRefs,omitempty"`
+}
+
+type runtimeCandidateProviderSafeOperationShapeProjection struct {
+	Hash             string                       `json:"hash,omitempty"`
+	Kind             string                       `json:"kind,omitempty"`
+	TargetRefs       []string                     `json:"targetRefs,omitempty"`
+	FailureClass     runtimecontract.FailureClass `json:"failureClass,omitempty"`
+	FailureCode      string                       `json:"failureCode,omitempty"`
+	FailureSignature string                       `json:"failureSignature,omitempty"`
 }
 
 // runtimeCandidateLargeRefsProjection is C5. Large/history material remains
@@ -764,20 +813,76 @@ func runtimeV2CandidateExecutionTailProjection(
 	outputContinuation *runtimecontract.RuntimeCandidateOutputContinuationRequest,
 	manifest runtimecontract.RuntimeCandidateContractManifest,
 ) runtimeCandidateExecutionTailProjection {
-	full := runtimeV2CandidateContextProjection(context, manifest)
+	context = context.Normalized()
 	return runtimeCandidateExecutionTailProjection{
 		Attempt:                   attempt,
 		Retry:                     runtimeV2CandidateRetryForManifest(attempt, previousFailure, manifest),
-		Failure:                   full.Failure,
-		AcceptedEvidence:          latestRuntimeEvidence(full.Evidence.Accepted),
-		RejectedEvidence:          latestRuntimeEvidence(full.Evidence.Rejected),
-		Assessments:               latestRuntimeAssessments(full.Assessments),
-		RepairHints:               append([]runtimecontract.RuntimeRepairHint(nil), full.RepairHints...),
-		RejectedOperationShapes:   append([]runtimecontract.RuntimeRejectedOperationShape(nil), full.RejectedOperationShapes...),
-		NoProgressOperationShapes: append([]runtimecontract.RuntimeRejectedOperationShape(nil), full.NoProgressOperationShapes...),
-		Continuation:              runtimeV2CandidateContinuationProjection(context.Normalized().Activation.Continuation),
+		Failure:                   runtimeV2ProviderSafeFailure(context.Failure),
+		AcceptedEvidence:          runtimeV2ProviderSafeEvidence(latestRuntimeEvidence(context.Evidence.Accepted)),
+		RejectedEvidence:          runtimeV2ProviderSafeEvidence(latestRuntimeEvidence(context.Evidence.Rejected)),
+		Assessments:               runtimeV2ProviderSafeAssessments(latestRuntimeAssessments(context.Assessments)),
+		RejectedOperationShapes:   runtimeV2ProviderSafeOperationShapes(context.RejectedOperationShapes),
+		NoProgressOperationShapes: runtimeV2ProviderSafeOperationShapes(context.NoProgressOperationShapes),
 		OutputContinuation:        outputContinuation,
 	}
+}
+
+func runtimeV2ProviderSafeFailure(value *runtimecontract.FailureFact) *runtimeCandidateProviderSafeFailureProjection {
+	if value == nil {
+		return nil
+	}
+	failure := value.Normalized()
+	return &runtimeCandidateProviderSafeFailureProjection{
+		Class: failure.Class, Code: failure.Code, Signature: failure.Signature,
+		TargetRefs: append([]string(nil), failure.TargetRefs...),
+	}
+}
+
+func runtimeV2ProviderSafeEvidence(values []runtimecontract.EvidenceFact) []runtimeCandidateProviderSafeEvidenceProjection {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]runtimeCandidateProviderSafeEvidenceProjection, 0, len(values))
+	for _, value := range values {
+		ret = append(ret, runtimeCandidateProviderSafeEvidenceProjection{
+			ID: value.ID, Kind: value.Kind, SubjectRef: value.SubjectRef, AuthoritySnapshotID: value.AuthoritySnapshotID,
+			DispatchID: value.DispatchID, OperationID: value.OperationID, Revision: value.Revision,
+			FailureClass: value.FailureClass, FailureCode: value.FailureCode, FailureSignature: value.FailureSignature,
+			ContentHash: value.ContentHash, ExitCode: value.ExitCode, EvidenceRefs: append([]string(nil), value.EvidenceRefs...),
+			TargetRefs: append([]string(nil), value.TargetRefs...), CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), value.CoverageWorkItemIDs...),
+			Quality: value.Quality, ZeroWork: value.ZeroWork,
+		})
+	}
+	return ret
+}
+
+func runtimeV2ProviderSafeAssessments(values []runtimecontract.RuntimeAssessmentFact) []runtimeCandidateProviderSafeAssessmentProjection {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]runtimeCandidateProviderSafeAssessmentProjection, 0, len(values))
+	for _, value := range values {
+		ret = append(ret, runtimeCandidateProviderSafeAssessmentProjection{
+			ID: value.ID, FocusID: value.FocusID, SliceID: value.SliceID, RequirementID: value.RequirementID,
+			CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), value.CoverageWorkItemIDs...), Disposition: value.Disposition,
+			EvidenceRefs: append([]string(nil), value.EvidenceRefs...), ArtifactRefs: append([]string(nil), value.ArtifactRefs...),
+		})
+	}
+	return ret
+}
+
+func runtimeV2ProviderSafeOperationShapes(values []runtimecontract.RuntimeRejectedOperationShape) []runtimeCandidateProviderSafeOperationShapeProjection {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]runtimeCandidateProviderSafeOperationShapeProjection, 0, len(values))
+	for _, value := range runtimecontract.NormalizeRuntimeRejectedOperationShapes(values) {
+		ret = append(ret, runtimeCandidateProviderSafeOperationShapeProjection{
+			Hash: value.Hash, Kind: value.Operation.Kind, TargetRefs: append([]string(nil), value.Operation.TargetRefs...),
+			FailureClass: value.FailureClass, FailureCode: value.FailureCode, FailureSignature: value.FailureSignature,
+		})
+	}
+	return ret
 }
 
 func runtimeV2CandidateManifestOperationKinds(manifest runtimecontract.RuntimeCandidateContractManifest) []string {
@@ -1467,9 +1572,6 @@ func runtimeV2CandidateRetryForManifest(attempt int, failure *runtimecontract.Ru
 	}
 	if previous.Class == runtimecontract.RuntimeCandidateFailureClassSchema || previous.Class == runtimecontract.RuntimeCandidateFailureClassContract {
 		instruction += " The previous candidate shape was rejected. Remove every field or value not permitted by that sealed manifest instead of adding a wrapper, narrative, summary, explanation or convenience parameter."
-	}
-	if previous.Class == runtimecontract.RuntimeCandidateFailureClassInfeasible {
-		instruction += " The previous operation was owner-infeasible before dispatch seal. Choose only manifest-permitted targets, selectors and parameters compatible with the current operationAdmissibilities inventory; do not repeat its failure signature."
 	}
 	if runtimeV2CandidateFailureIsOperationShapeReplay(previous.Code) {
 		instruction += " The previous candidate replayed a rejected or no-progress operation shape. Inspect context.rejectedOperationShapes and context.noProgressOperationShapes, then choose a materially different operation shape that changes its declared durable targets. Changing only an operation ID, narrative, dependency list, or cosmetic parameter is not sufficient."

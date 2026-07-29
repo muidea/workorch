@@ -180,6 +180,34 @@ func TestValidateRuntimeOperationsRejectsMutatingKindForValidation(t *testing.T)
 	}
 }
 
+func TestValidationCandidateRequiresSelectedObservableRecipe(t *testing.T) {
+	decision := validDecisionForState(ConvergenceStateNeedValidation)
+	decision.Action = RuntimeActionProduceValidation
+	decision.RequiredOutput = RequiredOutputContract{
+		Kind: RequiredOutputKindValidation, AcceptedKinds: []string{StepKindShellCommand},
+		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession},
+		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+	}.Normalized()
+	decision.AuthoritySnapshot.RequiredOutputHash = StableRequiredOutputHash(decision.RequiredOutput)
+	decision.AuthoritySnapshot.ID = stableAuthoritySnapshotID(decision.AuthoritySnapshot)
+	command := "go"
+	stateChanging := false
+	candidate := RuntimeCandidate{Validation: &ValidationCandidate{Operations: []ValidationOperation{{Operation: RuntimeOperation{
+		ID: "validate", Kind: StepKindShellCommand, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		Parameters: []OperationParameter{{Name: "command", String: &command}, {Name: "args", StringList: []string{"test", "./..."}}, {Name: "stateChanging", Boolean: &stateChanging}},
+	}}}}}
+	activation := RuntimeActivationContext{EvidencePolicies: []RuntimeEvidencePolicy{{
+		ID: "go-test-observable", AppliesTo: StepKindShellCommand, CommandName: "go", RequiredArgs: []string{"test", "-v"},
+	}}}
+	if err := candidate.ValidateWithActivation(decision, activation); err == nil || !strings.Contains(err.Error(), `observable recipe argument "-v"`) {
+		t.Fatalf("non-observable validation candidate error = %v", err)
+	}
+	candidate.Validation.Operations[0].Operation.Parameters[1].StringList = []string{"test", "-v", "./..."}
+	if err := candidate.ValidateWithActivation(decision, activation); err != nil {
+		t.Fatalf("observable validation candidate rejected: %v", err)
+	}
+}
+
 func TestRuntimeOperationNormalizedPreservesOrderedArgs(t *testing.T) {
 	cmd := "go"
 	// Flags that sort before "test" would produce `go -run ...` if StringList were sorted.

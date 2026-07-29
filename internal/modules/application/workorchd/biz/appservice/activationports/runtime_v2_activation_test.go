@@ -31,6 +31,8 @@ func TestRuntimeV2ActivationContextUsesConcreteSelectionSnapshots(t *testing.T) 
 		[]workorcheventpayload.Payload{workorcheventpayload.New(
 			workorcheventpayload.StringField("id", "policy-1"),
 			workorcheventpayload.StringField("appliesTo", "shell/command"),
+			workorcheventpayload.StringField("commandName", "go"),
+			workorcheventpayload.StringArrayField("requiredArgs", []string{"test", "-v"}),
 			workorcheventpayload.StringArrayField("zeroWorkMarkers", []string{"no tests"}),
 			workorcheventpayload.StringField("qualityOnZeroWork", "inconclusive"),
 		)},
@@ -41,7 +43,6 @@ func TestRuntimeV2ActivationContextUsesConcreteSelectionSnapshots(t *testing.T) 
 			"validationPolicies": []any{map[string]any{
 				"id": "validation-1", "scope": "workspace_profile", "appliesToEvidenceKinds": []any{"validation"},
 				"discoveryRequired": true, "validationScratchRequired": true, "maxValidationOnlyRetriesPerFocus": 2,
-				"implementationGapDiagnosticClasses": []any{"validation_command_invalid"},
 			}},
 			"profileContracts": map[string]any{
 				"software-dev": map[string]any{
@@ -81,6 +82,9 @@ func TestRuntimeV2ActivationContextUsesConcreteSelectionSnapshots(t *testing.T) 
 		activation.StageSoulBindings[0].Soul.Instructions != "execution instructions" || len(activation.Skills) != 1 || len(activation.MCPCapabilities) != 1 || len(activation.Memories) != 1 || len(activation.EvidencePolicies) != 1 {
 		t.Fatalf("runtime activation = %+v", activation)
 	}
+	if policy := activation.EvidencePolicies[0]; policy.CommandName != "go" || len(policy.RequiredArgs) != 2 || policy.RequiredArgs[0] != "-v" || policy.RequiredArgs[1] != "test" {
+		t.Fatalf("runtime activation observable evidence recipe = %+v", policy)
+	}
 	if capability := activation.MCPCapabilities[0]; capability.OperationKind != runtimecontract.StepKindMCPToolCall ||
 		capability.EffectScope != string(runtimecontract.RuntimeEffectNone) ||
 		capability.IdempotencyClass != string(runtimecontract.RuntimeOperationIdempotencySafeToReplay) {
@@ -90,9 +94,6 @@ func TestRuntimeV2ActivationContextUsesConcreteSelectionSnapshots(t *testing.T) 
 		len(activation.ExecutionContract.CapabilityUsagePolicies) != 1 || len(activation.ExecutionContract.ValidationPolicies) != 1 ||
 		activation.ExecutionContract.ValidationPolicies[0].MaxValidationOnlyRetriesPerFocus != 2 || len(activation.ExecutionContract.ProfileContracts) != 1 {
 		t.Fatalf("runtime execution contract = %+v", activation.ExecutionContract)
-	}
-	if got := activation.ExecutionContract.ValidationPolicies[0].ImplementationGapDiagnosticClasses; len(got) != 1 || got[0] != "validation_command_invalid" {
-		t.Fatalf("runtime validation policy diagnostic route = %v", got)
 	}
 	profile := activation.ExecutionContract.ProfileContracts[0]
 	if profile.ID != "software-dev" || len(profile.AcceptanceDimensions) != 1 || profile.AcceptanceDimensions[0].ID != "runtime_entrypoint" || !profile.AcceptanceDimensions[0].Required ||

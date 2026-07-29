@@ -145,6 +145,61 @@ func TestShellOwnerStateChangingReceiptReportsFileResourcesAndReplays(t *testing
 	}
 }
 
+func TestShellOwnerRejectsWorkspaceEffectOutsideSealedTargets(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	receipts := map[string]runtimecontract.RuntimeOperationReceipt{}
+	receiptObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
+	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.QueryRuntimeOperationReceiptCommand)
+		receipt, found := receipts[command.ExecutionKey]
+		result.Set(orchestratorevents.QueryRuntimeOperationReceiptResult{Receipt: &receipt, Found: found}, nil)
+	})
+	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)
+		receipts[command.Receipt.ExecutionKey] = command.Receipt
+		result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: command.Receipt}, nil)
+	})
+	t.Cleanup(func() {
+		receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
+		receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
+	})
+	owner := &Biz{Base: basebiz.New(modulecommon.ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter()}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+	workspace := t.TempDir()
+	command := shellStateChangingReceiptCommand(workspace, "printf declared > generated.txt; printf unexpected > rogue.txt")
+	response := sendShellStateChangingReceiptCommand(t, ctx, hub, command)
+	if response.Status != runtimecontract.RuntimeOperationExecutionStatusRejected || response.Failure == nil ||
+		response.Failure.Class != runtimecontract.FailureClassEffectMismatch || response.Failure.Code != "undeclared_workspace_effect" ||
+		response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || response.Receipt.Changed ||
+		response.Receipt.ObservedEffectScope != runtimecontract.RuntimeEffectUnknown {
+		t.Fatalf("undeclared workspace effect was accepted: %+v", response)
+	}
+	if len(response.Failure.TargetRefs) != 1 || response.Failure.TargetRefs[0] != "rogue.txt" {
+		t.Fatalf("undeclared target lineage = %+v", response.Failure)
+	}
+}
+
+func TestShellOwnerAcceptsObservedEffectsWithinMultipleSealedTargets(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	workspace := t.TempDir()
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
+		WorkspaceDeliverableDirectory: workspace, Command: "sh", Args: []string{"-c", "printf one > first.txt; printf two > second.txt"},
+		StateChanging: true, TargetRefs: []string{"first.txt", "second.txt"},
+	})
+	outside := shellUndeclaredWorkspaceTargets(result.WorkspaceObservedTargetChanges, []string{"first.txt", "second.txt"})
+	if err != nil || !shellWorkspaceTargetChangesChanged(result.WorkspaceObservedTargetChanges) || len(outside) != 0 {
+		t.Fatalf("declared multi-target observation result=%+v outside=%v err=%v", result, outside, err)
+	}
+	if got := shellObservedChangedWorkspaceTargets(result.WorkspaceObservedTargetChanges); len(got) != 2 || got[0] != "first.txt" || got[1] != "second.txt" {
+		t.Fatalf("observed changed targets = %v", got)
+	}
+}
+
 func shellStateChangingReceiptCommand(workspace, script string) orchestratorevents.ExecuteShellOperationCommand {
 	return orchestratorevents.ExecuteShellOperationCommand{
 		Execution: orchestratorevents.RuntimeOperationExecutionEnvelope{

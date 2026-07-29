@@ -98,22 +98,20 @@ func TestActiveRejectedOperationShapesRetainsOnlyCurrentLineageAndInfeasibleProp
 	}
 
 	infeasible := stateChangeCandidate()
-	operation := infeasible.StateChange.Operations[0].Operation
 	aggregate = stateChangeAggregate(t)
 	transaction := aggregate.Decision.AuthorityTransaction()
 	aggregate.CandidateAttempts = []runtimecontract.RuntimeCandidateAttemptRecord{{
 		AuthorityContractID: runtimecontract.StableAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction),
 		Transaction:         transaction, Attempt: 0, StablePrefixHash: "stable-prefix", State: runtimecontract.RuntimeCandidateAttemptStateFailed,
 		Proposal: &infeasible,
-		Failure:  &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassInfeasible, Code: "operation_target_invalid", Reason: "target invalid"},
+		Failure:  &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_target_outside_grounding", Reason: "target invalid"},
 		Feasibilities: []runtimecontract.RuntimeCandidateFeasibilityRecord{{
-			OperationID: operation.ID, AdmissibilitySnapshotID: "inventory-1", Feasible: false,
+			OperationID: infeasible.StateChange.Operations[0].Operation.ID, AdmissibilitySnapshotID: "inventory-1", Feasible: false,
 			Failure: &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_target_invalid", Signature: "target-invalid", Message: "target invalid"},
 		}},
 	}}
-	shapes := ActiveRejectedOperationShapes(aggregate)
-	if len(shapes) != 1 || shapes[0].Hash != runtimecontract.StableRuntimeOperationShape(operation) || shapes[0].FailureCode != "operation_target_invalid" {
-		t.Fatalf("failed infeasible proposal did not remain active candidate context: %+v", shapes)
+	if shapes := ActiveRejectedOperationShapes(aggregate); len(shapes) != 0 {
+		t.Fatalf("candidate attempt facts must not synthesize rejected operation lineage: %+v", shapes)
 	}
 }
 

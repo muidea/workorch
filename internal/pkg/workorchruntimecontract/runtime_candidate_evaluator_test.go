@@ -20,7 +20,6 @@ func TestRuntimeCandidateRejectionCodeDispositionMatrixIsTotal(t *testing.T) {
 		{code: "candidate_action_evidence_mismatch", disposition: RuntimeCandidateCorrectionCorrectableOnce},
 		{code: "candidate_target_outside_grounding", disposition: RuntimeCandidateCorrectionCorrectableOnce},
 		{code: "candidate_creation_scope_missing_file_target", disposition: RuntimeCandidateCorrectionCorrectableOnce},
-		{code: "operation_target_not_regular", disposition: RuntimeCandidateCorrectionCorrectableOnce},
 		{code: "candidate_replays_rejected_candidate_shape", disposition: RuntimeCandidateCorrectionRejectedFinal, terminalCode: "candidate_retry_exhausted"},
 		{code: "candidate_retry_exhausted", disposition: RuntimeCandidateCorrectionRejectedFinal, terminalCode: "candidate_retry_exhausted"},
 		{code: "workspace_resolution_failed", disposition: RuntimeCandidateCorrectionRejectedFinal, terminalCode: "workspace_resolution_failed"},
@@ -38,6 +37,9 @@ func TestRuntimeCandidateRejectionCodeDispositionMatrixIsTotal(t *testing.T) {
 	}
 	if _, ok := RuntimeCandidateRejectionCodeDisposition("candidate_correction_undefined"); ok {
 		t.Fatal("candidate_correction_undefined must not remain an ordinary rejection code")
+	}
+	if _, ok := RuntimeCandidateRejectionCodeDisposition("operation_target_not_regular"); ok {
+		t.Fatal("owner feasibility code must not enter the candidate correction matrix")
 	}
 }
 

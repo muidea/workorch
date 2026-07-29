@@ -62,6 +62,10 @@ type RuntimeCandidateFeasibilityRecord struct {
 	AdmissibilitySnapshotID string
 	AcquisitionBinding      string
 	Feasible                bool
+	// Observation is the owner-authored factual result. It is separate from the
+	// CandidateAttempt Failure field so an owner infeasibility cannot enter the
+	// SM-3 correction matrix.
+	Observation *RuntimeOwnerFeasibilityObservation
 	// ReplayProof is optional owner preflight output. When present it is sealed
 	// into the execution record for same-key/fence receipt recovery; it is never
 	// execution evidence and cannot authorize a dispatch by itself.
@@ -92,6 +96,10 @@ type RuntimeCandidateAttemptRecord struct {
 	Feasibilities []RuntimeCandidateFeasibilityRecord
 	Failure       *RuntimeCandidateFailure
 	Stale         *RuntimePrerequisiteStale
+	// OwnerFeasibility is immutable owner fact lineage for an invalidated
+	// proposal. It is never a candidate failure and therefore cannot authorize
+	// attempt 1.
+	OwnerFeasibility *RuntimeOwnerFeasibilityObservation
 	// PrerequisiteRequest records why this unsealed attempt was invalidated for
 	// owner fact acquisition, making duplicate delivery/restart deterministic.
 	PrerequisiteRequest *RuntimeOperationPrerequisiteRequest
@@ -366,7 +374,7 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 		bySnapshot[value.Transaction.AuthoritySnapshotID] = append(bySnapshot[value.Transaction.AuthoritySnapshotID], value)
 		switch value.State {
 		case RuntimeCandidateAttemptStatePending, RuntimeCandidateAttemptStateAccepted:
-			if value.Failure != nil || value.Stale != nil || value.PrerequisiteRequest != nil {
+			if value.Failure != nil || value.Stale != nil || value.PrerequisiteRequest != nil || value.OwnerFeasibility != nil {
 				return fmt.Errorf("runtime candidate attempt %s state %s cannot carry failure", key, value.State)
 			}
 			if value.State == RuntimeCandidateAttemptStateAccepted && value.Proposal != nil {
@@ -379,11 +387,21 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 			if value.Failure == nil || value.Failure.Class == "" || strings.TrimSpace(value.Failure.Reason) == "" {
 				return fmt.Errorf("failed runtime candidate attempt %s requires typed failure", key)
 			}
-			if value.Stale != nil || value.PrerequisiteRequest != nil {
+			if value.Stale != nil || value.PrerequisiteRequest != nil || value.OwnerFeasibility != nil {
 				return fmt.Errorf("failed runtime candidate attempt %s cannot carry freshness stale", key)
 			}
 		case RuntimeCandidateAttemptStateInvalidated:
-			if value.Failure != nil || value.Proposal != nil || len(value.Feasibilities) != 0 || (value.Stale == nil && value.PrerequisiteRequest == nil) || (value.Stale != nil && value.PrerequisiteRequest != nil) {
+			reasonCount := 0
+			if value.Stale != nil {
+				reasonCount++
+			}
+			if value.PrerequisiteRequest != nil {
+				reasonCount++
+			}
+			if value.OwnerFeasibility != nil {
+				reasonCount++
+			}
+			if value.Failure != nil || value.Proposal != nil || len(value.Feasibilities) != 0 || reasonCount != 1 {
 				return fmt.Errorf("invalidated runtime candidate attempt %s requires exactly one typed invalidation reason", key)
 			}
 			if value.Stale != nil {
@@ -394,6 +412,14 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 			if value.PrerequisiteRequest != nil {
 				if err := value.PrerequisiteRequest.Validate(); err != nil {
 					return fmt.Errorf("invalidated runtime candidate attempt %s prerequisite request: %w", key, err)
+				}
+			}
+			if value.OwnerFeasibility != nil {
+				if err := value.OwnerFeasibility.Validate(); err != nil {
+					return fmt.Errorf("invalidated runtime candidate attempt %s owner feasibility: %w", key, err)
+				}
+				if value.OwnerFeasibility.Disposition != RuntimeOwnerFeasibilityInfeasible {
+					return fmt.Errorf("invalidated runtime candidate attempt %s owner feasibility must be infeasible", key)
 				}
 			}
 		default:
@@ -432,7 +458,7 @@ func ValidateRuntimeCandidateFeasibilityRecords(values []RuntimeCandidateFeasibi
 		}
 		seen[operationID] = struct{}{}
 		if value.Feasible {
-			if value.Failure != nil || value.Stale != nil || value.PrerequisiteRequest != nil {
+			if value.Failure != nil || value.Stale != nil || value.PrerequisiteRequest != nil || value.Observation != nil {
 				return fmt.Errorf("feasible runtime candidate operation %q cannot carry failure", operationID)
 			}
 			if value.ReplayProof != nil {
@@ -448,6 +474,15 @@ func ValidateRuntimeCandidateFeasibilityRecords(values []RuntimeCandidateFeasibi
 		}
 		if value.ReplayProof != nil {
 			return fmt.Errorf("infeasible runtime candidate operation %q cannot carry replay proof", operationID)
+		}
+		if value.Observation != nil {
+			if err := value.Observation.Validate(); err != nil {
+				return fmt.Errorf("runtime candidate operation %q owner feasibility observation: %w", operationID, err)
+			}
+			if value.Stale != nil || value.PrerequisiteRequest != nil || value.Failure != nil {
+				return fmt.Errorf("runtime candidate operation %q mixes owner feasibility observation with legacy feasibility fields", operationID)
+			}
+			continue
 		}
 		if value.Stale != nil {
 			if value.Failure != nil || value.PrerequisiteRequest != nil {
@@ -511,12 +546,17 @@ func ValidateRuntimeCandidateAttemptRecordsForScope(workspaceID common.Workspace
 	return nil
 }
 
-// StableAuthorityContractID identifies the candidate retry contract without
-// reducer bookkeeping identity.
+// StableAuthorityContractID identifies one sealed candidate retry contract.
+// AuthoritySnapshotID is intentionally part of the identity: an SM-2 owner
+// fact (including an infeasible capability observation) may produce a fresh
+// authority with otherwise identical focus/action/output hashes. Reusing the
+// former contract would either overwrite its immutable invalidated lineage or
+// incorrectly deny the new authority its own attempt 0.
 func StableAuthorityContractID(workspaceID common.WorkspaceID, runID common.RunID, transaction AuthorityTransaction) string {
 	h := sha256.New()
 	writeHashString(h, string(workspaceID))
 	writeHashString(h, string(runID))
+	writeHashString(h, transaction.AuthoritySnapshotID)
 	writeHashString(h, transaction.FocusID)
 	writeHashString(h, string(transaction.Action))
 	writeHashString(h, transaction.RequiredOutputHash)
@@ -531,7 +571,8 @@ func StableAuthorityContractID(workspaceID common.WorkspaceID, runID common.RunI
 }
 
 func SameAuthorityContract(left AuthorityTransaction, right AuthorityTransaction) bool {
-	return left.FocusID == right.FocusID &&
+	return left.AuthoritySnapshotID == right.AuthoritySnapshotID &&
+		left.FocusID == right.FocusID &&
 		left.Action == right.Action &&
 		left.RequiredOutputHash == right.RequiredOutputHash &&
 		left.DefinitionRevision == right.DefinitionRevision &&
@@ -599,6 +640,10 @@ func (r RuntimeStateRecord) Clone() RuntimeStateRecord {
 			request := attempt.PrerequisiteRequest.Normalized()
 			ret.CandidateAttempts[idx].PrerequisiteRequest = &request
 		}
+		if attempt.OwnerFeasibility != nil {
+			observation := attempt.OwnerFeasibility.Clone()
+			ret.CandidateAttempts[idx].OwnerFeasibility = &observation
+		}
 	}
 	ret.GovernanceRequests = append([]RuntimeGovernanceRequestRecord(nil), r.GovernanceRequests...)
 	ret.GovernanceResolutions = append([]RuntimeGovernanceResolutionRecord(nil), r.GovernanceResolutions...)
@@ -626,6 +671,10 @@ func cloneRuntimeCandidateFeasibilities(values []RuntimeCandidateFeasibilityReco
 		if value.Failure != nil {
 			failure := value.Failure.Clone()
 			ret[idx].Failure = &failure
+		}
+		if value.Observation != nil {
+			observation := value.Observation.Clone()
+			ret[idx].Observation = &observation
 		}
 		if value.Stale != nil {
 			stale := *value.Stale

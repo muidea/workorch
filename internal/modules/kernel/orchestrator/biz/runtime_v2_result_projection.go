@@ -159,7 +159,9 @@ func (m *Biz) recordRuntimeDeliveryAcknowledgement(ctx context.Context, acknowle
 	if m.bizPtr == nil || !m.bizPtr.RuntimeV2RepositoryConfigured() {
 		return nil
 	}
-	_, _, err := m.bizPtr.RecordRuntimeV2DeliveryAcknowledgement(ctx, *acknowledgement)
+	_, err := m.submitRuntimeV2InternalEvent(ctx, runtimev2.RuntimeInternalEvent{
+		Kind: runtimev2.RuntimeInternalEventTerminalDeliveryAcknowledged, WorkspaceID: acknowledgement.WorkspaceID, RunID: acknowledgement.RunID, DeliveryAcknowledgement: acknowledgement,
+	})
 	return err
 }
 

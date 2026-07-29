@@ -207,6 +207,67 @@ func TestRuntimeControllerExecutesDependencyOrderedOperationsAndCommitsEvidence(
 	}
 }
 
+func TestRuntimeControllerRestartContinuesSealedDispatchAfterResourceChangingReceipt(t *testing.T) {
+	ctx := context.Background()
+	aggregate := stateChangeAggregate(t)
+	_, _ = addFreshFileAdmissibilityObservation(t, &aggregate)
+	repository := &durableRuntimeStateRepository{aggregate: aggregate}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{
+		{Operation: patchApplyTestOperation("write-1", "main.go")},
+		{Operation: func() runtimecontract.RuntimeOperation {
+			operation := patchApplyTestOperation("write-2", "other.go")
+			operation.DependsOn = []string{"write-1"}
+			return operation
+		}()},
+	}}}
+	sealed := sealCandidateForTest(t, repository, candidate)
+	claimed, err := controller.claimOperationExecution(ctx, "ws-1", "run-1", "write-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, ok := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, "write-1")
+	if !ok {
+		t.Fatal("first operation execution was not claimed")
+	}
+	receipt := runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: execution.ExecutionKey, OperationID: "write-1", Outcome: runtimecontract.RuntimeOperationOutcomeAccepted,
+		ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, Changed: true,
+		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "first durable effect"},
+		ResourceChanges: []runtimecontract.RuntimeResourceChange{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", BeforeRevision: "tree-v1", AfterRevision: "tree-v2",
+		}},
+	}
+	if _, _, err := controller.CommitOperationReceipt(ctx, "ws-1", "run-1", sealed.ActiveDispatch.ID, execution.Fence, receipt); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a process loss after the owner receipt CAS and before evidence
+	// commit. The restarted SM-3 owner must commit that receipt exactly once and
+	// execute only the remaining sealed operation; it must not re-request a
+	// candidate or replay the first durable effect.
+	restarted, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &recordingOperationExecutor{owner: restarted}
+	completed, err := restarted.ExecuteActiveDispatch(ctx, "ws-1", "run-1", executor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(executor.requests) != 1 || executor.requests[0].Operation.ID != "write-2" ||
+		completed.ActiveDispatch != nil || len(completed.CompletedDispatches) != 1 ||
+		completed.CompletedDispatches[0].State != DispatchStateCommitted ||
+		completed.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite ||
+		len(completed.Facts.Evidence.Accepted) != 2 || len(completed.Facts.Prerequisites.Pending) != 1 {
+		t.Fatalf("restart did not continue the sealed dispatch correctly: requests=%+v aggregate=%+v", executor.requests, completed)
+	}
+}
+
 func TestRuntimeControllerStopsDispatchAfterRejectedOperation(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
@@ -427,10 +488,12 @@ func TestRuntimeControllerRecoversClaimedAtMostOnceOperationOnlyWithSealedReplay
 	}
 }
 
-func TestRuntimeControllerRoutesDurableNoOpReceiptToStructuredSameFocusRepair(t *testing.T) {
+func TestRuntimeControllerRoutesStateChangeNoOpToOneBoundedCurrentStateValidation(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	aggregate, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	facts := controllerFacts()
+	facts.Capabilities.ValidationKinds = []string{runtimecontract.StepKindFileRead}
+	aggregate, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -443,14 +506,32 @@ func TestRuntimeControllerRoutesDurableNoOpReceiptToStructuredSameFocusRepair(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if progressed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || progressed.Facts.Failure == nil || progressed.Facts.Failure.Class != runtimecontract.FailureClassEffectMismatch {
-		t.Fatalf("no-op did not route to same-focus effect repair: decision=%+v failure=%+v", progressed.Decision, progressed.Facts.Failure)
+	if progressed.Decision.Action != runtimecontract.RuntimeActionProduceValidation || progressed.Facts.Failure == nil || progressed.Facts.Failure.Class != runtimecontract.FailureClassEffectMismatch || progressed.Facts.Failure.Code != runtimeStateChangeNoOpWithoutProvenanceCode {
+		t.Fatalf("no-op did not route to bounded current-state validation: decision=%+v failure=%+v", progressed.Decision, progressed.Facts.Failure)
 	}
 	if len(progressed.Facts.Failure.TargetRefs) != 0 || progressed.Facts.Resources.FailureTarget != nil {
 		t.Fatalf("core effect mismatch promoted operation input into repair authority: failure=%+v failureTarget=%+v", progressed.Facts.Failure, progressed.Facts.Resources.FailureTarget)
 	}
+	if len(progressed.Facts.Repair.NoProgressOperationShapes) != 1 || progressed.Facts.Repair.NoProgressOperationShapes[0].FailureCode != runtimeStateChangeNoOpWithoutProvenanceCode || progressed.Facts.Repair.NoProgressCount != 1 {
+		t.Fatalf("no-op did not persist exact bounded no-progress lineage: %+v", progressed.Facts.Repair)
+	}
 	if len(progressed.Facts.Evidence.Accepted) != 0 || len(progressed.Facts.Evidence.Rejected) != 1 || len(progressed.OperationReceipts) != 1 {
 		t.Fatalf("no-op incorrectly closed durable evidence: accepted=%+v rejected=%+v receipts=%+v", progressed.Facts.Evidence.Accepted, progressed.Facts.Evidence.Rejected, progressed.OperationReceipts)
+	}
+	if _, err := beginAndAcceptCandidate(t, controller, progressed, runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{
+		Operation: runtimecontract.RuntimeOperation{ID: "inspect-current-state", Kind: runtimecontract.StepKindFileRead, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}},
+	}}}}); err != nil {
+		t.Fatal(err)
+	}
+	inspected, err := controller.ExecuteActiveDispatch(context.Background(), "ws-v2", "run-v2", &noOpOperationExecutor{owner: controller})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspected.Decision.Action != runtimecontract.RuntimeActionFail || inspected.Decision.Terminal == nil || inspected.Decision.Terminal.Code != "state_change_provenance_missing" {
+		t.Fatalf("validated no-op state did not terminate the provenance gap: decision=%+v", inspected.Decision)
+	}
+	if len(inspected.Facts.Evidence.Accepted) != 1 || inspected.Facts.Evidence.Accepted[0].Kind != runtimecontract.EvidenceKindValidation || len(inspected.Facts.Evidence.Rejected) != 1 {
+		t.Fatalf("no-op path fabricated state-change evidence: accepted=%+v rejected=%+v", inspected.Facts.Evidence.Accepted, inspected.Facts.Evidence.Rejected)
 	}
 }
 
@@ -634,9 +715,9 @@ func TestRuntimeControllerRejectsAcceptedOwnerReceiptWithInconclusiveValidationE
 	if err != nil {
 		t.Fatal(err)
 	}
-	if executor.called != 1 || progressed.ActiveDispatch != nil || progressed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange ||
+	if executor.called != 1 || progressed.ActiveDispatch != nil || progressed.Decision.Action != runtimecontract.RuntimeActionProduceValidation ||
 		progressed.Decision.Terminal != nil || progressed.Facts.Focus.ID != "focus-v2" {
-		t.Fatalf("inconclusive validation did not return to same-focus repair: %+v calls=%d", progressed, executor.called)
+		t.Fatalf("inconclusive validation did not return to same-focus validation repair: %+v calls=%d", progressed, executor.called)
 	}
 	if len(progressed.Facts.Evidence.Accepted) != 0 || len(progressed.Facts.Evidence.Rejected) != 1 || progressed.Facts.Failure == nil ||
 		progressed.Facts.Failure.Class != runtimecontract.FailureClassCoverageAssessmentIncomplete ||
