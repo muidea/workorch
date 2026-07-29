@@ -446,14 +446,15 @@ func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.Wor
 		return nil
 	}
 	drive := func(driveCtx context.Context) {
-		retryDelivery := false
+		retryDrive := false
+		retryDelay := time.Second
 		// The singleflight key belongs to the scheduled drive, including the
 		// no-op path where Stop wins before this background task begins. It
 		// must therefore be released before the lifecycle readiness check.
 		defer func() {
 			m.endRuntimeV2Drive(driveKey)
-			if retryDelivery {
-				m.scheduleRuntimeV2RecoveryRetry(driveCtx, workspaceID, runID)
+			if retryDrive {
+				m.scheduleRuntimeV2RecoveryRetry(driveCtx, workspaceID, runID, retryDelay)
 			}
 		}()
 		// Keep the Runtime V2 authority and its EventHub-backed dependencies
@@ -469,7 +470,7 @@ func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.Wor
 			var persistedPending *runtimeV2PersistedDrivePendingError
 			if errors.As(err, &persistedPending) {
 				slog.Debug("workorch Runtime V2 persisted bounded retry state", "source", source, "workspaceID", workspaceID, "runID", runID, "revision", persistedPending.Revision)
-				retryDelivery = true
+				retryDrive = true
 				return
 			}
 			var projectionErr *runtimeV2ProjectionError
@@ -480,7 +481,7 @@ func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.Wor
 					slog.Warn("workorch Runtime V2 terminal delivery budget commit failed", "workspaceID", workspaceID, "runID", runID, "err", budgetErr)
 					return
 				}
-				retryDelivery = consumed
+				retryDrive = consumed
 				return
 			}
 			slog.Warn("workorch Runtime V2 drive failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", err)
@@ -495,13 +496,25 @@ func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.Wor
 						slog.Warn("workorch Runtime V2 recovery budget commit failed", "workspaceID", workspaceID, "runID", runID, "kind", budgetKind, "err", budgetErr)
 						return
 					}
-					retryDelivery = consumed
+					retryDrive = consumed
 					if !consumed && failure.Class == runtimecontract.FailureClassOwnerTransientUnavailable {
 						if _, recordErr := m.submitRuntimeV2InternalEvent(driveCtx, runtimev2.RuntimeInternalEvent{Kind: runtimev2.RuntimeInternalEventDriveFailureObserved, WorkspaceID: workspaceID, RunID: runID, FailureFact: &failure}); recordErr != nil {
 							slog.Warn("workorch Runtime V2 exhausted operation recovery fact commit failed", "workspaceID", workspaceID, "runID", runID, "err", recordErr)
 						} else {
-							retryDelivery = true
+							retryDrive = true
 						}
+					}
+					if !consumed && failure.Class == runtimecontract.FailureClassCASConflict {
+						// The recovery ledger is bounded for observability, not a
+						// license to strand an active aggregate. A CAS conflict has
+						// no business-terminal meaning: reload/re-drive remains an
+						// Orchestrator-local SM-4 responsibility until the physical
+						// persistence race clears or a process restart inventories it.
+						// Back off after the persisted budget is exhausted so a
+						// pathological writer cannot spin the owner lane.
+						retryDrive = true
+						retryDelay = 5 * time.Second
+						slog.Error("workorch Runtime V2 CAS recovery ledger exhausted; keeping owner-local re-drive pending", "source", source, "workspaceID", workspaceID, "runID", runID)
 					}
 				}
 				return
@@ -523,7 +536,7 @@ func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.Wor
 					slog.Warn("workorch Runtime V2 terminal delivery budget commit failed", "workspaceID", workspaceID, "runID", runID, "err", budgetErr)
 					return
 				}
-				retryDelivery = consumed
+				retryDrive = consumed
 			}
 		}
 	}
@@ -539,13 +552,16 @@ func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.Wor
 	return nil
 }
 
-func (m *Biz) scheduleRuntimeV2RecoveryRetry(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) {
+func (m *Biz) scheduleRuntimeV2RecoveryRetry(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, delay time.Duration) {
 	if m == nil || m.BackgroundRoutine() == nil || workspaceID == "" || runID == "" {
 		return
 	}
+	if delay <= 0 {
+		delay = time.Second
+	}
 	retryCtx := orchestratorBackgroundContext(ctx, workspaceID)
 	if err := m.BackgroundRoutine().AsyncFunction(func() {
-		timer := time.NewTimer(time.Second)
+		timer := time.NewTimer(delay)
 		defer timer.Stop()
 		select {
 		case <-retryCtx.Done():

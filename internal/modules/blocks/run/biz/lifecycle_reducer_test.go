@@ -304,6 +304,114 @@ func TestGenericRunUpdateDoesNotPublishLifecycleFactOrChangeSM1(t *testing.T) {
 	// SM-1 transition.
 }
 
+// Runtime V2 aggregate writes are semantically fenced by RuntimeStateRevision,
+// not by the enclosing Run record revision. This exercises the physical CAS
+// rebase used when an unrelated SM-1/model write wins the repository race.
+func TestRuntimeV2AggregatePersistenceRebasesUnrelatedRunModelWrite(t *testing.T) {
+	ctx := context.Background()
+	definition := runtimecontract.RuntimeDefinitionContext{Revision: "def-v2", GoalID: "goal-v2", DoDID: "dod-v2"}
+	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "provider", ModelID: "model"}}
+	bootstrap := runtimecontract.RuntimeBootstrap{Definition: definition, Activation: activation}
+	currentState := runtimecontract.RuntimeStateRecord{
+		StateRevision: 7, Definition: definition,
+		Facts: runtimecontract.RuntimeFacts{WorkspaceID: "ws-v2", RunID: "run-v2", DefinitionRevision: definition.Revision, Activation: activation},
+	}
+	base := memory.NewRunRepository()
+	if err := base.Create(ctx, &runmodel.Run{
+		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: definition.GoalID, DoDID: definition.DoDID, DefinitionRevision: definition.Revision,
+		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2, RuntimeBootstrap: &bootstrap, RuntimeState: &currentState,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runs := &runtimeStateCASRaceRepository{RunRepository: base, mutateModelOnly: true}
+	biz := New()
+	if err := biz.Configure(Dependencies{Runs: runs, EventHub: magicevent.NewHub(8)}); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = biz.Stop(ctx) }()
+
+	nextState := currentState.Clone()
+	nextState.StateRevision++
+	expected := currentState.StateRevision
+	result, err := biz.updateRuntimeV2State(ctx, &runmodel.Run{
+		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: definition.GoalID, DoDID: definition.DoDID, DefinitionRevision: definition.Revision,
+		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2, RuntimeBootstrap: &bootstrap, RuntimeState: &currentState,
+	}, runevents.UpdateRunCommand{RunID: "run-v2", WorkspaceID: "ws-v2", RuntimeState: &nextState, ExpectedRuntimeStateRevision: &expected})
+	if err != nil {
+		t.Fatalf("Runtime V2 aggregate update: %v", err)
+	}
+	if result.Run == nil || result.Run.Priority != 17 || result.Run.RuntimeState == nil || result.Run.RuntimeState.StateRevision != nextState.StateRevision {
+		t.Fatalf("rebased Run = %+v", result.Run)
+	}
+	if runs.casCalls != 2 {
+		t.Fatalf("physical CAS calls = %d, want 2", runs.casCalls)
+	}
+}
+
+func TestRuntimeV2AggregatePersistenceRejectsAggregateRevisionRace(t *testing.T) {
+	ctx := context.Background()
+	definition := runtimecontract.RuntimeDefinitionContext{Revision: "def-v2", GoalID: "goal-v2", DoDID: "dod-v2"}
+	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "provider", ModelID: "model"}}
+	bootstrap := runtimecontract.RuntimeBootstrap{Definition: definition, Activation: activation}
+	currentState := runtimecontract.RuntimeStateRecord{
+		StateRevision: 7, Definition: definition,
+		Facts: runtimecontract.RuntimeFacts{WorkspaceID: "ws-v2", RunID: "run-v2", DefinitionRevision: definition.Revision, Activation: activation},
+	}
+	base := memory.NewRunRepository()
+	if err := base.Create(ctx, &runmodel.Run{
+		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: definition.GoalID, DoDID: definition.DoDID, DefinitionRevision: definition.Revision,
+		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2, RuntimeBootstrap: &bootstrap, RuntimeState: &currentState,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runs := &runtimeStateCASRaceRepository{RunRepository: base, mutateAggregate: true}
+	biz := New()
+	if err := biz.Configure(Dependencies{Runs: runs, EventHub: magicevent.NewHub(8)}); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = biz.Stop(ctx) }()
+	nextState := currentState.Clone()
+	nextState.StateRevision++
+	expected := currentState.StateRevision
+	_, err := biz.updateRuntimeV2State(ctx, &runmodel.Run{
+		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: definition.GoalID, DoDID: definition.DoDID, DefinitionRevision: definition.Revision,
+		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2, RuntimeBootstrap: &bootstrap, RuntimeState: &currentState,
+	}, runevents.UpdateRunCommand{RunID: "run-v2", WorkspaceID: "ws-v2", RuntimeState: &nextState, ExpectedRuntimeStateRevision: &expected})
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("aggregate revision race err = %v, want conflict", err)
+	}
+}
+
+type runtimeStateCASRaceRepository struct {
+	*memory.RunRepository
+	mutateModelOnly bool
+	mutateAggregate bool
+	casCalls        int
+}
+
+func (r *runtimeStateCASRaceRepository) CompareAndSwap(ctx context.Context, item *runmodel.Run, expectedRevision uint64) error {
+	r.casCalls++
+	if r.casCalls != 1 {
+		return r.RunRepository.CompareAndSwap(ctx, item, expectedRevision)
+	}
+	current, err := r.RunRepository.GetByWorkspaceID(ctx, item.WorkspaceID, item.ID)
+	if err != nil {
+		return err
+	}
+	changed := *current
+	if r.mutateAggregate {
+		next := current.RuntimeState.Clone()
+		next.StateRevision++
+		changed.RuntimeState = &next
+	} else if r.mutateModelOnly {
+		changed.Priority = 17
+	}
+	if err := r.RunRepository.CompareAndSwap(ctx, &changed, current.Revision); err != nil {
+		return err
+	}
+	return common.ErrConflict
+}
+
 func TestLifecycleHandlerTerminalThenActivateRemainsTerminal(t *testing.T) {
 	biz, runs, _ := newLifecycleTestBiz(t)
 	seedV2TerminalRun(t, runs, common.RunStateActive, runtimecontract.RuntimeActionComplete, "completed", "done", "auth-1")

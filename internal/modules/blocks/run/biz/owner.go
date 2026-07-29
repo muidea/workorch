@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -481,30 +482,19 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 			return runevents.RunCommandResult{}, err
 		}
 		if runUsesRuntimeV2(current) {
-			if cmd.RuntimeState == nil || cmd.ExpectedRuntimeStateRevision == nil || cmd.ExpectedModelRevision == nil ||
+			if cmd.RuntimeState == nil || cmd.ExpectedRuntimeStateRevision == nil ||
 				cmd.RuntimeState.Facts.WorkspaceID != cmd.WorkspaceID || cmd.RuntimeState.Facts.RunID != cmd.RunID {
 				return runevents.RunCommandResult{}, fmt.Errorf("%w: Runtime V2 aggregate update requires scoped state and expected revision", common.ErrInvalidArgument)
 			}
 			if err := cmd.RuntimeState.Validate(); err != nil {
 				return runevents.RunCommandResult{}, fmt.Errorf("%w: invalid Runtime V2 aggregate update: %v", common.ErrInvalidArgument, err)
 			}
-		} else if cmd.RuntimeState != nil || cmd.ExpectedRuntimeStateRevision != nil || cmd.ExpectedModelRevision != nil {
+			return m.updateRuntimeV2State(ctx, current, cmd)
+		} else if cmd.RuntimeState != nil || cmd.ExpectedRuntimeStateRevision != nil {
 			return runevents.RunCommandResult{}, common.ErrInvalidArgument
 		}
 		if err := validateRunUpdate(current, cmd); err != nil {
 			return runevents.RunCommandResult{}, err
-		}
-		if cmd.ExpectedRuntimeStateRevision != nil {
-			currentRevision := uint64(0)
-			if current.RuntimeState != nil {
-				currentRevision = current.RuntimeState.StateRevision
-			}
-			if currentRevision != *cmd.ExpectedRuntimeStateRevision {
-				return runevents.RunCommandResult{}, common.ErrConflict
-			}
-		}
-		if cmd.ExpectedModelRevision != nil && current.Revision != *cmd.ExpectedModelRevision {
-			return runevents.RunCommandResult{}, common.ErrConflict
 		}
 		item := runFromUpdateCommand(current, cmd)
 		if err := m.runs.CompareAndSwap(ctx, item, current.Revision); err != nil {
@@ -526,6 +516,46 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 	default:
 		return runevents.RunCommandResult{}, common.ErrInvalidArgument
 	}
+}
+
+// updateRuntimeV2State persists an Orchestrator-owned aggregate through the
+// Run owner's physical record. SM-1 mutations can legitimately change the
+// record revision while the aggregate revision remains unchanged. In that
+// case rebase the opaque RuntimeState write on the latest Run record; only an
+// aggregate revision mismatch is a semantic conflict that returns to the
+// Orchestrator SM-4 recovery owner.
+func (m *Biz) updateRuntimeV2State(ctx context.Context, current *runmodel.Run, cmd runcontracts.UpdateRunCommand) (runevents.RunCommandResult, error) {
+	const maxPhysicalCASRebases = 4
+	for attempt := 0; attempt < maxPhysicalCASRebases; attempt++ {
+		if current == nil {
+			return runevents.RunCommandResult{}, common.ErrNotFound
+		}
+		if err := validateRunUpdate(current, cmd); err != nil {
+			return runevents.RunCommandResult{}, err
+		}
+		currentRevision := uint64(0)
+		if current.RuntimeState != nil {
+			currentRevision = current.RuntimeState.StateRevision
+		}
+		if currentRevision != *cmd.ExpectedRuntimeStateRevision {
+			return runevents.RunCommandResult{}, common.ErrConflict
+		}
+		item := runFromUpdateCommand(current, cmd)
+		err := m.runs.CompareAndSwap(ctx, item, current.Revision)
+		if err == nil {
+			return runevents.RunCommandResult{Run: item}, nil
+		}
+		if !errors.Is(err, common.ErrConflict) {
+			return runevents.RunCommandResult{}, err
+		}
+		// A physical CAS conflict may be a concurrent SM-1/model write. Reload
+		// and retry only while the semantic aggregate fence is still current.
+		current, err = m.runs.GetByWorkspaceID(ctx, cmd.WorkspaceID, cmd.RunID)
+		if err != nil {
+			return runevents.RunCommandResult{}, err
+		}
+	}
+	return runevents.RunCommandResult{}, common.ErrConflict
 }
 
 func purgeRunRuntimeResources(ctx context.Context, steps repository.StepRepository, checkpoints repository.RuntimeCheckpointRepository, runID common.RunID) (int, error) {

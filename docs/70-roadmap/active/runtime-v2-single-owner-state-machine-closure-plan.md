@@ -36,6 +36,24 @@ invalidation record，并仅用该 `PrerequisiteID` 的 record generation 生成
 该 key；read-only stale/no-progress 仍独占唯一有界的 `prerequisite_refresh` budget。File/Git/Shell 等 Block 只返回
 typed receipt/fact，TUI/Web/read-model 仅投影 stale budget 与 invalidation 审计，均不得接管该状态迁移。
 
+### 2026-07-29：Run persistence 与 SM-4 CAS liveness 收口
+
+fresh live 的 `ws-93e2cb765f87dcca/run-003` 暴露了另一条非业务停滞路径：Run record 的无关模型写入会改变
+完整 record revision；若该 revision 同时作为 Runtime aggregate 保存前置，Orchestrator 虽未发生 SM-2/SM-3
+语义冲突，仍会收到 CAS conflict。CAS reload 记账达到上限后旧实现不再调度 drive，留下
+`active + nonterminal + acquire_prerequisite + no scheduled drive`。
+
+收口规则如下：
+
+1. `blocks/run` 仍是 aggregate 的物理 persistence adapter 与 SM-1 lifecycle owner，但不拥有 SM-2/3/4
+   语义；`UpdateRunCommand` 只接受 `ExpectedRuntimeStateRevision`，不得携带完整 Run model revision。
+2. Run owner 发生物理 record CAS 时，若最新 record 的 RuntimeState revision 仍等于 expected revision，必须在
+   最新 record 上 rebase 后重试，以保留并发的 lifecycle/model 字段；若 RuntimeState revision 已改变，才返回
+   semantic conflict 给 Orchestrator。
+3. Orchestrator 仍是唯一 aggregate reducer/CAS coordinator。CAS ledger 只限制持久化计数，不能许可静止：
+   耗尽后 SM-4 保留 owner-local、退避的 reload/re-drive 后继；不得由 TUI/Web/Application/Run Block 发送补偿
+   Resume，也不得把 CAS 误判为业务 terminal。
+
 ## 2. 最新 deployed 反例与根因
 
 已完成的 SMO-1～SMO-6 是不可回退的代码与测试基线，但不构成 fresh deployed 正向收敛的证明。最新全新 workspace
@@ -206,7 +224,7 @@ Application 不拥有 Runtime 状态机，但它拥有 activation-time `RuntimeB
 | `blocks/file/biz` | manifest/selector/current revision 的 repair-surface confirmation | aggregate/focus/coverage 写入、从 diagnostic 猜 target、选择 action | confirmation freshness、scope mismatch、stale/duplicate |
 | `blocks/git/mcp/ssh/web/biz` | 同一 typed feasibility/receipt taxonomy；审计不携带 Runtime state | aggregate/focus/coverage/action 写入 | all emitted owner code category completeness |
 | `blocks/llm/biz` | 渲染 sealed C0-C5，其中 C4 仅含 provider-safe repair fact/diagnostic projection | 补 action、重建 authority、从 raw diagnostic 推 target | stable-prefix / new-authority request audit |
-| `blocks/run` | SM-1 owner-local activation/block/terminal | action selection | duplicate intent、terminal delivery |
+| `blocks/run` | SM-1 owner-local activation/block/terminal；opaque aggregate physical CAS rebase | action selection、aggregate transition/recovery | duplicate intent、terminal delivery、model write 不阻断 aggregate save |
 | `blocks/result`、`blocks/workspace` | terminal delivery owner-local acknowledgement | acceptance/terminal 裁决 | Result→Workspace→Run idempotency |
 | TUI/Web/eventstream | intent、审计、投影 | setter、自动 Resume、错误文本驱动 | no implicit state mutation scan |
 | `scripts/verify-boundary-contract.sh` | 静态边界门禁 | 业务分流 | pkg purity、owner-result、UI/application scan、repair fact 无 action、唯一 coordinator CAS |
@@ -257,6 +275,10 @@ C7-B～C7-E、C8-B～C8-F 是 regression baseline，不再作为可独立开始�
 - receipt/evidence 前后 crash，exact `ExecutionKey + Fence` 不重放副作用/provider call；
 - duplicate Resume 只合并 drive；
 - 多 workspace 同时 activation、feasibility、dispatch、delivery，没有 context/identity 串扰；
+- 无关 Run model/lifecycle revision 与 aggregate save 并发时必须 rebase 并保留双方字段；RuntimeState revision
+  变化仍必须返回 semantic CAS conflict；
+- CAS reload ledger 耗尽后不得出现 `active + nonterminal + no scheduled drive`，且不得依赖 TUI/Web/Run intent
+  补偿或错误地投影业务 terminal；
 - terminal delivery 保持 `Result -> Workspace -> Run`，projection 失败不改写 terminal。
 - validation receipt 后、File confirmation 前后 crash/restart、duplicate、乱序：最多一次确认命令，零副作用重放，且只由 Orchestrator 内部事件提交状态；
 - 相同 failure signature、相同 confirmed revision 且零 durable repair receipt 时，SM-4 必须在再次请求 provider 前 typed fail-fast；不得耗尽普通 validation repair budget。

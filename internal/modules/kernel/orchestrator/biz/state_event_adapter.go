@@ -380,8 +380,6 @@ func updateRunCommandFromModel(item *runmodel.Run) runcontracts.UpdateRunCommand
 		revision := item.RuntimeState.StateRevision
 		ret.ExpectedRuntimeStateRevision = &revision
 	}
-	modelRevision := item.Revision
-	ret.ExpectedModelRevision = &modelRevision
 	return ret
 }
 

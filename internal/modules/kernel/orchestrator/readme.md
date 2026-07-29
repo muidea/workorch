@@ -122,7 +122,10 @@ R4/P0～P6/A-4 只作回归基线，不再是活动实施标准。
 - candidate request 携带从 persisted facts 和唯一 manifest 渲染的 typed `RuntimeCandidateContext`；当前 focus/evidence/failure 是 context，operation kind/parameter/target/effect/coverage/dependency 授权只来自 manifest。C4 只投影 provider-safe failure/evidence/assessment/shape identity 与 attempt-1 的 typed rejection/directive；它不得携带 raw reason/summary/payload、owner feasibility 或 recovery/governance action。LLM block 不从 V1 map、raw reason 或临时上下文重建 authority。
 - Runtime V2 dispatch 在执行前持久化 `SealedDispatch`、完整 transaction、candidate hash 和 typed step input；execution evidence 只有在 snapshot、dispatch 与 operation 一致时才能提交并触发下一次 reducer。
 - capability owner 的 validation receipt 必须持久化中立 quality/zero-work/check observation，并纳入 stable receipt hash；SM-3 在普通响应与 exact-fence restart recovery 两条路径执行同一质量裁决，弱验证只进入 rejected evidence，不得因 owner exit code 为 0 关闭 coverage。
-- Runtime V2 aggregate 通过 Run owner 的 EventHub update 合同持久化；Orchestrator 使用 expected revision 执行 CAS，不直接访问 Run repository，也不把 aggregate 编码进 `map[string]any`。
+- Runtime V2 aggregate 通过 Run owner 的 EventHub update 合同持久化；Orchestrator 使用
+  `ExpectedRuntimeStateRevision` 执行语义 CAS，不直接访问 Run repository，也不把 aggregate 编码进
+  `map[string]any`。Run owner 对同一 aggregate revision 上的无关 Run model/lifecycle 写入执行物理
+  CAS rebase；完整 Run model revision 不是 aggregate fence。
 - Runtime V2 初始化时封存 typed Goal/DoD definition context；后续 candidate request 与重启恢复只能读取 Run owner 中持久化的定义快照，不能由调用方临时重建。
 - `InitializeRuntimeV2FromRun` 只读取 Run owner 已持久化的 typed bootstrap，生成 initial facts 并执行 preflight/reducer；Orchestrator 不解析 V1 execution context map 来重建定义或 focus。
 - Runtime V2 controller 统一负责 initialize、prerequisite commit、candidate seal 和 evidence commit；服务重启只加载既有 aggregate，不得因重复 Start/Resume 再次执行 reducer 或增加 attempt。
@@ -214,7 +217,7 @@ R4/P0～P6/A-4 只作回归基线，不再是活动实施标准。
   continuation/terminal fact；Run owner 决定自身 blocked→active 或 terminal，application resolved watcher 不得发送 Resume。
 - 相同 governance resolution 的 duplicate commit 只能重试幂等 fact delivery；Run owner reducer 与 singleflight gate
   分别合并 lifecycle input 与 drive，避免“aggregate 已提交但 Run 仍 blocked”的单边状态。
-- provider transport、operation recovery、CAS reload、terminal delivery 使用独立 persisted recovery policy/ledger；candidate attempt 0/1 与 per-focus repair budget 不得消费这些预算。
+- provider transport、operation recovery、CAS reload、terminal delivery 使用独立 persisted recovery policy/ledger；candidate attempt 0/1 与 per-focus repair budget 不得消费这些预算。CAS ledger 耗尽只停止其计数增长，不能将业务 Run 终态化或使 active aggregate 静止；SM-4 保留带退避的 owner-local reload/re-drive，直到物理竞争消失或 fresh-process inventory 接管。
 - startup recovery 必须通过 Run owner concrete typed inventory 获取 `active_no_dispatch`、`active_sealed_dispatch`、`blocked_governance`、`terminal_delivery_pending`，不得由 Orchestrator 使用通用 Run List 自行推断；`active + RuntimeBootstrap + no RuntimeStateRecord` 是 `active_no_dispatch`，必须进入同一 DriveRuntimeV2 初始化链路；`runtimeContractVersion` 仅为审计字段，不得作为 inventory 或路由门槛。SM-4 在 Orchestrator `Run` 中同步完成全部 inventory 分页，缺 subscriber、owner error、nil/wrong result 或 cursor 异常必须使启动失败。盘点成功后才以 run-scoped singleflight 将具体 re-drive 交给 `BackgroundRoutine`，不建立 application scan 或第二套 startup retry 状态机。
 - definition revision、Goal/DoD identity、正文或 capability contract 任一漂移都必须返回 conflict；definition context revision 必须与 facts 和 authority transaction 一致。
 - LLM dispatch 前必须先完成 manifest、target snapshot、failure target、capability、validation scratch 和 provider ceiling preflight；缺失资源只能进入 deterministic `AcquirePrerequisite`，不得混入 LLM state-changing requiredOutput。

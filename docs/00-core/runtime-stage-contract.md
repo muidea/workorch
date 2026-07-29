@@ -65,7 +65,9 @@ typed RuntimeBootstrap
 
 1. Application 只构造 typed `RuntimeBootstrap` 并向 Run owner 提交 scoped activation / continuation intent；
    不指定 Run、Workspace 或 Result 的目标状态。
-2. Run owner 只持久化 Run lifecycle、Runtime V2 aggregate、definition revision 与 lineage。
+2. Run owner 持久化 Run lifecycle、definition revision、lineage 与 Runtime V2 aggregate；其中 aggregate 是
+   Orchestrator 的不透明持久化负载。其语义 CAS 只比较 `RuntimeState.StateRevision`，不得以完整 Run 模型
+   revision（SM-1/lifecycle 或其他 Run 字段）阻断 SM-2/SM-3/SM-4 的保存。
 3. Orchestrator 是 reducer、prerequisite/freshness、candidate/dispatch、evidence、governance
    resolution 与 terminal decision 的唯一权威。
 4. capability owner 只执行自己的 typed prerequisite/operation 并返回 receipt；Result、Workspace、Run
@@ -274,6 +276,10 @@ sealed authority + preflight ready
   fail-fast，不能在进程内空转。
 - singleflight key 必须包含 workspace/run。重复 Start、Resume 和 governance continuation 只合并到
   同一 drive。
+- Runtime aggregate 的物理存储可与 Run record 共用 CAS，但 Run owner 必须在未变化的
+  `RuntimeState.StateRevision` 上重载并 rebase 无关模型写入；只有 aggregate revision 漂移才返回给
+  Orchestrator 作为语义 CAS conflict。CAS recovery ledger 耗尽不改变业务 Run 为 terminal，也不得留下
+  `active + nonterminal + no scheduled drive`：SM-4 必须保留 owner-local、退避的 reload/re-drive 后继。
 - startup 由 Run owner typed inventory 区分 `active_no_dispatch`、`active_sealed_dispatch`、
   `blocked_governance`、`terminal_delivery_pending`；盘点失败必须 fail-fast，不能由 application 猜测。
 - reducer terminal 已 sealed 后，SM-4 仅重试已持久化 terminal delivery request，等待 Result、Workspace、Run
