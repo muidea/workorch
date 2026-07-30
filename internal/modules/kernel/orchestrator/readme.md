@@ -164,8 +164,9 @@ R4/P0～P6/A-4 只作回归基线，不再是活动实施标准。
 - 真实 `RuntimeCASConflictError` 是唯一进入 CAS reload ledger 的事实；semantic persistence rejection 不创建 CAS/retry lease。CAS ledger 耗尽停止计数增长但仍保留带退避的 persisted owner-local successor，避免 active aggregate CPU 空转或无后继静止。
 - reducer/aggregate 已进入 governed wait 或 terminal 后，后续 owner projection 失败只能记录 projection error 并等待幂等重试，不得把已确定的 complete/fail authority 改写成 `runtime_v2_drive_failed`。
 - 普通 drive、governance resolution 与 drive-failure terminal 共用唯一 terminal delivery lane：先校验 persisted sealed aggregate，
-  再发布 Result -> Workspace -> Run 的有界 delivery fact 序列，并仅在 SM-4 记录 acknowledgement；任一 delivery
-  失败进入延迟重试，不得改写 reducer terminal 或越权写 owner state。
+  再发布 Result -> Workspace -> Run 的有界 delivery fact 序列，并仅在 SM-4 记录 acknowledgement；ack 只能取自
+  该三个 owner 的同步 typed response 后转入 Orchestrator private internal event，绝不开放独立 EventHub ack command；
+  任一 delivery 失败进入延迟重试，不得改写 reducer terminal 或越权写 owner state。
 - Start/Resume 由 Application 向 Run owner 提交 scoped intent；Run owner 内部迁移并发布 `RunStateChanged` 后，
   Orchestrator 才后台执行唯一 Runtime V2 drive。application 不再拥有 Start/Resume continuation queue，Orchestrator
   service 不暴露 execution-context-patch resume facade。

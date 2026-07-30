@@ -46,17 +46,20 @@ func TestRuntimeTerminalDeliveryRequestDataValidate(t *testing.T) {
 	}
 }
 
-func TestRecordRuntimeDeliveryAcknowledgementCommandValidate(t *testing.T) {
-	cmd := RecordRuntimeDeliveryAcknowledgementCommand{
-		Acknowledgement: runtimecontract.RuntimeDeliveryAcknowledgement{
-			WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1",
-			AuthoritySnapshotID: "auth-1", CausationID: "terminal-delivery/td-1",
-			Outcome:           runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"},
-			Owner:             runtimecontract.RuntimeDeliveryOwnerRun,
-			AcknowledgedState: runtimecontract.RuntimeDeliveryAcknowledgedRunTerminal,
-		},
+func TestTerminalDeliveryAcknowledgementIsNotAPublicEventHubContract(t *testing.T) {
+	// SM-4 acknowledgements are private Orchestrator internal events produced
+	// only from the Result -> Workspace -> Run synchronous command responses.
+	// Keep a literal guard here so a future package cannot restore the former
+	// public ack endpoint without deliberately changing this boundary.
+	const retiredTopic = "/orchestrator/runtime-lifecycle/record-delivery-acknowledgement"
+	for _, contract := range Contracts() {
+		if contract.Topic == retiredTopic {
+			t.Fatalf("retired delivery acknowledgement topic remains registered: %+v", contract)
+		}
 	}
-	if err := cmd.Validate(); err != nil {
-		t.Fatalf("valid ack command: %v", err)
+	for _, contract := range MessageContracts() {
+		if contract.Topic == retiredTopic {
+			t.Fatalf("retired delivery acknowledgement message remains registered: %+v", contract)
+		}
 	}
 }

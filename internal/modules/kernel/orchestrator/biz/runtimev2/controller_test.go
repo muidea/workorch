@@ -74,6 +74,46 @@ func TestRuntimeControllerInitializeRunsPreflightReduceAndPersistOnce(t *testing
 	}
 }
 
+func TestRuntimeControllerActivationInternalEventIsTheBootstrapMutationBoundary(t *testing.T) {
+	ctx := context.Background()
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := controllerFacts()
+	definition := controllerDefinition()
+
+	committed, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind:                 RuntimeInternalEventActivationObserved,
+		WorkspaceID:          facts.WorkspaceID,
+		RunID:                facts.RunID,
+		ActivationFacts:      &facts,
+		ActivationDefinition: &definition,
+	})
+	if err != nil {
+		t.Fatalf("activation internal event: %v", err)
+	}
+	if committed.Aggregate.StateRevision != 1 || repository.saves != 1 {
+		t.Fatalf("activation aggregate=%+v saves=%d, want one bootstrap commit", committed.Aggregate, repository.saves)
+	}
+
+	wrongScope := facts
+	wrongScope.RunID = "run-other"
+	if _, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind:                 RuntimeInternalEventActivationObserved,
+		WorkspaceID:          facts.WorkspaceID,
+		RunID:                facts.RunID,
+		ActivationFacts:      &wrongScope,
+		ActivationDefinition: &definition,
+	}); err == nil {
+		t.Fatal("activation with mismatched event scope succeeded")
+	}
+	if repository.saves != 1 {
+		t.Fatalf("mismatched activation wrote aggregate: saves=%d", repository.saves)
+	}
+}
+
 func TestRuntimeControllerApplyInternalEventPersistsOwnerFactOnce(t *testing.T) {
 	ctx := context.Background()
 	repository := &controllerRepository{}

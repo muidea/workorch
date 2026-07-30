@@ -110,33 +110,6 @@ func TestDecisionApprovalInfoTypes(t *testing.T) {
 	}
 }
 
-func TestAgentResumeRunUsesUnifiedWorkspaceRunCommand(t *testing.T) {
-	runBackend := &recordingAgentRunBackend{}
-	a := NewWithBackend(agentResumeBackend{fakeBackend: newFakeBackend(), run: runBackend})
-
-	if err := a.ResumeRun(context.Background(), "ws-agent-resume", "run-agent-resume"); err != nil {
-		t.Fatalf("ResumeRun: %v", err)
-	}
-	if runBackend.resumeCalled {
-		t.Fatal("agent used legacy Run.Resume path")
-	}
-	got := runBackend.command
-	if got.WorkspaceID != "ws-agent-resume" ||
-		got.ExpectedRunID != "run-agent-resume" ||
-		got.Intent != backend.RunCommandIntentResume ||
-		got.Reason != "user_requested" ||
-		got.Source != "agent" {
-		t.Fatalf("command = %+v, want scoped agent resume command", got)
-	}
-}
-
-func TestAgentResumeRunRequiresWorkspaceScope(t *testing.T) {
-	a := NewWithBackend(agentResumeBackend{fakeBackend: newFakeBackend(), run: &recordingAgentRunBackend{}})
-	if err := a.ResumeRun(context.Background(), "", "run-agent-resume"); err == nil {
-		t.Fatal("ResumeRun error = nil, want workspace required")
-	}
-}
-
 func TestAgentDecisionAndApprovalResolutionRequireWorkspaceScope(t *testing.T) {
 	decisionBackend := &recordingAgentDecisionBackend{}
 	approvalBackend := &recordingAgentApprovalBackend{}
@@ -163,8 +136,9 @@ func TestAgentDecisionAndApprovalResolutionRequireWorkspaceScope(t *testing.T) {
 func TestAgentDecisionAndApprovalResolutionUseScopedCommands(t *testing.T) {
 	decisionBackend := &recordingAgentDecisionBackend{}
 	approvalBackend := &recordingAgentApprovalBackend{}
+	base := newFakeBackend()
 	a := NewWithBackend(agentResolutionBackend{
-		fakeBackend: newFakeBackend(),
+		fakeBackend: base,
 		decision:    decisionBackend,
 		approval:    approvalBackend,
 	})
@@ -199,6 +173,12 @@ func TestAgentDecisionAndApprovalResolutionUseScopedCommands(t *testing.T) {
 		approvalBackend.rejections[0].WorkspaceID != "ws-agent" ||
 		approvalBackend.rejections[0].ApprovalID != "approval-reject-agent" {
 		t.Fatalf("rejection calls = %+v, want scoped reject", approvalBackend.rejections)
+	}
+	// A governance resolution is an owner fact. Its Runtime V2 continuation is
+	// emitted by Orchestrator, so client code must not append a second resume.
+	if base.runCommand.WorkspaceID != "" || base.runCommand.ExpectedRunID != "" ||
+		base.runCommand.Intent != "" || base.runCommand.Reason != "" || base.runCommand.Source != "" {
+		t.Fatalf("resolution unexpectedly issued a Run command: %+v", base.runCommand)
 	}
 }
 
@@ -312,13 +292,6 @@ func (fakeRun) Status(context.Context, common.WorkspaceID, common.RunID) (*backe
 	return &backend.RunStatusInfo{}, nil
 }
 
-type agentResumeBackend struct {
-	*fakeBackend
-	run backend.RunBackend
-}
-
-func (b agentResumeBackend) Run() backend.RunBackend { return b.run }
-
 type agentResolutionBackend struct {
 	*fakeBackend
 	decision backend.DecisionBackend
@@ -327,41 +300,6 @@ type agentResolutionBackend struct {
 
 func (b agentResolutionBackend) Decision() backend.DecisionBackend { return b.decision }
 func (b agentResolutionBackend) Approval() backend.ApprovalBackend { return b.approval }
-
-type recordingAgentRunBackend struct {
-	command      backend.WorkspaceRunCommand
-	resumeCalled bool
-}
-
-func (b *recordingAgentRunBackend) Command(_ context.Context, req backend.WorkspaceRunCommand) (*backend.RunInfo, error) {
-	b.command = req
-	return nil, nil
-}
-
-func (b *recordingAgentRunBackend) Activate(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*backend.RunInfo, error) {
-	return nil, common.ErrInvalidArgument
-}
-
-func (b *recordingAgentRunBackend) Restart(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*backend.RunInfo, error) {
-	return nil, common.ErrInvalidArgument
-}
-
-func (b *recordingAgentRunBackend) Resume(context.Context, common.WorkspaceID, common.RunID, ...map[string]any) (*backend.RunInfo, error) {
-	b.resumeCalled = true
-	return nil, common.ErrInvalidArgument
-}
-
-func (b *recordingAgentRunBackend) Get(context.Context, common.WorkspaceID, common.RunID) (*backend.RunInfo, error) {
-	return nil, common.ErrNotFound
-}
-
-func (b *recordingAgentRunBackend) List(context.Context, common.WorkspaceID) ([]backend.RunInfo, error) {
-	return nil, nil
-}
-
-func (b *recordingAgentRunBackend) Status(context.Context, common.WorkspaceID, common.RunID) (*backend.RunStatusInfo, error) {
-	return nil, common.ErrNotFound
-}
 
 type recordingAgentDecisionBackend struct {
 	requests []backend.ResolveDecisionRequest

@@ -21,6 +21,14 @@ type RuntimeInternalEvent struct {
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
 
+	// ActivationFacts and ActivationDefinition are the validated Run-owner
+	// bootstrap fact for the one-time Runtime V2 aggregate creation.  They are
+	// deliberately carried through the same private dispatcher as every later
+	// mutation; a Run notification never calls a controller reducer directly.
+	ActivationFacts        *runtimecontract.RuntimeFacts
+	ActivationDefinition   *runtimecontract.RuntimeDefinitionContext
+	ActivationRequirements []RuntimeRequirement
+
 	PrerequisiteResult  *PrerequisiteResult
 	Stale               *runtimecontract.RuntimePrerequisiteStale
 	FeasibilityFact     *runtimecontract.RuntimeFeasibilityFact
@@ -65,6 +73,7 @@ type RuntimeInternalEvent struct {
 type RuntimeInternalEventKind string
 
 const (
+	RuntimeInternalEventActivationObserved                 RuntimeInternalEventKind = "activation_observed"
 	RuntimeInternalEventReconcileAuthority                 RuntimeInternalEventKind = "reconcile_authority"
 	RuntimeInternalEventPrerequisiteObserved               RuntimeInternalEventKind = "prerequisite_observed"
 	RuntimeInternalEventPrerequisitesReadOnlyStaleObserved RuntimeInternalEventKind = "prerequisites_read_only_stale_observed"
@@ -129,6 +138,14 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 	}
 	result := RuntimeInternalEventResult{}
 	switch event.Kind {
+	case RuntimeInternalEventActivationObserved:
+		if event.ActivationFacts == nil || event.ActivationDefinition == nil ||
+			event.ActivationFacts.WorkspaceID != event.WorkspaceID || event.ActivationFacts.RunID != event.RunID {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.Initialize(ctx, *event.ActivationFacts, event.ActivationDefinition.Clone(), append([]RuntimeRequirement(nil), event.ActivationRequirements...))
+		result.Aggregate = aggregate
+		return result, err
 	case RuntimeInternalEventReconcileAuthority:
 		aggregate, err := c.ReconcileAuthorityBeforeCandidate(ctx, event.WorkspaceID, event.RunID)
 		result.Aggregate = aggregate
@@ -335,7 +352,7 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		if event.DeliveryAcknowledgement == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, changed, err := c.RecordDeliveryAcknowledgement(ctx, *event.DeliveryAcknowledgement)
+		aggregate, changed, err := c.recordDeliveryAcknowledgement(ctx, *event.DeliveryAcknowledgement)
 		result.Aggregate = aggregate
 		result.BudgetConsumed = changed
 		return result, err

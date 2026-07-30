@@ -34,5 +34,16 @@ func (o *RuntimeOrchestrator) InitializeRuntimeV2FromRun(ctx context.Context, ru
 	if err != nil {
 		return runtimev2.RuntimeAggregate{}, err
 	}
-	return o.runtimeV2Controller.Initialize(ctx, facts, bootstrap.Definition, bootstrap.Requirements)
+	applied, err := o.ApplyRuntimeV2InternalEvent(ctx, runtimev2.RuntimeInternalEvent{
+		Kind:                   runtimev2.RuntimeInternalEventActivationObserved,
+		WorkspaceID:            run.WorkspaceID,
+		RunID:                  run.ID,
+		ActivationFacts:        &facts,
+		ActivationDefinition:   &bootstrap.Definition,
+		ActivationRequirements: append([]runtimev2.RuntimeRequirement(nil), bootstrap.Requirements...),
+	})
+	if err != nil {
+		return runtimev2.RuntimeAggregate{}, err
+	}
+	return applied.Aggregate, nil
 }

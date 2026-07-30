@@ -152,12 +152,6 @@ func (d RuntimeTerminalDeliveryRequestData) Identity() runtimecontract.RuntimeTe
 	}
 }
 
-// RecordRuntimeDeliveryAcknowledgementCommand records an owner ack into the
-// SM-4 delivery ledger. It never rewrites SM-2 terminal.
-type RecordRuntimeDeliveryAcknowledgementCommand struct {
-	Acknowledgement runtimecontract.RuntimeDeliveryAcknowledgement
-}
-
 // RequestRuntimeTerminationCommand is an application administrative intent.
 // Orchestrator persists RuntimeTerminationRecord before it starts SM-4.
 type RequestRuntimeTerminationCommand struct {
@@ -183,17 +177,4 @@ func (c RequestRuntimeTerminationCommand) Validate() error {
 		return fmt.Errorf("%w: runtime termination intent requires scope, kind, requester and reason", common.ErrInvalidArgument)
 	}
 	return nil
-}
-
-func (c RecordRuntimeDeliveryAcknowledgementCommand) Validate() error {
-	return c.Acknowledgement.Validate()
-}
-
-// RecordRuntimeDeliveryAcknowledgementResult is the ledger write result.
-type RecordRuntimeDeliveryAcknowledgementResult struct {
-	TerminalDeliveryID string
-	Owner              runtimecontract.RuntimeDeliveryOwner
-	Recorded           bool
-	StateRevision      uint64
-	Diagnostic         string
 }

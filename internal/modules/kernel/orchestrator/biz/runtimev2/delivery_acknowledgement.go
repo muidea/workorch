@@ -8,10 +8,12 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// RecordDeliveryAcknowledgement persists an SM-4 receipt without changing the
-// sealed authority/terminal decision. Duplicate identical acknowledgements are
-// idempotent; a conflicting owner receipt is rejected.
-func (c *RuntimeController) RecordDeliveryAcknowledgement(ctx context.Context, acknowledgement runtimecontract.RuntimeDeliveryAcknowledgement) (RuntimeAggregate, bool, error) {
+// recordDeliveryAcknowledgement persists an SM-4 receipt without changing the
+// sealed authority/terminal decision. It is reachable only through the
+// controller's private internal-event dispatcher, so no adapter or sibling
+// owner can invoke a delivery-ledger transition directly. Duplicate identical
+// acknowledgements are idempotent; a conflicting owner receipt is rejected.
+func (c *RuntimeController) recordDeliveryAcknowledgement(ctx context.Context, acknowledgement runtimecontract.RuntimeDeliveryAcknowledgement) (RuntimeAggregate, bool, error) {
 	if c == nil || c.repository == nil {
 		return RuntimeAggregate{}, false, common.ErrInvalidArgument
 	}

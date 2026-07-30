@@ -157,6 +157,44 @@ type countingGovernanceRunReader struct {
 	lastGetByWorkspaceID    common.WorkspaceID
 }
 
+type countingGovernanceTicketReader struct {
+	getCount  atomic.Int32
+	lastScope common.WorkspaceID
+}
+
+func (r *countingGovernanceTicketReader) Get(ctx context.Context, _ common.TicketID) (*decisionmodel.Ticket, error) {
+	r.getCount.Add(1)
+	r.lastScope = common.RuntimeWorkspaceIDFromContext(ctx)
+	return nil, common.ErrNotFound
+}
+
+type countingGovernanceApprovalReader struct {
+	getCount  atomic.Int32
+	lastScope common.WorkspaceID
+}
+
+func (r *countingGovernanceApprovalReader) Get(ctx context.Context, _ common.ApprovalID) (*approvalmodel.Approval, error) {
+	r.getCount.Add(1)
+	r.lastScope = common.RuntimeWorkspaceIDFromContext(ctx)
+	return nil, common.ErrNotFound
+}
+
+type replayGovernanceRunReader struct {
+	items []*runmodel.Run
+}
+
+func (r replayGovernanceRunReader) Get(context.Context, common.RunID) (*runmodel.Run, error) {
+	return nil, common.ErrNotFound
+}
+
+func (r replayGovernanceRunReader) GetByWorkspaceID(context.Context, common.WorkspaceID, common.RunID) (*runmodel.Run, error) {
+	return nil, common.ErrNotFound
+}
+
+func (r replayGovernanceRunReader) List(context.Context) ([]*runmodel.Run, error) {
+	return append([]*runmodel.Run(nil), r.items...), nil
+}
+
 func (r *countingGovernanceRunReader) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
 	r.getCount.Add(1)
 	return r.inner.Get(ctx, id)
@@ -301,7 +339,13 @@ func TestProcessPendingTicketUsesWorkspaceScopedRunLookup(t *testing.T) {
 		LoadConfig:           testGovernanceConfig(true, 0.82, 3),
 	})
 
-	svc.processPendingTicket(ctx, ticketID)
+	// Background reconciliation must be given the workspace by the owner fact
+	// that scheduled it.  It must never discover scope by reading a ticket ID.
+	scopedCtx, err := common.BindRuntimeWorkspaceContext(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("bind workspace context: %v", err)
+	}
+	svc.processPendingTicket(scopedCtx, ticketID)
 
 	if got := countingRuns.getCount.Load(); got != 0 {
 		t.Fatalf("run Get count = %d, want 0 for ticket-scoped governance lookup", got)
@@ -317,6 +361,63 @@ func TestProcessPendingTicketUsesWorkspaceScopedRunLookup(t *testing.T) {
 	}
 	if definitions.goalScope != workspaceID || definitions.dodScope != workspaceID {
 		t.Fatalf("definition scopes goal=%s dod=%s, want %s", definitions.goalScope, definitions.dodScope, workspaceID)
+	}
+}
+
+func TestProcessPendingWorkRejectsUnscopedIdentifierBeforeOwnerIO(t *testing.T) {
+	ctx := context.Background()
+	tickets := &countingGovernanceTicketReader{}
+	approvals := &countingGovernanceApprovalReader{}
+	svc := NewService(Dependencies{
+		Tickets:    tickets,
+		Approvals:  approvals,
+		LoadConfig: testGovernanceConfig(true, 0.82, 3),
+	})
+
+	// Ticket and approval identifiers are only workspace-local.  A background
+	// worker without an immutable source fact must not turn either into an
+	// unscoped read through another owner.
+	svc.processPendingTicket(ctx, "ticket-local")
+	svc.processPendingApproval(ctx, "approval-local")
+
+	if got := tickets.getCount.Load(); got != 0 {
+		t.Fatalf("unscoped ticket reads = %d, want 0", got)
+	}
+	if got := approvals.getCount.Load(); got != 0 {
+		t.Fatalf("unscoped approval reads = %d, want 0", got)
+	}
+}
+
+func TestGovernanceOwnerFactsPropagateWorkspaceScopeToBackgroundWork(t *testing.T) {
+	ctx := context.Background()
+	tickets := &countingGovernanceTicketReader{}
+	approvals := &countingGovernanceApprovalReader{}
+	svc := NewService(Dependencies{
+		Tickets:   tickets,
+		Approvals: approvals,
+		Runs: replayGovernanceRunReader{items: []*runmodel.Run{
+			{ID: "run-ticket", WorkspaceID: "ws-ticket", State: common.RunStateBlockedOnDecision, BlockingTicketID: "ticket-local"},
+			{ID: "run-approval", WorkspaceID: "ws-approval", State: common.RunStateBlockedOnApproval, BlockingApprovalID: "approval-local"},
+		}},
+		LoadConfig: testGovernanceConfig(true, 0.82, 3),
+	})
+
+	// Notification and restart replay both begin from an owner fact containing
+	// workspace scope.  The worker may never infer that scope from ticket or
+	// approval IDs, which are intentionally only workspace-local.
+	svc.processTicketCreated(ctx, decisionevents.TicketChangedData{
+		TicketID: "ticket-event", WorkspaceID: "ws-ticket-event", RunID: "run-ticket-event", State: common.DecisionTicketStateOpen,
+	})
+	svc.processApprovalCreated(ctx, approvalevents.ApprovalChangedData{
+		ApprovalID: "approval-event", WorkspaceID: "ws-approval-event", RunID: "run-approval-event", State: common.ApprovalStatePending,
+	})
+	if tickets.lastScope != "ws-ticket-event" || approvals.lastScope != "ws-approval-event" {
+		t.Fatalf("notification scopes ticket=%q approval=%q", tickets.lastScope, approvals.lastScope)
+	}
+
+	svc.reconcileBlockedRuns(ctx)
+	if tickets.lastScope != "ws-ticket" || approvals.lastScope != "ws-approval" {
+		t.Fatalf("reconciliation scopes ticket=%q approval=%q", tickets.lastScope, approvals.lastScope)
 	}
 }
 
@@ -364,7 +465,13 @@ func TestProcessPendingApprovalUsesWorkspaceScopedRunLookup(t *testing.T) {
 		LoadConfig:           testGovernanceConfig(true, 0.82, 3),
 	})
 
-	svc.processPendingApproval(ctx, approvalID)
+	// See the ticket counterpart above: the event/reconciliation source owns
+	// workspace scope, not the locally-unique approval identifier.
+	scopedCtx, err := common.BindRuntimeWorkspaceContext(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("bind workspace context: %v", err)
+	}
+	svc.processPendingApproval(scopedCtx, approvalID)
 
 	if got := countingRuns.getCount.Load(); got != 0 {
 		t.Fatalf("run Get count = %d, want 0 for approval-scoped governance lookup", got)

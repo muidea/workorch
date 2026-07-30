@@ -393,6 +393,11 @@ func (s *Service) scheduleBlockedRunReconciliationLocked() error {
 }
 
 func (s *Service) processTicketCreated(ctx context.Context, data decisionevents.TicketChangedData) {
+	var err error
+	ctx, err = common.BindRuntimeWorkspaceContext(ctx, data.WorkspaceID)
+	if err != nil {
+		return
+	}
 	cfg, err := s.loadConfig()
 	if err != nil || !isEnabled(cfg.Governance.AutoTicket.Enabled) {
 		return
@@ -407,6 +412,12 @@ func (s *Service) processTicketCreated(ctx context.Context, data decisionevents.
 func (s *Service) processPendingTicket(ctx context.Context, ticketID common.TicketID) {
 	cfg, err := s.loadConfig()
 	if err != nil || !isEnabled(cfg.Governance.AutoTicket.Enabled) {
+		return
+	}
+	// A ticket ID is only locally unique.  A background/restart worker must
+	// receive its workspace from an immutable owner fact before it may read or
+	// resolve anything through another owner.
+	if common.RuntimeWorkspaceIDFromContext(ctx) == "" {
 		return
 	}
 	if ticketID == "" || s.hasClosedTrace(ctx, "ticket", string(ticketID)) {
@@ -503,6 +514,11 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 }
 
 func (s *Service) processApprovalCreated(ctx context.Context, data approvalevents.ApprovalChangedData) {
+	var err error
+	ctx, err = common.BindRuntimeWorkspaceContext(ctx, data.WorkspaceID)
+	if err != nil {
+		return
+	}
 	cfg, err := s.loadConfig()
 	if err != nil || !isEnabled(cfg.Governance.AutoApproval.Enabled) {
 		return
@@ -517,6 +533,11 @@ func (s *Service) processApprovalCreated(ctx context.Context, data approvalevent
 func (s *Service) processPendingApproval(ctx context.Context, approvalID common.ApprovalID) {
 	cfg, err := s.loadConfig()
 	if err != nil || !isEnabled(cfg.Governance.AutoApproval.Enabled) {
+		return
+	}
+	// Approval IDs also require workspace scope.  Do not let a process-global
+	// reconciliation loop turn an unscoped identifier into owner I/O.
+	if common.RuntimeWorkspaceIDFromContext(ctx) == "" {
 		return
 	}
 	if approvalID == "" || s.hasClosedTrace(ctx, "approval", string(approvalID)) {
@@ -595,6 +616,14 @@ func (s *Service) processPendingApproval(ctx context.Context, approvalID common.
 }
 
 func (s *Service) processRunStateChanged(ctx context.Context, data runevents.RunStateChangedData) {
+	if data.Validate() != nil {
+		return
+	}
+	var err error
+	ctx, err = common.BindRuntimeWorkspaceContext(ctx, data.WorkspaceID)
+	if err != nil {
+		return
+	}
 	if data.State == common.RunStateBlockedOnDecision && data.BlockingTicketID != "" {
 		ticket, err := s.tickets.Get(ctx, data.BlockingTicketID)
 		if err != nil || ticket == nil {
@@ -636,17 +665,21 @@ func (s *Service) reconcileBlockedRuns(ctx context.Context) {
 		return
 	}
 	for _, item := range runs {
-		if item == nil {
+		if item == nil || item.WorkspaceID == "" {
+			continue
+		}
+		workspaceCtx, scopeErr := common.BindRuntimeWorkspaceContext(ctx, item.WorkspaceID)
+		if scopeErr != nil {
 			continue
 		}
 		switch item.State {
 		case common.RunStateBlockedOnDecision:
 			if item.BlockingTicketID != "" {
-				s.processPendingTicket(ctx, item.BlockingTicketID)
+				s.processPendingTicket(workspaceCtx, item.BlockingTicketID)
 			}
 		case common.RunStateBlockedOnApproval:
 			if item.BlockingApprovalID != "" {
-				s.processPendingApproval(ctx, item.BlockingApprovalID)
+				s.processPendingApproval(workspaceCtx, item.BlockingApprovalID)
 			}
 		}
 	}

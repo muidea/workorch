@@ -351,8 +351,14 @@ DTO、常量和纯 helper；共享 `workorchruntimecontract` 仅保存 owner-neu
 当前实施进度：C0 的 inventory boundary regression 已落地；C1 的 raw inventory、schema incompatibility
 administrative outcome 和 non-resumable continuation 已落地；C2 的 startup schema path 已落地；C3 的 typed
 persistence result 和真实 revision-mismatch CAS gate 已落地；C4 的 schema-v4 persisted recovery lease、generation
-fence、restart recovery 与本地 timer/singleflight coalescing 已实现，待 C8 的全量 race/live 验证。C2 的其余所有外部
-输入统一 internal event 化，以及 C3 的 semantic fact 归入 SM-2/SM-3 reducer，仍保持未关闭并由后续卡继续收口。
+fence、restart recovery 与本地 timer/singleflight coalescing 已实现，待 C8 的全量 race/live 验证。C5 已删除公开的
+`RecordRuntimeDeliveryAcknowledgement` EventHub 命令和 Orchestrator facade；SM-4 ack 只能来自 Result、Workspace、Run
+对 sealed terminal delivery command 的同步 typed response，随后经 Orchestrator private internal event 写入 ledger。
+C6 已删除 Decision/Approval 成功后由 Agent CLI 自动发送第二个 `/run resume` 的路径，治理 resolution 只等待 owner
+fact 链继续。C7 已为 Governance 的 ticket/approval notification 与 restart reconciliation 传递并验证 workspace
+scope；无 scope 的本地 ticket/approval ID 不会发起跨 owner 读取。C2 的其余所有外部输入统一 internal event 化，以及
+C3 的 semantic fact 归入 SM-2/SM-3 reducer，仍保持未关闭并由后续卡继续收口。首次 activation/bootstrap 已改为
+`activation_observed` private internal event；Run bootstrap fact 不再直接调用 controller 的 `Initialize` reducer。
 
 **完成条件：** 所有 22 个单元均有 scope、typed result、owner mutation 与 no-cross-state-transition 的回归证据；
 没有 global current workspace/run 或跨 owner repository/service 注入。

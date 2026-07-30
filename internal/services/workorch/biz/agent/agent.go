@@ -284,25 +284,6 @@ func (a *Agent) ClearNotified() {
 	a.notifiedApproval = ""
 }
 
-func (a *Agent) ResumeRun(ctx context.Context, workspaceID string, runID string) error {
-	a.ClearNotified()
-	if a.be == nil {
-		return fmt.Errorf("agent backend is required")
-	}
-	wsID := common.WorkspaceID(strings.TrimSpace(workspaceID))
-	if wsID == "" {
-		return fmt.Errorf("workspace is required")
-	}
-	_, err := a.be.Run().Command(ctx, backend.WorkspaceRunCommand{
-		WorkspaceID:   wsID,
-		ExpectedRunID: common.RunID(strings.TrimSpace(runID)),
-		Intent:        backend.RunCommandIntentResume,
-		Reason:        "user_requested",
-		Source:        "agent",
-	})
-	return err
-}
-
 func (a *Agent) completedInfo(runID common.RunID) RunCompletedInfo {
 	a.mu.Lock()
 	defer a.mu.Unlock()

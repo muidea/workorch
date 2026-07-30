@@ -168,6 +168,9 @@ func (m *Biz) deliverRuntimeV2Run(ctx context.Context, request orchestratorevent
 	return m.recordRuntimeDeliveryAcknowledgement(ctx, ownerResult.DeliveryAck)
 }
 
+// recordRuntimeDeliveryAcknowledgement is deliberately private to the terminal
+// delivery lane.  Its input is the concrete synchronous Result/Workspace/Run
+// owner response; no public EventHub command may manufacture an SM-4 ack.
 func (m *Biz) recordRuntimeDeliveryAcknowledgement(ctx context.Context, acknowledgement *runtimecontract.RuntimeDeliveryAcknowledgement) error {
 	if acknowledgement == nil {
 		return common.ErrInvalidArgument

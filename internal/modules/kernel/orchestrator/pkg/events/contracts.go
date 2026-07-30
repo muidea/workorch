@@ -29,7 +29,6 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorOpenRuntimeGovernanceRequest,
 		TopicOrchestratorRequestRuntimeTermination,
 		TopicOrchestratorCommitRuntimeOperationReceipt,
-		TopicOrchestratorRecordRuntimeDeliveryAcknowledgement,
 	)...)
 	ret = append(ret, eventcontract.Build("orchestrator", eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute,
 		TopicOrchestratorDriveRuntimeV2,

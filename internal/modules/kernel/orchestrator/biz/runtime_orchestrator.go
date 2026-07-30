@@ -104,13 +104,6 @@ func (o *RuntimeOrchestrator) ConsumeRuntimeV2RecoveryBudget(ctx context.Context
 	return o.runtimeV2Controller.ConsumeRecoveryBudget(ctx, workspaceID, runID, kind)
 }
 
-func (o *RuntimeOrchestrator) RecordRuntimeV2DeliveryAcknowledgement(ctx context.Context, acknowledgement runtimemodel.RuntimeDeliveryAcknowledgement) (runtimev2.RuntimeAggregate, bool, error) {
-	if o == nil || o.runtimeV2Controller == nil {
-		return runtimev2.RuntimeAggregate{}, false, common.ErrInvalidArgument
-	}
-	return o.runtimeV2Controller.RecordDeliveryAcknowledgement(ctx, acknowledgement)
-}
-
 func (o *RuntimeOrchestrator) RequestTermination(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, kind runtimemodel.RuntimeTerminationKind, requestedBy, reason string) (runtimev2.RuntimeAggregate, error) {
 	if o == nil || o.runtimeV2Controller == nil {
 		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument

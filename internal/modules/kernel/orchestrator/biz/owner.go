@@ -121,7 +121,6 @@ func (m *Biz) Start() error {
 			orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt,
 			orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution,
 			orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
-			orchestratorevents.TopicOrchestratorRecordRuntimeDeliveryAcknowledgement,
 			orchestratorevents.TopicOrchestratorRequestRuntimeTermination,
 			decisionevents.TopicDecisionCommandRecordEvidence,
 			approvalevents.TopicApprovalCommandRecordEvidence,
@@ -132,7 +131,6 @@ func (m *Biz) Start() error {
 		m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, m.handleRuntimeV2OperationReceipt)
 		m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution, m.handleRuntimeV2GovernanceResolution)
 		m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, m.handleRuntimeV2GovernanceTicketResolution)
-		m.SubscribeFunc(orchestratorevents.TopicOrchestratorRecordRuntimeDeliveryAcknowledgement, m.handleRuntimeDeliveryAcknowledgement)
 		m.SubscribeFunc(orchestratorevents.TopicOrchestratorRequestRuntimeTermination, m.handleRuntimeTerminationRequest)
 		m.SubscribeFunc(decisionevents.TopicDecisionCommandRecordEvidence, m.handleDecisionEvidenceCommand)
 		m.SubscribeFunc(approvalevents.TopicApprovalCommandRecordEvidence, m.handleApprovalEvidenceCommand)
@@ -183,24 +181,6 @@ func (m *Biz) handleRuntimeTerminationRequest(ev magicevent.Event, result magice
 			WorkspaceReleased:  deliveryAcknowledged(completed, request.TerminalDeliveryID, runtimecontract.RuntimeDeliveryOwnerWorkspace),
 			StateRevision:      completed.StateRevision,
 		}, nil)
-	}
-}
-
-func (m *Biz) handleRuntimeDeliveryAcknowledgement(ev magicevent.Event, result magicevent.Result) {
-	cmd, ok := ev.Data().(orchestratorevents.RecordRuntimeDeliveryAcknowledgementCommand)
-	if !ok || m == nil || m.bizPtr == nil {
-		setOrchestratorAck(result, common.ErrInvalidArgument)
-		return
-	}
-	updatedEvent, err := m.submitRuntimeV2InternalEvent(ev.Context(), runtimev2.RuntimeInternalEvent{
-		Kind: runtimev2.RuntimeInternalEventTerminalDeliveryAcknowledged, WorkspaceID: cmd.Acknowledgement.WorkspaceID, RunID: cmd.Acknowledgement.RunID, DeliveryAcknowledgement: &cmd.Acknowledgement,
-	})
-	if err != nil {
-		setOrchestratorAck(result, err)
-		return
-	}
-	if result != nil {
-		result.Set(orchestratorevents.RecordRuntimeDeliveryAcknowledgementResult{TerminalDeliveryID: cmd.Acknowledgement.TerminalDeliveryID, Owner: cmd.Acknowledgement.Owner, Recorded: updatedEvent.BudgetConsumed, StateRevision: updatedEvent.Aggregate.StateRevision}, nil)
 	}
 }
 
