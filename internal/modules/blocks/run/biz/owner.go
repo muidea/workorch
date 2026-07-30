@@ -3,7 +3,6 @@ package run
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -187,45 +186,28 @@ func buildRuntimeV2RecoveryInventory(runs []*runmodel.Run, cmd runevents.QueryRu
 			continue
 		}
 		// RuntimeContractVersion is audit metadata, not a V1/V2 routing gate.
-		// An active Run with a persisted typed bootstrap but no aggregate is the
-		// first SM-4 recovery state: DriveRuntimeV2 initializes it exactly once
-		// before it can acquire prerequisites or seal a dispatch. Keep legacy
-		// active Runs (which have neither bootstrap nor aggregate) out of the V2
-		// inventory rather than synthesizing authority from their old state.
-		if run.RuntimeState == nil {
-			if run.State == common.RunStateActive && run.RuntimeBootstrap != nil {
-				items = append(items, runevents.RuntimeV2RecoveryInventoryItem{
-					WorkspaceID: run.WorkspaceID,
-					RunID:       run.ID,
-					Class:       runevents.RuntimeV2RecoveryActiveNoDispatch,
-				})
-			}
+		// This inventory is deliberately raw: Run owns only its lifecycle and
+		// opaque persistence record. It must not inspect Decision, dispatch,
+		// governance, delivery, or recovery semantics owned by Orchestrator.
+		if runStateIsTerminal(run.State) || (run.RuntimeBootstrap == nil && run.RuntimeState == nil) {
 			continue
 		}
-		state := run.RuntimeState
 		item := runevents.RuntimeV2RecoveryInventoryItem{
-			WorkspaceID: run.WorkspaceID, RunID: run.ID, StateRevision: state.StateRevision,
-			BlockingTicketID: run.BlockingTicketID, BlockingApprovalID: run.BlockingApprovalID,
-			TerminalDeliveryAttempts: state.Facts.Recovery.TerminalDeliveryAttempts,
+			WorkspaceID:         run.WorkspaceID,
+			RunID:               run.ID,
+			State:               run.State,
+			HasRuntimeBootstrap: run.RuntimeBootstrap != nil,
+			HasRuntimeState:     run.RuntimeState != nil,
 		}
-		if state.ActiveDispatch != nil {
-			item.ActiveDispatchID = state.ActiveDispatch.ID
+		if run.RuntimeState != nil {
+			item.RuntimeStateRevision = run.RuntimeState.StateRevision
+			item.RuntimeStateSchemaVersion = run.RuntimeState.SchemaVersion
+			item.RuntimeStateRef = runevents.RuntimeStateRef(run.WorkspaceID, run.ID, run.RuntimeState.StateRevision)
 		}
-		switch {
-		case state.Decision.State == runtimemodel.ConvergenceStateComplete || state.Decision.State == runtimemodel.ConvergenceStateFailed:
-			if !runStateIsTerminal(run.State) {
-				item.Class = runevents.RuntimeV2RecoveryTerminalDeliveryPending
-			}
-		case run.State == common.RunStateBlockedOnDecision || run.State == common.RunStateBlockedOnApproval:
-			item.Class = runevents.RuntimeV2RecoveryBlockedGovernance
-		case run.State == common.RunStateActive && state.ActiveDispatch != nil:
-			item.Class = runevents.RuntimeV2RecoveryActiveSealedDispatch
-		case run.State == common.RunStateActive:
-			item.Class = runevents.RuntimeV2RecoveryActiveNoDispatch
+		if run.RuntimeActivationStatus != nil {
+			item.RuntimeActivationDisposition = run.RuntimeActivationStatus.Disposition
 		}
-		if item.Class != "" {
-			items = append(items, item)
-		}
+		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool {
 		left := string(items[i].WorkspaceID) + "\x00" + string(items[i].RunID)
@@ -482,13 +464,6 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 			return runevents.RunCommandResult{}, err
 		}
 		if runUsesRuntimeV2(current) {
-			if cmd.RuntimeState == nil || cmd.ExpectedRuntimeStateRevision == nil ||
-				cmd.RuntimeState.Facts.WorkspaceID != cmd.WorkspaceID || cmd.RuntimeState.Facts.RunID != cmd.RunID {
-				return runevents.RunCommandResult{}, fmt.Errorf("%w: Runtime V2 aggregate update requires scoped state and expected revision", common.ErrInvalidArgument)
-			}
-			if err := cmd.RuntimeState.Validate(); err != nil {
-				return runevents.RunCommandResult{}, fmt.Errorf("%w: invalid Runtime V2 aggregate update: %v", common.ErrInvalidArgument, err)
-			}
 			return m.updateRuntimeV2State(ctx, current, cmd)
 		} else if cmd.RuntimeState != nil || cmd.ExpectedRuntimeStateRevision != nil {
 			return runevents.RunCommandResult{}, common.ErrInvalidArgument
@@ -528,34 +503,42 @@ func (m *Biz) updateRuntimeV2State(ctx context.Context, current *runmodel.Run, c
 	const maxPhysicalCASRebases = 4
 	for attempt := 0; attempt < maxPhysicalCASRebases; attempt++ {
 		if current == nil {
-			return runevents.RunCommandResult{}, common.ErrNotFound
+			return runtimeStateUpdateOutcome(nil, cmd, runevents.RuntimeStateUpdateDispositionOwnerTransient, 0, common.ErrNotFound), nil
 		}
 		if err := validateRunUpdate(current, cmd); err != nil {
-			return runevents.RunCommandResult{}, err
+			observedRevision := uint64(0)
+			if current.RuntimeState != nil {
+				observedRevision = current.RuntimeState.StateRevision
+			}
+			return runtimeStateUpdateOutcome(current, cmd, runevents.RuntimeStateUpdateDispositionSemanticRejection, observedRevision, err), nil
 		}
 		currentRevision := uint64(0)
 		if current.RuntimeState != nil {
 			currentRevision = current.RuntimeState.StateRevision
 		}
 		if currentRevision != *cmd.ExpectedRuntimeStateRevision {
-			return runevents.RunCommandResult{}, common.ErrConflict
+			return runtimeStateUpdateOutcome(current, cmd, runevents.RuntimeStateUpdateDispositionAggregateRevisionMismatch, currentRevision, nil), nil
 		}
 		item := runFromUpdateCommand(current, cmd)
 		err := m.runs.CompareAndSwap(ctx, item, current.Revision)
 		if err == nil {
-			return runevents.RunCommandResult{Run: item}, nil
+			return runtimeStateUpdateOutcome(item, cmd, runevents.RuntimeStateUpdateDispositionAccepted, item.RuntimeState.StateRevision, nil), nil
 		}
 		if !errors.Is(err, common.ErrConflict) {
-			return runevents.RunCommandResult{}, err
+			return runtimeStateUpdateOutcome(current, cmd, runevents.RuntimeStateUpdateDispositionOwnerTransient, currentRevision, err), nil
 		}
 		// A physical CAS conflict may be a concurrent SM-1/model write. Reload
 		// and retry only while the semantic aggregate fence is still current.
 		current, err = m.runs.GetByWorkspaceID(ctx, cmd.WorkspaceID, cmd.RunID)
 		if err != nil {
-			return runevents.RunCommandResult{}, err
+			return runtimeStateUpdateOutcome(nil, cmd, runevents.RuntimeStateUpdateDispositionOwnerTransient, currentRevision, err), nil
 		}
 	}
-	return runevents.RunCommandResult{}, common.ErrConflict
+	observedRevision := uint64(0)
+	if current != nil && current.RuntimeState != nil {
+		observedRevision = current.RuntimeState.StateRevision
+	}
+	return runtimeStateUpdateOutcome(current, cmd, runevents.RuntimeStateUpdateDispositionOwnerTransient, observedRevision, common.ErrConflict), nil
 }
 
 func purgeRunRuntimeResources(ctx context.Context, steps repository.StepRepository, checkpoints repository.RuntimeCheckpointRepository, runID common.RunID) (int, error) {
@@ -637,6 +620,7 @@ func runFromUpdateCommand(current *runmodel.Run, cmd runcontracts.UpdateRunComma
 	}
 	item := *current
 	item.RuntimeState = cloneRuntimeStateRecord(cmd.RuntimeState)
+	item.RuntimeActivationStatus = current.RuntimeActivationStatus.Clone()
 	if item.RuntimeBootstrap != nil {
 		item.RuntimeContractVersion = runtimemodel.RuntimeContractVersionV2
 	}
@@ -650,7 +634,8 @@ func validateRunUpdate(current *runmodel.Run, cmd runcontracts.UpdateRunCommand)
 	if !runUsesRuntimeV2(current) {
 		return nil
 	}
-	if cmd.RuntimeState == nil {
+	if cmd.RuntimeState == nil || cmd.ExpectedRuntimeStateRevision == nil ||
+		cmd.RuntimeState.Facts.WorkspaceID != cmd.WorkspaceID || cmd.RuntimeState.Facts.RunID != cmd.RunID {
 		return common.ErrConflict
 	}
 	if current.RuntimeBootstrap == nil {
@@ -715,20 +700,21 @@ func compactRunListItem(item *runmodel.Run) *runmodel.Run {
 		return nil
 	}
 	return &runmodel.Run{
-		ID:                 item.ID,
-		WorkspaceID:        item.WorkspaceID,
-		GoalID:             item.GoalID,
-		DoDID:              item.DoDID,
-		Lineage:            item.Lineage,
-		DefinitionRevision: item.DefinitionRevision,
-		InitialStepKind:    item.InitialStepKind,
-		State:              item.State,
-		Priority:           item.Priority,
-		BlockingTicketID:   item.BlockingTicketID,
-		BlockingApprovalID: item.BlockingApprovalID,
-		FailureReason:      item.FailureReason,
-		CreatedAt:          item.CreatedAt,
-		StartedAt:          item.StartedAt,
-		EndedAt:            item.EndedAt,
+		ID:                      item.ID,
+		WorkspaceID:             item.WorkspaceID,
+		GoalID:                  item.GoalID,
+		DoDID:                   item.DoDID,
+		Lineage:                 item.Lineage,
+		DefinitionRevision:      item.DefinitionRevision,
+		InitialStepKind:         item.InitialStepKind,
+		RuntimeActivationStatus: item.RuntimeActivationStatus.Clone(),
+		State:                   item.State,
+		Priority:                item.Priority,
+		BlockingTicketID:        item.BlockingTicketID,
+		BlockingApprovalID:      item.BlockingApprovalID,
+		FailureReason:           item.FailureReason,
+		CreatedAt:               item.CreatedAt,
+		StartedAt:               item.StartedAt,
+		EndedAt:                 item.EndedAt,
 	}
 }

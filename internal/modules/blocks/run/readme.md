@@ -15,20 +15,26 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
 ## 组件交互及合同
 
 - Run owner 通过 `TopicRunCommandRuntimeV2RecoveryInventory` 提供分页 typed recovery inventory；item 只包含本
-  owner 的 SM-1 state、RuntimeStateRecord presence 与 opaque revision/ref，不读取 dispatch/governance/delivery
-  ledger 做 SM-2/3/4 分类。该窄只读 topic 在 `Setup`（Configure 后）即订阅，早于常规 Run CRUD topic；
+  owner 的 SM-1 state、bootstrap/state presence、opaque revision/ref、实际 persisted schema 和 Run-owned
+  administrative disposition，不读取 dispatch/governance/delivery ledger 做 SM-2/3/4 分类。该窄只读 topic 在
+  `Setup`（Configure 后）即订阅，早于常规 Run CRUD topic；
   Orchestrator 通过 typed record query load 后在 owner-local SM-4 分类 recovery case，不直接扫描 Run repository。
 
 - Run 自身的 create/ensure/get/list/update/delete、Step 查询和 Checkpoint 查询由 `blocks/run/pkg/events` 定义具体 command 与 `RunCommandResult`。
 - workspace/run purge 通过 `PurgeRuntimeResourcesCommand` 由 Run owner 删除该 scope 下的 Step 与 RuntimeCheckpoint；命令必须先确认 Run 属于指定 workspace，并返回实际删除数量。
 - Runtime V2 正式状态使用 typed `RuntimeStateRecord` 随 Run 物理持久化；update command 必须携带 expected runtime
-  revision，Run owner 只校验 workspace/run scope、schema envelope 与 expected/observed revision，并在同一 EventHub
-  lane 内执行 opaque CAS。Run 不解释其中的 facts、authority、candidate、dispatch、evidence 或 governance ledger。
+  revision，并返回唯一的 `accepted`、`aggregate_revision_mismatch`、`semantic_rejection` 或 `owner_transient`
+  typed fact。只有 expected/observed aggregate revision 实际不匹配才是 CAS；Run 对无关物理 record write 自行
+  rebase。Run 不解释其中的 facts、authority、candidate、dispatch、evidence 或 governance ledger。
 - Run 创建合同可携带 typed `RuntimeBootstrap`，保存 effective Goal/DoD definition、ordered focus queue 与 prerequisite requirements；bootstrap 在 RuntimeState 初始化前保持不可变。
 - 创建或启动 Run 前，通过 EventHub 读取 `blocks/workspace` 的有效 workspace definition 和 revision。
 - 启动和恢复由 application 向 Run owner发送具体 activation / continuation intent；Run Biz 在自身 reducer 中完成状态准入、
   CAS 持久化并发布 `RunStateChangedData`。Orchestrator 只能消费该通知触发 drive，不能投影 Run lifecycle。
   Runtime V2 Resume 只携带 workspace/run scope，不接受 loaded Run 或上下文 patch。
+- Orchestrator 发现不支持的 persisted Runtime schema 时，只能发送带 scope、opaque state ref、actual/supported
+  schema 和 safe original diagnostic 的 `ApplyRuntimeStateIncompatibleFactCommand`。Run reducer 将它持久化为
+  `fresh_activation_required`；该 Run 的 `ContinueRun` 返回 typed non-resumable disposition，既不发 continuation
+  fact，也不触发 drive。只有用户显式 fresh activation/restart 才可创建 current-schema Run。
 - governed blocker 必须携带对应 DecisionTicket 或 Approval 的 workspace/run scope。
 - Run 创建及状态变化使用 `RunStateChangedData` typed notification；通知只包含 SM-1 state、causation 与 opaque
   RuntimeState revision/ref，不镜像 Orchestrator action/focus/repair。Governance、Eventstream 和 application 按需订阅。

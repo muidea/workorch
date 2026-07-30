@@ -40,6 +40,7 @@ func Contracts() []eventcontract.Contract {
 		TopicRunCommandApplyGovernanceWait,
 		TopicRunCommandApplyContinuationEligible,
 		TopicRunCommandApplyTerminalDelivery,
+		TopicRunCommandApplyRuntimeStateIncompatible,
 	)...)
 	return ret
 }

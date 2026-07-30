@@ -18,6 +18,7 @@ import (
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -210,19 +211,52 @@ func (m *Biz) recoverRuntimeV2Startup(ctx context.Context) error {
 	}
 	recovered := 0
 	for _, item := range items {
-		switch item.Class {
-		case runevents.RuntimeV2RecoveryBlockedGovernance:
-			if _, loadErr := m.bizPtr.LoadRuntimeV2(ctx, item.WorkspaceID, item.RunID); loadErr != nil {
-				return fmt.Errorf("Runtime V2 startup recovery blocked governance load workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, loadErr)
+		// A Run-owned administrative outcome is not an Orchestrator failure and
+		// must never re-enter SM-4. Only explicit fresh activation creates a new
+		// current-schema Run.
+		if item.RuntimeActivationDisposition == runmodel.RuntimeActivationDispositionFreshActivationRequired {
+			continue
+		}
+		if !item.HasRuntimeState {
+			if item.State == common.RunStateActive && item.HasRuntimeBootstrap {
+				if err := m.scheduleRuntimeV2Drive(ctx, item.WorkspaceID, item.RunID, "startup_recovery:bootstrap"); err != nil {
+					return fmt.Errorf("Runtime V2 startup bootstrap schedule workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, err)
+				}
+				recovered++
 			}
 			continue
-		case runevents.RuntimeV2RecoveryActiveNoDispatch, runevents.RuntimeV2RecoveryActiveSealedDispatch,
-			runevents.RuntimeV2RecoveryTerminalDeliveryPending:
+		}
+
+		aggregate, loadErr := m.bizPtr.LoadRuntimeV2(ctx, item.WorkspaceID, item.RunID)
+		if loadErr != nil {
+			var schemaErr *runtimecontract.RuntimeStateSchemaVersionError
+			if errors.As(loadErr, &schemaErr) {
+				if err := m.applyRunRuntimeStateIncompatible(ctx, item, schemaErr); err != nil {
+					return fmt.Errorf("Runtime V2 startup schema incompatibility workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, err)
+				}
+				continue
+			}
+			return fmt.Errorf("Runtime V2 startup recovery load workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, loadErr)
+		}
+
+		// Recovery classification is exclusively an Orchestrator SM-4 concern
+		// after typed aggregate load. The Run inventory remains opaque.
+		source := ""
+		switch {
+		case aggregate.Decision.State == runtimecontract.ConvergenceStateComplete || aggregate.Decision.State == runtimecontract.ConvergenceStateFailed:
+			source = "startup_recovery:terminal_delivery"
+		case aggregate.Decision.State == runtimecontract.ConvergenceStateNeedGovernance:
+			// The current Run lifecycle is blocked on its persisted governance
+			// binding. It is not drive eligible until the owner receives a
+			// continuation fact.
+			continue
+		case item.State == common.RunStateActive:
+			source = "startup_recovery:active"
 		default:
 			continue
 		}
-		if err := m.scheduleRuntimeV2Drive(ctx, item.WorkspaceID, item.RunID, "startup_recovery:"+string(item.Class)); err != nil {
-			return fmt.Errorf("Runtime V2 startup recovery schedule workspace=%s run=%s class=%s: %w", item.WorkspaceID, item.RunID, item.Class, err)
+		if err := m.scheduleRuntimeV2Drive(ctx, item.WorkspaceID, item.RunID, source); err != nil {
+			return fmt.Errorf("Runtime V2 startup recovery schedule workspace=%s run=%s source=%s: %w", item.WorkspaceID, item.RunID, source, err)
 		}
 		recovered++
 	}
@@ -293,7 +327,7 @@ func (m *Biz) Stop(ctx context.Context) error {
 // external owner state.
 func (m *Biz) handleRunStateChanged(ev magicevent.Event, result magicevent.Result) {
 	data, ok := ev.Data().(runevents.RunStateChangedData)
-	if ok && ev.Source() == runevents.CommandDestination && data.Validate() == nil && data.State == common.RunStateActive {
+	if ok && ev.Source() == runevents.CommandDestination && data.Validate() == nil && data.State == common.RunStateActive && !data.RequiresFreshActivation() {
 		if err := m.scheduleRuntimeV2Drive(ev.Context(), data.WorkspaceID, data.RunID, "run_state_active"); err != nil && !errors.Is(err, context.Canceled) {
 			m.recordRuntimeV2DriveScheduleFailure(ev.Context(), data.WorkspaceID, data.RunID, "run_state_active", err)
 		}

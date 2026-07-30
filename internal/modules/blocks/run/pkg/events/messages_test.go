@@ -26,6 +26,23 @@ func TestRunStateChangedDataFromModelIncludesOnlyOpaqueRuntimeReference(t *testi
 	}
 }
 
+func TestRunStateChangedDataCarriesOnlyRunOwnedFreshActivationDisposition(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive,
+		RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 7},
+		RuntimeActivationStatus: &runmodel.RuntimeActivationStatus{
+			Disposition: runmodel.RuntimeActivationDispositionFreshActivationRequired,
+		},
+	}
+	data := RunStateChangedDataFromModel(run)
+	if !data.RequiresFreshActivation() || data.RuntimeActivationDisposition != runmodel.RuntimeActivationDispositionFreshActivationRequired || data.CausationID != "run-state/run-1/7/fresh_activation_required" {
+		t.Fatalf("run state fact=%+v", data)
+	}
+	if err := data.Validate(); err != nil {
+		t.Fatalf("validate run state fact: %v", err)
+	}
+}
+
 func TestRunContinuationRequestedDataValidate(t *testing.T) {
 	if err := (RunContinuationRequestedData{WorkspaceID: "ws-1", RunID: "run-1", CausationID: "resume-1"}).Validate(); err != nil {
 		t.Fatalf("valid continuation fact: %v", err)

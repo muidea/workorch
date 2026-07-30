@@ -4,7 +4,6 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -26,7 +25,10 @@ func (r runtimeV2StateRepository) Load(ctx context.Context, workspaceID common.W
 	if err != nil {
 		return runtimev2.RuntimeAggregate{}, err
 	}
-	if run.RuntimeContractVersion != runtimecontract.RuntimeContractVersionV2 || run.RuntimeState == nil {
+	// RuntimeContractVersion is audit metadata only. A persisted typed record
+	// must be loaded (and then schema-gated) even when an older Run omitted the
+	// marker; otherwise an unsupported aggregate remains falsely resumable.
+	if run.RuntimeState == nil {
 		return runtimev2.RuntimeAggregate{}, common.ErrNotFound
 	}
 	record := run.RuntimeState.Clone()
@@ -58,18 +60,40 @@ func (r runtimeV2StateRepository) Save(ctx context.Context, aggregate runtimev2.
 	command.ExpectedRuntimeStateRevision = &expectedRevision
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandUpdate, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	bindOwnerCommandLane(event, runevents.TopicRunCommandUpdate, "run", string(run.ID), run.WorkspaceID, run.ID)
-	_, err = runCommandResponse(r.hub.Send(event), runevents.TopicRunCommandUpdate)
-	if errors.Is(err, common.ErrConflict) {
-		observedRevision := uint64(0)
-		if current, loadErr := (runEventRepository{hub: r.hub}).GetByWorkspaceID(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID); loadErr == nil && current.RuntimeState != nil {
-			observedRevision = current.RuntimeState.StateRevision
-		}
-		return &runtimev2.RuntimeCASConflictError{
-			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-			ExpectedRevision: expectedRevision, ObservedRevision: observedRevision, Cause: err,
-		}
+	response, err := runCommandResponse(r.hub.Send(event), runevents.TopicRunCommandUpdate)
+	if err != nil {
+		return err
 	}
-	return err
+	if response.RuntimeStateUpdate == nil {
+		return common.ErrInvalidArgument
+	}
+	outcome := *response.RuntimeStateUpdate
+	if err := outcome.Validate(); err != nil {
+		return err
+	}
+	switch outcome.Disposition {
+	case runevents.RuntimeStateUpdateDispositionAccepted:
+		return nil
+	case runevents.RuntimeStateUpdateDispositionAggregateRevisionMismatch:
+		return &runtimev2.RuntimeCASConflictError{
+			WorkspaceID: outcome.WorkspaceID, RunID: outcome.RunID,
+			ExpectedRevision: outcome.ExpectedRuntimeRevision, ObservedRevision: outcome.ObservedRuntimeRevision,
+		}
+	case runevents.RuntimeStateUpdateDispositionSemanticRejection:
+		return &runtimev2.RuntimeSemanticRejectionError{
+			WorkspaceID: outcome.WorkspaceID, RunID: outcome.RunID,
+			ExpectedRevision: outcome.ExpectedRuntimeRevision, ObservedRevision: outcome.ObservedRuntimeRevision,
+			Feedback: outcome.Feedback.CloneOriginal(),
+		}
+	case runevents.RuntimeStateUpdateDispositionOwnerTransient:
+		return &runtimev2.RuntimeOwnerTransientError{
+			WorkspaceID: outcome.WorkspaceID, RunID: outcome.RunID,
+			ExpectedRevision: outcome.ExpectedRuntimeRevision, ObservedRevision: outcome.ObservedRuntimeRevision,
+			Feedback: outcome.Feedback.CloneOriginal(),
+		}
+	default:
+		return common.ErrInvalidArgument
+	}
 }
 
 func runtimeStateRecordFromAggregate(aggregate runtimev2.RuntimeAggregate) runtimecontract.RuntimeStateRecord {

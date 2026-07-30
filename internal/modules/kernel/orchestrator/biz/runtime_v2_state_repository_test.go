@@ -299,6 +299,47 @@ func TestRuntimeV2StateRepositoryRejectsStaleRevision(t *testing.T) {
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("Save stale revision err = %v, want conflict", err)
 	}
+	var cas *runtimev2.RuntimeCASConflictError
+	if !errors.As(err, &cas) || cas.ExpectedRevision != 1 || cas.ObservedRevision != 2 {
+		t.Fatalf("Save stale revision outcome = %+v", cas)
+	}
+}
+
+func TestRuntimeV2StateRepositoryReturnsSemanticRejectionWithoutCASRetry(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	runs := memory.NewRunRepository()
+	current := runtimeV2RunForTest(common.RunStateActive, runtimeV2Definition())
+	current.RuntimeContractVersion = runtimecontract.RuntimeContractVersionV2
+	record := runtimeStateRecordFromAggregate(runtimeV2Aggregate(t, 0))
+	current.RuntimeState = &record
+	// The aggregate to be saved remains internally valid; only the Run-owned
+	// immutable definition fence differs, which is a semantic rejection rather
+	// than a physical aggregate revision mismatch.
+	current.DefinitionRevision = "definition-drift"
+	if err := runs.Create(ctx, current); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+
+	err := (runtimeV2StateRepository{hub: hub}).Save(ctx, runtimeV2Aggregate(t, 1), 0)
+	var semantic *runtimev2.RuntimeSemanticRejectionError
+	if !errors.As(err, &semantic) || semantic.Feedback.Domain != runtimecontract.RuntimeFeedbackDomainPersistence ||
+		semantic.Feedback.StableCategory != runtimecontract.RuntimeFeedbackCategorySemanticRejection || semantic.Feedback.OriginalDiagnostic == nil {
+		t.Fatalf("semantic update result=%+v err=%v", semantic, err)
+	}
+	var cas *runtimev2.RuntimeCASConflictError
+	if errors.As(err, &cas) {
+		t.Fatalf("semantic rejection entered CAS retry path: %+v", cas)
+	}
 }
 
 // The owner-catalog dependency is the authority for an MCP failure target.

@@ -12,6 +12,7 @@ import (
 	magictask "github.com/muidea/magicCommon/task"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -99,9 +100,10 @@ func TestGMMR1SM4StartupRecoverySchedulesBootstrapOnlyActiveRun(t *testing.T) {
 	recoveryObserver.Subscribe(runevents.TopicRunCommandRuntimeV2RecoveryInventory, func(_ magicevent.Event, result magicevent.Result) {
 		if result != nil {
 			result.Set(runevents.QueryRuntimeV2RecoveryInventoryResult{Items: []runevents.RuntimeV2RecoveryInventoryItem{{
-				WorkspaceID: "ws-bootstrap-only",
-				RunID:       "run-bootstrap-only",
-				Class:       runevents.RuntimeV2RecoveryActiveNoDispatch,
+				WorkspaceID:         "ws-bootstrap-only",
+				RunID:               "run-bootstrap-only",
+				State:               common.RunStateActive,
+				HasRuntimeBootstrap: true,
 			}}}, nil)
 		}
 	})
@@ -122,6 +124,80 @@ func TestGMMR1SM4StartupRecoverySchedulesBootstrapOnlyActiveRun(t *testing.T) {
 	}
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
+	}
+}
+
+func TestGMMR2StartupUnsupportedSchemaMarksRunFreshActivationWithoutDrive(t *testing.T) {
+	deps := moduleContractDependencies()
+	background := &recordingBackgroundRoutine{}
+	deps.BackgroundRoutine = background
+	observer := magicevent.NewSimpleObserver(runevents.CommandDestination, deps.CommandHub)
+	item := runevents.RuntimeV2RecoveryInventoryItem{
+		WorkspaceID:               "ws-schema-unsupported",
+		RunID:                     "run-schema-unsupported",
+		State:                     common.RunStateActive,
+		HasRuntimeBootstrap:       true,
+		HasRuntimeState:           true,
+		RuntimeStateRevision:      11,
+		RuntimeStateSchemaVersion: runtimecontract.RuntimeStateSchemaVersionV2,
+		RuntimeStateRef:           "runtime-state/ws-schema-unsupported/run-schema-unsupported/11",
+	}
+	var received *runevents.ApplyRuntimeStateIncompatibleFactCommand
+	observer.Subscribe(runevents.TopicRunCommandRuntimeV2RecoveryInventory, func(_ magicevent.Event, result magicevent.Result) {
+		if result != nil {
+			result.Set(runevents.QueryRuntimeV2RecoveryInventoryResult{Items: []runevents.RuntimeV2RecoveryInventoryItem{item}}, nil)
+		}
+	})
+	observer.Subscribe(runevents.TopicRunCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		if result != nil {
+			result.Set(runevents.RunCommandResult{Run: &runmodel.Run{
+				ID: item.RunID, WorkspaceID: item.WorkspaceID, State: common.RunStateActive,
+				// The audit marker is intentionally blank: schema gate must still
+				// create the Run-owned fresh-activation outcome.
+				RuntimeState: &runtimecontract.RuntimeStateRecord{SchemaVersion: runtimecontract.RuntimeStateSchemaVersionV2, StateRevision: item.RuntimeStateRevision},
+			}}, nil)
+		}
+	})
+	observer.Subscribe(runevents.TopicRunCommandApplyRuntimeStateIncompatible, func(event magicevent.Event, result magicevent.Result) {
+		command, ok := event.Data().(runevents.ApplyRuntimeStateIncompatibleFactCommand)
+		if !ok {
+			if result != nil {
+				result.Set(nil, nil)
+			}
+			return
+		}
+		copy := command
+		received = &copy
+		if result != nil {
+			result.Set(runevents.RunLifecycleCommandResult{Transitioned: true, RuntimeActivationDisposition: runmodel.RuntimeActivationDispositionFreshActivationRequired}, nil)
+		}
+	})
+	t.Cleanup(func() {
+		observer.Unsubscribe(runevents.TopicRunCommandRuntimeV2RecoveryInventory)
+		observer.Unsubscribe(runevents.TopicRunCommandGet)
+		observer.Unsubscribe(runevents.TopicRunCommandApplyRuntimeStateIncompatible)
+		deps.CommandHub.Terminate(context.Background())
+	})
+
+	module := New()
+	if err := module.Configure(deps); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if background.asyncFunctionCalls != 0 {
+		t.Fatalf("unsupported schema scheduled %d background drives", background.asyncFunctionCalls)
+	}
+	if received == nil || received.WorkspaceID != item.WorkspaceID || received.RunID != item.RunID ||
+		received.RuntimeStateRef != item.RuntimeStateRef || received.ActualSchemaVersion != runtimecontract.RuntimeStateSchemaVersionV2 ||
+		received.SupportedSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent ||
+		received.Feedback.Domain != runtimecontract.RuntimeFeedbackDomainDrive || received.Feedback.StableCategory != runtimecontract.RuntimeFeedbackCategoryStateSchemaUnsupported ||
+		received.Feedback.OriginalDiagnostic == nil {
+		t.Fatalf("schema incompatibility fact=%+v", received)
+	}
+	if err := module.Stop(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }
 

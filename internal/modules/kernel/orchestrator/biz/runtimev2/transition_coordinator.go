@@ -39,16 +39,6 @@ func (c *RuntimeTransitionCoordinator) Commit(ctx context.Context, aggregate Run
 		if errors.As(err, &typed) {
 			return typed
 		}
-		if errors.Is(err, common.ErrConflict) {
-			observedRevision := uint64(0)
-			if current, loadErr := c.repository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID); loadErr == nil {
-				observedRevision = current.StateRevision
-			}
-			return &RuntimeCASConflictError{
-				WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-				ExpectedRevision: expectedRevision, ObservedRevision: observedRevision, Cause: err,
-			}
-		}
 		return err
 	}
 	return nil

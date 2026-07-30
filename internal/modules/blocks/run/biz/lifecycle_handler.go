@@ -28,6 +28,7 @@ func (m *Biz) lifecycleTopics() []string {
 		runevents.TopicRunCommandApplyGovernanceWait,
 		runevents.TopicRunCommandApplyContinuationEligible,
 		runevents.TopicRunCommandApplyTerminalDelivery,
+		runevents.TopicRunCommandApplyRuntimeStateIncompatible,
 	}
 }
 
@@ -114,6 +115,15 @@ func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (runevents.RunLifecyc
 		reduce = func(current *runmodel.Run) (lifecycleTransition, error) {
 			return reduceTerminalDelivery(current, cmd)
 		}
+	case runevents.TopicRunCommandApplyRuntimeStateIncompatible:
+		cmd, ok := data.(runevents.ApplyRuntimeStateIncompatibleFactCommand)
+		if !ok || ev.Source() != runtimeLifecycleFactSource {
+			return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
+		}
+		workspaceID, runID = cmd.WorkspaceID, cmd.RunID
+		reduce = func(current *runmodel.Run) (lifecycleTransition, error) {
+			return reduceRuntimeStateIncompatible(current, cmd)
+		}
 	default:
 		return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
 	}
@@ -129,7 +139,7 @@ func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (runevents.RunLifecyc
 	if err != nil {
 		return response, err
 	}
-	if topic == runevents.TopicRunCommandContinue && !response.Transitioned && response.Run != nil && response.Run.State == common.RunStateActive {
+	if topic == runevents.TopicRunCommandContinue && !response.Transitioned && response.Run != nil && response.Run.State == common.RunStateActive && response.RuntimeActivationDisposition != runmodel.RuntimeActivationDispositionFreshActivationRequired {
 		m.publishContinuationRequested(ctx, response.Run, data.(runevents.ContinueRunCommand).CausationID)
 	}
 	return response, nil
@@ -157,10 +167,11 @@ func (m *Biz) applyLifecycleLocked(
 		}
 		if transition.Noop {
 			result := runevents.RunLifecycleCommandResult{
-				Run:           current,
-				Transitioned:  false,
-				PreviousState: previous,
-				Diagnostic:    transition.Diagnostic,
+				Run:                          current,
+				Transitioned:                 false,
+				PreviousState:                previous,
+				RuntimeActivationDisposition: runtimeActivationDispositionForRun(current),
+				Diagnostic:                   transition.Diagnostic,
 			}
 			if deliveryCmd != nil && runStateIsTerminal(current.State) {
 				result.DeliveryAck = runTerminalDeliveryAck(current, *deliveryCmd, runtimecontract.RuntimeDeliveryAcknowledgedNoop)
@@ -176,9 +187,10 @@ func (m *Biz) applyLifecycleLocked(
 		}
 		m.publishLifecycleTransition(ctx, next)
 		result := runevents.RunLifecycleCommandResult{
-			Run:           next,
-			Transitioned:  true,
-			PreviousState: previous,
+			Run:                          next,
+			Transitioned:                 true,
+			PreviousState:                previous,
+			RuntimeActivationDisposition: runtimeActivationDispositionForRun(next),
 		}
 		if deliveryCmd != nil {
 			result.DeliveryAck = runTerminalDeliveryAck(next, *deliveryCmd, runtimecontract.RuntimeDeliveryAcknowledgedRunTerminal)
@@ -186,6 +198,13 @@ func (m *Biz) applyLifecycleLocked(
 		return result, nil
 	}
 	return runevents.RunLifecycleCommandResult{}, common.ErrConflict
+}
+
+func runtimeActivationDispositionForRun(run *runmodel.Run) runmodel.RuntimeActivationDisposition {
+	if run == nil || run.RuntimeActivationStatus == nil {
+		return ""
+	}
+	return run.RuntimeActivationStatus.Disposition
 }
 
 func runTerminalDeliveryAck(

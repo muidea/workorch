@@ -327,6 +327,25 @@ Result 永不参与 acceptance 裁决。
 DTO、常量和纯 helper；共享 `workorchruntimecontract` 仅保存 owner-neutral DTO、enum、clone/normalize/validate/hash
 等纯函数。
 
+#### R2 当前 22 组件范围
+
+本表取代已归档的独立组件矩阵，避免 active 目录存在两份并列的实施标准。它只登记当前 R2 的审计范围；各卡的
+具体改动和验收仍以上述 C1–C8 为准。
+
+| 类型 | 注册组件 |
+| --- | --- |
+| Initiator | `internal/initiators/workorchruntime` |
+| Application Module | `internal/modules/application/workorchd` |
+| Kernel Module | `internal/modules/kernel/orchestrator`、`internal/modules/kernel/governance`、`internal/modules/kernel/system` |
+| Resource / governance Block | `internal/modules/blocks/run`、`internal/modules/blocks/workspace`、`internal/modules/blocks/result`、`internal/modules/blocks/decision`、`internal/modules/blocks/approval`、`internal/modules/blocks/eventstream` |
+| Capability Block | `internal/modules/blocks/llm`、`internal/modules/blocks/file`、`internal/modules/blocks/git`、`internal/modules/blocks/shell`、`internal/modules/blocks/mcp`、`internal/modules/blocks/ssh`、`internal/modules/blocks/web` |
+| Supporting Block | `internal/modules/blocks/memory`、`internal/modules/blocks/skill`、`internal/modules/blocks/soul`、`internal/modules/blocks/mcpregistry` |
+
+当前实施进度：C0 的 inventory boundary regression 已落地；C1 的 raw inventory、schema incompatibility
+administrative outcome 和 non-resumable continuation 已落地；C2 的 startup schema path 已落地；C3 的 typed
+persistence result 和真实 revision-mismatch CAS gate 已落地。C2 的其余所有外部输入统一 internal event 化，以及
+C3 的 semantic fact 归入 SM-2/SM-3 reducer，仍保持未关闭并由后续卡继续收口。
+
 **完成条件：** 所有 22 个单元均有 scope、typed result、owner mutation 与 no-cross-state-transition 的回归证据；
 没有 global current workspace/run 或跨 owner repository/service 注入。
 

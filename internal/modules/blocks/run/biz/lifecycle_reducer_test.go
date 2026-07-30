@@ -112,6 +112,92 @@ func TestReduceContinueWithoutGovernanceFactRejected(t *testing.T) {
 	}
 }
 
+func schemaIncompatibleFact(workspaceID common.WorkspaceID, runID common.RunID, revision uint64, actualSchema uint32) runevents.ApplyRuntimeStateIncompatibleFactCommand {
+	stateRef := runevents.RuntimeStateRef(workspaceID, runID, revision)
+	return runevents.ApplyRuntimeStateIncompatibleFactCommand{
+		WorkspaceID:            workspaceID,
+		RunID:                  runID,
+		SourceOwner:            "kernel/orchestrator",
+		CausationID:            "runtime-state-incompatible/" + stateRef,
+		RuntimeStateRef:        stateRef,
+		ActualSchemaVersion:    actualSchema,
+		SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
+		Feedback: runtimecontract.RuntimeFeedback{
+			Domain:         runtimecontract.RuntimeFeedbackDomainDrive,
+			StableCategory: runtimecontract.RuntimeFeedbackCategoryStateSchemaUnsupported,
+			WorkspaceID:    workspaceID,
+			RunID:          runID,
+			OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{
+				SchemaVersion:    runtimecontract.RuntimeOriginalDiagnosticSchemaV1,
+				OwnerModuleID:    "kernel/orchestrator",
+				OriginalClass:    "runtime_state_schema",
+				OriginalCode:     "unsupported_runtime_state_schema",
+				OriginalMessage:  "runtime state schema is unsupported by this binary",
+				Signature:        "runtime-state-schema/fixture",
+				ObservedRevision: stateRef,
+			},
+		},
+	}
+}
+
+func TestReduceRuntimeStateIncompatiblePersistsFreshActivationRequirement(t *testing.T) {
+	current := &runmodel.Run{
+		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive,
+		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
+		RuntimeState:           &runtimecontract.RuntimeStateRecord{SchemaVersion: runtimecontract.RuntimeStateSchemaVersionV2, StateRevision: 7},
+	}
+	cmd := schemaIncompatibleFact("ws-1", "run-1", 7, runtimecontract.RuntimeStateSchemaVersionV2)
+	transition, err := reduceRuntimeStateIncompatible(current, cmd)
+	if err != nil || transition.Noop || transition.Target != common.RunStateActive || transition.RuntimeActivationStatus == nil {
+		t.Fatalf("transition=%+v err=%v", transition, err)
+	}
+	next := applyLifecycleTransition(current, transition)
+	if next.RuntimeActivationStatus == nil || next.RuntimeActivationStatus.Disposition != runmodel.RuntimeActivationDispositionFreshActivationRequired ||
+		next.RuntimeActivationStatus.ActualSchemaVersion != runtimecontract.RuntimeStateSchemaVersionV2 || next.RuntimeActivationStatus.Feedback == nil ||
+		next.RuntimeActivationStatus.Feedback.OriginalDiagnostic == nil || next.RuntimeActivationStatus.Feedback.OriginalDiagnostic.Signature != "runtime-state-schema/fixture" {
+		t.Fatalf("fresh-activation status=%+v", next.RuntimeActivationStatus)
+	}
+	duplicate, err := reduceRuntimeStateIncompatible(next, cmd)
+	if err != nil || !duplicate.Noop {
+		t.Fatalf("duplicate transition=%+v err=%v", duplicate, err)
+	}
+	wrongRef := cmd
+	wrongRef.RuntimeStateRef = "runtime-state/ws-1/run-1/8"
+	if _, err := reduceRuntimeStateIncompatible(current, wrongRef); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("mismatched ref error=%v", err)
+	}
+	wrongSchema := cmd
+	wrongSchema.ActualSchemaVersion = 1
+	if _, err := reduceRuntimeStateIncompatible(current, wrongSchema); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("mismatched schema error=%v", err)
+	}
+}
+
+func TestLifecycleIncompatibleStateMakesContinueTypedNoop(t *testing.T) {
+	biz, runs, _ := newLifecycleTestBiz(t)
+	seed := seedRun(t, runs, common.RunStateActive)
+	seed.RuntimeContractVersion = runtimecontract.RuntimeContractVersionV2
+	seed.RuntimeState = &runtimecontract.RuntimeStateRecord{SchemaVersion: runtimecontract.RuntimeStateSchemaVersionV2, StateRevision: 4}
+	if err := runs.Update(context.Background(), seed); err != nil {
+		t.Fatalf("seed incompatible run: %v", err)
+	}
+	ctx := context.Background()
+	response, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
+		runevents.TopicRunCommandApplyRuntimeStateIncompatible, "kernel/orchestrator", runevents.CommandDestination, magicevent.NewHeader(), ctx,
+		schemaIncompatibleFact("ws-1", "run-1", 4, runtimecontract.RuntimeStateSchemaVersionV2),
+	))
+	if err != nil || !response.Transitioned || response.RuntimeActivationDisposition != runmodel.RuntimeActivationDispositionFreshActivationRequired {
+		t.Fatalf("incompatible response=%+v err=%v", response, err)
+	}
+	continued, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
+		runevents.TopicRunCommandContinue, "application/workorchd", runevents.CommandDestination, magicevent.NewHeader(), ctx,
+		runevents.ContinueRunCommand{WorkspaceID: "ws-1", RunID: "run-1", CausationID: "resume/fixture"},
+	))
+	if err != nil || continued.Transitioned || continued.RuntimeActivationDisposition != runmodel.RuntimeActivationDispositionFreshActivationRequired || continued.Diagnostic != string(runmodel.RuntimeActivationDispositionFreshActivationRequired) {
+		t.Fatalf("continue response=%+v err=%v", continued, err)
+	}
+}
+
 func TestReduceContinuationEligibleRequiresMatchingTicket(t *testing.T) {
 	current := &runmodel.Run{
 		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateBlockedOnDecision,
@@ -399,12 +485,13 @@ func TestRuntimeV2AggregatePersistenceRejectsAggregateRevisionRace(t *testing.T)
 	nextState := currentState.Clone()
 	nextState.StateRevision++
 	expected := currentState.StateRevision
-	_, err := biz.updateRuntimeV2State(ctx, &runmodel.Run{
+	result, err := biz.updateRuntimeV2State(ctx, &runmodel.Run{
 		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: definition.GoalID, DoDID: definition.DoDID, DefinitionRevision: definition.Revision,
 		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2, RuntimeBootstrap: &bootstrap, RuntimeState: &currentState,
 	}, runevents.UpdateRunCommand{RunID: "run-v2", WorkspaceID: "ws-v2", RuntimeState: &nextState, ExpectedRuntimeStateRevision: &expected})
-	if !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("aggregate revision race err = %v, want conflict", err)
+	if err != nil || result.RuntimeStateUpdate == nil || result.RuntimeStateUpdate.Disposition != runevents.RuntimeStateUpdateDispositionAggregateRevisionMismatch ||
+		result.RuntimeStateUpdate.ExpectedRuntimeRevision != expected || result.RuntimeStateUpdate.ObservedRuntimeRevision != expected+1 {
+		t.Fatalf("aggregate revision race result=%+v err=%v", result.RuntimeStateUpdate, err)
 	}
 }
 

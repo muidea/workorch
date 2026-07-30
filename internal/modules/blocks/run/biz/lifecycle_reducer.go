@@ -14,13 +14,14 @@ import (
 // lifecycleTransition is the owner-local SM-1 decision produced by a pure
 // reducer. External inputs never supply Target directly.
 type lifecycleTransition struct {
-	Target           common.RunState
-	BlockingTicketID common.TicketID
-	BlockingApproval common.ApprovalID
-	FailureReason    string
-	StartedAt        string
-	EndedAt          string
-	TerminalDelivery *runtimecontract.RuntimeTerminalDeliveryIdentity
+	Target                  common.RunState
+	BlockingTicketID        common.TicketID
+	BlockingApproval        common.ApprovalID
+	FailureReason           string
+	StartedAt               string
+	EndedAt                 string
+	TerminalDelivery        *runtimecontract.RuntimeTerminalDeliveryIdentity
+	RuntimeActivationStatus *runmodel.RuntimeActivationStatus
 	// Noop means the input was accepted without rewriting owner state
 	// (duplicate, already-terminal, or already-converged).
 	Noop       bool
@@ -43,6 +44,9 @@ func reduceActivateRun(current *runmodel.Run, cmd runevents.ActivateRunCommand) 
 	}
 	if runStateIsTerminal(current.State) {
 		return lifecycleTransition{Noop: true, Diagnostic: "run already terminal"}, nil
+	}
+	if runtimeActivationDispositionForRun(current) == runmodel.RuntimeActivationDispositionFreshActivationRequired {
+		return lifecycleTransition{Noop: true, Diagnostic: string(runmodel.RuntimeActivationDispositionFreshActivationRequired)}, nil
 	}
 	if current.State == common.RunStateActive {
 		return lifecycleTransition{Noop: true, Diagnostic: "run already active"}, nil
@@ -166,12 +170,62 @@ func reduceContinueRun(current *runmodel.Run, cmd runevents.ContinueRunCommand) 
 	if runStateIsTerminal(current.State) {
 		return lifecycleTransition{Noop: true, Diagnostic: "run already terminal"}, nil
 	}
+	if runtimeActivationDispositionForRun(current) == runmodel.RuntimeActivationDispositionFreshActivationRequired {
+		return lifecycleTransition{Noop: true, Diagnostic: string(runmodel.RuntimeActivationDispositionFreshActivationRequired)}, nil
+	}
 	if current.State == common.RunStateActive {
 		return lifecycleTransition{Noop: true, Diagnostic: "run already active"}, nil
 	}
 	// Continue intent alone never rewrites blocked_* without a matching
 	// governance continuation fact (ApplyRuntimeContinuationEligibleCommand).
 	return lifecycleTransition{}, fmt.Errorf("%w: continue requires matching governance continuation fact", common.ErrConflict)
+}
+
+// reduceRuntimeStateIncompatible converts the immutable Orchestrator schema
+// observation into Run-owned administrative state. The Runtime aggregate stays
+// opaque: only its stored ref/version are compared and no authority, dispatch,
+// governance, or delivery value is decoded here.
+func reduceRuntimeStateIncompatible(current *runmodel.Run, cmd runevents.ApplyRuntimeStateIncompatibleFactCommand) (lifecycleTransition, error) {
+	if current == nil {
+		return lifecycleTransition{}, common.ErrInvalidArgument
+	}
+	if err := cmd.Validate(); err != nil {
+		return lifecycleTransition{}, err
+	}
+	if current.WorkspaceID != cmd.WorkspaceID || current.ID != cmd.RunID {
+		return lifecycleTransition{}, common.ErrConflict
+	}
+	if runStateIsTerminal(current.State) {
+		return lifecycleTransition{Noop: true, Diagnostic: "run already terminal"}, nil
+	}
+	if current.RuntimeState == nil {
+		return lifecycleTransition{}, fmt.Errorf("%w: runtime state incompatibility requires persisted runtime state", common.ErrConflict)
+	}
+	if runevents.RuntimeStateRef(current.WorkspaceID, current.ID, current.RuntimeState.StateRevision) != cmd.RuntimeStateRef ||
+		current.RuntimeState.SchemaVersion != cmd.ActualSchemaVersion {
+		return lifecycleTransition{}, fmt.Errorf("%w: runtime state incompatibility identity mismatch", common.ErrConflict)
+	}
+	feedback := cmd.Feedback.CloneOriginal()
+	status := &runmodel.RuntimeActivationStatus{
+		Disposition:            runmodel.RuntimeActivationDispositionFreshActivationRequired,
+		RuntimeStateRef:        cmd.RuntimeStateRef,
+		ActualSchemaVersion:    cmd.ActualSchemaVersion,
+		SupportedSchemaVersion: cmd.SupportedSchemaVersion,
+		Feedback:               &feedback,
+	}
+	if current.RuntimeActivationStatus != nil {
+		if sameRuntimeActivationStatus(current.RuntimeActivationStatus, status) {
+			return lifecycleTransition{Noop: true, Diagnostic: string(status.Disposition)}, nil
+		}
+		return lifecycleTransition{}, fmt.Errorf("%w: conflicting runtime activation status", common.ErrConflict)
+	}
+	return lifecycleTransition{
+		Target:                  current.State,
+		BlockingTicketID:        current.BlockingTicketID,
+		BlockingApproval:        current.BlockingApprovalID,
+		FailureReason:           current.FailureReason,
+		RuntimeActivationStatus: status,
+	}, nil
 }
 
 func reduceTerminalDelivery(current *runmodel.Run, cmd runevents.ApplyRuntimeTerminalDeliveryCommand) (lifecycleTransition, error) {
@@ -366,6 +420,9 @@ func applyLifecycleTransition(current *runmodel.Run, transition lifecycleTransit
 		identity := transition.TerminalDelivery.Normalized()
 		next.TerminalDelivery = &identity
 	}
+	if transition.RuntimeActivationStatus != nil {
+		next.RuntimeActivationStatus = transition.RuntimeActivationStatus.Clone()
+	}
 	if transition.Target == common.RunStateSuperseded {
 		lineage := next.Lineage
 		if strings.TrimSpace(lineage.LineageState) == "" || lineage.LineageState == "active" {
@@ -374,6 +431,20 @@ func applyLifecycleTransition(current *runmodel.Run, transition lifecycleTransit
 		}
 	}
 	return &next
+}
+
+func sameRuntimeActivationStatus(left, right *runmodel.RuntimeActivationStatus) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	if left.Disposition != right.Disposition || left.RuntimeStateRef != right.RuntimeStateRef ||
+		left.ActualSchemaVersion != right.ActualSchemaVersion || left.SupportedSchemaVersion != right.SupportedSchemaVersion {
+		return false
+	}
+	if left.Feedback == nil || right.Feedback == nil {
+		return left.Feedback == nil && right.Feedback == nil
+	}
+	return runtimecontract.StableRuntimeFeedbackHash(*left.Feedback) == runtimecontract.StableRuntimeFeedbackHash(*right.Feedback)
 }
 
 func sameRunTerminalDelivery(left, right *runtimecontract.RuntimeTerminalDeliveryIdentity) bool {

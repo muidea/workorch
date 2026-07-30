@@ -171,6 +171,47 @@ type ApplyRuntimeTerminalDeliveryCommand struct {
 	FailureReason       string
 }
 
+// ApplyRuntimeStateIncompatibleFactCommand is an immutable SM-4 observation
+// that an existing opaque Runtime state cannot be read by this binary. It
+// carries no requested Run state: Run owner converts it to its private SM-1
+// lifecycle event and persists fresh_activation_required itself.
+type ApplyRuntimeStateIncompatibleFactCommand struct {
+	WorkspaceID            common.WorkspaceID
+	RunID                  common.RunID
+	SourceOwner            string
+	CausationID            string
+	RuntimeStateRef        string
+	ActualSchemaVersion    uint32
+	SupportedSchemaVersion uint32
+	Feedback               runtimecontract.RuntimeFeedback
+}
+
+func (c ApplyRuntimeStateIncompatibleFactCommand) Normalized() ApplyRuntimeStateIncompatibleFactCommand {
+	c.SourceOwner = strings.TrimSpace(c.SourceOwner)
+	c.CausationID = strings.TrimSpace(c.CausationID)
+	c.RuntimeStateRef = strings.TrimSpace(c.RuntimeStateRef)
+	c.Feedback = c.Feedback.CloneOriginal()
+	return c
+}
+
+func (c ApplyRuntimeStateIncompatibleFactCommand) Validate() error {
+	c = c.Normalized()
+	if c.WorkspaceID == "" || c.RunID == "" || c.SourceOwner != runtimeLifecycleSourceOwner || c.CausationID == "" || c.RuntimeStateRef == "" {
+		return fmt.Errorf("%w: runtime state incompatibility fact requires scope, source, causation and state reference", common.ErrInvalidArgument)
+	}
+	if c.ActualSchemaVersion == 0 || c.SupportedSchemaVersion == 0 || c.ActualSchemaVersion == c.SupportedSchemaVersion {
+		return fmt.Errorf("%w: runtime state incompatibility requires distinct actual and supported schema versions", common.ErrInvalidArgument)
+	}
+	if c.Feedback.Domain != runtimecontract.RuntimeFeedbackDomainDrive || c.Feedback.StableCategory != runtimecontract.RuntimeFeedbackCategoryStateSchemaUnsupported ||
+		c.Feedback.WorkspaceID != c.WorkspaceID || c.Feedback.RunID != c.RunID || c.Feedback.OriginalDiagnostic == nil {
+		return fmt.Errorf("%w: runtime state incompatibility requires scoped schema feedback", common.ErrInvalidArgument)
+	}
+	if err := c.Feedback.Validate(); err != nil {
+		return fmt.Errorf("%w: runtime state incompatibility feedback: %v", common.ErrInvalidArgument, err)
+	}
+	return nil
+}
+
 func (c ApplyRuntimeTerminalDeliveryCommand) Normalized() ApplyRuntimeTerminalDeliveryCommand {
 	c.SourceOwner = strings.TrimSpace(c.SourceOwner)
 	c.CausationID = strings.TrimSpace(c.CausationID)
@@ -217,5 +258,8 @@ type RunLifecycleCommandResult struct {
 	Transitioned  bool
 	PreviousState common.RunState
 	DeliveryAck   *runtimecontract.RuntimeDeliveryAcknowledgement
-	Diagnostic    string
+	// RuntimeActivationDisposition is a Run-owned outcome for non-resumable
+	// records. It is not an Orchestrator convergence or drive classification.
+	RuntimeActivationDisposition runmodel.RuntimeActivationDisposition
+	Diagnostic                   string
 }

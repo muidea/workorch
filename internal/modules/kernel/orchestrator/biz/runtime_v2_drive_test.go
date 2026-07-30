@@ -175,7 +175,22 @@ func (r *failOnceCASRuntimeV2Repository) Load(ctx context.Context, workspaceID c
 func (r *failOnceCASRuntimeV2Repository) Save(ctx context.Context, aggregate runtimev2.RuntimeAggregate, expectedRevision uint64) error {
 	if expectedRevision > 0 && r.remainingFailures > 0 {
 		r.remainingFailures--
-		return common.ErrConflict
+		// Model a real competing aggregate writer: a generic storage conflict
+		// with no aggregate revision drift is now an owner-local rebase/transient
+		// concern, not permission for SM-4 CAS recovery.
+		current, err := r.delegate.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+		if err != nil {
+			return err
+		}
+		competing := current
+		competing.StateRevision++
+		if err := r.delegate.Save(ctx, competing, current.StateRevision); err != nil {
+			return err
+		}
+		return &runtimev2.RuntimeCASConflictError{
+			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+			ExpectedRevision: expectedRevision, ObservedRevision: competing.StateRevision,
+		}
 	}
 	return r.delegate.Save(ctx, aggregate, expectedRevision)
 }

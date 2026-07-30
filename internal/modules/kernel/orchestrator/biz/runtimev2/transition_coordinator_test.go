@@ -68,7 +68,7 @@ func TestRuntimeTransitionCoordinatorRejectsInvalidAggregateBeforeCAS(t *testing
 	}
 }
 
-func TestRuntimeTransitionCoordinatorPropagatesCASConflictWithoutCommittedState(t *testing.T) {
+func TestRuntimeTransitionCoordinatorDoesNotPromoteUntypedConflictToCAS(t *testing.T) {
 	repository := &transitionCoordinatorRepository{saveErr: common.ErrConflict}
 	coordinator, err := NewRuntimeTransitionCoordinator(repository)
 	if err != nil {
@@ -81,8 +81,8 @@ func TestRuntimeTransitionCoordinatorPropagatesCASConflictWithoutCommittedState(
 		t.Fatalf("Commit error = %v, want conflict", err)
 	}
 	var conflict *RuntimeCASConflictError
-	if !errors.As(err, &conflict) || conflict.ExpectedRevision != aggregate.StateRevision-1 {
-		t.Fatalf("Commit conflict = %+v, want typed expected revision %d", conflict, aggregate.StateRevision-1)
+	if errors.As(err, &conflict) {
+		t.Fatalf("untyped conflict was incorrectly promoted to CAS conflict: %+v", conflict)
 	}
 	if repository.saves != 1 {
 		t.Fatalf("repository Save calls = %d, want 1", repository.saves)

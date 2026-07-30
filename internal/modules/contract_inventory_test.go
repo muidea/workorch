@@ -10,9 +10,10 @@ import (
 
 func TestComponentContractMatrixCoversRegisteredComponents(t *testing.T) {
 	root := findRepoRoot(t)
-	// The active component matrix is the single source of truth. Archived plans
-	// document history only and must not constrain the current component shape.
-	planPath := filepath.Join(root, "docs", "70-roadmap", "active", "component-contract-and-regression-closure-matrix.md")
+	// RUNTIME-SMO-R2 contains the active 22-component boundary matrix. Archived
+	// plans document history only and must not constrain the current component
+	// shape.
+	planPath := filepath.Join(root, "docs", "70-roadmap", "active", "runtime-v2-single-owner-state-machine-closure-plan.md")
 	planBytes, err := os.ReadFile(planPath)
 	if err != nil {
 		t.Fatalf("read closure plan: %v", err)

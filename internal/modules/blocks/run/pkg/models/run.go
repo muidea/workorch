@@ -19,14 +19,17 @@ type Run struct {
 	RuntimeBootstrap       *runtimecontract.RuntimeBootstrap
 	RuntimeContractVersion string
 	RuntimeState           *runtimecontract.RuntimeStateRecord
-	State                  common.RunState
-	Priority               int
-	BlockingTicketID       common.TicketID
-	BlockingApprovalID     common.ApprovalID
-	FailureReason          string
-	CreatedAt              string
-	StartedAt              string
-	EndedAt                string
+	// RuntimeActivationStatus is the Run owner's administrative resume status.
+	// It never contains decoded aggregate authority or a requested target state.
+	RuntimeActivationStatus *RuntimeActivationStatus
+	State                   common.RunState
+	Priority                int
+	BlockingTicketID        common.TicketID
+	BlockingApprovalID      common.ApprovalID
+	FailureReason           string
+	CreatedAt               string
+	StartedAt               string
+	EndedAt                 string
 	// TerminalDelivery is the Run owner's immutable SM-1 terminal fence.
 	TerminalDelivery *runtimecontract.RuntimeTerminalDeliveryIdentity
 }

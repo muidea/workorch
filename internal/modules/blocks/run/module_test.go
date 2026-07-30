@@ -25,7 +25,7 @@ func newRunModuleTestHub(t *testing.T) magicevent.Hub {
 	return hub
 }
 
-func TestBuildRuntimeV2RecoveryInventoryClassifiesAuthorityState(t *testing.T) {
+func TestBuildRuntimeV2RecoveryInventoryContainsOnlyRunOwnedOpaqueFacts(t *testing.T) {
 	bootstrapOnly := runtimecontract.RuntimeBootstrap{SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent}
 	runs := []*runmodel.Run{
 		// A bootstrap-only activation is a valid SM-4 initialization recovery
@@ -46,21 +46,36 @@ func TestBuildRuntimeV2RecoveryInventoryClassifiesAuthorityState(t *testing.T) {
 			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 3, Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedGovernance}}},
 		{ID: "run-terminal-pending", WorkspaceID: "ws-3", State: common.RunStateActive, RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
 			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 4, Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateComplete}, Facts: runtimecontract.RuntimeFacts{Recovery: runtimecontract.RuntimeRecoveryLedger{TerminalDeliveryAttempts: 2}}}},
+		{ID: "run-fresh-activation-required", WorkspaceID: "ws-4", State: common.RunStateActive, RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
+			RuntimeState:            &runtimecontract.RuntimeStateRecord{SchemaVersion: runtimecontract.RuntimeStateSchemaVersionV2, StateRevision: 5},
+			RuntimeActivationStatus: &runmodel.RuntimeActivationStatus{Disposition: runmodel.RuntimeActivationDispositionFreshActivationRequired, RuntimeStateRef: "runtime-state/ws-4/run-fresh-activation-required/5", ActualSchemaVersion: runtimecontract.RuntimeStateSchemaVersionV2, SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent}},
 	}
 	result := runbiz.BuildRuntimeV2RecoveryInventory(runs, runevents.QueryRuntimeV2RecoveryInventoryCommand{Limit: 10})
-	if len(result.Items) != 6 {
+	if len(result.Items) != 7 {
 		t.Fatalf("recovery items = %+v", result.Items)
 	}
-	classes := map[common.RunID]runevents.RuntimeV2RecoveryClass{}
+	items := map[common.RunID]runevents.RuntimeV2RecoveryInventoryItem{}
 	for _, item := range result.Items {
-		classes[item.RunID] = item.Class
+		items[item.RunID] = item
 	}
-	if classes["run-bootstrap-only"] != runevents.RuntimeV2RecoveryActiveNoDispatch ||
-		classes["run-audit-version-blank"] != runevents.RuntimeV2RecoveryActiveNoDispatch ||
-		classes["run-legacy"] != "" ||
-		classes["run-active"] != runevents.RuntimeV2RecoveryActiveNoDispatch || classes["run-sealed"] != runevents.RuntimeV2RecoveryActiveSealedDispatch ||
-		classes["run-blocked"] != runevents.RuntimeV2RecoveryBlockedGovernance || classes["run-terminal-pending"] != runevents.RuntimeV2RecoveryTerminalDeliveryPending {
-		t.Fatalf("recovery classes = %+v", classes)
+	if _, ok := items["run-legacy"]; ok {
+		t.Fatalf("legacy run unexpectedly entered recovery inventory: %+v", items["run-legacy"])
+	}
+	bootstrap := items["run-bootstrap-only"]
+	if bootstrap.State != common.RunStateActive || !bootstrap.HasRuntimeBootstrap || bootstrap.HasRuntimeState || bootstrap.RuntimeStateRef != "" {
+		t.Fatalf("bootstrap-only inventory = %+v", bootstrap)
+	}
+	sealed := items["run-sealed"]
+	if sealed.State != common.RunStateActive || !sealed.HasRuntimeState || sealed.RuntimeStateRevision != 2 || sealed.RuntimeStateRef != "runtime-state/ws-1/run-sealed/2" {
+		t.Fatalf("sealed opaque inventory = %+v", sealed)
+	}
+	blocked := items["run-blocked"]
+	if blocked.State != common.RunStateBlockedOnDecision || !blocked.HasRuntimeState || blocked.RuntimeStateRevision != 3 {
+		t.Fatalf("blocked lifecycle inventory = %+v", blocked)
+	}
+	fresh := items["run-fresh-activation-required"]
+	if fresh.RuntimeActivationDisposition != runmodel.RuntimeActivationDispositionFreshActivationRequired || fresh.RuntimeStateSchemaVersion != runtimecontract.RuntimeStateSchemaVersionV2 {
+		t.Fatalf("fresh-activation inventory = %+v", fresh)
 	}
 }
 

@@ -5,6 +5,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -12,7 +13,6 @@ import (
 	resultmodule "github.com/muidea/workorch/internal/modules/blocks/result"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	runmodule "github.com/muidea/workorch/internal/modules/blocks/run"
-	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodule "github.com/muidea/workorch/internal/modules/blocks/workspace"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
@@ -817,10 +817,9 @@ func assertAdministrativeSupersedeAuthority(t *testing.T, aggregate runtimev2.Ru
 	}
 }
 
-// Terminal delivery recovery is scheduling metadata only.  Its bounded ledger
-// must never mutate the already-sealed terminal authority, and a process that
-// restarts after the last local retry must still receive the pending terminal
-// from the Run owner's typed recovery inventory.
+// Terminal delivery recovery is scheduling metadata only. Its bounded ledger
+// must never mutate the already-sealed terminal authority; startup first gets
+// only the Run-owned opaque record and classifies terminal delivery after load.
 func TestRuntimeV2TerminalDeliveryBudgetExhaustionRetainsStartupRecoveryInventory(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -886,7 +885,8 @@ func TestRuntimeV2TerminalDeliveryBudgetExhaustionRetainsStartupRecoveryInventor
 	}
 	t.Cleanup(func() { _ = restartedRunOwner.Stop(ctx) })
 	inventory, err := queryRuntimeV2RecoveryInventory(ctx, restartedHub)
-	if err != nil || len(inventory) != 1 || inventory[0].Class != runevents.RuntimeV2RecoveryTerminalDeliveryPending || inventory[0].TerminalDeliveryAttempts != 1 {
+	if err != nil || len(inventory) != 1 || inventory[0].State != common.RunStateActive || !inventory[0].HasRuntimeState ||
+		inventory[0].RuntimeStateRevision != charged.StateRevision || inventory[0].RuntimeStateRef != "runtime-state/ws-v2/run-v2/"+fmt.Sprint(charged.StateRevision) {
 		t.Fatalf("terminal startup inventory=%+v err=%v", inventory, err)
 	}
 	persisted, err := runs.Get(ctx, "run-v2")

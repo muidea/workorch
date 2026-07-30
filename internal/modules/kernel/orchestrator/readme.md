@@ -230,6 +230,13 @@ R4/P0～P6/A-4 只作回归基线，不再是活动实施标准。
   SM-4 在 Orchestrator `Run` 中同步完成全部 inventory/load 分页；缺 subscriber、owner error、nil/wrong result 或
   cursor 异常必须使启动失败。盘点成功后才以 run-scoped singleflight 将具体 re-drive 交给
   `BackgroundRoutine`，不建立 application scan 或第二套 startup retry 状态机。
+- inventory 中的 actual schema 不受 `runtimeContractVersion` 审计字段影响。typed record load 返回
+  `RuntimeStateSchemaVersionError` 时，SM-4 只发送 immutable incompatibility fact 给 Run owner；它不提交 drive
+  failure aggregate、不请求 LLM/operation、不创建 governance ticket，且 Run owner 的
+  `fresh_activation_required` notification 不再进入 drive scheduling。
+- Run owner opaque aggregate update 返回 `accepted`、`aggregate_revision_mismatch`、`semantic_rejection` 或
+  `owner_transient` concrete result。仅 `aggregate_revision_mismatch` 的实际 revision mismatch 可构造
+  `RuntimeCASConflictError`；Orchestrator 禁止用泛化 `errors.Is(err, common.ErrConflict)` 推断 CAS retry。
 - definition revision、Goal/DoD identity、正文或 capability contract 任一漂移都必须返回 conflict；definition context revision 必须与 facts 和 authority transaction 一致。
 - LLM dispatch 前必须先完成 manifest、target snapshot、failure target、capability、validation scratch 和 provider ceiling preflight；缺失资源只能进入 canonical `need_prerequisite`，不得混入 LLM state-changing requiredOutput。
 - block 输出只是 candidate；evidence quality、coverage binding、next action 和 accepted Result 只能由 Orchestrator 判定。

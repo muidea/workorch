@@ -7,6 +7,7 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 	"strings"
 )
 
@@ -39,34 +40,77 @@ type ListRunsByWorkspaceCommand struct {
 	Compact     bool
 }
 
-type RuntimeV2RecoveryClass string
-
-const (
-	RuntimeV2RecoveryActiveNoDispatch        RuntimeV2RecoveryClass = "active_no_dispatch"
-	RuntimeV2RecoveryActiveSealedDispatch    RuntimeV2RecoveryClass = "active_sealed_dispatch"
-	RuntimeV2RecoveryBlockedGovernance       RuntimeV2RecoveryClass = "blocked_governance"
-	RuntimeV2RecoveryTerminalDeliveryPending RuntimeV2RecoveryClass = "terminal_delivery_pending"
-)
-
 type QueryRuntimeV2RecoveryInventoryCommand struct {
 	Cursor string
 	Limit  int
 }
 
 type RuntimeV2RecoveryInventoryItem struct {
-	WorkspaceID              common.WorkspaceID
-	RunID                    common.RunID
-	StateRevision            uint64
-	Class                    RuntimeV2RecoveryClass
-	ActiveDispatchID         string
-	BlockingTicketID         common.TicketID
-	BlockingApprovalID       common.ApprovalID
-	TerminalDeliveryAttempts int
+	WorkspaceID                  common.WorkspaceID
+	RunID                        common.RunID
+	State                        common.RunState
+	HasRuntimeBootstrap          bool
+	HasRuntimeState              bool
+	RuntimeStateRef              string
+	RuntimeStateRevision         uint64
+	RuntimeStateSchemaVersion    uint32
+	RuntimeActivationDisposition runmodel.RuntimeActivationDisposition
 }
 
 type QueryRuntimeV2RecoveryInventoryResult struct {
 	Items      []RuntimeV2RecoveryInventoryItem
 	NextCursor string
+}
+
+// RuntimeStateUpdateDisposition is the Run owner's factual outcome for an
+// opaque Runtime aggregate CAS request. Only aggregate_revision_mismatch
+// authorizes Orchestrator SM-4 CAS reload; the other outcomes must not be
+// collapsed into common.ErrConflict.
+type RuntimeStateUpdateDisposition string
+
+const (
+	RuntimeStateUpdateDispositionAccepted                  RuntimeStateUpdateDisposition = "accepted"
+	RuntimeStateUpdateDispositionAggregateRevisionMismatch RuntimeStateUpdateDisposition = "aggregate_revision_mismatch"
+	RuntimeStateUpdateDispositionSemanticRejection         RuntimeStateUpdateDisposition = "semantic_rejection"
+	RuntimeStateUpdateDispositionOwnerTransient            RuntimeStateUpdateDisposition = "owner_transient"
+)
+
+// RuntimeStateUpdateResult is a concrete cross-owner fact. It preserves both
+// aggregate revision fence values and the bounded producer diagnostic without
+// carrying decoded aggregate authority.
+type RuntimeStateUpdateResult struct {
+	WorkspaceID             common.WorkspaceID
+	RunID                   common.RunID
+	Disposition             RuntimeStateUpdateDisposition
+	ExpectedRuntimeRevision uint64
+	ObservedRuntimeRevision uint64
+	Feedback                runtimecontract.RuntimeFeedback
+}
+
+func (r RuntimeStateUpdateResult) Validate() error {
+	if r.WorkspaceID == "" || r.RunID == "" {
+		return fmt.Errorf("%w: runtime state update result requires scope", common.ErrInvalidArgument)
+	}
+	category := runtimecontract.RuntimeFeedbackCategoryAccepted
+	switch r.Disposition {
+	case RuntimeStateUpdateDispositionAccepted:
+	case RuntimeStateUpdateDispositionAggregateRevisionMismatch:
+		category = runtimecontract.RuntimeFeedbackCategoryAggregateRevisionMismatch
+	case RuntimeStateUpdateDispositionSemanticRejection:
+		category = runtimecontract.RuntimeFeedbackCategorySemanticRejection
+	case RuntimeStateUpdateDispositionOwnerTransient:
+		category = runtimecontract.RuntimeFeedbackCategoryOwnerTransient
+	default:
+		return fmt.Errorf("%w: unsupported runtime state update disposition", common.ErrInvalidArgument)
+	}
+	if r.Feedback.Domain != runtimecontract.RuntimeFeedbackDomainPersistence || r.Feedback.StableCategory != category ||
+		r.Feedback.WorkspaceID != r.WorkspaceID || r.Feedback.RunID != r.RunID {
+		return fmt.Errorf("%w: runtime state update feedback does not match disposition or scope", common.ErrInvalidArgument)
+	}
+	if err := r.Feedback.Validate(); err != nil {
+		return fmt.Errorf("%w: runtime state update feedback: %v", common.ErrInvalidArgument, err)
+	}
+	return nil
 }
 
 type GetStepCommand struct {
@@ -113,6 +157,10 @@ type RunStateChangedData struct {
 	// repair, authority or dispatch semantics owned by Orchestrator.
 	RuntimeStateRevision uint64
 	RuntimeStateRef      string
+	// RuntimeActivationDisposition is a Run-owned administrative outcome. It
+	// does not expose or derive an Orchestrator action, focus, dispatch, or
+	// recovery classification.
+	RuntimeActivationDisposition runmodel.RuntimeActivationDisposition
 }
 
 // RunContinuationRequestedData is emitted only by Run owner after it accepts
@@ -148,10 +196,33 @@ func RunStateChangedDataFromModel(run *runmodel.Run) RunStateChangedData {
 	}
 	if run.RuntimeState != nil {
 		ret.RuntimeStateRevision = run.RuntimeState.StateRevision
-		ret.RuntimeStateRef = fmt.Sprintf("runtime-state/%s/%s/%d", run.WorkspaceID, run.ID, run.RuntimeState.StateRevision)
+		ret.RuntimeStateRef = RuntimeStateRef(run.WorkspaceID, run.ID, run.RuntimeState.StateRevision)
+	}
+	if run.RuntimeActivationStatus != nil {
+		ret.RuntimeActivationDisposition = run.RuntimeActivationStatus.Disposition
 	}
 	ret.CausationID = "run-state/" + string(run.ID) + "/" + fmt.Sprintf("%d", ret.RuntimeStateRevision)
+	if ret.RuntimeActivationDisposition != "" {
+		ret.CausationID += "/" + string(ret.RuntimeActivationDisposition)
+	}
 	return ret
+}
+
+// RuntimeStateRef returns the opaque Run-owner reference used by recovery,
+// lifecycle facts, and schema observations. It contains no decoded aggregate
+// state.
+func RuntimeStateRef(workspaceID common.WorkspaceID, runID common.RunID, revision uint64) string {
+	if workspaceID == "" || runID == "" {
+		return ""
+	}
+	return fmt.Sprintf("runtime-state/%s/%s/%d", workspaceID, runID, revision)
+}
+
+// RequiresFreshActivation reports the only currently non-resumable Run-owned
+// administrative disposition. It is a pure projection helper and never
+// selects an Orchestrator drive action.
+func (d RunStateChangedData) RequiresFreshActivation() bool {
+	return d.RuntimeActivationDisposition == runmodel.RuntimeActivationDispositionFreshActivationRequired
 }
 
 // Validate verifies the immutable identity carried by a Run owner
@@ -165,6 +236,9 @@ func (d RunStateChangedData) Validate() error {
 	if d.RuntimeStateRevision > 0 && strings.TrimSpace(d.RuntimeStateRef) == "" {
 		return fmt.Errorf("%w: runtime run state fact requires opaque runtime state ref", common.ErrInvalidArgument)
 	}
+	if d.RuntimeActivationDisposition != "" && d.RuntimeActivationDisposition != runmodel.RuntimeActivationDispositionFreshActivationRequired {
+		return fmt.Errorf("%w: unsupported runtime activation disposition", common.ErrInvalidArgument)
+	}
 	return nil
 }
 
@@ -176,6 +250,10 @@ type RunCommandResult struct {
 	Checkpoint   *runmodel.RuntimeCheckpoint
 	Checkpoints  []*runmodel.RuntimeCheckpoint
 	DeletedCount int
+	// RuntimeStateUpdate is populated only for an opaque Runtime V2 aggregate
+	// update. It gives Orchestrator an exact persistence fact rather than an
+	// ambiguous generic conflict.
+	RuntimeStateUpdate *RuntimeStateUpdateResult
 }
 
 func MessageContracts() []eventcontract.MessageContract {
@@ -200,6 +278,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[ApplyRuntimeGovernanceWaitCommand, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandApplyGovernanceWait).MessageContract(),
 		eventcontract.CommandTopic[ApplyRuntimeContinuationEligibleCommand, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandApplyContinuationEligible).MessageContract(),
 		eventcontract.CommandTopic[ApplyRuntimeTerminalDeliveryCommand, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandApplyTerminalDelivery).MessageContract(),
+		eventcontract.CommandTopic[ApplyRuntimeStateIncompatibleFactCommand, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandApplyRuntimeStateIncompatible).MessageContract(),
 	}
 	for _, topic := range []string{
 		TopicRunCreated,

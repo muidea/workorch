@@ -22,6 +22,13 @@ type RuntimeFeedbackDomain string
 const (
 	RuntimeFeedbackDomainFeasibility RuntimeFeedbackDomain = "feasibility"
 	RuntimeFeedbackDomainOperation   RuntimeFeedbackDomain = "operation"
+	// RuntimeFeedbackDomainDrive identifies an Orchestrator SM-4 observation.
+	// It remains factual: consumers, rather than this DTO, decide whether the
+	// observation changes their own lifecycle state.
+	RuntimeFeedbackDomainDrive RuntimeFeedbackDomain = "drive"
+	// RuntimeFeedbackDomainPersistence identifies a Run-owner opaque aggregate
+	// persistence outcome. It is a factual contract, not a retry directive.
+	RuntimeFeedbackDomainPersistence RuntimeFeedbackDomain = "persistence"
 )
 
 // RuntimeFeedbackCategory is the producer's stable, factual category. The
@@ -29,7 +36,13 @@ const (
 // table; this DTO must not encode that choice.
 type RuntimeFeedbackCategory string
 
-const RuntimeFeedbackCategoryAccepted RuntimeFeedbackCategory = "accepted"
+const (
+	RuntimeFeedbackCategoryAccepted                  RuntimeFeedbackCategory = "accepted"
+	RuntimeFeedbackCategoryStateSchemaUnsupported    RuntimeFeedbackCategory = "state_schema_unsupported"
+	RuntimeFeedbackCategoryAggregateRevisionMismatch RuntimeFeedbackCategory = "aggregate_revision_mismatch"
+	RuntimeFeedbackCategorySemanticRejection         RuntimeFeedbackCategory = "semantic_rejection"
+	RuntimeFeedbackCategoryOwnerTransient            RuntimeFeedbackCategory = "owner_transient"
+)
 
 // RuntimeFeedback carries a bounded factual result across owner, aggregate,
 // audit, and projection boundaries. It is a pure value contract: it defines

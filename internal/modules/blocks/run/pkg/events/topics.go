@@ -35,9 +35,10 @@ const (
 
 	// RUNTIME-SMO owner-local lifecycle commands. External inputs never carry a
 	// target RunState; only Run Biz may migrate SM-1.
-	TopicRunCommandActivate                  = "/run/command/activate"
-	TopicRunCommandContinue                  = "/run/command/continue"
-	TopicRunCommandApplyGovernanceWait       = "/run/command/apply-governance-wait"
-	TopicRunCommandApplyContinuationEligible = "/run/command/apply-continuation-eligible"
-	TopicRunCommandApplyTerminalDelivery     = "/run/command/apply-terminal-delivery"
+	TopicRunCommandActivate                      = "/run/command/activate"
+	TopicRunCommandContinue                      = "/run/command/continue"
+	TopicRunCommandApplyGovernanceWait           = "/run/command/apply-governance-wait"
+	TopicRunCommandApplyContinuationEligible     = "/run/command/apply-continuation-eligible"
+	TopicRunCommandApplyTerminalDelivery         = "/run/command/apply-terminal-delivery"
+	TopicRunCommandApplyRuntimeStateIncompatible = "/run/command/apply-runtime-state-incompatible"
 )

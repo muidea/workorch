@@ -115,6 +115,59 @@ func (m *Biz) applyRunContinuationEligible(
 	return nil
 }
 
+// applyRunRuntimeStateIncompatible delivers an immutable SM-4 observation to
+// the Run owner. It does not attempt to write a failure into an aggregate the
+// current binary cannot load, and it never schedules LLM, operation, or
+// governance work for that record.
+func (m *Biz) applyRunRuntimeStateIncompatible(
+	ctx context.Context,
+	item runevents.RuntimeV2RecoveryInventoryItem,
+	schemaErr *runtimecontract.RuntimeStateSchemaVersionError,
+) error {
+	if m == nil || m.EventHub() == nil || schemaErr == nil || item.WorkspaceID == "" || item.RunID == "" || item.RuntimeStateRef == "" {
+		return common.ErrInvalidArgument
+	}
+	feedback := runtimecontract.RuntimeFeedback{
+		Domain:         runtimecontract.RuntimeFeedbackDomainDrive,
+		StableCategory: runtimecontract.RuntimeFeedbackCategoryStateSchemaUnsupported,
+		WorkspaceID:    item.WorkspaceID,
+		RunID:          item.RunID,
+		OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{
+			SchemaVersion:    runtimecontract.RuntimeOriginalDiagnosticSchemaV1,
+			OwnerModuleID:    ModuleID,
+			OriginalClass:    "runtime_state_schema",
+			OriginalCode:     "unsupported_runtime_state_schema",
+			OriginalMessage:  "runtime state schema is unsupported by this binary",
+			Signature:        fmt.Sprintf("runtime-state-schema/%d/%d/%s", schemaErr.Actual, schemaErr.Supported, item.RuntimeStateRef),
+			ObservedRevision: item.RuntimeStateRef,
+		},
+	}
+	cmd := runevents.ApplyRuntimeStateIncompatibleFactCommand{
+		WorkspaceID:            item.WorkspaceID,
+		RunID:                  item.RunID,
+		SourceOwner:            ModuleID,
+		CausationID:            fmt.Sprintf("runtime-state-incompatible/%s/%d/%d", item.RuntimeStateRef, schemaErr.Actual, schemaErr.Supported),
+		RuntimeStateRef:        item.RuntimeStateRef,
+		ActualSchemaVersion:    schemaErr.Actual,
+		SupportedSchemaVersion: schemaErr.Supported,
+		Feedback:               feedback,
+	}.Normalized()
+	if err := cmd.Validate(); err != nil {
+		return err
+	}
+	event := magicevent.NewEventWithContext(
+		runevents.TopicRunCommandApplyRuntimeStateIncompatible,
+		ModuleID,
+		runevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		cmd,
+	)
+	bindOwnerCommandLane(event, runevents.TopicRunCommandApplyRuntimeStateIncompatible, "run", string(item.RunID), item.WorkspaceID, item.RunID)
+	_, err := runLifecycleCommandResponse(m.EventHub().Send(event), runevents.TopicRunCommandApplyRuntimeStateIncompatible)
+	return err
+}
+
 func runtimeGovernanceWaitCausationID(authoritySnapshotID, dispatchID string, ticketID common.TicketID, approvalID common.ApprovalID) string {
 	return fmt.Sprintf("runtime-governance-wait/%s/%s/%s/%s", authoritySnapshotID, dispatchID, ticketID, approvalID)
 }
